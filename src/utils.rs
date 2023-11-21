@@ -1,16 +1,16 @@
+use itertools::Itertools;
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_crypto::hash::HashOutputTarget;
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use itertools::Itertools;
 
 pub(crate) const TWO_POWER_8: usize = 256;
 pub(crate) const TWO_POWER_16: usize = 65536;
 pub(crate) const TWO_POWER_24: usize = 16777216;
 
-/// Useful to convert between u32 representation and u8 representation in circuit. 
+/// Useful to convert between u32 representation and u8 representation in circuit.
 /// For example hash output is using u32 representations.
 pub fn array_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,

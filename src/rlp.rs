@@ -491,7 +491,7 @@ mod tests {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::rlp::{RlpHeader,MAX_LEN_BYTES };
+    use crate::rlp::{RlpHeader, MAX_LEN_BYTES};
 
     #[test]
     fn test_data_len() -> Result<()> {
