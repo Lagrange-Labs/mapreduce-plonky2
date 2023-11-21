@@ -6,3 +6,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+itertools = "0.12.0"
+plonky2 = "0.1.4"
+
+# supporting latest plonky2
+plonky2_crypto = { git = "https://github.com/nikkolasg/plonky2-crypto" }
+serde = "1.0.193"
+
+[dev-dependencies]
+anyhow = "1.0.75"
+rlp = "0.5.2"
