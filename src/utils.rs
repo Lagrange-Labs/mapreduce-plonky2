@@ -146,8 +146,6 @@ pub fn right_shift<F: RichField + Extendable<D>, const D: usize>(
     let shifted_bits = &bits[shift..];
 
     // Convert the shifted bits back to a number
-
-    // builder.connect(res, x);
     bits_to_num(builder, shifted_bits)
 }
 
