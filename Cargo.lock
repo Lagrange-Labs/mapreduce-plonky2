@@ -627,8 +627,22 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "derive_more"
 version = "0.99.17"
+=======
+name = "env_logger"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a12e6657c4c97ebab115a42dcee77225f7f482cdd841cf7088c657a42e9e00e7"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "fixed-hash"
+version = "0.7.0"
+>>>>>>> modified tests in rlp to print gate info
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fb810d30a7c1953f91334de7244731fc3f3c10d7fe163338a35b9f640960321"
 dependencies = [
@@ -835,10 +849,20 @@ version = "18.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7413c5f74cc903ea37386a8965a936cbeb334bd270862fdece542c1b2dcbc898"
 dependencies = [
+<<<<<<< HEAD
  "ethereum-types",
  "hex",
  "once_cell",
  "regex",
+=======
+ "anyhow",
+ "env_logger",
+ "itertools 0.12.0",
+ "log",
+ "plonky2",
+ "plonky2_crypto",
+ "rlp",
+>>>>>>> modified tests in rlp to print gate info
  "serde",
  "serde_json",
  "sha3",
