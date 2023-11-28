@@ -33,31 +33,41 @@ const MAX_LEGACY_TX_LENGTH: usize = 532;
 /// Maximum size the gas value can take in bytes.
 const MAX_GAS_VALUE_LEN: usize = 32;
 
-pub fn legacy_tx_leaf_proof<
+/// There are different ways to extract values from a transaction. This enum
+/// list some.
+pub(crate) enum ExtractionMethod {
+    /// RLPBased decodes each header consecutively and extract the gas value
+    /// TODO: Currently hardcode that the gas value is 3rd item in the tx list
+    /// because we use const generics and can't pass the index as a parameter.
+    RLPBased,
+    /// Directly reads at the specified offset.
+    /// Offset of the item in the tx list - length is assumed to be constant
+    /// OffsetBased is NOT secure, it is only useful for testing & quick prototyping purposes.
+    OffsetBased(usize),
+}
+
+/// Provides a proof for a leaf node in a MPT tree holding a legacy tx. It exposes
+/// the hash of the node as public input, as well as the gas value of the tx.
+pub fn legacy_tx_leaf_node_proof<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,
 >(
     config: &CircuitConfig,
-    node: &[u8],
-    node_length: usize,
-    gas_offset: usize,
-    extract_unsafe: bool,
+    mut node: Vec<u8>,
+    extract: ExtractionMethod,
 ) -> Result<ProofTuple<F, C, D>> {
-    assert_eq!(node.len(), MAX_LEGACY_TX_NODE_LENGTH);
-
     let mut b = CircuitBuilder::<F, D>::new(config.clone());
     let mut pw = PartialWitness::new();
 
+    let node_length = node.len();
+    node.resize(MAX_LEGACY_TX_NODE_LENGTH, 0);
     let node_targets = b.add_virtual_targets(MAX_LEGACY_TX_NODE_LENGTH);
-
-    let gas_offset_target = b.add_virtual_target();
 
     // Witness assignement
     for i in 0..MAX_LEGACY_TX_NODE_LENGTH {
         pw.set_target(node_targets[i], F::from_canonical_u8(node[i]));
     }
-    pw.set_target(gas_offset_target, F::from_canonical_usize(gas_offset));
 
     // Hash computation and exposing as public input
     let length_target = b.add_virtual_target();
@@ -65,62 +75,62 @@ pub fn legacy_tx_leaf_proof<
     hash_node(&mut b, &mut pw, &node_targets, length_target, node_length);
 
     // Gas value extraction and exposing as public input
-    if extract_unsafe {
-        unsafe_extract_gas_value(&mut b, &node_targets, gas_offset_target);
-    } else {
-        extract_gas_value(&mut b, &node_targets);
-    }
-    let data = b.build::<C>();
+    let gas_value_array = match extract {
+        // gas is at 3rd position
+        ExtractionMethod::RLPBased => {
+            extract_item_from_tx_list::<F, D, 3, MAX_GAS_VALUE_LEN>(&mut b, &node_targets)
+        }
+        ExtractionMethod::OffsetBased(offset) => {
+            // NOTE: It does NOT guarantee the offset is _correct_. The prover CAN give
+            // any offset within the given slice that has been hashed, and claim it is
+            // the gas value.
+            let gas_offset_target = b.add_virtual_target();
+            pw.set_target(gas_offset_target, F::from_canonical_usize(offset));
+            extract_array::<F, D, MAX_GAS_VALUE_LEN>(&mut b, &node_targets, gas_offset_target)
+        }
+    };
+    // maximum length that the RLP(gas) == RLP(U256) can take:
+    // * 32 bytes for the value (U256 = 32 bytes)
+    // TODO: pack the gas value into U32Target - more compact
+    b.register_public_inputs(&gas_value_array);
 
+    // proving part
+    let data = b.build::<C>();
     let proof = data.prove(pw)?;
 
     Ok((proof, data.verifier_only, data.common))
 }
 
-/// Directly read the gas value at the specified offset.
-/// NOTE: It does NOT guarantee the offset is _correct_. The prover CAN give
-/// any offset within the given slice that has been hashed, and claim it is
-/// the gas value.
-/// This method is only useful for testing & quick prototyping purposes,
-/// it is NOT safe.
-fn unsafe_extract_gas_value<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    node: &[Target],
-    gas_offset: Target,
-) {
-    let gas_value_array = extract_array(b, node, gas_offset, MAX_GAS_VALUE_LEN);
-    b.register_public_inputs(&gas_value_array);
-}
-
 /// Reads the header of the RLP node, then reads the header of the TX item
-/// then reads the header of the third items in the list (which is the gas).
-/// From that, it exact the gas value and registers it as public input.
-fn extract_gas_value<F: RichField + Extendable<D>, const D: usize>(
+/// then reads all headers of the items in the list until it reaches the given
+/// header at position N. It reads that header and returns the offset from the array
+/// where the data is starting
+fn extract_item_from_tx_list<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    const N_FIELDS: usize,
+    const MAX_VALUE_SIZE: usize,
+>(
     b: &mut CircuitBuilder<F, D>,
     node: &[Target],
-) {
+    // TODO: make that const generic
+) -> [Target; MAX_VALUE_SIZE] {
     // First, decode headers of RLP ( RLP (key), RLP(tx) )
     let tuple_headers = decode_tuple(b, node);
     let rlp_tx_index = 1;
     // extract the RLP(tx) from the node encoding
     let tx_offset = tuple_headers.offset[rlp_tx_index];
-    let rlp_tx = extract_array(b, node, tx_offset, MAX_LEGACY_TX_LENGTH);
+    let rlp_tx = extract_array::<F, D, MAX_LEGACY_TX_LENGTH>(b, node, tx_offset);
 
     // then extract the gas fees: it's the third item in the tx list (out of 9 for legacy tx)
     // NOTE: we should only decode the things we need, so for example here
     // the gas fee is at the 3rd position then we only need to decode up to the 3rd
     // headers in the list and keep the rest untouched. However, later user query might
     // want the whole thing.
-    let tx_list = decode_fixed_list::<F, D, 3>(b, &rlp_tx);
-    // -------- GAS PRICE EXTRACTION ------
-    let gas_index = 2;
-    let gas_offset = tx_list.offset[gas_index];
-    // maximum length that the RLP(gas) == RLP(U256) can take:
-    // * 32 bytes for the value (U256 = 32 bytes)
-    // extracted gas value
-    let gas_value_array = extract_array(b, &rlp_tx, gas_offset, MAX_GAS_VALUE_LEN);
-    // TODO: pack the gas value into U32Target - more compact
-    b.register_public_inputs(&gas_value_array);
+    let tx_list = decode_fixed_list::<F, D, N_FIELDS>(b, &rlp_tx);
+    let item_index = N_FIELDS - 1;
+    let item_offset = tx_list.offset[item_index];
+    extract_array::<F, D, MAX_VALUE_SIZE>(b, &rlp_tx, item_offset)
 }
 
 fn hash_node<F: RichField + Extendable<D>, const D: usize>(
@@ -241,24 +251,127 @@ fn hash_node<F: RichField + Extendable<D>, const D: usize>(
 #[cfg(test)]
 mod test {
     use anyhow::Result;
+    use ethers::types::Transaction;
+    use plonky2::field::types::Field;
     use plonky2::{
         iop::witness::PartialWitness,
         plonk::{
             circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
+            circuit_data::{CircuitConfig, VerifierCircuitData},
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
+    use rlp::{Decodable, Encodable, Rlp};
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+
     const STRING: usize = 0;
     const LIST: usize = 1;
 
-    use crate::utils::test::connect;
     use crate::utils::test::data_to_constant_targets;
+    use crate::utils::test::{connect, keccak256};
     use crate::{
         mpt_tx::MAX_LEGACY_TX_NODE_LENGTH,
         rlp::{decode_header, decode_tuple},
     };
 
+    use super::{legacy_tx_leaf_node_proof, ExtractionMethod};
+
+    #[test]
+    fn test_legacy_tx_leaf_proof_rlp_extract() -> Result<()> {
+        // The following test data comes from:
+        // ```
+        //     let block_number = 10593417;
+        //     let tx_index = U64::from(3);
+        // ```
+        let leaf_node_hex= "f87420b871f86f826b2585199c82cc0083015f9094e955ede0a3dbf651e2891356ecd0509c1edb8d9c8801051fdc4efdc0008025a02190f26e70a82d7f66354a13cda79b6af1aa808db768a787aeb348d425d7d0b3a06a82bd0518bc9b69dc551e20d772a1b06222edfc5d39b6973e4f4dc46ed8b196";
+        let leaf_node_buff = hex::decode(leaf_node_hex).unwrap();
+        let node_hash = keccak256(&leaf_node_buff);
+        let tx_hex = "f86f826b2585199c82cc0083015f9094e955ede0a3dbf651e2891356ecd0509c1edb8d9c8801051fdc4efdc0008025a02190f26e70a82d7f66354a13cda79b6af1aa808db768a787aeb348d425d7d0b3a06a82bd0518bc9b69dc551e20d772a1b06222edfc5d39b6973e4f4dc46ed8b196";
+        let tx_buff = hex::decode(tx_hex).unwrap();
+        let tx = Transaction::decode(&Rlp::new(&tx_buff)).unwrap();
+
+        let config = CircuitConfig::standard_recursion_config();
+        let leaf_proof = legacy_tx_leaf_node_proof::<F, C, D>(
+            &config,
+            leaf_node_buff,
+            ExtractionMethod::RLPBased,
+        )?;
+        let vcd = VerifierCircuitData {
+            verifier_only: leaf_proof.1.clone(),
+            common: leaf_proof.2.clone(),
+        };
+
+        vcd.verify(leaf_proof.0.clone())?;
+        // verify hash of the node
+        let expected_hash = crate::utils::test::hash_to_fields::<F>(&node_hash);
+        let proof_hash = &leaf_proof.0.public_inputs[0..8];
+        assert!(expected_hash == proof_hash, "hashes not equal?");
+        // verify gas value
+        let gas_buff = tx.gas.rlp_bytes();
+        let gas_rlp = rlp::Rlp::new(&gas_buff);
+        let gas_header = gas_rlp.payload_info()?;
+        let gas_value = gas_rlp.data().unwrap().to_vec();
+        assert_eq!(
+            &leaf_proof.0.public_inputs[8..8 + gas_header.value_len],
+            gas_value
+                .iter()
+                .take(gas_header.value_len)
+                .map(|byte| F::from_canonical_u8(*byte))
+                .collect::<Vec<_>>()
+                .as_slice()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_legacy_tx_leaf_proof_offset_extract() -> Result<()> {
+        // The following test data comes from:
+        // ```
+        //     let block_number = 10593417;
+        //     let tx_index = U64::from(3);
+        // ```
+        let leaf_node_hex= "f87420b871f86f826b2585199c82cc0083015f9094e955ede0a3dbf651e2891356ecd0509c1edb8d9c8801051fdc4efdc0008025a02190f26e70a82d7f66354a13cda79b6af1aa808db768a787aeb348d425d7d0b3a06a82bd0518bc9b69dc551e20d772a1b06222edfc5d39b6973e4f4dc46ed8b196";
+        let leaf_node_buff = hex::decode(leaf_node_hex).unwrap();
+        let node_hash = keccak256(&leaf_node_buff);
+        let tx_hex = "f86f826b2585199c82cc0083015f9094e955ede0a3dbf651e2891356ecd0509c1edb8d9c8801051fdc4efdc0008025a02190f26e70a82d7f66354a13cda79b6af1aa808db768a787aeb348d425d7d0b3a06a82bd0518bc9b69dc551e20d772a1b06222edfc5d39b6973e4f4dc46ed8b196";
+        let tx_buff = hex::decode(tx_hex).unwrap();
+        let tx = Transaction::decode(&Rlp::new(&tx_buff)).unwrap();
+
+        let (gas_offset, _) = gas_offset_from_rlp_node(&leaf_node_buff);
+        let config = CircuitConfig::standard_recursion_config();
+        let leaf_proof = legacy_tx_leaf_node_proof::<F, C, D>(
+            &config,
+            leaf_node_buff,
+            ExtractionMethod::OffsetBased(gas_offset),
+        )?;
+        let vcd = VerifierCircuitData {
+            verifier_only: leaf_proof.1.clone(),
+            common: leaf_proof.2.clone(),
+        };
+
+        vcd.verify(leaf_proof.0.clone())?;
+        // verify hash of the node
+        let expected_hash = crate::utils::test::hash_to_fields::<F>(&node_hash);
+        let proof_hash = &leaf_proof.0.public_inputs[0..8];
+        assert!(expected_hash == proof_hash, "hashes not equal?");
+        // verify gas value
+        let gas_buff = tx.gas.rlp_bytes();
+        let gas_rlp = rlp::Rlp::new(&gas_buff);
+        let gas_header = gas_rlp.payload_info()?;
+        let gas_value = gas_rlp.data().unwrap().to_vec();
+        assert_eq!(
+            &leaf_proof.0.public_inputs[8..8 + gas_header.value_len],
+            gas_value
+                .iter()
+                .take(gas_header.value_len)
+                .map(|byte| F::from_canonical_u8(*byte))
+                .collect::<Vec<_>>()
+                .as_slice()
+        );
+        Ok(())
+    }
     #[test]
     fn test_rlp_mpt_node_list() -> Result<()> {
         // come from last tx in block 10593417, leaf node for tx idx 03 in the MPT
@@ -294,9 +407,6 @@ mod test {
         // add redundant header_len to mimick the circuit function
         assert!(header.value_len + header.header_len == computed_len);
 
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
 
         let mut pw = PartialWitness::new();
@@ -357,5 +467,48 @@ mod test {
         let data = b.build::<C>();
         let proof = data.prove(pw)?;
         data.verify(proof)
+    }
+    use std::cmp::Ordering;
+    /// Function that returns the offset of the gas value in the RLP encoded
+    /// node containing a transaction. It also returns the gas length.
+    fn gas_offset_from_rlp_node(node: &[u8]) -> (usize, usize) {
+        let node_rlp = rlp::Rlp::new(node);
+        let tuple_info = node_rlp.payload_info().unwrap();
+        let tuple_offset = tuple_info.header_len;
+        assert_eq!(node_rlp.item_count().unwrap(), 2);
+        let tx_index = 1;
+        let gas_index = 2;
+        let mut tx_offset = tuple_offset;
+        let mut gas_value_len = 0;
+        let mut gas_offset = 0;
+        node_rlp.iter().enumerate().for_each(|(i, r)| {
+            let h = r.payload_info().unwrap();
+            tx_offset += h.header_len;
+            match i.cmp(&tx_index) {
+                Ordering::Less => tx_offset += h.value_len,
+                Ordering::Greater => panic!("node should not have more than 2 items"),
+                Ordering::Equal => {
+                    let tx_rlp = rlp::Rlp::new(r.data().unwrap());
+                    gas_offset += tx_rlp.payload_info().unwrap().header_len;
+                    tx_rlp.iter().enumerate().for_each(|(j, rr)| {
+                        let hh = rr.payload_info().unwrap();
+                        match j.cmp(&gas_index) {
+                            Ordering::Less => {
+                                gas_offset += hh.header_len;
+                                gas_offset += hh.value_len;
+                            }
+                            // do nothing as we don't care about the other items
+                            Ordering::Greater => {}
+                            Ordering::Equal => {
+                                // we want the value directly - we skip the header
+                                gas_offset += hh.header_len;
+                                gas_value_len = hh.value_len;
+                            }
+                        }
+                    });
+                }
+            }
+        });
+        (tx_offset + gas_offset, gas_value_len)
     }
 }

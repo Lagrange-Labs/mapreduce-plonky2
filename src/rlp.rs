@@ -169,7 +169,7 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
 
         // read the header starting from the offset -
         // nikko: this is assuming the header will take at least 1 bytes and less than 1 + MAX_LEN_BYTES
-        let header = take_dot_drop::<F, D, { MAX_LEN_BYTES + 1 }>(b, data, offset);
+        let header = extract_array::<F, D, { MAX_LEN_BYTES + 1 }>(b, data, offset);
         let RlpHeader {
             len: field_len,
             offset: field_offset,
@@ -204,10 +204,6 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
         num_fields = b.add(num_fields, loop_p.target);
     }
 
-    // make sure the total length is equal to the added length of all items
-    // otherwise attacker could specify an inconsistent length in the first header
-    //b.connect(total_len, offset);
-
     RlpList {
         offset: dec_off,
         len: dec_len,
@@ -216,30 +212,8 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
     }
 }
 
-/// Returns an array of length `len` containing the elements of `array` starting at `offset`.
-// nikko TODO: this is my own to hack around, and avoid take dot drop which is
-// super expensive, but we should remove the call to quin_selector
-// and directly make the constraints inside the loop, will remove the N^2 complexity
-// into just linear ?
-// TODO: remove and only use take_dot_drop if possible (and rename it to extract_array)
-pub fn extract_array<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    array: &[Target],
-    offset: Target,
-    len: usize,
-) -> Vec<Target> {
-    (0..len)
-        .map(|i| {
-            let i_target = b.constant(F::from_canonical_usize(i));
-            let offset_plus_i = b.add(offset, i_target);
-            quin_selector(b, array, offset_plus_i)
-        })
-        .collect()
-}
-
-/// Similar to extract_array but for a constant size.
-/// nikko: Make it such other circuits only use this one.
-pub fn take_dot_drop<F: RichField + Extendable<D>, const D: usize, const M: usize>(
+/// Returns an array of length `M` from the array `arr` starting at index `offset`
+pub fn extract_array<F: RichField + Extendable<D>, const D: usize, const M: usize>(
     b: &mut CircuitBuilder<F, D>,
     arr: &[Target],
     offset: Target,
@@ -458,7 +432,7 @@ mod tests {
         };
 
         let res_dot_drop =
-            super::take_dot_drop::<F, D, { MAX_LEN_BYTES + 1 }>(&mut builder, &data3, zero);
+            super::extract_array::<F, D, { MAX_LEN_BYTES + 1 }>(&mut builder, &data3, zero);
         let res_rlp_header3 = super::decode_header(&mut builder, &res_dot_drop);
 
         // builder.connect(rlp_header.len, res_rlp_header.len);
@@ -524,7 +498,6 @@ mod tests {
 
         let decoded = super::decode_fixed_list::<F, D, 17>(&mut builder, &data);
 
-        let num_fields = builder.constant(F::from_canonical_u64(17));
         let offset: Vec<Target> = [
             4, 37, 70, 103, 136, 169, 202, 235, 268, 301, 334, 367, 400, 433, 466, 499, 532,
         ]
