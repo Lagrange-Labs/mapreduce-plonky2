@@ -252,7 +252,8 @@ fn hash_node<F: RichField + Extendable<D>, const D: usize>(
 mod test {
     use anyhow::Result;
     use ethers::types::Transaction;
-    use plonky2::field::types::Field;
+    use plonky2::field::extension::Extendable;
+    use plonky2::hash::hash_types::RichField;
     use plonky2::{
         iop::witness::PartialWitness,
         plonk::{
@@ -271,15 +272,24 @@ mod test {
 
     use crate::utils::test::data_to_constant_targets;
     use crate::utils::test::{connect, keccak256};
+    use crate::ProofTuple;
     use crate::{
         mpt_tx::MAX_LEGACY_TX_NODE_LENGTH,
         rlp::{decode_header, decode_tuple},
     };
 
     use super::{legacy_tx_leaf_node_proof, ExtractionMethod};
-
-    #[test]
-    fn test_legacy_tx_leaf_proof_rlp_extract() -> Result<()> {
+    fn run_leaf_proof_test<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        const D: usize,
+        Circuit,
+    >(
+        circuit: Circuit,
+    ) -> Result<()>
+    where
+        Circuit: FnOnce(&CircuitConfig, &[u8]) -> Result<ProofTuple<F, C, D>>,
+    {
         // The following test data comes from:
         // ```
         //     let block_number = 10593417;
@@ -293,11 +303,7 @@ mod test {
         let tx = Transaction::decode(&Rlp::new(&tx_buff)).unwrap();
 
         let config = CircuitConfig::standard_recursion_config();
-        let leaf_proof = legacy_tx_leaf_node_proof::<F, C, D>(
-            &config,
-            leaf_node_buff,
-            ExtractionMethod::RLPBased,
-        )?;
+        let leaf_proof = circuit(&config, &leaf_node_buff)?;
         let vcd = VerifierCircuitData {
             verifier_only: leaf_proof.1.clone(),
             common: leaf_proof.2.clone(),
@@ -324,53 +330,22 @@ mod test {
         );
         Ok(())
     }
-
     #[test]
-    fn test_legacy_tx_leaf_proof_offset_extract() -> Result<()> {
-        // The following test data comes from:
-        // ```
-        //     let block_number = 10593417;
-        //     let tx_index = U64::from(3);
-        // ```
-        let leaf_node_hex= "f87420b871f86f826b2585199c82cc0083015f9094e955ede0a3dbf651e2891356ecd0509c1edb8d9c8801051fdc4efdc0008025a02190f26e70a82d7f66354a13cda79b6af1aa808db768a787aeb348d425d7d0b3a06a82bd0518bc9b69dc551e20d772a1b06222edfc5d39b6973e4f4dc46ed8b196";
-        let leaf_node_buff = hex::decode(leaf_node_hex).unwrap();
-        let node_hash = keccak256(&leaf_node_buff);
-        let tx_hex = "f86f826b2585199c82cc0083015f9094e955ede0a3dbf651e2891356ecd0509c1edb8d9c8801051fdc4efdc0008025a02190f26e70a82d7f66354a13cda79b6af1aa808db768a787aeb348d425d7d0b3a06a82bd0518bc9b69dc551e20d772a1b06222edfc5d39b6973e4f4dc46ed8b196";
-        let tx_buff = hex::decode(tx_hex).unwrap();
-        let tx = Transaction::decode(&Rlp::new(&tx_buff)).unwrap();
-
-        let (gas_offset, _) = gas_offset_from_rlp_node(&leaf_node_buff);
-        let config = CircuitConfig::standard_recursion_config();
-        let leaf_proof = legacy_tx_leaf_node_proof::<F, C, D>(
-            &config,
-            leaf_node_buff,
-            ExtractionMethod::OffsetBased(gas_offset),
-        )?;
-        let vcd = VerifierCircuitData {
-            verifier_only: leaf_proof.1.clone(),
-            common: leaf_proof.2.clone(),
-        };
-
-        vcd.verify(leaf_proof.0.clone())?;
-        // verify hash of the node
-        let expected_hash = crate::utils::test::hash_to_fields::<F>(&node_hash);
-        let proof_hash = &leaf_proof.0.public_inputs[0..8];
-        assert!(expected_hash == proof_hash, "hashes not equal?");
-        // verify gas value
-        let gas_buff = tx.gas.rlp_bytes();
-        let gas_rlp = rlp::Rlp::new(&gas_buff);
-        let gas_header = gas_rlp.payload_info()?;
-        let gas_value = gas_rlp.data().unwrap().to_vec();
-        assert_eq!(
-            &leaf_proof.0.public_inputs[8..8 + gas_header.value_len],
-            gas_value
-                .iter()
-                .take(gas_header.value_len)
-                .map(|byte| F::from_canonical_u8(*byte))
-                .collect::<Vec<_>>()
-                .as_slice()
-        );
-        Ok(())
+    fn test_legacy_tx_leaf_proof_rlp_extract() -> Result<()> {
+        run_leaf_proof_test(|c, n| {
+            legacy_tx_leaf_node_proof::<F, C, D>(c, n.to_vec(), ExtractionMethod::RLPBased)
+        })
+    }
+    #[test]
+    fn test_legacy_tx_leaf_proof_offset() -> Result<()> {
+        run_leaf_proof_test(|c, n| {
+            let (gas_offset, _) = gas_offset_from_rlp_node(n);
+            legacy_tx_leaf_node_proof::<F, C, D>(
+                c,
+                n.to_vec(),
+                ExtractionMethod::OffsetBased(gas_offset),
+            )
+        })
     }
     #[test]
     fn test_rlp_mpt_node_list() -> Result<()> {
