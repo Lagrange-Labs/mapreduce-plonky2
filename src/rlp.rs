@@ -4,20 +4,13 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
-// nikko: Seems like this constant means the maximum number of bytes the length of data
-// can take. However, this is set arbitrarily because there can be up 7 bytes
-// expressing the length of the data according to RLP specs for long lists
-// size = prefix - 248 (where prefix is a single byte so can go up to 255)
-pub const MAX_LEN_BYTES: usize = 2;
-
-// nikko: I assume this is a practical consideration that tx and storage and receipts
-// don't have more than 17 fields and each items list don't have more than 17?
-pub const MAX_FIELDS: usize = 17;
-
-/// Whether the data represents a list or a string.
-pub const STRING: usize = 0;
-/// Whether the data represents a list or a string.
-pub const LIST: usize = 1;
+/// The maximum number of bytes the length of data can take.
+/// NOTE: However, this is set arbitrarily because there can be up 7 bytes
+/// expressing the length of the data according to RLP specs for long lists
+/// size = prefix - 248 (where prefix is a single byte so can go up to 255)
+/// 2 is the usual in practice for eth MPT related data.
+/// nikko: verify that assumption.
+const MAX_LEN_BYTES: usize = 2;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RlpHeader {
@@ -140,30 +133,6 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
     }
 }
 
-/// RLP String decoder : returns the offset in the array where string starts and
-/// the length of the string.
-/// It checks that the type is correctly a string and the length is within correct
-/// range.
-/// nikko: I dont think we need these extra checks - we should remove.
-pub(crate) fn decode_str<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    data: &[Target],
-) -> (Target, Target) {
-    let rlp_header: RlpHeader = decode_header(b, data);
-
-    let is_string = b.constant(F::from_canonical_usize(STRING));
-    b.connect(rlp_header.data_type, is_string);
-
-    let data_len = data.len();
-    let total_len = b.add(rlp_header.len, rlp_header.offset);
-    let data_len_target = b.constant(F::from_canonical_usize(data_len));
-    let is_lt = less_than(b, total_len, data_len_target, 63);
-    let true_pred = b._true();
-    b.connect(is_lt.target, true_pred.target);
-
-    (rlp_header.offset, rlp_header.len)
-}
-
 /// Decodes a list of two elements.
 pub(crate) fn decode_tuple<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
@@ -172,37 +141,30 @@ pub(crate) fn decode_tuple<F: RichField + Extendable<D>, const D: usize>(
     decode_fixed_list::<F, D, 2>(b, data)
 }
 
-/// Decodes a list of fixed number of items
+/// Decodes the header of the list, and then decodes the first N items of the list.
+/// NOTE: the `num_field` is set to N in this case, since it does not read the full array.
+/// Hence, N can be lower than the actual number of fields in the list.
 pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
 ) -> RlpList<N> {
     let zero = b.zero();
     let one = b.one();
+    let n_target = b.constant(F::from_canonical_usize(N));
 
     let mut num_fields = zero;
     let mut dec_off = [zero; N];
     let mut dec_len = [zero; N];
     let mut dec_type = [zero; N];
 
-    let RlpHeader {
-        len: payload_len,
-        offset: header_len,
-        data_type,
-    } = decode_header(b, data);
+    let list_header = decode_header(b, data);
+    let mut offset = list_header.offset;
 
-    // total_len includes the header byte + potential len_len bytes + payload len
-    let total_len = b.add(header_len, payload_len);
-
-    let is_list = b.constant(F::from_canonical_usize(LIST));
-    b.connect(is_list, data_type);
-
-    let mut offset = header_len;
     // decode each headers of each items ofthe list
     // remember in a list each item of the list is RLP encoded
     for i in 0..N {
-        // stop when you've looked at the whole expected length
-        let mut loop_p = b.is_equal(offset, total_len);
+        // stop when you've looked at the number of expected items
+        let mut loop_p = b.is_equal(num_fields, n_target);
         loop_p = b.not(loop_p);
 
         // read the header starting from the offset -
@@ -244,156 +206,7 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
 
     // make sure the total length is equal to the added length of all items
     // otherwise attacker could specify an inconsistent length in the first header
-    b.connect(total_len, offset);
-
-    RlpList {
-        offset: dec_off,
-        len: dec_len,
-        data_type: dec_type,
-        num_fields,
-    }
-}
-/// RLP List decoder : returns the offsetS in the array where elementS start and
-/// their respective lengthS
-pub fn decode_list<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    data: &[Target],
-) -> RlpList<MAX_FIELDS> {
-    let zero = b.zero();
-    let one = b.one();
-
-    let mut num_fields = zero;
-    let mut dec_off = [zero; MAX_FIELDS];
-    let mut dec_len = [zero; MAX_FIELDS];
-    let mut dec_type = [zero; MAX_FIELDS];
-
-    let RlpHeader {
-        len: payload_len,
-        mut offset,
-        data_type,
-    } = decode_header(b, data);
-
-    // total_len includes the header byte + potential len_len bytes + payload len
-    let total_len = b.add(offset, payload_len);
-
-    let is_list = b.constant(F::from_canonical_usize(LIST));
-    b.connect(is_list, data_type);
-
-    for i in 0..MAX_FIELDS {
-        let mut loop_p = b.is_equal(offset, total_len);
-        loop_p = b.not(loop_p);
-
-        // read the header starting from the offset - the header will at most 1 bytes + MAX_LEN_BYTES
-        // remember in a list each item of the list is RLP encoded
-        let header = take_dot_drop::<F, D, { MAX_LEN_BYTES + 1 }>(b, data, offset);
-        let RlpHeader {
-            len: field_len,
-            offset: field_offset,
-            data_type: field_type,
-        } = decode_header(b, &header);
-        let total_field_len = b.add(field_offset, field_len);
-
-        let one_sub_field_type = b.sub(one, field_type);
-        // d_off_i = ((1-field_type) * field_offset + offset) * (offset != total_len)
-        //  - if type is 0, str, then d_off_i basically = field_offset + offset
-        //    -> value starts at offset + field_offset from the beginning of the given array
-        //  - if type is 1, list, then d_off_i basically = offset because it's a list so we
-        // again need to decode the rlp header right at the offset?
-        let mut d_off_i = b.mul(one_sub_field_type, field_offset);
-        d_off_i = b.add(d_off_i, offset);
-        d_off_i = b.mul(loop_p.target, d_off_i);
-
-        // d_len_i = ((field_type * field_offset) + field_len) * (offset != total_len)
-        // - if type is 0, str, then d_len_i = field_len
-        // - if type is 1, list, then d_len_i = field_offset + field_len
-        // index where to find the data within the item array
-        let mut d_len_i = b.mul(field_type, field_offset);
-        d_len_i = b.add(d_len_i, field_len);
-        d_len_i = b.mul(loop_p.target, d_len_i);
-        let d_type_i = b.mul(loop_p.target, field_type);
-
-        dec_off[i] = d_off_i;
-        dec_len[i] = d_len_i;
-        dec_type[i] = d_type_i;
-
-        // move offset to the next field in the list
-        offset = b.mul_add(loop_p.target, total_field_len, offset);
-        num_fields = b.add(num_fields, loop_p.target);
-    }
-
-    // nikko: I think we can remove this - no need to check RLP is correct !
-    b.connect(total_len, offset);
-
-    RlpList {
-        offset: dec_off,
-        len: dec_len,
-        data_type: dec_type,
-        num_fields,
-    }
-}
-
-/// decode a list whose length (= sum of its items) are less than 55 bytes
-/// and all its items must be a string (no sub-list)
-pub fn decode_short_list<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    data: &[Target],
-) -> RlpList<MAX_FIELDS> {
-    let zero = b.zero();
-
-    let mut num_fields = zero;
-    let mut dec_off = [zero; MAX_FIELDS];
-    let mut dec_len = [zero; MAX_FIELDS];
-    let mut dec_type = [zero; MAX_FIELDS];
-
-    let RlpHeader {
-        len: payload_len,
-        mut offset,
-        data_type,
-    } = decode_header(b, data);
-    let total_len = b.add(offset, payload_len);
-    let true_pred = b._true();
-    let is_list = b.constant(F::from_canonical_usize(LIST));
-    b.connect(is_list, data_type);
-
-    for i in 0..MAX_FIELDS {
-        let mut loop_p = b.is_equal(offset, total_len);
-        loop_p = b.not(loop_p);
-
-        // let header = b.random_access(offset, data.to_vec());
-        let header = quin_selector(b, data, offset);
-
-        // assert(header < 0xb8); // Header must represent a string of length < 56 bytes.
-        let bytes_0xb8 = b.constant(F::from_canonical_usize(0xb8));
-        let is_lt = less_than(b, header, bytes_0xb8, 63);
-        b.connect(is_lt.target, true_pred.target);
-
-        let field_type = b.constant(F::from_canonical_usize(STRING));
-
-        let bytes_0x80 = b.constant(F::from_canonical_usize(0x80));
-        let single_bytes_p = less_than(b, header, bytes_0x80, 63);
-        let field_off = b.not(single_bytes_p);
-
-        let mut field_len = b.sub(header, bytes_0x80);
-        field_len = b.mul(field_len, field_off.target);
-        field_len = b.add(single_bytes_p.target, field_len);
-
-        let total_field_len = b.add(field_off.target, field_len);
-
-        let mut d_off_i = b.add(offset, field_off.target);
-        d_off_i = b.mul(loop_p.target, d_off_i);
-        let d_len_i = b.mul(loop_p.target, field_len);
-        let d_type_i = b.mul(loop_p.target, field_type);
-
-        dec_off[i] = d_off_i;
-        dec_len[i] = d_len_i;
-        dec_type[i] = d_type_i;
-
-        let offset_add = b.mul(loop_p.target, total_field_len);
-        offset = b.add(offset, offset_add);
-        num_fields = b.add(num_fields, loop_p.target);
-    }
-
-    b.connect(total_len, offset);
+    //b.connect(total_len, offset);
 
     RlpList {
         offset: dec_off,
@@ -486,7 +299,7 @@ mod tests {
 
     use plonky2::field::types::Field;
     use plonky2::iop::target::Target;
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+    use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
@@ -520,6 +333,8 @@ mod tests {
         data.verify(proof)
     }
 
+    // TODO: replace these tests by deterministic tests by creating the data first and then
+    // encoding in RLP and give that to circuit. Right now we just don't know what these vectors hold.
     #[test]
     fn test_decode_len() -> Result<()> {
         const D: usize = 2;
@@ -661,33 +476,6 @@ mod tests {
     }
 
     #[test]
-    fn test_rlp_decode_empty_list() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-        let config = CircuitConfig::standard_recursion_config();
-        let pw = PartialWitness::new();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-
-        let zero = builder.zero();
-
-        let data: Vec<Target> = [0xc0]
-            .iter()
-            .map(|x| builder.constant(F::from_canonical_u64(*x)))
-            .collect();
-
-        let empty_list = super::decode_list(&mut builder, &data);
-        builder.connect(empty_list.num_fields, zero);
-
-        builder.register_public_inputs(&data);
-        builder.register_public_input(empty_list.num_fields);
-
-        let data = builder.build::<C>();
-        let proof = data.prove(pw)?;
-        data.verify(proof)
-    }
-
-    #[test]
     fn test_rlp_decode() -> Result<()> {
         let data: [u64; 532] = [
             249, 2, 17, 160, 10, 210, 58, 71, 229, 91, 254, 185, 245, 139, 35, 127, 191, 50, 125,
@@ -734,7 +522,7 @@ mod tests {
             .map(|x| builder.constant(F::from_canonical_u64(*x)))
             .collect();
 
-        let decoded = super::decode_list(&mut builder, &data);
+        let decoded = super::decode_fixed_list::<F, D, 17>(&mut builder, &data);
 
         let num_fields = builder.constant(F::from_canonical_u64(17));
         let offset: Vec<Target> = [
@@ -754,7 +542,6 @@ mod tests {
             .map(|x| builder.constant(F::from_canonical_u64(*x)))
             .collect();
 
-        builder.connect(decoded.num_fields, num_fields);
         for i in 0..17 {
             builder.connect(decoded.offset[i], offset[i]);
             builder.connect(decoded.len[i], len[i]);
