@@ -37,4 +37,8 @@ ci = []
 =======
 env_logger = { version = "0.9.0", default-features = false }
 log = { version = "0.4.14", default-features = false }
+<<<<<<< HEAD
 >>>>>>> modified tests in rlp to print gate info
+=======
+rand = "0.8.5"
+>>>>>>> added comparison of quin_selector vs random_access
