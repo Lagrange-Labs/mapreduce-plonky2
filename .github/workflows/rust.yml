@@ -57,6 +57,8 @@ jobs:
         with:
           command: test
           args: --release
+        env: 
+          CI_RPC_URL: ${{ secrets.CI_RPC_URL }}
 
   fmt:
     name: Rustfmt

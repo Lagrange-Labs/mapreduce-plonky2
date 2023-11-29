@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 #![feature(generic_const_exprs)]
 
 use plonky2::plonk::{
@@ -5,8 +6,9 @@ use plonky2::plonk::{
     proof::ProofWithPublicInputs,
 };
 
-mod mpt_tx;
+mod eth;
 mod rlp;
+mod transaction;
 mod utils;
 
 /// Bundle containing the raw proof, the verification key, and some common data
