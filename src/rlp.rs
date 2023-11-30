@@ -279,7 +279,36 @@ mod tests {
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
     use crate::rlp::{RlpHeader, MAX_LEN_BYTES};
+    #[test]
+    fn test_vk() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let config = CircuitConfig::standard_recursion_config();
+        use plonky2::field::types::Sample;
+        let n = 15;
+        let a = F::rand_vec(n);
+        let b = F::rand_vec(n);
+        let mut b1 = CircuitBuilder::<F, D>::new(config.clone());
+        let pw1 = PartialWitness::new();
+        b1.constants(&a);
+        let d1 = b1.build::<C>();
+        let p1 = d1.prove(pw1)?;
+        d1.verify(p1)?;
+        let digest1 = d1.verifier_only.circuit_digest;
+        
+        let mut b2 = CircuitBuilder::<F, D>::new(config);
+        b2.constants(&b);
+        let d2 = b2.build::<C>();
+        let pw2 = PartialWitness::new();
+        let p2 = d2.prove(pw2)?;
+        d2.verify(p2)?;
+        let digest2 = d2.verifier_only.circuit_digest;
+        assert_eq!(digest1, digest2);
+        Ok(())
+    }
 
+    // TODO: replace these tests by deterministic tests by cr
     #[test]
     fn test_data_len() -> Result<()> {
         const D: usize = 2;

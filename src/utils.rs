@@ -141,6 +141,17 @@ pub(crate) mod test {
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use sha3::{Digest, Keccak256};
 
+    pub(crate) fn hash_output_to_field<F: RichField>(expected: &[u8]) -> Vec<F> {
+        let iter_u32 = expected.iter().chunks(4);
+        iter_u32
+            .into_iter()
+            .map(|chunk| {
+                let mut chunk_buff = chunk.map(|b| *b).collect::<Vec<u8>>();
+                let u32_num = read_le_u32(&mut chunk_buff.as_slice());
+                F::from_canonical_u32(u32_num)
+            })
+            .collect::<Vec<_>>()
+    }
     pub(crate) fn keccak256(data: &[u8]) -> Vec<u8> {
         let mut hasher = Keccak256::new();
         hasher.update(data);
