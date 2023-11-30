@@ -10,7 +10,7 @@ name: Check, Test, and Format
 jobs:
   check:
     name: Check
-    runs-on: ubuntu-latest
+    runs-on: lg-prover-32CPU
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -32,7 +32,7 @@ jobs:
           command: check
   test:
     name: Test Suite
-    runs-on: ubuntu-latest
+    runs-on: lg-prover-32CPU
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -60,7 +60,7 @@ jobs:
 
   fmt:
     name: Rustfmt
-    runs-on: ubuntu-latest
+    runs-on: lg-prover-32CPU
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
