@@ -1,2 +1,2 @@
 mod mpt;
-//mod prover;
+mod prover;

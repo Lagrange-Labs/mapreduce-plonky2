@@ -1,12 +1,12 @@
 //! Module containing several structure definitions for Ethereum related operations
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
 use anyhow::{Ok, Result};
-use eth_trie::{EthTrie, MemoryDB, Trie};
+use eth_trie::{EthTrie, MemoryDB, Trie, Node};
 use ethers::{
     providers::{Http, Middleware, Provider},
     types::{BlockId, Bytes, Transaction, TransactionReceipt, U64},
 };
-use rlp::{Encodable, RlpStream};
+use rlp::{Encodable, Rlp, RlpStream};
 use std::{env, sync::Arc};
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
 /// bad transactions, so we only compute over valid transactions.
@@ -135,6 +135,45 @@ impl BlockData {
     }
 }
 
+/// Extract the hash in case of Extension node, or all the hashes in case of a Branch node.
+pub(crate) fn extract_child_hashes(rlp_data: &[u8]) -> Vec<Vec<u8>> {
+    let rlp = Rlp::new(rlp_data);
+    let mut hashes = Vec::new();
+
+    // Check for branch node (length of 17 items)
+    if rlp.item_count().unwrap_or(0) == 17 {
+        for i in 0..16 {
+            let item = rlp.at(i).unwrap();
+            if item.is_data() && item.data().unwrap().len() == 32 {
+                hashes.push(item.data().unwrap().to_vec());
+            }
+        }
+    } else if rlp.item_count().unwrap_or(0) == 2 {
+        // Check for extension or leaf node
+        let possible_hash = rlp.at(1).unwrap();
+        if possible_hash.is_data() && possible_hash.data().unwrap().len() == 32 {
+            hashes.push(possible_hash.data().unwrap().to_vec());
+        }
+    }
+    hashes
+}
+/// Computes the length of the radix, of the "key" to lookup in the MPT trie, from
+/// the path of nodes given.
+/// TODO: transform that to only use the raw encoded bytes, instead of the nodes. Would
+/// allow us to remove the need to give the proofs as nodes.
+pub(crate) fn compute_key_length(path: &[Node]) -> usize {
+        let mut key_len = 0;
+        for node in path {
+            match node {
+                Node::Branch(b) => key_len += 1,
+                Node::Extension(e) => key_len += e.read().unwrap().prefix.len(),
+                Node::Leaf(l) => key_len += l.key.len(),
+                Node::Hash(h) => panic!("what is a hash node!?"),
+                Node::Empty => panic!("should not be an empty node in the path"),
+            }
+        }
+        key_len
+    }
 #[cfg(test)]
 mod test {
     use super::*;

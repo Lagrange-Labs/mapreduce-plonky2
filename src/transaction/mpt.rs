@@ -123,7 +123,6 @@ pub fn recursive_node_proof<
     mut node: Vec<u8>,
     inner_proofs: &[ProofTuple<F, InnerC, D>],
     hash_offsets: &[usize],
-    hash: &[u8],
 ) -> Result<ProofTuple<F, C, D>>
 where
     InnerC::Hasher: AlgebraicHasher<F>,
@@ -132,7 +131,6 @@ where
     node.resize(MAX_INTERMEDIATE_NODE_LENGTH, 0);
     assert_ne!(inner_proofs.len(), 0);
     assert_eq!(inner_proofs.len(), hash_offsets.len());
-    assert_eq!(hash.len(), 32);
     assert!(node_length <= MAX_INTERMEDIATE_NODE_LENGTH);
     assert!(node_length > 0);
 
@@ -338,7 +336,6 @@ fn hash_node<F: RichField + Extendable<D>, const D: usize>(
             .collect::<Vec<_>>(),
     );
 }
-
 #[cfg(test)]
 mod test {
     use anyhow::Result;
@@ -367,15 +364,12 @@ mod test {
 
     use super::{recursive_node_proof, MAX_LEGACY_TX_NODE_LENGTH};
     use crate::rlp::{decode_header, decode_tuple};
-    use crate::utils::test::{connect, keccak256};
+    use crate::utils::find_index_subvector;
     use crate::utils::test::{data_to_constant_targets, hash_output_to_field};
+    use crate::utils::{keccak256, test::connect};
     use crate::ProofTuple;
 
     use super::{legacy_tx_leaf_node_proof, ExtractionMethod};
-    // Returns the index where the subvector starts in v, if any.
-    fn find_index_subvector(v: &[u8], sub: &[u8]) -> Option<usize> {
-        (0..(v.len() - sub.len())).find(|&i| &v[i..i + sub.len()] == sub)
-    }
 
     #[test]
     fn test_legacy_full_proof() -> Result<()> {
@@ -407,7 +401,7 @@ mod test {
             } else {
                 let hash_offset = find_index_subvector(&node, &last_hash).unwrap();
                 let p = last_proof.unwrap();
-                recursive_node_proof(&config, node, &[p], &[hash_offset], &last_hash)?
+                recursive_node_proof(&config, node, &[p], &[hash_offset])?
             };
 
             let vcd = VerifierCircuitData {
@@ -459,7 +453,7 @@ mod test {
 
         vcd.verify(leaf_proof.0.clone())?;
         // verify hash of the node
-        let expected_hash = crate::utils::test::hash_to_fields::<F>(&node_hash);
+        let expected_hash = crate::utils::hash_to_fields::<F>(&node_hash);
         let proof_hash = &leaf_proof.0.public_inputs[0..8];
         assert!(expected_hash == proof_hash, "hashes not equal?");
         // verify gas value
