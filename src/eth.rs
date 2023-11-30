@@ -1,7 +1,7 @@
 //! Module containing several structure definitions for Ethereum related operations
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
 use anyhow::{Ok, Result};
-use eth_trie::{EthTrie, MemoryDB, Trie, Node};
+use eth_trie::{EthTrie, MemoryDB, Node, Trie};
 use ethers::{
     providers::{Http, Middleware, Provider},
     types::{BlockId, Bytes, Transaction, TransactionReceipt, U64},
@@ -162,18 +162,18 @@ pub(crate) fn extract_child_hashes(rlp_data: &[u8]) -> Vec<Vec<u8>> {
 /// TODO: transform that to only use the raw encoded bytes, instead of the nodes. Would
 /// allow us to remove the need to give the proofs as nodes.
 pub(crate) fn compute_key_length(path: &[Node]) -> usize {
-        let mut key_len = 0;
-        for node in path {
-            match node {
-                Node::Branch(b) => key_len += 1,
-                Node::Extension(e) => key_len += e.read().unwrap().prefix.len(),
-                Node::Leaf(l) => key_len += l.key.len(),
-                Node::Hash(h) => panic!("what is a hash node!?"),
-                Node::Empty => panic!("should not be an empty node in the path"),
-            }
+    let mut key_len = 0;
+    for node in path {
+        match node {
+            Node::Branch(b) => key_len += 1,
+            Node::Extension(e) => key_len += e.read().unwrap().prefix.len(),
+            Node::Leaf(l) => key_len += l.key.len(),
+            Node::Hash(h) => panic!("what is a hash node!?"),
+            Node::Empty => panic!("should not be an empty node in the path"),
         }
-        key_len
     }
+    key_len
+}
 #[cfg(test)]
 mod test {
     use super::*;

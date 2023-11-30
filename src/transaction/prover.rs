@@ -1,4 +1,11 @@
 use crate::utils::find_index_subvector;
+use crate::{
+    eth::{compute_key_length, extract_child_hashes, BlockData},
+    transaction::mpt::{legacy_tx_leaf_node_proof, recursive_node_proof, ExtractionMethod},
+    utils::keccak256,
+    ProofTuple,
+};
+use anyhow::anyhow;
 use anyhow::Result;
 use eth_trie::{Node, Trie};
 use ethers::{types::BlockId, utils::hex};
@@ -13,14 +20,6 @@ use plonky2::{
 };
 use rlp::Encodable;
 use std::{collections::HashMap, marker::PhantomData};
-use anyhow::anyhow;
-use crate::{
-    eth::{compute_key_length, extract_child_hashes, BlockData},
-    transaction::mpt::{legacy_tx_leaf_node_proof, recursive_node_proof, ExtractionMethod},
-    utils::keccak256,
-    ProofTuple,
-};
-
 
 struct TxBlockProver<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> {
     data: BlockData,
