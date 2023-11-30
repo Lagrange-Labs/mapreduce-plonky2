@@ -5,12 +5,12 @@ on:
       - main
 
 
-name: Check and Lint
+name: Check, Test, and Format
 
 jobs:
   check:
     name: Check
-    runs-on: ubuntu-latest
+    runs-on: lg-prover-32CPU
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -30,10 +30,37 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: check
+  test:
+    name: Test Suite
+    runs-on: lg-prover-32CPU
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: "--all --release -- --test-threads 32"
 
   fmt:
     name: Rustfmt
-    runs-on: ubuntu-latest
+    runs-on: lg-prover-32CPU
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
