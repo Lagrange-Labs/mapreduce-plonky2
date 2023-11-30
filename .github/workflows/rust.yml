@@ -54,7 +54,7 @@ jobs:
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
-          args: "--all --release -- --test-threads 32"
+          args: "--all --release"
 
 
   fmt:
