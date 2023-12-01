@@ -296,17 +296,19 @@ mod tests {
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
-        let arr:[u64; 8] = [0, 1, 1, 2, 3, 5, 8, 13];
-        let rand_index: usize = rand::thread_rng().gen_range(0..arr.len());
+        let bits_of_length: usize = 7;
+        let byte_arr: Vec<u8> = (0..1<<bits_of_length).map(|_i| rand::thread_rng().gen()).collect();
+        println!("byte_arr length: {}", byte_arr.len());
+        let rand_index: usize = rand::thread_rng().gen_range(0..1<<bits_of_length);
 
         // quin version
         debug!("QUIN VERSION");
         let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config.clone());
 
-        let arr_target: Vec<Target> = arr
+        let arr_target: Vec<Target> = byte_arr
             .iter()
-            .map(|x| builder.constant(F::from_canonical_u64(*x)))
+            .map(|x| builder.constant(F::from_canonical_u8(*x)))
             .collect();
 
         let n: Target = builder.constant(F::from_canonical_usize(rand_index));
@@ -329,9 +331,9 @@ mod tests {
         let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let arr_target: Vec<Target> = arr
+        let arr_target: Vec<Target> = byte_arr
             .iter()
-            .map(|x| builder.constant(F::from_canonical_u64(*x)))
+            .map(|x| builder.constant(F::from_canonical_u8(*x)))
             .collect();
 
         let n: Target = builder.constant(F::from_canonical_usize(rand_index));
