@@ -341,11 +341,15 @@ mod test {
     use anyhow::Result;
     use ethers::types::Transaction;
     use plonky2::field::extension::Extendable;
+    use plonky2::field::types::Field;
     use plonky2::hash::hash_types::RichField;
     use plonky2::hash::keccak;
+    use plonky2::iop::target::Target;
+    use plonky2::iop::witness::WitnessWrite;
     use plonky2::plonk::circuit_data::{CommonCircuitData, VerifierOnlyCircuitData};
     use plonky2::plonk::config::AlgebraicHasher;
     use plonky2::plonk::proof::ProofWithPublicInputs;
+    use plonky2::util::ceil_div_usize;
     use plonky2::{
         iop::witness::PartialWitness,
         plonk::{
@@ -354,6 +358,14 @@ mod test {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
+    use plonky2_crypto::biguint::BigUintTarget;
+    use plonky2_crypto::hash::keccak256::{
+        CircuitBuilderHashKeccak, WitnessHashKeccak, KECCAK256_R,
+    };
+    use plonky2_crypto::hash::{keccak256, CircuitBuilderHash, HashInputTarget, HashOutputTarget};
+    use plonky2_crypto::u32::arithmetic_u32::U32Target;
+    use rand::distributions::Standard;
+    use rand::{thread_rng, Rng};
     use rlp::{Decodable, Encodable, Rlp};
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -364,8 +376,8 @@ mod test {
 
     use super::{recursive_node_proof, MAX_LEGACY_TX_NODE_LENGTH};
     use crate::rlp::{decode_header, decode_tuple};
-    use crate::utils::find_index_subvector;
     use crate::utils::test::{data_to_constant_targets, hash_output_to_field};
+    use crate::utils::{convert_u8_to_u32, find_index_subvector, less_than};
     use crate::utils::{keccak256, test::connect};
     use crate::ProofTuple;
 
@@ -586,6 +598,8 @@ mod test {
         data.verify(proof)
     }
     use std::cmp::Ordering;
+    use std::marker::PhantomData;
+    use std::os::unix::thread;
     /// Function that returns the offset of the gas value in the RLP encoded
     /// node containing a transaction. It also returns the gas length.
     fn gas_offset_from_rlp_node(node: &[u8]) -> (usize, usize) {
@@ -627,5 +641,212 @@ mod test {
             }
         });
         (tx_offset + gas_offset, gas_value_len)
+    }
+
+    trait ToTargets {
+        fn to_targets(&self) -> Vec<Target>;
+    }
+
+    impl ToTargets for Vec<Target> {
+        fn to_targets(&self) -> Vec<Target> {
+            self.clone()
+        }
+    }
+
+    impl ToTargets for HashOutputTarget {
+        fn to_targets(&self) -> Vec<Target> {
+            self.limbs.iter().map(|limb| limb.0).collect::<Vec<_>>()
+        }
+    }
+
+    trait CircuitHasher<F: RichField + Extendable<D>, const D: usize> {
+        type OutputTarget: ToTargets;
+        fn hash(
+            builder: &mut CircuitBuilder<F, D>,
+            pw: &mut PartialWitness<F>,
+            inputs: &[Target],
+            length: usize,
+        ) -> Self::OutputTarget;
+    }
+
+    struct PoseidonHashing<F: RichField, C: GenericConfig<D, F = F>, const D: usize>
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
+        _f: PhantomData<F>,
+        _c: PhantomData<C>,
+    }
+
+    impl<F, C, const D: usize> CircuitHasher<F, D> for PoseidonHashing<F, C, D>
+    where
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        C::Hasher: AlgebraicHasher<F>,
+    {
+        type OutputTarget = Vec<Target>;
+
+        fn hash(
+            builder: &mut CircuitBuilder<F, D>,
+            pw: &mut PartialWitness<F>,
+            data: &[Target],
+            l: usize,
+        ) -> Self::OutputTarget {
+            assert!(l <= data.len());
+            builder.hash_n_to_m_no_pad::<C::Hasher>(data[..l].to_vec(), 1)
+        }
+    }
+
+    struct KeccakHasher<F: RichField, const D: usize> {
+        _f: PhantomData<F>,
+    }
+    impl<F, const D: usize> CircuitHasher<F, D> for KeccakHasher<F, D>
+    where
+        F: RichField + Extendable<D>,
+    {
+        type OutputTarget = HashOutputTarget;
+        fn hash(
+            b: &mut CircuitBuilder<F, D>,
+            pw: &mut PartialWitness<F>,
+            node: &[Target],
+            length: usize, // unpadded length u32 interpreted, should be PADDED
+        ) -> Self::OutputTarget {
+            let length_target = b.add_virtual_target();
+            pw.set_target(length_target, F::from_canonical_usize(length));
+            let total_len = node.len();
+            // the end of the data slice up to the end of the fixed size array.
+            let input_len_bits = length * 8; // only pad the data that is inside the fixed buffer
+            let num_actual_blocks = 1 + input_len_bits / KECCAK256_R;
+            let padded_len_bits = num_actual_blocks * KECCAK256_R;
+            // reason why ^: this is annoying to do in circuit.
+            let num_bytes = ceil_div_usize(padded_len_bits, 8);
+            let diff = num_bytes - length;
+
+            let diff_target = b.add_virtual_target();
+            pw.set_target(diff_target, F::from_canonical_usize(diff));
+            let end_padding = b.add(length_target, diff_target);
+            let one = b.one();
+            let end_padding = b.sub(end_padding, one); // inclusive range
+                                                       // little endian so we start padding from the end of the byte
+            let single_pad = b.constant(F::from_canonical_usize(0x81)); // 1000 0001
+            let begin_pad = b.constant(F::from_canonical_usize(0x01)); // 0000 0001
+            let end_pad = b.constant(F::from_canonical_usize(0x80)); // 1000 0000
+                                                                     // TODO : make that const generic
+                                                                     // TODO : make that const generic
+            let padded_node = node
+                .iter()
+                .enumerate()
+                .map(|(i, byte)| {
+                    let i_target = b.constant(F::from_canonical_usize(i));
+                    // condition if we are within the data range ==> i < length
+                    let is_data = less_than(b, i_target, length_target, 32);
+                    // condition if we start the padding ==> i == length
+                    let is_start_padding = b.is_equal(i_target, length_target);
+                    // condition if we are done with the padding ==> i == length + diff - 1
+                    let is_end_padding = b.is_equal(i_target, end_padding);
+                    // condition if we only need to add one byte 1000 0001 to pad
+                    // because we work on u8 data, we know we're at least adding 1 byte and in
+                    // this case it's 0x81 = 1000 0001
+                    // i == length == diff - 1
+                    let is_start_and_end = b.and(is_start_padding, is_end_padding);
+
+                    // nikko XXX: Is this sound ? I think so but not 100% sure.
+                    // I think it's ok to not use `quin_selector` or `b.random_acess` because
+                    // if the prover gives another byte target, then the resulting hash would be invalid,
+                    let item_data = b.mul(is_data.target, *byte);
+                    let item_start_padding = b.mul(is_start_padding.target, begin_pad);
+                    let item_end_padding = b.mul(is_end_padding.target, end_pad);
+                    let item_start_and_end = b.mul(is_start_and_end.target, single_pad);
+                    // if all of these conditions are false, then item will be 0x00,i.e. the padding
+                    let mut item = item_data;
+                    item = b.add(item, item_start_padding);
+                    item = b.add(item, item_end_padding);
+                    item = b.add(item, item_start_and_end);
+                    item
+                })
+                .collect::<Vec<_>>();
+
+            // NOTE we don't pad anymore because we enforce that the resulting length is already a multiple
+            // of 4 so it will fit the conversion to u32 and circuit vk would stay the same for different
+            // data length
+            assert!(total_len % 4 == 0);
+            // pad node (u8 targets) to multiple of 4
+            //let mut padded: Vec<Target> = node.to_vec();
+            //let diff = padded.len() % 4;
+            //for _ in 0..diff {
+            //    padded.push(zero);
+            //}
+
+            // convert padded node to u32
+            let node_u32_target: Vec<U32Target> = convert_u8_to_u32(b, &padded_node);
+
+            // fixed size block delimitation: this is where we tell the hash function gadget
+            // to only look at a certain portion of our data, each bool says if the hash function
+            // will update its state for this block or not.
+            let rate_bytes = b.constant(F::from_canonical_usize(KECCAK256_R / 8));
+            let end_padding_offset = b.add(end_padding, one);
+            let nb_blocks = b.div(end_padding_offset, rate_bytes);
+            // - 1 because keccak always take first block so we don't count it
+            let nb_actual_blocks = b.sub(nb_blocks, one);
+            let total_num_blocks = total_len / (KECCAK256_R / 8) - 1;
+            let blocks = (0..total_num_blocks)
+                .map(|i| {
+                    let i_target = b.constant(F::from_canonical_usize(i));
+                    less_than(b, i_target, nb_actual_blocks, 8)
+                })
+                .collect::<Vec<_>>();
+
+            let hash_target = HashInputTarget {
+                input: BigUintTarget {
+                    limbs: node_u32_target,
+                },
+                input_bits: padded_len_bits,
+                blocks,
+            };
+
+            b.hash_keccak256(&hash_target)
+        }
+    }
+
+    use plonky2::field::types::Sample;
+
+    #[test]
+    fn test_hashing_in_circuit_poseidon() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let config = CircuitConfig::standard_recursion_config();
+        const N: usize = 6;
+        let data: Vec<F> = F::rand_vec(N);
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let mut pw = PartialWitness::new();
+        let targets = builder.add_virtual_targets(N);
+        let output = PoseidonHashing::<F, C, D>::hash(&mut builder, &mut pw, &targets, N);
+        for i in 0..N {
+            pw.set_target(targets[i], data[i]);
+        }
+
+        let data = builder.build::<C>();
+        let proof = data.prove(pw)?;
+        data.verify(proof)
+    }
+    #[test]
+    fn test_hashing_in_circuit_hash() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let config = CircuitConfig::standard_recursion_config();
+        const N: usize = keccak256::KECCAK256_R / 8 * 3;
+        let data: Vec<u8> = thread_rng().sample_iter(&Standard).take(N).collect();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let mut pw = PartialWitness::new();
+        let targets = builder.add_virtual_targets(N);
+        let output = KeccakHasher::<F, D>::hash(&mut builder, &mut pw, &targets, N);
+        for i in 0..N {
+            pw.set_target(targets[i], F::from_canonical_u8(data[i]));
+        }
+
+        let data = builder.build::<C>();
+        let proof = data.prove(pw)?;
+        data.verify(proof)
     }
 }
