@@ -11,35 +11,27 @@ use plonky2::{
         circuit_data::CircuitConfig,
         config::{AlgebraicHasher, GenericConfig},
     },
-    util::ceil_div_usize,
-};
-use plonky2_crypto::{
-    biguint::BigUintTarget,
-    hash::{
-        keccak256::{CircuitBuilderHashKeccak, KECCAK256_R},
-        HashInputTarget,
-    },
-    u32::arithmetic_u32::U32Target,
 };
 
 use crate::{
+    hash::hash_array,
     rlp::{decode_fixed_list, decode_tuple, extract_array},
-    utils::{convert_u8_to_u32, less_than},
+    utils::convert_u8_to_u32,
     ProofTuple,
 };
 
 /// The maximum length of a RLP encoded leaf node in a MPT tree holding a legacy tx.
-const MAX_LEGACY_TX_NODE_LENGTH: usize = 532;
+pub(crate) const MAX_LEGACY_TX_NODE_LENGTH: usize = 532;
 /// The maximum size a RLP encoded legacy tx can take. This is different from
 /// `LEGACY_TX_NODE_LENGTH` because the latter contains the key in the path
 /// as well.
-const MAX_LEGACY_TX_LENGTH: usize = 532;
+pub(crate) const MAX_LEGACY_TX_LENGTH: usize = 532;
 /// Maximum size the gas value can take in bytes.
-const MAX_GAS_VALUE_LEN: usize = 32;
+pub(crate) const MAX_GAS_VALUE_LEN: usize = 32;
 
 /// Size of an intermediate (branch or leaf) node in the MPT trie.
 /// A branch node can take up to 17*32 = 544 bytes.
-const MAX_INTERMEDIATE_NODE_LENGTH: usize = 544;
+pub(crate) const MAX_INTERMEDIATE_NODE_LENGTH: usize = 544;
 
 /// Length of a "key" (a hash) in the MPT trie.
 const HASH_LENGTH: usize = 32;
@@ -132,7 +124,6 @@ where
     assert_ne!(inner_proofs.len(), 0);
     assert_eq!(inner_proofs.len(), hash_offsets.len());
     assert!(node_length <= MAX_INTERMEDIATE_NODE_LENGTH);
-    assert!(node_length > 0);
 
     let mut b = CircuitBuilder::<F, D>::new(config.clone());
     let mut pw = PartialWitness::new();
@@ -149,17 +140,48 @@ where
         pw.set_target(node_targets[i], F::from_canonical_u8(node[i]));
     }
 
+    // Hash the RLP encoding and expose the hash of this node
     let hash = hash_array(&mut b, &mut pw, &node_targets, length_target, node_length);
     b.register_public_inputs(&hash);
 
-    // verify each inner proof - can be up to 16 if a branch node is full
-    //let mut proofs_canonical_hash_targets = vec![];
+    // verify all children proofs.
+    // TODO: make it constant size
+    // TODO: allow giving dumb proofs to be able to select which children to verify
+    // for some cases we don't need to verify all of them
+    verify_proofs(
+        &mut b,
+        &mut pw,
+        &node_targets,
+        &offset_targets,
+        inner_proofs,
+    );
+
+    let data = b.build::<C>();
+    let proof = data.prove(pw)?;
+
+    Ok((proof, data.verifier_only, data.common))
+}
+
+/// verify each inner proof - can be up to 16 if a branch node is full
+pub(super) fn verify_proofs<
+    F: RichField + Extendable<D>,
+    InnerC: GenericConfig<D, F = F>,
+    const D: usize,
+>(
+    b: &mut CircuitBuilder<F, D>,
+    pw: &mut PartialWitness<F>,
+    node_targets: &[Target],
+    offset_targets: &[Target],
+    inner_proofs: &[ProofTuple<F, InnerC, D>],
+) where
+    InnerC::Hasher: AlgebraicHasher<F>,
+{
     for (offset, prooft) in offset_targets.iter().zip(inner_proofs.iter()) {
-        let children_hash = extract_array::<F, D, HASH_LENGTH>(&mut b, &node_targets, *offset);
+        let children_hash = extract_array::<F, D, HASH_LENGTH>(b, node_targets, *offset);
         // connect the lookup hash to the proof hash
         // hash is exposed as 8 target elements so need to convert from u8 array to u32
         // 32 bytes hash output = 256 bits = 32 bits * 8 => 8 u32 targets exposed
-        let extracted_hash = convert_u8_to_u32(&mut b, &children_hash);
+        let extracted_hash = convert_u8_to_u32(b, &children_hash);
         let (inner_proof, inner_vd, inner_cd) = prooft;
         let pt = b.add_virtual_proof_with_pis(inner_cd);
         pw.set_proof_with_pis_target(&pt, inner_proof);
@@ -184,13 +206,7 @@ where
         pw.set_hash_target(inner_data.circuit_digest, inner_vd.circuit_digest);
         b.verify_proof::<InnerC>(&pt, &inner_data, inner_cd);
     }
-
-    let data = b.build::<C>();
-    let proof = data.prove(pw)?;
-
-    Ok((proof, data.verifier_only, data.common))
 }
-
 /// Reads the header of the RLP node, then reads the header of the TX item
 /// then reads all headers of the items in the list until it reaches the given
 /// header at position N. It reads that header and returns the offset from the array
@@ -223,169 +239,12 @@ fn extract_item_from_tx_list<
     extract_array::<F, D, MAX_VALUE_SIZE>(b, &rlp_tx, item_offset)
 }
 
-fn hash_array<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    pw: &mut PartialWitness<F>,
-    node: &[Target],       // assume constant size : TODO make it const generic
-    length_target: Target, // the size of the data inside this fixed size array
-    length: usize,         // could maybe be done with a generator but simpler this way
-) -> Vec<Target> {
-    let total_len = node.len();
-    // the computation of the padding length can be done outside the circuit
-    // because the important thing is that we prove in crcuit (a) we did some padding
-    // starting from the end of the message and (b) that padded array is transformed
-    // into u32 array correctly.
-    // We don't care if the _padding length_ if done incorrectly,
-    // because the hash output will be incorrect because hash computation is constrained.
-    // If the prover gave a incorrect length_target, that means either the data buffer
-    // will be changed, OR the the padding "buffer" will be changed from what is expected
-    // -> in both cases, the resulting hash will be different.
-    // (a) is necessary to allow the circuit to take as witness this length_target such
-    // that we can _directly_ lookup the data that is interesting for us _without_ passing
-    // through the expensive RLP decoding steps. To do this, we need to make sure, the prover
-    // can NOT give a target_length value which points to an index > to where we actually
-    // start padding the data. Otherwise, target_length could point to _any_ byte after
-    // the end of the data slice up to the end of the fixed size array.
-    let input_len_bits = length * 8; // only pad the data that is inside the fixed buffer
-    let num_actual_blocks = 1 + input_len_bits / KECCAK256_R;
-    let padded_len_bits = num_actual_blocks * KECCAK256_R;
-    // reason why ^: this is annoying to do in circuit.
-    let num_bytes = ceil_div_usize(padded_len_bits, 8);
-    let diff = num_bytes - length;
-
-    let diff_target = b.add_virtual_target();
-    pw.set_target(diff_target, F::from_canonical_usize(diff));
-    let end_padding = b.add(length_target, diff_target);
-    let one = b.one();
-    let end_padding = b.sub(end_padding, one); // inclusive range
-                                               // little endian so we start padding from the end of the byte
-    let single_pad = b.constant(F::from_canonical_usize(0x81)); // 1000 0001
-    let begin_pad = b.constant(F::from_canonical_usize(0x01)); // 0000 0001
-    let end_pad = b.constant(F::from_canonical_usize(0x80)); // 1000 0000
-                                                             // TODO : make that const generic
-    let padded_node = node
-        .iter()
-        .enumerate()
-        .map(|(i, byte)| {
-            let i_target = b.constant(F::from_canonical_usize(i));
-            // condition if we are within the data range ==> i < length
-            let is_data = less_than(b, i_target, length_target, 32);
-            // condition if we start the padding ==> i == length
-            let is_start_padding = b.is_equal(i_target, length_target);
-            // condition if we are done with the padding ==> i == length + diff - 1
-            let is_end_padding = b.is_equal(i_target, end_padding);
-            // condition if we only need to add one byte 1000 0001 to pad
-            // because we work on u8 data, we know we're at least adding 1 byte and in
-            // this case it's 0x81 = 1000 0001
-            // i == length == diff - 1
-            let is_start_and_end = b.and(is_start_padding, is_end_padding);
-
-            // nikko XXX: Is this sound ? I think so but not 100% sure.
-            // I think it's ok to not use `quin_selector` or `b.random_acess` because
-            // if the prover gives another byte target, then the resulting hash would be invalid,
-            let item_data = b.mul(is_data.target, *byte);
-            let item_start_padding = b.mul(is_start_padding.target, begin_pad);
-            let item_end_padding = b.mul(is_end_padding.target, end_pad);
-            let item_start_and_end = b.mul(is_start_and_end.target, single_pad);
-            // if all of these conditions are false, then item will be 0x00,i.e. the padding
-            let mut item = item_data;
-            item = b.add(item, item_start_padding);
-            item = b.add(item, item_end_padding);
-            item = b.add(item, item_start_and_end);
-            item
-        })
-        .collect::<Vec<_>>();
-
-    // NOTE we don't pad anymore because we enforce that the resulting length is already a multiple
-    // of 4 so it will fit the conversion to u32 and circuit vk would stay the same for different
-    // data length
-    assert!(total_len % 4 == 0);
-
-    // convert padded node to u32
-    let node_u32_target: Vec<U32Target> = convert_u8_to_u32(b, &padded_node);
-
-    // fixed size block delimitation: this is where we tell the hash function gadget
-    // to only look at a certain portion of our data, each bool says if the hash function
-    // will update its state for this block or not.
-    let rate_bytes = b.constant(F::from_canonical_usize(KECCAK256_R / 8));
-    let end_padding_offset = b.add(end_padding, one);
-    let nb_blocks = b.div(end_padding_offset, rate_bytes);
-    // - 1 because keccak always take first block so we don't count it
-    let nb_actual_blocks = b.sub(nb_blocks, one);
-    let total_num_blocks = total_len / (KECCAK256_R / 8) - 1;
-    let blocks = (0..total_num_blocks)
-        .map(|i| {
-            let i_target = b.constant(F::from_canonical_usize(i));
-            less_than(b, i_target, nb_actual_blocks, 8)
-        })
-        .collect::<Vec<_>>();
-
-    let hash_target = HashInputTarget {
-        input: BigUintTarget {
-            limbs: node_u32_target,
-        },
-        input_bits: padded_len_bits,
-        blocks,
-    };
-
-    let hash_output = b.hash_keccak256(&hash_target);
-    hash_output
-        .limbs
-        .iter()
-        .map(|limb| limb.0)
-        .collect::<Vec<_>>()
-}
-
-/// Takes a RLP encoded block, an item to match in the block, and the index of the item.
-/// It
-/// * Exposes the hash of the header as a public output
-/// * enforces that the given item is at the correct encoded offset in the block for the
-/// given length.
-/// For example, for verifying a tx root hash, the item is the root hash of the tx trie,
-/// the offset is where the hash starts in RLP encoded data.
-/// NOTE: this circuit directly reads into the block array to extract the item value
-/// and compare it against the one given. This is secure because we rely on the hash
-/// of the block to ensure that prover is looking at the right content. The circuit
-/// makes sure the offset given is within range of what has been passed to the hashing
-/// gadget.
-fn block_inclusion<F, const D: usize, const ITEM_LEN: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    pw: &mut PartialWitness<F>,
-    block: &[Target],    // RLP encoding of the block
-    block_length: usize, // length of the RLP encoding of the block
-    item: &[Target],     // item to match in the block RLP encoding
-    item_offset: usize,  // offset where to look for the value in block
-) where
-    F: RichField + Extendable<D>,
-{
-    // hashing the block & expose public input
-    let length_target = b.add_virtual_target();
-    pw.set_target(length_target, F::from_canonical_usize(block_length));
-    let hash = hash_array(b, pw, block, length_target, block_length);
-    b.register_public_inputs(&hash);
-
-    // tx root hash verification
-    let offset_target = b.add_virtual_target();
-    pw.set_target(offset_target, F::from_canonical_usize(item_offset));
-    // 10 = 2^1024 -> header should not go above that
-    let within_range = less_than(b, offset_target, length_target, 10);
-    let t = b._true();
-    b.connect(t.target, within_range.target);
-    let arr = extract_array::<F, D, ITEM_LEN>(b, block, offset_target);
-    // make sure the hash given is correct
-    for i in 0..ITEM_LEN {
-        b.connect(arr[i], item[i]);
-    }
-}
 #[cfg(test)]
 mod test {
     use anyhow::Result;
-    use ethers::types::{Block, Transaction, H256};
+    use ethers::types::Transaction;
     use plonky2::field::extension::Extendable;
     use plonky2::hash::hash_types::RichField;
-    use plonky2::hash::keccak;
-    use plonky2::iop::witness::WitnessWrite;
-    use plonky2::plonk::circuit_data::{CommonCircuitData, VerifierOnlyCircuitData};
     use plonky2::plonk::config::AlgebraicHasher;
     use plonky2::{
         iop::witness::PartialWitness,
@@ -404,71 +263,14 @@ mod test {
     const LIST: usize = 1;
 
     use super::{recursive_node_proof, MAX_LEGACY_TX_NODE_LENGTH};
-    use crate::eth::RLPBlock;
+    use crate::hash::hash_to_fields;
     use crate::rlp::{decode_header, decode_tuple};
-    use crate::transaction::mpt::block_inclusion;
+    use crate::utils::find_index_subvector;
     use crate::utils::test::{data_to_constant_targets, hash_output_to_field};
-    use crate::utils::{find_index_subvector, hash_to_fields};
     use crate::utils::{keccak256, test::connect};
     use crate::ProofTuple;
-    use plonky2::field::types::Field;
 
     use super::{legacy_tx_leaf_node_proof, ExtractionMethod};
-
-    #[test]
-    fn test_block_inclusion() -> Result<()> {
-        let block_str = "7b2268617368223a22307834343162636461323939363966653463393437393062383533386237306533306236366336326236396665363531366265613939363334643239306431366337222c22706172656e7448617368223a22307838323139636261363732353034353438343230343430656531613339396663623235656536323133383862333838653965613639663536663930363130643031222c2273686133556e636c6573223a22307831646363346465386465633735643761616238356235363762366363643431616433313234353162393438613734313366306131343266643430643439333437222c226d696e6572223a22307834346664336162383338316363336431346166613763346166376664313363646336353032366531222c227374617465526f6f74223a22307837356430653937303463336661336635633232643330373862386232643036636266656537663061363233643932386235373232346332363539663534633833222c227472616e73616374696f6e73526f6f74223a22307861623431663838366265323363643738366438613639613732623066393838656137326530623265303339373064303739386635653033373633613434326363222c227265636569707473526f6f74223a22307836376563346533623238626636373964626431306233636139636232356162376433656662643334646239333866623138386663643635633861316230343036222c226e756d626572223a223078613161343839222c2267617355736564223a2230783135633038222c226761734c696d6974223a223078626561343035222c22657874726144617461223a2230783730373037393635323037373632222c226c6f6773426c6f6f6d223a2230783030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030222c2274696d657374616d70223a2230783566323935626139222c22646966666963756c7479223a22307838613838643536313132396166222c22746f74616c446966666963756c7479223a22307833383736663032306432656332323638316666222c227365616c4669656c6473223a5b5d2c22756e636c6573223a5b5d2c227472616e73616374696f6e73223a5b22307862306334333231336338366332636163636538636565663936356238383135323964333165356265393361643663656663656632663331396132306566316235222c22307835626262663634626430663038343635616362653330616462326265383037343838633338343763393461376466616261666661336532356162336136303461222c22307837643936356131303364626238653230323736383265343562643337316366393262623965313562383464356232666130646661343533333338373965643132222c22307830623431666334633164383531386364656461393831323236393437373235366264633431356562333963343533313838356666393732386436616430393662225d2c2273697a65223a223078343463222c226d697848617368223a22307864653961653931633830613866643134643563653332323032623966666361613839623863353931393938343037333539663138363033313463313066383632222c226e6f6e6365223a22307831316566633637313536336235366339222c2262617365466565506572476173223a6e756c6c7d";
-        let block: Block<H256> = serde_json::from_slice(&hex::decode(block_str).unwrap()).unwrap();
-        let mut block_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
-        let block_rlp_len = block_rlp.len();
-        let block_hash_str = "441bcda29969fe4c94790b8538b70e30b66c62b69fe6516bea99634d290d16c7";
-        let block_hash = hex::decode(block_hash_str).unwrap();
-        let block_tx_root_hash_str =
-            "ab41f886be23cd786d8a69a72b0f988ea72e0b2e03970d0798f5e03763a442cc";
-        let tx_root = hex::decode(block_tx_root_hash_str).unwrap();
-
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config.clone());
-        let mut pw = PartialWitness::new();
-
-        // TODO: have one for the newest blocks headers
-        const MAX_HEADER_LEN: usize = 600;
-        assert!(block_rlp_len < MAX_HEADER_LEN);
-        block_rlp.resize(MAX_HEADER_LEN, 0);
-        let block_tgt = builder.add_virtual_targets(MAX_HEADER_LEN);
-        for i in 0..MAX_HEADER_LEN {
-            pw.set_target(block_tgt[i], F::from_canonical_u8(block_rlp[i]));
-        }
-        const HASH_LEN: usize = 32;
-        assert!(tx_root.len() == HASH_LEN);
-        let item = builder.add_virtual_targets(HASH_LEN);
-        for i in 0..HASH_LEN {
-            pw.set_target(item[i], F::from_canonical_u8(tx_root[i]));
-        }
-        let item_offset = find_index_subvector(&block_rlp, &tx_root).unwrap();
-        println!("[+] Starting proving now");
-        let now = Instant::now();
-        block_inclusion::<F, D, HASH_LEN>(
-            &mut builder,
-            &mut pw,
-            &block_tgt,
-            block_rlp_len,
-            &item,
-            item_offset,
-        );
-        let data = builder.build::<C>();
-        let end = now.elapsed();
-        println!("[+] building circuit {:?}s", end.as_secs());
-        let start = Instant::now();
-        let proof = data.prove(pw)?;
-        let end = now.elapsed();
-        println!("[+] proving proof {:?}s", end.as_secs());
-        // making sure right hash is exposed
-        let exp_inputs = hash_to_fields::<F>(&block_hash);
-        assert_eq!(exp_inputs, proof.public_inputs[0..exp_inputs.len()]);
-        data.verify(proof)?;
-        Ok(())
-    }
 
     #[test]
     fn test_legacy_full_proof() -> Result<()> {
@@ -552,7 +354,7 @@ mod test {
 
         vcd.verify(leaf_proof.0.clone())?;
         // verify hash of the node
-        let expected_hash = crate::utils::hash_to_fields::<F>(&node_hash);
+        let expected_hash = hash_to_fields::<F>(&node_hash);
         let proof_hash = &leaf_proof.0.public_inputs[0..8];
         assert!(expected_hash == proof_hash, "hashes not equal?");
         // verify gas value
@@ -685,7 +487,6 @@ mod test {
         data.verify(proof)
     }
     use std::cmp::Ordering;
-    use std::time::Instant;
     /// Function that returns the offset of the gas value in the RLP encoded
     /// node containing a transaction. It also returns the gas length.
     fn gas_offset_from_rlp_node(node: &[u8]) -> (usize, usize) {

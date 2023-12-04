@@ -7,6 +7,7 @@ use plonky2::plonk::{
 };
 
 mod eth;
+mod hash;
 mod rlp;
 mod transaction;
 mod utils;

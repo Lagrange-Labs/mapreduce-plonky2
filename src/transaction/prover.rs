@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::anyhow;
 use anyhow::Result;
-use eth_trie::{Node, Trie};
+use eth_trie::Trie;
 use ethers::{types::BlockId, utils::hex};
 use plonky2::{
     field::extension::Extendable,
@@ -15,7 +15,6 @@ use plonky2::{
     plonk::{
         circuit_data::{CircuitConfig, VerifierCircuitData},
         config::{AlgebraicHasher, GenericConfig},
-        proof::ProofWithPublicInputs,
     },
 };
 use rlp::Encodable;
@@ -267,7 +266,7 @@ mod test {
     use ethers::types::BlockNumber;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::{transaction::prover::TxBlockProver, utils::hash_to_fields};
+    use crate::{hash::hash_to_fields, transaction::prover::TxBlockProver};
     use anyhow::Result;
 
     #[tokio::test]
