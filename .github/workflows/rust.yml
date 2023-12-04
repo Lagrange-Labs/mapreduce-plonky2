@@ -31,6 +31,7 @@ jobs:
         with:
           command: check
   test:
+    name: Test Suite
     runs-on: lg-prover-32CPU
     steps:
       - name: Checkout sources
