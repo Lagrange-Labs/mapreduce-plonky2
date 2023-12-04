@@ -83,7 +83,8 @@ pub fn legacy_tx_leaf_node_proof<
     // Hash computation and exposing as public input
     let length_target = b.add_virtual_target();
     pw.set_target(length_target, F::from_canonical_usize(node_length));
-    hash_node(&mut b, &mut pw, &node_targets, length_target, node_length);
+    let hash = hash_array(&mut b, &mut pw, &node_targets, length_target, node_length);
+    b.register_public_inputs(&hash);
 
     // Gas value extraction and exposing as public input
     let gas_value_array = match extract {
@@ -148,7 +149,8 @@ where
         pw.set_target(node_targets[i], F::from_canonical_u8(node[i]));
     }
 
-    hash_node(&mut b, &mut pw, &node_targets, length_target, node_length);
+    let hash = hash_array(&mut b, &mut pw, &node_targets, length_target, node_length);
+    b.register_public_inputs(&hash);
 
     // verify each inner proof - can be up to 16 if a branch node is full
     //let mut proofs_canonical_hash_targets = vec![];
@@ -221,13 +223,13 @@ fn extract_item_from_tx_list<
     extract_array::<F, D, MAX_VALUE_SIZE>(b, &rlp_tx, item_offset)
 }
 
-fn hash_node<F: RichField + Extendable<D>, const D: usize>(
+fn hash_array<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     pw: &mut PartialWitness<F>,
     node: &[Target],       // assume constant size : TODO make it const generic
     length_target: Target, // the size of the data inside this fixed size array
     length: usize,         // could maybe be done with a generator but simpler this way
-) {
+) -> Vec<Target> {
     let total_len = node.len();
     // the computation of the padding length can be done outside the circuit
     // because the important thing is that we prove in crcuit (a) we did some padding
@@ -327,20 +329,63 @@ fn hash_node<F: RichField + Extendable<D>, const D: usize>(
     };
 
     let hash_output = b.hash_keccak256(&hash_target);
-    b.register_public_inputs(
-        &hash_output
-            .limbs
-            .iter()
-            .map(|limb| limb.0)
-            .collect::<Vec<_>>(),
-    );
+    hash_output
+        .limbs
+        .iter()
+        .map(|limb| limb.0)
+        .collect::<Vec<_>>()
+}
+
+/// Takes a RLP encoded block, an item to match in the block, and the index of the item.
+/// It
+/// * Exposes the hash of the header as a public output
+/// * enforces that the given item is at the correct encoded offset in the block for the
+/// given length.
+/// For example, for verifying a tx root hash, the item is the root hash of the tx trie,
+/// the offset is where the hash starts in RLP encoded data.
+/// NOTE: this circuit directly reads into the block array to extract the item value
+/// and compare it against the one given. This is secure because we rely on the hash
+/// of the block to ensure that prover is looking at the right content. The circuit
+/// makes sure the offset given is within range of what has been passed to the hashing
+/// gadget.
+fn block_inclusion<F, const D: usize, const ITEM_LEN: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    pw: &mut PartialWitness<F>,
+    block: &[Target],    // RLP encoding of the block
+    block_length: usize, // length of the RLP encoding of the block
+    item: &[Target],     // item to match in the block RLP encoding
+    item_offset: usize,  // offset where to look for the value in block
+) where
+    F: RichField + Extendable<D>,
+{
+    // hashing the block & expose public input
+    let length_target = b.add_virtual_target();
+    pw.set_target(length_target, F::from_canonical_usize(block_length));
+    let hash = hash_array(b, pw, block, length_target, block_length);
+    b.register_public_inputs(&hash);
+
+    // tx root hash verification
+    let offset_target = b.add_virtual_target();
+    pw.set_target(offset_target, F::from_canonical_usize(item_offset));
+    // 10 = 2^1024 -> header should not go above that
+    let within_range = less_than(b, offset_target, length_target, 10);
+    let t = b._true();
+    b.connect(t.target, within_range.target);
+    let arr = extract_array::<F, D, ITEM_LEN>(b, block, offset_target);
+    // make sure the hash given is correct
+    for i in 0..ITEM_LEN {
+        b.connect(arr[i], item[i]);
+    }
 }
 #[cfg(test)]
 mod test {
     use anyhow::Result;
-    use ethers::types::Transaction;
+    use ethers::types::{Block, Transaction, H256};
     use plonky2::field::extension::Extendable;
     use plonky2::hash::hash_types::RichField;
+    use plonky2::hash::keccak;
+    use plonky2::iop::witness::WitnessWrite;
+    use plonky2::plonk::circuit_data::{CommonCircuitData, VerifierOnlyCircuitData};
     use plonky2::plonk::config::AlgebraicHasher;
     use plonky2::{
         iop::witness::PartialWitness,
@@ -359,13 +404,71 @@ mod test {
     const LIST: usize = 1;
 
     use super::{recursive_node_proof, MAX_LEGACY_TX_NODE_LENGTH};
+    use crate::eth::RLPBlock;
     use crate::rlp::{decode_header, decode_tuple};
-    use crate::utils::find_index_subvector;
+    use crate::transaction::mpt::block_inclusion;
     use crate::utils::test::{data_to_constant_targets, hash_output_to_field};
+    use crate::utils::{find_index_subvector, hash_to_fields};
     use crate::utils::{keccak256, test::connect};
     use crate::ProofTuple;
+    use plonky2::field::types::Field;
 
     use super::{legacy_tx_leaf_node_proof, ExtractionMethod};
+
+    #[test]
+    fn test_block_inclusion() -> Result<()> {
+        let block_str = "7b2268617368223a22307834343162636461323939363966653463393437393062383533386237306533306236366336326236396665363531366265613939363334643239306431366337222c22706172656e7448617368223a22307838323139636261363732353034353438343230343430656531613339396663623235656536323133383862333838653965613639663536663930363130643031222c2273686133556e636c6573223a22307831646363346465386465633735643761616238356235363762366363643431616433313234353162393438613734313366306131343266643430643439333437222c226d696e6572223a22307834346664336162383338316363336431346166613763346166376664313363646336353032366531222c227374617465526f6f74223a22307837356430653937303463336661336635633232643330373862386232643036636266656537663061363233643932386235373232346332363539663534633833222c227472616e73616374696f6e73526f6f74223a22307861623431663838366265323363643738366438613639613732623066393838656137326530623265303339373064303739386635653033373633613434326363222c227265636569707473526f6f74223a22307836376563346533623238626636373964626431306233636139636232356162376433656662643334646239333866623138386663643635633861316230343036222c226e756d626572223a223078613161343839222c2267617355736564223a2230783135633038222c226761734c696d6974223a223078626561343035222c22657874726144617461223a2230783730373037393635323037373632222c226c6f6773426c6f6f6d223a2230783030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030222c2274696d657374616d70223a2230783566323935626139222c22646966666963756c7479223a22307838613838643536313132396166222c22746f74616c446966666963756c7479223a22307833383736663032306432656332323638316666222c227365616c4669656c6473223a5b5d2c22756e636c6573223a5b5d2c227472616e73616374696f6e73223a5b22307862306334333231336338366332636163636538636565663936356238383135323964333165356265393361643663656663656632663331396132306566316235222c22307835626262663634626430663038343635616362653330616462326265383037343838633338343763393461376466616261666661336532356162336136303461222c22307837643936356131303364626238653230323736383265343562643337316366393262623965313562383464356232666130646661343533333338373965643132222c22307830623431666334633164383531386364656461393831323236393437373235366264633431356562333963343533313838356666393732386436616430393662225d2c2273697a65223a223078343463222c226d697848617368223a22307864653961653931633830613866643134643563653332323032623966666361613839623863353931393938343037333539663138363033313463313066383632222c226e6f6e6365223a22307831316566633637313536336235366339222c2262617365466565506572476173223a6e756c6c7d";
+        let block: Block<H256> = serde_json::from_slice(&hex::decode(block_str).unwrap()).unwrap();
+        let mut block_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
+        let block_rlp_len = block_rlp.len();
+        let block_hash_str = "441bcda29969fe4c94790b8538b70e30b66c62b69fe6516bea99634d290d16c7";
+        let block_hash = hex::decode(block_hash_str).unwrap();
+        let block_tx_root_hash_str =
+            "ab41f886be23cd786d8a69a72b0f988ea72e0b2e03970d0798f5e03763a442cc";
+        let tx_root = hex::decode(block_tx_root_hash_str).unwrap();
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+        let mut pw = PartialWitness::new();
+
+        // TODO: have one for the newest blocks headers
+        const MAX_HEADER_LEN: usize = 600;
+        assert!(block_rlp_len < MAX_HEADER_LEN);
+        block_rlp.resize(MAX_HEADER_LEN, 0);
+        let block_tgt = builder.add_virtual_targets(MAX_HEADER_LEN);
+        for i in 0..MAX_HEADER_LEN {
+            pw.set_target(block_tgt[i], F::from_canonical_u8(block_rlp[i]));
+        }
+        const HASH_LEN: usize = 32;
+        assert!(tx_root.len() == HASH_LEN);
+        let item = builder.add_virtual_targets(HASH_LEN);
+        for i in 0..HASH_LEN {
+            pw.set_target(item[i], F::from_canonical_u8(tx_root[i]));
+        }
+        let item_offset = find_index_subvector(&block_rlp, &tx_root).unwrap();
+        println!("[+] Starting proving now");
+        let now = Instant::now();
+        block_inclusion::<F, D, HASH_LEN>(
+            &mut builder,
+            &mut pw,
+            &block_tgt,
+            block_rlp_len,
+            &item,
+            item_offset,
+        );
+        let data = builder.build::<C>();
+        let end = now.elapsed();
+        println!("[+] building circuit {:?}s", end.as_secs());
+        let start = Instant::now();
+        let proof = data.prove(pw)?;
+        let end = now.elapsed();
+        println!("[+] proving proof {:?}s", end.as_secs());
+        // making sure right hash is exposed
+        let exp_inputs = hash_to_fields::<F>(&block_hash);
+        assert_eq!(exp_inputs, proof.public_inputs[0..exp_inputs.len()]);
+        data.verify(proof)?;
+        Ok(())
+    }
 
     #[test]
     fn test_legacy_full_proof() -> Result<()> {
@@ -582,6 +685,7 @@ mod test {
         data.verify(proof)
     }
     use std::cmp::Ordering;
+    use std::time::Instant;
     /// Function that returns the offset of the gas value in the RLP encoded
     /// node containing a transaction. It also returns the gas length.
     fn gas_offset_from_rlp_node(node: &[u8]) -> (usize, usize) {

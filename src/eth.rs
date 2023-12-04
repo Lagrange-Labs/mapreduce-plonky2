@@ -4,10 +4,12 @@ use anyhow::{Ok, Result};
 use eth_trie::{EthTrie, MemoryDB, Node, Trie};
 use ethers::{
     providers::{Http, Middleware, Provider},
-    types::{BlockId, Bytes, Transaction, TransactionReceipt, U64},
+    types::{Block, BlockId, Bytes, Transaction, TransactionReceipt, U64},
 };
 use rlp::{Encodable, Rlp, RlpStream};
 use std::{env, sync::Arc};
+
+use crate::utils::keccak256;
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
 /// bad transactions, so we only compute over valid transactions.
 pub(crate) struct TxAndReceipt(Transaction, TransactionReceipt);
@@ -135,6 +137,54 @@ impl BlockData {
     }
 }
 
+pub(crate) trait BlockUtil {
+    fn block_hash(&self) -> Vec<u8> {
+        keccak256(&self.rlp())
+    }
+    fn rlp(&self) -> Vec<u8>;
+}
+
+impl<X> BlockUtil for Block<X> {
+    fn rlp(&self) -> Vec<u8> {
+        let rlp = RLPBlock(self);
+        rlp::encode(&rlp).to_vec()
+    }
+}
+pub(crate) struct RLPBlock<'a, X>(pub &'a Block<X>);
+impl<'a, X> rlp::Encodable for RLPBlock<'a, X> {
+    fn rlp_append(&self, s: &mut rlp::RlpStream) {
+        s.begin_unbounded_list();
+        s.append(&self.0.parent_hash);
+        s.append(&self.0.uncles_hash);
+        s.append(&self.0.author.unwrap());
+        s.append(&self.0.state_root);
+        s.append(&self.0.transactions_root);
+        s.append(&self.0.receipts_root);
+        s.append(&self.0.logs_bloom.unwrap());
+        s.append(&self.0.difficulty);
+        s.append(&self.0.number.unwrap());
+        s.append(&self.0.gas_limit);
+        s.append(&self.0.gas_used);
+        s.append(&self.0.timestamp);
+        s.append(&self.0.extra_data.to_vec());
+        s.append(&self.0.mix_hash.unwrap());
+        s.append(&self.0.nonce.unwrap());
+        rlp_opt(s, &self.0.base_fee_per_gas);
+        rlp_opt(s, &self.0.withdrawals_root);
+        rlp_opt(s, &self.0.blob_gas_used);
+        rlp_opt(s, &self.0.excess_blob_gas);
+        rlp_opt(s, &self.0.parent_beacon_block_root);
+        s.finalize_unbounded_list();
+    }
+}
+
+/// Extracted from ether-rs
+pub(crate) fn rlp_opt<T: rlp::Encodable>(rlp: &mut rlp::RlpStream, opt: &Option<T>) {
+    if let Some(inner) = opt {
+        rlp.append(inner);
+    }
+}
+
 /// Extract the hash in case of Extension node, or all the hashes in case of a Branch node.
 pub(crate) fn extract_child_hashes(rlp_data: &[u8]) -> Vec<Vec<u8>> {
     let rlp = Rlp::new(rlp_data);
@@ -176,13 +226,33 @@ pub(crate) fn compute_key_length(path: &[Node]) -> usize {
 }
 #[cfg(test)]
 mod test {
+    use ethers::types::H256;
+
     use super::*;
 
     #[tokio::test]
     async fn fetch_block() -> Result<()> {
         let block_number = 10593417;
-        let block = BlockData::fetch(block_number).await?;
+        let mut block = BlockData::fetch(block_number).await?;
         assert_eq!(block.block.number.unwrap(), block_number.into());
+        let computed = block.block.block_hash();
+        let expected = block.block.hash.unwrap();
+        assert_eq!(computed.to_vec(), expected.as_bytes());
+        let thin_block: Block<H256> = block.block.clone().into();
+        let encoding = serde_json::to_vec(&thin_block).unwrap();
+        let thin_block2: Block<H256> = serde_json::from_slice(&encoding).unwrap();
+        //let encoding = bincode::serialize(&thin_block).unwrap();
+        //let thin_block2: Block<H256> = bincode::deserialize(&encoding).unwrap();
+        //let encoding = rmp_serde::encode::to_vec(&thin_block).unwrap();
+        //let thin_block2: Block<H256> = rmp_serde::decode::from_slice(&encoding).unwrap();
+        assert_eq!(thin_block, thin_block2);
+
+        println!("block serialize() : {:?}", hex::encode(encoding));
+        println!("block hash : {:?}", hex::encode(computed));
+        println!(
+            "block tx root hash : {:?}",
+            hex::encode(block.tx_trie.root_hash()?)
+        );
         Ok(())
     }
 }

@@ -28,19 +28,6 @@ struct TxBlockProver<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, c
     _pc: PhantomData<C>,
 }
 
-struct RecursiveProofData<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
-{
-    // The nodes left to traverse in the path to go to the root
-    mpt_proof: Vec<Node>,
-    mpt_bytes: Vec<Vec<u8>>,
-    key: Vec<u8>,
-    key_ptr: usize,
-    // the current proof proving the whole subtree of the node with the
-    // given "hash"
-    proof: ProofWithPublicInputs<F, C, D>,
-    hash: Vec<u8>,
-}
-
 struct MPTNode<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> {
     node_bytes: Vec<u8>, // RLP byte representation of the node
     hash: Vec<u8>,       // its hash
@@ -146,6 +133,7 @@ where
             .children_proofs
             .iter()
             .map(|p| p.hash.clone())
+            // TODO: replace by something smarter
             .map(|hash| find_index_subvector(&node_bytes, &hash).expect("invalid hash"))
             .collect::<Vec<_>>();
         println!(
