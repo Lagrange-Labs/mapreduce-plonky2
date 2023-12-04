@@ -274,7 +274,6 @@ where
     }
 }
 
-#[cfg(test)]
 mod test {
     use eth_trie::Trie;
     use ethers::types::BlockNumber;

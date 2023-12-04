@@ -8,9 +8,8 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CommonCircuitData, ProverCircuitData},
+        circuit_data::CircuitConfig,
         config::{AlgebraicHasher, GenericConfig},
-        proof::ProofWithPublicInputs,
     },
     util::ceil_div_usize,
 };
@@ -342,10 +341,7 @@ mod test {
     use ethers::types::Transaction;
     use plonky2::field::extension::Extendable;
     use plonky2::hash::hash_types::RichField;
-    use plonky2::hash::keccak;
-    use plonky2::plonk::circuit_data::{CommonCircuitData, VerifierOnlyCircuitData};
     use plonky2::plonk::config::AlgebraicHasher;
-    use plonky2::plonk::proof::ProofWithPublicInputs;
     use plonky2::{
         iop::witness::PartialWitness,
         plonk::{

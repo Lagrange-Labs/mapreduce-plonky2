@@ -179,7 +179,7 @@ pub(crate) mod test {
         iter_u32
             .into_iter()
             .map(|chunk| {
-                let mut chunk_buff = chunk.map(|b| *b).collect::<Vec<u8>>();
+                let mut chunk_buff = chunk.copied().collect::<Vec<u8>>();
                 let u32_num = read_le_u32(&mut chunk_buff.as_slice());
                 F::from_canonical_u32(u32_num)
             })
