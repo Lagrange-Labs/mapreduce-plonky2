@@ -340,6 +340,7 @@ mod test {
         let config = CircuitConfig::standard_recursion_config();
         let result = aggregate_sequential_headers::<F, C, C, D, N_PROOFS>(&config, &proofs)?;
 
+        verify_proof_tuple(&result)?;
         Ok(())
     }
 
