@@ -80,9 +80,9 @@ fn prove_header_inclusion<F, const D: usize, const ITEM_LEN: usize>(
 /// ITEM_LEN is the length of the item to match in the header - normally to verify
 /// the tx root hash for example, it is 32.
 /// The public inputs exposed are:
-/// [idx, idx, previousHeaderHash, headerHash]
-///  * reason to put twice idx is to keep a similar structure for higher level proofs that need
-/// the full range of headers verified so far.
+/// [u32, previousHeaderHash, headerHash]
+///  * The first u32 represents how many "header proofs" have been aggregated so far. Since
+/// this proof is only for one header, this is always 1.
 ///  * reason for the previous header hash is to allow verification of the sequentiality of
 /// the headers when aggregating such proofs later on.
 pub(crate) fn mpt_root_in_header<F, C, InnerC, const D: usize>(
@@ -165,45 +165,116 @@ where
         root_offset,
     );
 
-    // hashing the header & expose public input [previousHash, hash]
+    // hashing the header & expose public inputs [1, previousHash, hash]
     let hash = hash_array(&mut b, &mut pw, &header_targets, header_len_tgt, header_len);
     // we can directly extract the parent hash without "reading the array in circuit" because attacker won't
     // be able to link the previous header proof with a different hash (which is constrained in the circuit).
     let uncompressed_previous_hash =
         &header_targets[PARENT_HASH_INDEX..PARENT_HASH_INDEX + HASH_LEN];
     let packed_prev_hash = convert_u8_to_u32(&mut b, uncompressed_previous_hash);
-    b.register_public_inputs(&packed_prev_hash.iter().map(|x| x.0).collect::<Vec<_>>());
-    b.register_public_inputs(&hash);
+    let one = b.one();
+    HeaderProofInputs::<Target>::insert(
+        &mut b,
+        &one,
+        &packed_prev_hash.iter().map(|x| x.0).collect::<Vec<_>>(),
+        &hash,
+    );
     let data = b.build::<C>();
     let proof = data.prove(pw)?;
 
     Ok((proof, data.verifier_only, data.common))
 }
 
-/// Takes N
-//pub(crate) fn aggregate_sequential_headers<F, C, const D: usize, const ARITY: usize>(
-//    config: &CircuitConfig,
-//    headers: &[Vec<u8>],
-//    root_node: Vec<u8>,
-//    inner_proofs: &[ProofTuple<F, C, D>; ARITY],
-//    children_offsets: &[usize],
-//    root_offset: usize,
-//) -> Result<ProofTuple<F, C, D>>
-//where
-//    F: RichField + Extendable<D>,
-//    C: GenericConfig<D, F = F>,
-//    C::Hasher: AlgebraicHasher<F>,
-//{
-//    assert!(headers.len() > 0);
-//    assert!(headers.len() < MAX_HEADER_LEN);
-//    let header_len = headers.len();
-//    let mut header = Vec::new();
-//    for h in headers {
-//        header.extend(h);
-//    }
-//    header.resize(MAX_HEADER_LEN, 0);
-//    // ------------ node preparation ------------------
-//}
+/// Helper structure to extract the public inputs of the header proof and
+/// to insert them when creating an aggregation proof.
+struct HeaderProofInputs<'a, X> {
+    elems: &'a [X],
+}
+
+impl<'a, X> HeaderProofInputs<'a, X> {
+    fn new(elems: &'a [X]) -> Self {
+        Self { elems }
+    }
+    fn nb_aggregated(&self) -> &'a X {
+        &self.elems[0]
+    }
+    fn previous_hash(&self) -> &'a [X] {
+        &self.elems[1..1 + PACKED_HASH_LEN]
+    }
+    fn hash(&self) -> &'a [X] {
+        &self.elems[1 + PACKED_HASH_LEN..1 + 2 * PACKED_HASH_LEN]
+    }
+}
+impl<'a> HeaderProofInputs<'a, Target> {
+    fn insert<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        nb_aggregated: &Target,
+        previous_hash: &[Target],
+        hash: &[Target],
+    ) {
+        b.register_public_input(*nb_aggregated);
+        b.register_public_inputs(previous_hash);
+        b.register_public_inputs(hash);
+    }
+}
+/// Takes N "header" proofs, verifies them, check the sequentiality of the hashes (i.e.
+/// proof for block header i+1 has a previous hash equal to the hash in proof block header i).
+/// Then it exposes the hash of the smallest height header and the hash of the highest height header
+/// as well as the number of aggregated proofs so far.
+pub(crate) fn aggregate_sequential_headers<F, C, InnerC, const D: usize, const ARITY: usize>(
+    config: &CircuitConfig,
+    inner_proofs: &[ProofTuple<F, InnerC, D>],
+) -> Result<ProofTuple<F, C, D>>
+where
+    F: RichField + Extendable<D>,
+    C: GenericConfig<D, F = F>,
+    InnerC: GenericConfig<D, F = F>,
+    InnerC::Hasher: AlgebraicHasher<F>,
+{
+    assert!(inner_proofs.len() == ARITY);
+    let mut b = CircuitBuilder::<F, D>::new(config.clone());
+    let mut pw = PartialWitness::new();
+
+    // verify all the proofs first
+    let mut pts = Vec::new();
+    for proof in inner_proofs {
+        let (iproof, ivd, icd) = proof;
+        let pt = b.add_virtual_proof_with_pis(icd);
+        pw.set_proof_with_pis_target(&pt, iproof);
+        let inner_data = b.add_virtual_verifier_data(icd.config.fri_config.cap_height);
+        pw.set_cap_target(&inner_data.constants_sigmas_cap, &ivd.constants_sigmas_cap);
+        pw.set_hash_target(inner_data.circuit_digest, ivd.circuit_digest);
+        b.verify_proof::<InnerC>(&pt, &inner_data, icd);
+        pts.push(pt);
+    }
+    // then verify sequentiality of the hashes and extract the number of proofs
+    for i in 0..ARITY - 1 {
+        let previous_header = &pts[i];
+        let next_header = &pts[i + 1];
+        // the hash of the previous header
+        let previous_hash = &HeaderProofInputs::new(&previous_header.public_inputs).hash();
+        // the previous hash field of the current header
+        let next_header_prev_hash =
+            HeaderProofInputs::new(&next_header.public_inputs).previous_hash();
+        for j in 0..PACKED_HASH_LEN {
+            b.connect(previous_hash[j], next_header_prev_hash[j]);
+        }
+    }
+    // compute how many proofs have been aggregated up to this point
+    let nb_aggregated = pts
+        .iter()
+        .fold(b.zero(), |acc, pt| b.add(acc, pt.public_inputs[0]));
+
+    // then exposes the hash corresponding to the smallest height headers
+    // and then the highest height header hash
+    let smallest_hash = HeaderProofInputs::new(&pts[0].public_inputs).hash();
+    let largest_hash = HeaderProofInputs::new(&pts[ARITY - 1].public_inputs).hash();
+    HeaderProofInputs::insert(&mut b, &nb_aggregated, smallest_hash, largest_hash);
+
+    let data = b.build::<C>();
+    let proof = data.prove(pw)?;
+    Ok((proof, data.verifier_only, data.common))
+}
 #[cfg(test)]
 mod test {
     use std::time::Instant;
@@ -211,6 +282,7 @@ mod test {
     use anyhow::Result;
     use eth_trie::Trie;
     use ethers::types::{Block, H256, U64};
+    use itertools::Itertools;
     use plonky2::field::extension::Extendable;
     use plonky2::field::types::Field;
     use plonky2::hash::hash_types::RichField;
@@ -223,17 +295,53 @@ mod test {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
+    use rand::RngCore;
     use rlp::Encodable;
 
     use crate::eth::{BlockData, RLPBlock};
     use crate::transaction::header::{
-        mpt_root_in_header, prove_header_inclusion, HASH_LEN, PACKED_HASH_LEN,
+        mpt_root_in_header, prove_header_inclusion, HeaderProofInputs, HASH_LEN, PACKED_HASH_LEN,
     };
     use crate::utils::test::hash_output_to_field;
-    use crate::utils::{find_index_subvector, keccak256, verify_proof_tuple};
+    use crate::utils::{find_index_subvector, keccak256, verify_proof_tuple, IntTargetWriter};
+
+    use super::aggregate_sequential_headers;
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
+
+    #[test]
+    fn test_header_aggregation() -> Result<()> {
+        let create_proof = |nb: usize, prev_hash: &[u32], hash: &[u32]| {
+            let mut b = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
+            let mut pw = PartialWitness::new();
+            let nb_tgt = b.add_virtual_target();
+            let prev_hash_tgt = b.add_virtual_targets(PACKED_HASH_LEN);
+            let hash_tgt = b.add_virtual_targets(PACKED_HASH_LEN);
+            HeaderProofInputs::insert(&mut b, &nb_tgt, &prev_hash_tgt, &hash_tgt);
+            pw.set_target(nb_tgt, F::from_canonical_usize(nb));
+            pw.set_int_targets(&prev_hash_tgt, prev_hash);
+            pw.set_int_targets(&hash_tgt, hash);
+            let data = b.build::<C>();
+            let proof = data.prove(pw).unwrap();
+            (proof, data.verifier_only, data.common)
+        };
+        const N_PROOFS: usize = 3;
+        let hashes = (0..=N_PROOFS)
+            .map(|_| {
+                (0..PACKED_HASH_LEN)
+                    .map(|_| rand::thread_rng().next_u32())
+                    .collect::<Vec<_>>()
+            })
+            .collect_vec();
+        let proofs = (0..N_PROOFS)
+            .map(|i| create_proof(1, &hashes[i], &hashes[i + 1]))
+            .collect_vec();
+        let config = CircuitConfig::standard_recursion_config();
+        let result = aggregate_sequential_headers::<F, C, C, D, N_PROOFS>(&config, &proofs)?;
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn tx_root_to_header() {
@@ -286,18 +394,19 @@ mod test {
         verify_proof_tuple(&block_proof)?;
         println!("[+] Block Header Proof Verified");
         // Verify if public inputs are correctly set:
-        // [prevHash, hash]
+        // [1, prevHash, hash]
         // TODO: for next version, we put the [height, hash] as public inputs
         let expected_hash = hash_output_to_field::<F>(header_hash.as_bytes());
         let previous_exp_hash = hash_output_to_field::<F>(previous_hash.as_bytes());
+        assert_eq!(F::from_canonical_u8(1), block_proof.0.public_inputs[0]);
         assert_eq!(
             previous_exp_hash,
-            block_proof.0.public_inputs[0..PACKED_HASH_LEN],
+            block_proof.0.public_inputs[1..1 + PACKED_HASH_LEN],
             "prev hashes not equal?"
         );
         assert_eq!(
             expected_hash,
-            block_proof.0.public_inputs[PACKED_HASH_LEN..2 * PACKED_HASH_LEN],
+            block_proof.0.public_inputs[1 + PACKED_HASH_LEN..1 + 2 * PACKED_HASH_LEN],
             "hashes not equal?"
         );
         Ok(())
