@@ -148,7 +148,7 @@ where
     // TODO: make it constant size
     // TODO: allow giving dumb proofs to be able to select which children to verify
     // for some cases we don't need to verify all of them
-    verify_proofs(
+    verify_children_proofs(
         &mut b,
         &mut pw,
         &node_targets,
@@ -163,7 +163,7 @@ where
 }
 
 /// verify each inner proof - can be up to 16 if a branch node is full
-pub(super) fn verify_proofs<
+pub(super) fn verify_children_proofs<
     F: RichField + Extendable<D>,
     InnerC: GenericConfig<D, F = F>,
     const D: usize,

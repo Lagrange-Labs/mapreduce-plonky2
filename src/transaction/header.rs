@@ -13,12 +13,11 @@ use plonky2::{
         config::{AlgebraicHasher, GenericConfig},
     },
 };
-use plonky2_crypto::hash::CircuitBuilderHash;
 
 use crate::{
     hash::hash_array,
     rlp::extract_array,
-    transaction::mpt::{verify_proofs, MAX_INTERMEDIATE_NODE_LENGTH},
+    transaction::mpt::{verify_children_proofs, MAX_INTERMEDIATE_NODE_LENGTH},
     utils::{convert_u8_to_u32, less_than, IntTargetWriter},
     ProofTuple,
 };
@@ -30,6 +29,12 @@ const PACKED_HASH_LEN: usize = 8;
 /// Maximum length of a RLP encoded header.
 /// TODO verify assumption
 const MAX_HEADER_LEN: usize = 600;
+
+/// Offset where to find the parent hash of the header in the RLP encoding.
+/// Given the parent hash is the first field present in the header, a header
+/// is always a "long list" type, and the hash is constant size, then the offset
+/// where it starts is always constant as well.
+const PARENT_HASH_INDEX: usize = 4;
 
 /// Takes a RLP encoded header, an item to match in the header, and its offset.
 /// It
@@ -47,28 +52,22 @@ fn prove_header_inclusion<F, const D: usize, const ITEM_LEN: usize>(
     b: &mut CircuitBuilder<F, D>,
     pw: &mut PartialWitness<F>,
     header: &[Target],  // RLP encoding of the header
-    header_len: usize,  // length of the RLP encoding of the block
+    header_len: Target, // length of the RLP encoding of the block
     item: &[Target],    // item to match in the block RLP encoding
     item_offset: usize, // offset where to look for the value in block
 ) where
     F: RichField + Extendable<D>,
 {
-    // hashing the block & expose public input
-    let length_target = b.add_virtual_target();
-    pw.set_target(length_target, F::from_canonical_usize(header_len));
-    let hash = hash_array(b, pw, header, length_target, header_len);
-    b.register_public_inputs(&hash);
-
     // tx root hash verification
     let offset_target = b.add_virtual_target();
     pw.set_target(offset_target, F::from_canonical_usize(item_offset));
     // 10 = 2^1024 -> header should not go above that
-    let within_range = less_than(b, offset_target, length_target, 10);
+    let within_range = less_than(b, offset_target, header_len, 10);
     let t = b._true();
     b.connect(t.target, within_range.target);
     let arr = extract_array::<F, D, ITEM_LEN>(b, header, offset_target);
     // make sure the hash given is correct
-    for i in 0..1 {
+    for i in 0..ITEM_LEN {
         b.connect(arr[i], item[i]);
     }
 }
@@ -80,7 +79,13 @@ fn prove_header_inclusion<F, const D: usize, const ITEM_LEN: usize>(
 /// * It hashes the block and exposes the hash as a public input.
 /// ITEM_LEN is the length of the item to match in the header - normally to verify
 /// the tx root hash for example, it is 32.
-fn mpt_root_in_header<F, C, InnerC, const D: usize>(
+/// The public inputs exposed are:
+/// [idx, idx, previousHeaderHash, headerHash]
+///  * reason to put twice idx is to keep a similar structure for higher level proofs that need
+/// the full range of headers verified so far.
+///  * reason for the previous header hash is to allow verification of the sequentiality of
+/// the headers when aggregating such proofs later on.
+pub(crate) fn mpt_root_in_header<F, C, InnerC, const D: usize>(
     config: &CircuitConfig,
     mut header: Vec<u8>,                       // RLP encoding of the block header
     mut root_node: Vec<u8>,                    // root node to verify
@@ -116,10 +121,10 @@ where
 
     let offset_targets = b.add_virtual_targets(children_offsets.len());
     let node_targets = b.add_virtual_targets(MAX_INTERMEDIATE_NODE_LENGTH);
-    let length_target = b.add_virtual_target();
+    let node_len_tgt = b.add_virtual_target();
     let root_hash_target = b.add_virtual_targets(HASH_LEN);
 
-    pw.set_target(length_target, F::from_canonical_usize(node_length));
+    pw.set_target(node_len_tgt, F::from_canonical_usize(node_length));
     for (offset_tgt, offset) in offset_targets.iter().zip(children_offsets) {
         pw.set_target(*offset_tgt, F::from_canonical_u32(*offset as u32));
     }
@@ -131,17 +136,19 @@ where
     // Fill the RLP header bytes
     let header_targets = b.add_virtual_targets(MAX_HEADER_LEN);
     pw.set_int_targets(&header_targets, &header);
+    let header_len_tgt = b.add_virtual_target();
+    pw.set_target(header_len_tgt, F::from_canonical_usize(header_len));
 
     // hash the root node and compare with witness given by prover
     // We compare on packed u32 because going from u8 -> u32 is cheap, but reverse
     // is less.
-    let packed_root_hash = hash_array(&mut b, &mut pw, &node_targets, length_target, node_length);
+    let packed_root_hash = hash_array(&mut b, &mut pw, &node_targets, node_len_tgt, node_length);
     let exp_packed_root_hash = convert_u8_to_u32(&mut b, &root_hash_target);
     for i in 0..PACKED_HASH_LEN {
         b.connect(packed_root_hash[i], exp_packed_root_hash[i].0);
     }
     // verify any children proofs
-    verify_proofs(
+    verify_children_proofs(
         &mut b,
         &mut pw,
         &node_targets,
@@ -153,17 +160,50 @@ where
         &mut b,
         &mut pw,
         &header_targets,
-        header_len,
+        header_len_tgt,
         &root_hash_target, // node hash == root hash in header !
         root_offset,
     );
 
+    // hashing the header & expose public input [previousHash, hash]
+    let hash = hash_array(&mut b, &mut pw, &header_targets, header_len_tgt, header_len);
+    // we can directly extract the parent hash without "reading the array in circuit" because attacker won't
+    // be able to link the previous header proof with a different hash (which is constrained in the circuit).
+    let uncompressed_previous_hash =
+        &header_targets[PARENT_HASH_INDEX..PARENT_HASH_INDEX + HASH_LEN];
+    let packed_prev_hash = convert_u8_to_u32(&mut b, uncompressed_previous_hash);
+    b.register_public_inputs(&packed_prev_hash.iter().map(|x| x.0).collect::<Vec<_>>());
+    b.register_public_inputs(&hash);
     let data = b.build::<C>();
     let proof = data.prove(pw)?;
 
     Ok((proof, data.verifier_only, data.common))
 }
 
+/// Takes N
+//pub(crate) fn aggregate_sequential_headers<F, C, const D: usize, const ARITY: usize>(
+//    config: &CircuitConfig,
+//    headers: &[Vec<u8>],
+//    root_node: Vec<u8>,
+//    inner_proofs: &[ProofTuple<F, C, D>; ARITY],
+//    children_offsets: &[usize],
+//    root_offset: usize,
+//) -> Result<ProofTuple<F, C, D>>
+//where
+//    F: RichField + Extendable<D>,
+//    C: GenericConfig<D, F = F>,
+//    C::Hasher: AlgebraicHasher<F>,
+//{
+//    assert!(headers.len() > 0);
+//    assert!(headers.len() < MAX_HEADER_LEN);
+//    let header_len = headers.len();
+//    let mut header = Vec::new();
+//    for h in headers {
+//        header.extend(h);
+//    }
+//    header.resize(MAX_HEADER_LEN, 0);
+//    // ------------ node preparation ------------------
+//}
 #[cfg(test)]
 mod test {
     use std::time::Instant;
@@ -174,7 +214,6 @@ mod test {
     use plonky2::field::extension::Extendable;
     use plonky2::field::types::Field;
     use plonky2::hash::hash_types::RichField;
-    use plonky2::plonk::circuit_data::VerifierCircuitData;
     use plonky2::plonk::config::AlgebraicHasher;
     use plonky2::{
         iop::witness::{PartialWitness, WitnessWrite},
@@ -187,7 +226,6 @@ mod test {
     use rlp::Encodable;
 
     use crate::eth::{BlockData, RLPBlock};
-    use crate::hash::hash_to_fields;
     use crate::transaction::header::{
         mpt_root_in_header, prove_header_inclusion, HASH_LEN, PACKED_HASH_LEN,
     };
@@ -217,9 +255,11 @@ mod test {
         let tx_root_hash = data.tx_trie.root_hash()?;
         let header_hash = data.block.hash.unwrap();
         let header_rlp = rlp::encode(&RLPBlock(&data.block)).to_vec();
-
+        // figure out the offset of the previous hash
+        let previous_hash = data.block.parent_hash;
+        let prev_hash_offset = find_index_subvector(&header_rlp, previous_hash.as_bytes()).unwrap();
+        println!("prev hash offset: {}", prev_hash_offset);
         let config = CircuitConfig::standard_recursion_config();
-
         // directly provides the root node of the tx trie
         let root_node = mpt_proof[0].clone();
         assert!(keccak256(&root_node) == tx_root_hash.as_bytes());
@@ -245,13 +285,24 @@ mod test {
         );
         verify_proof_tuple(&block_proof)?;
         println!("[+] Block Header Proof Verified");
-        // Verify if public inputs are correctly set: block hash should be the output now
+        // Verify if public inputs are correctly set:
+        // [prevHash, hash]
         // TODO: for next version, we put the [height, hash] as public inputs
         let expected_hash = hash_output_to_field::<F>(header_hash.as_bytes());
-        let proof_hash = &block_proof.0.public_inputs[0..8];
-        assert!(expected_hash == proof_hash, "hashes not equal?");
+        let previous_exp_hash = hash_output_to_field::<F>(previous_hash.as_bytes());
+        assert_eq!(
+            previous_exp_hash,
+            block_proof.0.public_inputs[0..PACKED_HASH_LEN],
+            "prev hashes not equal?"
+        );
+        assert_eq!(
+            expected_hash,
+            block_proof.0.public_inputs[PACKED_HASH_LEN..2 * PACKED_HASH_LEN],
+            "hashes not equal?"
+        );
         Ok(())
     }
+
     #[test]
     fn test_header_inclusion_alone() -> Result<()> {
         let block_str = "7b2268617368223a22307834343162636461323939363966653463393437393062383533386237306533306236366336326236396665363531366265613939363334643239306431366337222c22706172656e7448617368223a22307838323139636261363732353034353438343230343430656531613339396663623235656536323133383862333838653965613639663536663930363130643031222c2273686133556e636c6573223a22307831646363346465386465633735643761616238356235363762366363643431616433313234353162393438613734313366306131343266643430643439333437222c226d696e6572223a22307834346664336162383338316363336431346166613763346166376664313363646336353032366531222c227374617465526f6f74223a22307837356430653937303463336661336635633232643330373862386232643036636266656537663061363233643932386235373232346332363539663534633833222c227472616e73616374696f6e73526f6f74223a22307861623431663838366265323363643738366438613639613732623066393838656137326530623265303339373064303739386635653033373633613434326363222c227265636569707473526f6f74223a22307836376563346533623238626636373964626431306233636139636232356162376433656662643334646239333866623138386663643635633861316230343036222c226e756d626572223a223078613161343839222c2267617355736564223a2230783135633038222c226761734c696d6974223a223078626561343035222c22657874726144617461223a2230783730373037393635323037373632222c226c6f6773426c6f6f6d223a2230783030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030222c2274696d657374616d70223a2230783566323935626139222c22646966666963756c7479223a22307838613838643536313132396166222c22746f74616c446966666963756c7479223a22307833383736663032306432656332323638316666222c227365616c4669656c6473223a5b5d2c22756e636c6573223a5b5d2c227472616e73616374696f6e73223a5b22307862306334333231336338366332636163636538636565663936356238383135323964333165356265393361643663656663656632663331396132306566316235222c22307835626262663634626430663038343635616362653330616462326265383037343838633338343763393461376466616261666661336532356162336136303461222c22307837643936356131303364626238653230323736383265343562643337316366393262623965313562383464356232666130646661343533333338373965643132222c22307830623431666334633164383531386364656461393831323236393437373235366264633431356562333963343533313838356666393732386436616430393662225d2c2273697a65223a223078343463222c226d697848617368223a22307864653961653931633830613866643134643563653332323032623966666361613839623863353931393938343037333539663138363033313463313066383632222c226e6f6e6365223a22307831316566633637313536336235366339222c2262617365466565506572476173223a6e756c6c7d";
@@ -271,6 +322,8 @@ mod test {
         // TODO: have one for the newest blocks headers
         const MAX_HEADER_LEN: usize = 600;
         assert!(block_rlp_len < MAX_HEADER_LEN);
+        let rlp_len_tgt = builder.add_virtual_target();
+        pw.set_target(rlp_len_tgt, F::from_canonical_usize(block_rlp_len));
         block_rlp.resize(MAX_HEADER_LEN, 0);
         let block_tgt = builder.add_virtual_targets(MAX_HEADER_LEN);
         for i in 0..MAX_HEADER_LEN {
@@ -289,7 +342,7 @@ mod test {
             &mut builder,
             &mut pw,
             &block_tgt,
-            block_rlp_len,
+            rlp_len_tgt,
             &item,
             item_offset,
         );
@@ -300,9 +353,6 @@ mod test {
         let proof = data.prove(pw)?;
         let end = start.elapsed();
         println!("[+] proving proof {:?}s", end.as_secs());
-        // making sure right hash is exposed
-        let exp_inputs = hash_to_fields::<F>(&block_hash);
-        assert_eq!(exp_inputs, proof.public_inputs[0..exp_inputs.len()]);
         data.verify(proof)?;
         Ok(())
     }
