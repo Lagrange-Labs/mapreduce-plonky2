@@ -53,12 +53,12 @@ pub(crate) enum ExtractionMethod {
     OffsetBased(usize),
 }
 
-struct NodeProofInputs<'a, X> {
+pub(super) struct NodeProofInputs<'a, X> {
     elems: &'a [X],
 }
 
 impl<'a, X> NodeProofInputs<'a, X> {
-    fn new(elems: &'a [X]) -> Result<Self> {
+    pub(super) fn new(elems: &'a [X]) -> Result<Self> {
         // at least one element of computation output
         if elems.len() < PACKED_HASH_LEN + 1 {
             return Err(anyhow::anyhow!(
@@ -68,12 +68,12 @@ impl<'a, X> NodeProofInputs<'a, X> {
         Ok(Self { elems })
     }
 
-    fn hash(&self) -> &'a [X] {
+    pub(super) fn hash(&self) -> &'a [X] {
         &self.elems[0..PACKED_HASH_LEN]
     }
     // NOTE: TODO: should make a wrapper on top to provide specific interpretation
     // of the output
-    fn outputs(&self) -> &'a [X] {
+    pub(super) fn outputs(&self) -> &'a [X] {
         &self.elems[PACKED_HASH_LEN..]
     }
 }
@@ -194,8 +194,9 @@ where
         inner_proofs,
     );
 
-    // TODO: gas extraction and reduction
-    NodeProofInputs::register_inputs(&mut b, &hash, &[b.one()]);
+    // TODO: gas extraction and reduction. Currently a hack, just input a constant value
+    let one = b.one();
+    NodeProofInputs::register_inputs(&mut b, &hash, &[one]);
 
     let data = b.build::<C>();
     let proof = data.prove(pw)?;
@@ -351,7 +352,7 @@ mod test {
     use crate::utils::find_index_subvector;
     use crate::utils::test::{data_to_constant_targets, hash_output_to_field};
     use crate::utils::{keccak256, test::connect};
-    use crate::ProofTuple;
+    use crate::{ByteProofTuple, ProofTuple};
 
     use super::{legacy_tx_leaf_node_proof, ExtractionMethod};
 
@@ -454,6 +455,7 @@ mod test {
                 .collect::<Vec<_>>()
                 .as_slice()
         );
+        let serialized = ByteProofTuple::serialize(leaf_proof).expect("can't serialize the proof");
         Ok(())
     }
     #[test]
