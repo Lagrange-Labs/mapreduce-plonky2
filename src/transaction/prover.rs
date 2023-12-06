@@ -126,7 +126,6 @@ where
         let node_hash = keccak256(&node_bytes);
         let parent_hash = node.parent_hash.clone();
         let config = self.config.clone();
-        let node_key = node.key.clone();
         // where to find the hashes for each children of the node
         let children_hash_offsets = node
             .children_proofs

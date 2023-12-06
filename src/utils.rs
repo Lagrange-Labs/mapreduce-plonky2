@@ -169,6 +169,17 @@ pub fn greater_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
     let a_plus_1 = builder.add(a, one);
     less_than(builder, b, a_plus_1, n)
 }
+pub(crate) fn hash_to_fields<F: RichField>(expected: &[u8]) -> Vec<F> {
+    let iter_u32 = expected.iter().chunks(4);
+    iter_u32
+        .into_iter()
+        .map(|chunk| {
+            let chunk_buff = chunk.copied().collect::<Vec<u8>>();
+            let u32_num = read_le_u32(&mut chunk_buff.as_slice());
+            F::from_canonical_u32(u32_num)
+        })
+        .collect::<Vec<_>>()
+}
 
 // taken from rust doc https://doc.rust-lang.org/std/primitive.u32.html#method.from_be_bytes
 pub(crate) fn read_le_u32(input: &mut &[u8]) -> u32 {
@@ -201,7 +212,7 @@ pub(crate) mod test {
         iter_u32
             .into_iter()
             .map(|chunk| {
-                let mut chunk_buff = chunk.copied().collect::<Vec<u8>>();
+                let chunk_buff = chunk.copied().collect::<Vec<u8>>();
                 let u32_num = read_le_u32(&mut chunk_buff.as_slice());
                 F::from_canonical_u32(u32_num)
             })

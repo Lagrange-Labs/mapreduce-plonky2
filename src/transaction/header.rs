@@ -420,7 +420,6 @@ mod test {
         let mut block_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
         let block_rlp_len = block_rlp.len();
         let block_hash_str = "441bcda29969fe4c94790b8538b70e30b66c62b69fe6516bea99634d290d16c7";
-        let block_hash = hex::decode(block_hash_str).unwrap();
         let block_tx_root_hash_str =
             "ab41f886be23cd786d8a69a72b0f988ea72e0b2e03970d0798f5e03763a442cc";
         let tx_root = hex::decode(block_tx_root_hash_str).unwrap();

@@ -7,7 +7,7 @@ use ethers::{
     types::{Block, BlockId, Bytes, Transaction, TransactionReceipt, U64},
 };
 use rlp::{Encodable, Rlp, RlpStream};
-use std::{env, sync::Arc};
+use std::{sync::Arc};
 
 use crate::utils::keccak256;
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
