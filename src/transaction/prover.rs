@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::anyhow;
 use anyhow::Result;
-use eth_trie::{Node, Trie};
+use eth_trie::Trie;
 use ethers::{types::BlockId, utils::hex};
 use plonky2::{
     field::extension::Extendable,
@@ -15,7 +15,6 @@ use plonky2::{
     plonk::{
         circuit_data::{CircuitConfig, VerifierCircuitData},
         config::{AlgebraicHasher, GenericConfig},
-        proof::ProofWithPublicInputs,
     },
 };
 use rlp::Encodable;
@@ -26,19 +25,6 @@ struct TxBlockProver<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, c
     config: CircuitConfig,
     _pf: PhantomData<F>,
     _pc: PhantomData<C>,
-}
-
-struct RecursiveProofData<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
-{
-    // The nodes left to traverse in the path to go to the root
-    mpt_proof: Vec<Node>,
-    mpt_bytes: Vec<Vec<u8>>,
-    key: Vec<u8>,
-    key_ptr: usize,
-    // the current proof proving the whole subtree of the node with the
-    // given "hash"
-    proof: ProofWithPublicInputs<F, C, D>,
-    hash: Vec<u8>,
 }
 
 struct MPTNode<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> {
@@ -140,12 +126,12 @@ where
         let node_hash = keccak256(&node_bytes);
         let parent_hash = node.parent_hash.clone();
         let config = self.config.clone();
-        let node_key = node.key.clone();
         // where to find the hashes for each children of the node
         let children_hash_offsets = node
             .children_proofs
             .iter()
             .map(|p| p.hash.clone())
+            // TODO: replace by something smarter
             .map(|hash| find_index_subvector(&node_bytes, &hash).expect("invalid hash"))
             .collect::<Vec<_>>();
         println!(
@@ -279,7 +265,7 @@ mod test {
     use ethers::types::BlockNumber;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::{transaction::prover::TxBlockProver, utils::hash_to_fields};
+    use crate::{hash::hash_to_fields, transaction::prover::TxBlockProver};
     use anyhow::Result;
 
     #[tokio::test]

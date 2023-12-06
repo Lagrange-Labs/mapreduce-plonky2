@@ -1,11 +1,44 @@
+use anyhow::Result;
 use itertools::Itertools;
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
+use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::plonk::circuit_data::VerifierCircuitData;
+use plonky2::plonk::config::GenericConfig;
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use sha3::Digest;
 use sha3::Keccak256;
+
+use crate::ProofTuple;
+
+pub(crate) fn verify_proof_tuple<
+    F: RichField + Extendable<D>,
+    C: GenericConfig<D, F = F>,
+    const D: usize,
+>(
+    proof: &ProofTuple<F, C, D>,
+) -> Result<()> {
+    let vcd = VerifierCircuitData {
+        verifier_only: proof.1.clone(),
+        common: proof.2.clone(),
+    };
+    vcd.verify(proof.0.clone())
+}
+
+/// Allows to write directly a vector of integers into a partial witness
+pub trait IntTargetWriter {
+    fn set_int_targets<T: Into<u32> + Clone>(&mut self, t: &[Target], v: &[T]);
+}
+impl<F: RichField> IntTargetWriter for PartialWitness<F> {
+    fn set_int_targets<T: Into<u32> + Clone>(&mut self, t: &[Target], v: &[T]) {
+        assert_eq!(t.len(), v.len());
+        for i in 0..t.len() {
+            self.set_target(t[i], F::from_canonical_u32(v[i].clone().into()));
+        }
+    }
+}
 
 // Returns the index where the subvector starts in v, if any.
 pub(crate) fn find_index_subvector(v: &[u8], sub: &[u8]) -> Option<usize> {
@@ -149,7 +182,7 @@ pub(crate) fn hash_to_fields<F: RichField>(expected: &[u8]) -> Vec<F> {
 }
 
 // taken from rust doc https://doc.rust-lang.org/std/primitive.u32.html#method.from_be_bytes
-fn read_le_u32(input: &mut &[u8]) -> u32 {
+pub(crate) fn read_le_u32(input: &mut &[u8]) -> u32 {
     let (int_bytes, rest) = input.split_at(std::mem::size_of::<u32>());
     *input = rest;
     u32::from_le_bytes(int_bytes.try_into().unwrap())
@@ -179,7 +212,7 @@ pub(crate) mod test {
         iter_u32
             .into_iter()
             .map(|chunk| {
-                let mut chunk_buff = chunk.copied().collect::<Vec<u8>>();
+                let chunk_buff = chunk.copied().collect::<Vec<u8>>();
                 let u32_num = read_le_u32(&mut chunk_buff.as_slice());
                 F::from_canonical_u32(u32_num)
             })
