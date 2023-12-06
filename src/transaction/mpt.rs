@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use anyhow::Result;
 use plonky2::{
     field::extension::Extendable,
@@ -19,6 +21,8 @@ use crate::{
     utils::convert_u8_to_u32,
     ProofTuple,
 };
+
+use super::PACKED_HASH_LEN;
 
 /// The maximum length of a RLP encoded leaf node in a MPT tree holding a legacy tx.
 pub(crate) const MAX_LEGACY_TX_NODE_LENGTH: usize = 532;
@@ -49,6 +53,42 @@ pub(crate) enum ExtractionMethod {
     OffsetBased(usize),
 }
 
+struct NodeProofInputs<'a, X> {
+    elems: &'a [X],
+}
+
+impl<'a, X> NodeProofInputs<'a, X> {
+    fn new(elems: &'a [X]) -> Result<Self> {
+        // at least one element of computation output
+        if elems.len() < PACKED_HASH_LEN + 1 {
+            return Err(anyhow::anyhow!(
+                "NodeProofInputs: elems length is too small"
+            ));
+        }
+        Ok(Self { elems })
+    }
+
+    fn hash(&self) -> &'a [X] {
+        &self.elems[0..PACKED_HASH_LEN]
+    }
+    // NOTE: TODO: should make a wrapper on top to provide specific interpretation
+    // of the output
+    fn outputs(&self) -> &'a [X] {
+        &self.elems[PACKED_HASH_LEN..]
+    }
+}
+
+impl<'a> NodeProofInputs<'a, Target> {
+    fn register_inputs<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        hash: &[Target],
+        outputs: &[Target],
+    ) {
+        b.register_public_inputs(hash);
+        b.register_public_inputs(outputs);
+    }
+}
+
 /// Provides a proof for a leaf node in a MPT tree holding a legacy tx. It exposes
 /// the hash of the node as public input, as well as the gas value of the tx.
 pub fn legacy_tx_leaf_node_proof<
@@ -76,7 +116,6 @@ pub fn legacy_tx_leaf_node_proof<
     let length_target = b.add_virtual_target();
     pw.set_target(length_target, F::from_canonical_usize(node_length));
     let hash = hash_array(&mut b, &mut pw, &node_targets, length_target, node_length);
-    b.register_public_inputs(&hash);
 
     // Gas value extraction and exposing as public input
     let gas_value_array = match extract {
@@ -96,7 +135,7 @@ pub fn legacy_tx_leaf_node_proof<
     // maximum length that the RLP(gas) == RLP(U256) can take:
     // * 32 bytes for the value (U256 = 32 bytes)
     // TODO: pack the gas value into U32Target - more compact
-    b.register_public_inputs(&gas_value_array);
+    NodeProofInputs::register_inputs(&mut b, &hash, &gas_value_array);
 
     // proving part
     let data = b.build::<C>();
@@ -142,7 +181,6 @@ where
 
     // Hash the RLP encoding and expose the hash of this node
     let hash = hash_array(&mut b, &mut pw, &node_targets, length_target, node_length);
-    b.register_public_inputs(&hash);
 
     // verify all children proofs.
     // TODO: make it constant size
@@ -155,6 +193,9 @@ where
         &offset_targets,
         inner_proofs,
     );
+
+    // TODO: gas extraction and reduction
+    NodeProofInputs::register_inputs(&mut b, &hash, &[b.one()]);
 
     let data = b.build::<C>();
     let proof = data.prove(pw)?;
@@ -239,6 +280,48 @@ fn extract_item_from_tx_list<
     extract_array::<F, D, MAX_VALUE_SIZE>(b, &rlp_tx, item_offset)
 }
 
+/// Function that returns the offset of the gas value in the RLP encoded
+/// node containing a transaction. It also returns the gas length.
+pub(super) fn gas_offset_from_rlp_node(node: &[u8]) -> (usize, usize) {
+    let node_rlp = rlp::Rlp::new(node);
+    let tuple_info = node_rlp.payload_info().unwrap();
+    let tuple_offset = tuple_info.header_len;
+    assert_eq!(node_rlp.item_count().unwrap(), 2);
+    let tx_index = 1;
+    let gas_index = 2;
+    let mut tx_offset = tuple_offset;
+    let mut gas_value_len = 0;
+    let mut gas_offset = 0;
+    node_rlp.iter().enumerate().for_each(|(i, r)| {
+        let h = r.payload_info().unwrap();
+        tx_offset += h.header_len;
+        match i.cmp(&tx_index) {
+            Ordering::Less => tx_offset += h.value_len,
+            Ordering::Greater => panic!("node should not have more than 2 items"),
+            Ordering::Equal => {
+                let tx_rlp = rlp::Rlp::new(r.data().unwrap());
+                gas_offset += tx_rlp.payload_info().unwrap().header_len;
+                tx_rlp.iter().enumerate().for_each(|(j, rr)| {
+                    let hh = rr.payload_info().unwrap();
+                    match j.cmp(&gas_index) {
+                        Ordering::Less => {
+                            gas_offset += hh.header_len;
+                            gas_offset += hh.value_len;
+                        }
+                        // do nothing as we don't care about the other items
+                        Ordering::Greater => {}
+                        Ordering::Equal => {
+                            // we want the value directly - we skip the header
+                            gas_offset += hh.header_len;
+                            gas_value_len = hh.value_len;
+                        }
+                    }
+                });
+            }
+        }
+    });
+    (tx_offset + gas_offset, gas_value_len)
+}
 #[cfg(test)]
 mod test {
     use anyhow::Result;
@@ -262,7 +345,7 @@ mod test {
     const STRING: usize = 0;
     const LIST: usize = 1;
 
-    use super::{recursive_node_proof, MAX_LEGACY_TX_NODE_LENGTH};
+    use super::{gas_offset_from_rlp_node, recursive_node_proof, MAX_LEGACY_TX_NODE_LENGTH};
     use crate::hash::hash_to_fields;
     use crate::rlp::{decode_header, decode_tuple};
     use crate::utils::find_index_subvector;
@@ -485,48 +568,5 @@ mod test {
         let data = b.build::<C>();
         let proof = data.prove(pw)?;
         data.verify(proof)
-    }
-    use std::cmp::Ordering;
-    /// Function that returns the offset of the gas value in the RLP encoded
-    /// node containing a transaction. It also returns the gas length.
-    fn gas_offset_from_rlp_node(node: &[u8]) -> (usize, usize) {
-        let node_rlp = rlp::Rlp::new(node);
-        let tuple_info = node_rlp.payload_info().unwrap();
-        let tuple_offset = tuple_info.header_len;
-        assert_eq!(node_rlp.item_count().unwrap(), 2);
-        let tx_index = 1;
-        let gas_index = 2;
-        let mut tx_offset = tuple_offset;
-        let mut gas_value_len = 0;
-        let mut gas_offset = 0;
-        node_rlp.iter().enumerate().for_each(|(i, r)| {
-            let h = r.payload_info().unwrap();
-            tx_offset += h.header_len;
-            match i.cmp(&tx_index) {
-                Ordering::Less => tx_offset += h.value_len,
-                Ordering::Greater => panic!("node should not have more than 2 items"),
-                Ordering::Equal => {
-                    let tx_rlp = rlp::Rlp::new(r.data().unwrap());
-                    gas_offset += tx_rlp.payload_info().unwrap().header_len;
-                    tx_rlp.iter().enumerate().for_each(|(j, rr)| {
-                        let hh = rr.payload_info().unwrap();
-                        match j.cmp(&gas_index) {
-                            Ordering::Less => {
-                                gas_offset += hh.header_len;
-                                gas_offset += hh.value_len;
-                            }
-                            // do nothing as we don't care about the other items
-                            Ordering::Greater => {}
-                            Ordering::Equal => {
-                                // we want the value directly - we skip the header
-                                gas_offset += hh.header_len;
-                                gas_value_len = hh.value_len;
-                            }
-                        }
-                    });
-                }
-            }
-        });
-        (tx_offset + gas_offset, gas_value_len)
     }
 }
