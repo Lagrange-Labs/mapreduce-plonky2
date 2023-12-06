@@ -55,8 +55,9 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: "--all --release"
-
+          args: "--all --release -- --test-threads 32"
+        env: 
+          CI_RPC_URL: ${{ secrets.CI_RPC_URL }}
 
   fmt:
     name: Rustfmt

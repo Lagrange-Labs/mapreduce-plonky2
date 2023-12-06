@@ -6,7 +6,11 @@ use plonky2::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::CircuitConfig,
+        config::{AlgebraicHasher, GenericConfig},
+    },
     util::ceil_div_usize,
 };
 use plonky2_crypto::{
@@ -32,6 +36,13 @@ const MAX_LEGACY_TX_NODE_LENGTH: usize = 532;
 const MAX_LEGACY_TX_LENGTH: usize = 532;
 /// Maximum size the gas value can take in bytes.
 const MAX_GAS_VALUE_LEN: usize = 32;
+
+/// Size of an intermediate (branch or leaf) node in the MPT trie.
+/// A branch node can take up to 17*32 = 544 bytes.
+const MAX_INTERMEDIATE_NODE_LENGTH: usize = 544;
+
+/// Length of a "key" (a hash) in the MPT trie.
+const HASH_LENGTH: usize = 32;
 
 /// There are different ways to extract values from a transaction. This enum
 /// list some.
@@ -95,6 +106,83 @@ pub fn legacy_tx_leaf_node_proof<
     b.register_public_inputs(&gas_value_array);
 
     // proving part
+    let data = b.build::<C>();
+    let proof = data.prove(pw)?;
+
+    Ok((proof, data.verifier_only, data.common))
+}
+
+pub fn recursive_node_proof<
+    F: RichField + Extendable<D>,
+    C: GenericConfig<D, F = F>,
+    InnerC: GenericConfig<D, F = F>,
+    const D: usize,
+>(
+    config: &CircuitConfig,
+    mut node: Vec<u8>,
+    inner_proofs: &[ProofTuple<F, InnerC, D>],
+    hash_offsets: &[usize],
+) -> Result<ProofTuple<F, C, D>>
+where
+    InnerC::Hasher: AlgebraicHasher<F>,
+{
+    let node_length = node.len();
+    node.resize(MAX_INTERMEDIATE_NODE_LENGTH, 0);
+    assert_ne!(inner_proofs.len(), 0);
+    assert_eq!(inner_proofs.len(), hash_offsets.len());
+    assert!(node_length <= MAX_INTERMEDIATE_NODE_LENGTH);
+    assert!(node_length > 0);
+
+    let mut b = CircuitBuilder::<F, D>::new(config.clone());
+    let mut pw = PartialWitness::new();
+
+    let offset_targets = b.add_virtual_targets(hash_offsets.len());
+    let node_targets = b.add_virtual_targets(MAX_INTERMEDIATE_NODE_LENGTH);
+    let length_target = b.add_virtual_target();
+
+    pw.set_target(length_target, F::from_canonical_usize(node_length));
+    for (offset_tgt, offset) in offset_targets.iter().zip(hash_offsets) {
+        pw.set_target(*offset_tgt, F::from_canonical_u32(*offset as u32));
+    }
+    for i in 0..MAX_INTERMEDIATE_NODE_LENGTH {
+        pw.set_target(node_targets[i], F::from_canonical_u8(node[i]));
+    }
+
+    hash_node(&mut b, &mut pw, &node_targets, length_target, node_length);
+
+    // verify each inner proof - can be up to 16 if a branch node is full
+    //let mut proofs_canonical_hash_targets = vec![];
+    for (offset, prooft) in offset_targets.iter().zip(inner_proofs.iter()) {
+        let children_hash = extract_array::<F, D, HASH_LENGTH>(&mut b, &node_targets, *offset);
+        // connect the lookup hash to the proof hash
+        // hash is exposed as 8 target elements so need to convert from u8 array to u32
+        // 32 bytes hash output = 256 bits = 32 bits * 8 => 8 u32 targets exposed
+        let extracted_hash = convert_u8_to_u32(&mut b, &children_hash);
+        let (inner_proof, inner_vd, inner_cd) = prooft;
+        let pt = b.add_virtual_proof_with_pis(inner_cd);
+        pw.set_proof_with_pis_target(&pt, inner_proof);
+
+        // nikko: historically been done like this - we could just connect the extract hash directly
+        extracted_hash
+            .iter()
+            .zip(pt.public_inputs[0..8].iter())
+            .for_each(|(l, r)| {
+                b.connect(l.0, *r);
+            });
+
+        let inner_data = b.add_virtual_verifier_data(inner_cd.config.fri_config.cap_height);
+        // nikko: XXX WHy do we need these two lines ?
+        // In plonky2 benchmarks they dont use it but if we remove them from here
+        // it just fails
+        // See https://github.com/0xPolygonZero/plonky2/blob/main/plonky2/examples/bench_recursion.rs#L212-L217
+        pw.set_cap_target(
+            &inner_data.constants_sigmas_cap,
+            &inner_vd.constants_sigmas_cap,
+        );
+        pw.set_hash_target(inner_data.circuit_digest, inner_vd.circuit_digest);
+        b.verify_proof::<InnerC>(&pt, &inner_data, inner_cd);
+    }
+
     let data = b.build::<C>();
     let proof = data.prove(pw)?;
 
@@ -247,13 +335,13 @@ fn hash_node<F: RichField + Extendable<D>, const D: usize>(
             .collect::<Vec<_>>(),
     );
 }
-
 #[cfg(test)]
 mod test {
     use anyhow::Result;
     use ethers::types::Transaction;
     use plonky2::field::extension::Extendable;
     use plonky2::hash::hash_types::RichField;
+    use plonky2::plonk::config::AlgebraicHasher;
     use plonky2::{
         iop::witness::PartialWitness,
         plonk::{
@@ -270,15 +358,65 @@ mod test {
     const STRING: usize = 0;
     const LIST: usize = 1;
 
-    use crate::utils::test::data_to_constant_targets;
-    use crate::utils::test::{connect, keccak256};
+    use super::{recursive_node_proof, MAX_LEGACY_TX_NODE_LENGTH};
+    use crate::rlp::{decode_header, decode_tuple};
+    use crate::utils::find_index_subvector;
+    use crate::utils::test::{data_to_constant_targets, hash_output_to_field};
+    use crate::utils::{keccak256, test::connect};
     use crate::ProofTuple;
-    use crate::{
-        mpt_tx::MAX_LEGACY_TX_NODE_LENGTH,
-        rlp::{decode_header, decode_tuple},
-    };
 
     use super::{legacy_tx_leaf_node_proof, ExtractionMethod};
+
+    #[test]
+    fn test_legacy_full_proof() -> Result<()> {
+        run_legacy_mpt_proof::<F, C, D>()
+    }
+    fn run_legacy_mpt_proof<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        const D: usize,
+    >() -> Result<()>
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
+        let mpt_proof_hex = ["f851a098f3110a26a9ee7d32d5da055ebd725f09d6b5223aaa66a1f46382262830895680808080808080a00e6e346926890fbe0443125f7eed828ab63e0f4ebcd37722254eb097bac002528080808080808080","f87180a02675bad1a2403f7724522e6105b2279e66791dcd4a8a2165480b199d4cea6594a0fed7ac70c74e6148971bca70502ce65d28fd4060d8d4fa3acb29a5f84faff324a07f009b48d17653d95d8fd7974e26e03083d84f6a1262d03c076b272f545af3e580808080808080808080808080","f87420b871f86f826b2585199c82cc0083015f9094e955ede0a3dbf651e2891356ecd0509c1edb8d9c8801051fdc4efdc0008025a02190f26e70a82d7f66354a13cda79b6af1aa808db768a787aeb348d425d7d0b3a06a82bd0518bc9b69dc551e20d772a1b06222edfc5d39b6973e4f4dc46ed8b196"];
+        let mpt_proof = mpt_proof_hex
+            .iter()
+            .map(|hex| hex::decode(hex).unwrap())
+            .collect::<Vec<_>>();
+        let root_hash_hex = "ab41f886be23cd786d8a69a72b0f988ea72e0b2e03970d0798f5e03763a442cc";
+        let root_hash = hex::decode(root_hash_hex).unwrap();
+        let config = CircuitConfig::standard_recursion_config();
+
+        let mut last_proof = None;
+        let mut last_hash = vec![];
+        for (i, node) in mpt_proof.into_iter().rev().enumerate() {
+            let node_hash = keccak256(&node);
+            let proof = if i == 0 {
+                legacy_tx_leaf_node_proof::<F, C, D>(&config, node, ExtractionMethod::RLPBased)?
+            } else {
+                let hash_offset = find_index_subvector(&node, &last_hash).unwrap();
+                let p = last_proof.unwrap();
+                recursive_node_proof(&config, node, &[p], &[hash_offset])?
+            };
+
+            let vcd = VerifierCircuitData {
+                verifier_only: proof.1.clone(),
+                common: proof.2.clone(),
+            };
+            println!("[+] Proof index {} computed", i);
+            vcd.verify(proof.0.clone())?;
+            println!("[+] Proof index {} verified", i);
+            let expected_hash = hash_output_to_field::<F>(&node_hash);
+            let proof_hash = &proof.0.public_inputs[0..8];
+            assert!(expected_hash == proof_hash, "hashes not equal?");
+
+            last_proof = Some(proof);
+            last_hash = node_hash;
+        }
+        assert_eq!(last_hash, root_hash);
+        Ok(())
+    }
     fn run_leaf_proof_test<
         F: RichField + Extendable<D>,
         C: GenericConfig<D, F = F>,
@@ -311,7 +449,7 @@ mod test {
 
         vcd.verify(leaf_proof.0.clone())?;
         // verify hash of the node
-        let expected_hash = crate::utils::test::hash_to_fields::<F>(&node_hash);
+        let expected_hash = crate::utils::hash_to_fields::<F>(&node_hash);
         let proof_hash = &leaf_proof.0.public_inputs[0..8];
         assert!(expected_hash == proof_hash, "hashes not equal?");
         // verify gas value

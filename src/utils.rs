@@ -4,7 +4,21 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use sha3::Digest;
+use sha3::Keccak256;
 
+// Returns the index where the subvector starts in v, if any.
+pub(crate) fn find_index_subvector(v: &[u8], sub: &[u8]) -> Option<usize> {
+    (0..(v.len() - sub.len())).find(|&i| &v[i..i + sub.len()] == sub)
+}
+
+/// Compute the keccak256 hash of the given data.
+/// NOTE: probably should have two modules for circuit related stuff and non-circuit related stuff
+pub(crate) fn keccak256(data: &[u8]) -> Vec<u8> {
+    let mut hasher = Keccak256::new();
+    hasher.update(data);
+    hasher.finalize().to_vec()
+}
 pub(crate) fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
@@ -122,6 +136,24 @@ pub fn greater_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
     let a_plus_1 = builder.add(a, one);
     less_than(builder, b, a_plus_1, n)
 }
+pub(crate) fn hash_to_fields<F: RichField>(expected: &[u8]) -> Vec<F> {
+    let iter_u32 = expected.iter().chunks(4);
+    iter_u32
+        .into_iter()
+        .map(|chunk| {
+            let chunk_buff = chunk.copied().collect::<Vec<u8>>();
+            let u32_num = read_le_u32(&mut chunk_buff.as_slice());
+            F::from_canonical_u32(u32_num)
+        })
+        .collect::<Vec<_>>()
+}
+
+// taken from rust doc https://doc.rust-lang.org/std/primitive.u32.html#method.from_be_bytes
+fn read_le_u32(input: &mut &[u8]) -> u32 {
+    let (int_bytes, rest) = input.split_at(std::mem::size_of::<u32>());
+    *input = rest;
+    u32::from_le_bytes(int_bytes.try_into().unwrap())
+}
 
 #[cfg(test)]
 pub(crate) mod test {
@@ -139,31 +171,21 @@ pub(crate) mod test {
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use sha3::{Digest, Keccak256};
 
-    pub(crate) fn keccak256(data: &[u8]) -> Vec<u8> {
-        let mut hasher = Keccak256::new();
-        hasher.update(data);
-        hasher.finalize().to_vec()
-    }
-    pub(crate) fn hash_to_fields<F: RichField>(expected: &[u8]) -> Vec<F> {
+    use super::read_le_u32;
+
+    pub(crate) fn hash_output_to_field<F: RichField>(expected: &[u8]) -> Vec<F> {
         let iter_u32 = expected.iter().chunks(4);
         iter_u32
             .into_iter()
             .map(|chunk| {
-                let chunk_buff = chunk.copied().collect::<Vec<u8>>();
+                let mut chunk_buff = chunk.copied().collect::<Vec<u8>>();
                 let u32_num = read_le_u32(&mut chunk_buff.as_slice());
                 F::from_canonical_u32(u32_num)
             })
             .collect::<Vec<_>>()
     }
 
-    // taken from rust doc https://doc.rust-lang.org/std/primitive.u32.html#method.from_be_bytes
-    fn read_le_u32(input: &mut &[u8]) -> u32 {
-        let (int_bytes, rest) = input.split_at(std::mem::size_of::<u32>());
-        *input = rest;
-        u32::from_le_bytes(int_bytes.try_into().unwrap())
-    }
     pub(crate) fn connect<F: RichField + Extendable<D>, const D: usize, I: Into<u32>>(
         b: &mut CircuitBuilder<F, D>,
         pw: &mut PartialWitness<F>,

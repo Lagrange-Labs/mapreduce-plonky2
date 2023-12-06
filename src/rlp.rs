@@ -280,6 +280,7 @@ mod tests {
 
     use crate::rlp::{RlpHeader, MAX_LEN_BYTES};
 
+    // TODO: replace these tests by deterministic tests by cr
     #[test]
     fn test_data_len() -> Result<()> {
         const D: usize = 2;
