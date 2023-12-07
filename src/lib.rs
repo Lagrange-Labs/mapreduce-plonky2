@@ -48,7 +48,7 @@ impl ByteProofTuple {
             .to_bytes()
             .map_err(|e| anyhow::anyhow!("can't serialize vk: {:?}", e))?;
         //let common_data = bincode::serialize(&cd)?;
-        let gate_serializer = DefaultGateSerializer;
+        let gate_serializer = plonky2_crypto::u32::gates::HashGateSerializer;
         let common_data = cd
             .to_bytes(&gate_serializer)
             .map_err(|e| anyhow::anyhow!("can't serialize cd: {:?}", e))?; // nikko TODO: this is a hack, we need to serialize the cd properly
@@ -68,7 +68,7 @@ impl ByteProofTuple {
         let vd = VerifierOnlyCircuitData::from_bytes(btp.verification_data)
             .map_err(|e| anyhow::anyhow!(e))?;
         //let cd: CommonCircuitData<F, D> = bincode::deserialize(&btp.common_data)?;
-        let gate_serializer = DefaultGateSerializer;
+        let gate_serializer = plonky2_crypto::u32::gates::HashGateSerializer;
         let cd = CommonCircuitData::<F, D>::from_bytes(btp.common_data, &gate_serializer)
             .map_err(|e| anyhow::anyhow!("can't deserialize common data {:?}", e))?;
         let compressed_proof = CompressedProofWithPublicInputs::from_bytes(btp.proof, &cd)?;
@@ -79,6 +79,7 @@ impl ByteProofTuple {
 
 #[cfg(test)]
 mod test {
+    use ethers::utils::keccak256;
     use plonky2::{
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
@@ -87,6 +88,11 @@ mod test {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
+    use plonky2_crypto::hash::{
+        keccak256::{CircuitBuilderHashKeccak, WitnessHashKeccak, KECCAK256_R},
+        CircuitBuilderHash,
+    };
+    use rand::Rng;
 
     use crate::{utils::verify_proof_tuple, ByteProofTuple};
     use anyhow::Result;
@@ -100,12 +106,18 @@ mod test {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut pw = PartialWitness::new();
+        let hash_input = builder.add_virtual_hash_input_target(1, KECCAK256_R);
+        let hash_output = builder.hash_keccak256(&hash_input);
         let a = builder.add_virtual_target();
         let b = builder.add_virtual_target();
         let c = builder.mul(a, b);
         builder.register_public_input(c);
         pw.set_target(a, F::from_canonical_u8(2));
         pw.set_target(b, F::from_canonical_u8(3));
+        let hin = rand::thread_rng().gen::<[u8; 32]>();
+        let hout = keccak256(&hin[..]);
+        pw.set_keccak256_input_target(&hash_input, &hin);
+        pw.set_keccak256_output_target(&hash_output, &hout);
         let data = builder.build();
         let proof = data.prove(pw).unwrap();
         let tuple = (proof, data.verifier_only, data.common);
