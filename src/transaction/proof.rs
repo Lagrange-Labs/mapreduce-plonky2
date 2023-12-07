@@ -96,7 +96,7 @@ impl IntermediateMPT {
     }
 }
 
-struct RootMPTHeader {
+pub struct RootMPTHeader {
     pub header_node: Vec<u8>,
     pub root_node: Vec<u8>,
     pub inner_proofs: Vec<Vec<u8>>,

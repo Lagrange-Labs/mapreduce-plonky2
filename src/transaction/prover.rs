@@ -1,4 +1,5 @@
-use crate::transaction::proof::{IntermediateMPT, ProofType, TransactionMPT};
+use crate::eth::RLPBlock;
+use crate::transaction::proof::{IntermediateMPT, ProofType, RootMPTHeader, TransactionMPT};
 use crate::{
     eth::{extract_child_hashes, BlockData},
     utils::keccak256,
@@ -87,13 +88,49 @@ impl TxBlockProver {
                 true
             };
             if children_proofs_done {
-                let parent_proof = self.run_recursive_proof(proof_node)?;
+                let parent_proof = if proof_node.parent_hash.is_none() {
+                    // we have reached the root node so we now prove inclusion
+                    // in the block header as well
+                    println!("[+] Proving root node inclusion {}", node_hash);
+                    self.run_root_node_proof(proof_node)?
+                } else {
+                    self.run_recursive_proof(proof_node)?
+                };
                 current_proofs.push(parent_proof);
             }
         }
         Err(anyhow!("no root node found"))
     }
-
+    fn run_root_node_proof(&self, node: &MPTNode) -> Result<ProverOutput> {
+        let header_node = RLPBlock(&self.data.block).rlp_bytes();
+        let root_node = node.node_bytes.clone();
+        let root_hash = keccak256(&root_node);
+        let inner_proofs = node
+            .children_proofs
+            .iter()
+            .map(|p| p.proof.clone())
+            .collect::<Vec<_>>();
+        println!(
+            "[+] GO root node {} with {} children",
+            hex::encode(&root_hash),
+            inner_proofs.len()
+        );
+        let prover = ProofType::RootMPTHeader(RootMPTHeader {
+            header_node: header_node.to_vec(),
+            root_node,
+            inner_proofs,
+        });
+        let proof = prover.compute_proof()?;
+        println!(
+            "[+] OK Valid recursive proof for node hash {}",
+            hex::encode(&root_hash)
+        );
+        Ok(ProverOutput {
+            parent_hash: None,
+            proof,
+            hash: root_hash,
+        })
+    }
     fn run_recursive_proof(&self, node: &MPTNode) -> Result<ProverOutput> {
         let inner_proofs = node
             .children_proofs
@@ -194,7 +231,7 @@ mod test {
 
     use crate::{
         hash::hash_to_fields,
-        transaction::{mpt::NodeProofInputs, prover::TxBlockProver},
+        transaction::{header::HeaderProofInputs, mpt::NodeProofInputs, prover::TxBlockProver},
         ByteProofTuple,
     };
     use anyhow::Result;
@@ -207,12 +244,12 @@ mod test {
         type F = <C as GenericConfig<D>>::F;
         let mut prover = TxBlockProver::init(BlockNumber::from(block_number)).await?;
         let root_proof = prover.prove()?;
-        let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
-        let expected_pub_inputs = hash_to_fields::<F>(&root_hash);
+        //let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
+        let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
         let deserialized = ByteProofTuple::deserialize::<F, C, D>(&root_proof)?;
         assert_eq!(
             expected_pub_inputs,
-            NodeProofInputs::new(&deserialized.0.public_inputs)?.hash()
+            HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
         );
         Ok(())
     }

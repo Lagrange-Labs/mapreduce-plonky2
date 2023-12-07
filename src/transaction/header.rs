@@ -31,21 +31,21 @@ const MAX_HEADER_LEN: usize = 600;
 
 /// Helper structure to extract the public inputs of the header proof and
 /// to insert them when creating an aggregation proof.
-struct HeaderProofInputs<'a, X> {
+pub struct HeaderProofInputs<'a, X> {
     elems: &'a [X],
 }
 
 impl<'a, X> HeaderProofInputs<'a, X> {
-    fn new(elems: &'a [X]) -> Self {
+    pub fn new(elems: &'a [X]) -> Self {
         Self { elems }
     }
-    fn nb_aggregated(&self) -> &'a X {
+    pub fn nb_aggregated(&self) -> &'a X {
         &self.elems[0]
     }
-    fn previous_hash(&self) -> &'a [X] {
+    pub fn previous_hash(&self) -> &'a [X] {
         &self.elems[1..1 + PACKED_HASH_LEN]
     }
-    fn hash(&self) -> &'a [X] {
+    pub fn hash(&self) -> &'a [X] {
         &self.elems[1 + PACKED_HASH_LEN..1 + 2 * PACKED_HASH_LEN]
     }
 }
