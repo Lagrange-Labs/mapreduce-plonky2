@@ -271,8 +271,6 @@ mod tests {
 
     use anyhow::Result;
 
-    use log::{debug, LevelFilter, info};
-    use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::field::types::Field;
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
@@ -280,82 +278,11 @@ mod tests {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::rlp::{RlpHeader, MAX_LEN_BYTES, quin_selector};
+    use crate::rlp::{RlpHeader, MAX_LEN_BYTES};
 
-    fn init() {
-        env_logger::init();
-        log::set_max_level(LevelFilter::Debug);
-    }
-
-
-    #[test]
-    fn test_compare_quin_random_access() -> Result<()> {
-        use rand::Rng;
-        init();
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-        let config = CircuitConfig::standard_recursion_config();
-        let bits_of_length: usize = 7;
-        let byte_arr: Vec<u8> = (0..1<<bits_of_length).map(|_i| rand::thread_rng().gen()).collect();
-        println!("byte_arr length: {}", byte_arr.len());
-        let rand_index: usize = rand::thread_rng().gen_range(0..1<<bits_of_length);
-
-        // quin version
-        debug!("QUIN VERSION");
-        let pw = PartialWitness::new();
-        let mut builder = CircuitBuilder::<F, D>::new(config.clone());
-
-        let arr_target: Vec<Target> = byte_arr
-            .iter()
-            .map(|x| builder.constant(F::from_canonical_u8(*x)))
-            .collect();
-
-        let n: Target = builder.constant(F::from_canonical_usize(rand_index));
-
-        let element = arr_target[rand_index];
-        let ret_element = quin_selector(&mut builder, &arr_target, n);
-
-        builder.connect(element, ret_element);
-        builder.register_public_inputs(&arr_target);
-        builder.register_public_input(ret_element);
-        builder.print_gate_counts(0);
-
-        let data = builder.build::<C>();
-        debug!("lde size: {}",data.common.lde_size());
-        let proof = data.prove(pw)?;
-        assert!(data.verify(proof).is_ok());
-
-        // random access version
-        debug!("RANDOM ACCESS VERSION");
-        let pw = PartialWitness::new();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-
-        let arr_target: Vec<Target> = byte_arr
-            .iter()
-            .map(|x| builder.constant(F::from_canonical_u8(*x)))
-            .collect();
-
-        let n: Target = builder.constant(F::from_canonical_usize(rand_index));
-
-        let element = arr_target[rand_index];
-        let ret_element = builder.random_access(n,arr_target.clone());
-
-        builder.connect(element, ret_element);
-        builder.register_public_inputs(&arr_target);
-        builder.register_public_input(ret_element);
-        builder.print_gate_counts(0);
-
-        let data = builder.build::<C>();
-        debug!("lde size: {}",data.common.lde_size());
-        let proof = data.prove(pw)?;
-        data.verify(proof)
-    }
-
-
+    // TODO: replace these tests by deterministic tests by cr
     #[test]
     fn test_data_len() -> Result<()> {
-        init();
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -376,10 +303,7 @@ mod tests {
         builder.register_public_inputs(&data);
         builder.register_public_input(ret_target);
 
-        builder.print_gate_counts(0);
-
         let data = builder.build::<C>();
-        debug!("lde_size(): {}",data.common.lde_size());
         let proof = data.prove(pw)?;
         data.verify(proof)
     }
@@ -528,7 +452,6 @@ mod tests {
 
     #[test]
     fn test_rlp_decode() -> Result<()> {
-        init();
         let data: [u64; 532] = [
             249, 2, 17, 160, 10, 210, 58, 71, 229, 91, 254, 185, 245, 139, 35, 127, 191, 50, 125,
             165, 19, 165, 59, 86, 127, 77, 226, 197, 94, 143, 9, 69, 104, 149, 113, 39, 160, 164,
@@ -566,7 +489,7 @@ mod tests {
         type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
 
-        let pw: PartialWitness<GoldilocksField> = PartialWitness::new();
+        let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
         let data: Vec<Target> = data
@@ -598,11 +521,9 @@ mod tests {
             builder.connect(decoded.len[i], len[i]);
             builder.connect(decoded.data_type[i], data_type[i]);
         }
-        builder.print_gate_counts(0);
+
         let data = builder.build::<C>();
-        debug!("lde_size(): {}",data.common.lde_size());
-        //let proof = data.prove(pw)?;
-        //data.verify(proof)
-        Ok(())
+        let proof = data.prove(pw)?;
+        data.verify(proof)
     }
 }
