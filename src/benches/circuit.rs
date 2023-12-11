@@ -1,16 +1,16 @@
 #[cfg(test)]
 mod tests {
-    use std::env;
-    use std::time::Instant;
-    use std::io::Write;
-    use log::LevelFilter;
     use anyhow::Result;
+    use log::LevelFilter;
     use plonky2::field::types::Field;
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use std::env;
+    use std::io::Write;
+    use std::time::Instant;
 
     #[test]
     fn compare_quin_random_access() -> Result<()> {
@@ -24,22 +24,24 @@ mod tests {
 
         // both versions of the circuit need to capture this information
         let bits_of_length: usize = 6;
-        let byte_arr: Vec<u8> = (0..1<<bits_of_length).map(|_i| rand::thread_rng().gen()).collect();
+        let byte_arr: Vec<u8> = (0..1 << bits_of_length)
+            .map(|_i| rand::thread_rng().gen())
+            .collect();
         println!("Array length: {}", byte_arr.len());
-        let rand_index: usize = rand::thread_rng().gen_range(0..1<<bits_of_length);
+        let rand_index: usize = rand::thread_rng().gen_range(0..1 << bits_of_length);
 
         let config = CircuitConfig::standard_recursion_config();
 
-        let quin_version = |builder: &mut CircuitBuilder<F, D>| {    
+        let quin_version = |builder: &mut CircuitBuilder<F, D>| {
             let arr_target: Vec<Target> = byte_arr
                 .iter()
                 .map(|x| builder.constant(F::from_canonical_u8(*x)))
                 .collect();
             let n: Target = builder.constant(F::from_canonical_usize(rand_index));
             let element = arr_target[rand_index];
-            
-            let ret_element = quin_selector( builder, &arr_target, n);
-            
+
+            let ret_element = quin_selector(builder, &arr_target, n);
+
             builder.connect(element, ret_element);
             builder.register_public_input(ret_element);
             builder.register_public_inputs(&arr_target);
@@ -53,7 +55,7 @@ mod tests {
             let n: Target = builder.constant(F::from_canonical_usize(rand_index));
             let element = arr_target[rand_index];
 
-            let ret_element = builder.random_access(n,arr_target.clone());
+            let ret_element = builder.random_access(n, arr_target.clone());
 
             builder.connect(element, ret_element);
             builder.register_public_input(ret_element);
@@ -68,15 +70,13 @@ mod tests {
             (random_access_version, "RANDOM ACCESS VERSION"),
             |_| {}, // identity function
         )
-    }    
+    }
 
     /// Sets RUST_LOG=debug and initializes the logger
     fn init_logging() {
         env::set_var("RUST_LOG", "debug");
         env_logger::builder()
-            .format(|buf, record| {
-                writeln!(buf, "    {}", record.args())
-            })
+            .format(|buf, record| writeln!(buf, "    {}", record.args()))
             .init();
         log::set_max_level(LevelFilter::Debug);
     }
@@ -109,7 +109,7 @@ mod tests {
             println!("{:.2?}", now.elapsed());
 
             // time the proving process
-            print!("    Proving.....");         
+            print!("    Proving.....");
             let pw = PartialWitness::new();
             let now = Instant::now();
             let proof = data.prove(pw)?;
@@ -137,9 +137,9 @@ mod tests {
         v2(&mut builder2);
         after(&mut builder2);
         let verified2 = end(builder2);
-        
+
         assert!(verified1.is_ok());
         assert!(verified2.is_ok());
         verified1.and(verified2)
     }
-}  
+}

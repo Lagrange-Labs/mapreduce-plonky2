@@ -6,12 +6,12 @@ use plonky2::plonk::{
     proof::ProofWithPublicInputs,
 };
 
+mod benches;
 mod eth;
 mod hash;
 mod rlp;
 mod transaction;
 mod utils;
-mod benches;
 
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.
