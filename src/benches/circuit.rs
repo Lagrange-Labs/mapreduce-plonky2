@@ -2,6 +2,7 @@
 mod tests {
     use std::env;
     use std::time::Instant;
+    use std::io::Write;
     use log::LevelFilter;
     use anyhow::Result;
     use plonky2::field::types::Field;
@@ -29,8 +30,7 @@ mod tests {
 
         let config = CircuitConfig::standard_recursion_config();
 
-        let quin_version = |builder: &mut CircuitBuilder<F, D>| {
-            println!("QUIN VERSION");        
+        let quin_version = |builder: &mut CircuitBuilder<F, D>| {    
             let arr_target: Vec<Target> = byte_arr
                 .iter()
                 .map(|x| builder.constant(F::from_canonical_u8(*x)))
@@ -46,7 +46,6 @@ mod tests {
         };
 
         let random_access_version = |builder: &mut CircuitBuilder<F, D>| {
-            println!("RANDOM ACCESS VERSION");
             let arr_target: Vec<Target> = byte_arr
                 .iter()
                 .map(|x| builder.constant(F::from_canonical_u8(*x)))
@@ -65,8 +64,8 @@ mod tests {
         // after each version so we pass the identity function
         compare::<C, D>(
             config,
-            quin_version,
-            random_access_version,
+            (quin_version, "QUIN VERSION"),
+            (random_access_version, "RANDOM ACCESS VERSION"),
             |_| {}, // identity function
         )
     }    
@@ -74,7 +73,11 @@ mod tests {
     /// Sets RUST_LOG=debug and initializes the logger
     fn init_logging() {
         env::set_var("RUST_LOG", "debug");
-        env_logger::init();
+        env_logger::builder()
+            .format(|buf, record| {
+                writeln!(buf, "    {}", record.args())
+            })
+            .init();
         log::set_max_level(LevelFilter::Debug);
     }
 
@@ -84,8 +87,8 @@ mod tests {
     /// can be used to add identical gates after the differences.
     fn compare<C, const D: usize>(
         config: CircuitConfig,
-        v1: impl Fn(&mut CircuitBuilder<C::F, D>),
-        v2: impl Fn(&mut CircuitBuilder<C::F, D>),
+        (v1, v1_name): (impl Fn(&mut CircuitBuilder<C::F, D>), &str),
+        (v2, v2_name): (impl Fn(&mut CircuitBuilder<C::F, D>), &str),
         after: impl Fn(&mut CircuitBuilder<C::F, D>),
     ) -> Result<()>
     where
@@ -95,38 +98,42 @@ mod tests {
         // to be printed to the screen
         init_logging();
 
-        // 
         let end = |builder: CircuitBuilder<C::F, D>| {
             // print gate information from the DEBUG log level
             builder.print_gate_counts(0);
 
-            print!("Building....");
+            // time the build process
+            print!("    Building....");
             let now = Instant::now();
             let data = builder.build::<C>();
             println!("{:.2?}", now.elapsed());
 
-            print!("Proving.....");         
+            // time the proving process
+            print!("    Proving.....");         
             let pw = PartialWitness::new();
             let now = Instant::now();
             let proof = data.prove(pw)?;
             println!("{:.2?}", now.elapsed());
 
-            print!("Verifying...");
+            // time the verification process
+            print!("    Verifying...");
             let now = Instant::now();
             let res = data.verify(proof);
             println!("{:.2?}", now.elapsed());
 
-            println!("LDE size: {}",data.common.lde_size());
+            println!("    LDE size: {}", data.common.lde_size());
 
             res
         };
 
         let mut builder1 = CircuitBuilder::<C::F, D>::new(config.clone());
+        println!("\n{}", v1_name);
         v1(&mut builder1);
         after(&mut builder1);
         let verified1 = end(builder1);
 
         let mut builder2 = CircuitBuilder::<C::F, D>::new(config);
+        println!("\n{}", v2_name);
         v2(&mut builder2);
         after(&mut builder2);
         let verified2 = end(builder2);
@@ -135,4 +142,4 @@ mod tests {
         assert!(verified2.is_ok());
         verified1.and(verified2)
     }
-}
+}  
