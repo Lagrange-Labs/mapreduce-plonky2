@@ -61,6 +61,7 @@ pub(crate) fn hash_array<F: RichField + Extendable<D>, const D: usize>(
     // reason why ^: this is annoying to do in circuit.
     let num_bytes = ceil_div_usize(padded_len_bits, 8);
     let diff = num_bytes - length;
+    println!("HASH -> num_bytes: {}, diff {}", num_bytes, diff);
 
     let diff_target = b.add_virtual_target();
     pw.set_target(diff_target, F::from_canonical_usize(diff));

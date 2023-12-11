@@ -25,11 +25,12 @@ use crate::{
 use super::PACKED_HASH_LEN;
 
 /// The maximum length of a RLP encoded leaf node in a MPT tree holding a legacy tx.
-pub(crate) const MAX_LEGACY_TX_NODE_LENGTH: usize = 532;
+/// Of the form RLP(RLP(key), RLP(tx))
+pub(crate) const MAX_RLP_NODE_TX_LEN: usize = 816;
 /// The maximum size a RLP encoded legacy tx can take. This is different from
 /// `LEGACY_TX_NODE_LENGTH` because the latter contains the key in the path
 /// as well.
-pub(crate) const MAX_LEGACY_TX_LENGTH: usize = 532;
+pub(crate) const MAX_RLP_TX_LEN: usize = 748;
 /// Maximum size the gas value can take in bytes.
 pub(crate) const MAX_GAS_VALUE_LEN: usize = 32;
 
@@ -51,6 +52,13 @@ pub(crate) enum ExtractionMethod {
     /// Offset of the item in the tx list - length is assumed to be constant
     /// OffsetBased is NOT secure, it is only useful for testing & quick prototyping purposes.
     OffsetBased(usize),
+}
+
+/// Holds the different types of transactions available in Ethereum.
+pub enum TxType {
+    Legacy,  // no prefix
+    EIP2930, // prefix 0x01
+    EIP1559, // prefix 0x02
 }
 
 pub(super) struct NodeProofInputs<'a, X> {
@@ -89,8 +97,6 @@ impl<'a> NodeProofInputs<'a, Target> {
     }
 }
 
-/// Provides a proof for a leaf node in a MPT tree holding a legacy tx. It exposes
-/// the hash of the node as public input, as well as the gas value of the tx.
 pub fn legacy_tx_leaf_node_proof<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
@@ -100,15 +106,39 @@ pub fn legacy_tx_leaf_node_proof<
     mut node: Vec<u8>,
     extract: ExtractionMethod,
 ) -> Result<ProofTuple<F, C, D>> {
+    tx_leaf_node_proof(config, node, TxType::Legacy, extract)
+}
+
+/// Provides a proof for a leaf node in a MPT tree holding a legacy tx. It exposes
+/// the hash of the node as public input, as well as the gas value of the tx.
+/// NOTE: the tx_type and extract parameters influence on the circuit structure
+/// and therefore leads to different verification keys.
+pub fn tx_leaf_node_proof<
+    F: RichField + Extendable<D>,
+    C: GenericConfig<D, F = F>,
+    const D: usize,
+>(
+    config: &CircuitConfig,
+    mut node: Vec<u8>,
+    tx_type: TxType,
+    extract: ExtractionMethod,
+) -> Result<ProofTuple<F, C, D>> {
     let mut b = CircuitBuilder::<F, D>::new(config.clone());
     let mut pw = PartialWitness::new();
+    let one = b.one();
 
+    assert!(
+        node.len() <= MAX_RLP_NODE_TX_LEN,
+        "tx has {} bytes, max is {} bytes",
+        node.len(),
+        MAX_RLP_NODE_TX_LEN
+    );
     let node_length = node.len();
-    node.resize(MAX_LEGACY_TX_NODE_LENGTH, 0);
-    let node_targets = b.add_virtual_targets(MAX_LEGACY_TX_NODE_LENGTH);
+    node.resize(MAX_RLP_NODE_TX_LEN, 0);
+    let node_targets = b.add_virtual_targets(MAX_RLP_NODE_TX_LEN);
 
     // Witness assignement
-    for i in 0..MAX_LEGACY_TX_NODE_LENGTH {
+    for i in 0..MAX_RLP_NODE_TX_LEN {
         pw.set_target(node_targets[i], F::from_canonical_u8(node[i]));
     }
 
@@ -121,7 +151,38 @@ pub fn legacy_tx_leaf_node_proof<
     let gas_value_array = match extract {
         // gas is at 3rd position
         ExtractionMethod::RLPBased => {
-            extract_item_from_tx_list::<F, D, 3, MAX_GAS_VALUE_LEN>(&mut b, &node_targets)
+            // we skip a byte if it's not a legacy.
+            // NOTE: we don't need to prove it's a correct legacy, or eip1559 tx etc, since
+            // the consensus layer does it for us. Since it's always one byte to skip,
+            // we don't need to extract as well, we can just skip it (i.e. it's static).
+            // NOTE: this currently produce different VK depending on tx type
+            // TODO: make one universal circuit for all see if we dont loose too much perf
+
+            // by default, we don't skip any byte, i.e. legacy tx
+            let type_offset = b.zero();
+            match tx_type {
+                TxType::Legacy => extract_item_from_tx_list::<F, D, 3, MAX_GAS_VALUE_LEN>(
+                    &mut b,
+                    &node_targets,
+                    type_offset,
+                ),
+                TxType::EIP2930 => {
+                    let type_offset = b.add(type_offset, one);
+                    extract_item_from_tx_list::<F, D, 4, MAX_GAS_VALUE_LEN>(
+                        &mut b,
+                        &node_targets,
+                        type_offset,
+                    )
+                }
+                TxType::EIP1559 => {
+                    let type_offset = b.add(type_offset, one);
+                    extract_item_from_tx_list::<F, D, 5, MAX_GAS_VALUE_LEN>(
+                        &mut b,
+                        &node_targets,
+                        type_offset,
+                    )
+                }
+            }
         }
         ExtractionMethod::OffsetBased(offset) => {
             // NOTE: It does NOT guarantee the offset is _correct_. The prover CAN give
@@ -261,6 +322,8 @@ fn extract_item_from_tx_list<
 >(
     b: &mut CircuitBuilder<F, D>,
     node: &[Target],
+    // Offset at which decoding the tx list, since new tx types have different encodings
+    type_offset: Target,
     // TODO: make that const generic
 ) -> [Target; MAX_VALUE_SIZE] {
     // First, decode headers of RLP ( RLP (key), RLP(tx) )
@@ -268,7 +331,8 @@ fn extract_item_from_tx_list<
     let rlp_tx_index = 1;
     // extract the RLP(tx) from the node encoding
     let tx_offset = tuple_headers.offset[rlp_tx_index];
-    let rlp_tx = extract_array::<F, D, MAX_LEGACY_TX_LENGTH>(b, node, tx_offset);
+    let tx_offset = b.add(tx_offset, type_offset);
+    let rlp_tx = extract_array::<F, D, MAX_RLP_TX_LEN>(b, node, tx_offset);
 
     // then extract the gas fees: it's the third item in the tx list (out of 9 for legacy tx)
     // NOTE: we should only decode the things we need, so for example here
@@ -325,8 +389,11 @@ pub(super) fn gas_offset_from_rlp_node(node: &[u8]) -> (usize, usize) {
 }
 #[cfg(test)]
 mod test {
+    use std::time::Instant;
+
     use anyhow::Result;
-    use ethers::types::Transaction;
+    use eth_trie::Trie;
+    use ethers::types::{Transaction, U64};
     use plonky2::field::extension::Extendable;
     use plonky2::hash::hash_types::RichField;
     use plonky2::plonk::config::AlgebraicHasher;
@@ -346,13 +413,16 @@ mod test {
     const STRING: usize = 0;
     const LIST: usize = 1;
 
-    use super::{gas_offset_from_rlp_node, recursive_node_proof, MAX_LEGACY_TX_NODE_LENGTH};
+    use super::{gas_offset_from_rlp_node, recursive_node_proof, MAX_RLP_NODE_TX_LEN};
+    use crate::eth::BlockData;
     use crate::hash::hash_to_fields;
     use crate::rlp::{decode_header, decode_tuple};
-    use crate::utils::find_index_subvector;
+    use crate::transaction::mpt::{tx_leaf_node_proof, NodeProofInputs, TxType};
     use crate::utils::test::{data_to_constant_targets, hash_output_to_field};
+    use crate::utils::{find_index_subvector, verify_proof_tuple};
     use crate::utils::{keccak256, test::connect};
     use crate::{ByteProofTuple, ProofTuple};
+    use plonky2::field::types::Field;
 
     use super::{legacy_tx_leaf_node_proof, ExtractionMethod};
 
@@ -455,7 +525,7 @@ mod test {
                 .collect::<Vec<_>>()
                 .as_slice()
         );
-        let serialized = ByteProofTuple::serialize(leaf_proof).expect("can't serialize the proof");
+        let _ = ByteProofTuple::serialize(leaf_proof).expect("can't serialize the proof");
         Ok(())
     }
     #[test]
@@ -474,6 +544,61 @@ mod test {
                 ExtractionMethod::OffsetBased(gas_offset),
             )
         })
+    }
+
+    #[tokio::test]
+    async fn test_eip1559_tx_leaf_proof() -> Result<()> {
+        let mut data = BlockData::fetch(18761362).await?;
+        let tx_hash =
+            //hex::decode("829dc04de7e51901a4b01cf3679f91e12bbf94dcd0c152ecc38789d1be44ac6c")
+            hex::decode("0565265ff9c7a9110e35cfc23e5cfd538ad0568e8c7c122aebf3e6dbd6006590")
+                .unwrap();
+        let txr = data
+            .txs
+            .iter()
+            .find(|tx| tx.tx().hash.as_bytes() == tx_hash)
+            .unwrap();
+        let tx = txr.tx();
+        let mpt_proof = data
+            .tx_trie
+            .get_proof(&tx.transaction_index.unwrap().rlp_bytes())
+            .unwrap();
+        let leaf_node = mpt_proof.last().unwrap().clone();
+        let config = CircuitConfig::standard_recursion_config();
+        let tx_type = match tx.transaction_type {
+            Some(x) if x == U64::from(0x02) => TxType::EIP1559,
+            _ => panic!("should be eip1559 type"),
+        };
+        let now = Instant::now();
+        let proof = tx_leaf_node_proof::<F, C, D>(
+            &config,
+            leaf_node.clone(),
+            tx_type,
+            ExtractionMethod::RLPBased,
+        )?;
+        let end = now.elapsed();
+        println!("[+] Proof computed in {:?}", end);
+        verify_proof_tuple(&proof)?;
+
+        let proof_inputs = &NodeProofInputs::<F>::new(&proof.0.public_inputs)?;
+        let expected_hash = hash_to_fields::<F>(&keccak256(&leaf_node));
+        let proof_hash = proof_inputs.hash();
+        assert!(expected_hash == proof_hash, "hashes not equal?");
+        let gas_buff = tx.gas.rlp_bytes();
+        let gas_rlp = rlp::Rlp::new(&gas_buff);
+        let gas_header = gas_rlp.payload_info()?;
+        let gas_value = gas_rlp.data().unwrap().to_vec();
+        let gas_value_len = gas_value.len();
+        assert_eq!(
+            &proof_inputs.outputs()[0..gas_value_len],
+            gas_value
+                .iter()
+                .take(gas_header.value_len)
+                .map(|byte| F::from_canonical_u8(*byte))
+                .collect::<Vec<_>>()
+                .as_slice()
+        );
+        Ok(())
     }
     #[test]
     fn test_rlp_mpt_node_list() -> Result<()> {
@@ -518,7 +643,7 @@ mod test {
         // before transforming to targets, we pad to constant size so circuit always work for different sizes
         // Note we can't do it when reading rlp data offcircuit because rlp library continues to read until the
         // end of the array so it's not gonna be a list(2) anymore but much longer list.
-        data.resize(MAX_LEGACY_TX_NODE_LENGTH, 0);
+        data.resize(MAX_RLP_NODE_TX_LEN, 0);
         let node_targets = data_to_constant_targets(&mut b, &data);
 
         // check the header of the list is correctly decoded

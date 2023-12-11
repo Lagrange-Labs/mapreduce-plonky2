@@ -1,5 +1,9 @@
 use crate::eth::RLPBlock;
+use crate::hash::hash_to_fields;
+use crate::transaction::mpt::NodeProofInputs;
 use crate::transaction::proof::{IntermediateMPT, ProofType, RootMPTHeader, TransactionMPT};
+use crate::transaction::PACKED_HASH_LEN;
+use crate::ByteProofTuple;
 use crate::{
     eth::{extract_child_hashes, BlockData},
     utils::keccak256,
@@ -7,7 +11,9 @@ use crate::{
 use anyhow::anyhow;
 use anyhow::Result;
 use eth_trie::Trie;
+use ethers::types::Transaction;
 use ethers::{types::BlockId, utils::hex};
+use plonky2::plonk::config::PoseidonGoldilocksConfig;
 use rlp::Encodable;
 use std::collections::HashMap;
 
@@ -24,6 +30,8 @@ struct MPTNode {
     // TODO: we want to support the case where we don't put all hashes
     children_hashes: Vec<Vec<u8>>,
     parent_hash: Option<Vec<u8>>, // indicator to go up one level when this node has been "proven"
+    /// Used for information about tx in the leaf node proving phase
+    transaction: Option<Transaction>,
 }
 
 struct ProverOutput {
@@ -165,13 +173,29 @@ impl TxBlockProver {
         let mpt_node = trie.get(&leaf_hash).expect("leaf should be inside trie");
         let node_bytes = mpt_node.node_bytes.clone();
         let parent_hash = mpt_node.parent_hash.clone();
-        println!("[+] GO leaf proof - hash {}", hex::encode(&leaf_hash));
+        // Safe because by construction we're in the leaf node
+        let transaction = mpt_node.transaction.clone().unwrap();
+        println!(
+            "[+] GO leaf proof - tx hash {}",
+            hex::encode(transaction.hash().as_bytes())
+        );
         let prover = ProofType::TransactionMPT(TransactionMPT {
             leaf_node: node_bytes,
-            quick_check: true,
+            quick_check: false,
+            transaction,
         });
         let proof = prover.compute_proof()?;
-
+        #[cfg(test)]
+        {
+            println!(" --- checking if hash fits ---");
+            type C = plonky2::plonk::config::PoseidonGoldilocksConfig;
+            type F = <C as plonky2::plonk::config::GenericConfig<2>>::F;
+            let t = ByteProofTuple::deserialize::<F, C, 2>(&proof.clone())
+                .expect("invalid deserialization");
+            let computed_hash = &t.0.public_inputs[0..PACKED_HASH_LEN];
+            let expected = hash_to_fields::<F>(&mpt_node.hash);
+            assert_eq!(computed_hash, expected);
+        }
         println!(
             "[+] OK Valid proof for leaf - hash {}",
             hex::encode(&leaf_hash)
@@ -216,6 +240,7 @@ impl TxBlockProver {
                     children_proofs,
                     children_hashes,
                     parent_hash,
+                    transaction: if i == 0 { Some(txr.tx().clone()) } else { None },
                 };
                 tree.entry(hash).or_insert(trie_node);
             }
@@ -225,20 +250,39 @@ impl TxBlockProver {
 }
 
 mod test {
-    use eth_trie::Trie;
     use ethers::types::BlockNumber;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
     use crate::{
         hash::hash_to_fields,
-        transaction::{header::HeaderProofInputs, mpt::NodeProofInputs, prover::TxBlockProver},
+        transaction::{header::HeaderProofInputs, prover::TxBlockProver},
         ByteProofTuple,
     };
     use anyhow::Result;
 
     #[tokio::test]
-    pub async fn prove_all_tx() -> Result<()> {
+    pub async fn prove_all_tx_legacy() -> Result<()> {
+        // block containing only 4 tx all of type legacy
         let block_number = 10593417;
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let mut prover = TxBlockProver::init(BlockNumber::from(block_number)).await?;
+        let root_proof = prover.prove()?;
+        //let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
+        let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
+        let deserialized = ByteProofTuple::deserialize::<F, C, D>(&root_proof)?;
+        assert_eq!(
+            expected_pub_inputs,
+            HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    pub async fn prove_all_tx_1559() -> Result<()> {
+        // block containing only 4 tx all of type 1559
+        let block_number = 18761362;
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ethers::types::Transaction;
+use ethers::types::{Transaction, U64};
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -17,8 +17,8 @@ use crate::{
 use super::{
     header::{aggregate_sequential_headers, mpt_root_in_header},
     mpt::{
-        gas_offset_from_rlp_node, legacy_tx_leaf_node_proof, recursive_node_proof,
-        ExtractionMethod, NodeProofInputs,
+        gas_offset_from_rlp_node, recursive_node_proof, tx_leaf_node_proof, ExtractionMethod,
+        NodeProofInputs, TxType,
     },
 };
 
@@ -55,6 +55,9 @@ impl ProofType {
 pub struct TransactionMPT {
     pub leaf_node: Vec<u8>,
     pub quick_check: bool,
+    /// The raw transaction that is being proven. Necessary to lookup specific
+    /// fields easily (simpler than decoding RLP).
+    pub transaction: Transaction,
 }
 
 impl TransactionMPT {
@@ -68,7 +71,13 @@ impl TransactionMPT {
         } else {
             ExtractionMethod::RLPBased
         };
-        legacy_tx_leaf_node_proof(&config, self.leaf_node, e)
+
+        let tx_type = match self.transaction.transaction_type {
+            Some(x) if x == U64::from(0x01) => TxType::EIP2930,
+            Some(x) if x == U64::from(0x02) => TxType::EIP1559,
+            _ => TxType::Legacy,
+        };
+        tx_leaf_node_proof(&config, self.leaf_node, tx_type, e)
     }
 }
 
