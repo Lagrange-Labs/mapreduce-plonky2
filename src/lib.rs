@@ -6,6 +6,7 @@ use plonky2::plonk::{
     proof::ProofWithPublicInputs,
 };
 
+mod benches;
 mod eth;
 mod hash;
 mod rlp;
