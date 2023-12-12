@@ -109,7 +109,11 @@ impl TxBlockProver {
 
     pub fn prove(&mut self) -> Result<Vec<u8>> {
         let (mut trie, leaves_hashes) = self.init_proofs_trie();
-        println!("[+] Built internal trie with {} nodes in total", trie.len());
+        println!(
+            "[+] Built internal trie with {} leaves, and {} nodes in total",
+            leaves_hashes.len(),
+            trie.len()
+        );
         let mut current_proofs = leaves_hashes
             .iter()
             .map(|h| self.run_leaf_proof(&trie, h.clone()))

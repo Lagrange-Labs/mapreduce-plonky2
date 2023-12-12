@@ -32,16 +32,6 @@ pub(crate) fn hash_to_fields<F: RichField>(expected: &[u8]) -> Vec<F> {
         .collect::<Vec<_>>()
 }
 
-pub(crate) fn compute_padding_len(length: usize) -> usize {
-    let input_len_bits = length * 8; // only pad the data that is inside the fixed buffer
-    let num_actual_blocks = 1 + input_len_bits / KECCAK256_R;
-    let padded_len_bits = num_actual_blocks * KECCAK256_R;
-    // reason why ^: this is annoying to do in circuit.
-    let num_bytes = ceil_div_usize(padded_len_bits, 8);
-    let diff = num_bytes - length;
-    diff
-}
-
 pub(crate) fn hash_array<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     pw: &mut PartialWitness<F>,
@@ -71,7 +61,6 @@ pub(crate) fn hash_array<F: RichField + Extendable<D>, const D: usize>(
     // reason why ^: this is annoying to do in circuit.
     let num_bytes = ceil_div_usize(padded_len_bits, 8);
     let diff = num_bytes - length;
-    println!("HASH -> num_bytes: {}, diff {}", num_bytes, diff);
     // we need to make sure that there is enough data len to fit the padding inside
     assert!(
         length + diff <= total_len,

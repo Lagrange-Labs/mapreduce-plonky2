@@ -70,16 +70,15 @@ pub fn data_len<F: RichField + Extendable<D>, const D: usize>(
 
     res
 }
-
-/// Returns the header of this RLP encoded data.
 pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
+    offset: Target,
 ) -> RlpHeader {
     let one = b.one();
     let zero = b.zero();
 
-    let prefix = data[0];
+    let prefix = quin_selector(b, data, offset);
 
     let byte_80 = b.constant(F::from_canonical_usize(128));
     let byte_b7 = b.constant(F::from_canonical_usize(183));
@@ -137,8 +136,9 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
 pub(crate) fn decode_tuple<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
+    data_offset: Target,
 ) -> RlpList<2> {
-    decode_fixed_list::<F, D, 2>(b, data)
+    decode_fixed_list::<F, D, 2>(b, data, data_offset)
 }
 
 /// Decodes the header of the list, and then decodes the first N items of the list.
@@ -147,6 +147,7 @@ pub(crate) fn decode_tuple<F: RichField + Extendable<D>, const D: usize>(
 pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
+    data_offset: Target,
 ) -> RlpList<N> {
     let zero = b.zero();
     let one = b.one();
@@ -157,8 +158,8 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
     let mut dec_len = [zero; N];
     let mut dec_type = [zero; N];
 
-    let list_header = decode_header(b, data);
-    let mut offset = list_header.offset;
+    let list_header = decode_header(b, data, data_offset);
+    let mut offset = b.add(data_offset, list_header.offset);
 
     // decode each headers of each items ofthe list
     // remember in a list each item of the list is RLP encoded
@@ -169,12 +170,12 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
 
         // read the header starting from the offset -
         // nikko: this is assuming the header will take at least 1 bytes and less than 1 + MAX_LEN_BYTES
-        let header = extract_array::<F, D, { MAX_LEN_BYTES + 1 }>(b, data, offset);
+        //let header = extract_array::<F, D, { MAX_LEN_BYTES + 1 }>(b, data, offset);
         let RlpHeader {
             len: field_len,
             offset: field_offset,
             data_type: field_type,
-        } = decode_header(b, &header);
+        } = decode_header(b, data, offset);
         let total_field_len = b.add(field_offset, field_len);
 
         let one_sub_field_type = b.sub(one, field_type);
@@ -278,7 +279,70 @@ mod tests {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::rlp::{RlpHeader, MAX_LEN_BYTES};
+    use crate::rlp::{decode_header, RlpHeader, MAX_LEN_BYTES};
+    use crate::utils::IntTargetWriter;
+    #[test]
+    fn test_decode_header_long_list() -> Result<()> {
+        let n_items = 5;
+        let data_len = 65;
+        let data = (0..n_items)
+            .map(|_| {
+                (0..data_len)
+                    .map(|_| rand::random::<u8>())
+                    .collect::<Vec<u8>>()
+            })
+            .collect::<Vec<_>>();
+        let rlp_data = rlp::encode_list::<Vec<u8>, _>(&data);
+        let stream = rlp::Rlp::new(&rlp_data);
+        let header = stream.payload_info().unwrap();
+        let proto = stream.prototype().unwrap();
+        match proto {
+            rlp::Prototype::List(n) if n == n_items => {}
+            _ => {
+                panic!("not a good list")
+            }
+        }
+        let header_len = header.header_len;
+        let header0 = stream.at(0)?.payload_info()?;
+        let h0_len = header0.header_len;
+        let first_item = rlp::Rlp::new(&rlp_data[header_len..]);
+        let first_item_header = first_item.payload_info()?;
+        assert!(first_item_header.header_len == h0_len);
+        assert!(first_item_header.value_len == header0.value_len);
+
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let config = CircuitConfig::standard_recursion_config();
+        let mut pw = PartialWitness::new();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let rlp_data_tgt = builder.add_virtual_targets(rlp_data.len());
+        pw.set_int_targets(&rlp_data_tgt, &rlp_data);
+        let hlen_tgt = builder.constant(F::from_canonical_u32(header_len as u32));
+        let vlen_tgt = builder.constant(F::from_canonical_u32(header.value_len as u32));
+        let zero = builder.zero();
+        let header_tgt = decode_header(&mut builder, &rlp_data_tgt, zero);
+        // compare the header len outside circuit with inside circuit
+        builder.connect(header_tgt.offset, hlen_tgt);
+        // compare the header value len outside circuit with inside circuit
+        builder.connect(header_tgt.len, vlen_tgt);
+
+        // first item (header + value) starts directly after the first header
+        let offset = header_tgt.offset;
+        // decode the header of the first item in the list starting at the right position
+        let h0 = decode_header(&mut builder, &rlp_data_tgt, offset);
+        let h0len_tgt = builder.constant(F::from_canonical_u32(h0_len as u32));
+        let v0len_tgt = builder.constant(F::from_canonical_u32(header0.value_len as u32));
+        // compare header of first item in list len outside circuit with inside circuit
+        builder.connect(h0.offset, h0len_tgt);
+        // compare value len of first item in list outside circuit with inside circuit
+        builder.connect(h0.len, v0len_tgt);
+
+        let data = builder.build::<C>();
+        let proof = data.prove(pw)?;
+        data.verify(proof)?;
+        Ok(())
+    }
 
     // TODO: replace these tests by deterministic tests by cr
     #[test]
@@ -332,7 +396,7 @@ mod tests {
             data_type: builder.constant(F::from_canonical_usize(0)),
         };
 
-        let res_rlp_header1 = super::decode_header(&mut builder, &data1);
+        let res_rlp_header1 = super::decode_header(&mut builder, &data1, zero);
 
         // builder.connect(rlp_header.len, res_rlp_header.len);
         builder.connect(rlp_header1.offset, res_rlp_header1.offset);
@@ -410,7 +474,7 @@ mod tests {
             data_type: builder.constant(F::from_canonical_usize(0)),
         };
 
-        let res_rlp_header2 = super::decode_header(&mut builder, &data2);
+        let res_rlp_header2 = super::decode_header(&mut builder, &data2, zero);
 
         // builder.connect(rlp_header.len, res_rlp_header.len);
         builder.connect(rlp_header2.offset, res_rlp_header2.offset);
@@ -434,7 +498,7 @@ mod tests {
 
         let res_dot_drop =
             super::extract_array::<F, D, { MAX_LEN_BYTES + 1 }>(&mut builder, &data3, zero);
-        let res_rlp_header3 = super::decode_header(&mut builder, &res_dot_drop);
+        let res_rlp_header3 = super::decode_header(&mut builder, &res_dot_drop, zero);
 
         // builder.connect(rlp_header.len, res_rlp_header.len);
         builder.connect(rlp_header3.offset, res_rlp_header3.offset);
@@ -496,8 +560,8 @@ mod tests {
             .iter()
             .map(|x| builder.constant(F::from_canonical_u64(*x)))
             .collect();
-
-        let decoded = super::decode_fixed_list::<F, D, 17>(&mut builder, &data);
+        let zero = builder.zero();
+        let decoded = super::decode_fixed_list::<F, D, 17>(&mut builder, &data, zero);
 
         let offset: Vec<Target> = [
             4, 37, 70, 103, 136, 169, 202, 235, 268, 301, 334, 367, 400, 433, 466, 499, 532,

@@ -26,11 +26,11 @@ use super::PACKED_HASH_LEN;
 
 /// The maximum length of a RLP encoded leaf node in a MPT tree holding a legacy tx.
 /// Of the form RLP(RLP(key), RLP(tx))
-pub(crate) const MAX_RLP_NODE_TX_LEN: usize = 532;
+pub(crate) const MAX_RLP_NODE_TX_LEN: usize = 816;
 /// The maximum size a RLP encoded legacy tx can take. This is different from
 /// `LEGACY_TX_NODE_LENGTH` because the latter contains the key in the path
 /// as well. It's only RLP(tx).
-pub(crate) const MAX_RLP_TX_LEN: usize = 500;
+pub(crate) const MAX_RLP_TX_LEN: usize = 734;
 /// Maximum size the gas value can take in bytes.
 pub(crate) const MAX_GAS_VALUE_LEN: usize = 32;
 
@@ -326,23 +326,24 @@ fn extract_item_from_tx_list<
     type_offset: Target,
     // TODO: make that const generic
 ) -> [Target; MAX_VALUE_SIZE] {
+    let zero = b.zero();
     // First, decode headers of RLP ( RLP (key), RLP(tx) )
-    let tuple_headers = decode_tuple(b, node);
+    let tuple_headers = decode_tuple(b, node, zero);
     let rlp_tx_index = 1;
     // extract the RLP(tx) from the node encoding
     let tx_offset = tuple_headers.offset[rlp_tx_index];
     let tx_offset = b.add(tx_offset, type_offset);
-    let rlp_tx = extract_array::<F, D, MAX_RLP_TX_LEN>(b, node, tx_offset);
+    //let rlp_tx = extract_array::<F, D, MAX_RLP_TX_LEN>(b, node, tx_offset);
 
     // then extract the gas fees: it's the third item in the tx list (out of 9 for legacy tx)
     // NOTE: we should only decode the things we need, so for example here
     // the gas fee is at the 3rd position then we only need to decode up to the 3rd
     // headers in the list and keep the rest untouched. However, later user query might
     // want the whole thing.
-    let tx_list = decode_fixed_list::<F, D, N_FIELDS>(b, &rlp_tx);
+    let tx_list = decode_fixed_list::<F, D, N_FIELDS>(b, node, tx_offset);
     let item_index = N_FIELDS - 1;
-    let item_offset = tx_list.offset[item_index];
-    extract_array::<F, D, MAX_VALUE_SIZE>(b, &rlp_tx, item_offset)
+    let item_offset = b.add(tx_offset, tx_list.offset[item_index]);
+    extract_array::<F, D, MAX_VALUE_SIZE>(b, node, item_offset)
 }
 
 /// Function that returns the offset of the gas value in the RLP encoded
@@ -647,14 +648,16 @@ mod test {
         let node_targets = data_to_constant_targets(&mut b, &data);
 
         // check the header of the list is correctly decoded
-        let rlp_header = decode_header(&mut b, &node_targets);
+        let zero = b.zero();
+        let rlp_header = decode_header(&mut b, &node_targets, zero);
         connect(&mut b, &mut pw, rlp_header.offset, header.header_len as u32);
         connect(&mut b, &mut pw, rlp_header.len, header.value_len as u32);
         // it's a list so type = 1
         connect(&mut b, &mut pw, rlp_header.data_type, LIST as u32);
 
         // decode all the sub headers now, we know there are only two
-        let rlp_list = decode_tuple(&mut b, &node_targets);
+        let zero = b.zero();
+        let rlp_list = decode_tuple(&mut b, &node_targets, zero);
         // check the first sub header which is the key of the MPT leaf node
         // value of the key header starts after first header and after header of the key item
         let expected_key_value_offset = key_header.header_len + header.header_len;
