@@ -27,7 +27,7 @@ use crate::{
 
 /// Maximum length of a RLP encoded header.
 /// TODO verify assumption
-const MAX_HEADER_LEN: usize = 600;
+const MAX_HEADER_LEN: usize = 680;
 
 /// Helper structure to extract the public inputs of the header proof and
 /// to insert them when creating an aggregation proof.

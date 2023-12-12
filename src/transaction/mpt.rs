@@ -26,11 +26,11 @@ use super::PACKED_HASH_LEN;
 
 /// The maximum length of a RLP encoded leaf node in a MPT tree holding a legacy tx.
 /// Of the form RLP(RLP(key), RLP(tx))
-pub(crate) const MAX_RLP_NODE_TX_LEN: usize = 816;
+pub(crate) const MAX_RLP_NODE_TX_LEN: usize = 532;
 /// The maximum size a RLP encoded legacy tx can take. This is different from
 /// `LEGACY_TX_NODE_LENGTH` because the latter contains the key in the path
-/// as well.
-pub(crate) const MAX_RLP_TX_LEN: usize = 748;
+/// as well. It's only RLP(tx).
+pub(crate) const MAX_RLP_TX_LEN: usize = 500;
 /// Maximum size the gas value can take in bytes.
 pub(crate) const MAX_GAS_VALUE_LEN: usize = 32;
 
@@ -103,7 +103,7 @@ pub fn legacy_tx_leaf_node_proof<
     const D: usize,
 >(
     config: &CircuitConfig,
-    mut node: Vec<u8>,
+    node: Vec<u8>,
     extract: ExtractionMethod,
 ) -> Result<ProofTuple<F, C, D>> {
     tx_leaf_node_proof(config, node, TxType::Legacy, extract)

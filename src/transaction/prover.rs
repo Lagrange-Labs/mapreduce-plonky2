@@ -1,6 +1,5 @@
 use crate::eth::RLPBlock;
 use crate::hash::hash_to_fields;
-use crate::transaction::mpt::NodeProofInputs;
 use crate::transaction::proof::{IntermediateMPT, ProofType, RootMPTHeader, TransactionMPT};
 use crate::transaction::PACKED_HASH_LEN;
 use crate::ByteProofTuple;
@@ -11,27 +10,85 @@ use crate::{
 use anyhow::anyhow;
 use anyhow::Result;
 use eth_trie::Trie;
-use ethers::types::Transaction;
+use ethers::types::{Transaction, H256};
 use ethers::{types::BlockId, utils::hex};
-use plonky2::plonk::config::PoseidonGoldilocksConfig;
 use rlp::Encodable;
 use std::collections::HashMap;
 
+#[derive(Debug, Default)]
+pub(crate) enum TxFilter {
+    // only prove tx that are less than this size in bytes
+    BySize(usize),
+    // only prove the tx which have these hashes
+    ByHash(Vec<H256>),
+    // no policy at all
+    #[default]
+    Everything,
+}
+
+impl TxFilter {
+    pub fn should_prove(&self, tx: &Transaction) -> (bool, String) {
+        match self {
+            Self::BySize(max_size) => (
+                tx.rlp().len() <= *max_size,
+                format!("tx size {} <= {}", tx.rlp().len(), max_size),
+            ),
+            Self::ByHash(hashes) => (
+                hashes.contains(&tx.hash()),
+                format!("tx not contained {:?}", tx.hash()),
+            ),
+            Self::Everything => (true, "".to_string()),
+        }
+    }
+}
 struct TxBlockProver {
     data: BlockData,
+    policy: TxFilter,
 }
 
 struct MPTNode {
     node_bytes: Vec<u8>, // RLP byte representation of the node
     hash: Vec<u8>,       // its hash
+    // ALL the children of this node if any (zero if leaf for example)
+    total_nb_children: usize,
+    // expected children hashes - will be filled in with only the hashes that we
+    // traverse in the proofs of all tx we are looking at. For the nodes that we don't
+    // traverse, their hash may be in children_hashes, and we'll only provide a "null" proof
+    // for them.
+    exp_children: Vec<Vec<u8>>,
     // child i : (key, proof) - key needed locate where is the hash of the child in the node
-    children_proofs: Vec<ProverOutput>, // will be filled in
-    // expected hashes of the children if any (zero if leaf for example)
-    // TODO: we want to support the case where we don't put all hashes
-    children_hashes: Vec<Vec<u8>>,
+    rcvd_children_proofs: Vec<ProverOutput>, // will be filled in
     parent_hash: Option<Vec<u8>>, // indicator to go up one level when this node has been "proven"
     /// Used for information about tx in the leaf node proving phase
     transaction: Option<Transaction>,
+}
+impl MPTNode {
+    fn is_provable(&self) -> bool {
+        if self.exp_children.len() == self.rcvd_children_proofs.len() {
+            println!(
+                "[+] Node proof {} : only {} / {} (exp) / {} (total) children proofs",
+                hex::encode(&self.hash),
+                self.rcvd_children_proofs.len(),
+                self.exp_children.len(),
+                self.total_nb_children,
+            );
+        }
+        if !self
+            .rcvd_children_proofs
+            .iter()
+            .all(|p| self.exp_children.contains(&p.hash))
+        {
+            panic!("some children proofs are not expected");
+        }
+        println!(
+            "[+] Node proof {} : ALL {} / {} (exp) / {} (total)  received children proofs",
+            hex::encode(&self.hash),
+            self.rcvd_children_proofs.len(),
+            self.exp_children.len(),
+            self.total_nb_children,
+        );
+        true
+    }
 }
 
 struct ProverOutput {
@@ -45,9 +102,9 @@ struct ProverOutput {
 /// Hash mapping the hash of a node in the trie to the data
 type HashTrie = HashMap<Vec<u8>, MPTNode>;
 impl TxBlockProver {
-    pub async fn init<T: Into<BlockId> + Send + Sync>(id: T) -> Result<Self> {
+    pub async fn init<T: Into<BlockId> + Send + Sync>(id: T, policy: TxFilter) -> Result<Self> {
         let data = BlockData::fetch(id).await?;
-        Ok(Self { data })
+        Ok(Self { data, policy })
     }
 
     pub fn prove(&mut self) -> Result<Vec<u8>> {
@@ -69,33 +126,8 @@ impl TxBlockProver {
                 .get_mut(parent_hash)
                 .expect("every node should be in the trie");
             // a proof for one of the children of this node in the MPT has been computed!
-            proof_node.children_proofs.push(output);
-            // look if we have all the individual children proofs to start proving this node now
-            let exp_children_hashes = &proof_node.children_hashes;
-            let rcvd_children = proof_node.children_proofs.len();
-            let children_proofs_done = if exp_children_hashes.len() != rcvd_children {
-                println!(
-                    "[+] Node proof {} : only {}/{} children proofs",
-                    &node_hash,
-                    rcvd_children,
-                    exp_children_hashes.len()
-                );
-                false // not the same number of proofs than children in branch node
-            } else {
-                // make sure we have all the same hashes
-                let all = exp_children_hashes
-                    .iter()
-                    .all(|h| proof_node.children_proofs.iter().any(|p| *p.hash == *h));
-                println!(
-                    "[+] Node proof {} : ALL {}/{} children proofs!",
-                    &node_hash,
-                    rcvd_children,
-                    exp_children_hashes.len()
-                );
-                assert!(all, "same number of proofs but different hashes !?");
-                true
-            };
-            if children_proofs_done {
+            proof_node.rcvd_children_proofs.push(output);
+            if proof_node.is_provable() {
                 let parent_proof = if proof_node.parent_hash.is_none() {
                     // we have reached the root node so we now prove inclusion
                     // in the block header as well
@@ -114,7 +146,7 @@ impl TxBlockProver {
         let root_node = node.node_bytes.clone();
         let root_hash = keccak256(&root_node);
         let inner_proofs = node
-            .children_proofs
+            .rcvd_children_proofs
             .iter()
             .map(|p| p.proof.clone())
             .collect::<Vec<_>>();
@@ -141,7 +173,7 @@ impl TxBlockProver {
     }
     fn run_recursive_proof(&self, node: &MPTNode) -> Result<ProverOutput> {
         let inner_proofs = node
-            .children_proofs
+            .rcvd_children_proofs
             .iter()
             .map(|p| p.proof.clone())
             .collect::<Vec<_>>();
@@ -151,7 +183,7 @@ impl TxBlockProver {
         println!(
             "[+] GO recursive proof for node {} with {} children",
             hex::encode(&node_hash),
-            node.children_hashes.len()
+            node.total_nb_children
         );
         let prover = ProofType::IntermediateMPT(IntermediateMPT {
             intermediate_node: node_bytes,
@@ -215,9 +247,20 @@ impl TxBlockProver {
         let mut tree = HashMap::new();
         let mut leaves = Vec::new();
         for txr in self.data.txs.iter() {
+            let (should_prove, reason) = self.policy.should_prove(txr.tx());
+            if !should_prove {
+                println!(
+                    "[-] Policy skipping tx {} - {:?}\n\t-{}",
+                    txr.tx().transaction_index.unwrap(),
+                    txr.tx().hash(),
+                    reason
+                );
+                continue;
+            }
             let idx = txr.receipt().transaction_index;
             let key = idx.rlp_bytes().to_vec();
             let proof_bytes = self.data.tx_trie.get_proof(&key).unwrap();
+            let mut child_hash = None;
             for (i, node_bytes) in proof_bytes.iter().rev().enumerate() {
                 let idx_in_path = proof_bytes.len() - 1 - i;
                 let hash = keccak256(node_bytes);
@@ -225,7 +268,6 @@ impl TxBlockProver {
                     leaves.push(hash.clone());
                 }
                 let node_bytes = node_bytes.to_vec();
-                let children_proofs = vec![];
                 let parent_hash = if idx_in_path > 0 {
                     Some(keccak256(&proof_bytes[idx_in_path - 1]))
                 } else {
@@ -233,16 +275,27 @@ impl TxBlockProver {
                 };
                 // nikko TODO: This assumes there is no value in the branch node.
                 // Will need to make sure this assumption is true in practice for tx at least
-                let children_hashes = extract_child_hashes(&node_bytes);
-                let trie_node = MPTNode {
-                    node_bytes,
-                    hash: hash.clone(),
-                    children_proofs,
-                    children_hashes,
-                    parent_hash,
-                    transaction: if i == 0 { Some(txr.tx().clone()) } else { None },
+                let nb_children = extract_child_hashes(&node_bytes).len();
+                // only record the child hash starting from the parent of the leaf
+                let mut exp_child = if let Some(h) = child_hash {
+                    vec![h]
+                } else {
+                    vec![]
                 };
-                tree.entry(hash).or_insert(trie_node);
+                tree.entry(hash.clone())
+                    .and_modify(|n: &mut MPTNode| {
+                        n.exp_children.append(&mut exp_child);
+                    })
+                    .or_insert(MPTNode {
+                        node_bytes,
+                        hash: hash.clone(),
+                        rcvd_children_proofs: vec![],
+                        exp_children: exp_child,
+                        total_nb_children: nb_children,
+                        parent_hash,
+                        transaction: if i == 0 { Some(txr.tx().clone()) } else { None },
+                    });
+                child_hash = Some(hash);
             }
         }
         (tree, leaves)
@@ -255,7 +308,11 @@ mod test {
 
     use crate::{
         hash::hash_to_fields,
-        transaction::{header::HeaderProofInputs, prover::TxBlockProver},
+        transaction::{
+            header::HeaderProofInputs,
+            mpt::MAX_RLP_TX_LEN,
+            prover::{TxBlockProver, TxFilter},
+        },
         ByteProofTuple,
     };
     use anyhow::Result;
@@ -267,7 +324,8 @@ mod test {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        let mut prover = TxBlockProver::init(BlockNumber::from(block_number)).await?;
+        let filter = TxFilter::BySize(MAX_RLP_TX_LEN);
+        let mut prover = TxBlockProver::init(BlockNumber::from(block_number), filter).await?;
         let root_proof = prover.prove()?;
         //let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
         let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
@@ -283,10 +341,14 @@ mod test {
     pub async fn prove_all_tx_1559() -> Result<()> {
         // block containing only 4 tx all of type 1559
         let block_number = 18761362;
+        //let block_number = 18761234;
+        //let block_number = 18761175;
+        //let block_number = 18756870;
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        let mut prover = TxBlockProver::init(BlockNumber::from(block_number)).await?;
+        let filter = TxFilter::BySize(MAX_RLP_TX_LEN);
+        let mut prover = TxBlockProver::init(BlockNumber::from(block_number), filter).await?;
         let root_proof = prover.prove()?;
         //let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
         let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
