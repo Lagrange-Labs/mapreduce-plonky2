@@ -90,3 +90,39 @@ where
     // Create the circuits
     // fn circuits(&self, inputs: Vec<M::Input>) -> Fn(....)
 }
+
+
+struct PublicInputU64 {
+    x: u64,
+}
+
+impl Data for PublicInputU64 {
+    fn neutral() -> Self {
+        Self {
+            x: 0u64
+        }
+    }
+
+    fn encoding<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>) {
+        let target = builder.constant(F::from_canonical_u64(self.x));
+        builder.register_public_input(target);
+    }
+}
+
+struct Sum<D: Data>{
+    data: Vec<D>
+}
+
+impl<I: Data> Reduce for Sum<I> {
+    type Input = I;
+
+    fn eval(&self, left: Self::Input, right: Self::Input) -> Self::Input {
+        todo!()
+    }
+
+    fn circuit<F: RichField + Extendable<D>, const D: usize>(&self, left: Self::Input, right: Self::Input, output: Self::Input, builder: &mut CircuitBuilder<F, D>) {
+        todo!()
+    }
+
+    
+}
