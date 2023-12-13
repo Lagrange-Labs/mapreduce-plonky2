@@ -61,7 +61,11 @@ pub struct TransactionMPT {
 }
 
 impl TransactionMPT {
-    fn compute_proof<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
+    pub fn compute_proof<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        const D: usize,
+    >(
         self,
     ) -> Result<ProofTuple<F, C, D>> {
         let config = CircuitConfig::standard_recursion_config();

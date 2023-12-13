@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 mod eth;
 mod hash;
 mod rlp;
-mod transaction;
+pub mod transaction;
 mod utils;
 
 /// Bundle containing the raw proof, the verification key, and some common data

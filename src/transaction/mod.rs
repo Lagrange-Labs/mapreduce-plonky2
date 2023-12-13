@@ -1,8 +1,8 @@
 mod header;
 mod mpt;
-mod proof;
+pub mod proof;
 #[cfg(test)]
-mod prover;
+pub mod prover;
 
 /// Length of a hash in bytes.
 const HASH_LEN: usize = 32;
