@@ -1,10 +1,13 @@
-use plonky2::{plonk::circuit_builder::CircuitBuilder, hash::hash_types::RichField, field::extension::Extendable};
+use plonky2::{plonk::circuit_builder::CircuitBuilder, hash::hash_types::RichField, field::extension::Extendable, iop::target::Target};
 
 /// Data that can be represented in a circuit by some encoding
 pub trait Data {
     // An instance of Data must provide a function that encodes
     // the data in contains in a circuit by mutating a CircuitBuilder.
     fn encoding<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>);
+
+    // A function producing the neutral element.
+    fn neutral() -> Self;
 }
 
 /// Defines a map computation with its associated circuit
@@ -27,10 +30,13 @@ pub trait Reduce {
     type Input: Data;
 
     // TO DO:
-    //   Have a Reduce computation be general over an arity other than 2
+    // Have a Reduce computation be general over an arity other than 2.
+    // This is easy for `eval` as we can just use the `eval` function
+    // in a flatmap. However this may not be as easy for constructing (efficient) 
+    // circuits because we'll need to know how to pack the constraints.
+    //
+    // Unless...plonky2 packs constraints for you?
 
-    // A function producing the neutral element.
-    fn neutral(&self) -> Self::Input;
 
     // The reduce computation to be performed. The inputs and output
     // must be representable in a circuit. The `eval` function
@@ -78,6 +84,9 @@ where
     fn eval(&self, inputs: Vec<M::Input>) -> R::Input {
         inputs.iter()
         .map(|a| self.map.eval(a))
-        .fold(self.reduce.neutral(), |acc, element| self.reduce.eval(acc, element))
+        .fold(R::Input::neutral(), |acc, element| self.reduce.eval(acc, element))
     }
+
+    // Create the circuits
+    // fn circuits(&self, inputs: Vec<M::Input>) -> Fn(....)
 }
