@@ -44,6 +44,8 @@ impl TxFilter {
 struct TxBlockProver {
     data: BlockData,
     policy: TxFilter,
+    #[cfg(test)]
+    nb_nodes: usize,
 }
 
 struct MPTNode {
@@ -104,7 +106,12 @@ type HashTrie = HashMap<Vec<u8>, MPTNode>;
 impl TxBlockProver {
     pub async fn init<T: Into<BlockId> + Send + Sync>(id: T, policy: TxFilter) -> Result<Self> {
         let data = BlockData::fetch(id).await?;
-        Ok(Self { data, policy })
+        Ok(Self {
+            data,
+            policy,
+            #[cfg(test)]
+            nb_nodes: 0,
+        })
     }
 
     pub fn prove(&mut self) -> Result<Vec<u8>> {
@@ -114,6 +121,10 @@ impl TxBlockProver {
             leaves_hashes.len(),
             trie.len()
         );
+        #[cfg(test)]
+        {
+            self.nb_nodes = trie.len();
+        }
         let mut current_proofs = leaves_hashes
             .iter()
             .map(|h| self.run_leaf_proof(&trie, h.clone()))
@@ -307,8 +318,12 @@ impl TxBlockProver {
 }
 
 mod test {
-    use ethers::types::BlockNumber;
+    use std::time::Instant;
+
+    use csv::Writer;
+    use ethers::types::{BlockId, BlockNumber};
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use serde::Serialize;
 
     use crate::{
         hash::hash_to_fields,
@@ -361,6 +376,66 @@ mod test {
             expected_pub_inputs,
             HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
         );
+        Ok(())
+    }
+
+    #[derive(Serialize, Debug)]
+    struct BenchData {
+        pub block_nb: u64,
+        // total nb of tx
+        pub nb_tx: usize,
+        pub nb_nodes: usize,
+        // actually the ones being proven (after filtering)
+        pub nb_proven: usize,
+        pub lde_size: usize,
+        pub time_proving: u64,
+    }
+
+    async fn test_one_block<T: Into<BlockId> + Send + Sync>(blockid: T) -> Result<BenchData> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let filter = TxFilter::BySize(MAX_RLP_TX_LEN);
+        let mut prover = TxBlockProver::init(blockid, filter).await?;
+        let start = Instant::now();
+        let root_proof = prover.prove()?;
+        let end = start.elapsed().as_secs();
+        let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
+        let deserialized = ByteProofTuple::deserialize::<F, C, D>(&root_proof)?;
+        assert_eq!(
+            expected_pub_inputs,
+            HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
+        );
+        let nb_tx = prover.data.txs.len();
+        let filtered = prover
+            .data
+            .txs
+            .iter()
+            .filter(|txr| prover.policy.should_prove(txr.tx()).0)
+            .count();
+        let lde_size = deserialized.2.lde_size();
+        Ok(BenchData {
+            block_nb: prover.data.block.number.unwrap().as_u64(),
+            nb_tx,
+            nb_nodes: prover.nb_nodes,
+            nb_proven: filtered,
+            lde_size,
+            time_proving: end,
+        })
+    }
+
+    #[tokio::test]
+    pub async fn test_many_blocks() -> Result<()> {
+        let mut data = Vec::new();
+        //let blocks = vec![18775351, 18768804, 18774792, 18774297];
+        let blocks = vec![18775351];
+        for b in blocks {
+            let blockid = BlockNumber::from(b);
+            let bench_data = test_one_block(blockid).await?;
+            data.push(bench_data);
+        }
+        let mut wtr = Writer::from_path("bench_tx.csv")?;
+        wtr.serialize(data)?;
         Ok(())
     }
 }
