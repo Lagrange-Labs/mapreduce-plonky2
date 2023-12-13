@@ -373,10 +373,10 @@ mod test {
         pub block_nb: u64,
         // total nb of tx
         pub nb_tx: usize,
+        // number of nodes in the trie to prove
         pub nb_nodes: usize,
         // actually the ones being proven (after filtering)
-        pub nb_proven: usize,
-        pub lde_size: usize,
+        pub tx_proven: usize,
         pub time_proving_sec: u64,
     }
 
@@ -402,13 +402,11 @@ mod test {
             .iter()
             .filter(|txr| prover.policy.should_prove(txr.tx()).0)
             .count();
-        let lde_size = deserialized.2.lde_size();
         Ok(BenchData {
             block_nb: prover.data.block.number.unwrap().as_u64(),
             nb_tx,
             nb_nodes: prover.nb_nodes,
-            nb_proven: filtered,
-            lde_size,
+            tx_proven: filtered,
             time_proving_sec: end.as_secs(),
         })
     }
