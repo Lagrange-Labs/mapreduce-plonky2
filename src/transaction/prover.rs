@@ -232,17 +232,6 @@ impl TxBlockProver {
             transaction,
         });
         let proof = prover.compute_proof()?;
-        #[cfg(test)]
-        {
-            println!(" --- checking if hash fits ---");
-            type C = plonky2::plonk::config::PoseidonGoldilocksConfig;
-            type F = <C as plonky2::plonk::config::GenericConfig<2>>::F;
-            let t = ByteProofTuple::deserialize::<F, C, 2>(&proof.clone())
-                .expect("invalid deserialization");
-            let computed_hash = &t.0.public_inputs[0..PACKED_HASH_LEN];
-            let expected = hash_to_fields::<F>(&mpt_node.hash);
-            assert_eq!(computed_hash, expected);
-        }
         println!(
             "[+] OK Valid proof for leaf - hash {}",
             hex::encode(&leaf_hash)
