@@ -2,12 +2,9 @@ use plonky2::{plonk::circuit_builder::CircuitBuilder, hash::hash_types::RichFiel
 
 /// Data that can be represented in a circuit by some encoding
 pub trait Data {
-    // An instance of Data must provide a function that encodes
-    // the data in contains in a circuit by mutating a CircuitBuilder.
-    fn encoding<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>);
-
-    // A function producing the neutral element.
-    fn neutral() -> Self;
+    /// An instance of Data must provide a function that encodes
+    /// the data in contains in a circuit by mutating a CircuitBuilder.
+    fn encoding<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>) -> Target;
 }
 
 /// Defines a map computation with its associated circuit
@@ -22,7 +19,7 @@ pub trait Map {
 
     // A function which adds constraints to a CircuitBuilder
     // that should be satisfied by `eval`.
-    fn circuit<F: RichField + Extendable<D>, const D: usize>(&self, input: Self::Input, output: Self::Output, builder: &mut CircuitBuilder<F, D>);  
+    fn circuit<F: RichField + Extendable<D>, const D: usize>(&self, input: Self::Input, builder: &mut CircuitBuilder<F, D>) -> Target;  
 }
 
 /// Defines a reduce computation and its associated circuit. 
@@ -38,6 +35,9 @@ pub trait Reduce {
     // Unless...plonky2 packs constraints for you?
 
 
+    /// A function producing the neutral element with respect to `eval`.
+    fn neutral() -> Self::Input;
+
     // The reduce computation to be performed. The inputs and output
     // must be representable in a circuit. The `eval` function
     // should be associative and have a neutral element so that:
@@ -48,7 +48,7 @@ pub trait Reduce {
     // A function adding constraints to a circuit builder which should
     // be satisfied by the reduce computation in `eval`. That is,
     // if eval(x, y) = z, then circuit(x, y, z) should be true.
-    fn circuit<F: RichField + Extendable<D>, const D: usize>(&self, left: Self::Input, right: Self::Input, output: Self::Input, builder: &mut CircuitBuilder<F, D>);
+    fn circuit<F: RichField + Extendable<D>, const D: usize>(&self, left: Self::Input, right: Self::Input, builder: &mut CircuitBuilder<F, D>) -> Target;
 }
 
 /// A MapReduce computation is a list of Maps and Reduces whose input and output
@@ -84,7 +84,7 @@ where
     fn eval(&self, inputs: Vec<M::Input>) -> R::Input {
         inputs.iter()
         .map(|a| self.map.eval(a))
-        .fold(R::Input::neutral(), |acc, element| self.reduce.eval(acc, element))
+        .fold(R::neutral(), |acc, element| self.reduce.eval(acc, element))
     }
 
     // Create the circuits
@@ -97,32 +97,35 @@ struct PublicInputU64 {
 }
 
 impl Data for PublicInputU64 {
-    fn neutral() -> Self {
-        Self {
-            x: 0u64
+    fn encoding<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>) -> Target {
+        let target = builder.constant(F::from_canonical_u64(self.x));
+        builder.register_public_input(target);
+        target
+    }
+}
+
+struct SumPublicInputU64{
+    data: Vec<PublicInputU64>
+}
+
+impl Reduce for SumPublicInputU64 {
+    type Input = PublicInputU64;
+
+    fn neutral() -> Self::Input {
+        PublicInputU64 {
+            x: 0u64,
         }
     }
 
-    fn encoding<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>) {
-        let target = builder.constant(F::from_canonical_u64(self.x));
-        builder.register_public_input(target);
-    }
-}
-
-struct Sum<D: Data>{
-    data: Vec<D>
-}
-
-impl<I: Data> Reduce for Sum<I> {
-    type Input = I;
-
     fn eval(&self, left: Self::Input, right: Self::Input) -> Self::Input {
-        todo!()
+        PublicInputU64 {
+            x: left.x + right.x,
+        }
     }
 
-    fn circuit<F: RichField + Extendable<D>, const D: usize>(&self, left: Self::Input, right: Self::Input, output: Self::Input, builder: &mut CircuitBuilder<F, D>) {
-        todo!()
+    fn circuit<F: RichField + Extendable<D>, const D: usize>(&self, left: Self::Input, right: Self::Input, builder: &mut CircuitBuilder<F, D>) -> Target {
+        let left_target = left.encoding(builder);
+        let right_target = right.encoding(builder);
+        builder.add(left_target, right_target)
     }
-
-    
 }
