@@ -1,10 +1,16 @@
-use plonky2::{plonk::circuit_builder::CircuitBuilder, hash::hash_types::RichField, field::extension::Extendable, iop::target::Target};
+use plonky2::{
+    field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
+    plonk::circuit_builder::CircuitBuilder,
+};
 
 /// Data that can be represented in a circuit by some encoding
 pub trait Data {
     /// An instance of Data must provide a function that encodes
     /// the data in contains in a circuit by mutating a CircuitBuilder.
-    fn encode<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>) -> Target;
+    fn encode<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target;
 }
 
 /// Defines a map computation with its associated circuit
@@ -19,21 +25,24 @@ pub trait Map {
 
     // A function which adds constraints to a CircuitBuilder
     // that should be satisfied by `eval`.
-    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(&self, input: &Target, builder: &mut CircuitBuilder<F, D>) -> Target;
+    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        input: &Target,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target;
 }
 
-/// Defines a reduce computation and its associated circuit. 
+/// Defines a reduce computation and its associated circuit.
 pub trait Reduce {
     type Input: Data;
 
     // TO DO:
     // Have a Reduce computation be general over an arity other than 2.
     // This is easy for `eval` as we can just use the `eval` function
-    // in a flatmap. However this may not be as easy for constructing (efficient) 
+    // in a flatmap. However this may not be as easy for constructing (efficient)
     // circuits because we'll need to know how to pack the constraints.
     //
     // Unless...plonky2 packs constraints for you?
-
 
     /// A function producing the neutral element with respect to `eval`.
     fn neutral(&self) -> Self::Input;
@@ -48,11 +57,16 @@ pub trait Reduce {
     // A function adding constraints to a circuit builder which should
     // be satisfied by the reduce computation in `eval`. That is,
     // if eval(x, y) = z, then circuit(x, y, z) should be true.
-    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(&self, left: &Target, right: &Target, builder: &mut CircuitBuilder<F, D>) -> Target;
+    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        left: &Target,
+        right: &Target,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target;
 }
 
 /// A MapReduce computation is a list of Maps and Reduces whose input and output
-/// types match up in sequence. Because a MapReduce computation consists of both 
+/// types match up in sequence. Because a MapReduce computation consists of both
 /// Maps and Reduces the output type may differ from the input type.
 struct MapReduce<M, R>
 where
@@ -67,42 +81,42 @@ where
     reduce: R,
 }
 
-impl<M, R> MapReduce<M, R> 
-where 
+impl<M, R> MapReduce<M, R>
+where
     M: Map,
     R: Reduce<Input = M::Output>,
 {
-
     fn new(map: M, reduce: R) -> Self {
-        Self {
-            map,
-            reduce,
-        }
+        Self { map, reduce }
     }
 
     // This can be derived from the `eval` methods of the component Maps and Reduces
     fn eval(&self, inputs: Vec<M::Input>) -> R::Input {
-        inputs.iter()
-        .map(|x| self.map.eval(x))
-        .fold(self.reduce.neutral(), |acc, y| self.reduce.eval(&acc, &y))
+        inputs
+            .iter()
+            .map(|x| self.map.eval(x))
+            .fold(self.reduce.neutral(), |acc, y| self.reduce.eval(&acc, &y))
     }
 
     // Create the circuit
-    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(&self, inputs: Vec<M::Input>, builder: &mut CircuitBuilder<F, D>) -> Target {
-        let init_targets: Vec<Target> = inputs.iter()
-            .map(|x| x.encode(builder))
-            .collect();
-        let after_map_targets: Vec<Target> = init_targets.iter()
+    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        inputs: Vec<M::Input>,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target {
+        let init_targets: Vec<Target> = inputs.iter().map(|x| x.encode(builder)).collect();
+        let after_map_targets: Vec<Target> = init_targets
+            .iter()
             .map(|y| self.map.add_constraints(y, builder))
             .collect();
 
         let neutral = self.reduce.neutral().encode(builder);
 
-        after_map_targets.iter()
-            .fold(neutral, |acc, z| self.reduce.add_constraints(&acc, z, builder))
+        after_map_targets.iter().fold(neutral, |acc, z| {
+            self.reduce.add_constraints(&acc, z, builder)
+        })
     }
 }
-
 
 #[derive(Clone)]
 struct PublicInputU64 {
@@ -110,13 +124,15 @@ struct PublicInputU64 {
 }
 
 impl Data for PublicInputU64 {
-    fn encode<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>) -> Target {
+    fn encode<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target {
         let target = builder.constant(F::from_canonical_u64(self.x));
         builder.register_public_input(target);
         target
     }
 }
-
 
 struct IdPublicInputU64;
 
@@ -128,7 +144,11 @@ impl Map for IdPublicInputU64 {
         input.clone()
     }
 
-    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(&self, input: &Target, builder: &mut CircuitBuilder<F, D>) -> Target {
+    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        input: &Target,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target {
         *input
     }
 }
@@ -139,9 +159,7 @@ impl Reduce for SumPublicInputU64 {
     type Input = PublicInputU64;
 
     fn neutral(&self) -> Self::Input {
-        PublicInputU64 {
-            x: 0u64,
-        }
+        PublicInputU64 { x: 0u64 }
     }
 
     fn eval(&self, left: &Self::Input, right: &Self::Input) -> Self::Input {
@@ -150,11 +168,15 @@ impl Reduce for SumPublicInputU64 {
         }
     }
 
-    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(&self, left: &Target, right: &Target, builder: &mut CircuitBuilder<F, D>) -> Target {
+    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        left: &Target,
+        right: &Target,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target {
         builder.add(*left, *right)
     }
 }
-
 
 mod test {
     use anyhow::Result;
@@ -165,13 +187,11 @@ mod test {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::mapreduce::{SumPublicInputU64, IdPublicInputU64, MapReduce, PublicInputU64};
+    use crate::mapreduce::{IdPublicInputU64, MapReduce, PublicInputU64, SumPublicInputU64};
 
     #[test]
     fn test_sum_circuit() -> Result<()> {
-        let data: Vec<u64> = vec![
-            1,2,3,4,5,6,7,8,9,10
-        ];
+        let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
         let computed_output: u64 = data.iter().sum();
 
@@ -181,13 +201,13 @@ mod test {
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
-        
+
         let id_map = IdPublicInputU64;
         let sum = SumPublicInputU64;
 
         let mr_sum = MapReduce::new(id_map, sum);
 
-        let inputs = data.into_iter().map(|x| PublicInputU64{x}).collect();
+        let inputs = data.into_iter().map(|x| PublicInputU64 { x }).collect();
         let output = mr_sum.add_constraints(inputs, &mut builder);
 
         // check that the computed output equals the circuit output
@@ -195,7 +215,7 @@ mod test {
         builder.connect(output, computed_target);
 
         let circuit_data = builder.build::<C>();
-        
+
         let pw = PartialWitness::new();
         let proof = circuit_data.prove(pw)?;
         let res = circuit_data.verify(proof);
