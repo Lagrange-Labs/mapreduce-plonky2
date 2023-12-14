@@ -4,7 +4,7 @@ use plonky2::{plonk::circuit_builder::CircuitBuilder, hash::hash_types::RichFiel
 pub trait Data {
     /// An instance of Data must provide a function that encodes
     /// the data in contains in a circuit by mutating a CircuitBuilder.
-    fn encoding<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>) -> Target;
+    fn encode<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>) -> Target;
 }
 
 /// Defines a map computation with its associated circuit
@@ -19,7 +19,7 @@ pub trait Map {
 
     // A function which adds constraints to a CircuitBuilder
     // that should be satisfied by `eval`.
-    fn circuit<F: RichField + Extendable<D>, const D: usize>(&self, input: Self::Input, builder: &mut CircuitBuilder<F, D>) -> Target;  
+    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(&self, input: &Target, builder: &mut CircuitBuilder<F, D>) -> Target;
 }
 
 /// Defines a reduce computation and its associated circuit. 
@@ -36,19 +36,19 @@ pub trait Reduce {
 
 
     /// A function producing the neutral element with respect to `eval`.
-    fn neutral() -> Self::Input;
+    fn neutral(&self) -> Self::Input;
 
     // The reduce computation to be performed. The inputs and output
     // must be representable in a circuit. The `eval` function
     // should be associative and have a neutral element so that:
     //  eval(x, eval(y, z)) = eval(eval(x, y), z) for all x,y,z in T
     //  eval(neutral, x) = eval(x, neutral) = x for all x in T
-    fn eval(&self, left: Self::Input, right: Self::Input) -> Self::Input;
+    fn eval(&self, left: &Self::Input, right: &Self::Input) -> Self::Input;
 
     // A function adding constraints to a circuit builder which should
     // be satisfied by the reduce computation in `eval`. That is,
     // if eval(x, y) = z, then circuit(x, y, z) should be true.
-    fn circuit<F: RichField + Extendable<D>, const D: usize>(&self, left: Self::Input, right: Self::Input, builder: &mut CircuitBuilder<F, D>) -> Target;
+    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(&self, left: &Target, right: &Target, builder: &mut CircuitBuilder<F, D>) -> Target;
 }
 
 /// A MapReduce computation is a list of Maps and Reduces whose input and output
@@ -83,12 +83,23 @@ where
     // This can be derived from the `eval` methods of the component Maps and Reduces
     fn eval(&self, inputs: Vec<M::Input>) -> R::Input {
         inputs.iter()
-        .map(|a| self.map.eval(a))
-        .fold(R::neutral(), |acc, element| self.reduce.eval(acc, element))
+        .map(|x| self.map.eval(x))
+        .fold(self.reduce.neutral(), |acc, y| self.reduce.eval(&acc, &y))
     }
 
-    // Create the circuits
-    // fn circuits(&self, inputs: Vec<M::Input>) -> Fn(....)
+    // Create the circuit
+    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(&self, inputs: Vec<M::Input>, builder: &mut CircuitBuilder<F, D>) {
+        let init_targets: Vec<Target> = inputs.iter()
+            .map(|x| x.encode(builder))
+            .collect();
+        let after_map_targets: Vec<Target> = init_targets.iter()
+            .map(|y| self.map.add_constraints(y, builder))
+            .collect();
+
+        let neutral = self.reduce.neutral().encode(builder);
+        let after_reduce_target = after_map_targets.iter()
+            .fold(neutral, |acc, z| self.reduce.add_constraints(&acc, z, builder));
+    }
 }
 
 
@@ -97,7 +108,7 @@ struct PublicInputU64 {
 }
 
 impl Data for PublicInputU64 {
-    fn encoding<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>) -> Target {
+    fn encode<F: RichField + Extendable<D>, const D: usize>(&self, builder: &mut CircuitBuilder<F, D>) -> Target {
         let target = builder.constant(F::from_canonical_u64(self.x));
         builder.register_public_input(target);
         target
@@ -111,21 +122,19 @@ struct SumPublicInputU64{
 impl Reduce for SumPublicInputU64 {
     type Input = PublicInputU64;
 
-    fn neutral() -> Self::Input {
+    fn neutral(&self) -> Self::Input {
         PublicInputU64 {
             x: 0u64,
         }
     }
 
-    fn eval(&self, left: Self::Input, right: Self::Input) -> Self::Input {
+    fn eval(&self, left: &Self::Input, right: &Self::Input) -> Self::Input {
         PublicInputU64 {
             x: left.x + right.x,
         }
     }
 
-    fn circuit<F: RichField + Extendable<D>, const D: usize>(&self, left: Self::Input, right: Self::Input, builder: &mut CircuitBuilder<F, D>) -> Target {
-        let left_target = left.encoding(builder);
-        let right_target = right.encoding(builder);
-        builder.add(left_target, right_target)
+    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(&self, left: &Target, right: &Target, builder: &mut CircuitBuilder<F, D>) -> Target {
+        builder.add(*left, *right)
     }
 }
