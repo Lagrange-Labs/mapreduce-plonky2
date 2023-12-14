@@ -1,5 +1,10 @@
+use plonky2::{hash::hash_types::RichField, field::extension::Extendable, plonk::circuit_builder::CircuitBuilder, iop::target::Target};
+
+use super::{data_types::PublicInputU64, Map, Reduce};
+
 struct IdPublicInputU64;
 
+// identity map
 impl Map for IdPublicInputU64 {
     type Input = PublicInputU64;
     type Output = PublicInputU64;
@@ -27,7 +32,7 @@ impl Reduce for SumPublicInputU64 {
     }
 
     fn eval(&self, left: &Self::Input, right: &Self::Input) -> Self::Input {
-        PublicInputU64(left.x + right.x)
+        PublicInputU64(left.0 + right.0)
     }
 
     fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
@@ -49,7 +54,7 @@ mod test {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::mapreduce::{IdPublicInputU64, MapReduce, PublicInputU64, SumPublicInputU64};
+    use crate::mapreduce::{sum::IdPublicInputU64, MapReduce, data_types::PublicInputU64, sum::SumPublicInputU64};
 
     #[test]
     fn test_sum_circuit() -> Result<()> {
@@ -69,7 +74,7 @@ mod test {
 
         let mr_sum = MapReduce::new(id_map, sum);
 
-        let inputs = data.into_iter().map(|x| PublicInputU64 { x }).collect();
+        let inputs = data.into_iter().map(|x| PublicInputU64(x)).collect();
         let output = mr_sum.add_constraints(inputs, &mut builder);
 
         // check that the computed output equals the circuit output
