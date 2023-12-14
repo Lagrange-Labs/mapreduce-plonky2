@@ -29,6 +29,8 @@ mod merkle_tree;
 mod rlp;
 pub mod transaction;
 mod utils;
+mod mapreduce;
+
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.
 /// TODO: This is a temporary tuple. We need to save the verification key separately.
