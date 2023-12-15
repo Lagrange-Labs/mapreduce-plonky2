@@ -11,7 +11,6 @@ use plonky2::{
         config::GenericConfig,
         proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs},
     },
-    util::serialization::DefaultGateSerializer,
 };
 use serde::{Deserialize, Serialize};
 
@@ -33,16 +32,20 @@ pub(crate) type ProofTuple<F, C, const D: usize> = (
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ByteProofTuple {
-    proof: Vec<u8>,
+    proof_bytes: Vec<u8>,
     verification_data: Vec<u8>,
     common_data: Vec<u8>,
 }
 
 impl ByteProofTuple {
-    fn serialize<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
-        proof: ProofTuple<F, C, D>,
+    fn from_proof_tuple<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        const D: usize,
+    >(
+        proof_tuple: ProofTuple<F, C, D>,
     ) -> Result<Vec<u8>> {
-        let (proof, vd, cd) = proof;
+        let (proof, vd, cd) = proof_tuple;
         let compressed_proof = proof.compress(&vd.circuit_digest, &cd)?;
         let proof_bytes = compressed_proof.to_bytes();
         let verification_data = vd
@@ -54,7 +57,7 @@ impl ByteProofTuple {
             .to_bytes(&gate_serializer)
             .map_err(|e| anyhow::anyhow!("can't serialize cd: {:?}", e))?; // nikko TODO: this is a hack, we need to serialize the cd properly
         let btp = ByteProofTuple {
-            proof: proof_bytes,
+            proof_bytes,
             verification_data,
             common_data,
         };
@@ -62,7 +65,11 @@ impl ByteProofTuple {
         Ok(buff)
     }
 
-    fn deserialize<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
+    fn into_proof_tuple<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        const D: usize,
+    >(
         proof_bytes: &[u8],
     ) -> Result<ProofTuple<F, C, D>> {
         let btp: ByteProofTuple = bincode::deserialize(proof_bytes)?;
@@ -72,7 +79,7 @@ impl ByteProofTuple {
         let gate_serializer = plonky2_crypto::u32::gates::HashGateSerializer;
         let cd = CommonCircuitData::<F, D>::from_bytes(btp.common_data, &gate_serializer)
             .map_err(|e| anyhow::anyhow!("can't deserialize common data {:?}", e))?;
-        let compressed_proof = CompressedProofWithPublicInputs::from_bytes(btp.proof, &cd)?;
+        let compressed_proof = CompressedProofWithPublicInputs::from_bytes(btp.proof_bytes, &cd)?;
         let proof = compressed_proof.decompress(&vd.circuit_digest, &cd)?;
         Ok((proof, vd, cd))
     }
@@ -124,8 +131,8 @@ mod test {
         let tuple = (proof, data.verifier_only, data.common);
         verify_proof_tuple(&tuple)?;
         let expected = tuple.clone();
-        let serialized = ByteProofTuple::serialize::<F, C, D>(tuple).unwrap();
-        let deserialized = ByteProofTuple::deserialize::<F, C, D>(&serialized).unwrap();
+        let serialized = ByteProofTuple::from_proof_tuple::<F, C, D>(tuple).unwrap();
+        let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&serialized).unwrap();
         assert_eq!(expected, deserialized);
         Ok(())
     }

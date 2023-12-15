@@ -526,7 +526,7 @@ mod test {
                 .collect::<Vec<_>>()
                 .as_slice()
         );
-        let _ = ByteProofTuple::serialize(leaf_proof).expect("can't serialize the proof");
+        let _ = ByteProofTuple::from_proof_tuple(leaf_proof).expect("can't serialize the proof");
         Ok(())
     }
     #[test]

@@ -337,7 +337,7 @@ mod test {
         let root_proof = prover.prove()?;
         //let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
         let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
-        let deserialized = ByteProofTuple::deserialize::<F, C, D>(&root_proof)?;
+        let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&root_proof)?;
         assert_eq!(
             expected_pub_inputs,
             HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
@@ -360,7 +360,7 @@ mod test {
         let root_proof = prover.prove()?;
         //let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
         let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
-        let deserialized = ByteProofTuple::deserialize::<F, C, D>(&root_proof)?;
+        let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&root_proof)?;
         assert_eq!(
             expected_pub_inputs,
             HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
@@ -390,7 +390,7 @@ mod test {
         let root_proof = prover.prove()?;
         let end = start.elapsed();
         let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
-        let deserialized = ByteProofTuple::deserialize::<F, C, D>(&root_proof)?;
+        let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&root_proof)?;
         assert_eq!(
             expected_pub_inputs,
             HeaderProofInputs::new(&deserialized.0.public_inputs).hash()

@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use log::{LevelFilter, log_enabled, Level};
+    use log::{log_enabled, Level, LevelFilter};
     use plonky2::field::types::Field;
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
@@ -76,7 +76,7 @@ mod tests {
             )
         };
 
-        (0..(array_bits_of_length_max+1))
+        (0..(array_bits_of_length_max + 1))
             .map(comparison)
             .fold(Ok(()), |r, state| state.and(r))
     }
