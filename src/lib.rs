@@ -15,6 +15,7 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
+mod benches;
 mod eth;
 mod hash;
 mod rlp;
