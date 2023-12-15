@@ -39,27 +39,26 @@ pub fn data_len<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
     len_of_len: Target,
+    offset: Target,
 ) -> Target {
     let mut res = b.zero();
+    let one = b.one();
     let const_256 = b.constant(F::from_canonical_u64(256));
-    let arr_len = data.len();
 
     for i in 0..MAX_LEN_BYTES {
-        // this makes sure we don't read outside of the data length: it can happen
-        // because we call this function in circuit regardless of the actual
-        // type of rlp data. If it's a single short value, then reading after 1st byte
-        // might just fail.
-        let arr_len_pred: usize = if i + 1 < arr_len { 1 } else { 0 };
-
-        let i_target = b.constant(F::from_canonical_usize(i));
-        let len_of_len_pred = less_than(b, i_target, len_of_len, 8);
-
+        let i_tgt = b.constant(F::from_canonical_u8(i as u8));
+        // make sure we don't read out more than the actual len
+        let len_of_len_pred = less_than(b, i_tgt, len_of_len, 8);
+        // this part offset i to read from the array
+        let i_offset = b.add(i_tgt, offset);
         // i+1 because first byte is the RLP type
-        let arr_access = data[(i + 1) * arr_len_pred];
+        let i_plus_1 = b.add(i_offset, one);
+        let item = quin_selector(b, data, i_plus_1);
+
         // shift result by one byte
         let multiplicand = b.mul(const_256, res);
         // res += 2^i * arr[i+1] only if we're in right range
-        let sum = b.add(multiplicand, arr_access);
+        let sum = b.add(multiplicand, item);
         let multiplicand_2 = b.mul(sum, len_of_len_pred.target);
 
         let not_len_of_len_pred_target = b.not(len_of_len_pred);
@@ -109,15 +108,15 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
     let select_3 = b._if(prefix_less_0xb8, one, select_2);
     // offset = if prefix < 0x80 { 0 } else  { select3 }
     // i.e. if it's a single byte value, no offset we directly read value
-    let offset = b._if(prefix_less_0x80, zero, select_3);
+    let offset_data = b._if(prefix_less_0x80, zero, select_3);
 
     // read the lenght encoded depending on the type
     let prefix_minus_f7 = b.sub(prefix, byte_f7);
-    let long_list_len = data_len(b, data, prefix_minus_f7);
+    let long_list_len = data_len(b, data, prefix_minus_f7, offset);
     let short_list_len = b.sub(prefix, byte_c0);
     let select_1 = b._if(prefix_less_0xf8, short_list_len, long_list_len);
     let prefix_minus_b7 = b.sub(prefix, byte_b7);
-    let long_str_len = data_len(b, data, prefix_minus_b7);
+    let long_str_len = data_len(b, data, prefix_minus_b7, offset);
     let select_2 = b._if(prefix_less_0xc0, long_str_len, select_1);
     let short_str_len = b.sub(prefix, byte_80);
     let select_3 = b._if(prefix_less_0xb8, short_str_len, select_2);
@@ -127,7 +126,7 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
 
     RlpHeader {
         len,
-        offset,
+        offset: offset_data,
         data_type,
     }
 }
@@ -361,7 +360,8 @@ mod tests {
         let ret_target = builder.constant(F::from_canonical_u64(1024));
 
         let len_of_len = builder.constant(F::from_canonical_u64(2));
-        let res = super::data_len(&mut builder, &data, len_of_len);
+        let zero = builder.zero();
+        let res = super::data_len(&mut builder, &data, len_of_len, zero);
         builder.connect(res, ret_target);
 
         builder.register_public_inputs(&data);
