@@ -342,7 +342,8 @@ fn extract_item_from_tx_list<
     // want the whole thing.
     let tx_list = decode_fixed_list::<F, D, N_FIELDS>(b, node, tx_offset);
     let item_index = N_FIELDS - 1;
-    let item_offset = b.add(tx_offset, tx_list.offset[item_index]);
+    //let item_offset = b.add(tx_offset, tx_list.offset[item_index]);
+    let item_offset = tx_list.offset[item_index];
     extract_array::<F, D, MAX_VALUE_SIZE>(b, node, item_offset)
 }
 
