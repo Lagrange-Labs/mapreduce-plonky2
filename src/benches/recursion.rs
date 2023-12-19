@@ -16,7 +16,7 @@ mod test {
     use serde::Serialize;
 
     use crate::{
-        hash::hash_array,
+        hash::{hash_array, HashGadget},
         utils::{verify_proof_tuple, IntTargetWriter},
         ProofTuple,
     };
@@ -34,8 +34,8 @@ mod test {
         mut arr: Vec<u8>,
     ) -> (CircuitBuilder<F, D>, PartialWitness<F>) {
         let length = arr.len();
-        assert!(length < 816);
-        arr.resize(816, 0);
+        let padded_len = HashGadget::compute_size_with_padding(length);
+        arr.resize(padded_len, 0);
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut pw = PartialWitness::new();
@@ -69,7 +69,7 @@ mod test {
             pw.set_proof_with_pis_target(&pt, inner_proof);
             let idata = builder.add_virtual_verifier_data(inner_cd.config.fri_config.cap_height);
             pw.set_verifier_data_target(&idata, inner_vd);
-            builder.verify_proof::<C>(&pt, &idata, &inner_cd);
+            builder.verify_proof::<C>(&pt, &idata, inner_cd);
         }
         (builder, pw)
     }
@@ -83,6 +83,11 @@ mod test {
         let proof = data.prove(pw).unwrap();
         let tuple = (proof, data.verifier_only, data.common);
 
+        let (b, pw) = recurse_circuit::<F, C, C, D>(&[tuple.clone()]);
+        let data: CircuitData<F, C, D> = b.build();
+        let proof = data.prove(pw).unwrap();
+        let recurse_tuple = (proof, data.verifier_only, data.common);
+
         let mut wtr = csv::Writer::from_path("bench_plonky2.csv").expect("can't write csv");
         for n in [64, 128, 256, 512] {
             let arr = rand_arr(n);
@@ -90,10 +95,18 @@ mod test {
             let res = run_proof(n, ProofType::Hashing, hashing);
             wtr.serialize(res).unwrap();
         }
-        // recursion
+        // recursion of simple leafs
         for n in [1, 2, 4, 8] {
             let tuples = (0..n).map(|_| tuple.clone()).collect::<Vec<_>>();
-            let res = run_proof(n, ProofType::Recursion, || {
+            let res = run_proof(n, ProofType::RecursionLeaf, || {
+                recurse_circuit::<F, C, C, D>(&tuples)
+            });
+            wtr.serialize(res).unwrap();
+        }
+        // recursion of recursive proofs
+        for n in [1, 2, 4, 8] {
+            let tuples = (0..n).map(|_| recurse_tuple.clone()).collect::<Vec<_>>();
+            let res = run_proof(n, ProofType::RecursiveSquare, || {
                 recurse_circuit::<F, C, C, D>(&tuples)
             });
             wtr.serialize(res).unwrap();
@@ -104,7 +117,9 @@ mod test {
     #[derive(Serialize, Debug)]
     enum ProofType {
         Hashing,
-        Recursion,
+        RecursionLeaf,
+        // recurse over a recursive leaf proof
+        RecursiveSquare,
     }
     #[derive(Debug, Serialize)]
     struct BenchResult {
@@ -114,6 +129,7 @@ mod test {
         proving: u128,
         lde_size: usize,
         degree: usize,
+        gate_constraints: usize,
     }
 
     fn run_proof<P>(n: usize, proof_type: ProofType, f: P) -> BenchResult
@@ -131,6 +147,12 @@ mod test {
         let time_proving = start.elapsed();
         let lde = data.common.lde_size();
         let degree = data.common.constraint_degree();
+        let gate_constraints = data
+            .common
+            .gates
+            .iter()
+            .map(|g| g.0.num_constraints())
+            .sum();
         verify_proof_tuple(&(proof, data.verifier_only, data.common)).expect("invalid proof");
         BenchResult {
             n,
@@ -139,6 +161,7 @@ mod test {
             proving: time_proving.as_millis(),
             lde_size: lde,
             degree,
+            gate_constraints,
         }
     }
 }

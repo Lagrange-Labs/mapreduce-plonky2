@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, time::Instant};
 
 use anyhow::Result;
 use plonky2::{
@@ -199,8 +199,20 @@ pub fn tx_leaf_node_proof<
     NodeProofInputs::register_inputs(&mut b, &hash, &gas_value_array);
 
     // proving part
+    println!("[+] TX PROOF -> building");
+    let now = Instant::now();
     let data = b.build::<C>();
+    println!(
+        "[+] TX PROOF -> building -> in {}ms",
+        now.elapsed().as_millis()
+    );
+    println!("[+] TX PROOF -> proving");
+    let now = Instant::now();
     let proof = data.prove(pw)?;
+    println!(
+        "[+] TX PROOF -> proving -> in {}ms",
+        now.elapsed().as_millis()
+    );
 
     Ok((proof, data.verifier_only, data.common))
 }
@@ -259,8 +271,21 @@ where
     let one = b.one();
     NodeProofInputs::register_inputs(&mut b, &hash, &[one]);
 
+    // proving part
+    println!("[+] RECURSIVE PROOF -> building");
+    let now = Instant::now();
     let data = b.build::<C>();
+    println!(
+        "[+] RECURSIVE PROOF -> building -> in {}ms",
+        now.elapsed().as_millis()
+    );
+    println!("[+] RECURSIVE PROOF -> proving");
+    let now = Instant::now();
     let proof = data.prove(pw)?;
+    println!(
+        "[+] RECURSIVE PROOF -> proving -> in {}ms",
+        now.elapsed().as_millis()
+    );
 
     Ok((proof, data.verifier_only, data.common))
 }

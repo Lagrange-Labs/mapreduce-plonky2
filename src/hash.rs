@@ -20,6 +20,8 @@ use plonky2_crypto::{
 
 use crate::utils::{convert_u8_to_u32, less_than, read_le_u32};
 
+/// Take the bytes array output of hash function and convert it to an array of
+/// fields encoding the same hash (using little endian encoding).
 pub(crate) fn hash_to_fields<F: RichField>(expected: &[u8]) -> Vec<F> {
     let iter_u32 = expected.iter().chunks(4);
     iter_u32
@@ -30,6 +32,23 @@ pub(crate) fn hash_to_fields<F: RichField>(expected: &[u8]) -> Vec<F> {
             F::from_canonical_u32(u32_num)
         })
         .collect::<Vec<_>>()
+}
+
+/// TODO: THis is the beginning of a large refactoring to have circuit decoupling the
+/// building part and the proving part. Currently just needed to extract functions
+/// related to the size of the padding for bench purposes.
+pub struct HashGadget {}
+impl HashGadget {
+    pub fn compute_size_with_padding(data_len: usize) -> usize {
+        let input_len_bits = data_len * 8; // only pad the data that is inside the fixed buffer
+        let num_actual_blocks = 1 + input_len_bits / KECCAK256_R;
+        let padded_len_bits = num_actual_blocks * KECCAK256_R;
+        // reason why ^: this is annoying to do in circuit.
+        ceil_div_usize(padded_len_bits, 8)
+    }
+    fn compute_padding_size(data_len: usize) -> usize {
+        Self::compute_size_with_padding(data_len) - data_len
+    }
 }
 
 pub(crate) fn hash_array<F: RichField + Extendable<D>, const D: usize>(
@@ -141,7 +160,6 @@ pub(crate) fn hash_array<F: RichField + Extendable<D>, const D: usize>(
         input: BigUintTarget {
             limbs: node_u32_target,
         },
-        //input_bits: padded_len_bits,
         input_bits: 0,
         blocks,
     };
