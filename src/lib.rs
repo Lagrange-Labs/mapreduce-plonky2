@@ -15,7 +15,7 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-mod eth;
+pub mod eth;
 mod hash;
 mod rlp;
 pub mod transaction;

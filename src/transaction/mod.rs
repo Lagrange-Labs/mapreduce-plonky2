@@ -1,7 +1,6 @@
 mod header;
 mod mpt;
 pub mod proof;
-#[cfg(test)]
 pub mod prover;
 
 /// Length of a hash in bytes.

@@ -142,8 +142,8 @@ impl RootMPTHeader {
     }
 }
 
-struct HeaderAggregation {
-    header_proofs: Vec<Vec<u8>>,
+pub struct HeaderAggregation {
+    pub header_proofs: Vec<Vec<u8>>,
 }
 
 impl HeaderAggregation {

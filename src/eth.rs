@@ -5,6 +5,7 @@ use eth_trie::{EthTrie, MemoryDB, Node, Trie};
 use ethers::{
     providers::{Http, Middleware, Provider},
     types::{Block, BlockId, Bytes, Transaction, TransactionReceipt, U64},
+    utils::hex,
 };
 use rlp::{Encodable, Rlp, RlpStream};
 #[cfg(feature = "ci")]
@@ -188,7 +189,7 @@ pub(crate) fn rlp_opt<T: rlp::Encodable>(rlp: &mut rlp::RlpStream, opt: &Option<
 }
 
 /// Extract the hash in case of Extension node, or all the hashes in case of a Branch node.
-pub(crate) fn extract_child_hashes(rlp_data: &[u8]) -> Vec<Vec<u8>> {
+pub fn extract_child_hashes(rlp_data: &[u8]) -> Vec<Vec<u8>> {
     let rlp = Rlp::new(rlp_data);
     let mut hashes = Vec::new();
 
