@@ -1,71 +1,130 @@
-use crate::utils::find_index_subvector;
+use crate::eth::RLPBlock;
+use crate::hash::hash_to_fields;
+use crate::transaction::proof::{IntermediateMPT, ProofType, RootMPTHeader, TransactionMPT};
+use crate::transaction::PACKED_HASH_LEN;
+use crate::ByteProofTuple;
 use crate::{
-    eth::{compute_key_length, extract_child_hashes, BlockData},
-    transaction::mpt::{legacy_tx_leaf_node_proof, recursive_node_proof, ExtractionMethod},
+    eth::{extract_child_hashes, BlockData},
     utils::keccak256,
-    ProofTuple,
 };
 use anyhow::anyhow;
 use anyhow::Result;
 use eth_trie::Trie;
+use ethers::types::{Transaction, H256};
 use ethers::{types::BlockId, utils::hex};
-use plonky2::{
-    field::extension::Extendable,
-    hash::hash_types::RichField,
-    plonk::{
-        circuit_data::{CircuitConfig, VerifierCircuitData},
-        config::{AlgebraicHasher, GenericConfig},
-    },
-};
 use rlp::Encodable;
-use std::{collections::HashMap, marker::PhantomData};
+use std::collections::HashMap;
 
-struct TxBlockProver<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> {
-    data: BlockData,
-    config: CircuitConfig,
-    _pf: PhantomData<F>,
-    _pc: PhantomData<C>,
+#[derive(Debug, Default)]
+pub(crate) enum TxFilter {
+    // only prove tx that are less than this size in bytes
+    BySize(usize),
+    // only prove the tx which have these hashes
+    ByHash(Vec<H256>),
+    // no policy at all
+    #[default]
+    Everything,
 }
 
-struct MPTNode<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> {
+impl TxFilter {
+    pub fn should_prove(&self, tx: &Transaction) -> (bool, String) {
+        match self {
+            Self::BySize(max_size) => (
+                tx.rlp().len() <= *max_size,
+                format!("tx size {} <= {}", tx.rlp().len(), max_size),
+            ),
+            Self::ByHash(hashes) => (
+                hashes.contains(&tx.hash()),
+                format!("tx not contained {:?}", tx.hash()),
+            ),
+            Self::Everything => (true, "".to_string()),
+        }
+    }
+}
+struct TxBlockProver {
+    data: BlockData,
+    policy: TxFilter,
+    #[cfg(test)]
+    nb_nodes: usize,
+}
+
+struct MPTNode {
     node_bytes: Vec<u8>, // RLP byte representation of the node
     hash: Vec<u8>,       // its hash
-    key_ptr: usize,      // ptr to any key in the subtree - act like a "height" in some sort
-    key: Vec<u8>, // any key that leads to this node - key[0..key_ptr] is the same for the whole subtree of this node
+    // ALL the children of this node if any (zero if leaf for example)
+    total_nb_children: usize,
+    // expected children hashes - will be filled in with only the hashes that we
+    // traverse in the proofs of all tx we are looking at. For the nodes that we don't
+    // traverse, their hash may be in children_hashes, and we'll only provide a "null" proof
+    // for them.
+    exp_children: Vec<Vec<u8>>,
     // child i : (key, proof) - key needed locate where is the hash of the child in the node
-    children_proofs: Vec<ProverOutput<F, C, D>>, // will be filled in
-    children_hashes: Vec<Vec<u8>>, // potential hashes of the children if any (zero if leaf for example)
-    parent_hash: Option<Vec<u8>>,  // indicator to go up one level when this node has been "proven"
+    rcvd_children_proofs: Vec<ProverOutput>, // will be filled in
+    parent_hash: Option<Vec<u8>>, // indicator to go up one level when this node has been "proven"
+    /// Used for information about tx in the leaf node proving phase
+    transaction: Option<Transaction>,
+}
+impl MPTNode {
+    fn is_provable(&self) -> bool {
+        if self.exp_children.len() == self.rcvd_children_proofs.len() {
+            println!(
+                "[+] Node proof {} : only {} / {} (exp) / {} (total) children proofs",
+                hex::encode(&self.hash),
+                self.rcvd_children_proofs.len(),
+                self.exp_children.len(),
+                self.total_nb_children,
+            );
+        }
+        if !self
+            .rcvd_children_proofs
+            .iter()
+            .all(|p| self.exp_children.contains(&p.hash))
+        {
+            panic!("some children proofs are not expected");
+        }
+        println!(
+            "[+] Node proof {} : ALL {} / {} (exp) / {} (total)  received children proofs",
+            hex::encode(&self.hash),
+            self.rcvd_children_proofs.len(),
+            self.exp_children.len(),
+            self.total_nb_children,
+        );
+        true
+    }
 }
 
-struct ProverOutput<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> {
+struct ProverOutput {
     parent_hash: Option<Vec<u8>>,
     // hash of this node
     hash: Vec<u8>,
     // plonky2 proof for this node
-    proof: ProofTuple<F, C, D>,
+    proof: Vec<u8>,
 }
 
-type HashTrie<F, C, const D: usize> = HashMap<Vec<u8>, MPTNode<F, C, D>>;
-impl<F, C, const D: usize> TxBlockProver<F, C, D>
-where
-    F: RichField + Extendable<D>,
-    C: GenericConfig<D, F = F> + 'static,
-    C::Hasher: AlgebraicHasher<F>,
-{
-    pub async fn init<T: Into<BlockId> + Send + Sync>(id: T) -> Result<Self> {
+/// Hash mapping the hash of a node in the trie to the data
+type HashTrie = HashMap<Vec<u8>, MPTNode>;
+impl TxBlockProver {
+    pub async fn init<T: Into<BlockId> + Send + Sync>(id: T, policy: TxFilter) -> Result<Self> {
         let data = BlockData::fetch(id).await?;
         Ok(Self {
             data,
-            config: CircuitConfig::standard_recursion_config(),
-            _pf: PhantomData,
-            _pc: PhantomData,
+            policy,
+            #[cfg(test)]
+            nb_nodes: 0,
         })
     }
 
-    pub fn prove(&mut self) -> Result<ProofTuple<F, C, D>> {
+    pub fn prove(&mut self) -> Result<Vec<u8>> {
         let (mut trie, leaves_hashes) = self.init_proofs_trie();
-        println!("[+] Built internal trie with {} nodes in total", trie.len());
+        println!(
+            "[+] Built internal trie with {} leaves, and {} nodes in total",
+            leaves_hashes.len(),
+            trie.len()
+        );
+        #[cfg(test)]
+        {
+            self.nb_nodes = trie.len();
+        }
         let mut current_proofs = leaves_hashes
             .iter()
             .map(|h| self.run_leaf_proof(&trie, h.clone()))
@@ -82,109 +141,104 @@ where
                 .get_mut(parent_hash)
                 .expect("every node should be in the trie");
             // a proof for one of the children of this node in the MPT has been computed!
-            proof_node.children_proofs.push(output);
-            // look if we have all the individual children proofs to start proving this node now
-            let exp_children_hashes = &proof_node.children_hashes;
-            let rcvd_children = proof_node.children_proofs.len();
-            let children_proofs_done = if exp_children_hashes.len() != rcvd_children {
-                println!(
-                    "[+] Node proof {} : only {}/{} children proofs",
-                    &node_hash,
-                    rcvd_children,
-                    exp_children_hashes.len()
-                );
-                false // not the same number of proofs than children in branch node
-            } else {
-                // make sure we have all the same hashes
-                let all = exp_children_hashes
-                    .iter()
-                    .all(|h| proof_node.children_proofs.iter().any(|p| *p.hash == *h));
-                println!(
-                    "[+] Node proof {} : ALL {}/{} children proofs!",
-                    &node_hash,
-                    rcvd_children,
-                    exp_children_hashes.len()
-                );
-                assert!(all, "same number of proofs but different hashes !?");
-                true
-            };
-            if children_proofs_done {
-                let parent_proof = self.run_recursive_proof(proof_node)?;
+            proof_node.rcvd_children_proofs.push(output);
+            if proof_node.is_provable() {
+                let parent_proof = if proof_node.parent_hash.is_none() {
+                    // we have reached the root node so we now prove inclusion
+                    // in the block header as well
+                    println!("[+] Proving root node inclusion {}", node_hash);
+                    self.run_root_node_proof(proof_node)?
+                } else {
+                    self.run_recursive_proof(proof_node)?
+                };
                 current_proofs.push(parent_proof);
             }
         }
         Err(anyhow!("no root node found"))
     }
-
-    fn run_recursive_proof(&self, node: &MPTNode<F, C, D>) -> Result<ProverOutput<F, C, D>> {
+    fn run_root_node_proof(&self, node: &MPTNode) -> Result<ProverOutput> {
+        let header_node = RLPBlock(&self.data.block).rlp_bytes();
+        let root_node = node.node_bytes.clone();
+        let root_hash = keccak256(&root_node);
         let inner_proofs = node
-            .children_proofs
+            .rcvd_children_proofs
+            .iter()
+            .map(|p| p.proof.clone())
+            .collect::<Vec<_>>();
+        println!(
+            "[+] GO root node {} with {} children",
+            hex::encode(&root_hash),
+            inner_proofs.len()
+        );
+        let prover = ProofType::RootMPTHeader(RootMPTHeader {
+            header_node: header_node.to_vec(),
+            root_node,
+            inner_proofs,
+        });
+        let proof = prover.compute_proof()?;
+        println!(
+            "[+] OK Valid recursive proof for node hash {}",
+            hex::encode(&root_hash)
+        );
+        Ok(ProverOutput {
+            parent_hash: None,
+            proof,
+            hash: root_hash,
+        })
+    }
+    fn run_recursive_proof(&self, node: &MPTNode) -> Result<ProverOutput> {
+        let inner_proofs = node
+            .rcvd_children_proofs
             .iter()
             .map(|p| p.proof.clone())
             .collect::<Vec<_>>();
         let node_bytes = node.node_bytes.clone();
         let node_hash = keccak256(&node_bytes);
         let parent_hash = node.parent_hash.clone();
-        let config = self.config.clone();
-        // where to find the hashes for each children of the node
-        let children_hash_offsets = node
-            .children_proofs
-            .iter()
-            .map(|p| p.hash.clone())
-            // TODO: replace by something smarter
-            .map(|hash| find_index_subvector(&node_bytes, &hash).expect("invalid hash"))
-            .collect::<Vec<_>>();
         println!(
             "[+] GO recursive proof for node {} with {} children",
             hex::encode(&node_hash),
-            node.children_hashes.len()
+            node.total_nb_children
         );
-        // F, C, C, D because we use same recursive config at each step
-        let plonk_proof = recursive_node_proof::<F, C, C, D>(
-            &config,
-            node_bytes,
-            inner_proofs.as_slice(),
-            &children_hash_offsets,
-        )?;
-        Self::verify_proof_tuple(&plonk_proof)?;
+        let prover = ProofType::IntermediateMPT(IntermediateMPT {
+            intermediate_node: node_bytes,
+            children_proofs: inner_proofs,
+        });
+        let proof = prover.compute_proof()?;
         println!(
             "[+] OK Valid recursive proof for node hash {}",
             hex::encode(&node_hash)
         );
         Ok(ProverOutput {
             parent_hash,
-            proof: plonk_proof,
+            proof,
             hash: node_hash,
         })
     }
 
-    fn run_leaf_proof(
-        &self,
-        trie: &HashTrie<F, C, D>,
-        leaf_hash: Vec<u8>,
-    ) -> Result<ProverOutput<F, C, D>> {
+    fn run_leaf_proof(&self, trie: &HashTrie, leaf_hash: Vec<u8>) -> Result<ProverOutput> {
         let mpt_node = trie.get(&leaf_hash).expect("leaf should be inside trie");
-        let key = mpt_node.key.clone();
         let node_bytes = mpt_node.node_bytes.clone();
         let parent_hash = mpt_node.parent_hash.clone();
-        let config = self.config.clone();
+        // Safe because by construction we're in the leaf node
+        let transaction = mpt_node.transaction.clone().unwrap();
         println!(
-            "[+] GO leaf proof idx {} - hash {}",
-            hex::encode(&key),
-            hex::encode(&leaf_hash)
+            "[+] GO leaf proof - tx hash {}",
+            hex::encode(transaction.hash().as_bytes())
         );
-        let plonk_proof =
-            legacy_tx_leaf_node_proof(&config, node_bytes, ExtractionMethod::RLPBased)?;
-        Self::verify_proof_tuple(&plonk_proof)?;
-
+        let prover = ProofType::TransactionMPT(TransactionMPT {
+            leaf_node: node_bytes,
+            quick_check: false,
+            transaction,
+        });
+        let proof = prover.compute_proof()?;
         println!(
-            "[+] OK Valid proof for leaf idx {} - hash {}",
-            hex::encode(&key),
+            "[+] OK Valid proof for leaf - hash {}",
             hex::encode(&leaf_hash)
         );
         Ok(ProverOutput {
             parent_hash,
-            proof: plonk_proof,
+            proof,
             hash: leaf_hash,
         })
     }
@@ -192,26 +246,32 @@ where
     // Returns the hashmap filled with the trie info
     // and returns the initial list of nodes's hash, which happen to be leaves, to prove
     #[allow(clippy::type_complexity)]
-    fn init_proofs_trie(&mut self) -> (HashMap<Vec<u8>, MPTNode<F, C, D>>, Vec<Vec<u8>>) {
+    fn init_proofs_trie(&mut self) -> (HashMap<Vec<u8>, MPTNode>, Vec<Vec<u8>>) {
         // H(node) => { MPTNode() }
         let mut tree = HashMap::new();
         let mut leaves = Vec::new();
         for txr in self.data.txs.iter() {
+            let (should_prove, reason) = self.policy.should_prove(txr.tx());
+            if !should_prove {
+                println!(
+                    "[-] Policy skipping tx {} - {:?}\n\t-{}",
+                    txr.tx().transaction_index.unwrap(),
+                    txr.tx().hash(),
+                    reason
+                );
+                continue;
+            }
             let idx = txr.receipt().transaction_index;
             let key = idx.rlp_bytes().to_vec();
-            // nikko TODO: only kept for computing key length but can be done only with
-            // the raw bytes - should change.
-            let proof_nodes = self.data.tx_trie.get_proof_nodes(&key).unwrap();
             let proof_bytes = self.data.tx_trie.get_proof(&key).unwrap();
+            let mut child_hash = None;
             for (i, node_bytes) in proof_bytes.iter().rev().enumerate() {
-                let idx_in_path = proof_nodes.len() - 1 - i;
+                let idx_in_path = proof_bytes.len() - 1 - i;
                 let hash = keccak256(node_bytes);
-                let key_ptr = compute_key_length(&proof_nodes[..idx_in_path]);
                 if i == 0 {
                     leaves.push(hash.clone());
                 }
                 let node_bytes = node_bytes.to_vec();
-                let children_proofs = vec![];
                 let parent_hash = if idx_in_path > 0 {
                     Some(keccak256(&proof_bytes[idx_in_path - 1]))
                 } else {
@@ -219,66 +279,149 @@ where
                 };
                 // nikko TODO: This assumes there is no value in the branch node.
                 // Will need to make sure this assumption is true in practice for tx at least
-                let children_hashes = extract_child_hashes(&node_bytes);
-                let trie_node = MPTNode {
-                    node_bytes,
-                    hash: hash.clone(),
-                    key_ptr,
-                    children_proofs,
-                    children_hashes,
-                    parent_hash,
-                    // nikko: note this will be different for different for diff. leaves under the same
-                    // subtree. However, currently the code expects a key when proving recursively
-                    // so we only need to put one, regardless of all the others in the same subtree.
-                    // in this example, only the key of the last tx in the subtree will be stored/used.
-                    // TODO: remove the key from the recursive API and only pass the new nibble
-                    key: key.clone(),
+                let nb_children = extract_child_hashes(&node_bytes).len();
+                // only record the child hash starting from the parent of the leaf
+                let mut exp_child = if let Some(h) = child_hash {
+                    vec![h]
+                } else {
+                    vec![]
                 };
-                #[cfg(test)]
-                {
-                    // if entry is already in the tree, we don't need to add it, but we
-                    // check it's correct still - i.e. all ptr in the subtree starting
-                    // at this node should be the same since all leafs in this subtree
-                    // have the same key until at least this node.
-                    if tree.contains_key(&hash) {
-                        let present_trie_node: &MPTNode<F, C, D> = tree.get(&hash).unwrap();
-                        assert!(present_trie_node.key_ptr == trie_node.key_ptr);
-                    }
-                }
-                tree.entry(hash).or_insert(trie_node);
+                tree.entry(hash.clone())
+                    .and_modify(|n: &mut MPTNode| {
+                        n.exp_children.append(&mut exp_child);
+                    })
+                    .or_insert(MPTNode {
+                        node_bytes,
+                        hash: hash.clone(),
+                        rcvd_children_proofs: vec![],
+                        exp_children: exp_child,
+                        total_nb_children: nb_children,
+                        parent_hash,
+                        transaction: if i == 0 { Some(txr.tx().clone()) } else { None },
+                    });
+                child_hash = Some(hash);
             }
         }
         (tree, leaves)
     }
-
-    fn verify_proof_tuple(proof: &ProofTuple<F, C, D>) -> Result<()> {
-        let vcd = VerifierCircuitData {
-            verifier_only: proof.1.clone(),
-            common: proof.2.clone(),
-        };
-        vcd.verify(proof.0.clone())
-    }
 }
 
 mod test {
-    use eth_trie::Trie;
-    use ethers::types::BlockNumber;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use std::time::Instant;
 
-    use crate::{hash::hash_to_fields, transaction::prover::TxBlockProver};
+    use csv::Writer;
+    use ethers::types::{BlockId, BlockNumber};
+    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use serde::Serialize;
+
+    use crate::{
+        hash::hash_to_fields,
+        transaction::{
+            header::HeaderProofInputs,
+            mpt::MAX_RLP_TX_LEN,
+            prover::{TxBlockProver, TxFilter},
+        },
+        ByteProofTuple,
+    };
     use anyhow::Result;
 
     #[tokio::test]
-    pub async fn prove_all_tx() -> Result<()> {
+    pub async fn prove_all_tx_legacy() -> Result<()> {
+        // block containing only 4 tx all of type legacy
         let block_number = 10593417;
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        let mut prover = TxBlockProver::<F, C, D>::init(BlockNumber::from(block_number)).await?;
+        let filter = TxFilter::BySize(MAX_RLP_TX_LEN);
+        let mut prover = TxBlockProver::init(BlockNumber::from(block_number), filter).await?;
         let root_proof = prover.prove()?;
-        let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
-        let expected_pub_inputs = hash_to_fields::<F>(&root_hash);
-        assert_eq!(expected_pub_inputs, root_proof.0.public_inputs[0..8]);
+        //let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
+        let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
+        let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&root_proof)?;
+        assert_eq!(
+            expected_pub_inputs,
+            HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    pub async fn prove_all_tx_1559() -> Result<()> {
+        // block containing only 4 tx all of type 1559
+        let block_number = 18761362;
+        //let block_number = 18761234;
+        //let block_number = 18761175;
+        //let block_number = 18756870;
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let filter = TxFilter::BySize(MAX_RLP_TX_LEN);
+        let mut prover = TxBlockProver::init(BlockNumber::from(block_number), filter).await?;
+        let root_proof = prover.prove()?;
+        //let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
+        let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
+        let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&root_proof)?;
+        assert_eq!(
+            expected_pub_inputs,
+            HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
+        );
+        Ok(())
+    }
+
+    #[derive(Serialize, Debug)]
+    struct BenchData {
+        pub block_nb: u64,
+        // total nb of tx
+        pub nb_tx: usize,
+        // actually the ones being proven (after filtering)
+        pub tx_proven: usize,
+        // total number of nodes in the trie to prove
+        pub nb_nodes: usize,
+        pub time_proving_sec: u64,
+    }
+
+    async fn test_one_block<T: Into<BlockId> + Send + Sync>(blockid: T) -> Result<BenchData> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let filter = TxFilter::BySize(MAX_RLP_TX_LEN);
+        let mut prover = TxBlockProver::init(blockid, filter).await?;
+        let start = Instant::now();
+        let root_proof = prover.prove()?;
+        let end = start.elapsed();
+        let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
+        let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&root_proof)?;
+        assert_eq!(
+            expected_pub_inputs,
+            HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
+        );
+        let nb_tx = prover.data.txs.len();
+        let filtered = prover
+            .data
+            .txs
+            .iter()
+            .filter(|txr| prover.policy.should_prove(txr.tx()).0)
+            .count();
+        Ok(BenchData {
+            block_nb: prover.data.block.number.unwrap().as_u64(),
+            nb_tx,
+            tx_proven: filtered,
+            nb_nodes: prover.nb_nodes,
+            time_proving_sec: end.as_secs(),
+        })
+    }
+
+    #[tokio::test]
+    pub async fn test_many_blocks() -> Result<()> {
+        //let blocks = vec![18775351, 18768804, 18774792, 18774297];
+        let mut wtr = Writer::from_path("bench_tx.csv")?;
+        let blocks = vec![18775351, 18775351];
+        for b in blocks {
+            let blockid = BlockNumber::from(b);
+            let bench_data = test_one_block(blockid).await?;
+            wtr.serialize(bench_data)?;
+        }
+        wtr.flush()?;
         Ok(())
     }
 }

@@ -7,6 +7,8 @@ use ethers::{
     types::{Block, BlockId, Bytes, Transaction, TransactionReceipt, U64},
 };
 use rlp::{Encodable, Rlp, RlpStream};
+#[cfg(feature = "ci")]
+use std::env;
 use std::sync::Arc;
 
 use crate::utils::keccak256;
@@ -71,7 +73,7 @@ pub struct BlockData {
 impl BlockData {
     pub async fn fetch<T: Into<BlockId> + Send + Sync>(blockid: T) -> Result<Self> {
         #[cfg(feature = "ci")]
-        let url = env::var("CI_RPC_URL").expect("RPC_URL env var not set");
+        let url = env::var("CI_RPC_URL").expect("CI_RPC_URL env var not set");
         #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
         //let provider = Provider::<Http>::try_from

@@ -17,19 +17,50 @@ use plonky2::{
 use crate::{
     hash::hash_array,
     rlp::extract_array,
-    transaction::mpt::{verify_children_proofs, MAX_INTERMEDIATE_NODE_LENGTH},
+    transaction::{
+        mpt::{verify_children_proofs, MAX_INTERMEDIATE_NODE_LENGTH},
+        HASH_LEN, PACKED_HASH_LEN,
+    },
     utils::{convert_u8_to_u32, less_than, IntTargetWriter},
     ProofTuple,
 };
 
-/// Length of a hash in bytes.
-const HASH_LEN: usize = 32;
-/// Length of a hash in U32
-const PACKED_HASH_LEN: usize = 8;
 /// Maximum length of a RLP encoded header.
 /// TODO verify assumption
-const MAX_HEADER_LEN: usize = 600;
+const MAX_HEADER_LEN: usize = 680;
 
+/// Helper structure to extract the public inputs of the header proof and
+/// to insert them when creating an aggregation proof.
+pub struct HeaderProofInputs<'a, X> {
+    elems: &'a [X],
+}
+
+impl<'a, X> HeaderProofInputs<'a, X> {
+    pub fn new(elems: &'a [X]) -> Self {
+        Self { elems }
+    }
+    pub fn nb_aggregated(&self) -> &'a X {
+        &self.elems[0]
+    }
+    pub fn previous_hash(&self) -> &'a [X] {
+        &self.elems[1..1 + PACKED_HASH_LEN]
+    }
+    pub fn hash(&self) -> &'a [X] {
+        &self.elems[1 + PACKED_HASH_LEN..1 + 2 * PACKED_HASH_LEN]
+    }
+}
+impl<'a> HeaderProofInputs<'a, Target> {
+    fn insert<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        nb_aggregated: &Target,
+        previous_hash: &[Target],
+        hash: &[Target],
+    ) {
+        b.register_public_input(*nb_aggregated);
+        b.register_public_inputs(previous_hash);
+        b.register_public_inputs(hash);
+    }
+}
 /// Offset where to find the parent hash of the header in the RLP encoding.
 /// Given the parent hash is the first field present in the header, a header
 /// is always a "long list" type, and the hash is constant size, then the offset
@@ -185,38 +216,6 @@ where
     Ok((proof, data.verifier_only, data.common))
 }
 
-/// Helper structure to extract the public inputs of the header proof and
-/// to insert them when creating an aggregation proof.
-struct HeaderProofInputs<'a, X> {
-    elems: &'a [X],
-}
-
-impl<'a, X> HeaderProofInputs<'a, X> {
-    fn new(elems: &'a [X]) -> Self {
-        Self { elems }
-    }
-    fn nb_aggregated(&self) -> &'a X {
-        &self.elems[0]
-    }
-    fn previous_hash(&self) -> &'a [X] {
-        &self.elems[1..1 + PACKED_HASH_LEN]
-    }
-    fn hash(&self) -> &'a [X] {
-        &self.elems[1 + PACKED_HASH_LEN..1 + 2 * PACKED_HASH_LEN]
-    }
-}
-impl<'a> HeaderProofInputs<'a, Target> {
-    fn insert<F: RichField + Extendable<D>, const D: usize>(
-        b: &mut CircuitBuilder<F, D>,
-        nb_aggregated: &Target,
-        previous_hash: &[Target],
-        hash: &[Target],
-    ) {
-        b.register_public_input(*nb_aggregated);
-        b.register_public_inputs(previous_hash);
-        b.register_public_inputs(hash);
-    }
-}
 /// Takes N "header" proofs, verifies them, check the sequentiality of the hashes (i.e.
 /// proof for block header i+1 has a previous hash equal to the hash in proof block header i).
 /// Then it exposes the hash of the smallest height header and the hash of the highest height header
