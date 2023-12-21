@@ -2,20 +2,26 @@
 mod test {
     use std::time::Instant;
 
+    use hashbrown::HashMap;
+    use plonky2::field::types::Sample;
+    use plonky2::gates::noop::NoopGate;
+    use plonky2::recursion::cyclic_recursion::check_cyclic_proof_verifier_data;
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder,
-            circuit_data::{CircuitConfig, CircuitData},
-            config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig},
+            circuit_data::{CircuitConfig, CircuitData, CommonCircuitData},
+            config::{AlgebraicHasher, GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
         },
+        recursion::dummy_circuit::cyclic_base_proof,
     };
     use rand::Rng;
     use serde::Serialize;
 
     use crate::{
+        benches::test::init_logging,
         hash::{hash_array, HashGadget},
         utils::{verify_proof_tuple, IntTargetWriter},
         ProofTuple,
@@ -31,14 +37,13 @@ mod test {
     }
 
     fn hash_circuit<F: RichField + Extendable<D>, const D: usize>(
+        mut builder: CircuitBuilder<F, D>,
+        mut pw: PartialWitness<F>,
         mut arr: Vec<u8>,
     ) -> (CircuitBuilder<F, D>, PartialWitness<F>) {
         let length = arr.len();
         let padded_len = HashGadget::compute_size_with_padding(length);
         arr.resize(padded_len, 0);
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::new(config);
-        let mut pw = PartialWitness::new();
         let arr_tgt = builder.add_virtual_targets(arr.len());
         pw.set_int_targets(&arr_tgt, &arr);
         let length_tgt = builder.add_virtual_target();
@@ -54,15 +59,14 @@ mod test {
         C: GenericConfig<D, F = F>,
         const D: usize,
     >(
+        mut builder: CircuitBuilder<F, D>,
+        mut pw: PartialWitness<F>,
         inners: &[ProofTuple<F, InnerC, D>],
     ) -> (CircuitBuilder<F, D>, PartialWitness<F>)
     where
         InnerC::Hasher: AlgebraicHasher<F>,
         C::Hasher: AlgebraicHasher<F>,
     {
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::new(config);
-        let mut pw = PartialWitness::new();
         for iproof in inners {
             let (inner_proof, inner_vd, inner_cd) = iproof;
             let pt = builder.add_virtual_proof_with_pis(inner_cd);
@@ -74,53 +78,15 @@ mod test {
         (builder, pw)
     }
 
-    #[test]
-    fn compare_recursion_vs_hashing() {
-        let len = 600;
-        let arr = rand_arr(len);
-        let (b, pw) = hash_circuit(arr.clone());
-        let data: CircuitData<F, C, D> = b.build();
-        let proof = data.prove(pw).unwrap();
-        let tuple = (proof, data.verifier_only, data.common);
-
-        let (b, pw) = recurse_circuit::<F, C, C, D>(&[tuple.clone()]);
-        let data: CircuitData<F, C, D> = b.build();
-        let proof = data.prove(pw).unwrap();
-        let recurse_tuple = (proof, data.verifier_only, data.common);
-
-        let mut wtr = csv::Writer::from_path("bench_plonky2.csv").expect("can't write csv");
-        for n in [64, 128, 256, 512] {
-            let arr = rand_arr(n);
-            let hashing = move || hash_circuit::<F, D>(arr);
-            let res = run_proof(n, ProofType::Hashing, hashing);
-            wtr.serialize(res).unwrap();
-        }
-        // recursion of simple leafs
-        for n in [1, 2, 4, 8] {
-            let tuples = (0..n).map(|_| tuple.clone()).collect::<Vec<_>>();
-            let res = run_proof(n, ProofType::RecursionLeaf, || {
-                recurse_circuit::<F, C, C, D>(&tuples)
-            });
-            wtr.serialize(res).unwrap();
-        }
-        // recursion of recursive proofs
-        for n in [1, 2, 4, 8] {
-            let tuples = (0..n).map(|_| recurse_tuple.clone()).collect::<Vec<_>>();
-            let res = run_proof(n, ProofType::RecursiveSquare, || {
-                recurse_circuit::<F, C, C, D>(&tuples)
-            });
-            wtr.serialize(res).unwrap();
-        }
-        wtr.flush().unwrap();
-    }
-
     #[derive(Serialize, Debug)]
     enum ProofType {
         Hashing,
         RecursionLeaf,
         // recurse over a recursive leaf proof
         RecursiveSquare,
+        RecursionDummy,
     }
+
     #[derive(Debug, Serialize)]
     struct BenchResult {
         proof_type: ProofType,
@@ -132,14 +98,21 @@ mod test {
         gate_constraints: usize,
     }
 
-    fn run_proof<P>(n: usize, proof_type: ProofType, f: P) -> BenchResult
+    fn run_proof<P>(n: usize, proof_type: ProofType, f: P) -> (BenchResult, ProofTuple<F, C, D>)
     where
-        P: FnOnce() -> (CircuitBuilder<F, D>, PartialWitness<F>),
+        P: FnOnce(
+            CircuitBuilder<F, D>,
+            PartialWitness<F>,
+        ) -> (CircuitBuilder<F, D>, PartialWitness<F>),
     {
         println!("[+] Starting benchmark {:?} : n = {}", proof_type, n);
-        let (b, pw) = f();
+        let config = CircuitConfig::standard_recursion_config();
+        let builder = CircuitBuilder::new(config);
+        let pw = PartialWitness::new();
+        let (builder, pw) = f(builder, pw);
+        builder.print_gate_counts(0);
         let start = Instant::now();
-        let data: CircuitData<F, C, D> = b.build();
+        let data: CircuitData<F, C, D> = builder.build();
         let time_building = start.elapsed();
 
         let start = Instant::now();
@@ -153,15 +126,174 @@ mod test {
             .iter()
             .map(|g| g.0.num_constraints())
             .sum();
-        verify_proof_tuple(&(proof, data.verifier_only, data.common)).expect("invalid proof");
-        BenchResult {
-            n,
-            proof_type,
-            building: time_building.as_millis(),
-            proving: time_proving.as_millis(),
-            lde_size: lde,
-            degree,
-            gate_constraints,
+        verify_proof_tuple(&(
+            proof.clone(),
+            data.verifier_only.clone(),
+            data.common.clone(),
+        ))
+        .expect("invalid proof");
+        (
+            BenchResult {
+                n,
+                proof_type,
+                building: time_building.as_millis(),
+                proving: time_proving.as_millis(),
+                lde_size: lde,
+                degree,
+                gate_constraints,
+            },
+            (proof, data.verifier_only, data.common),
+        )
+    }
+
+    #[test]
+    fn compare_recursion_vs_hashing() {
+        init_logging();
+        let len = 600;
+        let arr = rand_arr(len);
+        let (_, tuple) = run_proof(len, ProofType::Hashing, |b, pw| {
+            hash_circuit::<F, D>(b, pw, arr.clone())
+        });
+
+        let (_, recurse_tuple) = run_proof(1, ProofType::RecursionLeaf, |b, pw| {
+            recurse_circuit::<F, C, C, D>(b, pw, &[tuple.clone()])
+        });
+
+        let mut wtr = csv::Writer::from_path("bench_plonky2.csv").expect("can't write csv");
+        for n in [64, 128, 256, 512, 1024] {
+            let arr = rand_arr(n);
+            let hashing = move |b, pw| hash_circuit::<F, D>(b, pw, arr);
+            let (res, _) = run_proof(n, ProofType::Hashing, hashing);
+            wtr.serialize(res).unwrap();
         }
+        // recursion of simple leafs
+        for n in [1, 2, 4, 8, 16] {
+            let tuples = (0..n).map(|_| tuple.clone()).collect::<Vec<_>>();
+            let (res, _) = run_proof(n, ProofType::RecursionLeaf, |b, pw| {
+                recurse_circuit::<F, C, C, D>(b, pw, &tuples)
+            });
+            wtr.serialize(res).unwrap();
+        }
+        // recursion of recursive proofs
+        for n in [1, 2, 4, 8, 16] {
+            let tuples = (0..n).map(|_| recurse_tuple.clone()).collect::<Vec<_>>();
+            let (res, _) = run_proof(n, ProofType::RecursiveSquare, |b, pw| {
+                recurse_circuit::<F, C, C, D>(b, pw, &tuples)
+            });
+            wtr.serialize(res).unwrap();
+        }
+        wtr.flush().unwrap();
+    }
+
+    #[test]
+    fn compare_recursion_vk() {
+        let (_, hash_proof) = run_proof(600, ProofType::Hashing, |b, pw| {
+            hash_circuit::<F, D>(b, pw, rand_arr(600))
+        });
+        println!(
+            "[+] Hash proof vk {:?}",
+            hex::encode(hash_proof.1.circuit_digest.to_bytes())
+        );
+
+        let mut last_proof = hash_proof;
+        for i in 0..4 {
+            let (_, p) = run_proof(1, ProofType::RecursionLeaf, |b, pw| {
+                recurse_circuit::<F, C, C, D>(b, pw, &[last_proof.clone()])
+            });
+            println!(
+                "[+] Level {} recursive proof vk {:?}",
+                i + 1,
+                hex::encode(p.1.circuit_digest.to_bytes())
+            );
+            last_proof = p;
+        }
+    }
+
+    fn prepare_common_data_step0v1<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        const D: usize,
+    >() -> CommonCircuitData<F, D> {
+        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        b.build::<C>().common
+    }
+    fn prepare_common_data_step0v2<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        const D: usize,
+    >() -> CommonCircuitData<F, D>
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
+        let config = CircuitConfig::standard_recursion_config();
+        let builder = CircuitBuilder::<F, D>::new(config);
+        let data = builder.build::<C>();
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let proof = builder.add_virtual_proof_with_pis(&data.common);
+        let verifier_data =
+            builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
+        builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
+        let data = builder.build::<C>();
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let proof = builder.add_virtual_proof_with_pis(&data.common);
+        let verifier_data =
+            builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
+        builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
+        // It panics without it
+        while builder.num_gates() < 1 << 12 {
+            builder.add_gate(NoopGate, vec![]);
+        }
+        builder.build::<C>().common
+    }
+
+    #[test]
+    fn bench_unified_circuit() {
+        println!("[+] Prepare common data step 0");
+        // ?? why v1 is not working
+        let leaf_cd = prepare_common_data_step0v2::<F, C, D>();
+        let inputs = F::rand_vec(4);
+        let mut cd = leaf_cd;
+
+        println!("[+] Creating circuit");
+        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let mut pw = PartialWitness::new();
+        // verify 1 proof: either dummy one or real one
+        let condition_t = b.add_virtual_bool_target_safe();
+        let inputs_t = b.add_virtual_public_input_arr::<4>();
+        let verifier_t = b.add_verifier_data_public_inputs();
+        // needs to make this cheat so the first dummy common data
+        cd.num_public_inputs = b.num_public_inputs();
+        let proof_t = b.add_virtual_proof_with_pis(&cd);
+        println!("[+] Circuit verify cyclic proof");
+        b.conditionally_verify_cyclic_proof_or_dummy::<C>(condition_t, &proof_t, &cd)
+            .expect("this should not panic");
+
+        // build and set expected proofs
+        println!("[+] Building proof");
+        let cyclic_data = b.build::<C>();
+        println!("[+] Setting witness");
+        pw.set_target_arr(&inputs_t, &inputs);
+        // first time it is false since it's dummy proof - then it's set to true
+        pw.set_bool_target(condition_t, false);
+        let mut inputs_map = HashMap::new();
+        for (i, v) in inputs.iter().enumerate() {
+            inputs_map.insert(i, *v);
+        }
+        pw.set_proof_with_pis_target::<C, D>(
+            &proof_t,
+            &cyclic_base_proof(&cd, &cyclic_data.verifier_only, inputs_map),
+        );
+        pw.set_verifier_data_target(&verifier_t, &cyclic_data.verifier_only);
+        println!("[+] Proving proof");
+        let proof = cyclic_data.prove(pw).expect("proof should pass");
+        println!("[+] Verifying cyclic verifier data");
+        check_cyclic_proof_verifier_data(&proof, &cyclic_data.verifier_only, &cyclic_data.common)
+            .expect("unverified vk");
+        println!("[+] Verifying proof");
+        verify_proof_tuple(&(proof.clone(), cyclic_data.verifier_only, cyclic_data.common))
+            .expect("invalid proof");
     }
 }
