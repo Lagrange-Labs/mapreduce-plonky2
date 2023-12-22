@@ -1,10 +1,14 @@
 #[cfg(test)]
 mod test {
+    use anyhow::Result;
     use std::time::Instant;
 
     use hashbrown::HashMap;
     use plonky2::field::types::Sample;
     use plonky2::gates::noop::NoopGate;
+    use plonky2::iop::target::BoolTarget;
+    use plonky2::plonk::circuit_data::VerifierCircuitTarget;
+    use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
     use plonky2::recursion::cyclic_recursion::check_cyclic_proof_verifier_data;
     use plonky2::{
         field::extension::Extendable,
@@ -214,7 +218,7 @@ mod test {
         C: GenericConfig<D, F = F>,
         const D: usize,
     >() -> CommonCircuitData<F, D> {
-        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         b.build::<C>().common
     }
     fn prepare_common_data_step0v2<
@@ -226,17 +230,15 @@ mod test {
         C::Hasher: AlgebraicHasher<F>,
     {
         let config = CircuitConfig::standard_recursion_config();
-        let builder = CircuitBuilder::<F, D>::new(config);
+        let builder = CircuitBuilder::<F, D>::new(config.clone());
         let data = builder.build::<C>();
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let mut builder = CircuitBuilder::<F, D>::new(config.clone());
         let proof = builder.add_virtual_proof_with_pis(&data.common);
         let verifier_data =
             builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
         builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
         let data = builder.build::<C>();
 
-        let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let proof = builder.add_virtual_proof_with_pis(&data.common);
         let verifier_data =
@@ -249,6 +251,160 @@ mod test {
         builder.build::<C>().common
     }
 
+    struct CyclicCircuit<F, CC, const D: usize, U>
+    where
+        F: RichField + Extendable<D>,
+        U: UserCircuit<F, D>,
+        CC: GenericConfig<D, F = F>,
+        CC::Hasher: AlgebraicHasher<F>,
+    {
+        step_condition: BoolTarget,
+        verifier_data: VerifierCircuitTarget,
+        proof: ProofWithPublicInputsTarget<D>,
+        user_wires: U::Wires,
+        base_common: CommonCircuitData<F, D>,
+        circuit_data: CircuitData<F, CC, D>,
+    }
+
+    trait UserCircuit<F, const D: usize>
+    where
+        F: RichField + Extendable<D>,
+    {
+        type Wires;
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires;
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires);
+        fn base_inputs(&self) -> Vec<F>;
+    }
+
+    impl<F, CC, const D: usize, U> CyclicCircuit<F, CC, D, U>
+    where
+        F: RichField + Extendable<D>,
+        U: UserCircuit<F, D>,
+        CC: GenericConfig<D, F = F> + 'static,
+        CC::Hasher: AlgebraicHasher<F>,
+    {
+        fn new() -> Self {
+            let mut cd = prepare_common_data_step0v2::<F, CC, D>();
+            let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+            let wires = U::build(&mut b);
+            // verify 1 proof: either dummy one or real one
+            let condition_t = b.add_virtual_bool_target_safe();
+            let verifier_t = b.add_verifier_data_public_inputs();
+            // needs to make this cheat so the first dummy common data
+            cd.num_public_inputs = b.num_public_inputs();
+            let proof_t = b.add_virtual_proof_with_pis(&cd);
+            println!("[+] Circuit verify cyclic proof");
+            b.conditionally_verify_cyclic_proof_or_dummy::<CC>(condition_t, &proof_t, &cd)
+                .expect("this should not panic");
+
+            println!("[+] Building proof");
+            let cyclic_data = b.build::<CC>();
+            Self {
+                step_condition: condition_t,
+                verifier_data: verifier_t,
+                proof: proof_t,
+                user_wires: wires,
+                base_common: cd,
+                circuit_data: cyclic_data,
+            }
+        }
+        // first time it is false since it's dummy proof - then it's set to true
+        fn prove_init(&self, circuit: U) -> Result<ProofTuple<F, CC, D>> {
+            self.prove_internal(circuit, true, None)
+        }
+        fn prove_step(
+            &self,
+            circuit: U,
+            last_proof: ProofWithPublicInputs<F, CC, D>,
+        ) -> Result<ProofTuple<F, CC, D>> {
+            self.prove_internal(circuit, false, Some(last_proof))
+        }
+
+        fn prove_internal(
+            &self,
+            circuit: U,
+            init: bool,
+            last_proof: Option<ProofWithPublicInputs<F, CC, D>>,
+        ) -> Result<ProofTuple<F, CC, D>> {
+            println!("[+] Setting witness");
+            let mut pw = PartialWitness::new();
+            circuit.prove(&mut pw, &self.user_wires);
+            // step_condition must be true to verify the real proof. If false, it verifies
+            // the dummy first proof
+            pw.set_bool_target(self.step_condition, !init);
+            let last_proof = if init {
+                let mut inputs_map: HashMap<usize, F> = HashMap::new();
+                for (i, v) in circuit.base_inputs().iter().enumerate() {
+                    inputs_map.insert(i, *v);
+                }
+                cyclic_base_proof(
+                    &self.base_common,
+                    &self.circuit_data.verifier_only,
+                    inputs_map,
+                )
+            } else {
+                last_proof.ok_or(anyhow::anyhow!("no last proof given for non base step"))?
+            };
+            pw.set_proof_with_pis_target::<CC, D>(&self.proof, &last_proof);
+            pw.set_verifier_data_target(&self.verifier_data, &self.circuit_data.verifier_only);
+            println!("[+] Proving proof");
+            let proof = self.circuit_data.prove(pw)?;
+            Ok((
+                proof,
+                self.circuit_data.verifier_only.clone(),
+                self.circuit_data.common.clone(),
+            ))
+        }
+        fn verify_proof(&self, proof: ProofWithPublicInputs<F, CC, D>) -> Result<()> {
+            println!("[+] Verifying cyclic verifier data");
+            check_cyclic_proof_verifier_data(
+                &proof,
+                &self.circuit_data.verifier_only.clone(),
+                &self.circuit_data.common.clone(),
+            )?;
+            println!("[+] Verifying proof");
+            verify_proof_tuple(&(
+                proof.clone(),
+                self.circuit_data.verifier_only.clone(),
+                self.circuit_data.common.clone(),
+            ))
+        }
+    }
+    struct NoopCircuit {}
+    impl NoopCircuit {
+        fn new() -> Self {
+            Self {}
+        }
+    }
+    impl<F, const D: usize> UserCircuit<F, D> for NoopCircuit
+    where
+        F: RichField + Extendable<D>,
+    {
+        type Wires = ();
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {}
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {}
+        fn base_inputs(&self) -> Vec<F> {
+            vec![]
+        }
+    }
+
+    #[test]
+    fn test_cyclic_circuit_basic() {
+        test_cyclic_circuit(vec![NoopCircuit::new(), NoopCircuit::new()])
+    }
+    fn test_cyclic_circuit<U: UserCircuit<F, D>>(steps: Vec<U>) {
+        let circuit = CyclicCircuit::<F, C, D, U>::new();
+        let mut last_proof: ProofWithPublicInputs<F, C, D>;
+        for step in steps.into_iter() {
+            last_proof = circuit
+                .prove_init(step)
+                .expect("base step failed")
+                .0;
+            circuit
+                .verify_proof(last_proof.clone())
+                .expect("failed verification of base step");
+        }
+    }
     #[test]
     fn bench_unified_circuit() {
         println!("[+] Prepare common data step 0");
@@ -279,9 +435,9 @@ mod test {
         // first time it is false since it's dummy proof - then it's set to true
         pw.set_bool_target(condition_t, false);
         let mut inputs_map = HashMap::new();
-        for (i, v) in inputs.iter().enumerate() {
-            inputs_map.insert(i, *v);
-        }
+        //for (i, v) in inputs.iter().enumerate() {
+        //    inputs_map.insert(i, *v);
+        //}
         pw.set_proof_with_pis_target::<C, D>(
             &proof_t,
             &cyclic_base_proof(&cd, &cyclic_data.verifier_only, inputs_map),
