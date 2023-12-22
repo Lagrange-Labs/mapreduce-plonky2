@@ -45,7 +45,7 @@ pub struct TxBlockProver {
     pub nb_nodes: usize,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct MPTNode {
     pub node_bytes: Vec<u8>, // RLP byte representation of the node
     pub hash: Vec<u8>,       // its hash
@@ -91,7 +91,7 @@ impl MPTNode {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ProverOutput {
     parent_hash: Option<Vec<u8>>,
     // hash of this node
@@ -115,15 +115,6 @@ impl TxBlockProver {
 
     pub fn prove(&mut self) -> Result<Vec<u8>> {
         let (mut trie, leaves_hashes) = self.init_proofs_trie();
-
-        trie.values().for_each(|v| {
-            println!(
-                "{:?} -> {:?} [{}]",
-                v.parent_hash.as_ref().map(|h| hex::encode(h)),
-                hex::encode(&v.hash),
-                if v.transaction.is_some() { "x" } else { " " }
-            );
-        });
 
         println!(
             "[+] Built internal trie with {} leaves, and {} nodes in total",
@@ -213,7 +204,9 @@ impl TxBlockProver {
             intermediate_node: node_bytes,
             children_proofs: inner_proofs,
         });
+
         let proof = prover.compute_proof()?;
+
         println!(
             "[+] OK Valid recursive proof for node hash {}",
             hex::encode(&node_hash)
@@ -241,10 +234,6 @@ impl TxBlockProver {
             transaction,
         });
         let proof = prover.compute_proof()?;
-        println!(
-            "[+] OK Valid proof for leaf - hash {}",
-            hex::encode(&leaf_hash)
-        );
         Ok(ProverOutput {
             parent_hash,
             proof,
@@ -274,42 +263,10 @@ impl TxBlockProver {
             let key = idx.rlp_bytes().to_vec();
             let proof_bytes = self.data.tx_trie.get_proof(&key).unwrap();
 
-            let mut vals: Vec<Vec<_>> = self
-                .data
-                .tx_trie
-                .iter()
-                .flat_map(|(k, v)| vec![k, v])
-                .collect();
-            vals.sort();
-            let total: Vec<u8> = vals.into_iter().fold(vec![], |mut acc, curr| {
-                acc.extend(curr);
-                acc
-            });
-            let mut trie_total_hash = hex::encode(keccak256(&total));
-            trie_total_hash.truncate(5);
-            println!("TRIE TOTAL HASH {:?}", trie_total_hash);
-            let mut key_hash = hex::encode(keccak256(&key));
-            key_hash.truncate(5);
-            println!("KEY HASH {}", key_hash);
-            let mut proof_bytes_hash = hex::encode(keccak256(
-                &proof_bytes
-                    .iter()
-                    .flat_map(|b| b)
-                    .cloned()
-                    .collect::<Vec<u8>>(),
-            ));
-            proof_bytes_hash.truncate(5);
-            println!("PROOF BYTES HASH {}", proof_bytes_hash);
-
             let mut child_hash = None;
             for (i, node_bytes) in proof_bytes.iter().rev().enumerate() {
                 let idx_in_path = proof_bytes.len() - 1 - i;
                 let hash = keccak256(node_bytes);
-
-                // println!("bytes: {}", hex::encode(&node_bytes));
-                // println!("idx_in_path: {}", idx_in_path);
-                // println!("hash: {}", hex::encode(&hash));
-                // println!("---------------");
 
                 if i == 0 {
                     leaves.push(hash.clone());
