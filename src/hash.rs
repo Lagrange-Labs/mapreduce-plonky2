@@ -39,14 +39,14 @@ pub(crate) fn hash_to_fields<F: RichField>(expected: &[u8]) -> Vec<F> {
 /// related to the size of the padding for bench purposes.
 pub struct HashGadget {}
 impl HashGadget {
-    pub fn compute_size_with_padding(data_len: usize) -> usize {
+    pub const fn compute_size_with_padding(data_len: usize) -> usize {
         let input_len_bits = data_len * 8; // only pad the data that is inside the fixed buffer
         let num_actual_blocks = 1 + input_len_bits / KECCAK256_R;
         let padded_len_bits = num_actual_blocks * KECCAK256_R;
         // reason why ^: this is annoying to do in circuit.
         ceil_div_usize(padded_len_bits, 8)
     }
-    fn compute_padding_size(data_len: usize) -> usize {
+    pub const fn compute_padding_size(data_len: usize) -> usize {
         Self::compute_size_with_padding(data_len) - data_len
     }
 }

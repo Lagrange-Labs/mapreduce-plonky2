@@ -1,12 +1,19 @@
 #[cfg(test)]
 mod test {
+    use anyhow::anyhow;
+    use anyhow::ensure;
     use anyhow::Result;
-    use std::time::Instant;
-
     use hashbrown::HashMap;
+    use plonky2::field::types::Field;
     use plonky2::field::types::Sample;
     use plonky2::gates::noop::NoopGate;
+    use plonky2::hash::hash_types::HashOutTarget;
+    use plonky2::hash::hash_types::NUM_HASH_OUT_ELTS;
+    use plonky2::hash::hashing::hash_n_to_hash_no_pad;
+    use plonky2::hash::poseidon::PoseidonHash;
+    use plonky2::hash::poseidon::PoseidonPermutation;
     use plonky2::iop::target::BoolTarget;
+    use plonky2::iop::target::Target;
     use plonky2::plonk::circuit_data::VerifierCircuitTarget;
     use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
     use plonky2::recursion::cyclic_recursion::check_cyclic_proof_verifier_data;
@@ -21,9 +28,18 @@ mod test {
         },
         recursion::dummy_circuit::cyclic_base_proof,
     };
+    use plonky2_crypto::biguint::BigUintTarget;
+    use plonky2_crypto::hash::keccak256::CircuitBuilderHashKeccak;
+    use plonky2_crypto::hash::keccak256::KECCAK256_R;
+    use plonky2_crypto::hash::HashInputTarget;
+    use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::Rng;
     use serde::Serialize;
+    use std::sync::Arc;
+    use std::time::Instant;
 
+    use crate::utils::convert_u8_to_u32;
+    use crate::utils::less_than;
     use crate::{
         benches::test::init_logging,
         hash::{hash_array, HashGadget},
@@ -240,14 +256,21 @@ mod test {
         let data = builder.build::<C>();
 
         let mut builder = CircuitBuilder::<F, D>::new(config);
+        //HashCircuit::<680>::build(&mut builder);
         let proof = builder.add_virtual_proof_with_pis(&data.common);
         let verifier_data =
             builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
         builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
+        builder.print_gate_counts(0);
         // It panics without it
-        while builder.num_gates() < 1 << 12 {
+        while builder.num_gates() < 1 << 14 {
             builder.add_gate(NoopGate, vec![]);
         }
+        //let min_degree_bits = 14;
+        //let min_gates = (1 << (min_degree_bits - 1)) + 1;
+        //for _ in builder.num_gates()..min_gates {
+        //    builder.add_gate(NoopGate, vec![]);
+        //}
         builder.build::<C>().common
     }
 
@@ -266,7 +289,7 @@ mod test {
         circuit_data: CircuitData<F, CC, D>,
     }
 
-    trait UserCircuit<F, const D: usize>
+    trait UserCircuit<F, const D: usize>: Clone
     where
         F: RichField + Extendable<D>,
     {
@@ -284,6 +307,7 @@ mod test {
         CC::Hasher: AlgebraicHasher<F>,
     {
         fn new() -> Self {
+            println!("[+] Building cyclic circuit");
             let mut cd = prepare_common_data_step0v2::<F, CC, D>();
             let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
             let wires = U::build(&mut b);
@@ -293,11 +317,12 @@ mod test {
             // needs to make this cheat so the first dummy common data
             cd.num_public_inputs = b.num_public_inputs();
             let proof_t = b.add_virtual_proof_with_pis(&cd);
-            println!("[+] Circuit verify cyclic proof");
             b.conditionally_verify_cyclic_proof_or_dummy::<CC>(condition_t, &proof_t, &cd)
                 .expect("this should not panic");
 
-            println!("[+] Building proof");
+            println!("[+] Building cyclic circuit data");
+            b.print_gate_counts(0);
+            println!(" ---> {} num gates", b.num_gates());
             let cyclic_data = b.build::<CC>();
             Self {
                 step_condition: condition_t,
@@ -370,6 +395,7 @@ mod test {
             ))
         }
     }
+    #[derive(Clone, Debug)]
     struct NoopCircuit {}
     impl NoopCircuit {
         fn new() -> Self {
@@ -388,18 +414,275 @@ mod test {
         }
     }
 
+    #[derive(Clone, Debug)]
+    struct HashCircuit<const N: usize> {
+        data: [u8; N],
+        unpadded_len: usize,
+    }
+    struct HashWires<const N: usize> {
+        input_array: ArrayWire<N>,
+        diff: Target,
+        // 256/u32 = 8
+        output_array: [Target; 8],
+    }
+
+    #[derive(Debug, Clone)]
+    struct ArrayWire<const N: usize> {
+        arr: [Target; N],
+        real_len: Target,
+    }
+    impl<const N: usize> HashCircuit<N> {
+        fn new(mut data: Vec<u8>) -> Result<Self> {
+            let total = HashGadget::compute_size_with_padding(data.len());
+            ensure!(total <= N, "{}bytes can't fit in {} with padding", total, N);
+            // NOTE we don't pad anymore because we enforce that the resulting length is already a multiple
+            // of 4 so it will fit the conversion to u32 and circuit vk would stay the same for different
+            // data length
+            ensure!(
+                N % 4 == 0,
+                "Fixed array size must be 0 mod 4 for conversion with u32"
+            );
+
+            let unpadded_len = data.len();
+            data.resize(N, 0);
+            Ok(Self {
+                data: data.try_into().unwrap(),
+                unpadded_len,
+            })
+        }
+
+        fn build_from_array<F: RichField + Extendable<D>, const D: usize>(
+            b: &mut CircuitBuilder<F, D>,
+            a: &ArrayWire<N>,
+        ) -> <Self as UserCircuit<F, D>>::Wires {
+            let diff_target = b.add_virtual_target();
+            let end_padding = b.add(a.real_len, diff_target);
+            let one = b.one();
+            let end_padding = b.sub(end_padding, one); // inclusive range
+                                                       // little endian so we start padding from the end of the byte
+            let single_pad = b.constant(F::from_canonical_usize(0x81)); // 1000 0001
+            let begin_pad = b.constant(F::from_canonical_usize(0x01)); // 0000 0001
+            let end_pad = b.constant(F::from_canonical_usize(0x80)); // 1000 0000
+                                                                     // TODO : make that const generic
+            let padded_node = a
+                .arr
+                .iter()
+                .enumerate()
+                .map(|(i, byte)| {
+                    let i_target = b.constant(F::from_canonical_usize(i));
+                    // condition if we are within the data range ==> i < length
+                    let is_data = less_than(b, i_target, a.real_len, 32);
+                    // condition if we start the padding ==> i == length
+                    let is_start_padding = b.is_equal(i_target, a.real_len);
+                    // condition if we are done with the padding ==> i == length + diff - 1
+                    let is_end_padding = b.is_equal(i_target, end_padding);
+                    // condition if we only need to add one byte 1000 0001 to pad
+                    // because we work on u8 data, we know we're at least adding 1 byte and in
+                    // this case it's 0x81 = 1000 0001
+                    // i == length == diff - 1
+                    let is_start_and_end = b.and(is_start_padding, is_end_padding);
+
+                    // nikko XXX: Is this sound ? I think so but not 100% sure.
+                    // I think it's ok to not use `quin_selector` or `b.random_acess` because
+                    // if the prover gives another byte target, then the resulting hash would be invalid,
+                    let item_data = b.mul(is_data.target, *byte);
+                    let item_start_padding = b.mul(is_start_padding.target, begin_pad);
+                    let item_end_padding = b.mul(is_end_padding.target, end_pad);
+                    let item_start_and_end = b.mul(is_start_and_end.target, single_pad);
+                    // if all of these conditions are false, then item will be 0x00,i.e. the padding
+                    let mut item = item_data;
+                    item = b.add(item, item_start_padding);
+                    item = b.add(item, item_end_padding);
+                    item = b.add(item, item_start_and_end);
+                    item
+                })
+                .collect::<Vec<_>>();
+
+            // convert padded node to u32
+            let node_u32_target: Vec<U32Target> = convert_u8_to_u32(b, &padded_node);
+
+            // fixed size block delimitation: this is where we tell the hash function gadget
+            // to only look at a certain portion of our data, each bool says if the hash function
+            // will update its state for this block or not.
+            let rate_bytes = b.constant(F::from_canonical_usize(KECCAK256_R / 8));
+            let end_padding_offset = b.add(end_padding, one);
+            let nb_blocks = b.div(end_padding_offset, rate_bytes);
+            // - 1 because keccak always take first block so we don't count it
+            let nb_actual_blocks = b.sub(nb_blocks, one);
+            let total_num_blocks = N / (KECCAK256_R / 8) - 1;
+            let blocks = (0..total_num_blocks)
+                .map(|i| {
+                    let i_target = b.constant(F::from_canonical_usize(i));
+                    less_than(b, i_target, nb_actual_blocks, 8)
+                })
+                .collect::<Vec<_>>();
+
+            let hash_target = HashInputTarget {
+                input: BigUintTarget {
+                    limbs: node_u32_target,
+                },
+                input_bits: 0,
+                blocks,
+            };
+
+            let hash_output = b.hash_keccak256(&hash_target);
+            let output_array: [Target; 8] = hash_output
+                .limbs
+                .iter()
+                .map(|limb| limb.0)
+                .collect::<Vec<_>>()
+                .try_into()
+                .expect("keccak256 should have 8 u32 limbs");
+            HashWires {
+                input_array: a.clone(),
+                diff: diff_target,
+                output_array,
+            }
+        }
+        fn prove_from_array<F: RichField>(
+            pw: &mut PartialWitness<F>,
+            wires: &HashWires<N>,
+            unpadded_len: usize,
+        ) {
+            let diff = HashGadget::compute_padding_size(unpadded_len);
+            pw.set_target(wires.diff, F::from_canonical_usize(diff));
+        }
+    }
+
+    impl<F, const D: usize, const N: usize> UserCircuit<F, D> for HashCircuit<N>
+    where
+        F: RichField + Extendable<D>,
+    {
+        type Wires = HashWires<N>;
+
+        fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let real_len = b.add_virtual_target();
+            let array = b.add_virtual_target_arr::<N>();
+            let wires = Self::build_from_array(
+                b,
+                &ArrayWire {
+                    arr: array,
+                    real_len,
+                },
+            );
+            b.register_public_inputs(&wires.output_array);
+            wires
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            pw.set_int_targets(&wires.input_array.arr, &self.data);
+            pw.set_target(
+                wires.input_array.real_len,
+                F::from_canonical_usize(self.unpadded_len),
+            );
+            Self::prove_from_array(pw, wires, self.unpadded_len);
+        }
+        fn base_inputs(&self) -> Vec<F> {
+            // since we don't care about the public inputs of the first
+            // proof (since we're not reading them , because we take array
+            // to hash as witness)
+            // 8 * u32 = 256 bits
+            F::rand_vec(8)
+        }
+    }
+
+    #[derive(Clone)]
+    struct PoseidonCircuit<F, const N: usize> {
+        inputs: [F; N],
+    }
+    struct PoseidonWires<const N: usize> {
+        inputs: [Target; N],
+        outputs: HashOutTarget,
+    }
+
+    impl<F, const N: usize> PoseidonCircuit<F, N> {
+        fn new(inputs: [F; N]) -> Self {
+            Self { inputs }
+        }
+    }
+
+    impl<F, const D: usize, const N: usize> UserCircuit<F, D> for PoseidonCircuit<F, N>
+    where
+        F: RichField + Extendable<D>,
+    {
+        type Wires = PoseidonWires<N>;
+        fn base_inputs(&self) -> Vec<F> {
+            F::rand_vec(NUM_HASH_OUT_ELTS)
+        }
+        fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let inputs = b.add_virtual_target_arr::<N>();
+            let outputs = b.hash_n_to_hash_no_pad::<PoseidonHash>(inputs.to_vec());
+            b.register_public_inputs(&outputs.elements);
+            PoseidonWires { inputs, outputs }
+        }
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            pw.set_target_arr(&wires.inputs, &self.inputs);
+            let output = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&self.inputs);
+            pw.set_hash_target(wires.outputs, output);
+        }
+    }
+
+    #[test]
+    fn test_simple_circuit_keccak256() {
+        const DATA_LEN: usize = 544;
+        const MAX_LEN: usize = HashGadget::compute_size_with_padding(DATA_LEN);
+        let circuit =
+            HashCircuit::<MAX_LEN>::new(rand_arr(DATA_LEN)).expect("to create keccak circuit");
+        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let wires = HashCircuit::<MAX_LEN>::build(&mut b);
+        let data = b.build::<C>();
+        let mut pw = PartialWitness::new();
+        <HashCircuit<MAX_LEN> as UserCircuit<F, D>>::prove(&circuit, &mut pw, &wires);
+        let proof = data.prove(pw).expect("should prove");
+        verify_proof_tuple(&(proof, data.verifier_only, data.common)).expect("proof invalid");
+    }
     #[test]
     fn test_cyclic_circuit_basic() {
-        test_cyclic_circuit(vec![NoopCircuit::new(), NoopCircuit::new()])
+        test_cyclic_circuit((0..4).map(|_| NoopCircuit::new()).collect::<Vec<_>>());
     }
+
+    #[test]
+    fn test_simple_circuit_poseidon() {
+        init_logging();
+        const NB_ELEM: usize = 4;
+        let circuit = PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap());
+        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let mut pw = PartialWitness::new();
+        let wires = PoseidonCircuit::<F, NB_ELEM>::build(&mut b);
+        let circuit_data = b.build::<C>();
+        <PoseidonCircuit<F, NB_ELEM> as UserCircuit<F, D>>::prove(&circuit, &mut pw, &wires);
+        circuit_data.prove(pw).expect("invalid proof");
+    }
+    #[test]
+    fn test_cyclic_circuit_keccak256() {
+        init_logging();
+        let n = 3;
+        const DATA_LEN: usize = 544;
+        const MAX_LEN: usize = HashGadget::compute_size_with_padding(DATA_LEN);
+        let circuits = (0..n)
+            .map(|_| HashCircuit::<MAX_LEN>::new(rand_arr(DATA_LEN)))
+            .collect::<Result<Vec<_>>>()
+            .expect("can't create hash circuits");
+        test_cyclic_circuit(circuits)
+    }
+    #[test]
+    fn test_cyclic_circuit_poseidon() {
+        init_logging();
+        let n = 5;
+        const NB_ELEM: usize = 4;
+        let circuits = (0..n)
+            .map(|_| PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap()))
+            .collect::<Vec<_>>();
+        test_cyclic_circuit(circuits)
+    }
+
     fn test_cyclic_circuit<U: UserCircuit<F, D>>(steps: Vec<U>) {
         let circuit = CyclicCircuit::<F, C, D, U>::new();
-        let mut last_proof: ProofWithPublicInputs<F, C, D>;
+        let mut last_proof = circuit
+            .prove_init(steps[0].clone())
+            .expect("base step failed")
+            .0;
         for step in steps.into_iter() {
-            last_proof = circuit
-                .prove_init(step)
-                .expect("base step failed")
-                .0;
             circuit
                 .verify_proof(last_proof.clone())
                 .expect("failed verification of base step");
