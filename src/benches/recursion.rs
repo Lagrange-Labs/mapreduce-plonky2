@@ -263,7 +263,7 @@ mod test {
         builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
         builder.print_gate_counts(0);
         // It panics without it
-        while builder.num_gates() < 1 << 14 {
+        while builder.num_gates() < 1 << 12 {
             builder.add_gate(NoopGate, vec![]);
         }
         //let min_degree_bits = 14;
@@ -415,11 +415,11 @@ mod test {
     }
 
     #[derive(Clone, Debug)]
-    struct HashCircuit<const N: usize> {
+    struct KeccakCircuit<const N: usize> {
         data: [u8; N],
         unpadded_len: usize,
     }
-    struct HashWires<const N: usize> {
+    struct KeccakWires<const N: usize> {
         input_array: ArrayWire<N>,
         diff: Target,
         // 256/u32 = 8
@@ -431,7 +431,7 @@ mod test {
         arr: [Target; N],
         real_len: Target,
     }
-    impl<const N: usize> HashCircuit<N> {
+    impl<const N: usize> KeccakCircuit<N> {
         fn new(mut data: Vec<u8>) -> Result<Self> {
             let total = HashGadget::compute_size_with_padding(data.len());
             ensure!(total <= N, "{}bytes can't fit in {} with padding", total, N);
@@ -533,7 +533,7 @@ mod test {
                 .collect::<Vec<_>>()
                 .try_into()
                 .expect("keccak256 should have 8 u32 limbs");
-            HashWires {
+            KeccakWires {
                 input_array: a.clone(),
                 diff: diff_target,
                 output_array,
@@ -541,7 +541,7 @@ mod test {
         }
         fn prove_from_array<F: RichField>(
             pw: &mut PartialWitness<F>,
-            wires: &HashWires<N>,
+            wires: &KeccakWires<N>,
             unpadded_len: usize,
         ) {
             let diff = HashGadget::compute_padding_size(unpadded_len);
@@ -549,11 +549,11 @@ mod test {
         }
     }
 
-    impl<F, const D: usize, const N: usize> UserCircuit<F, D> for HashCircuit<N>
+    impl<F, const D: usize, const N: usize> UserCircuit<F, D> for KeccakCircuit<N>
     where
         F: RichField + Extendable<D>,
     {
-        type Wires = HashWires<N>;
+        type Wires = KeccakWires<N>;
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let real_len = b.add_virtual_target();
@@ -627,12 +627,12 @@ mod test {
         const DATA_LEN: usize = 544;
         const MAX_LEN: usize = HashGadget::compute_size_with_padding(DATA_LEN);
         let circuit =
-            HashCircuit::<MAX_LEN>::new(rand_arr(DATA_LEN)).expect("to create keccak circuit");
+            KeccakCircuit::<MAX_LEN>::new(rand_arr(DATA_LEN)).expect("to create keccak circuit");
         let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-        let wires = HashCircuit::<MAX_LEN>::build(&mut b);
+        let wires = KeccakCircuit::<MAX_LEN>::build(&mut b);
         let data = b.build::<C>();
         let mut pw = PartialWitness::new();
-        <HashCircuit<MAX_LEN> as UserCircuit<F, D>>::prove(&circuit, &mut pw, &wires);
+        <KeccakCircuit<MAX_LEN> as UserCircuit<F, D>>::prove(&circuit, &mut pw, &wires);
         let proof = data.prove(pw).expect("should prove");
         verify_proof_tuple(&(proof, data.verifier_only, data.common)).expect("proof invalid");
     }
@@ -660,7 +660,7 @@ mod test {
         const DATA_LEN: usize = 544;
         const MAX_LEN: usize = HashGadget::compute_size_with_padding(DATA_LEN);
         let circuits = (0..n)
-            .map(|_| HashCircuit::<MAX_LEN>::new(rand_arr(DATA_LEN)))
+            .map(|_| KeccakCircuit::<MAX_LEN>::new(rand_arr(DATA_LEN)))
             .collect::<Result<Vec<_>>>()
             .expect("can't create hash circuits");
         test_cyclic_circuit(circuits)
