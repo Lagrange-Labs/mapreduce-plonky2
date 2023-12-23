@@ -256,14 +256,14 @@ mod test {
         let data = builder.build::<C>();
 
         let mut builder = CircuitBuilder::<F, D>::new(config);
-        //HashCircuit::<680>::build(&mut builder);
+        KeccakCircuit::<200>::build(&mut builder);
         let proof = builder.add_virtual_proof_with_pis(&data.common);
         let verifier_data =
             builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
         builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
         builder.print_gate_counts(0);
         // It panics without it
-        while builder.num_gates() < 1 << 12 {
+        while builder.num_gates() < 1 << 15 {
             builder.add_gate(NoopGate, vec![]);
         }
         //let min_degree_bits = 14;
@@ -682,7 +682,11 @@ mod test {
             .prove_init(steps[0].clone())
             .expect("base step failed")
             .0;
-        for step in steps.into_iter() {
+        for step in steps.into_iter().skip(1) {
+            last_proof = circuit
+                .prove_step(step, last_proof)
+                .expect("invalid step proof")
+                .0;
             circuit
                 .verify_proof(last_proof.clone())
                 .expect("failed verification of base step");
