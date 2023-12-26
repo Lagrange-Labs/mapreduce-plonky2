@@ -15,7 +15,7 @@ use std::sync::Arc;
 use crate::utils::keccak256;
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
 /// bad transactions, so we only compute over valid transactions.
-pub(crate) struct TxAndReceipt(Transaction, TransactionReceipt);
+pub struct TxAndReceipt(Transaction, TransactionReceipt);
 
 impl TxAndReceipt {
     pub fn tx(&self) -> &Transaction {
