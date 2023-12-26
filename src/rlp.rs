@@ -39,27 +39,26 @@ pub fn data_len<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
     len_of_len: Target,
+    offset: Target,
 ) -> Target {
     let mut res = b.zero();
+    let one = b.one();
     let const_256 = b.constant(F::from_canonical_u64(256));
-    let arr_len = data.len();
 
     for i in 0..MAX_LEN_BYTES {
-        // this makes sure we don't read outside of the data length: it can happen
-        // because we call this function in circuit regardless of the actual
-        // type of rlp data. If it's a single short value, then reading after 1st byte
-        // might just fail.
-        let arr_len_pred: usize = if i + 1 < arr_len { 1 } else { 0 };
-
-        let i_target = b.constant(F::from_canonical_usize(i));
-        let len_of_len_pred = less_than(b, i_target, len_of_len, 8);
-
+        let i_tgt = b.constant(F::from_canonical_u8(i as u8));
+        // make sure we don't read out more than the actual len
+        let len_of_len_pred = less_than(b, i_tgt, len_of_len, 8);
+        // this part offset i to read from the array
+        let i_offset = b.add(i_tgt, offset);
         // i+1 because first byte is the RLP type
-        let arr_access = data[(i + 1) * arr_len_pred];
+        let i_plus_1 = b.add(i_offset, one);
+        let item = quin_selector(b, data, i_plus_1);
+
         // shift result by one byte
         let multiplicand = b.mul(const_256, res);
         // res += 2^i * arr[i+1] only if we're in right range
-        let sum = b.add(multiplicand, arr_access);
+        let sum = b.add(multiplicand, item);
         let multiplicand_2 = b.mul(sum, len_of_len_pred.target);
 
         let not_len_of_len_pred_target = b.not(len_of_len_pred);
@@ -70,6 +69,8 @@ pub fn data_len<F: RichField + Extendable<D>, const D: usize>(
 
     res
 }
+/// It returns the RLP header information starting at data[offset]. The header.offset
+/// is absolute from the 0-index of data (not from the `offset` index)
 pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
@@ -109,15 +110,15 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
     let select_3 = b._if(prefix_less_0xb8, one, select_2);
     // offset = if prefix < 0x80 { 0 } else  { select3 }
     // i.e. if it's a single byte value, no offset we directly read value
-    let offset = b._if(prefix_less_0x80, zero, select_3);
+    let offset_data = b._if(prefix_less_0x80, zero, select_3);
 
     // read the lenght encoded depending on the type
     let prefix_minus_f7 = b.sub(prefix, byte_f7);
-    let long_list_len = data_len(b, data, prefix_minus_f7);
+    let long_list_len = data_len(b, data, prefix_minus_f7, offset);
     let short_list_len = b.sub(prefix, byte_c0);
     let select_1 = b._if(prefix_less_0xf8, short_list_len, long_list_len);
     let prefix_minus_b7 = b.sub(prefix, byte_b7);
-    let long_str_len = data_len(b, data, prefix_minus_b7);
+    let long_str_len = data_len(b, data, prefix_minus_b7, offset);
     let select_2 = b._if(prefix_less_0xc0, long_str_len, select_1);
     let short_str_len = b.sub(prefix, byte_80);
     let select_3 = b._if(prefix_less_0xb8, short_str_len, select_2);
@@ -125,9 +126,10 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
 
     let data_type = greater_than_or_equal_to(b, prefix, byte_c0, 8).target;
 
+    let final_offset = b.add(offset, offset_data);
     RlpHeader {
         len,
-        offset,
+        offset: final_offset,
         data_type,
     }
 }
@@ -144,13 +146,14 @@ pub(crate) fn decode_tuple<F: RichField + Extendable<D>, const D: usize>(
 /// Decodes the header of the list, and then decodes the first N items of the list.
 /// NOTE: the `num_field` is set to N in this case, since it does not read the full array.
 /// Hence, N can be lower than the actual number of fields in the list.
+/// The offsets decoded in the returned list are starting from the 0-index of `data`
+/// not from the `offset` index.
 pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
     data_offset: Target,
 ) -> RlpList<N> {
     let zero = b.zero();
-    let one = b.one();
     let n_target = b.constant(F::from_canonical_usize(N));
 
     let mut num_fields = zero;
@@ -159,7 +162,7 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
     let mut dec_type = [zero; N];
 
     let list_header = decode_header(b, data, data_offset);
-    let mut offset = b.add(data_offset, list_header.offset);
+    let mut offset = list_header.offset;
 
     // decode each headers of each items ofthe list
     // remember in a list each item of the list is RLP encoded
@@ -168,40 +171,20 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
         let mut loop_p = b.is_equal(num_fields, n_target);
         loop_p = b.not(loop_p);
 
-        // read the header starting from the offset -
-        // nikko: this is assuming the header will take at least 1 bytes and less than 1 + MAX_LEN_BYTES
-        //let header = extract_array::<F, D, { MAX_LEN_BYTES + 1 }>(b, data, offset);
+        // read the header starting from the offset
         let RlpHeader {
             len: field_len,
             offset: field_offset,
             data_type: field_type,
         } = decode_header(b, data, offset);
-        let total_field_len = b.add(field_offset, field_len);
+        let new_offset = b.add(field_offset, field_len);
 
-        let one_sub_field_type = b.sub(one, field_type);
-        // d_off_i = ((1-field_type) * field_offset + offset) * (offset != total_len)
-        //  - if type is 0, str, then d_off_i basically = field_offset + offset
-        //  - if type is 1, list, then d_off_i basically = offset because it's a list so we
-        // again need to decode the rlp header
-        let mut d_off_i = b.mul(one_sub_field_type, field_offset);
-        d_off_i = b.add(d_off_i, offset);
-        d_off_i = b.mul(loop_p.target, d_off_i);
-
-        // d_len_i = ((field_type * field_offset) + field_len) * (offset != total_len)
-        // - if type is 0, str, then d_len_i = field_len
-        // - if type is 1, list, then d_len_i = field_offset + field_len
-        // index where to find the data within the item array
-        let mut d_len_i = b.mul(field_type, field_offset);
-        d_len_i = b.add(d_len_i, field_len);
-        d_len_i = b.mul(loop_p.target, d_len_i);
-        let d_type_i = b.mul(loop_p.target, field_type);
-
-        dec_off[i] = d_off_i;
-        dec_len[i] = d_len_i;
-        dec_type[i] = d_type_i;
+        dec_off[i] = field_offset;
+        dec_len[i] = field_len;
+        dec_type[i] = field_type;
 
         // move offset to the next field in the list
-        offset = b.mul_add(loop_p.target, total_field_len, offset);
+        offset = b.mul(loop_p.target, new_offset);
         num_fields = b.add(num_fields, loop_p.target);
     }
 
@@ -279,7 +262,7 @@ mod tests {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::rlp::{decode_header, RlpHeader, MAX_LEN_BYTES};
+    use crate::rlp::{decode_fixed_list, decode_header, RlpHeader, MAX_LEN_BYTES};
     use crate::utils::IntTargetWriter;
     #[test]
     fn test_decode_header_long_list() -> Result<()> {
@@ -333,10 +316,20 @@ mod tests {
         let h0 = decode_header(&mut builder, &rlp_data_tgt, offset);
         let h0len_tgt = builder.constant(F::from_canonical_u32(h0_len as u32));
         let v0len_tgt = builder.constant(F::from_canonical_u32(header0.value_len as u32));
+        // since decode_header returns based off 0-index we need to shift expected header
+        // header || header0 || v0 || ...
+        // so h0offset (where v0 starts) is header len + header0 len
+        let h0offset = builder.add(h0len_tgt, offset);
         // compare header of first item in list len outside circuit with inside circuit
-        builder.connect(h0.offset, h0len_tgt);
+        builder.connect(h0.offset, h0offset);
         // compare value len of first item in list outside circuit with inside circuit
+        // note len doesn't change from offset so it's good
         builder.connect(h0.len, v0len_tgt);
+
+        // check if decoding long list gives same result
+        let list = decode_fixed_list::<F, D, 1>(&mut builder, &rlp_data_tgt, zero);
+        builder.connect(h0offset, list.offset[0]);
+        builder.connect(h0.len, list.len[0]);
 
         let data = builder.build::<C>();
         let proof = data.prove(pw)?;
@@ -361,7 +354,8 @@ mod tests {
         let ret_target = builder.constant(F::from_canonical_u64(1024));
 
         let len_of_len = builder.constant(F::from_canonical_u64(2));
-        let res = super::data_len(&mut builder, &data, len_of_len);
+        let zero = builder.zero();
+        let res = super::data_len(&mut builder, &data, len_of_len, zero);
         builder.connect(res, ret_target);
 
         builder.register_public_inputs(&data);

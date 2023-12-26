@@ -338,7 +338,7 @@ mod test {
         let root_proof = prover.prove()?;
         //let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
         let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
-        let deserialized = ByteProofTuple::deserialize::<F, C, D>(&root_proof)?;
+        let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&root_proof)?;
         assert_eq!(
             expected_pub_inputs,
             HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
@@ -361,7 +361,7 @@ mod test {
         let root_proof = prover.prove()?;
         //let root_hash = prover.data.tx_trie.root_hash()?.as_bytes().to_vec();
         let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
-        let deserialized = ByteProofTuple::deserialize::<F, C, D>(&root_proof)?;
+        let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&root_proof)?;
         assert_eq!(
             expected_pub_inputs,
             HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
@@ -374,11 +374,11 @@ mod test {
         pub block_nb: u64,
         // total nb of tx
         pub nb_tx: usize,
-        pub nb_nodes: usize,
         // actually the ones being proven (after filtering)
-        pub nb_proven: usize,
-        pub lde_size: usize,
-        pub time_proving: u64,
+        pub tx_proven: usize,
+        // total number of nodes in the trie to prove
+        pub nb_nodes: usize,
+        pub time_proving_sec: u64,
     }
 
     async fn test_one_block<T: Into<BlockId> + Send + Sync>(blockid: T) -> Result<BenchData> {
@@ -389,9 +389,9 @@ mod test {
         let mut prover = TxBlockProver::init(blockid, filter).await?;
         let start = Instant::now();
         let root_proof = prover.prove()?;
-        let end = start.elapsed().as_secs();
+        let end = start.elapsed();
         let expected_pub_inputs = hash_to_fields::<F>(prover.data.block.hash.unwrap().as_bytes());
-        let deserialized = ByteProofTuple::deserialize::<F, C, D>(&root_proof)?;
+        let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&root_proof)?;
         assert_eq!(
             expected_pub_inputs,
             HeaderProofInputs::new(&deserialized.0.public_inputs).hash()
@@ -403,29 +403,26 @@ mod test {
             .iter()
             .filter(|txr| prover.policy.should_prove(txr.tx()).0)
             .count();
-        let lde_size = deserialized.2.lde_size();
         Ok(BenchData {
             block_nb: prover.data.block.number.unwrap().as_u64(),
             nb_tx,
+            tx_proven: filtered,
             nb_nodes: prover.nb_nodes,
-            nb_proven: filtered,
-            lde_size,
-            time_proving: end,
+            time_proving_sec: end.as_secs(),
         })
     }
 
     #[tokio::test]
     pub async fn test_many_blocks() -> Result<()> {
-        let mut data = Vec::new();
         //let blocks = vec![18775351, 18768804, 18774792, 18774297];
-        let blocks = vec![18775351];
+        let mut wtr = Writer::from_path("bench_tx.csv")?;
+        let blocks = vec![18775351, 18775351];
         for b in blocks {
             let blockid = BlockNumber::from(b);
             let bench_data = test_one_block(blockid).await?;
-            data.push(bench_data);
+            wtr.serialize(bench_data)?;
         }
-        let mut wtr = Writer::from_path("bench_tx.csv")?;
-        wtr.serialize(data)?;
+        wtr.flush()?;
         Ok(())
     }
 }

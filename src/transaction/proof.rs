@@ -48,7 +48,7 @@ impl ProofType {
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
         let proof = self.compute_proof_raw::<F, C, D>()?;
-        ByteProofTuple::serialize(proof)
+        ByteProofTuple::from_proof_tuple(proof)
     }
 }
 
@@ -156,7 +156,7 @@ impl HeaderAggregation {
         let decoded_proofs = self
             .header_proofs
             .iter()
-            .map(|buff| ByteProofTuple::deserialize::<F, C, D>(buff))
+            .map(|buff| ByteProofTuple::into_proof_tuple::<F, C, D>(buff))
             .collect::<Result<Vec<_>>>()?;
         let config = CircuitConfig::standard_recursion_config();
         // TODO: remove the const generic, too painful to work with and just go with
@@ -201,7 +201,7 @@ fn deserialize_proofs<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, 
     proofs
         .iter()
         .map(|buff| {
-            let tuple = ByteProofTuple::deserialize(buff)?;
+            let tuple = ByteProofTuple::into_proof_tuple(buff)?;
             verify_proof_tuple(&tuple)?;
             Ok(tuple)
         })
