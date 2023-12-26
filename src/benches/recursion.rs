@@ -277,7 +277,7 @@ mod test {
     struct CyclicCircuit<F, CC, const D: usize, U>
     where
         F: RichField + Extendable<D>,
-        U: UserCircuit<F, D>,
+        U: IVCCircuit<F, D>,
         CC: GenericConfig<D, F = F>,
         CC::Hasher: AlgebraicHasher<F>,
     {
@@ -296,19 +296,38 @@ mod test {
         type Wires;
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires;
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires);
+    }
+
+    trait IVCCircuit<F, const D: usize>: UserCircuit<F, D>
+    where
+        F: RichField + Extendable<D>,
+    {
+        /// returns the number of gates the circuit should have at the
+        /// end of the first circuit creation. It must be in log2 base
+        /// as it is being used in the following way
+        /// ```
+        ///     while builder.num_gates() < 1 << gates {
+        ///         builder.add_gate(NoopGate, vec![]);
+        ///     }
+        /// ```
+        /// Implementers can add any custom gates for example as well
+        /// so the first basic proof has the same shape than the following
+        /// ones.
+        fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize;
         fn base_inputs(&self) -> Vec<F>;
     }
 
     impl<F, CC, const D: usize, U> CyclicCircuit<F, CC, D, U>
     where
         F: RichField + Extendable<D>,
-        U: UserCircuit<F, D>,
+        U: IVCCircuit<F, D>,
         CC: GenericConfig<D, F = F> + 'static,
         CC::Hasher: AlgebraicHasher<F>,
     {
         fn new() -> Self {
             println!("[+] Building cyclic circuit");
-            let mut cd = prepare_common_data_step0v2::<F, CC, D>();
+            //let mut cd = prepare_common_data_step0v2::<F, CC, D>();
+            let mut cd = Self::build_first_proof();
             let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
             let wires = U::build(&mut b);
             // verify 1 proof: either dummy one or real one
@@ -394,6 +413,30 @@ mod test {
                 self.circuit_data.common.clone(),
             ))
         }
+        fn build_first_proof() -> CommonCircuitData<F, D> {
+            let config = CircuitConfig::standard_recursion_config();
+            let builder = CircuitBuilder::<F, D>::new(config.clone());
+            let data = builder.build::<CC>();
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            let proof = builder.add_virtual_proof_with_pis(&data.common);
+            let verifier_data =
+                builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
+            builder.verify_proof::<CC>(&proof, &verifier_data, &data.common);
+            let data = builder.build::<CC>();
+
+            let mut builder = CircuitBuilder::<F, D>::new(config);
+            let to_pad = U::dummy_circuit(&mut builder);
+            let proof = builder.add_virtual_proof_with_pis(&data.common);
+            let verifier_data =
+                builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
+            builder.verify_proof::<CC>(&proof, &verifier_data, &data.common);
+            builder.print_gate_counts(0);
+            // It panics without it
+            while builder.num_gates() < 1 << to_pad {
+                builder.add_gate(NoopGate, vec![]);
+            }
+            builder.build::<CC>().common
+        }
     }
     #[derive(Clone, Debug)]
     struct NoopCircuit {}
@@ -409,8 +452,17 @@ mod test {
         type Wires = ();
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {}
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {}
+    }
+
+    impl<F, const D: usize> IVCCircuit<F, D> for NoopCircuit
+    where
+        F: RichField + Extendable<D>,
+    {
         fn base_inputs(&self) -> Vec<F> {
             vec![]
+        }
+        fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
+            12
         }
     }
 
@@ -577,12 +629,21 @@ mod test {
             );
             Self::prove_from_array(pw, wires, self.unpadded_len);
         }
+    }
+    impl<const N: usize> IVCCircuit<F, D> for KeccakCircuit<N>
+    where
+        F: RichField + Extendable<D>,
+    {
         fn base_inputs(&self) -> Vec<F> {
             // since we don't care about the public inputs of the first
             // proof (since we're not reading them , because we take array
             // to hash as witness)
             // 8 * u32 = 256 bits
             F::rand_vec(8)
+        }
+        fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
+            KeccakCircuit::<200>::build(builder);
+            15
         }
     }
 
@@ -600,15 +661,23 @@ mod test {
             Self { inputs }
         }
     }
+    impl<const N: usize> IVCCircuit<F, D> for PoseidonCircuit<F, N>
+    where
+        F: RichField + Extendable<D>,
+    {
+        fn base_inputs(&self) -> Vec<F> {
+            F::rand_vec(NUM_HASH_OUT_ELTS)
+        }
+        fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
+            12
+        }
+    }
 
     impl<F, const D: usize, const N: usize> UserCircuit<F, D> for PoseidonCircuit<F, N>
     where
         F: RichField + Extendable<D>,
     {
         type Wires = PoseidonWires<N>;
-        fn base_inputs(&self) -> Vec<F> {
-            F::rand_vec(NUM_HASH_OUT_ELTS)
-        }
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let inputs = b.add_virtual_target_arr::<N>();
             let outputs = b.hash_n_to_hash_no_pad::<PoseidonHash>(inputs.to_vec());
@@ -623,36 +692,10 @@ mod test {
     }
 
     #[test]
-    fn test_simple_circuit_keccak256() {
-        const DATA_LEN: usize = 544;
-        const MAX_LEN: usize = HashGadget::compute_size_with_padding(DATA_LEN);
-        let circuit =
-            KeccakCircuit::<MAX_LEN>::new(rand_arr(DATA_LEN)).expect("to create keccak circuit");
-        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-        let wires = KeccakCircuit::<MAX_LEN>::build(&mut b);
-        let data = b.build::<C>();
-        let mut pw = PartialWitness::new();
-        <KeccakCircuit<MAX_LEN> as UserCircuit<F, D>>::prove(&circuit, &mut pw, &wires);
-        let proof = data.prove(pw).expect("should prove");
-        verify_proof_tuple(&(proof, data.verifier_only, data.common)).expect("proof invalid");
-    }
-    #[test]
     fn test_cyclic_circuit_basic() {
         test_cyclic_circuit((0..4).map(|_| NoopCircuit::new()).collect::<Vec<_>>());
     }
 
-    #[test]
-    fn test_simple_circuit_poseidon() {
-        init_logging();
-        const NB_ELEM: usize = 4;
-        let circuit = PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap());
-        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-        let mut pw = PartialWitness::new();
-        let wires = PoseidonCircuit::<F, NB_ELEM>::build(&mut b);
-        let circuit_data = b.build::<C>();
-        <PoseidonCircuit<F, NB_ELEM> as UserCircuit<F, D>>::prove(&circuit, &mut pw, &wires);
-        circuit_data.prove(pw).expect("invalid proof");
-    }
     #[test]
     fn test_cyclic_circuit_keccak256() {
         init_logging();
@@ -676,7 +719,31 @@ mod test {
         test_cyclic_circuit(circuits)
     }
 
-    fn test_cyclic_circuit<U: UserCircuit<F, D>>(steps: Vec<U>) {
+    #[test]
+    fn test_simple_circuit_poseidon() {
+        const NB_ELEM: usize = 4;
+        let circuit = PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap());
+        test_simple_circuit(circuit);
+    }
+    #[test]
+    fn test_simple_circuit_keccak256() {
+        const DATA_LEN: usize = 544;
+        const MAX_LEN: usize = HashGadget::compute_size_with_padding(DATA_LEN);
+        let circuit =
+            KeccakCircuit::<MAX_LEN>::new(rand_arr(DATA_LEN)).expect("to create keccak circuit");
+        test_simple_circuit(circuit)
+    }
+
+    fn test_simple_circuit<U: UserCircuit<F, D>>(u: U) {
+        init_logging();
+        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let mut pw = PartialWitness::new();
+        let wires = U::build(&mut b);
+        let circuit_data = b.build::<C>();
+        u.prove(&mut pw, &wires);
+        circuit_data.prove(pw).expect("invalid proof");
+    }
+    fn test_cyclic_circuit<U: IVCCircuit<F, D>>(steps: Vec<U>) {
         let circuit = CyclicCircuit::<F, C, D, U>::new();
         let mut last_proof = circuit
             .prove_init(steps[0].clone())
