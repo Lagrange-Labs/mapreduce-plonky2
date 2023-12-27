@@ -302,6 +302,10 @@ mod test {
     where
         F: RichField + Extendable<D>,
     {
+        fn build_recursive(
+            b: &mut CircuitBuilder<F, D>,
+            p: &ProofWithPublicInputsTarget<D>,
+        ) -> Self::Wires;
         /// returns the number of gates the circuit should have at the
         /// end of the first circuit creation. It must be in log2 base
         /// as it is being used in the following way
@@ -315,8 +319,12 @@ mod test {
         /// ones.
         fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize;
         fn base_inputs(&self) -> Vec<F>;
+        fn num_io() -> usize;
     }
 
+    /// The number of elements added to public inputs list when adding a verifier data as public
+    /// input.
+    const NUM_ELEM_VERIFIER_DATA_PUBLIC_INPUTS: usize = 68;
     impl<F, CC, const D: usize, U> CyclicCircuit<F, CC, D, U>
     where
         F: RichField + Extendable<D>,
@@ -329,27 +337,59 @@ mod test {
             //let mut cd = prepare_common_data_step0v2::<F, CC, D>();
             let mut cd = Self::build_first_proof();
             let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-            let wires = U::build(&mut b);
-            // verify 1 proof: either dummy one or real one
-            let condition_t = b.add_virtual_bool_target_safe();
-            let verifier_t = b.add_verifier_data_public_inputs();
-            // needs to make this cheat so the first dummy common data
-            cd.num_public_inputs = b.num_public_inputs();
-            let proof_t = b.add_virtual_proof_with_pis(&cd);
-            b.conditionally_verify_cyclic_proof_or_dummy::<CC>(condition_t, &proof_t, &cd)
-                .expect("this should not panic");
+            if true {
+                // verify 1 proof: either dummy one or real one
+                let condition_t = b.add_virtual_bool_target_safe();
+                // putting build after the verifier data public input fails
+                // i.e. expectation is that verifier data is last on public inputs
+                // -> circuit must register the public inputs before
+                // -> circuit can _not_ use the output of his computation to check something with the proof ?
+                let num_user_io = U::num_io();
+                cd.num_public_inputs = NUM_ELEM_VERIFIER_DATA_PUBLIC_INPUTS + num_user_io;
+                let proof_t = b.add_virtual_proof_with_pis(&cd);
+                let wires = U::build_recursive(&mut b, &proof_t);
+                // this call adds 68 public input elements
+                let verifier_t = b.add_verifier_data_public_inputs();
+                // needs to make this cheat so the first dummy common data
+                //cd.num_public_inputs = b.num_public_inputs();
+                // the only thing that the proof requires is the number of public inputs
+                b.conditionally_verify_cyclic_proof_or_dummy::<CC>(condition_t, &proof_t, &cd)
+                    .expect("this should not panic");
+                println!("[+] Building cyclic circuit data");
+                b.print_gate_counts(0);
+                println!(" ---> {} num gates", b.num_gates());
+                let cyclic_data = b.build::<CC>();
+                Self {
+                    step_condition: condition_t,
+                    verifier_data: verifier_t,
+                    proof: proof_t,
+                    user_wires: wires,
+                    base_common: cd,
+                    circuit_data: cyclic_data,
+                }
+            } else {
+                let wires = U::build(&mut b);
+                // verify 1 proof: either dummy one or real one
+                let condition_t = b.add_virtual_bool_target_safe();
+                let verifier_t = b.add_verifier_data_public_inputs();
+                // needs to make this cheat so the first dummy common data
+                cd.num_public_inputs = b.num_public_inputs();
+                let proof_t = b.add_virtual_proof_with_pis(&cd);
+                b.conditionally_verify_cyclic_proof_or_dummy::<CC>(condition_t, &proof_t, &cd)
+                    .expect("this should not panic");
 
-            println!("[+] Building cyclic circuit data");
-            b.print_gate_counts(0);
-            println!(" ---> {} num gates", b.num_gates());
-            let cyclic_data = b.build::<CC>();
-            Self {
-                step_condition: condition_t,
-                verifier_data: verifier_t,
-                proof: proof_t,
-                user_wires: wires,
-                base_common: cd,
-                circuit_data: cyclic_data,
+                println!("[+] Building cyclic circuit data");
+                b.print_gate_counts(0);
+                println!(" ---> {} num gates", b.num_gates());
+                let cyclic_data = b.build::<CC>();
+                Self {
+                    step_condition: condition_t,
+                    verifier_data: verifier_t,
+                    proof: proof_t,
+                    user_wires: wires,
+                    base_common: cd,
+                    circuit_data: cyclic_data,
+                }
             }
         }
         // first time it is false since it's dummy proof - then it's set to true
@@ -458,11 +498,17 @@ mod test {
     where
         F: RichField + Extendable<D>,
     {
+        fn build_recursive(b: &mut CircuitBuilder<F, D>, p: &ProofWithPublicInputsTarget<D>) {
+            <Self as UserCircuit<F, D>>::build(b)
+        }
         fn base_inputs(&self) -> Vec<F> {
             vec![]
         }
         fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
             12
+        }
+        fn num_io() -> usize {
+            0
         }
     }
 
@@ -634,6 +680,12 @@ mod test {
     where
         F: RichField + Extendable<D>,
     {
+        fn build_recursive(
+            b: &mut CircuitBuilder<F, D>,
+            p: &ProofWithPublicInputsTarget<D>,
+        ) -> Self::Wires {
+            <Self as UserCircuit<F, D>>::build(b)
+        }
         fn base_inputs(&self) -> Vec<F> {
             // since we don't care about the public inputs of the first
             // proof (since we're not reading them , because we take array
@@ -644,6 +696,9 @@ mod test {
         fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
             KeccakCircuit::<200>::build(builder);
             15
+        }
+        fn num_io() -> usize {
+            8
         }
     }
 
@@ -665,11 +720,20 @@ mod test {
     where
         F: RichField + Extendable<D>,
     {
+        fn build_recursive(
+            b: &mut CircuitBuilder<F, D>,
+            p: &ProofWithPublicInputsTarget<D>,
+        ) -> Self::Wires {
+            <Self as UserCircuit<F, D>>::build(b)
+        }
         fn base_inputs(&self) -> Vec<F> {
             F::rand_vec(NUM_HASH_OUT_ELTS)
         }
         fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
             12
+        }
+        fn num_io() -> usize {
+            NUM_HASH_OUT_ELTS
         }
     }
 
