@@ -4,6 +4,7 @@ mod test {
     use anyhow::ensure;
     use anyhow::Result;
     use hashbrown::HashMap;
+    use itertools::Itertools;
     use plonky2::field::types::Field;
     use plonky2::field::types::Sample;
     use plonky2::gates::noop::NoopGate;
@@ -35,6 +36,7 @@ mod test {
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::Rng;
     use serde::Serialize;
+    use std::iter;
     use std::sync::Arc;
     use std::time::Instant;
 
@@ -274,16 +276,16 @@ mod test {
         builder.build::<C>().common
     }
 
-    struct CyclicCircuit<F, CC, const D: usize, U>
+    struct CyclicCircuit<F, CC, const D: usize, U, const N: usize>
     where
         F: RichField + Extendable<D>,
-        U: IVCCircuit<F, D>,
+        U: PCDCircuit<F, D, N>,
         CC: GenericConfig<D, F = F>,
         CC::Hasher: AlgebraicHasher<F>,
     {
         step_condition: BoolTarget,
         verifier_data: VerifierCircuitTarget,
-        proof: ProofWithPublicInputsTarget<D>,
+        proofs: [ProofWithPublicInputsTarget<D>; N],
         user_wires: U::Wires,
         base_common: CommonCircuitData<F, D>,
         circuit_data: CircuitData<F, CC, D>,
@@ -298,13 +300,13 @@ mod test {
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires);
     }
 
-    trait IVCCircuit<F, const D: usize>: UserCircuit<F, D>
+    trait PCDCircuit<F, const D: usize, const ARITY: usize>: UserCircuit<F, D>
     where
         F: RichField + Extendable<D>,
     {
         fn build_recursive(
             b: &mut CircuitBuilder<F, D>,
-            p: &ProofWithPublicInputsTarget<D>,
+            p: &[ProofWithPublicInputsTarget<D>; ARITY],
         ) -> Self::Wires;
         /// returns the number of gates the circuit should have at the
         /// end of the first circuit creation. It must be in log2 base
@@ -325,10 +327,10 @@ mod test {
     /// The number of elements added to public inputs list when adding a verifier data as public
     /// input.
     const NUM_ELEM_VERIFIER_DATA_PUBLIC_INPUTS: usize = 68;
-    impl<F, CC, const D: usize, U> CyclicCircuit<F, CC, D, U>
+    impl<F, CC, const D: usize, U, const ARITY: usize> CyclicCircuit<F, CC, D, U, ARITY>
     where
         F: RichField + Extendable<D>,
-        U: IVCCircuit<F, D>,
+        U: PCDCircuit<F, D, ARITY>,
         CC: GenericConfig<D, F = F> + 'static,
         CC::Hasher: AlgebraicHasher<F>,
     {
@@ -337,59 +339,46 @@ mod test {
             //let mut cd = prepare_common_data_step0v2::<F, CC, D>();
             let mut cd = Self::build_first_proof();
             let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-            if true {
-                // verify 1 proof: either dummy one or real one
-                let condition_t = b.add_virtual_bool_target_safe();
-                // putting build after the verifier data public input fails
-                // i.e. expectation is that verifier data is last on public inputs
-                // -> circuit must register the public inputs before
-                // -> circuit can _not_ use the output of his computation to check something with the proof ?
-                let num_user_io = U::num_io();
-                cd.num_public_inputs = NUM_ELEM_VERIFIER_DATA_PUBLIC_INPUTS + num_user_io;
-                let proof_t = b.add_virtual_proof_with_pis(&cd);
-                let wires = U::build_recursive(&mut b, &proof_t);
-                // this call adds 68 public input elements
-                let verifier_t = b.add_verifier_data_public_inputs();
-                // needs to make this cheat so the first dummy common data
-                //cd.num_public_inputs = b.num_public_inputs();
-                // the only thing that the proof requires is the number of public inputs
-                b.conditionally_verify_cyclic_proof_or_dummy::<CC>(condition_t, &proof_t, &cd)
-                    .expect("this should not panic");
-                println!("[+] Building cyclic circuit data");
-                b.print_gate_counts(0);
-                println!(" ---> {} num gates", b.num_gates());
-                let cyclic_data = b.build::<CC>();
-                Self {
-                    step_condition: condition_t,
-                    verifier_data: verifier_t,
-                    proof: proof_t,
-                    user_wires: wires,
-                    base_common: cd,
-                    circuit_data: cyclic_data,
-                }
-            } else {
-                let wires = U::build(&mut b);
-                // verify 1 proof: either dummy one or real one
-                let condition_t = b.add_virtual_bool_target_safe();
-                let verifier_t = b.add_verifier_data_public_inputs();
-                // needs to make this cheat so the first dummy common data
-                cd.num_public_inputs = b.num_public_inputs();
-                let proof_t = b.add_virtual_proof_with_pis(&cd);
-                b.conditionally_verify_cyclic_proof_or_dummy::<CC>(condition_t, &proof_t, &cd)
-                    .expect("this should not panic");
-
-                println!("[+] Building cyclic circuit data");
-                b.print_gate_counts(0);
-                println!(" ---> {} num gates", b.num_gates());
-                let cyclic_data = b.build::<CC>();
-                Self {
-                    step_condition: condition_t,
-                    verifier_data: verifier_t,
-                    proof: proof_t,
-                    user_wires: wires,
-                    base_common: cd,
-                    circuit_data: cyclic_data,
-                }
+            // verify 1 proof: either dummy one or real one
+            let condition_t = b.add_virtual_bool_target_safe();
+            // expectation is that verifier data is last on public inputs so we must know
+            // how much public input should the virtual proof will have before calling it,
+            // so we can pass it to the user circuit.
+            let num_user_io = U::num_io();
+            cd.num_public_inputs = NUM_ELEM_VERIFIER_DATA_PUBLIC_INPUTS + num_user_io;
+            let proofs_t = (0..ARITY)
+                .map(|_| b.add_virtual_proof_with_pis(&cd))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(); // safe because it has N elements guaranteed
+            let wires = U::build_recursive(&mut b, &proofs_t);
+            // this call adds 68 public input elements
+            let verifier_t = b.add_verifier_data_public_inputs();
+            // needs to make this cheat so the first dummy common data
+            //cd.num_public_inputs = b.num_public_inputs();
+            // the only thing that the proof requires is the number of public inputs
+            let (dummy_p, dummy_vd) = b.dummy_proof_and_vk::<CC>(&cd).unwrap();
+            for proof_t in proofs_t.iter() {
+                b.conditionally_verify_cyclic_proof::<CC>(
+                    condition_t,
+                    proof_t,
+                    &dummy_p,
+                    &dummy_vd,
+                    &cd,
+                )
+                .expect("this should not panic");
+            }
+            println!("[+] Building cyclic circuit data");
+            b.print_gate_counts(0);
+            println!(" ---> {} num gates", b.num_gates());
+            let cyclic_data = b.build::<CC>();
+            Self {
+                step_condition: condition_t,
+                verifier_data: verifier_t,
+                proofs: proofs_t,
+                user_wires: wires,
+                base_common: cd,
+                circuit_data: cyclic_data,
             }
         }
         // first time it is false since it's dummy proof - then it's set to true
@@ -399,16 +388,16 @@ mod test {
         fn prove_step(
             &self,
             circuit: U,
-            last_proof: ProofWithPublicInputs<F, CC, D>,
+            last_proofs: &[ProofWithPublicInputs<F, CC, D>; ARITY],
         ) -> Result<ProofTuple<F, CC, D>> {
-            self.prove_internal(circuit, false, Some(last_proof))
+            self.prove_internal(circuit, false, Some(last_proofs))
         }
 
         fn prove_internal(
             &self,
             circuit: U,
             init: bool,
-            last_proof: Option<ProofWithPublicInputs<F, CC, D>>,
+            last_proofs: Option<&[ProofWithPublicInputs<F, CC, D>; ARITY]>,
         ) -> Result<ProofTuple<F, CC, D>> {
             println!("[+] Setting witness");
             let mut pw = PartialWitness::new();
@@ -416,20 +405,29 @@ mod test {
             // step_condition must be true to verify the real proof. If false, it verifies
             // the dummy first proof
             pw.set_bool_target(self.step_condition, !init);
-            let last_proof = if init {
+            if init {
                 let mut inputs_map: HashMap<usize, F> = HashMap::new();
                 for (i, v) in circuit.base_inputs().iter().enumerate() {
                     inputs_map.insert(i, *v);
                 }
-                cyclic_base_proof(
+                let proof = cyclic_base_proof(
                     &self.base_common,
                     &self.circuit_data.verifier_only,
                     inputs_map,
-                )
+                );
+                // we verify ARITY out of them anyway right now. This would change depending on the shape
+                // of the graph ?
+                for target in self.proofs.iter() {
+                    pw.set_proof_with_pis_target::<CC, D>(target, &proof);
+                }
             } else {
-                last_proof.ok_or(anyhow::anyhow!("no last proof given for non base step"))?
-            };
-            pw.set_proof_with_pis_target::<CC, D>(&self.proof, &last_proof);
+                let last_proofs =
+                    last_proofs.ok_or(anyhow::anyhow!("no last proof given for non base step"))?;
+                for (target, proof) in self.proofs.iter().zip(last_proofs.iter()) {
+                    pw.set_proof_with_pis_target::<CC, D>(target, proof);
+                }
+            }
+
             pw.set_verifier_data_target(&self.verifier_data, &self.circuit_data.verifier_only);
             println!("[+] Proving proof");
             let proof = self.circuit_data.prove(pw)?;
@@ -494,11 +492,11 @@ mod test {
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {}
     }
 
-    impl<F, const D: usize> IVCCircuit<F, D> for NoopCircuit
+    impl<F, const D: usize, const N: usize> PCDCircuit<F, D, N> for NoopCircuit
     where
         F: RichField + Extendable<D>,
     {
-        fn build_recursive(b: &mut CircuitBuilder<F, D>, p: &ProofWithPublicInputsTarget<D>) {
+        fn build_recursive(b: &mut CircuitBuilder<F, D>, p: &[ProofWithPublicInputsTarget<D>; N]) {
             <Self as UserCircuit<F, D>>::build(b)
         }
         fn base_inputs(&self) -> Vec<F> {
@@ -676,15 +674,16 @@ mod test {
             Self::prove_from_array(pw, wires, self.unpadded_len);
         }
     }
-    impl<const N: usize> IVCCircuit<F, D> for KeccakCircuit<N>
+    impl<const N: usize, const ARITY: usize> PCDCircuit<F, D, ARITY> for KeccakCircuit<N>
     where
         F: RichField + Extendable<D>,
     {
         fn build_recursive(
             b: &mut CircuitBuilder<F, D>,
-            p: &ProofWithPublicInputsTarget<D>,
+            p: &[ProofWithPublicInputsTarget<D>; ARITY],
         ) -> Self::Wires {
             <Self as UserCircuit<F, D>>::build(b)
+            // TODO: check the proof public input match what is in the hash node for example for MPT
         }
         fn base_inputs(&self) -> Vec<F> {
             // since we don't care about the public inputs of the first
@@ -716,21 +715,25 @@ mod test {
             Self { inputs }
         }
     }
-    impl<const N: usize> IVCCircuit<F, D> for PoseidonCircuit<F, N>
+    impl<const N: usize, const ARITY: usize> PCDCircuit<F, D, ARITY> for PoseidonCircuit<F, N>
     where
         F: RichField + Extendable<D>,
     {
         fn build_recursive(
             b: &mut CircuitBuilder<F, D>,
-            p: &ProofWithPublicInputsTarget<D>,
+            p: &[ProofWithPublicInputsTarget<D>; ARITY],
         ) -> Self::Wires {
             <Self as UserCircuit<F, D>>::build(b)
+            // TODO: check the proof public input match what is expected
         }
         fn base_inputs(&self) -> Vec<F> {
             F::rand_vec(NUM_HASH_OUT_ELTS)
         }
         fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
-            12
+            match ARITY {
+                16 => 16,
+                _ => 12,
+            }
         }
         fn num_io() -> usize {
             NUM_HASH_OUT_ELTS
@@ -754,7 +757,16 @@ mod test {
             pw.set_hash_target(wires.outputs, output);
         }
     }
-
+    #[test]
+    fn test_pcd_circuit_poseidon() {
+        init_logging();
+        // 16 leaves will produce a single verification at the level 1 of 16 proofs
+        const N_LEAVES: usize = 16;
+        const NB_ELEM: usize = 4;
+        let step_fn =
+            || PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap());
+        test_pcd_circuit::<16, _>(N_LEAVES, step_fn);
+    }
     #[test]
     fn test_cyclic_circuit_basic() {
         test_cyclic_circuit((0..4).map(|_| NoopCircuit::new()).collect::<Vec<_>>());
@@ -807,15 +819,16 @@ mod test {
         u.prove(&mut pw, &wires);
         circuit_data.prove(pw).expect("invalid proof");
     }
-    fn test_cyclic_circuit<U: IVCCircuit<F, D>>(steps: Vec<U>) {
-        let circuit = CyclicCircuit::<F, C, D, U>::new();
+    // IVC : only one proof per step being verified
+    fn test_cyclic_circuit<U: PCDCircuit<F, D, 1>>(steps: Vec<U>) {
+        let circuit = CyclicCircuit::<F, C, D, U, 1>::new();
         let mut last_proof = circuit
             .prove_init(steps[0].clone())
             .expect("base step failed")
             .0;
         for step in steps.into_iter().skip(1) {
             last_proof = circuit
-                .prove_step(step, last_proof)
+                .prove_step(step, &vec![last_proof].try_into().unwrap())
                 .expect("invalid step proof")
                 .0;
             circuit
@@ -823,6 +836,38 @@ mod test {
                 .expect("failed verification of base step");
         }
     }
+    // IVC : only one proof per step being verified
+    fn test_pcd_circuit<const ARITY: usize, U: PCDCircuit<F, D, ARITY>>(
+        n_leaves: usize,
+        step_fn: impl Fn() -> U,
+    ) {
+        let circuit = CyclicCircuit::<F, C, D, U, ARITY>::new();
+        let mut last_proofs =
+            iter::repeat(circuit.prove_init(step_fn()).expect("base step failed").0)
+                .take(n_leaves)
+                .collect::<Vec<_>>();
+        while last_proofs.len() > 1 {
+            last_proofs = last_proofs
+                .iter()
+                .chunks(ARITY)
+                .into_iter()
+                .map(|children_proofs| {
+                    let children_vec = children_proofs.cloned().collect::<Vec<_>>();
+                    let children_array: [ProofWithPublicInputs<F, C, D>; ARITY] =
+                        children_vec.try_into().unwrap();
+                    let node_proof = circuit
+                        .prove_step(step_fn(), &children_array)
+                        .expect("invalid step proof")
+                        .0;
+                    circuit
+                        .verify_proof(node_proof.clone())
+                        .expect("failed verification of base step");
+                    node_proof
+                })
+                .collect();
+        }
+    }
+
     #[test]
     fn bench_unified_circuit() {
         println!("[+] Prepare common data step 0");
