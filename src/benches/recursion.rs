@@ -276,16 +276,16 @@ mod test {
         builder.build::<C>().common
     }
 
-    struct CyclicCircuit<F, CC, const D: usize, U, const N: usize>
+    struct CyclicCircuit<F, CC, const D: usize, U, const ARITY: usize>
     where
         F: RichField + Extendable<D>,
-        U: PCDCircuit<F, D, N>,
+        U: PCDCircuit<F, D, ARITY>,
         CC: GenericConfig<D, F = F>,
         CC::Hasher: AlgebraicHasher<F>,
     {
-        step_condition: BoolTarget,
+        present_proofs: [BoolTarget; ARITY],
         verifier_data: VerifierCircuitTarget,
-        proofs: [ProofWithPublicInputsTarget<D>; N],
+        proofs: [ProofWithPublicInputsTarget<D>; ARITY],
         user_wires: U::Wires,
         base_common: CommonCircuitData<F, D>,
         circuit_data: CircuitData<F, CC, D>,
@@ -339,8 +339,10 @@ mod test {
             //let mut cd = prepare_common_data_step0v2::<F, CC, D>();
             let mut cd = Self::build_first_proof();
             let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-            // verify 1 proof: either dummy one or real one
-            let condition_t = b.add_virtual_bool_target_safe();
+            let conditions_t: [BoolTarget; ARITY] =
+                Vec::from_iter((0..ARITY).map(|_| b.add_virtual_bool_target_safe()))
+                    .try_into()
+                    .unwrap();
             // expectation is that verifier data is last on public inputs so we must know
             // how much public input should the virtual proof will have before calling it,
             // so we can pass it to the user circuit.
@@ -358,13 +360,9 @@ mod test {
             //cd.num_public_inputs = b.num_public_inputs();
             // the only thing that the proof requires is the number of public inputs
             let (dummy_p, dummy_vd) = b.dummy_proof_and_vk::<CC>(&cd).unwrap();
-            for proof_t in proofs_t.iter() {
+            for (proof_t, present) in proofs_t.iter().zip(conditions_t.iter()) {
                 b.conditionally_verify_cyclic_proof::<CC>(
-                    condition_t,
-                    proof_t,
-                    &dummy_p,
-                    &dummy_vd,
-                    &cd,
+                    *present, proof_t, &dummy_p, &dummy_vd, &cd,
                 )
                 .expect("this should not panic");
             }
@@ -373,7 +371,7 @@ mod test {
             println!(" ---> {} num gates", b.num_gates());
             let cyclic_data = b.build::<CC>();
             Self {
-                step_condition: condition_t,
+                present_proofs: conditions_t,
                 verifier_data: verifier_t,
                 proofs: proofs_t,
                 user_wires: wires,
@@ -388,7 +386,7 @@ mod test {
         fn prove_step(
             &self,
             circuit: U,
-            last_proofs: &[ProofWithPublicInputs<F, CC, D>; ARITY],
+            last_proofs: &[Option<ProofWithPublicInputs<F, CC, D>>; ARITY],
         ) -> Result<ProofTuple<F, CC, D>> {
             self.prove_internal(circuit, false, Some(last_proofs))
         }
@@ -397,15 +395,15 @@ mod test {
             &self,
             circuit: U,
             init: bool,
-            last_proofs: Option<&[ProofWithPublicInputs<F, CC, D>; ARITY]>,
+            last_proofs: Option<&[Option<ProofWithPublicInputs<F, CC, D>>; ARITY]>,
         ) -> Result<ProofTuple<F, CC, D>> {
             println!("[+] Setting witness");
             let mut pw = PartialWitness::new();
             circuit.prove(&mut pw, &self.user_wires);
-            // step_condition must be true to verify the real proof. If false, it verifies
-            // the dummy first proof
-            pw.set_bool_target(self.step_condition, !init);
             if init {
+                for i in 0..ARITY {
+                    pw.set_bool_target(self.present_proofs[i], false);
+                }
                 let mut inputs_map: HashMap<usize, F> = HashMap::new();
                 for (i, v) in circuit.base_inputs().iter().enumerate() {
                     inputs_map.insert(i, *v);
@@ -423,8 +421,14 @@ mod test {
             } else {
                 let last_proofs =
                     last_proofs.ok_or(anyhow::anyhow!("no last proof given for non base step"))?;
-                for (target, proof) in self.proofs.iter().zip(last_proofs.iter()) {
-                    pw.set_proof_with_pis_target::<CC, D>(target, proof);
+                for (i, (target, proof_o)) in self.proofs.iter().zip(last_proofs.iter()).enumerate()
+                {
+                    if let Some(proof) = proof_o {
+                        pw.set_bool_target(self.present_proofs[i], true);
+                        pw.set_proof_with_pis_target::<CC, D>(target, proof);
+                    } else {
+                        pw.set_bool_target(self.present_proofs[i], false);
+                    }
                 }
             }
 
@@ -732,6 +736,7 @@ mod test {
         fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
             match ARITY {
                 16 => 16,
+                2 => 13,
                 _ => 12,
             }
         }
@@ -760,12 +765,27 @@ mod test {
     #[test]
     fn test_pcd_circuit_poseidon() {
         init_logging();
-        // 16 leaves will produce a single verification at the level 1 of 16 proofs
-        const N_LEAVES: usize = 16;
+        // the arity of the circuit
+        const ARITY: usize = 3;
+        // The actuanl number of proofs we have
+        const N_LEAVES: usize = 1;
         const NB_ELEM: usize = 4;
         let step_fn =
             || PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap());
-        test_pcd_circuit::<16, _>(N_LEAVES, step_fn);
+        test_pcd_circuit::<ARITY, _>(N_LEAVES, step_fn);
+    }
+
+    #[test]
+    fn test_pcd_circuit_keccak() {
+        init_logging();
+        // the arity of the circuit
+        const ARITY: usize = 2;
+        // The actuanl number of proofs we have
+        const N_LEAVES: usize = 1;
+        const DATA_LEN: usize = 544;
+        const BYTES: usize = HashGadget::compute_size_with_padding(DATA_LEN);
+        let step_fn = || KeccakCircuit::<BYTES>::new(rand_arr(DATA_LEN)).unwrap();
+        test_pcd_circuit::<ARITY, KeccakCircuit<BYTES>>(N_LEAVES, step_fn);
     }
     #[test]
     fn test_cyclic_circuit_basic() {
@@ -828,7 +848,7 @@ mod test {
             .0;
         for step in steps.into_iter().skip(1) {
             last_proof = circuit
-                .prove_step(step, &vec![last_proof].try_into().unwrap())
+                .prove_step(step, &vec![Some(last_proof)].try_into().unwrap())
                 .expect("invalid step proof")
                 .0;
             circuit
@@ -853,8 +873,15 @@ mod test {
                 .into_iter()
                 .map(|children_proofs| {
                     let children_vec = children_proofs.cloned().collect::<Vec<_>>();
-                    let children_array: [ProofWithPublicInputs<F, C, D>; ARITY] =
-                        children_vec.try_into().unwrap();
+                    let n_dummy = ARITY - children_vec.len();
+                    let children_array: [Option<ProofWithPublicInputs<F, C, D>>; ARITY] =
+                        children_vec
+                            .into_iter()
+                            .map(Some)
+                            .chain(std::iter::repeat(None).take(n_dummy))
+                            .collect::<Vec<_>>()
+                            .try_into()
+                            .unwrap();
                     let node_proof = circuit
                         .prove_step(step_fn(), &children_array)
                         .expect("invalid step proof")
@@ -866,6 +893,10 @@ mod test {
                 })
                 .collect();
         }
+        println!(
+            "[+] PCD circuit digest: {}",
+            hex::encode(circuit.circuit_data.verifier_only.circuit_digest.to_bytes())
+        );
     }
 
     #[test]
