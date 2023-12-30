@@ -448,7 +448,12 @@ where
     }
     fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
         KeccakCircuit::<200>::build(builder);
-        15
+        match ARITY {
+            1 => 15,
+            2 => 16,
+            3..=4 => 17,
+            _ => 18,
+        }
     }
     fn num_io() -> usize {
         8
