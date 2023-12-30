@@ -2382,6 +2382,7 @@ checksum = "26072860ba924cbfa98ea39c8c19b4dd6a4a25423dbdf219c1eca91aa0cf6964"
 [[package]]
 name = "plonky2"
 version = "0.1.4"
+source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
 dependencies = [
  "ahash",
  "anyhow",
@@ -2392,7 +2393,7 @@ dependencies = [
  "log",
  "num",
  "plonky2_field",
- "plonky2_maybe_rayon 0.1.1",
+ "plonky2_maybe_rayon 0.1.1 (git+https://github.com/nikkolasg/plonky2)",
  "plonky2_util",
  "rand",
  "rand_chacha",
@@ -2423,6 +2424,7 @@ dependencies = [
 [[package]]
 name = "plonky2_field"
 version = "0.1.1"
+source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
@@ -2437,19 +2439,21 @@ dependencies = [
 [[package]]
 name = "plonky2_maybe_rayon"
 version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "194db0cbdd974e92d897cd92b74adb3968dc1b967315eb280357c49a7637994e"
+
+[[package]]
+name = "plonky2_maybe_rayon"
+version = "0.1.1"
+source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
-name = "plonky2_maybe_rayon"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "194db0cbdd974e92d897cd92b74adb3968dc1b967315eb280357c49a7637994e"
-
-[[package]]
 name = "plonky2_util"
 version = "0.1.1"
+source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
 
 [[package]]
 name = "powerfmt"
