@@ -1,4 +1,6 @@
 #[cfg(test)]
+mod circuits;
+#[cfg(test)]
 mod random_access;
 #[cfg(test)]
 mod recursion;
