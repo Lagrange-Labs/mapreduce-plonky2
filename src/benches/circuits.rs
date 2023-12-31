@@ -42,6 +42,8 @@ where
     user_wires: U::Wires,
     base_common: CommonCircuitData<F, D>,
     circuit_data: CircuitData<F, CC, D>,
+    #[cfg(test)]
+    num_gates: usize,
 }
 
 trait UserCircuit<F, const D: usize>: Clone
@@ -117,7 +119,8 @@ where
         }
         println!("[+] Building cyclic circuit data");
         b.print_gate_counts(0);
-        println!(" ---> {} num gates", b.num_gates());
+        let num_gates = b.num_gates();
+        println!(" ---> {} num gates", num_gates);
         let cyclic_data = b.build::<CC>();
         Self {
             present_proofs: conditions_t,
@@ -126,6 +129,8 @@ where
             user_wires: wires,
             base_common: cd,
             circuit_data: cyclic_data,
+            #[cfg(test)]
+            num_gates,
         }
     }
     // first time it is false since it's dummy proof - then it's set to true
@@ -735,6 +740,7 @@ mod benchmark {
         n: usize,
         // arity is 0 when it's not recursive, 1 when ivc and more for PCD
         arity: usize,
+        gate_count: usize,
         building: u64,
         proving: u64,
         lde: usize,
@@ -751,6 +757,8 @@ mod benchmark {
     }
 
     pub trait Benchable {
+        // returns the relevant information depending on the circuit being benchmarked
+        // i.e. n can be the number of times we hash some fixed length data
         fn n(&self) -> usize;
     }
     impl<const BYTES: usize, const N: usize> Benchable for RepeatedKeccak<BYTES, N> {
@@ -781,6 +789,7 @@ mod benchmark {
         let mut pw = PartialWitness::new();
         let now = time::Instant::now();
         let wires = U::build(&mut b);
+        let gate_count = b.num_gates();
         let circuit_data = b.build::<C>();
         let building_time = now.elapsed();
         let now = time::Instant::now();
@@ -795,6 +804,7 @@ mod benchmark {
             );
         BenchResult {
             circuit: tname,
+            gate_count,
             n: u.n(),
             arity: 0,
             lde,
@@ -870,6 +880,7 @@ mod benchmark {
         BenchResult {
             circuit: tname,
             n: step_fn().n(),
+            gate_count: circuit.num_gates,
             arity: ARITY,
             lde: circuit.circuit_data.common.lde_size(),
             building: building_time,
