@@ -520,6 +520,8 @@ where
 }
 
 mod benchmark {
+    use ethers::abi::Hash;
+    use hashbrown::HashMap;
     use itertools::Itertools;
     use plonky2::{
         field::extension::Extendable,
@@ -610,6 +612,7 @@ mod benchmark {
                 let step_fn = || KeccakCircuit::<BYTES>::new(rand_arr(DATA_LEN)).unwrap();
                 $(
                     fns.push(Box::new(move || {
+                        // arity changing but with same number of work at each step
                         bench_pcd_circuit::<F, C, D, $a, _>(tname($a), $a, step_fn)
                     }));
                 )+
@@ -636,7 +639,9 @@ mod benchmark {
                 let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
                 $(
                     fns.push(Box::new(move || {
-                        bench_pcd_circuit::<F, C, D, $a, _>(tname($a), $a, || RepeatedKeccak::<BYTES,$a> {
+                        // always 1 arity because we only verify one proof
+                        // but verify multiple hashes
+                        bench_pcd_circuit::<F, C, D, 1, _>(tname($a), 1, || RepeatedKeccak::<BYTES,$a> {
                             circuits: [single_circuit; $a]
                         })
                     }));
@@ -649,7 +654,7 @@ mod benchmark {
         run_benchs("pcd_recursive_update_keccak.csv".to_string(), trials);
     }
 
-    #[derive(Copy, Clone, Debug)]
+    #[derive(Clone, Debug)]
     struct RepeatedKeccak<const BYTES: usize, const N: usize> {
         circuits: [KeccakCircuit<BYTES>; N],
     }
@@ -704,6 +709,7 @@ mod benchmark {
             match N {
                 1 => 15,
                 2 => 16,
+                4 if ARITY == 1 => 16,
                 3..=6 => 17,
                 _ => 18,
             }
