@@ -650,7 +650,7 @@ mod benchmark {
             }
             };
         }
-        let trials = bench_pcd!(1, 2, 4);
+        let trials = bench_pcd!(4);
         run_benchs("pcd_recursive_update_keccak.csv".to_string(), trials);
     }
 
@@ -709,7 +709,10 @@ mod benchmark {
             match N {
                 1 => 15,
                 2 => 16,
-                4 if ARITY == 1 => 16,
+                4 if ARITY == 1 => {
+                    println!("HERE!!");
+                    17
+                }
                 3..=6 => 17,
                 _ => 18,
             }
