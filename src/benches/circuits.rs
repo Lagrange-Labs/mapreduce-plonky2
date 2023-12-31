@@ -454,10 +454,12 @@ where
     fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
         KeccakCircuit::<200>::build(builder);
         match ARITY {
-            1 => 15,
-            2 => 16,
-            3..=4 => 17,
-            _ => 18,
+            1 | 2 => 15,
+            4 => 15,
+            8 => 16,
+            12 => 16,
+            16 => 19,
+            _ => panic!("unrecognized size - fill manually"),
         }
     }
     fn num_io() -> usize {
@@ -599,7 +601,7 @@ mod benchmark {
             }
         }
     }
-        let fns2 = keccak_circuit!(2, 3, 4);
+        let fns2 = keccak_circuit!(2, 4,6,8,10,12,14);
         run_benchs("keccak_repeated.csv".to_string(), fns2);
     }
 
@@ -625,7 +627,7 @@ mod benchmark {
             }
             };
         }
-        let trials = bench_pcd!(1, 2, 4);
+        let trials = bench_pcd!(1, 2, 4,8,12,16);
         run_benchs("pcd_1circuit_keccak.csv".to_string(), trials);
     }
 
@@ -655,7 +657,7 @@ mod benchmark {
             }
             };
         }
-        let trials = bench_pcd!(4);
+        let trials = bench_pcd!(1,2,3, 4, 8, 12);
         run_benchs("pcd_recursive_update_keccak.csv".to_string(), trials);
     }
 
@@ -714,11 +716,12 @@ mod benchmark {
             match N {
                 1 => 15,
                 2 => 16,
+                3 => 16,
                 4 if ARITY == 1 => {
-                    println!("HERE!!");
-                    17
+                    println!("HERE 19!!");
+                    16
                 }
-                3..=6 => 17,
+                4..=6 => 17,
                 _ => 18,
             }
         }
@@ -752,8 +755,8 @@ mod benchmark {
         for bench in benches {
             let result = bench();
             writer.serialize(result).unwrap();
+            writer.flush().unwrap();
         }
-        writer.flush().unwrap();
     }
 
     pub trait Benchable {
