@@ -3,18 +3,28 @@ mod data_types;
 
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, config::GenericConfig, circuit_data::CircuitConfig}, iop::witness::PartialWitness,
 };
+use anyhow::Result;
+use crate::ProofTuple;
 
 /// Data that can be represented in a circuit by some encoding
 pub trait Data {
     type Encoded;
     /// An instance of Data must provide a function that encodes
-    /// the data in contains in a circuit by mutating a CircuitBuilder.
+    /// the data it contains in a circuit as a Target or Targets 
+    /// by mutating a CircuitBuilder.
     fn encode<F: RichField + Extendable<D>, const D: usize>(
         &self,
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self::Encoded;
+
+    /// An instance of Data must provide a way to connect its underlying Targets
+    fn connect<F: RichField + Extendable<D>, const D: usize>(
+        left: Self::Encoded,
+        right: Self::Encoded,
+        builder: &mut CircuitBuilder<F, D>,
+    );
 }
 
 /// Defines a map computation with its associated circuit
@@ -120,4 +130,57 @@ where
             self.reduce.add_constraints(&acc, z, builder)
         })
     }
+
+    // Creates a circuit verifying a Map computation and produces a proof for it
+    fn map_proof<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        const D: usize,
+    >(
+        &self,
+        config: &CircuitConfig,
+        inputs: Vec<M::Input>,
+    ) -> Result<ProofTuple<F, C, D>> {
+        let mut b = CircuitBuilder::<F, D>::new(config.clone());
+        let pw = PartialWitness::new();
+
+        // compute the outputs by evaluating the map
+        let outputs: Vec<M::Output> = inputs.iter().map(|inp| self.map.eval(inp)).collect();
+
+        // add both the inputs and outputs as data in the circuit
+        let in_targets: Vec<<M::Input as Data>::Encoded> = inputs.iter().map(|x| x.encode(&mut b)).collect();
+        let out_targets: Vec<<M::Output as Data>::Encoded> = outputs.iter().map(|x| x.encode(&mut b)).collect();
+
+        // add constraints 
+        let computed_out_targets: Vec<<M::Output as Data>::Encoded> = in_targets
+            .iter()
+            .map(|y| self.map.add_constraints(y, &mut b))
+            .collect();
+        
+        // connect outputs
+        out_targets.into_iter().zip(computed_out_targets).for_each(|(ot, cot)| M::Output::connect(ot, cot, &mut b));
+
+
+        // proving part
+        let data = b.build::<C>();
+        let proof = data.prove(pw)?;
+
+        Ok((proof, data.verifier_only, data.common))
+    }
+
+    // TODO
+
+    //     // Creates a circuit verifying a Map computation and verifying a previous proof and produces a single proof of both
+    //     fn map_proof_recursive<
+    //     F: RichField + Extendable<D>,
+    //     C: GenericConfig<D, F = F>,
+    //     const D: usize,
+    // >(
+    //     &self,
+    //     config: &CircuitConfig,
+    //     inputs: Vec<M::Input>,
+    //     in_proof: ProofTuple<F, C, D>,
+    // ) -> Result<ProofTuple<F, C, D>> {
+
+    // }
 }
