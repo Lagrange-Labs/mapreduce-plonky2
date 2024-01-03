@@ -61,7 +61,11 @@ pub struct TransactionMPT {
 }
 
 impl TransactionMPT {
-    fn compute_proof<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
+    pub fn compute_proof<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        const D: usize,
+    >(
         self,
     ) -> Result<ProofTuple<F, C, D>> {
         let config = CircuitConfig::standard_recursion_config();
@@ -138,8 +142,8 @@ impl RootMPTHeader {
     }
 }
 
-struct HeaderAggregation {
-    header_proofs: Vec<Vec<u8>>,
+pub struct HeaderAggregation {
+    pub header_proofs: Vec<Vec<u8>>,
 }
 
 impl HeaderAggregation {

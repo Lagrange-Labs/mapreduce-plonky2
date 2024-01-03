@@ -1,8 +1,5 @@
 use crate::eth::RLPBlock;
-use crate::hash::hash_to_fields;
 use crate::transaction::proof::{IntermediateMPT, ProofType, RootMPTHeader, TransactionMPT};
-use crate::transaction::PACKED_HASH_LEN;
-use crate::ByteProofTuple;
 use crate::{
     eth::{extract_child_hashes, BlockData},
     utils::keccak256,
@@ -16,7 +13,7 @@ use rlp::Encodable;
 use std::collections::HashMap;
 
 #[derive(Debug, Default)]
-pub(crate) enum TxFilter {
+pub enum TxFilter {
     // only prove tx that are less than this size in bytes
     BySize(usize),
     // only prove the tx which have these hashes
@@ -41,28 +38,29 @@ impl TxFilter {
         }
     }
 }
-struct TxBlockProver {
-    data: BlockData,
-    policy: TxFilter,
+pub struct TxBlockProver {
+    pub data: BlockData,
+    pub policy: TxFilter,
     #[cfg(test)]
-    nb_nodes: usize,
+    pub nb_nodes: usize,
 }
 
-struct MPTNode {
-    node_bytes: Vec<u8>, // RLP byte representation of the node
-    hash: Vec<u8>,       // its hash
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct MPTNode {
+    pub node_bytes: Vec<u8>, // RLP byte representation of the node
+    pub hash: Vec<u8>,       // its hash
     // ALL the children of this node if any (zero if leaf for example)
-    total_nb_children: usize,
+    pub total_nb_children: usize,
     // expected children hashes - will be filled in with only the hashes that we
     // traverse in the proofs of all tx we are looking at. For the nodes that we don't
     // traverse, their hash may be in children_hashes, and we'll only provide a "null" proof
     // for them.
-    exp_children: Vec<Vec<u8>>,
+    pub exp_children: Vec<Vec<u8>>,
     // child i : (key, proof) - key needed locate where is the hash of the child in the node
-    rcvd_children_proofs: Vec<ProverOutput>, // will be filled in
-    parent_hash: Option<Vec<u8>>, // indicator to go up one level when this node has been "proven"
+    pub rcvd_children_proofs: Vec<ProverOutput>, // will be filled in
+    pub parent_hash: Option<Vec<u8>>, // indicator to go up one level when this node has been "proven"
     /// Used for information about tx in the leaf node proving phase
-    transaction: Option<Transaction>,
+    pub transaction: Option<Transaction>,
 }
 impl MPTNode {
     fn is_provable(&self) -> bool {
@@ -93,7 +91,8 @@ impl MPTNode {
     }
 }
 
-struct ProverOutput {
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct ProverOutput {
     parent_hash: Option<Vec<u8>>,
     // hash of this node
     hash: Vec<u8>,
@@ -116,6 +115,7 @@ impl TxBlockProver {
 
     pub fn prove(&mut self) -> Result<Vec<u8>> {
         let (mut trie, leaves_hashes) = self.init_proofs_trie();
+
         println!(
             "[+] Built internal trie with {} leaves, and {} nodes in total",
             leaves_hashes.len(),
@@ -204,7 +204,9 @@ impl TxBlockProver {
             intermediate_node: node_bytes,
             children_proofs: inner_proofs,
         });
+
         let proof = prover.compute_proof()?;
+
         println!(
             "[+] OK Valid recursive proof for node hash {}",
             hex::encode(&node_hash)
@@ -232,10 +234,6 @@ impl TxBlockProver {
             transaction,
         });
         let proof = prover.compute_proof()?;
-        println!(
-            "[+] OK Valid proof for leaf - hash {}",
-            hex::encode(&leaf_hash)
-        );
         Ok(ProverOutput {
             parent_hash,
             proof,
@@ -246,7 +244,7 @@ impl TxBlockProver {
     // Returns the hashmap filled with the trie info
     // and returns the initial list of nodes's hash, which happen to be leaves, to prove
     #[allow(clippy::type_complexity)]
-    fn init_proofs_trie(&mut self) -> (HashMap<Vec<u8>, MPTNode>, Vec<Vec<u8>>) {
+    pub fn init_proofs_trie(&mut self) -> (HashMap<Vec<u8>, MPTNode>, Vec<Vec<u8>>) {
         // H(node) => { MPTNode() }
         let mut tree = HashMap::new();
         let mut leaves = Vec::new();
@@ -264,10 +262,12 @@ impl TxBlockProver {
             let idx = txr.receipt().transaction_index;
             let key = idx.rlp_bytes().to_vec();
             let proof_bytes = self.data.tx_trie.get_proof(&key).unwrap();
+
             let mut child_hash = None;
             for (i, node_bytes) in proof_bytes.iter().rev().enumerate() {
                 let idx_in_path = proof_bytes.len() - 1 - i;
                 let hash = keccak256(node_bytes);
+
                 if i == 0 {
                     leaves.push(hash.clone());
                 }
@@ -306,6 +306,7 @@ impl TxBlockProver {
     }
 }
 
+#[cfg(test)]
 mod test {
     use std::time::Instant;
 
