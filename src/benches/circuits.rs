@@ -1,5 +1,6 @@
 use anyhow::{ensure, Result};
 use hashbrown::HashMap;
+use plonky2::gates::exponentiation::ExponentiationGate;
 use plonky2::gates::noop::NoopGate;
 use plonky2::hash::hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS};
 use plonky2::hash::hashing::hash_n_to_hash_no_pad;
@@ -89,8 +90,8 @@ where
     CC: GenericConfig<D, F = F> + 'static,
     CC::Hasher: AlgebraicHasher<F>,
 {
-    fn new() -> Self {
-        println!("[+] Building cyclic circuit");
+    fn new<B: Bete>() -> Self {
+        println!("[+] Building first base circuit");
         //let mut cd = prepare_common_data_step0v2::<F, CC, D>();
         let mut cd = Self::build_first_proof();
         let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
@@ -118,7 +119,7 @@ where
                 .expect("this should not panic");
         }
         println!("[+] Building cyclic circuit data");
-        b.print_gate_counts(0);
+        b.print_gate_counts(1);
         let num_gates = b.num_gates();
         println!(" ---> {} num gates", num_gates);
         let cyclic_data = b.build::<CC>();
@@ -208,7 +209,7 @@ where
             self.circuit_data.common.clone(),
         ))
     }
-    fn build_first_proof() -> CommonCircuitData<F, D> {
+    fn build_first_proof<B: Bete>() -> CommonCircuitData<F, D> {
         let config = CircuitConfig::standard_recursion_config();
         let builder = CircuitBuilder::<F, D>::new(config.clone());
         let data = builder.build::<CC>();
@@ -225,11 +226,17 @@ where
         let verifier_data =
             builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
         builder.verify_proof::<CC>(&proof, &verifier_data, &data.common);
-        builder.print_gate_counts(0);
+        println!(
+            "--- BEFORE PADDING GATE COUNT FOR DUMMY CIRCUIT (to_pad = {})--- ",
+            to_pad
+        );
+        builder.print_gate_counts(1);
         // It panics without it
         while builder.num_gates() < 1 << to_pad {
             builder.add_gate(NoopGate, vec![]);
         }
+        println!("--- BEFORE GATE COUNT FOR DUMMY CIRCUIT --- ");
+        builder.print_gate_counts(1);
         builder.build::<CC>().common
     }
 }
@@ -432,8 +439,8 @@ where
         Self::prove_from_array(pw, wires, self.unpadded_len);
     }
 }
-impl<F, const D: usize, const N: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
-    for KeccakCircuit<N>
+impl<F, const D: usize, const BYTES: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
+    for KeccakCircuit<BYTES>
 where
     F: RichField + Extendable<D>,
 {
@@ -458,7 +465,10 @@ where
             4 => 15,
             8 => 16,
             12 => 16,
-            16 => 19,
+            16 => {
+                builder.add_gate(ExponentiationGate::new(66), vec![]);
+                17
+            }
             _ => panic!("unrecognized size - fill manually"),
         }
     }
@@ -527,8 +537,6 @@ where
 }
 
 mod benchmark {
-    use ethers::abi::Hash;
-    use hashbrown::HashMap;
     use itertools::Itertools;
     use plonky2::{
         field::extension::Extendable,
@@ -547,7 +555,7 @@ mod benchmark {
     use super::{PCDCircuit, UserCircuit};
     use crate::{
         benches::{
-            circuits::{CyclicCircuit, KeccakCircuit, KeccakWires, NoopCircuit},
+            circuits::{CyclicCircuit, KeccakCircuit, KeccakWires},
             test::init_logging,
         },
         hash::HashGadget,
@@ -601,7 +609,7 @@ mod benchmark {
             }
         }
     }
-        let fns2 = keccak_circuit!(2, 4,6,8,10,12,14);
+        let fns2 = keccak_circuit!(2, 4, 6, 8, 10, 12, 14);
         run_benchs("keccak_repeated.csv".to_string(), fns2);
     }
 
@@ -612,6 +620,7 @@ mod benchmark {
     /// our recursion.
     #[test]
     fn bench_recursion_single_circuit() {
+        init_logging();
         let tname = |i| format!("pcd_single_circuit_keccak");
         macro_rules! bench_pcd {
             ($( $a:expr),+) => { {
@@ -627,7 +636,7 @@ mod benchmark {
             }
             };
         }
-        let trials = bench_pcd!(1, 2, 4,8,12,16);
+        let trials = bench_pcd!(16);
         run_benchs("pcd_1circuit_keccak.csv".to_string(), trials);
     }
 
@@ -639,6 +648,7 @@ mod benchmark {
     /// a proof, is N/2.
     #[test]
     fn bench_recursive_update_keccak() {
+        init_logging();
         let tname = |i| format!("pcd_single_circuit_keccak");
         let single_circuit = KeccakCircuit::<BYTES>::new(rand_arr(DATA_LEN)).unwrap();
         macro_rules! bench_pcd {
@@ -657,7 +667,7 @@ mod benchmark {
             }
             };
         }
-        let trials = bench_pcd!(1,2,3, 4, 8, 12);
+        let trials = bench_pcd!(3, 4, 8, 12);
         run_benchs("pcd_recursive_update_keccak.csv".to_string(), trials);
     }
 
