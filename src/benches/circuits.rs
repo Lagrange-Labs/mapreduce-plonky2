@@ -90,7 +90,7 @@ where
     CC: GenericConfig<D, F = F> + 'static,
     CC::Hasher: AlgebraicHasher<F>,
 {
-    fn new<B: Bete>() -> Self {
+    fn new() -> Self {
         println!("[+] Building first base circuit");
         //let mut cd = prepare_common_data_step0v2::<F, CC, D>();
         let mut cd = Self::build_first_proof();
@@ -209,7 +209,7 @@ where
             self.circuit_data.common.clone(),
         ))
     }
-    fn build_first_proof<B: Bete>() -> CommonCircuitData<F, D> {
+    fn build_first_proof() -> CommonCircuitData<F, D> {
         let config = CircuitConfig::standard_recursion_config();
         let builder = CircuitBuilder::<F, D>::new(config.clone());
         let data = builder.build::<CC>();
