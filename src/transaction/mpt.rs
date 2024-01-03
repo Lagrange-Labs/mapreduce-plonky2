@@ -43,7 +43,7 @@ const HASH_LENGTH: usize = 32;
 
 /// There are different ways to extract values from a transaction. This enum
 /// list some.
-pub(crate) enum ExtractionMethod {
+pub enum ExtractionMethod {
     /// RLPBased decodes each header consecutively and extract the gas value
     /// TODO: Currently hardcode that the gas value is 3rd item in the tx list
     /// because we use const generics and can't pass the index as a parameter.
