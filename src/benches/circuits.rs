@@ -83,6 +83,13 @@ where
 /// The number of elements added to public inputs list when adding a verifier data as public
 /// input.
 const NUM_ELEM_VERIFIER_DATA_PUBLIC_INPUTS: usize = 68;
+/// Responsible for inserting the right gates inside the dummy circuit creation and to
+/// pad accordingly. The reason it is a closure is because these things depend on the
+/// whole circuit being proven, not only on small pieces like Keccak or Poseidon.
+/// The implementer of the whole circuit needs to give the right padder otherwise building
+/// the circuit data will fail.
+type Padder<F, const D: usize> = fn(&mut CircuitBuilder<F, D>) -> usize;
+
 impl<F, CC, const D: usize, U, const ARITY: usize> CyclicCircuit<F, CC, D, U, ARITY>
 where
     F: RichField + Extendable<D>,
@@ -90,10 +97,9 @@ where
     CC: GenericConfig<D, F = F> + 'static,
     CC::Hasher: AlgebraicHasher<F>,
 {
-    fn new() -> Self {
+    fn new(padder: Padder<F, D>) -> Self {
         println!("[+] Building first base circuit");
-        //let mut cd = prepare_common_data_step0v2::<F, CC, D>();
-        let mut cd = Self::build_first_proof();
+        let mut cd = Self::build_first_proof(padder);
         let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let conditions_t: [BoolTarget; ARITY] =
             Vec::from_iter((0..ARITY).map(|_| b.add_virtual_bool_target_safe()))
@@ -209,7 +215,7 @@ where
             self.circuit_data.common.clone(),
         ))
     }
-    fn build_first_proof() -> CommonCircuitData<F, D> {
+    fn build_first_proof(padder: Padder<F, D>) -> CommonCircuitData<F, D> {
         let config = CircuitConfig::standard_recursion_config();
         let builder = CircuitBuilder::<F, D>::new(config.clone());
         let data = builder.build::<CC>();
@@ -221,22 +227,18 @@ where
         let data = builder.build::<CC>();
 
         let mut builder = CircuitBuilder::<F, D>::new(config);
-        let to_pad = U::dummy_circuit(&mut builder);
+        let to_pad = padder(&mut builder);
+        //let to_pad = U::dummy_circuit(&mut builder);
         let proof = builder.add_virtual_proof_with_pis(&data.common);
         let verifier_data =
             builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
         builder.verify_proof::<CC>(&proof, &verifier_data, &data.common);
-        println!(
-            "--- BEFORE PADDING GATE COUNT FOR DUMMY CIRCUIT (to_pad = {})--- ",
-            to_pad
-        );
-        builder.print_gate_counts(1);
         // It panics without it
         while builder.num_gates() < 1 << to_pad {
             builder.add_gate(NoopGate, vec![]);
         }
         println!("--- BEFORE GATE COUNT FOR DUMMY CIRCUIT --- ");
-        builder.print_gate_counts(1);
+        builder.print_gate_counts(0);
         builder.build::<CC>().common
     }
 }
@@ -537,7 +539,9 @@ where
 }
 
 mod benchmark {
+    use crate::benches::circuits::NoopCircuit;
     use itertools::Itertools;
+    use plonky2::gates::exponentiation::ExponentiationGate;
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -552,7 +556,7 @@ mod benchmark {
     use rand::Rng;
     use serde::Serialize;
 
-    use super::{PCDCircuit, UserCircuit};
+    use super::{PCDCircuit, Padder, UserCircuit};
     use crate::{
         benches::{
             circuits::{CyclicCircuit, KeccakCircuit, KeccakWires},
@@ -627,9 +631,22 @@ mod benchmark {
                 let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
                 let step_fn = || KeccakCircuit::<BYTES>::new(rand_arr(DATA_LEN)).unwrap();
                 $(
+                    let padder = |b: &mut CircuitBuilder<F,D>| {
+                        KeccakCircuit::<200>::build(b);
+                        match $a {
+                            1 | 2 => 15,
+                            4 => 15,
+                            8 => 16,
+                            12 => 16,
+                            16 => {
+                                b.add_gate(ExponentiationGate::new(66), vec![]);
+                                17
+                            }
+                            _ => panic!("unrecognozed size"),
+                        }};
                     fns.push(Box::new(move || {
                         // arity changing but with same number of work at each step
-                        bench_pcd_circuit::<F, C, D, $a, _>(tname($a), $a, step_fn)
+                        bench_pcd_circuit::<F, C, D, $a, _>(tname($a), $a, step_fn,padder)
                     }));
                 )+
                 fns
@@ -655,12 +672,23 @@ mod benchmark {
             ($( $a:expr),+) => { {
                 let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
                 $(
+                    let padder = |b: &mut CircuitBuilder<F,D>|{
+                        KeccakCircuit::<200>::build(b);
+                        match $a {
+                            1 => 15,
+                            2 => 16,
+                            3 => 16,
+                            4 => 16,
+                            5..=6 => 17,
+                            _ => 18,
+                        }
+                    };
                     fns.push(Box::new(move || {
                         // always 1 arity because we only verify one proof
                         // but verify multiple hashes
                         bench_pcd_circuit::<F, C, D, 1, _>(tname($a), 1, || RepeatedKeccak::<BYTES,$a> {
                             circuits: [single_circuit; $a]
-                        })
+                        },padder)
                     }));
                 )+
                 fns
@@ -671,6 +699,36 @@ mod benchmark {
         run_benchs("pcd_recursive_update_keccak.csv".to_string(), trials);
     }
 
+    #[test]
+    fn bench_recursion_noop() {
+        init_logging();
+        let tname = |i| format!("pcd_recursion_noop");
+        macro_rules! bench_pcd {
+            ($( $a:expr),+) => { {
+                let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
+                let step_fn = || NoopCircuit::new();
+                $(
+                        let padder = |b: &mut CircuitBuilder<F,D>| {
+                        match $a {
+                            1 => 12,
+                            2 => 13,
+                            4 => 14,
+                            8 => 15,
+                            _ => panic!("unrecognozed size"),
+                        }
+                    };
+                    fns.push(Box::new(move || {
+                        // arity changing but with same number of work at each step
+                        bench_pcd_circuit::<F, C, D, $a, _>(tname($a), $a, step_fn,padder)
+                    }));
+                )+
+                fns
+            }
+            };
+        }
+        let trials = bench_pcd!(8);
+        run_benchs("pcd_1circuit_keccak.csv".to_string(), trials);
+    }
     #[derive(Clone, Debug)]
     struct RepeatedKeccak<const BYTES: usize, const N: usize> {
         circuits: [KeccakCircuit<BYTES>; N],
@@ -772,8 +830,11 @@ mod benchmark {
     pub trait Benchable {
         // returns the relevant information depending on the circuit being benchmarked
         // i.e. n can be the number of times we hash some fixed length data
-        fn n(&self) -> usize;
+        fn n(&self) -> usize {
+            0
+        }
     }
+    impl Benchable for NoopCircuit {}
     impl<const BYTES: usize, const N: usize> Benchable for RepeatedKeccak<BYTES, N> {
         fn n(&self) -> usize {
             // number of times we repeat the hashing in the circuit
@@ -837,12 +898,13 @@ mod benchmark {
         tname: String,
         n_leaves: usize,
         step_fn: impl Fn() -> U,
+        padder: Padder<F, D>,
     ) -> BenchResult
     where
         C::Hasher: AlgebraicHasher<F>,
     {
         let now = time::Instant::now();
-        let circuit = CyclicCircuit::<F, C, D, U, ARITY>::new();
+        let circuit = CyclicCircuit::<F, C, D, U, ARITY>::new(padder);
         let building_time = now.elapsed().as_millis() as u64;
         let mut last_proofs =
             iter::repeat(circuit.prove_init(step_fn()).expect("base step failed").0)
@@ -900,180 +962,5 @@ mod benchmark {
             proving: (proving_time / n_prove) as u64,
             verifying: (verifying_time / n_prove) as u64,
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::iter;
-
-    use itertools::Itertools;
-    use plonky2::field::types::Sample;
-    use plonky2::{
-        iop::witness::PartialWitness,
-        plonk::{
-            circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
-            config::{GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
-            proof::ProofWithPublicInputs,
-        },
-    };
-    use rand::Rng;
-
-    use crate::{
-        benches::{
-            circuits::{KeccakCircuit, PoseidonCircuit},
-            test::init_logging,
-        },
-        hash::HashGadget,
-    };
-    use anyhow::Result;
-
-    use super::{CyclicCircuit, NoopCircuit, PCDCircuit, UserCircuit};
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
-
-    fn rand_arr(size: usize) -> Vec<u8> {
-        (0..size)
-            .map(|_| rand::thread_rng().gen())
-            .collect::<Vec<u8>>()
-    }
-    #[test]
-    fn test_pcd_circuit_poseidon() {
-        init_logging();
-        // the arity of the circuit
-        const ARITY: usize = 3;
-        // The actuanl number of proofs we have
-        const N_LEAVES: usize = 1;
-        const NB_ELEM: usize = 4;
-        let step_fn =
-            || PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap());
-        test_pcd_circuit::<ARITY, _>(N_LEAVES, step_fn);
-    }
-
-    #[test]
-    fn test_pcd_circuit_keccak() {
-        init_logging();
-        // the arity of the circuit
-        const ARITY: usize = 2;
-        // The actuanl number of proofs we have
-        const N_LEAVES: usize = 1;
-        const DATA_LEN: usize = 544;
-        const BYTES: usize = HashGadget::compute_size_with_padding(DATA_LEN);
-        let step_fn = || KeccakCircuit::<BYTES>::new(rand_arr(DATA_LEN)).unwrap();
-        test_pcd_circuit::<ARITY, KeccakCircuit<BYTES>>(N_LEAVES, step_fn);
-    }
-    #[test]
-    fn test_cyclic_circuit_basic() {
-        test_cyclic_circuit((0..4).map(|_| NoopCircuit::new()).collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn test_cyclic_circuit_keccak256() {
-        init_logging();
-        let n = 3;
-        const DATA_LEN: usize = 544;
-        const MAX_LEN: usize = HashGadget::compute_size_with_padding(DATA_LEN);
-        let circuits = (0..n)
-            .map(|_| KeccakCircuit::<MAX_LEN>::new(rand_arr(DATA_LEN)))
-            .collect::<Result<Vec<_>>>()
-            .expect("can't create hash circuits");
-        test_cyclic_circuit(circuits)
-    }
-    #[test]
-    fn test_cyclic_circuit_poseidon() {
-        init_logging();
-        let n = 5;
-        const NB_ELEM: usize = 4;
-        let circuits = (0..n)
-            .map(|_| PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap()))
-            .collect::<Vec<_>>();
-        test_cyclic_circuit(circuits)
-    }
-
-    #[test]
-    fn test_simple_circuit_poseidon() {
-        const NB_ELEM: usize = 4;
-        let circuit = PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap());
-        test_simple_circuit(circuit);
-    }
-    #[test]
-    fn test_simple_circuit_keccak256() {
-        const DATA_LEN: usize = 544;
-        const MAX_LEN: usize = HashGadget::compute_size_with_padding(DATA_LEN);
-        let circuit =
-            KeccakCircuit::<MAX_LEN>::new(rand_arr(DATA_LEN)).expect("to create keccak circuit");
-        test_simple_circuit(circuit)
-    }
-
-    fn test_simple_circuit<U: UserCircuit<F, D>>(u: U) {
-        init_logging();
-        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-        let mut pw = PartialWitness::new();
-        let wires = U::build(&mut b);
-        let circuit_data = b.build::<C>();
-        u.prove(&mut pw, &wires);
-        circuit_data.prove(pw).expect("invalid proof");
-    }
-    // IVC : only one proof per step being verified
-    fn test_cyclic_circuit<U: PCDCircuit<F, D, 1>>(steps: Vec<U>) {
-        let circuit = CyclicCircuit::<F, C, D, U, 1>::new();
-        let mut last_proof = circuit
-            .prove_init(steps[0].clone())
-            .expect("base step failed")
-            .0;
-        for step in steps.into_iter().skip(1) {
-            last_proof = circuit
-                .prove_step(step, &vec![Some(last_proof)].try_into().unwrap())
-                .expect("invalid step proof")
-                .0;
-            circuit
-                .verify_proof(last_proof.clone())
-                .expect("failed verification of base step");
-        }
-    }
-    // IVC : only one proof per step being verified
-    fn test_pcd_circuit<const ARITY: usize, U: PCDCircuit<F, D, ARITY>>(
-        n_leaves: usize,
-        step_fn: impl Fn() -> U,
-    ) {
-        let circuit = CyclicCircuit::<F, C, D, U, ARITY>::new();
-        let mut last_proofs =
-            iter::repeat(circuit.prove_init(step_fn()).expect("base step failed").0)
-                .take(n_leaves)
-                .collect::<Vec<_>>();
-        while last_proofs.len() > 1 {
-            last_proofs = last_proofs
-                .iter()
-                .chunks(ARITY)
-                .into_iter()
-                .map(|children_proofs| {
-                    let children_vec = children_proofs.cloned().collect::<Vec<_>>();
-                    let n_dummy = ARITY - children_vec.len();
-                    let children_array: [Option<ProofWithPublicInputs<F, C, D>>; ARITY] =
-                        children_vec
-                            .into_iter()
-                            .map(Some)
-                            .chain(std::iter::repeat(None).take(n_dummy))
-                            .collect::<Vec<_>>()
-                            .try_into()
-                            .unwrap();
-                    let node_proof = circuit
-                        .prove_step(step_fn(), &children_array)
-                        .expect("invalid step proof")
-                        .0;
-                    circuit
-                        .verify_proof(node_proof.clone())
-                        .expect("failed verification of base step");
-                    node_proof
-                })
-                .collect();
-        }
-        println!(
-            "[+] PCD circuit digest: {}",
-            hex::encode(circuit.circuit_data.verifier_only.circuit_digest.to_bytes())
-        );
     }
 }
