@@ -677,9 +677,8 @@ mod benchmark {
                         match $a {
                             1 => 15,
                             2 => 16,
-                            3 => 16,
-                            4 => 16,
-                            5..=6 => 17,
+                            4 => 17,
+                            5..=6 => 18,
                             _ => 18,
                         }
                     };
@@ -695,7 +694,7 @@ mod benchmark {
             }
             };
         }
-        let trials = bench_pcd!(3, 4, 8, 12);
+        let trials = bench_pcd!(4, 8, 12);
         run_benchs("pcd_recursive_update_keccak.csv".to_string(), trials);
     }
 
