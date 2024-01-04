@@ -64,18 +64,6 @@ where
         b: &mut CircuitBuilder<F, D>,
         p: &[ProofWithPublicInputsTarget<D>; ARITY],
     ) -> Self::Wires;
-    /// returns the number of gates the circuit should have at the
-    /// end of the first circuit creation. It must be in log2 base
-    /// as it is being used in the following way
-    /// ```
-    ///     while builder.num_gates() < 1 << gates {
-    ///         builder.add_gate(NoopGate, vec![]);
-    ///     }
-    /// ```
-    /// Implementers can add any custom gates for example as well
-    /// so the first basic proof has the same shape than the following
-    /// ones.
-    fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize;
     fn base_inputs(&self) -> Vec<F>;
     fn num_io() -> usize;
 }
@@ -228,7 +216,6 @@ where
 
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let to_pad = padder(&mut builder);
-        //let to_pad = U::dummy_circuit(&mut builder);
         let proof = builder.add_virtual_proof_with_pis(&data.common);
         let verifier_data =
             builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
@@ -267,9 +254,6 @@ where
     }
     fn base_inputs(&self) -> Vec<F> {
         vec![]
-    }
-    fn dummy_circuit(_: &mut CircuitBuilder<F, D>) -> usize {
-        12
     }
     fn num_io() -> usize {
         0
@@ -460,20 +444,6 @@ where
         // 8 * u32 = 256 bits
         F::rand_vec(8)
     }
-    fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
-        KeccakCircuit::<200>::build(builder);
-        match ARITY {
-            1 | 2 => 15,
-            4 => 15,
-            8 => 16,
-            12 => 16,
-            16 => {
-                builder.add_gate(ExponentiationGate::new(66), vec![]);
-                17
-            }
-            _ => panic!("unrecognized size - fill manually"),
-        }
-    }
     fn num_io() -> usize {
         8
     }
@@ -507,13 +477,6 @@ where
     }
     fn base_inputs(&self) -> Vec<F> {
         F::rand_vec(NUM_HASH_OUT_ELTS)
-    }
-    fn dummy_circuit(_: &mut CircuitBuilder<F, D>) -> usize {
-        match ARITY {
-            16 => 16,
-            2 => 13,
-            _ => 12,
-        }
     }
     fn num_io() -> usize {
         NUM_HASH_OUT_ELTS
@@ -653,7 +616,7 @@ mod benchmark {
             }
             };
         }
-        let trials = bench_pcd!(16);
+        let trials = bench_pcd!(1, 2, 4, 8, 16);
         run_benchs("pcd_1circuit_keccak.csv".to_string(), trials);
     }
 
@@ -677,9 +640,15 @@ mod benchmark {
                         match $a {
                             1 => 15,
                             2 => 16,
-                            4 => 17,
-                            5..=6 => 18,
-                            _ => 18,
+                            4 => {
+                                b.add_gate(ExponentiationGate::new(66), vec![]);
+                                17
+                            },
+                            8..=14 => {
+                                b.add_gate(ExponentiationGate::new(66), vec![]);
+                                18
+                            },
+                            _ => panic!("unrecognized size - fill manually"),
                         }
                     };
                     fns.push(Box::new(move || {
@@ -694,7 +663,7 @@ mod benchmark {
             }
             };
         }
-        let trials = bench_pcd!(4, 8, 12);
+        let trials = bench_pcd!(1, 2, 4, 8, 10, 14);
         run_benchs("pcd_recursive_update_keccak.csv".to_string(), trials);
     }
 
@@ -725,7 +694,7 @@ mod benchmark {
             }
             };
         }
-        let trials = bench_pcd!(8);
+        let trials = bench_pcd!(1, 2, 4, 8, 16);
         run_benchs("pcd_1circuit_keccak.csv".to_string(), trials);
     }
     #[derive(Clone, Debug)]
@@ -776,21 +745,6 @@ mod benchmark {
                 wires.push(KeccakCircuit::<BYTES>::build_recursive(b, p));
             }
             wires.try_into().unwrap()
-        }
-        fn dummy_circuit(builder: &mut CircuitBuilder<F, D>) -> usize {
-            <KeccakCircuit<BYTES> as PCDCircuit<F, D, ARITY>>::dummy_circuit(builder);
-            // trial and error
-            match N {
-                1 => 15,
-                2 => 16,
-                3 => 16,
-                4 if ARITY == 1 => {
-                    println!("HERE 19!!");
-                    16
-                }
-                4..=6 => 17,
-                _ => 18,
-            }
         }
         fn num_io() -> usize {
             let one = <KeccakCircuit<BYTES> as PCDCircuit<F, D, ARITY>>::num_io();
