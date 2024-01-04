@@ -682,6 +682,7 @@ mod benchmark {
                             2 => 13,
                             4 => 14,
                             8 => 15,
+                            16 => 16,
                             _ => panic!("unrecognozed size"),
                         }
                     };
