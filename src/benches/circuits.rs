@@ -577,7 +577,7 @@ mod benchmark {
         }
     }
         let fns2 = keccak_circuit!(2, 4, 6, 8, 10, 12, 14);
-        run_benchs("keccak_repeated.csv".to_string(), fns2);
+        run_benchs("bench_keccak_repeated.csv".to_string(), fns2);
     }
 
     /// Launch a benchmark that runs an unified circuit that does:
@@ -617,7 +617,7 @@ mod benchmark {
             };
         }
         let trials = bench_pcd!(1, 2, 4, 8, 16);
-        run_benchs("pcd_1circuit_keccak.csv".to_string(), trials);
+        run_benchs("bench_recursion_single_circuit.csv".to_string(), trials);
     }
 
     /// Bench a circuit that does:
@@ -664,7 +664,7 @@ mod benchmark {
             };
         }
         let trials = bench_pcd!(1, 2, 4, 8, 10, 14);
-        run_benchs("pcd_recursive_update_keccak.csv".to_string(), trials);
+        run_benchs("bench_recursive_update_keccak.csv".to_string(), trials);
     }
 
     #[test]
@@ -696,7 +696,7 @@ mod benchmark {
             };
         }
         let trials = bench_pcd!(1, 2, 4, 8, 16);
-        run_benchs("pcd_1circuit_keccak.csv".to_string(), trials);
+        run_benchs("bench_recursion_noop.csv".to_string(), trials);
     }
     #[derive(Clone, Debug)]
     struct RepeatedKeccak<const BYTES: usize, const N: usize> {
