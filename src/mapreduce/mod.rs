@@ -1,36 +1,39 @@
-mod sum;
-mod data_types;
+//mod sum;
+//mod data_types;
 
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,
-    plonk::{circuit_builder::CircuitBuilder, config::GenericConfig, circuit_data::CircuitConfig}, iop::witness::PartialWitness,
+    plonk::{circuit_builder::CircuitBuilder, config::GenericConfig, circuit_data::CircuitConfig}, iop::{witness::PartialWitness, target::Target},
 };
 use anyhow::Result;
 use crate::ProofTuple;
 
-/// Data that can be represented in a circuit by some encoding
-pub trait Data {
-    type Encoded;
-    /// An instance of Data must provide a function that encodes
-    /// the data it contains in a circuit as a Target or Targets 
-    /// by mutating a CircuitBuilder.
-    fn encode<F: RichField + Extendable<D>, const D: usize>(
+/// An item of a data set that can be represented by a fixed-length array of field elements
+pub trait DataItem {
+    const LENGTH: usize;
+
+    /// An instance of DataItem must provide a function that encodes
+    /// the data it contains as a vector of field elements
+    fn encode<F: RichField + Extendable<D>, const D: usize>(&self)-> Vec<F>;
+
+    /// An instance of DataItem must provide a function that decodes
+    /// a list of field elements as a DataItem
+    fn decode<F: RichField + Extendable<D>, const D: usize>(vec: Vec<F>) -> Self;
+
+    fn allocate_as_public<F: RichField + Extendable<D>, const D: usize>(
         &self,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> Self::Encoded;
-
-    /// An instance of Data must provide a way to connect its underlying Targets
-    fn connect<F: RichField + Extendable<D>, const D: usize>(
-        left: Self::Encoded,
-        right: Self::Encoded,
-        builder: &mut CircuitBuilder<F, D>,
-    );
+    ) -> Vec<Target> {
+        let targets = builder.constants(&self.encode());
+        builder.register_public_inputs(&targets);
+        targets
+    }
 }
 
 /// Defines a map computation with its associated circuit
 pub trait Map {
-    type Input: Data;
-    type Output: Data;
+    type Input: DataItem;
+    type Output: DataItem;
 
     // The map computation to be performed on a single item.
     // The input and output can have different types but each
@@ -41,14 +44,14 @@ pub trait Map {
     // that should be satisfied by `eval`.
     fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
         &self,
-        input: &<<Self as Map>::Input as Data>::Encoded,
+        input: &Self::Input,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> <<Self as Map>::Output as Data>::Encoded;
+    ) -> Self::Output;
 }
 
 /// Defines a reduce computation and its associated circuit.
 pub trait Reduce {
-    type Input: Data;
+    type Input: DataItem;
 
     // TO DO:
     // Have a Reduce computation be general over an arity other than 2.
@@ -73,10 +76,10 @@ pub trait Reduce {
     // if eval(x, y) = z, then circuit(x, y, z) should be true.
     fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
         &self,
-        left: &<<Self as Reduce>::Input as Data>::Encoded,
-        right: &<<Self as Reduce>::Input as Data>::Encoded,
+        left: &Self::Input,
+        right: &Self::Input,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> <<Self as Reduce>::Input as Data>::Encoded;
+    ) -> Self::Input;
 }
 
 /// A MapReduce computation is a list of Maps and Reduces whose input and output
@@ -117,56 +120,65 @@ where
         &self,
         inputs: Vec<M::Input>,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> <R::Input as Data>::Encoded {
-        let init_targets: Vec<<M::Input as Data>::Encoded> = inputs.iter().map(|x| x.encode(builder)).collect();
-        let after_map_targets: Vec<<M::Output as Data>::Encoded> = init_targets
+    )->
+        R::Input 
+    {
+        let init_targets: Vec<Target> = inputs
             .iter()
-            .map(|y| self.map.add_constraints(y, builder))
+            .map(|item| 
+                item.allocate_as_public(builder)
+            )
+            .flatten()
             .collect();
 
-        let neutral = self.reduce.neutral().encode(builder);
+        let after_map_targets: Vec<M::Output> = inputs
+            .iter()
+            .map(|item| 
+                self.map.add_constraints(item, builder))
+            .collect();
+
+        let neutral = self.reduce.neutral();
 
         after_map_targets.iter().fold(neutral, |acc, z| {
             self.reduce.add_constraints(&acc, z, builder)
         })
     }
 
-    // Creates a circuit verifying a Map computation and produces a proof for it
-    fn map_proof<
-        F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
-        const D: usize,
-    >(
-        &self,
-        config: &CircuitConfig,
-        inputs: Vec<M::Input>,
-    ) -> Result<ProofTuple<F, C, D>> {
-        let mut b = CircuitBuilder::<F, D>::new(config.clone());
-        let pw = PartialWitness::new();
+    // // Creates a circuit verifying a Map computation and produces a proof for it
+    // fn map_proof<
+    //     F: RichField + Extendable<D>,
+    //     C: GenericConfig<D, F = F>,
+    //     const D: usize,
+    // >(
+    //     &self,
+    //     config: &CircuitConfig,
+    //     inputs: Vec<M::Input>,
+    // ) -> Result<ProofTuple<F, C, D>> {
+    //     let mut b = CircuitBuilder::<F, D>::new(config.clone());
+    //     let pw = PartialWitness::new();
 
-        // compute the outputs by evaluating the map
-        let outputs: Vec<M::Output> = inputs.iter().map(|inp| self.map.eval(inp)).collect();
+    //     // compute the outputs by evaluating the map
+    //     let outputs: Vec<M::Output> = inputs.iter().map(|inp| self.map.eval(inp)).collect();
 
-        // add both the inputs and outputs as data in the circuit
-        let in_targets: Vec<<M::Input as Data>::Encoded> = inputs.iter().map(|x| x.encode(&mut b)).collect();
-        let out_targets: Vec<<M::Output as Data>::Encoded> = outputs.iter().map(|x| x.encode(&mut b)).collect();
+    //     // add both the inputs and outputs as data in the circuit
+    //     let in_targets: Vec<Target> = inputs.iter().flat_map(|x| x.encode(&mut b)).collect();
+    //     let out_targets: Vec<Target> = outputs.iter().flat_map(|x| x.encode(&mut b)).collect();
 
-        // add constraints 
-        let computed_out_targets: Vec<<M::Output as Data>::Encoded> = in_targets
-            .iter()
-            .map(|y| self.map.add_constraints(y, &mut b))
-            .collect();
+    //     // add constraints 
+    //     let computed_out_targets: Vec<Target> = in_targets
+    //         .iter()
+    //         .map(|y| self.map.add_constraints(y, &mut b))
+    //         .collect();
         
-        // connect outputs
-        out_targets.into_iter().zip(computed_out_targets).for_each(|(ot, cot)| M::Output::connect(ot, cot, &mut b));
+    //     // connect outputs
+    //     out_targets.into_iter().zip(computed_out_targets).for_each(|(ot, cot)| M::Output::connect(ot, cot, &mut b));
 
+    //     // proving part
+    //     let data = b.build::<C>();
+    //     let proof = data.prove(pw)?;
 
-        // proving part
-        let data = b.build::<C>();
-        let proof = data.prove(pw)?;
-
-        Ok((proof, data.verifier_only, data.common))
-    }
+    //     Ok((proof, data.verifier_only, data.common))
+    // }
 
     // TODO
 
