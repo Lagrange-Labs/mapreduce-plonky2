@@ -2,7 +2,10 @@
 mod tests {
     use anyhow::Result;
     use log::{log_enabled, Level, LevelFilter};
+    use plonky2::field::extension::Extendable;
     use plonky2::field::types::Field;
+    use plonky2::gadgets::arithmetic_extension::PowersTarget;
+    use plonky2::hash::hash_types::RichField;
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -11,6 +14,231 @@ mod tests {
     use std::env;
     use std::io::Write;
     use std::time::Instant;
+
+
+    fn rotation_setup<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        arr: &[Target],
+    ) -> Target {
+
+        let gen = F::MULTIPLICATIVE_GROUP_GENERATOR;
+        let power: u64 = (F::ORDER - 1) / 544;
+        let gen_order_544 = gen.exp_u64(power);
+        let powers = F::cyclic_subgroup_known_order(gen_order_544, 544);
+
+        let terms: Vec<Target> = arr.iter().zip(powers).map(|(x, c)| 
+            b.mul_const(c, *x)
+        ).collect();
+
+        b.add_many(terms)
+    }
+
+    fn rotation_access<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        arr: Target,
+        index: Target,
+        element: Target,
+    ) {
+
+        let gen = F::MULTIPLICATIVE_GROUP_GENERATOR;
+        let power: u64 = (F::ORDER - 1) / 544;
+        let r_inverse = gen.inverse().exp_u64(power);
+
+        let bits_of_index = b.split_le(index, 10);
+        let r_inverse_to_index = b.exp_from_bits_const_base(r_inverse, bits_of_index);
+        let shifted_arr = b.mul(r_inverse_to_index, arr);
+        let tail_times_r = b.sub(shifted_arr, element);
+        let tail = b.mul_const(r_inverse, tail_times_r);
+
+    }
+
+    fn vanishing_poly_setup<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        arr: &[Target],
+    ) -> Vec<Target> {
+        // separator is 2^8 since array elements are less than 2^8
+                
+        // preprocess the elements of the array
+        // cost: l constraints
+        arr.into_iter().enumerate().map(|(i, el)| {
+            // separator is 2^8 since array elements are less than 2^8
+            let i_target = F::from_canonical_usize(i*256);
+
+            // out = separator * i_target + a
+            b.add_const( *el, i_target)
+        }).collect()
+    }
+
+    fn vanishing_poly_access<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        indexed_elements: &[Target],
+        n: Target,
+        element: Target,
+    ){
+        // separator is 2^8 since array elements are less than 2^8
+        let separator = F::from_canonical_u64(256);
+        
+        let claimed_pair = b.mul_const_add(separator, n, element);
+
+        // index into the array at n by computing the vanishing polynomial
+        let diffs: Vec<Target> = indexed_elements.into_iter().map(|el|
+            b.sub(*el, claimed_pair)
+        ).collect();
+
+        let zero = b.zero();
+        let product = b.mul_many(diffs);
+        b.connect(product, zero);
+    }
+
+    #[test]
+    fn compare_quin_vanishing_poly() -> Result<()> {
+        use crate::rlp::quin_selector;
+        use rand::Rng;
+
+        // (l, n) = (length of array, number of array lookups)
+        let comparison = |n: usize| {
+            // common to both circuits
+            const D: usize = 2;
+            type C = PoseidonGoldilocksConfig;
+            type F = <C as GenericConfig<D>>::F;
+
+            let byte_arr = [
+            185, 4, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+            22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+            44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65,
+            66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87,
+            88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
+            108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124,
+            125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141,
+            142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158,
+            159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175,
+            176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192,
+            193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209,
+            210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226,
+            227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243,
+            244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 0, 1, 2, 3, 4, 5, 6, 7, 8,
+            9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+            31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
+            53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74,
+            75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96,
+            97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114,
+            115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131,
+            132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148,
+            149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165,
+            166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182,
+            183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199,
+            200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216,
+            217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233,
+            234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250,
+            234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250,
+            234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250,
+            1,
+        ];
+
+            println!("\nArray length: {}", byte_arr.len());
+
+            let rand_indices: Vec<usize> = (0..n).map(|_| rand::thread_rng().gen_range(0..byte_arr.len())).collect();
+
+            let config = CircuitConfig::standard_recursion_config();
+
+            let quin_version = |builder: &mut CircuitBuilder<F, D>| {
+                let arr_target: Vec<Target> = byte_arr
+                    .iter()
+                    .map(|x| builder.constant(F::from_canonical_u8(*x)))
+                    .collect();
+                
+                for rand_index in &rand_indices {
+                    let n: Target = builder.constant(F::from_canonical_usize(*rand_index));
+                    let ret_element = quin_selector(builder, &arr_target, n);
+                }
+            };
+
+            let vanishing_poly_version = |builder: &mut CircuitBuilder<F, D>| {
+                let arr_target: Vec<Target> = byte_arr
+                    .iter()
+                    .map(|x| builder.constant(F::from_canonical_u8(*x)))
+                    .collect();
+                let indexed_elements = vanishing_poly_setup(builder, &arr_target);
+
+                for rand_index in &rand_indices {
+                    let n: Target = builder.constant(F::from_canonical_usize(*rand_index));
+                    let element = arr_target[*rand_index];
+                    vanishing_poly_access(builder, &indexed_elements, n, element);
+                }
+            };
+
+            // in this case there is nothing to do to the circuit
+            // after each version so we pass the identity function
+            compare::<C, D>(
+                config,
+                (quin_version, "QUIN VERSION"),
+                (vanishing_poly_version, "VANISHING POLY VERSION"),
+                |_| {}, // identity function
+            )
+        };
+
+        comparison(32)
+    }
+
+    #[test]
+    fn arrays_by_vanishing_poly() -> Result<()> {
+        use rand::Rng;
+        init_logging();
+
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let config = CircuitConfig::standard_recursion_config();
+        let pw = PartialWitness::new();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+
+        let bits_of_length: usize = 6;
+        let byte_arr: Vec<u8> = (0..1 << bits_of_length)
+            .map(|_i| rand::thread_rng().gen())
+            .collect();
+        println!("\nArray length: {}", byte_arr.len());
+        let rand_index: usize = rand::thread_rng().gen_range(0..1 << bits_of_length);
+
+        let arr_target: Vec<Target> = byte_arr
+            .iter()
+            .map(|x| builder.constant(F::from_canonical_u8(*x)))
+            .collect();
+        let n: Target = builder.constant(F::from_canonical_usize(rand_index));
+        let element = arr_target[rand_index];
+
+        // separator is 2^8 since array elements are less than 2^8
+        let separator = F::from_canonical_u64(256);
+
+        // preprocess the elements of the array
+        // cost: l constraints
+        let indexed_elements: Vec<Target> = arr_target.into_iter().enumerate().map(|(i, el)| {
+            let i_target = builder.constant(F::from_canonical_usize(i));
+
+            // out = separator * i_target + a
+            builder.mul_const_add(separator, i_target, el)
+        }).collect();
+
+        let claimed_pair = builder.mul_const_add(separator, n, element);
+
+        // index into the array at n by computing the vanishing polynomial
+        let one = builder.one();
+        let product = indexed_elements.into_iter().fold(one, |acc, el| {
+            let diff = builder.sub(el, claimed_pair);
+            builder.mul(acc, diff)
+        });
+
+        let zero = builder.zero();
+        builder.connect(product, zero);      
+
+        builder.print_gate_counts(0);
+        let data = builder.build::<C>();
+        let proof = data.prove(pw)?;
+        let res = data.verify(proof);
+        println!("    LDE size: {}", data.common.lde_size());
+
+        res
+    }
 
     #[test]
     fn compare_quin_random_access() -> Result<()> {
