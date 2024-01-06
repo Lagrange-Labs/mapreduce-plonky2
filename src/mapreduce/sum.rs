@@ -5,10 +5,12 @@ use plonky2::{
 
 use super::{data_types::PublicU64, DataItem, Map, Reduce};
 
-struct SumID;
+// this is a hack that is only necessary because the MapReduce struct requires one
+// map followed by one reduce
+struct SumU64Id;
 
 // identity map
-impl Map for SumID {
+impl Map for SumU64Id {
     type Input = PublicU64;
     type Output = PublicU64;
 
@@ -25,9 +27,9 @@ impl Map for SumID {
     }
 }
 
-struct Sum;
+struct SumU64;
 
-impl Reduce for Sum {
+impl Reduce for SumU64 {
     type Input = PublicU64;
 
     fn neutral(&self) -> Self::Input {
@@ -67,7 +69,7 @@ mod test {
 
     use crate::mapreduce::{
         data_types::PublicU64,
-        sum::{Sum, SumID},
+        sum::{SumU64, SumU64Id},
         MapReduce,
     };
 
@@ -84,8 +86,8 @@ mod test {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let id_map = SumID;
-        let sum = Sum;
+        let id_map = SumU64Id;
+        let sum = SumU64;
 
         let mr_sum = MapReduce::new(id_map, sum);
 

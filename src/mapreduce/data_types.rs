@@ -22,6 +22,40 @@ impl DataItem for PublicU64 {
         &self,
         builder: &mut CircuitBuilder<F, D>,
     ) -> Vec<Target> {
-        builder.constants(&self.encode())
+        let cons = builder.constants(&self.encode());
+        builder.register_public_inputs(&cons);
+        cons
+    }
+}
+
+struct PublicByteString(Vec<u8>);
+
+impl DataItem for PublicByteString {
+    fn encode<F: RichField + Extendable<D>, const D: usize>(&self) -> Vec<F> {
+        self.0
+            .iter()
+            .map(|b| 
+                F::from_canonical_u8(*b)
+            ).collect()
+    }
+
+    fn decode<F: RichField + Extendable<D>, const D: usize>(list: Vec<F>) -> Self {
+        let bytes: Vec<u8> = list
+            .iter()
+            .map(|e| 
+                F::to_canonical_u64(e)
+                .try_into()
+                .unwrap()
+            ).collect();
+        PublicByteString(bytes)
+    }
+
+    fn allocate<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Vec<Target> {
+        let cons = builder.constants(&self.encode());
+        builder.register_public_inputs(&cons);
+        cons
     }
 }

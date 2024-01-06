@@ -60,7 +60,9 @@ pub trait Map {
         inputs
             .iter()
             .zip(&outputs)
-            .for_each(|(i, o)| self.add_constraints(i, o, builder));
+            .for_each(|(i, o)| 
+                self.add_constraints(i, o, builder)
+            );
 
         outputs
     }
@@ -69,14 +71,6 @@ pub trait Map {
 /// Defines a reduce computation and its associated circuit.
 pub trait Reduce {
     type Input: DataItem + Clone;
-
-    // TO DO:
-    // Have a Reduce computation be general over an arity other than 2.
-    // This is easy for `eval` as we can just use the `eval` function
-    // in a flatmap. However this may not be as easy for constructing (efficient)
-    // circuits because we'll need to know how to pack the constraints.
-    //
-    // Unless...plonky2 packs constraints for you?
 
     /// A function producing the neutral element with respect to `eval`.
     fn neutral(&self) -> Self::Input;
