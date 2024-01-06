@@ -1,13 +1,16 @@
-use plonky2::{hash::hash_types::RichField, field::extension::Extendable, plonk::circuit_builder::CircuitBuilder, iop::target::Target};
+use plonky2::{
+    field::extension::Extendable, hash::hash_types::RichField,
+    plonk::circuit_builder::CircuitBuilder,
+};
 
-use super::{data_types::PublicInputU64, Map, Reduce};
+use super::{data_types::PublicU64, DataItem, Map, Reduce};
 
-struct IdPublicInputU64;
+struct SumID;
 
 // identity map
-impl Map for IdPublicInputU64 {
-    type Input = PublicInputU64;
-    type Output = PublicInputU64;
+impl Map for SumID {
+    type Input = PublicU64;
+    type Output = PublicU64;
 
     fn eval(&self, input: &Self::Input) -> Self::Output {
         input.clone()
@@ -15,33 +18,38 @@ impl Map for IdPublicInputU64 {
 
     fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
         &self,
-        input: &Target,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> Target {
-        *input
+        _input: &PublicU64,
+        _output: &PublicU64,
+        _builder: &mut CircuitBuilder<F, D>,
+    ) {
     }
 }
 
-struct SumPublicInputU64;
+struct Sum;
 
-impl Reduce for SumPublicInputU64 {
-    type Input = PublicInputU64;
+impl Reduce for Sum {
+    type Input = PublicU64;
 
     fn neutral(&self) -> Self::Input {
-        PublicInputU64(0u64)
+        PublicU64(0u64)
     }
 
     fn eval(&self, left: &Self::Input, right: &Self::Input) -> Self::Input {
-        PublicInputU64(left.0 + right.0)
+        PublicU64(left.0 + right.0)
     }
 
     fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
         &self,
-        left: &Target,
-        right: &Target,
+        left: &PublicU64,
+        right: &PublicU64,
+        out: &PublicU64,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> Target {
-        builder.add(*left, *right)
+    ) {
+        let left_target = left.allocate(builder);
+        let right_target = right.allocate(builder);
+        let out_target = out.allocate(builder);
+        let computed_out = builder.add(left_target[0], right_target[0]);
+        builder.connect(out_target[0], computed_out);
     }
 }
 
@@ -53,8 +61,15 @@ mod test {
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use std::env;
+    use std::io::Write;
+    use std::time::Instant;
 
-    use crate::mapreduce::{sum::IdPublicInputU64, MapReduce, data_types::PublicInputU64, sum::SumPublicInputU64};
+    use crate::mapreduce::{
+        data_types::PublicU64,
+        sum::{Sum, SumID},
+        MapReduce,
+    };
 
     #[test]
     fn test_sum_circuit() -> Result<()> {
@@ -69,17 +84,15 @@ mod test {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let id_map = IdPublicInputU64;
-        let sum = SumPublicInputU64;
+        let id_map = SumID;
+        let sum = Sum;
 
         let mr_sum = MapReduce::new(id_map, sum);
 
-        let inputs = data.into_iter().map(|x| PublicInputU64(x)).collect();
-        let output = mr_sum.add_constraints(inputs, &mut builder);
+        let inputs: Vec<PublicU64> = data.iter().map(|x| PublicU64(*x)).collect();
+        let output = mr_sum.apply(&inputs, &mut builder);
 
-        // check that the computed output equals the circuit output
-        let computed_target = builder.constant(F::from_canonical_u64(computed_output));
-        builder.connect(output, computed_target);
+        assert!(output.0 == computed_output);
 
         let circuit_data = builder.build::<C>();
 

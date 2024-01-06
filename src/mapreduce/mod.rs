@@ -1,33 +1,32 @@
-//mod sum;
-//mod data_types;
+mod data_types;
+mod sum;
 
 use plonky2::{
-    field::extension::Extendable, hash::hash_types::RichField,
-    plonk::{circuit_builder::CircuitBuilder, config::GenericConfig, circuit_data::CircuitConfig}, iop::{witness::PartialWitness, target::Target},
+    field::extension::Extendable,
+    hash::hash_types::RichField,
+    iop::target::Target,
+    plonk::circuit_builder::CircuitBuilder,
 };
-use anyhow::Result;
-use crate::ProofTuple;
 
 /// An item of a data set that can be represented by a fixed-length array of field elements
 pub trait DataItem {
-    const LENGTH: usize;
+    // TODO:
+    // consider making a struct that bookkeeps DataItems and their associated Targets
+    // in a HashMap or similar
 
     /// An instance of DataItem must provide a function that encodes
     /// the data it contains as a vector of field elements
-    fn encode<F: RichField + Extendable<D>, const D: usize>(&self)-> Vec<F>;
+    fn encode<F: RichField + Extendable<D>, const D: usize>(&self) -> Vec<F>;
 
     /// An instance of DataItem must provide a function that decodes
     /// a list of field elements as a DataItem
-    fn decode<F: RichField + Extendable<D>, const D: usize>(vec: Vec<F>) -> Self;
+    fn decode<F: RichField + Extendable<D>, const D: usize>(list: Vec<F>) -> Self;
 
-    fn allocate_as_public<F: RichField + Extendable<D>, const D: usize>(
+    /// Allocates a DataItem in a circuit and returns a Target
+    fn allocate<F: RichField + Extendable<D>, const D: usize>(
         &self,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> Vec<Target> {
-        let targets = builder.constants(&self.encode());
-        builder.register_public_inputs(&targets);
-        targets
-    }
+    ) -> Vec<Target>;
 }
 
 /// Defines a map computation with its associated circuit
@@ -45,13 +44,31 @@ pub trait Map {
     fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
         &self,
         input: &Self::Input,
+        output: &Self::Output,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> Self::Output;
+    );
+
+    // TODO
+    // consider using eval and add_constraints to make the Map trait iterable
+    fn apply_map<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        inputs: &[Self::Input],
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Vec<Self::Output> {
+        let outputs: Vec<Self::Output> = inputs.iter().map(|item| self.eval(item)).collect();
+
+        inputs
+            .iter()
+            .zip(&outputs)
+            .for_each(|(i, o)| self.add_constraints(i, o, builder));
+
+        outputs
+    }
 }
 
 /// Defines a reduce computation and its associated circuit.
 pub trait Reduce {
-    type Input: DataItem;
+    type Input: DataItem + Clone;
 
     // TO DO:
     // Have a Reduce computation be general over an arity other than 2.
@@ -78,8 +95,41 @@ pub trait Reduce {
         &self,
         left: &Self::Input,
         right: &Self::Input,
+        out: &Self::Input,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> Self::Input;
+    );
+
+    fn reduce_no_recurse<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        inputs: &[Self::Input],
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Self::Input {
+        inputs.iter().fold(self.neutral(), |acc, z| {
+            let acc_next = self.eval(&acc, z);
+            self.add_constraints(&acc, z, &acc_next, builder);
+            acc_next
+        })
+    }
+
+    // TODO
+    // consider using eval and add_constraints to make the Reduce trait iterable and foldable
+    // also, consider a recursion threshold
+    fn apply_reduce<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        inputs: &[Self::Input],
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Self::Input {
+        if inputs.len() == 1 {
+            inputs[0].clone()
+        } else {
+            let (left_half, right_half) = inputs.split_at(inputs.len() / 2);
+            let pair = vec![
+                self.apply_reduce(left_half, builder),
+                self.apply_reduce(right_half, builder),
+            ];
+            self.reduce_no_recurse(&pair, builder)
+        }
+    }
 }
 
 /// A MapReduce computation is a list of Maps and Reduces whose input and output
@@ -107,92 +157,12 @@ where
         Self { map, reduce }
     }
 
-    // This can be derived from the `eval` methods of the component Maps and Reduces
-    fn eval(&self, inputs: Vec<M::Input>) -> R::Input {
-        inputs
-            .iter()
-            .map(|x| self.map.eval(x))
-            .fold(self.reduce.neutral(), |acc, y| self.reduce.eval(&acc, &y))
-    }
-
-    // Create the circuit
-    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
+    fn apply<F: RichField + Extendable<D>, const D: usize>(
         &self,
-        inputs: Vec<M::Input>,
+        inputs: &[M::Input],
         builder: &mut CircuitBuilder<F, D>,
-    )->
-        R::Input 
-    {
-        let init_targets: Vec<Target> = inputs
-            .iter()
-            .map(|item| 
-                item.allocate_as_public(builder)
-            )
-            .flatten()
-            .collect();
-
-        let after_map_targets: Vec<M::Output> = inputs
-            .iter()
-            .map(|item| 
-                self.map.add_constraints(item, builder))
-            .collect();
-
-        let neutral = self.reduce.neutral();
-
-        after_map_targets.iter().fold(neutral, |acc, z| {
-            self.reduce.add_constraints(&acc, z, builder)
-        })
+    ) -> R::Input {
+        let map_outs = self.map.apply_map(inputs, builder);
+        self.reduce.apply_reduce(&map_outs, builder)
     }
-
-    // // Creates a circuit verifying a Map computation and produces a proof for it
-    // fn map_proof<
-    //     F: RichField + Extendable<D>,
-    //     C: GenericConfig<D, F = F>,
-    //     const D: usize,
-    // >(
-    //     &self,
-    //     config: &CircuitConfig,
-    //     inputs: Vec<M::Input>,
-    // ) -> Result<ProofTuple<F, C, D>> {
-    //     let mut b = CircuitBuilder::<F, D>::new(config.clone());
-    //     let pw = PartialWitness::new();
-
-    //     // compute the outputs by evaluating the map
-    //     let outputs: Vec<M::Output> = inputs.iter().map(|inp| self.map.eval(inp)).collect();
-
-    //     // add both the inputs and outputs as data in the circuit
-    //     let in_targets: Vec<Target> = inputs.iter().flat_map(|x| x.encode(&mut b)).collect();
-    //     let out_targets: Vec<Target> = outputs.iter().flat_map(|x| x.encode(&mut b)).collect();
-
-    //     // add constraints 
-    //     let computed_out_targets: Vec<Target> = in_targets
-    //         .iter()
-    //         .map(|y| self.map.add_constraints(y, &mut b))
-    //         .collect();
-        
-    //     // connect outputs
-    //     out_targets.into_iter().zip(computed_out_targets).for_each(|(ot, cot)| M::Output::connect(ot, cot, &mut b));
-
-    //     // proving part
-    //     let data = b.build::<C>();
-    //     let proof = data.prove(pw)?;
-
-    //     Ok((proof, data.verifier_only, data.common))
-    // }
-
-    // TODO
-
-    //     // Creates a circuit verifying a Map computation and verifying a previous proof and produces a single proof of both
-    //     fn map_proof_recursive<
-    //     F: RichField + Extendable<D>,
-    //     C: GenericConfig<D, F = F>,
-    //     const D: usize,
-    // >(
-    //     &self,
-    //     config: &CircuitConfig,
-    //     inputs: Vec<M::Input>,
-    //     in_proof: ProofTuple<F, C, D>,
-    // ) -> Result<ProofTuple<F, C, D>> {
-
-    // }
 }

@@ -1,46 +1,27 @@
-use plonky2::{iop::target::Target, hash::hash_types::RichField, field::extension::Extendable, plonk::circuit_builder::CircuitBuilder};
+use plonky2::{
+    field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
+    plonk::circuit_builder::CircuitBuilder,
+};
 
-use super::Data;
+use super::DataItem;
 
 #[derive(Clone)]
-pub struct PublicInputU64(pub u64);
+pub struct PublicU64(pub u64);
 
-impl Data for PublicInputU64 {
-    type Encoded = Target;
+impl DataItem for PublicU64 {
+    fn encode<F: RichField + Extendable<D>, const D: usize>(&self) -> Vec<F> {
+        vec![F::from_canonical_u64(self.0)]
+    }
 
-    fn encode<F: RichField + Extendable<D>, const D: usize>(
+    fn decode<F: RichField + Extendable<D>, const D: usize>(list: Vec<F>) -> Self {
+        assert!(list.len() == 1);
+        Self(F::to_canonical_u64(&list[0]))
+    }
+
+    fn allocate<F: RichField + Extendable<D>, const D: usize>(
         &self,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> Self::Encoded {
-        let target = builder.constant(F::from_canonical_u64(self.0));
-        builder.register_public_input(target);
-        target
-    }
-
-    fn connect<F: RichField + Extendable<D>, const D: usize>(
-        left: Target,
-        right: Target,
-        builder: &mut CircuitBuilder<F, D>
-    ) {
-        builder.connect(left, right)
+    ) -> Vec<Target> {
+        builder.constants(&self.encode())
     }
 }
-
-
-// #[derive(Clone)]
-// pub struct VecPublicInputU64(Vec<u64>);
-
-// impl Data for VecPublicInputU64 {
-//     type Encoded = Vec<Target>;
-
-//     fn encode<F: RichField + Extendable<D>, const D: usize>(
-//         &self,
-//         builder: &mut CircuitBuilder<F, D>,
-//     ) -> Self::Encoded {
-//         let targets: Vec<Target> = self.0.iter()
-//             .map(|x| builder.constant(F::from_canonical_u64(*x)))
-//             .collect();
-//         targets.iter().for_each(|target| builder.register_public_input(*target));
-//         targets
-//     }
-// }
