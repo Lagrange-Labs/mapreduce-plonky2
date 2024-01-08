@@ -195,7 +195,15 @@ fn bench_simple_repeated_poseidon() {
     let circuit = RepeatedPoseidon::<F, NB_ELEM, N> {
         circuits: individual_circuits,
     };
-    bench_simple_circuit::<F, D, C, _>("simple_repeated_poseidon".to_string(), circuit);
+    run_benchs(
+        "simple_repeated_poseidon.csv".to_string(),
+        vec![Box::new(|| {
+            bench_simple_circuit::<F, D, C, _>(
+                format!("repeated_poseidon_n{}", N).to_string(),
+                circuit,
+            )
+        })],
+    );
 }
 
 #[derive(Serialize, Clone, Debug)]
