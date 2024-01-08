@@ -6,7 +6,9 @@ use anyhow::Result;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
+    iop::witness::PartialWitness,
     plonk::{
+        circuit_builder::CircuitBuilder,
         circuit_data::{CommonCircuitData, VerifierOnlyCircuitData},
         config::GenericConfig,
         proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs},
@@ -21,6 +23,7 @@ mod hash;
 mod rlp;
 pub mod transaction;
 mod utils;
+mod circuit;
 
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.

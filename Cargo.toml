@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = "1.0.75"
 itertools = "0.12.0"
 ethers = { version ="2.0.11", default-features = false, features = ["rustls"]}
-plonky2 = {version = "0.1.4", features = ["std"]}
+plonky2 = { version = "0.1.4" }
 
 # supporting latest plonky2
 plonky2_crypto = { git = "https://github.com/nikkolasg/plonky2-crypto" , branch = "feat/serialization" }
