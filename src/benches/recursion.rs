@@ -2,6 +2,7 @@ use crate::circuit::{NoopCircuit, ProofOrDummyTarget};
 use itertools::Itertools;
 use log::info;
 use plonky2::field::types::Sample;
+use plonky2::hash::poseidon::Poseidon;
 use plonky2::{
     field::extension::Extendable,
     hash::{
@@ -35,10 +36,11 @@ use std::{iter, time};
 /// Given Poseidon is already quite API-zed, it is not necessary to expose it at
 /// the moment, because it wouldn't offer a fully customizable experience to all
 /// the potential use cases.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct PoseidonCircuit<F, const ELEMS: usize> {
     inputs: [F; ELEMS],
 }
+#[derive(Debug)]
 struct PoseidonWires<const ELEMS: usize> {
     /// Input is kept as wires because prover need to assign the concrete
     /// values to it
@@ -143,6 +145,57 @@ fn test_simple_poseidon() {
     const NB_ELEM: usize = 5;
     let circuit = PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap());
     bench_simple_circuit::<F, D, C, _>("simple_poseidon".to_string(), circuit);
+}
+
+/// ELEMS : how many elements are you hashing at each poseidon call
+/// N : how many iteration of the poseidon call you are doing
+#[derive(Clone, Debug)]
+struct RepeatedPoseidon<F, const ELEMS: usize, const N: usize> {
+    circuits: [PoseidonCircuit<F, ELEMS>; N],
+}
+
+impl<F, const D: usize, const ELEMS: usize, const N: usize> UserCircuit<F, D>
+    for RepeatedPoseidon<F, ELEMS, N>
+where
+    F: RichField + Extendable<D>,
+{
+    type Wires = [PoseidonWires<ELEMS>; N];
+    fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+        (0..N)
+            .map(|_| PoseidonCircuit::<F, ELEMS>::build(c))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+    fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+        for (c, w) in self.circuits.iter().zip(wires.iter()) {
+            c.prove(pw, w)
+        }
+    }
+}
+impl<F, const E: usize, const N: usize> Benchable for RepeatedPoseidon<F, E, N> {
+    fn n(&self) -> usize {
+        N
+    }
+}
+
+#[test]
+fn bench_simple_repeated_poseidon() {
+    #[cfg(not(ci))]
+    init_logging();
+    const NB_ELEM: usize = 4;
+    //const N : usize = 4096 * 27; // 2^12 * 27
+    const N: usize = 2;
+    let individual_circuits = (0..N)
+        .map(|_| PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap()))
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+
+    let circuit = RepeatedPoseidon::<F, NB_ELEM, N> {
+        circuits: individual_circuits,
+    };
+    bench_simple_circuit::<F, D, C, _>("simple_repeated_poseidon".to_string(), circuit);
 }
 
 #[derive(Serialize, Clone, Debug)]
