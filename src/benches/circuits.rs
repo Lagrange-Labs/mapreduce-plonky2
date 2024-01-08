@@ -676,7 +676,7 @@ mod benchmark {
                 let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
                 let step_fn = || NoopCircuit::new();
                 $(
-                        let padder = |b: &mut CircuitBuilder<F,D>| {
+                    let padder = |b: &mut CircuitBuilder<F,D>| {
                         match $a {
                             1 => 12,
                             2 => 13,
