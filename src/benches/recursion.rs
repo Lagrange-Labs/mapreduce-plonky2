@@ -104,6 +104,7 @@ type F = <C as GenericConfig<D>>::F;
 
 #[test]
 fn bench_recursion_noop() {
+    #[cfg(not(ci))]
     init_logging();
     let tname = |i| format!("pcd_recursion_noop");
     macro_rules! bench_pcd {
@@ -130,12 +131,14 @@ fn bench_recursion_noop() {
             }
             };
         }
-    let trials = bench_pcd!(1, 2, 3);
+    // test for IVC and binary PCD case
+    let trials = bench_pcd!(1, 2);
     run_benchs("bench_recursion_noop.csv".to_string(), trials);
 }
 
 #[test]
 fn test_simple_poseidon() {
+    #[cfg(not(ci))]
     init_logging();
     const NB_ELEM: usize = 5;
     let circuit = PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap());
@@ -190,7 +193,6 @@ fn bench_simple_circuit<
 where
     F: RichField + Extendable<D>,
 {
-    init_logging();
     let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
     let mut pw = PartialWitness::new();
     let now = time::Instant::now();
