@@ -1,8 +1,10 @@
+use crate::benches::test::{bench_simple_circuit, run_benchs, BenchResult};
 use crate::circuit::{NoopCircuit, ProofOrDummyTarget};
+use crate::keccak::{self, KeccakWires};
 use itertools::Itertools;
 use log::info;
 use plonky2::field::types::Sample;
-use plonky2::hash::poseidon::Poseidon;
+use plonky2::gates::exponentiation::ExponentiationGate;
 use plonky2::{
     field::extension::Extendable,
     hash::{
@@ -16,16 +18,16 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::CircuitConfig,
         config::{AlgebraicHasher, GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
         proof::ProofWithPublicInputs,
     },
 };
-use serde::Serialize;
+use rand::Rng;
 
 use super::init_logging;
+use super::test::Benchable;
+use crate::circuit::CyclicCircuit;
 use crate::circuit::{PCDCircuit, Padder, UserCircuit};
-use crate::{circuit::CyclicCircuit, utils::verify_proof_tuple};
 use std::{iter, time};
 
 /// Circuit hashing ELEMS field elements into a standard Poseidon 256 bit output
@@ -91,13 +93,11 @@ where
         pw.set_hash_target(wires.outputs, output);
     }
 }
-
-macro_rules! timeit {
-    ($a:expr) => {{
-        let now = time::Instant::now();
-        $a;
-        now.elapsed()
-    }};
+impl Benchable for NoopCircuit {}
+impl<F, const ELEMS: usize> Benchable for PoseidonCircuit<F, ELEMS> {
+    fn n(&self) -> usize {
+        ELEMS
+    }
 }
 
 const D: usize = 2;
@@ -108,13 +108,13 @@ type F = <C as GenericConfig<D>>::F;
 fn bench_recursion_noop() {
     #[cfg(not(ci))]
     init_logging();
-    let tname = |i| format!("pcd_recursion_noop");
+    let tname = |_| format!("pcd_recursion_noop");
     macro_rules! bench_pcd {
             ($( $a:expr),+) => { {
                 let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
                 let step_fn = || NoopCircuit::new();
                 $(
-                    let padder = |b: &mut CircuitBuilder<F,D>| {
+                    let padder = |_: &mut CircuitBuilder<F,D>| {
                         match $a {
                             1 => 12,
                             2 => 13,
@@ -206,80 +206,204 @@ fn bench_simple_repeated_poseidon() {
     );
 }
 
-#[derive(Serialize, Clone, Debug)]
-struct BenchResult {
-    circuit: String,
-    // n is circuit dependent
-    n: usize,
-    // arity is 0 when it's not recursive, 1 when ivc and more for PCD
-    arity: usize,
-    gate_count: usize,
-    building: u64,
-    proving: u64,
-    lde: usize,
-    verifying: u64,
+fn rand_arr(size: usize) -> Vec<u8> {
+    (0..size)
+        .map(|_| rand::thread_rng().gen())
+        .collect::<Vec<u8>>()
 }
 
-fn run_benchs(fname: String, benches: Vec<Box<dyn FnOnce() -> BenchResult>>) {
-    let mut writer = csv::Writer::from_path(fname).unwrap();
-    for bench in benches {
-        let result = bench();
-        writer.serialize(result).unwrap();
-        writer.flush().unwrap();
+use crate::keccak::KeccakCircuit;
+impl<const BYTES: usize> Benchable for KeccakCircuit<BYTES> {
+    fn n(&self) -> usize {
+        BYTES
     }
+}
+#[derive(Clone, Debug)]
+struct RepeatedKeccak<const BYTES: usize, const N: usize> {
+    circuits: [KeccakCircuit<BYTES>; N],
 }
 
-pub trait Benchable {
-    // returns the relevant information depending on the circuit being benchmarked
-    // i.e. n can be the number of times we hash some fixed length data
+impl<const BYTES: usize, const N: usize> Benchable for RepeatedKeccak<BYTES, N> {
     fn n(&self) -> usize {
-        0
+        N
     }
 }
-impl Benchable for NoopCircuit {}
-impl<F, const ELEMS: usize> Benchable for PoseidonCircuit<F, ELEMS> {
-    fn n(&self) -> usize {
-        ELEMS
-    }
-}
-fn bench_simple_circuit<
-    F,
-    const D: usize,
-    C: GenericConfig<D, F = F>,
-    U: UserCircuit<F, D> + Benchable,
->(
-    tname: String,
-    u: U,
-) -> BenchResult
+impl<F, const D: usize, const BYTES: usize, const N: usize> UserCircuit<F, D>
+    for RepeatedKeccak<BYTES, N>
 where
     F: RichField + Extendable<D>,
 {
-    let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-    let mut pw = PartialWitness::new();
-    let now = time::Instant::now();
-    let wires = U::build(&mut b);
-    let gate_count = b.num_gates();
-    let circuit_data = b.build::<C>();
-    let building_time = now.elapsed();
-    let now = time::Instant::now();
-    u.prove(&mut pw, &wires);
-    let proof = circuit_data.prove(pw).expect("invalid proof");
-    let proving_time = now.elapsed();
-    let lde = circuit_data.common.lde_size();
-    let verifying_time =
-        timeit!(
-            verify_proof_tuple(&(proof, circuit_data.verifier_only, circuit_data.common)).unwrap()
-        );
-    BenchResult {
-        circuit: tname,
-        gate_count,
-        n: u.n(),
-        arity: 0,
-        lde,
-        building: building_time.as_millis() as u64,
-        proving: proving_time.as_millis() as u64,
-        verifying: verifying_time.as_millis() as u64,
+    type Wires = [KeccakWires<BYTES>; N];
+    fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+        (0..N)
+            .map(|_| KeccakCircuit::<BYTES>::build(c))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
     }
+
+    fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+        for (i, circuit) in self.circuits.iter().enumerate() {
+            circuit.prove(pw, &wires[i]);
+        }
+    }
+}
+
+// D = comes from plonky2
+// ARITY = of the PCD graph
+// BYTES = number of bytes hashed
+// N = number of times we repeat the hashing in circuit
+impl<F, const D: usize, const ARITY: usize, const N: usize, const BYTES: usize>
+    PCDCircuit<F, D, ARITY> for RepeatedKeccak<BYTES, N>
+where
+    F: RichField + Extendable<D>,
+{
+    // TODO: remove  assumption about public inputs, in this case we don't
+    // need to expose as pub inputs all the intermediate hashing
+    fn base_inputs(&self) -> Vec<F> {
+        (0..N).flat_map(|_| F::rand_vec(8)).collect()
+    }
+    fn build_recursive(
+        b: &mut CircuitBuilder<F, D>,
+        p: &[ProofOrDummyTarget<D>; ARITY],
+    ) -> Self::Wires {
+        let mut wires = vec![];
+        for _ in 0..N {
+            wires.push(KeccakCircuit::<BYTES>::build_recursive(b, p));
+        }
+        wires.try_into().unwrap()
+    }
+    fn num_io() -> usize {
+        let one = <KeccakCircuit<BYTES> as PCDCircuit<F, D, ARITY>>::num_io();
+        one * N
+    }
+}
+
+/// This creates a different circuits that hash some data, different number
+/// of times. This is to emulate verifying a MPT proof, where one needs
+/// to consecutively hash nodes on the path from leaf to the root.
+#[test]
+fn bench_keccak_repeated() {
+    const DATA_LEN: usize = 544;
+    const BYTES: usize = keccak::compute_size_with_padding(DATA_LEN);
+    // the whole reason we need these macros is to be able to declare "like at runtime"
+    // an array of things with different constants inside. We can't have "const" value
+    // on iteration so we have to use macro to avoid hardcoding them one by one.
+    macro_rules! keccak_circuit {
+        ($( $a:expr),+) => {
+            {
+            let tname = |i| format!("repeated-keccak-n{}-b{}", i, BYTES);
+            let single_circuit = KeccakCircuit::<BYTES>::new(rand_arr(DATA_LEN)).unwrap();
+            let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
+            $(
+                let name = tname($a);
+                let circuit = single_circuit.clone();
+                fns.push(Box::new(move || {
+                    bench_simple_circuit::<F, D, C, _>(
+                        name,
+                        RepeatedKeccak {
+                            circuits: [circuit; $a],
+                        },
+                    )
+                    }));
+            )+
+            fns
+            }
+        }
+    }
+    let fns2 = keccak_circuit!(2, 3);
+    run_benchs("bench_keccak_repeated.csv".to_string(), fns2);
+}
+
+/// Launch a benchmark that runs an unified circuit that does:
+/// 1. Keccak256() of some fixed data
+/// 2. Verify N proofs where N varies in the experiments
+/// This is to simulate the case where we want to have one unified circuit during
+/// our recursion.
+#[test]
+fn bench_recursion_single_circuit() {
+    const DATA_LEN: usize = 544;
+    const BYTES: usize = keccak::compute_size_with_padding(DATA_LEN);
+    init_logging();
+    let tname = |_| format!("pcd_single_circuit_keccak");
+    macro_rules! bench_pcd {
+            ($( $a:expr),+) => { {
+                let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
+                let step_fn = || KeccakCircuit::<BYTES>::new(rand_arr(DATA_LEN)).unwrap();
+                $(
+                    let padder = |b: &mut CircuitBuilder<F,D>| {
+                        KeccakCircuit::<200>::build(b);
+                        match $a {
+                            1 | 2 => 15,
+                            4 => 15,
+                            8 => 16,
+                            12 => 16,
+                            16 => {
+                                b.add_gate(ExponentiationGate::new(66), vec![]);
+                                17
+                            }
+                            _ => panic!("unrecognozed size"),
+                        }};
+                    fns.push(Box::new(move || {
+                        // arity changing but with same number of work at each step
+                        bench_pcd_circuit::<F, C, D, $a, _>(tname($a), $a, step_fn,padder)
+                    }));
+                )+
+                fns
+            }
+            };
+        }
+    let trials = bench_pcd!(1, 2);
+    run_benchs("bench_recursion_single_circuit.csv".to_string(), trials);
+}
+
+/// Bench a circuit that does:
+/// 1. Verify a proof recursively
+/// 2. Make N consecutive hashing of fixed length
+/// This is to emulate the cirucit where we can prove the update of a leaf
+/// of a leaf in the merkle tree. So N must be dividable by 2, so length of
+/// a proof, is N/2.
+#[test]
+fn bench_recursive_update_keccak() {
+    const DATA_LEN: usize = 544;
+    const BYTES: usize = keccak::compute_size_with_padding(DATA_LEN);
+    init_logging();
+    let tname = |_| format!("pcd_single_circuit_keccak");
+    let single_circuit = KeccakCircuit::<BYTES>::new(rand_arr(DATA_LEN)).unwrap();
+    macro_rules! bench_pcd {
+            ($( $a:expr),+) => { {
+                let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
+                $(
+                    let padder = |b: &mut CircuitBuilder<F,D>|{
+                        KeccakCircuit::<200>::build(b);
+                        match $a {
+                            1 => 15,
+                            2 => 16,
+                            4 => {
+                                b.add_gate(ExponentiationGate::new(66), vec![]);
+                                17
+                            },
+                            8..=14 => {
+                                b.add_gate(ExponentiationGate::new(66), vec![]);
+                                18
+                            },
+                            _ => panic!("unrecognized size - fill manually"),
+                        }
+                    };
+                    fns.push(Box::new(move || {
+                        // always 1 arity because we only verify one proof
+                        // but verify multiple hashes
+                        bench_pcd_circuit::<F, C, D, 1, _>(tname($a), 1, || RepeatedKeccak::<BYTES,$a> {
+                            circuits: [single_circuit; $a]
+                        },padder)
+                    }));
+                )+
+                fns
+            }
+            };
+        }
+    let trials = bench_pcd!(1, 2);
+    run_benchs("bench_recursive_update_keccak.csv".to_string(), trials);
 }
 
 fn bench_pcd_circuit<
