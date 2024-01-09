@@ -10,9 +10,9 @@ mod recursion;
 pub(crate) fn init_logging() {
     if !log_enabled!(Level::Debug) {
         env::set_var("RUST_LOG", "debug");
-        env_logger::builder()
+        let _ = env_logger::builder()
             .format(|buf, record| writeln!(buf, "    {}", record.args()))
-            .init();
+            .try_init();
         log::set_max_level(LevelFilter::Debug);
     }
 }
