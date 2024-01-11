@@ -4,7 +4,7 @@ mod sum;
 use std::marker::PhantomData;
 
 use plonky2::{
-    field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
+    field::extension::Extendable, hash::hash_types::RichField,
     plonk::circuit_builder::CircuitBuilder,
 };
 
@@ -17,13 +17,6 @@ pub trait DataItem<F: RichField + Extendable<D>, const D: usize> {
     /// An instance of DataItem must provide a function that encodes
     /// the data it contains as a vector of field elements
     fn encode(&self) -> Vec<F>;
-
-    /// An instance of DataItem must provide a function that decodes
-    /// a list of field elements as a DataItem
-    fn decode(list: Vec<F>) -> Self;
-
-    /// Allocates a DataItem in a circuit and returns a Target
-    fn allocate(&self, builder: &mut CircuitBuilder<F, D>) -> Vec<Target>;
 }
 
 /// Defines a map computation with its associated circuit
@@ -38,6 +31,8 @@ pub trait Map<F: RichField + Extendable<D>, const D: usize> {
 
     // A function which adds constraints to a CircuitBuilder
     // that should be satisfied by `eval`.
+    // TODO
+    // consider making this a function returning a closure that adds constraints to a builder
     fn add_constraints(
         &self,
         input: &Self::Input,

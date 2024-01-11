@@ -3,7 +3,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
-use super::{data_types::PublicU64, DataItem, Map, Reduce};
+use super::{data_types::PublicU64, Map, Reduce};
 
 // this is a hack that is only necessary because the MapReduce struct requires one
 // map followed by one reduce
@@ -53,11 +53,11 @@ where
         out: &PublicU64,
         builder: &mut CircuitBuilder<F, D>,
     ) {
-        let left_target = left.allocate(builder);
-        let right_target = right.allocate(builder);
-        let out_target = out.allocate(builder);
-        let computed_out = builder.add(left_target[0], right_target[0]);
-        builder.connect(out_target[0], computed_out);
+        // let left_target = left.allocate(builder);
+        // let right_target = right.allocate(builder);
+        // let out_target = out.allocate(builder);
+        // let computed_out = builder.add(left_target[0], right_target[0]);
+        // builder.connect(out_target[0], computed_out);
     }
 }
 
