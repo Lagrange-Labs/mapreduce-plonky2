@@ -10,7 +10,10 @@ use super::{data_types::PublicU64, DataItem, Map, Reduce};
 struct SumU64Id;
 
 // identity map
-impl Map for SumU64Id {
+impl<F, const D: usize> Map<F, D> for SumU64Id
+where
+    F: RichField + Extendable<D>,
+{
     type Input = PublicU64;
     type Output = PublicU64;
 
@@ -18,7 +21,7 @@ impl Map for SumU64Id {
         input.clone()
     }
 
-    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
+    fn add_constraints(
         &self,
         _input: &PublicU64,
         _output: &PublicU64,
@@ -29,7 +32,10 @@ impl Map for SumU64Id {
 
 struct SumU64;
 
-impl Reduce for SumU64 {
+impl<F, const D: usize> Reduce<F, D> for SumU64
+where
+    F: RichField + Extendable<D>,
+{
     type Input = PublicU64;
 
     fn neutral(&self) -> Self::Input {
@@ -40,7 +46,7 @@ impl Reduce for SumU64 {
         PublicU64(left.0 + right.0)
     }
 
-    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
+    fn add_constraints(
         &self,
         left: &PublicU64,
         right: &PublicU64,
