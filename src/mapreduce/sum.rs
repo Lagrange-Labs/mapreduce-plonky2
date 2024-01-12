@@ -1,6 +1,6 @@
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::circuit_builder::CircuitBuilder, iop::target::Target,
 };
 
 use super::{data_types::PublicU64, Map, Reduce};
@@ -10,9 +10,7 @@ use super::{data_types::PublicU64, Map, Reduce};
 struct SumU64Id;
 
 // identity map
-impl<F, const D: usize> Map<F, D> for SumU64Id
-where
-    F: RichField + Extendable<D>,
+impl Map for SumU64Id
 {
     type Input = PublicU64;
     type Output = PublicU64;
@@ -21,20 +19,18 @@ where
         input.clone()
     }
 
-    fn add_constraints(
+    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
         &self,
-        _input: &PublicU64,
-        _output: &PublicU64,
-        _builder: &mut CircuitBuilder<F, D>,
-    ) {
+        input: &Self::Input
+    ) -> impl Fn(&mut CircuitBuilder<F, D>) -> Self::Output 
+    {
+        |builder: &mut CircuitBuilder<F, D>| input.clone()
     }
 }
 
 struct SumU64;
 
-impl<F, const D: usize> Reduce<F, D> for SumU64
-where
-    F: RichField + Extendable<D>,
+impl Reduce for SumU64
 {
     type Input = PublicU64;
 
@@ -46,18 +42,17 @@ where
         PublicU64(left.0 + right.0)
     }
 
-    fn add_constraints(
+    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
         &self,
-        left: &PublicU64,
-        right: &PublicU64,
-        out: &PublicU64,
-        builder: &mut CircuitBuilder<F, D>,
-    ) {
-        // let left_target = left.allocate(builder);
-        // let right_target = right.allocate(builder);
-        // let out_target = out.allocate(builder);
-        // let computed_out = builder.add(left_target[0], right_target[0]);
-        // builder.connect(out_target[0], computed_out);
+        left: &Self::Input,
+        right: &Self::Input,
+    ) -> impl Fn(&mut CircuitBuilder<F, D>) -> Self::Input {
+        move |builder: &mut CircuitBuilder<F, D>| {
+            let left_target= builder.add_virtual_target();
+            let right_target= builder.add_virtual_target();
+            builder.add(left_target, right_target);
+            self.eval(&left, &right)
+        }
     }
 }
 
@@ -98,7 +93,7 @@ mod test {
         let mr_sum = MapReduce::new(id_map, sum);
 
         let inputs: Vec<PublicU64> = data.iter().map(|x| PublicU64(*x)).collect();
-        let output = mr_sum.apply(&inputs, &mut builder);
+        let output = mr_sum.add_constraints(&inputs, &mut builder);
 
         assert!(output.0 == computed_output);
 
