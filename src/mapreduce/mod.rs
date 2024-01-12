@@ -1,8 +1,6 @@
 mod data_types;
 mod sum;
 
-use std::marker::PhantomData;
-
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,
     plonk::circuit_builder::CircuitBuilder,

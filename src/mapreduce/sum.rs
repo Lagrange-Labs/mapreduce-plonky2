@@ -24,7 +24,7 @@ impl Map for SumU64Id
         input: &Self::Input
     ) -> impl Fn(&mut CircuitBuilder<F, D>) -> Self::Output 
     {
-        |builder: &mut CircuitBuilder<F, D>| input.clone()
+        |_builder: &mut CircuitBuilder<F, D>| input.clone()
     }
 }
 
