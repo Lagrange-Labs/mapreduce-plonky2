@@ -74,7 +74,7 @@ pub trait Reduce {
 /// A MapReduce computation is a list of Maps and Reduces whose input and output
 /// types match up in sequence. Because a MapReduce computation consists of both
 /// Maps and Reduces the output type may differ from the input type.
-struct MapReduce<M, R, F, const D: usize>
+struct MapReduce<M, R>
 where
     M: Map,
     R: Reduce<Input = M::Output>,
@@ -85,12 +85,10 @@ where
     //       allow any list of Maps and Reduces (whose type signatures work).
     map: M,
     reduce: R,
-    phantom: PhantomData<F>,
 }
 
-impl<M, R, F, const D: usize> MapReduce<M, R, F, D>
+impl<M, R> MapReduce<M, R>
 where
-    F: RichField + Extendable<D>,
     M: Map,
     R: Reduce<Input = M::Output>,
 {
@@ -98,7 +96,6 @@ where
         Self {
             map,
             reduce,
-            phantom: PhantomData,
         }
     }
 
@@ -111,11 +108,14 @@ where
             )
     }
 
-    fn add_reduce_constraints(
+    fn add_reduce_constraints<F, const D: usize>(
         &self,
         inputs: &[R::Input],
         builder: &mut CircuitBuilder<F, D>,
-    ) -> R::Input {
+    ) -> R::Input 
+    where
+        F: RichField + Extendable<D>,    
+    {
         if inputs.len() == 1 {
             // put neutral on the right
             // is this *always* ok ?
@@ -132,18 +132,27 @@ where
         }
     }
 
-    fn add_map_constraints(
+    fn add_map_constraints<F, const D: usize>(
         &self,
         inputs: &[M::Input],
         builder: &mut CircuitBuilder<F, D>,
-    ) -> Vec<M::Output> {
+    ) -> Vec<M::Output> 
+    where F: RichField + Extendable<D>
+    {
         inputs.iter()
             .map(|i| 
                 self.map.add_constraints(i)(builder)
             ).collect()
     }
 
-    fn add_constraints(&self, inputs: &[M::Input], builder: &mut CircuitBuilder<F, D>) -> R::Input {
+    fn add_constraints<F, const D: usize>(
+        &self,
+        inputs: &[M::Input],
+        builder: &mut CircuitBuilder<F, D>
+    ) -> R::Input
+    where
+        F: RichField + Extendable<D>,
+    {
         let map_outs: Vec<M::Output> = inputs
             .iter()
             .map(|i| 
