@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,
-    plonk::circuit_builder::CircuitBuilder, iop::target::Target,
+    plonk::circuit_builder::CircuitBuilder,
 };
 
 /// An item of a data set that can be represented by a fixed-length array of field elements

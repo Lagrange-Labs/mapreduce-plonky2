@@ -1,6 +1,6 @@
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,
-    plonk::circuit_builder::CircuitBuilder, iop::target::Target,
+    plonk::circuit_builder::CircuitBuilder,
 };
 
 use super::{data_types::PublicU64, Map, Reduce};
