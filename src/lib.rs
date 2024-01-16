@@ -6,7 +6,9 @@ use anyhow::Result;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
+    iop::witness::PartialWitness,
     plonk::{
+        circuit_builder::CircuitBuilder,
         circuit_data::{CommonCircuitData, VerifierOnlyCircuitData},
         config::GenericConfig,
         proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs},
@@ -17,6 +19,7 @@ use serde::{Deserialize, Serialize};
 mod benches;
 pub mod eth;
 
+mod circuit;
 mod hash;
 mod rlp;
 pub mod transaction;

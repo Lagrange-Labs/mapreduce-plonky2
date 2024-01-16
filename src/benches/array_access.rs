@@ -1,16 +1,15 @@
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use log::{log_enabled, Level, LevelFilter};
     use plonky2::field::types::Field;
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use std::env;
-    use std::io::Write;
     use std::time::Instant;
+
+    use crate::benches::init_logging;
 
     #[test]
     fn compare_quin_random_access() -> Result<()> {
@@ -78,19 +77,7 @@ mod tests {
 
         (0..(array_bits_of_length_max + 1))
             .map(comparison)
-            .fold(Ok(()), |r, state| state.and(r))
-    }
-
-    /// Sets RUST_LOG=debug and initializes the logger
-    /// if it hasn't been enabled already.
-    fn init_logging() {
-        if !log_enabled!(Level::Debug) {
-            env::set_var("RUST_LOG", "debug");
-            env_logger::builder()
-                .format(|buf, record| writeln!(buf, "    {}", record.args()))
-                .init();
-            log::set_max_level(LevelFilter::Debug);
-        }
+            .try_fold((), |acc, item| Ok(acc).and(item))
     }
 
     /// Compares the gate counts, LDE size, build time, proving time, and verification time
