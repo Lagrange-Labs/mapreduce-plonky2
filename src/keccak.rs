@@ -3,7 +3,7 @@ use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
     iop::{
-        target::Target,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
@@ -19,6 +19,7 @@ use plonky2_crypto::{
 };
 
 use crate::{
+    array::ArrayWire,
     circuit::UserCircuit,
     utils::{convert_u8_to_u32, less_than, IntTargetWriter},
 };
@@ -38,6 +39,28 @@ pub const fn compute_size_with_padding(data_len: usize) -> usize {
 pub const fn compute_padding_size(data_len: usize) -> usize {
     compute_size_with_padding(data_len) - data_len
 }
+
+/// Represents the output of the keccak hash function.
+/// It's a wrapper to implement some utility functions on top.
+#[derive(Clone, Debug)]
+pub struct OutputHash(pub [Target; 8]);
+
+impl OutputHash {
+    pub fn select<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        condition: BoolTarget,
+        other: &Self,
+        b: &mut CircuitBuilder<F, D>,
+    ) -> Self {
+        OutputHash(core::array::from_fn(|i| {
+            b.select(condition, self.0[i], other.0[i])
+        }))
+    }
+}
+
+/// Circuit able to hash any arrays of bytes of dynamic sizes as long as its
+/// padded version length is less than N. In other words, the data array is
+/// already at the length of the padding.
 #[derive(Clone, Copy, Debug)]
 pub struct KeccakCircuit<const N: usize> {
     data: [u8; N],
@@ -48,14 +71,9 @@ pub struct KeccakWires<const N: usize> {
     input_array: ArrayWire<N>,
     diff: Target,
     // 256/u32 = 8
-    output_array: [Target; 8],
+    pub output_array: OutputHash,
 }
 
-#[derive(Debug, Clone)]
-struct ArrayWire<const N: usize> {
-    arr: [Target; N],
-    real_len: Target,
-}
 impl<const N: usize> KeccakCircuit<N> {
     pub fn new(mut data: Vec<u8>) -> Result<Self> {
         let total = compute_size_with_padding(data.len());
@@ -76,7 +94,9 @@ impl<const N: usize> KeccakCircuit<N> {
         })
     }
 
-    fn build_from_array<F: RichField + Extendable<D>, const D: usize>(
+    /// Takes an array which is _already_ at the right padded length.
+    /// The circuit fills the padding part and hash it.
+    pub fn build_from_array<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         a: &ArrayWire<N>,
     ) -> <Self as UserCircuit<F, D>>::Wires {
@@ -161,9 +181,18 @@ impl<const N: usize> KeccakCircuit<N> {
         KeccakWires {
             input_array: a.clone(),
             diff: diff_target,
-            output_array,
+            output_array: OutputHash(output_array),
         }
     }
+
+    /// In the case we already have the array coming from another circuit, i.e.
+    /// the cleartext bytes are not available,
+    /// we can use this function during proving time. However, we do need the
+    /// unpadded length to correctly compute the padding currently.
+    /// NOTE: we could remove this requirement but it would mean computing the
+    /// padding size in circuit, which is annoying. Computing off circuit is
+    /// usually secure in our cases because we use it to check consistency with
+    /// a known hash, so if one tweaks the len, it will give invalid output hash.
     fn prove_from_array<F: RichField>(
         pw: &mut PartialWitness<F>,
         wires: &KeccakWires<N>,
@@ -181,15 +210,8 @@ where
     type Wires = KeccakWires<N>;
 
     fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-        let real_len = b.add_virtual_target();
-        let array = b.add_virtual_target_arr::<N>();
-        Self::build_from_array(
-            b,
-            &ArrayWire {
-                arr: array,
-                real_len,
-            },
-        )
+        let array = ArrayWire::<N>::new(b);
+        Self::build_from_array(b, &array)
     }
 
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -221,7 +243,7 @@ mod test {
             _: &[ProofOrDummyTarget<D>; ARITY],
         ) -> Self::Wires {
             let wires = <Self as UserCircuit<F, D>>::build(b);
-            b.register_public_inputs(&wires.output_array);
+            b.register_public_inputs(&wires.output_array.0);
             wires
             // TODO: check the proof public input match what is in the hash node for example for MPT
         }

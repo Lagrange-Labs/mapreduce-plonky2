@@ -1,7 +1,6 @@
 //! Plonky2 documentation
 #![warn(missing_docs)]
 #![feature(generic_const_exprs)]
-
 use anyhow::Result;
 use plonky2::{
     field::extension::Extendable,
@@ -19,9 +18,11 @@ use serde::{Deserialize, Serialize};
 mod benches;
 pub mod eth;
 
+mod array;
 mod circuit;
 mod hash;
 mod keccak;
+mod mpt_sequential;
 mod rlp;
 pub mod transaction;
 mod utils;
