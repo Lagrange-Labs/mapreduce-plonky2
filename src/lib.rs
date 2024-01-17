@@ -21,6 +21,7 @@ pub mod eth;
 
 mod circuit;
 mod hash;
+mod keccak;
 mod rlp;
 pub mod transaction;
 mod utils;
