@@ -1,9 +1,9 @@
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::circuit_builder::CircuitBuilder, iop::witness::{PartialWitness, WitnessWrite},
 };
 
-use super::{data_types::PublicU64, Map, Reduce};
+use super::{Map, Reduce, DataItem};
 
 // this is a hack that is only necessary because the MapReduce struct requires one
 // map followed by one reduce
@@ -12,45 +12,48 @@ struct SumU64Id;
 // identity map
 impl Map for SumU64Id
 {
-    type Input = PublicU64;
-    type Output = PublicU64;
+    type Input = DataItem;
+    type Output = DataItem;
 
     fn eval(&self, input: &Self::Input) -> Self::Output {
         input.clone()
     }
 
-    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
+    fn add_constraints_and_witnesses<F: RichField + Extendable<D>, const D: usize>(
         &self,
-        input: &Self::Input
-    ) -> impl Fn(&mut CircuitBuilder<F, D>) -> Self::Output 
-    {
-        |_builder: &mut CircuitBuilder<F, D>| input.clone()
+        input: &Self::Input,
+    ) -> impl Fn(&mut CircuitBuilder<F, D>, &mut PartialWitness<F>) -> Self::Output { 
+        {
+            |_builder: &mut CircuitBuilder<F, D>, _pw: &mut PartialWitness<F>| input.clone()
+        }
     }
 }
 
 struct SumU64;
 
-impl Reduce for SumU64
+impl<F: RichField> Reduce for SumU64
 {
-    type Input = PublicU64;
+    type Input = DataItem<F>;
 
     fn neutral(&self) -> Self::Input {
-        PublicU64(0u64)
+        F::from_canonical_u64(0);
     }
 
     fn eval(&self, left: &Self::Input, right: &Self::Input) -> Self::Input {
         PublicU64(left.0 + right.0)
     }
 
-    fn add_constraints<F: RichField + Extendable<D>, const D: usize>(
+    fn add_constraints_and_witnesses<F: RichField + Extendable<D>, const D: usize>(
         &self,
         left: &Self::Input,
         right: &Self::Input,
-    ) -> impl Fn(&mut CircuitBuilder<F, D>) -> Self::Input {
-        move |builder: &mut CircuitBuilder<F, D>| {
+    ) -> impl Fn(&mut CircuitBuilder<F, D>, &mut PartialWitness<F>) -> Self::Input {
+        move |builder, pw| {
             let left_target= builder.add_virtual_target();
             let right_target= builder.add_virtual_target();
-            builder.add(left_target, right_target);
+            let out_target = builder.add(left_target, right_target);
+            pw.set_target(left_target, left.get_values()[0]);
+            pw.set_target(right_target, right.get_values()[0]);
             self.eval(&left, &right)
         }
     }
