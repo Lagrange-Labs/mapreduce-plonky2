@@ -161,9 +161,17 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         b: &mut CircuitBuilder<F, D>,
     ) -> BoolTarget {
         let extracted = self.extract_array::<F, D, SUB>(b, at);
+        sub.equals(b, &extracted)
+    }
+
+    pub fn equals<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        other: &Self,
+    ) -> BoolTarget {
         let mut res = b._true();
-        for (extracted, given) in extracted.arr.iter().zip(sub.arr.iter()) {
-            let eq = b.is_equal(extracted.to_target(), given.to_target());
+        for (our, other) in self.arr.iter().zip(other.arr.iter()) {
+            let eq = b.is_equal(our.to_target(), other.to_target());
             res = b.and(res, eq);
         }
         res
@@ -257,7 +265,7 @@ mod test {
         {
             type Wires = (Array<Target, SIZE>, Target, Target);
             fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-                let array = Array::<Target, 80>::new(c);
+                let array = Array::<Target, SIZE>::new(c);
                 let exp_value = c.add_virtual_target();
                 let index = c.add_virtual_target();
                 let extracted = array.value_at(c, index);
@@ -278,5 +286,47 @@ mod test {
         let idx: usize = rng.gen_range(0..SIZE);
         let exp = arr[idx];
         test_simple_circuit(ValueAtCircuit { arr, idx, exp });
+    }
+    #[test]
+    fn test_extract_array() {
+        const SIZE: usize = 80;
+        const SUBSIZE: usize = 40;
+        #[derive(Clone, Debug)]
+        struct ExtractArrayCircuit {
+            arr: [u8; SIZE],
+            idx: usize,
+            exp: [u8; SUBSIZE],
+        }
+        impl<F, const D: usize> UserCircuit<F, D> for ExtractArrayCircuit
+        where
+            F: RichField + Extendable<D>,
+        {
+            type Wires = (Array<Target, SIZE>, Target, Array<Target, SUBSIZE>);
+            fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let array = Array::<Target, SIZE>::new(c);
+                let index = c.add_virtual_target();
+                let expected = Array::<Target, SUBSIZE>::new(c);
+                let extracted = array.extract_array::<_, _, SUBSIZE>(c, index);
+                let are_equal = expected.equals(c, &extracted);
+                let tru = c._true();
+                c.connect(are_equal.target,tru.target);
+                (array, index, expected)
+            }
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires
+                    .0
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
+                pw.set_target(wires.1, F::from_canonical_usize(self.idx));
+                wires
+                    .2
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.exp[i])));
+            }
+        }
+        let mut rng = thread_rng();
+        let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..]);
+        let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
+        let exp = create_array(|i| arr[idx + i]);
+        test_simple_circuit(ExtractArrayCircuit { arr, idx, exp });
     }
 }
