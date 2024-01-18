@@ -87,7 +87,7 @@ where
             let at = index_hashes[i];
             let found_hash_in_parent = hash_wires
                 .padded_u32 // this is the node but in u32 format
-                .contains_subarray(&last_hash_output, at, b);
+                .contains_subarray(b, &last_hash_output, at);
 
             // if we don't have to process it, then circuit should never fail at that step
             // otherwise, we should always enforce finding the hash in the parent node
