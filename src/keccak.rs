@@ -60,14 +60,14 @@ pub struct KeccakCircuit<const N: usize> {
 #[derive(Clone, Debug)]
 pub struct KeccakWires<const N: usize>
 where
-    [(); { N / 4 }]:,
+    [(); N / 4]:,
 {
     input_array: VectorWire<N>,
     /// this is the input node but in u32 format and padded.
     /// It is useful to keep around as we are comparing hashes in u32 format in other
     /// circuits. Note it's an array here because at this point we don't care
     /// anymore of the real len.
-    padded_u32: Array<U32Target, { N / 4 }>,
+    pub padded_u32: Array<U32Target, { N / 4 }>,
     diff: Target,
     // 256/u32 = 8
     pub output_array: OutputHash,
@@ -98,7 +98,7 @@ where
 
     /// Takes an array which is _already_ at the right padded length.
     /// The circuit fills the padding part and hash it.
-    pub fn build_from_array<F: RichField + Extendable<D>, const D: usize>(
+    pub fn hash_vector<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         a: &VectorWire<N>,
     ) -> <Self as UserCircuit<F, D>>::Wires {
@@ -113,7 +113,8 @@ where
                                                                  // TODO : make that const generic
         let padded_node = a
             .arr
-            .iter()
+            .arr
+            .iter() // TODO: implement iterable for Vector & Array
             .enumerate()
             .map(|(i, byte)| {
                 let i_target = b.constant(F::from_canonical_usize(i));
@@ -210,11 +211,11 @@ where
 
     fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
         let array = VectorWire::<N>::new(b);
-        Self::build_from_array(b, &array)
+        Self::hash_vector(b, &array)
     }
 
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-        pw.set_int_targets(&wires.input_array.arr, &self.data);
+        pw.set_int_targets(&wires.input_array.arr.arr, &self.data);
         pw.set_target(
             wires.input_array.real_len,
             F::from_canonical_usize(self.unpadded_len),
@@ -243,7 +244,7 @@ mod test {
             _: &[ProofOrDummyTarget<D>; ARITY],
         ) -> Self::Wires {
             let wires = <Self as UserCircuit<F, D>>::build(b);
-            b.register_public_inputs(&wires.output_array.0);
+            wires.output_array.register_as_public_input(b);
             wires
             // TODO: check the proof public input match what is in the hash node for example for MPT
         }

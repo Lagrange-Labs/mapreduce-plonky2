@@ -232,6 +232,7 @@ impl<F, const D: usize, const BYTES: usize, const N: usize> UserCircuit<F, D>
     for RepeatedKeccak<BYTES, N>
 where
     F: RichField + Extendable<D>,
+    [(); BYTES / 4]:,
 {
     type Wires = [KeccakWires<BYTES>; N];
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
@@ -257,6 +258,7 @@ impl<F, const D: usize, const ARITY: usize, const N: usize, const BYTES: usize>
     PCDCircuit<F, D, ARITY> for RepeatedKeccak<BYTES, N>
 where
     F: RichField + Extendable<D>,
+    [(); BYTES / 4]:,
 {
     // TODO: remove  assumption about public inputs, in this case we don't
     // need to expose as pub inputs all the intermediate hashing

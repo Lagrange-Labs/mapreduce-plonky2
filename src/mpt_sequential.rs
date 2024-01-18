@@ -6,16 +6,11 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
-use crate::{
-    array::Array,
-    keccak::{compute_size_with_padding, KeccakCircuit, OutputHash},
-};
-
-/// A simple alias to express u8 as Target
-type U8Target = Target;
+use crate::keccak::{compute_size_with_padding, KeccakCircuit, OutputHash};
 
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
+#[allow(non_snake_case)]
 const fn PADDING_LEN(d: usize) -> usize {
     compute_size_with_padding(d)
 }
@@ -28,22 +23,20 @@ const fn PADDING_LEN(d: usize) -> usize {
 ///     - Note since it uses keccak, the array being hashed is larger because
 /// keccak requires padding.
 #[derive(Clone, Debug)]
-struct Circuit<const DEPTH: usize, const NODE_LEN: usize>
+struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {}
+
+struct Wires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PADDING_LEN(NODE_LEN)]:,
+    [(); DEPTH - 1]:,
 {
     /// a vector of buffers whose size is the padded size of the maximum node length
     /// the padding may occur anywhere in the array but it can fit the maximum node size
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
     /// way to define everything according to max size of the data and
     /// "not care" about the padding size (almost!)
-    nodes: Vec<VectorWire<{ PADDING_LEN(NODE_LEN) }>>,
-}
+    nodes: [VectorWire<{ PADDING_LEN(NODE_LEN) }>; DEPTH],
 
-struct Wires<const DEPTH: usize>
-where
-    [(); DEPTH - 1]:,
-{
     /// in the case of a fixed circuit, the actual tree depth might be smaller.
     /// In this case, we set false on the part of the path we should not process.
     /// NOTE: for node at index i in the path, the boolean indicating if we should
@@ -67,7 +60,7 @@ where
     pub fn build_from_leaf_array<F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         leaf: &VectorWire<{ PADDING_LEN(NODE_LEN) }>,
-    ) -> (OutputHash, Wires<DEPTH>)
+    ) -> (OutputHash, Wires<DEPTH, NODE_LEN>)
     where
         F: RichField + Extendable<D>,
     {
@@ -76,40 +69,43 @@ where
         let index_hashes: [Target; DEPTH - 1] = core::array::from_fn(|_| b.add_virtual_target());
         // nodes should be ordered from leaf to root and padded at the end
         // depth -1 because we already are given the leaf
-        let nodes = (0..DEPTH - 1)
-            .map(|_| VectorWire::<{ PADDING_LEN(NODE_LEN) }>::new(b))
-            .collect::<Vec<_>>();
+        let nodes: [VectorWire<_>; DEPTH] = std::iter::once(leaf.clone())
+            .chain((0..DEPTH - 1).map(|_| VectorWire::<{ PADDING_LEN(NODE_LEN) }>::new(b)))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
         // hash the leaf first
-        let mut last_hash =
-            KeccakCircuit::<{ PADDING_LEN(NODE_LEN) }>::build_from_array(b, leaf).output_array;
+        let mut last_hash_output =
+            KeccakCircuit::<{ PADDING_LEN(NODE_LEN) }>::hash_vector(b, leaf).output_array;
         // we skip the first node which is the leaf
         let t = b._true();
         for i in 1..DEPTH {
             let is_real = should_process[i - 1];
-            // look if hash is inside the node
-            // XXX TODO
-            let found_hash = b._true();
+            // hash the next node first. We do this so we can get the U32 equivalence of the node
+            let hash_wires = KeccakCircuit::<{ PADDING_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
+            // look if hash is inside the node (in u32 format)
+            let at = index_hashes[i];
+            let found_hash_in_parent = hash_wires
+                .padded_u32 // this is the node but in u32 format
+                .contains_subarray(&last_hash_output, at, b);
 
             // if we don't have to process it, then circuit should never fail at that step
             // otherwise, we should always enforce finding the hash in the parent node
-            let link = b.select(is_real, found_hash.target, t.target);
-            b.connect(link, t.target);
+            let is_parent = b.select(is_real, found_hash_in_parent.target, t.target);
+            b.connect(is_parent, t.target);
 
-            // hash the next node
-            let new_hash =
-                KeccakCircuit::<{ PADDING_LEN(NODE_LEN) }>::build_from_array(b, &nodes[i])
-                    .output_array;
             // and select whether we should update or not
-            last_hash = new_hash.select(is_real, &last_hash, b);
+            last_hash_output = hash_wires
+                .output_array
+                .select(is_real, &last_hash_output, b);
         }
         (
-            last_hash,
+            last_hash_output,
             Wires {
+                nodes,
                 should_process,
                 index_hashes,
             },
         )
     }
 }
-
-struct CircuitWires;
