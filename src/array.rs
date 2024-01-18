@@ -31,6 +31,17 @@ pub struct Vector<const MAX_LEN: usize> {
     pub real_len: usize,
 }
 
+impl<const MAX_LEN: usize> Vector<MAX_LEN> {
+    pub fn from_vec(mut d: Vec<u8>) -> Result<Self> {
+        let len = d.len();
+        d.resize(MAX_LEN, 0);
+        Ok(Self {
+            arr: d.try_into().map_err(|e| anyhow!("{:?}",e))?,
+            real_len: len,
+        })
+    }
+}
+
 impl<const SIZE: usize> Index<usize> for VectorWire<SIZE> {
     type Output = Target;
     fn index(&self, index: usize) -> &Self::Output {
@@ -47,13 +58,11 @@ impl<const MAX_LEN: usize> VectorWire<MAX_LEN> {
         let arr = Array::<Target, MAX_LEN>::new(b);
         Self { arr, real_len }
     }
-}
-impl<const MAX_LEN: usize> Vector<MAX_LEN> {
-    pub fn assign<F: RichField>(&self, pw: &mut PartialWitness<F>, wire: &VectorWire<MAX_LEN>) {
-        pw.set_target(wire.real_len, F::from_canonical_usize(self.real_len));
+    pub fn assign<F: RichField>(&self, pw: &mut PartialWitness<F>, value: &Vector<MAX_LEN>) {
+        pw.set_target(self.real_len, F::from_canonical_usize(value.real_len));
         // small hack to specialize Array for assigning u8 inside
         // TODO: find a more elegant / generic way to assign any value into an Array
-        pw.set_int_targets(&wire.arr.arr, &self.arr);
+        pw.set_int_targets(&self.arr.arr, &value.arr);
     }
 }
 
@@ -154,7 +163,7 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
 
     /// Returns true if self[at..at+SUB] == sub, false otherwise.
     /// Cost is O(SIZE * SIZE + SUB) due to SIZE calls to value_at()
-    pub fn contains_subarray<F: RichField + Extendable<D>, const D: usize, const SUB: usize>(
+    pub fn contains_array<F: RichField + Extendable<D>, const D: usize, const SUB: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
         sub: &Array<T, SUB>,
@@ -241,7 +250,10 @@ mod test {
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
-        plonk::{circuit_builder::CircuitBuilder, config::{PoseidonGoldilocksConfig, GenericConfig}},
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
     };
     use rand::{thread_rng, Rng};
 
@@ -353,7 +365,7 @@ mod test {
                 let array = Array::<Target, SIZE>::new(c);
                 let index = c.add_virtual_target();
                 let sub = Array::<Target, SUBSIZE>::new(c);
-                let contains = array.contains_subarray::<_, _, SUBSIZE>(c, &sub, index);
+                let contains = array.contains_array::<_, _, SUBSIZE>(c, &sub, index);
                 let tru = c._true();
                 c.connect(contains.target, tru.target);
                 (array, index, sub)
@@ -373,6 +385,6 @@ mod test {
         rng.fill(&mut arr[..]);
         let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
         let exp = create_array(|i| arr[idx + i]);
-        test_simple_circuit::<F,D,C,_>(ContainsSubarrayCircuit { arr, idx, exp });
+        test_simple_circuit::<F, D, C, _>(ContainsSubarrayCircuit { arr, idx, exp });
     }
 }
