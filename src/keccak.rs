@@ -212,9 +212,10 @@ where
 mod test {
     use super::{KeccakCircuit, KeccakWires};
     use crate::{
-        array::VectorWire,
+        array::{Array, VectorWire},
         circuit::{test::test_simple_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit},
-        keccak::{compute_padding_size, compute_size_with_padding},
+        keccak::{compute_padding_size, compute_size_with_padding, PACKED_HASH_LEN},
+        utils::{keccak256, read_le_u32},
     };
     use core::array::from_fn as create_array;
     use plonky2::{
@@ -291,6 +292,7 @@ mod test {
         #[derive(Clone, Debug)]
         struct TestKeccak<const N: usize> {
             c: KeccakCircuit<N>,
+            exp: Vec<u8>,
         }
 
         impl<F, const D: usize, const N: usize> UserCircuit<F, D> for TestKeccak<N>
@@ -315,20 +317,27 @@ mod test {
                     F::from_canonical_usize(self.c.unpadded_len),
                 );
                 KeccakCircuit::prove_from_array(pw, wires, self.c.unpadded_len);
+                let exp_u32 = self
+                    .exp
+                    .chunks(4)
+                    .map(|c| F::from_canonical_u32(read_le_u32(&mut c.clone())))
+                    .collect::<Vec<_>>();
+
+                wires.output_array.assign(pw, &exp_u32.try_into().unwrap());
             }
         }
 
         let mut rng = thread_rng();
         let mut arr = [0u8; SIZE];
         rng.fill(&mut arr[..SIZE]);
-        let circuit = KeccakCircuit::<PADDED_LEN>::new(arr.to_vec()).unwrap();
+        let exp = keccak256(&arr[..SIZE]);
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        //test_simple_circuit::<F, D, C, _>(circuit);
         let circuit = TestKeccak::<PADDED_LEN> {
             c: KeccakCircuit::<PADDED_LEN>::new(arr.to_vec()).unwrap(),
+            exp,
         };
-        test_simple_circuit::<F,D,C,_>(circuit);
+        test_simple_circuit::<F, D, C, _>(circuit);
     }
 }
