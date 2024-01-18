@@ -1,18 +1,18 @@
+use crate::array::VectorWire;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
-    iop::{
-        target::{BoolTarget, Target},
-        witness::PartialWitness,
-    },
+    iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,
 };
 
 use crate::{
-    array::{Array, ArrayWire},
-    circuit::UserCircuit,
+    array::Array,
     keccak::{compute_size_with_padding, KeccakCircuit, OutputHash},
 };
+
+/// A simple alias to express u8 as Target
+type U8Target = Target;
 
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
@@ -37,7 +37,7 @@ where
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
     /// way to define everything according to max size of the data and
     /// "not care" about the padding size (almost!)
-    nodes: Vec<Array<{ PADDING_LEN(NODE_LEN) }>>,
+    nodes: Vec<VectorWire<{ PADDING_LEN(NODE_LEN) }>>,
 }
 
 struct Wires<const DEPTH: usize>
@@ -61,10 +61,12 @@ impl<const DEPTH: usize, const NODE_LEN: usize> Circuit<DEPTH, NODE_LEN>
 where
     [(); PADDING_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
+    // bound required from keccak
+    [(); PADDING_LEN(NODE_LEN) / 4]:,
 {
     pub fn build_from_leaf_array<F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-        leaf: &ArrayWire<{ PADDING_LEN(NODE_LEN) }>,
+        leaf: &VectorWire<{ PADDING_LEN(NODE_LEN) }>,
     ) -> (OutputHash, Wires<DEPTH>)
     where
         F: RichField + Extendable<D>,
@@ -75,7 +77,7 @@ where
         // nodes should be ordered from leaf to root and padded at the end
         // depth -1 because we already are given the leaf
         let nodes = (0..DEPTH - 1)
-            .map(|_| ArrayWire::<{ PADDING_LEN(NODE_LEN) }>::new(b))
+            .map(|_| VectorWire::<{ PADDING_LEN(NODE_LEN) }>::new(b))
             .collect::<Vec<_>>();
         // hash the leaf first
         let mut last_hash =
@@ -108,8 +110,6 @@ where
             },
         )
     }
-
-    pub fn prove<F: RichField>(&self, pw: PartialWitness<F>) {}
 }
 
 struct CircuitWires;

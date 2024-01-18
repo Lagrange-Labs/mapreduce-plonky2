@@ -40,6 +40,7 @@ impl<F: RichField> IntTargetWriter for PartialWitness<F> {
     }
 }
 
+
 // Returns the index where the subvector starts in v, if any.
 pub(crate) fn find_index_subvector(v: &[u8], sub: &[u8]) -> Option<usize> {
     (0..(v.len() - sub.len())).find(|&i| &v[i..i + sub.len()] == sub)
