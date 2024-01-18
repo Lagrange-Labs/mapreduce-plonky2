@@ -3,7 +3,8 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder, iop::witness::{PartialWitness, WitnessWrite},
 };
 
-use super::{Map, Reduce, DataItem};
+use super::{Map, Reduce};
+use crate::mapreduce::data_types::DataItem;
 
 // this is a hack that is only necessary because the MapReduce struct requires one
 // map followed by one reduce
@@ -31,12 +32,12 @@ impl Map for SumU64Id
 
 struct SumU64;
 
-impl<F: RichField> Reduce for SumU64
+impl<F: RichField + Extendable<D>> Reduce for SumU64
 {
     type Input = DataItem<F>;
 
     fn neutral(&self) -> Self::Input {
-        F::from_canonical_u64(0);
+        F::from_canonical_u64(0)
     }
 
     fn eval(&self, left: &Self::Input, right: &Self::Input) -> Self::Input {

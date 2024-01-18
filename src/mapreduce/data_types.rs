@@ -1,60 +1,84 @@
-use plonky2::{field::extension::Extendable, hash::hash_types::RichField, plonk::circuit_builder::CircuitBuilder, iop::target::{Target, BoolTarget}};
-use plonky2_crypto::u32::arithmetic_u32::{CircuitBuilderU32, U32Target};
+use plonky2::{field::extension::Extendable, hash::hash_types::RichField, plonk::circuit_builder::CircuitBuilder, iop::{target::{Target, BoolTarget}, witness::{WitnessWrite, PartialWitness}}};
+use plonky2_crypto::u32::{arithmetic_u32::{CircuitBuilderU32, U32Target}, witness::WitnessU32};
 
 use super::Data;
 
-/// An item of a data set that can be represented by a fixed-length array of field elements
-// pub trait DataItem {
-//     // TODO:
-//     // consider making a struct that bookkeeps DataItems and their associated Targets
-//     // in a HashMap or similar
+/// A Primitive is anything that we can treat as a "leaf" of the 
+/// data tree without descending further through the tree. Each 
+/// Primitive should have available methods on CircuitBuilder and
+/// PartialWitness which allocates and sets targets for it correctly. 
 
-//     /// An instance of DataItem must provide a function that retrieves or computes
-//     /// the values that will be added to the witness
-//     fn get_values<F>(&self) -> Vec<F>
-//     where
-//         F: RichField;
-
-//     /// An instance of DataItem must provide a function returning a closure that creates
-//     /// the targets that will added to the circuit
-//     fn create_targets<F, const D: usize>(&self) -> impl Fn(&mut CircuitBuilder<F, D>) -> Vec<Target>
-//     where
-//         F: RichField + Extendable<D>;
-    
-//     fn len(&self) -> usize;
-// }
-
-
-
-/// A DataItem is an arbitrary tree whose leaves are field elements.
-#[derive(Clone)]
-pub enum DataItem<F: RichField> {
-    Bool(F),
-    U32(F),
-    U64(F), 
-    DataVector(Vec<DataItem<F>>),
+pub enum Primitive {
+    Bool(Bool),
+    U8(U8),
+    U32(U32),
+    U64(U64),
 }
 
-impl<F> DataItem<F> {
-    fn create_targets<const D: usize>(self, builder: &mut CircuitBuilder<F, D>) -> TargetItem
-    where
-        F: RichField + Extendable<D>
-    {
-        match self {
-            Bool => TargetItem::Bool(builder.add_virtual_bool_target_unsafe()),
-            U32 => TargetItem::U32(builder.add_virtual_u32_target()),
-            U64 => TargetItem::U64(builder.add_virtual_target()),
-            DataItem::DataVector(vec) => TargetItem::TargetVector(vec.iter().map(|item| item.create_targets(builder)).collect()),
-        }
+pub trait Wire {
+    type Value;
+    type WireTarget;
+
+    fn create_target<F: RichField + Extendable<D>, const D: usize>(builder: &mut CircuitBuilder<F, D>) -> Self::WireTarget;
+    fn set_target<F: RichField>(target: Self::WireTarget, value: Self::Value, pw: &mut PartialWitness<F>);
+}
+
+pub struct Bool;
+
+impl Wire for Bool {
+    type Value = bool;
+    type WireTarget = BoolTarget;
+
+    fn create_target<F: RichField + Extendable<D>, const D: usize>(builder: &mut CircuitBuilder<F, D>) -> Self::WireTarget {
+        builder.add_virtual_bool_target_unsafe()
+    }
+
+    fn set_target<F: RichField>(target: Self::WireTarget, value: Self::Value, pw: &mut PartialWitness<F>) {
+        pw.set_bool_target(target, value)
     }
 }
 
-impl<F> Data for DataItem<F>{}
+pub struct U8;
 
-/// A TargetItem is an arbitrary tree whose leaves are targets.
-pub enum TargetItem {
-    Bool(BoolTarget),
-    U32(U32Target),
-    U64(Target),
-    TargetVector(Vec<TargetItem>),
+impl Wire for U8 {
+    type Value = u8;
+    type WireTarget = Target;
+
+    fn create_target<F: RichField + Extendable<D>, const D: usize>(builder: &mut CircuitBuilder<F, D>) -> Self::WireTarget {
+        builder.add_virtual_target()
+    }
+
+    fn set_target<F: RichField>(target: Self::WireTarget, value: Self::Value, pw: &mut PartialWitness<F>) {
+        pw.set_target(target, F::from_canonical_u8(value))
+    }
+}
+
+pub struct U32;
+
+impl Wire for U32 {
+    type Value = u32;
+    type WireTarget = U32Target;
+
+    fn create_target<F: RichField + Extendable<D>, const D: usize>(builder: &mut CircuitBuilder<F, D>) -> Self::WireTarget {
+        builder.add_virtual_u32_target()
+    }
+
+    fn set_target<F: RichField>(target: Self::WireTarget, value: Self::Value, pw: &mut PartialWitness<F>) {
+        pw.set_u32_target(target, value)
+    }
+}
+
+pub struct U64;
+
+impl Wire for U64 {
+    type Value = u64;
+    type WireTarget = Target;
+
+    fn create_target<F: RichField + Extendable<D>, const D: usize>(builder: &mut CircuitBuilder<F, D>) -> Self::WireTarget {
+        builder.add_virtual_target()
+    }
+
+    fn set_target<F: RichField>(target: Self::WireTarget, value: Self::Value, pw: &mut PartialWitness<F>) {
+        pw.set_target(target, F::from_canonical_u64(value))
+    }
 }
