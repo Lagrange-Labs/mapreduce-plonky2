@@ -241,7 +241,7 @@ mod test {
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
-        plonk::circuit_builder::CircuitBuilder,
+        plonk::{circuit_builder::CircuitBuilder, config::{PoseidonGoldilocksConfig, GenericConfig}},
     };
     use rand::{thread_rng, Rng};
 
@@ -249,6 +249,9 @@ mod test {
         array::Array,
         circuit::{test::test_simple_circuit, UserCircuit},
     };
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
 
     #[test]
     fn test_value_at() {
@@ -285,7 +288,7 @@ mod test {
         rng.fill(&mut arr[..]);
         let idx: usize = rng.gen_range(0..SIZE);
         let exp = arr[idx];
-        test_simple_circuit(ValueAtCircuit { arr, idx, exp });
+        test_simple_circuit::<F, D, C, _>(ValueAtCircuit { arr, idx, exp });
     }
 
     #[test]
@@ -328,7 +331,7 @@ mod test {
         rng.fill(&mut arr[..]);
         let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
         let exp = create_array(|i| arr[idx + i]);
-        test_simple_circuit(ExtractArrayCircuit { arr, idx, exp });
+        test_simple_circuit::<F, D, C, _>(ExtractArrayCircuit { arr, idx, exp });
     }
 
     #[test]
@@ -370,6 +373,6 @@ mod test {
         rng.fill(&mut arr[..]);
         let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
         let exp = create_array(|i| arr[idx + i]);
-        test_simple_circuit(ContainsSubarrayCircuit { arr, idx, exp });
+        test_simple_circuit::<F,D,C,_>(ContainsSubarrayCircuit { arr, idx, exp });
     }
 }

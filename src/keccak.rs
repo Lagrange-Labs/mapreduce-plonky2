@@ -50,8 +50,8 @@ pub const fn compute_padding_size(data_len: usize) -> usize {
 pub type OutputHash = Array<U32Target, PACKED_HASH_LEN>;
 
 /// Circuit able to hash any arrays of bytes of dynamic sizes as long as its
-/// padded version length is less than N. In other words, the data array is
-/// already at the length of the padding.
+/// padded version length is less than N. In other words, N is the maximal size
+/// of the array + padding to hash.
 #[derive(Clone, Copy, Debug)]
 pub struct KeccakCircuit<const N: usize> {
     data: [u8; N],
@@ -79,7 +79,13 @@ where
 {
     pub fn new(mut data: Vec<u8>) -> Result<Self> {
         let total = compute_size_with_padding(data.len());
-        ensure!(total <= N, "{}bytes can't fit in {} with padding", total, N);
+        ensure!(
+            total <= N,
+            "{} bytes can't fit in {} bytes with padding (data len {})",
+            total,
+            N,
+            data.len(),
+        );
         // NOTE we don't pad anymore because we enforce that the resulting length is already a multiple
         // of 4 so it will fit the conversion to u32 and circuit vk would stay the same for different
         // data length
@@ -101,7 +107,7 @@ where
     pub fn hash_vector<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         a: &VectorWire<N>,
-    ) -> <Self as UserCircuit<F, D>>::Wires {
+    ) -> KeccakWires<N> {
         let diff_target = b.add_virtual_target();
         let end_padding = b.add(a.real_len, diff_target);
         let one = b.one();
@@ -202,37 +208,54 @@ where
     }
 }
 
-impl<F, const D: usize, const N: usize> UserCircuit<F, D> for KeccakCircuit<N>
-where
-    F: RichField + Extendable<D>,
-    [(); N / 4]:,
-{
-    type Wires = KeccakWires<N>;
-
-    fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-        let array = VectorWire::<N>::new(b);
-        Self::hash_vector(b, &array)
-    }
-
-    fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-        pw.set_int_targets(&wires.input_array.arr.arr, &self.data);
-        pw.set_target(
-            wires.input_array.real_len,
-            F::from_canonical_usize(self.unpadded_len),
-        );
-        Self::prove_from_array(pw, wires, self.unpadded_len);
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use super::KeccakCircuit;
-    use crate::circuit::{PCDCircuit, ProofOrDummyTarget, UserCircuit};
-    use plonky2::{
-        field::extension::Extendable, hash::hash_types::RichField,
-        plonk::circuit_builder::CircuitBuilder,
+    use super::{KeccakCircuit, KeccakWires};
+    use crate::{
+        array::VectorWire,
+        circuit::{test::test_simple_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit},
+        keccak::{compute_padding_size, compute_size_with_padding},
     };
+    use core::array::from_fn as create_array;
+    use plonky2::{
+        field::extension::Extendable,
+        hash::hash_types::RichField,
+        iop::witness::{PartialWitness, WitnessWrite},
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
+    use rand::{thread_rng, Rng};
 
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+
+    impl<F, const D: usize, const N: usize> UserCircuit<F, D> for KeccakCircuit<N>
+    where
+        F: RichField + Extendable<D>,
+        [(); N / 4]:,
+    {
+        type Wires = KeccakWires<N>;
+
+        fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let input_array = VectorWire::<N>::new(b);
+            Self::hash_vector(b, &input_array)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            wires
+                .input_array
+                .arr
+                .assign(pw, &create_array(|i| F::from_canonical_u8(self.data[i])));
+            pw.set_target(
+                wires.input_array.real_len,
+                F::from_canonical_usize(self.unpadded_len),
+            );
+            Self::prove_from_array(pw, wires, self.unpadded_len);
+        }
+    }
     impl<F, const D: usize, const BYTES: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
         for KeccakCircuit<BYTES>
     where
@@ -258,5 +281,54 @@ mod test {
         fn num_io() -> usize {
             8
         }
+    }
+
+    #[test]
+    fn test_keccak_output() {
+        const SIZE: usize = 64;
+        const PADDED_LEN: usize = compute_size_with_padding(SIZE);
+
+        #[derive(Clone, Debug)]
+        struct TestKeccak<const N: usize> {
+            c: KeccakCircuit<N>,
+        }
+
+        impl<F, const D: usize, const N: usize> UserCircuit<F, D> for TestKeccak<N>
+        where
+            F: RichField + Extendable<D>,
+            [(); N / 4]:,
+        {
+            type Wires = KeccakWires<N>;
+
+            fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let input_array = VectorWire::<N>::new(b);
+                KeccakCircuit::hash_vector(b, &input_array)
+            }
+
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires
+                    .input_array
+                    .arr
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.c.data[i])));
+                pw.set_target(
+                    wires.input_array.real_len,
+                    F::from_canonical_usize(self.c.unpadded_len),
+                );
+                KeccakCircuit::prove_from_array(pw, wires, self.c.unpadded_len);
+            }
+        }
+
+        let mut rng = thread_rng();
+        let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..SIZE]);
+        let circuit = KeccakCircuit::<PADDED_LEN>::new(arr.to_vec()).unwrap();
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        //test_simple_circuit::<F, D, C, _>(circuit);
+        let circuit = TestKeccak::<PADDED_LEN> {
+            c: KeccakCircuit::<PADDED_LEN>::new(arr.to_vec()).unwrap(),
+        };
+        test_simple_circuit::<F,D,C,_>(circuit);
     }
 }

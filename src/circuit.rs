@@ -333,15 +333,13 @@ pub(crate) mod test {
             circuit_builder::CircuitBuilder,
             circuit_data::CircuitConfig,
             config::{GenericConfig, PoseidonGoldilocksConfig},
-        },
+        }, field::extension::Extendable, hash::hash_types::RichField,
     };
 
     use crate::utils::verify_proof_tuple;
 
     use super::UserCircuit;
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
+
     pub(crate) struct BenchResult {
         pub gate_count: usize,
         pub building: u64,
@@ -350,7 +348,14 @@ pub(crate) mod test {
         pub verifying: u64,
     }
 
-    pub(crate) fn test_simple_circuit<U: UserCircuit<F, D>>(u: U) -> BenchResult {
+    pub(crate) fn test_simple_circuit<
+        F: RichField + Extendable<D>,
+        const D: usize,
+        C: GenericConfig<D, F = F>,
+        U: UserCircuit<F, D>,
+    >(
+        u: U,
+    ) -> BenchResult {
         let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut pw = PartialWitness::new();
         let now = time::Instant::now();
