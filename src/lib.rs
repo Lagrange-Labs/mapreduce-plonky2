@@ -6,9 +6,7 @@ use anyhow::Result;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
-    iop::witness::PartialWitness,
     plonk::{
-        circuit_builder::CircuitBuilder,
         circuit_data::{CommonCircuitData, VerifierOnlyCircuitData},
         config::GenericConfig,
         proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs},

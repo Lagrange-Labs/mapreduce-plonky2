@@ -18,7 +18,7 @@ use crate::keccak::{compute_size_with_padding, KeccakCircuit, OutputHash};
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
 #[allow(non_snake_case)]
-const fn PADDING_LEN(d: usize) -> usize {
+const fn PAD_LEN(d: usize) -> usize {
     compute_size_with_padding(d)
 }
 /// Circuit that simoply proves the inclusion of a value inside a MPT tree.
@@ -37,7 +37,7 @@ struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
 
 struct Wires<const DEPTH: usize, const NODE_LEN: usize>
 where
-    [(); PADDING_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
 {
     /// a vector of buffers whose size is the padded size of the maximum node length
@@ -45,7 +45,7 @@ where
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
     /// way to define everything according to max size of the data and
     /// "not care" about the padding size (almost!)
-    nodes: [VectorWire<{ PADDING_LEN(NODE_LEN) }>; DEPTH],
+    nodes: [VectorWire<{ PAD_LEN(NODE_LEN) }>; DEPTH],
 
     /// in the case of a fixed circuit, the actual tree depth might be smaller.
     /// In this case, we set false on the part of the path we should not process.
@@ -62,10 +62,10 @@ where
 
 impl<const DEPTH: usize, const NODE_LEN: usize> Circuit<DEPTH, NODE_LEN>
 where
-    [(); PADDING_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
     // bound required from keccak
-    [(); PADDING_LEN(NODE_LEN) / 4]:,
+    [(); PAD_LEN(NODE_LEN) / 4]:,
 {
     pub fn new(nodes: Vec<Vec<u8>>) -> Self {
         Self { nodes }
@@ -84,19 +84,19 @@ where
         let index_hashes: [Target; DEPTH - 1] = core::array::from_fn(|_| b.add_virtual_target());
         // nodes should be ordered from leaf to root and padded at the end
         let nodes: [VectorWire<_>; DEPTH] = (0..DEPTH)
-            .map(|_| VectorWire::<{ PADDING_LEN(NODE_LEN) }>::new(b))
+            .map(|_| VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(b))
             .collect::<Vec<_>>()
             .try_into()
             .unwrap();
         // hash the leaf first
         let mut last_hash_output =
-            KeccakCircuit::<{ PADDING_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]).output_array;
+            KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]).output_array;
         let t = b._true();
         // we skip the first node which is the leaf
         for i in 1..DEPTH {
             let is_real = should_process[i - 1];
             // hash the next node first. We do this so we can get the U32 equivalence of the node
-            let hash_wires = KeccakCircuit::<{ PADDING_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
+            let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
             // look if hash is inside the node (in u32 format)
             let at = index_hashes[i - 1];
             let found_hash_in_parent = hash_wires
@@ -131,24 +131,29 @@ where
         p: &mut PartialWitness<F>,
         wires: &Wires<DEPTH, NODE_LEN>,
     ) -> Result<()> {
+        let pad_len = DEPTH - self.nodes.len();
         // convert nodes to array and pad with empty array if needed
-        for i in 0..DEPTH {
-            let node = if i < self.nodes.len() {
-                p.set_bool_target(wires.should_process[i], true);
-                self.nodes[i].clone()
-            } else {
-                p.set_bool_target(wires.should_process[i], false);
-                vec![]
-            };
-            let padded_vector = Vector::<{ PADDING_LEN(NODE_LEN) }>::from_vec(node)?;
-            wires.nodes[i].assign(p, &padded_vector);
+        let padded_nodes = self
+            .nodes
+            .iter()
+            .map(|n| Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(n.clone()))
+            .chain((0..pad_len).map(|_| Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(vec![])))
+            .collect::<Result<Vec<_>>>()?;
+        for (wire, node) in wires.nodes.iter().zip(padded_nodes.iter()) {
+            wire.assign(p, node);
         }
         // find the index of the child hash in the parent nodes for all nodes in the path
-        for i in 1..self.nodes.len() {
-            let child_hash = keccak256(&self.nodes[i - 1]);
-            let idx = find_index_subvector(&self.nodes[i], &child_hash)
-                .ok_or(anyhow!("can't find hash in parent node!"))?;
-            p.set_target(wires.child_hash_index[i - 1], F::from_canonical_usize(idx));
+        // and set to true the nodes we should process
+        for i in 1..DEPTH {
+            if i < self.nodes.len() {
+                p.set_bool_target(wires.should_process[i], true);
+                let child_hash = keccak256(&self.nodes[i - 1]);
+                let idx = find_index_subvector(&self.nodes[i], &child_hash)
+                    .ok_or(anyhow!("can't find hash in parent node!"))?;
+                p.set_target(wires.child_hash_index[i - 1], F::from_canonical_usize(idx));
+            } else {
+                p.set_bool_target(wires.should_process[i - 1], false);
+            }
         }
         Ok(())
     }
@@ -158,7 +163,7 @@ where
 mod test {
     use std::sync::Arc;
 
-    use eth_trie::{EthTrie, MemoryDB, Trie};
+    use eth_trie::{EthTrie, MemoryDB, Node, Trie};
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -174,9 +179,10 @@ mod test {
         array::VectorWire,
         circuit::{test::test_simple_circuit, UserCircuit},
         keccak::OutputHash,
+        utils::{find_index_subvector, keccak256},
     };
 
-    use super::{Circuit, Wires, PADDING_LEN};
+    use super::{Circuit, Wires, PAD_LEN};
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
@@ -190,14 +196,14 @@ mod test {
         for TestCircuit<DEPTH, NODE_LEN>
     where
         F: RichField + Extendable<D>,
-        [(); PADDING_LEN(NODE_LEN)]:,
+        [(); PAD_LEN(NODE_LEN)]:,
         [(); DEPTH - 1]:,
-        [(); PADDING_LEN(NODE_LEN) / 4]:,
+        [(); PAD_LEN(NODE_LEN) / 4]:,
     {
         type Wires = (OutputHash, Wires<DEPTH, NODE_LEN>);
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let leaf = VectorWire::<{ PADDING_LEN(NODE_LEN) }>::new(c);
+            let leaf = VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(c);
             Circuit::build(c)
         }
 
@@ -205,11 +211,21 @@ mod test {
             self.c.assign(pw, &wires.1).unwrap();
         }
     }
-
+    #[test]
+    fn test_subvector() {
+        let node = hex::decode(
+            "e48200a0a06b4a71765e17649ab73c5e176281619faf173519718e6e95a40a8768685a26c6",
+        )
+        .unwrap();
+        let child_hash =
+            hex::decode("6b4a71765e17649ab73c5e176281619faf173519718e6e95a40a8768685a26c6")
+                .unwrap();
+        find_index_subvector(&node, &child_hash).unwrap();
+    }
     #[test]
     fn test_mpt_proof_verification() {
         // max depth of the trie
-        const DEPTH: usize = 5;
+        const DEPTH: usize = 7;
         // leave one for padding
         const ACTUAL_DEPTH: usize = DEPTH - 1;
         // max len of a node
@@ -217,27 +233,37 @@ mod test {
         // build a random MPT trie
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
-        let mut n: u32 = 1;
-        // loop: insert elements as long as a random selected proof is not of the right length
+        let mut keys = Vec::new();
+        // loop: insert random elements as long as a random selected proof is not of the right length
         loop {
-            println!("-> Insertion of {} elements so far...", n);
-            let key = n.to_le_bytes();
+            println!("-> Insertion of {} elements so far...", keys.len());
+            let karr = thread_rng().gen::<[u8; 32]>().to_vec();
+            let key = rlp::encode(&karr);
             let random_len = thread_rng().gen_range(64..NODE_LEN);
             let random_bytes = (0..random_len)
                 .map(|_| thread_rng().gen::<u8>())
                 .collect::<Vec<_>>();
-            trie.insert(&key, &random_bytes).expect("can't insert");
+            trie.insert(&key, &rlp::encode(&random_bytes))
+                .expect("can't insert");
+            keys.push(key.clone());
             trie.root_hash().expect("root hash problem");
             let proof = trie.get_proof(&key).unwrap();
             if proof.len() >= ACTUAL_DEPTH {
                 break;
             }
-            n += 1;
         }
         let root = trie.root_hash().unwrap();
         // root is first so we reverse the order as in circuit we prove the opposite way
-        let mut proof = trie.get_proof(&n.to_le_bytes()).unwrap();
+        let key = keys.last().unwrap();
+        let mut proof = trie.get_proof(key).unwrap();
         proof.reverse();
+        assert!(proof.len() >= ACTUAL_DEPTH);
+        assert!(keccak256(proof.last().unwrap()) == root.to_fixed_bytes());
+        println!("PROOF LEN = {}", proof.len());
+        for i in 1..proof.len() {
+            let child_hash = keccak256(&proof[i - 1]);
+            assert!(find_index_subvector(&proof[i], &child_hash).is_some());
+        }
         // println!(
         //     "first item {:?} vs root {:} vs last item {:?}",
         //     hex::encode(keccak256(proof.first().unwrap())),

@@ -328,12 +328,12 @@ pub(crate) mod test {
     use std::time;
 
     use plonky2::{
+        field::extension::Extendable,
+        hash::hash_types::RichField,
         iop::witness::PartialWitness,
         plonk::{
-            circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
-        }, field::extension::Extendable, hash::hash_types::RichField,
+            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
+        },
     };
 
     use crate::utils::verify_proof_tuple;

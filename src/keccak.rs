@@ -3,7 +3,7 @@ use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
@@ -20,8 +20,7 @@ use plonky2_crypto::{
 
 use crate::{
     array::{Array, VectorWire},
-    circuit::UserCircuit,
-    utils::{convert_u8_to_u32, less_than, IntTargetWriter},
+    utils::{convert_u8_to_u32, less_than},
 };
 
 /// Length of a hash in bytes.
@@ -212,9 +211,9 @@ where
 mod test {
     use super::{KeccakCircuit, KeccakWires};
     use crate::{
-        array::{Array, VectorWire},
+        array::VectorWire,
         circuit::{test::test_simple_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit},
-        keccak::{compute_padding_size, compute_size_with_padding, PACKED_HASH_LEN},
+        keccak::compute_size_with_padding,
         utils::{keccak256, read_le_u32},
     };
     use core::array::from_fn as create_array;

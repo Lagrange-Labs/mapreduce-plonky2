@@ -218,10 +218,10 @@ pub(crate) fn compute_key_length(path: &[Node]) -> usize {
     let mut key_len = 0;
     for node in path {
         match node {
-            Node::Branch(b) => key_len += 1,
+            Node::Branch(_) => key_len += 1,
             Node::Extension(e) => key_len += e.read().unwrap().prefix.len(),
             Node::Leaf(l) => key_len += l.key.len(),
-            Node::Hash(h) => panic!("what is a hash node!?"),
+            Node::Hash(_) => panic!("what is a hash node!?"),
             Node::Empty => panic!("should not be an empty node in the path"),
         }
     }
@@ -229,13 +229,17 @@ pub(crate) fn compute_key_length(path: &[Node]) -> usize {
 }
 #[cfg(test)]
 mod test {
+
     use ethers::types::H256;
+    use rand::{thread_rng, Rng};
+
+    use crate::utils::find_index_subvector;
 
     use super::*;
 
     #[tokio::test]
     async fn fetch_block() -> Result<()> {
-        let block_number = 10593417;
+        let block_number = 10593419;
         let mut block = BlockData::fetch(block_number).await?;
         assert_eq!(block.block.number.unwrap(), block_number.into());
         let computed = block.block.block_hash();
@@ -250,12 +254,31 @@ mod test {
         //let thin_block2: Block<H256> = rmp_serde::decode::from_slice(&encoding).unwrap();
         assert_eq!(thin_block, thin_block2);
 
-        println!("block serialize() : {:?}", hex::encode(encoding));
         println!("block hash : {:?}", hex::encode(computed));
         println!(
             "block tx root hash : {:?}",
             hex::encode(block.tx_trie.root_hash()?)
         );
+        let random_idx = thread_rng().gen_range(0..block.txs.len());
+        let mut proof = block
+            .tx_trie
+            .get_proof(&U64::from(random_idx).rlp_bytes())?;
+        proof.reverse();
+        println!("Proof for tx index {:?}", random_idx);
+        for i in 1..proof.len() {
+            let child_hash = keccak256(&proof[i - 1]);
+            match find_index_subvector(&proof[i], &child_hash) {
+                Some(index) => {
+                    println!(
+                        "Index node {}: child hash found index {} in proof",
+                        i, index
+                    );
+                }
+                None => {
+                    println!("could not find index in proof");
+                }
+            }
+        }
         Ok(())
     }
 }
