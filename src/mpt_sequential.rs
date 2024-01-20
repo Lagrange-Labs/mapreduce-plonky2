@@ -1,12 +1,13 @@
 use crate::{
     array::{Vector, VectorWire},
+    keccak::{InputData, KeccakWires},
     utils::{find_index_subvector, keccak256},
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
 use plonky2::{
     field::extension::Extendable,
-    hash::hash_types::RichField,
+    hash::{hash_types::RichField, keccak},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -40,6 +41,7 @@ struct Wires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
+    [(); PAD_LEN(NODE_LEN) / 4]:,
 {
     /// a vector of buffers whose size is the padded size of the maximum node length
     /// the padding may occur anywhere in the array but it can fit the maximum node size
@@ -47,6 +49,10 @@ where
     /// way to define everything according to max size of the data and
     /// "not care" about the padding size (almost!)
     nodes: [VectorWire<{ PAD_LEN(NODE_LEN) }>; DEPTH],
+
+    /// We need to keep around the hashes wires because keccak needs to assign
+    /// some additional wires for each input (see keccak circuit for more info.).
+    keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; DEPTH],
 
     /// in the case of a fixed circuit, the actual tree depth might be smaller.
     /// In this case, we set false on the part of the path we should not process.
@@ -87,18 +93,20 @@ where
         let nodes: [VectorWire<_>; DEPTH] =
             create_array(|_| VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(b));
         // hash the leaf first
-        let mut last_hash_output = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]).output_array;
+        let mut leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]);
+        let mut last_hash_output = leaf_hash.output_array.clone();
+        let mut keccak_wires = vec![leaf_hash];
         let t = b._true();
         // we skip the first node which is the leaf
         for i in 1..DEPTH {
             let is_real = should_process[i - 1];
             let at = index_hashes[i - 1];
             // hash the next node first. We do this so we can get the U32 equivalence of the node
-            //let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
+            let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
             // look if hash is inside the node (in u32 format)
-            // let found_hash_in_parent = hash_wires
-            //     .padded_u32 // this is the node but in u32 format
-            //     .contains_array(b, &last_hash_output, at);
+            //let found_hash_in_parent = hash_wires
+            //    .padded_u32 // this is the node but in u32 format
+            //    .contains_array(b, &last_hash_output, at);
             //b.connect(found_hash_in_parent.target, t.target);
 
             // if we don't have to process it, then circuit should never fail at that step
@@ -106,6 +114,8 @@ where
             //let is_parent = b.select(is_real, found_hash_in_parent.target, t.target);
             //b.connect(is_parent, t.target);
 
+            last_hash_output = hash_wires.output_array.clone();
+            keccak_wires.push(hash_wires);
             // and select whether we should update or not
             //last_hash_output = hash_wires
             //    .output_array
@@ -114,6 +124,7 @@ where
         (
             last_hash_output,
             Wires {
+                keccak_wires: keccak_wires.try_into().unwrap(),
                 nodes,
                 should_process,
                 child_hash_index: index_hashes,
@@ -137,8 +148,16 @@ where
             .map(|n| Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(n.clone()))
             .chain((0..pad_len).map(|_| Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(vec![])))
             .collect::<Result<Vec<_>>>()?;
-        for (wire, node) in wires.nodes.iter().zip(padded_nodes.iter()) {
+        for (i, (wire, node)) in wires.nodes.iter().zip(padded_nodes.iter()).enumerate() {
             wire.assign(p, node);
+            KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
+                p,
+                &wires.keccak_wires[i],
+                // Given we already assign the input data elsewhere, we notify to keccak circuit
+                // that it doesn't need to assign it again, just its add. wires.
+                // TODO: this might be doable via a generator implementation with Plonky2...?
+                &InputData::Assigned(node),
+            );
         }
         println!(
             "padded nodes len {}: {:?}",
@@ -263,7 +282,7 @@ mod test {
         let mut proof = trie.get_proof(key).unwrap();
         proof.reverse();
         assert!(proof.len() >= ACTUAL_DEPTH);
-        assert!(proof.len() <= DEPTH);
+        assert!(proof.len() == DEPTH);
         assert!(keccak256(proof.last().unwrap()) == root.to_fixed_bytes());
         println!("PROOF LEN = {}", proof.len());
         for i in 1..proof.len() {

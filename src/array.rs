@@ -214,7 +214,9 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         b: &mut CircuitBuilder<F, D>,
         at: Target,
     ) -> T {
-        if SIZE < RANDOM_ACCESS_SIZE {
+        // Only use random_access when SIZE is a power of 2 and smaller than 64
+        // see https://stackoverflow.com/a/600306/1202623 for the trick
+        if SIZE < RANDOM_ACCESS_SIZE && (SIZE & (SIZE - 1) == 0) {
             // Escape hatch when we can use random_access from plonky2 base
             return T::from_target(b.random_access(
                 at,
@@ -260,6 +262,7 @@ mod test {
     use crate::{
         array::Array,
         circuit::{test::test_simple_circuit, UserCircuit},
+        utils::find_index_subvector,
     };
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -348,24 +351,23 @@ mod test {
 
     #[test]
     fn test_contains_subarray() {
-        const SIZE: usize = 80;
-        const SUBSIZE: usize = 40;
         #[derive(Clone, Debug)]
-        struct ContainsSubarrayCircuit {
-            arr: [u8; SIZE],
+        struct ContainsSubarrayCircuit<const S: usize, const SUB: usize> {
+            arr: [u8; S],
             idx: usize,
-            exp: [u8; SUBSIZE],
+            exp: [u8; SUB],
         }
-        impl<F, const D: usize> UserCircuit<F, D> for ContainsSubarrayCircuit
+        impl<F, const D: usize, const S: usize, const SUB: usize> UserCircuit<F, D>
+            for ContainsSubarrayCircuit<S, SUB>
         where
             F: RichField + Extendable<D>,
         {
-            type Wires = (Array<Target, SIZE>, Target, Array<Target, SUBSIZE>);
+            type Wires = (Array<Target, S>, Target, Array<Target, SUB>);
             fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-                let array = Array::<Target, SIZE>::new(c);
+                let array = Array::<Target, S>::new(c);
                 let index = c.add_virtual_target();
-                let sub = Array::<Target, SUBSIZE>::new(c);
-                let contains = array.contains_array::<_, _, SUBSIZE>(c, &sub, index);
+                let sub = Array::<Target, SUB>::new(c);
+                let contains = array.contains_array::<_, _, SUB>(c, &sub, index);
                 let tru = c._true();
                 c.connect(contains.target, tru.target);
                 (array, index, sub)
@@ -381,10 +383,40 @@ mod test {
             }
         }
         let mut rng = thread_rng();
-        let mut arr = [0u8; SIZE];
-        rng.fill(&mut arr[..]);
-        let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
-        let exp = create_array(|i| arr[idx + i]);
-        test_simple_circuit::<F, D, C, _>(ContainsSubarrayCircuit { arr, idx, exp });
+        {
+            const SIZE: usize = 81;
+            const SUBSIZE: usize = 41;
+            let mut arr = [0u8; SIZE];
+            rng.fill(&mut arr[..]);
+            let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
+            let exp = create_array(|i| arr[idx + i]);
+            test_simple_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
+                arr,
+                idx,
+                exp,
+            });
+        }
+        {
+            // trying where the subarray is at the end
+            const SIZE: usize = 37;
+            const SUBSIZE: usize = 32;
+            let node = hex::decode(
+                "e48200a0a06b4a71765e17649ab73c5e176281619faf173519718e6e95a40a8768685a26c6",
+            )
+            .unwrap();
+            let child_hash =
+                hex::decode("6b4a71765e17649ab73c5e176281619faf173519718e6e95a40a8768685a26c6")
+                    .unwrap();
+            let idx = find_index_subvector(&node, &child_hash).unwrap();
+            test_simple_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
+                arr: node.try_into().unwrap(),
+                idx,
+                exp: child_hash.try_into().unwrap(),
+            });
+
+            //println!("len node = {}", node.len());
+            //println!("len child = {}", child_hash.len());
+            //println!("idx = {}", idx);
+        }
     }
 }

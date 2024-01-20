@@ -184,24 +184,53 @@ where
         }
     }
 
-    /// In the case we already have the array coming from another circuit, i.e.
-    /// the cleartext bytes are not available,
-    /// we can use this function during proving time. However, we do need the
+    /// This
+    /// Usually the input data is already assigned in other places of our circuits.
+    /// This method takes the data and aHowever, we do need the
     /// unpadded length to correctly compute the padding currently.
     /// NOTE: we could remove this requirement but it would mean computing the
     /// padding size in circuit, which is annoying. Computing off circuit is
     /// usually secure in our cases because we use it to check consistency with
     /// a known hash, so if one tweaks the len, it will give invalid output hash.
-    fn assign<F: RichField>(&self, pw: &mut PartialWitness<F>, wires: &KeccakWires<N>) {
-        wires.input_array.assign(pw, &self.data);
-        let diff = compute_padding_size(self.data.real_len);
+    pub fn assign<F: RichField>(
+        pw: &mut PartialWitness<F>,
+        wires: &KeccakWires<N>,
+        data: &InputData<N>,
+    ) {
+        if let InputData::NonAssigned(vector) = data {
+            wires.input_array.assign(pw, vector);
+        }
+        let diff = compute_padding_size(data.real_len());
         pw.set_target(wires.diff, F::from_canonical_usize(diff));
+    }
+}
+
+/// InputData holds the information if the input data wire is already assigned or not.
+/// Usually in most cases the input data is already assigned in other places of our circuits.
+/// For some cases like only hashing or bench or tests, we need to assign the data to the
+/// wires still.
+pub enum InputData<'a, const N: usize> {
+    /// During assignement time (proving time), keccak circuit assumes the data
+    /// is already assigned to the respective input wires. However, it still needs
+    /// to assign the padding size difference, an internal keccak wire.
+    Assigned(&'a Vector<N>),
+    /// In this mode, keccak circuit will assign both the data and the padding difference
+    /// size. Useful in case the input data is not created elsewhere.
+    NonAssigned(&'a Vector<N>),
+}
+
+impl<'a, const N: usize> InputData<'a, N> {
+    pub fn real_len(&self) -> usize {
+        match self {
+            InputData::Assigned(v) => v.real_len,
+            InputData::NonAssigned(v) => v.real_len,
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::{KeccakCircuit, KeccakWires};
+    use super::{InputData, KeccakCircuit, KeccakWires};
     use crate::{
         array::VectorWire,
         circuit::{test::test_simple_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit},
@@ -236,7 +265,7 @@ mod test {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.assign(pw, wires);
+            KeccakCircuit::<N>::assign(pw, wires, &InputData::NonAssigned(&self.data));
         }
     }
     impl<F, const D: usize, const BYTES: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
@@ -290,7 +319,7 @@ mod test {
             }
 
             fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-                self.c.assign(pw, wires);
+                KeccakCircuit::<N>::assign(pw, wires, &InputData::NonAssigned(&self.c.data));
                 let exp_u32 = self
                     .exp
                     .chunks(4)
