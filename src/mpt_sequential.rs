@@ -149,6 +149,7 @@ where
             .chain((0..pad_len).map(|_| Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(vec![])))
             .collect::<Result<Vec<_>>>()?;
         for (i, (wire, node)) in wires.nodes.iter().zip(padded_nodes.iter()).enumerate() {
+            println!("Assigning node {}", i);
             wire.assign(p, node);
             KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
                 p,
@@ -292,10 +293,15 @@ mod test {
         println!("PROOF LEN = {}", proof.len());
         for i in 1..proof.len() {
             let child_hash = keccak256(&proof[i - 1]);
-            assert!(find_index_subvector(&proof[i], &child_hash).is_some());
+            let u8idx = find_index_subvector(&proof[i], &child_hash);
+            assert!(u8idx.is_some());
             let ch32 = convert_u8_to_u32_slice(&child_hash);
             let node32 = convert_u8_to_u32_slice(&proof[i]);
-            assert!(find_index_subvector(&node32, &ch32).is_some());
+            assert!(
+                find_index_subvector(&node32, &ch32).is_some(),
+                "u8dx = {:?}",
+                u8idx
+            );
         }
         // println!(
         //     "first item {:?} vs root {:} vs last item {:?}",
