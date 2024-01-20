@@ -1,7 +1,7 @@
 use crate::{
     array::{Vector, VectorWire},
     keccak::{InputData, KeccakWires},
-    utils::{find_index_subvector, keccak256},
+    utils::{convert_u8_to_u32, convert_u8_to_u32_slice, find_index_subvector, keccak256},
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
@@ -104,9 +104,9 @@ where
             // hash the next node first. We do this so we can get the U32 equivalence of the node
             let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
             // look if hash is inside the node (in u32 format)
-            //let found_hash_in_parent = hash_wires
-            //    .padded_u32 // this is the node but in u32 format
-            //    .contains_array(b, &last_hash_output, at);
+            let found_hash_in_parent = hash_wires
+                .padded_u32 // this is the node but in u32 format
+                .contains_array(b, &last_hash_output, at);
             //b.connect(found_hash_in_parent.target, t.target);
 
             // if we don't have to process it, then circuit should never fail at that step
@@ -171,7 +171,12 @@ where
                 // we always process the leaf so we start at index 0 for parent of leaf
                 p.set_bool_target(wires.should_process[i - 1], true);
                 let child_hash = keccak256(&self.nodes[i - 1]);
-                let idx = find_index_subvector(&self.nodes[i], &child_hash)
+                let parent32 = convert_u8_to_u32_slice(&self.nodes[i]);
+                let hash32 = convert_u8_to_u32_slice(&child_hash);
+                //let idx = find_index_subvector(&self.nodes[i], &child_hash)
+                // Since, in circuit, we're looking at the u32 already converted version,
+                // we need to look for the index in the u32 format way
+                let idx = find_index_subvector(&parent32, &hash32)
                     .ok_or(anyhow!("can't find hash in parent node!"))?;
                 p.set_target(wires.child_hash_index[i - 1], F::from_canonical_usize(idx));
                 println!("Index {}: should process true. idx {}", i, idx);
@@ -203,7 +208,7 @@ mod test {
         array::VectorWire,
         circuit::{test::test_simple_circuit, UserCircuit},
         keccak::OutputHash,
-        utils::{find_index_subvector, keccak256},
+        utils::{convert_u8_to_u32_slice, find_index_subvector, keccak256},
     };
 
     use super::{Circuit, Wires, PAD_LEN};
@@ -253,7 +258,7 @@ mod test {
         // leave one for padding
         const ACTUAL_DEPTH: usize = DEPTH;
         // max len of a node
-        const NODE_LEN: usize = 144;
+        const NODE_LEN: usize = 80;
         // build a random MPT trie
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
@@ -288,6 +293,9 @@ mod test {
         for i in 1..proof.len() {
             let child_hash = keccak256(&proof[i - 1]);
             assert!(find_index_subvector(&proof[i], &child_hash).is_some());
+            let ch32 = convert_u8_to_u32_slice(&child_hash);
+            let node32 = convert_u8_to_u32_slice(&proof[i]);
+            assert!(find_index_subvector(&node32, &ch32).is_some());
         }
         // println!(
         //     "first item {:?} vs root {:} vs last item {:?}",

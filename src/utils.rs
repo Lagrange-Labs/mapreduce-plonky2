@@ -41,7 +41,7 @@ impl<F: RichField> IntTargetWriter for PartialWitness<F> {
 }
 
 // Returns the index where the subvector starts in v, if any.
-pub(crate) fn find_index_subvector(v: &[u8], sub: &[u8]) -> Option<usize> {
+pub(crate) fn find_index_subvector<T: PartialEq>(v: &[T], sub: &[T]) -> Option<usize> {
     (0..(v.len() - sub.len() + 1)).find(|&i| &v[i..i + sub.len()] == sub)
 }
 
@@ -168,6 +168,19 @@ pub fn greater_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
     let one = builder.one();
     let a_plus_1 = builder.add(a, one);
     less_than(builder, b, a_plus_1, n)
+}
+
+/// Resize the input vector if needed
+pub(crate) fn convert_u8_to_u32_slice(data: &[u8]) -> Vec<u32> {
+    let mut d = data.to_vec();
+    if data.len() % 4 != 0 {
+        d.resize(data.len() + (4 - (data.len() % 4)), 0);
+    }
+    let mut converted = Vec::new();
+    while !d.is_empty() {
+        converted.push(read_le_u32(&mut &d[..]))
+    }
+    converted
 }
 
 // taken from rust doc https://doc.rust-lang.org/std/primitive.u32.html#method.from_be_bytes
