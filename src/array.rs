@@ -24,7 +24,7 @@ pub struct VectorWire<const MAX_LEN: usize> {
 
 /// A fixed buffer array containing dynammic length data, the equivalent of
 /// `ArrayWire` outside circuit.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct Vector<const MAX_LEN: usize> {
     // hardcoding to be bytes srently only use case
     pub arr: [u8; MAX_LEN],
@@ -36,7 +36,7 @@ impl<const MAX_LEN: usize> Vector<MAX_LEN> {
         let len = d.len();
         d.resize(MAX_LEN, 0);
         Ok(Self {
-            arr: d.try_into().map_err(|e| anyhow!("{:?}",e))?,
+            arr: d.try_into().map_err(|e| anyhow!("{:?}", e))?,
             real_len: len,
         })
     }

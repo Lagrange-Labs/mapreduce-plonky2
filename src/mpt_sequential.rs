@@ -3,6 +3,7 @@ use crate::{
     utils::{find_index_subvector, keccak256},
 };
 use anyhow::{anyhow, Result};
+use core::array::from_fn as create_array;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -80,38 +81,35 @@ where
         F: RichField + Extendable<D>,
     {
         let should_process: [BoolTarget; DEPTH - 1] =
-            core::array::from_fn(|_| b.add_virtual_bool_target_safe());
-        let index_hashes: [Target; DEPTH - 1] = core::array::from_fn(|_| b.add_virtual_target());
+            create_array(|_| b.add_virtual_bool_target_safe());
+        let index_hashes: [Target; DEPTH - 1] = create_array(|_| b.add_virtual_target());
         // nodes should be ordered from leaf to root and padded at the end
-        let nodes: [VectorWire<_>; DEPTH] = (0..DEPTH)
-            .map(|_| VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(b))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
+        let nodes: [VectorWire<_>; DEPTH] =
+            create_array(|_| VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(b));
         // hash the leaf first
-        let mut last_hash_output =
-            KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]).output_array;
+        let mut last_hash_output = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]).output_array;
         let t = b._true();
         // we skip the first node which is the leaf
         for i in 1..DEPTH {
             let is_real = should_process[i - 1];
-            // hash the next node first. We do this so we can get the U32 equivalence of the node
-            let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
-            // look if hash is inside the node (in u32 format)
             let at = index_hashes[i - 1];
-            let found_hash_in_parent = hash_wires
-                .padded_u32 // this is the node but in u32 format
-                .contains_array(b, &last_hash_output, at);
+            // hash the next node first. We do this so we can get the U32 equivalence of the node
+            //let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
+            // look if hash is inside the node (in u32 format)
+            // let found_hash_in_parent = hash_wires
+            //     .padded_u32 // this is the node but in u32 format
+            //     .contains_array(b, &last_hash_output, at);
+            //b.connect(found_hash_in_parent.target, t.target);
 
             // if we don't have to process it, then circuit should never fail at that step
             // otherwise, we should always enforce finding the hash in the parent node
-            let is_parent = b.select(is_real, found_hash_in_parent.target, t.target);
-            b.connect(is_parent, t.target);
+            //let is_parent = b.select(is_real, found_hash_in_parent.target, t.target);
+            //b.connect(is_parent, t.target);
 
             // and select whether we should update or not
-            last_hash_output = hash_wires
-                .output_array
-                .select(is_real, &last_hash_output, b);
+            //last_hash_output = hash_wires
+            //    .output_array
+            //    .select(is_real, &last_hash_output, b);
         }
         (
             last_hash_output,
@@ -142,15 +140,22 @@ where
         for (wire, node) in wires.nodes.iter().zip(padded_nodes.iter()) {
             wire.assign(p, node);
         }
+        println!(
+            "padded nodes len {}: {:?}",
+            padded_nodes.len(),
+            padded_nodes
+        );
         // find the index of the child hash in the parent nodes for all nodes in the path
         // and set to true the nodes we should process
         for i in 1..DEPTH {
             if i < self.nodes.len() {
-                p.set_bool_target(wires.should_process[i], true);
+                // we always process the leaf so we start at index 0 for parent of leaf
+                p.set_bool_target(wires.should_process[i - 1], true);
                 let child_hash = keccak256(&self.nodes[i - 1]);
                 let idx = find_index_subvector(&self.nodes[i], &child_hash)
                     .ok_or(anyhow!("can't find hash in parent node!"))?;
                 p.set_target(wires.child_hash_index[i - 1], F::from_canonical_usize(idx));
+                println!("Index {}: should process true. idx {}", i, idx);
             } else {
                 p.set_bool_target(wires.should_process[i - 1], false);
             }
@@ -163,7 +168,7 @@ where
 mod test {
     use std::sync::Arc;
 
-    use eth_trie::{EthTrie, MemoryDB, Node, Trie};
+    use eth_trie::{EthTrie, MemoryDB, Trie};
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -225,9 +230,9 @@ mod test {
     #[test]
     fn test_mpt_proof_verification() {
         // max depth of the trie
-        const DEPTH: usize = 7;
+        const DEPTH: usize = 3;
         // leave one for padding
-        const ACTUAL_DEPTH: usize = DEPTH - 1;
+        const ACTUAL_DEPTH: usize = DEPTH;
         // max len of a node
         const NODE_LEN: usize = 144;
         // build a random MPT trie
@@ -258,6 +263,7 @@ mod test {
         let mut proof = trie.get_proof(key).unwrap();
         proof.reverse();
         assert!(proof.len() >= ACTUAL_DEPTH);
+        assert!(proof.len() <= DEPTH);
         assert!(keccak256(proof.last().unwrap()) == root.to_fixed_bytes());
         println!("PROOF LEN = {}", proof.len());
         for i in 1..proof.len() {

@@ -19,7 +19,7 @@ use plonky2_crypto::{
 };
 
 use crate::{
-    array::{Array, VectorWire},
+    array::{Array, Vector, VectorWire},
     utils::{convert_u8_to_u32, less_than},
 };
 
@@ -51,10 +51,9 @@ pub type OutputHash = Array<U32Target, PACKED_HASH_LEN>;
 /// Circuit able to hash any arrays of bytes of dynamic sizes as long as its
 /// padded version length is less than N. In other words, N is the maximal size
 /// of the array + padding to hash.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct KeccakCircuit<const N: usize> {
-    data: [u8; N],
-    unpadded_len: usize,
+    data: Vector<N>,
 }
 #[derive(Clone, Debug)]
 pub struct KeccakWires<const N: usize>
@@ -93,12 +92,8 @@ where
             "Fixed array size must be 0 mod 4 for conversion with u32"
         );
 
-        let unpadded_len = data.len();
-        data.resize(N, 0);
-        Ok(Self {
-            data: data.try_into().unwrap(),
-            unpadded_len,
-        })
+        let data = Vector::<N>::from_vec(data)?;
+        Ok(Self { data })
     }
 
     /// Takes an array which is _already_ at the right padded length.
@@ -197,12 +192,9 @@ where
     /// padding size in circuit, which is annoying. Computing off circuit is
     /// usually secure in our cases because we use it to check consistency with
     /// a known hash, so if one tweaks the len, it will give invalid output hash.
-    fn prove_from_array<F: RichField>(
-        pw: &mut PartialWitness<F>,
-        wires: &KeccakWires<N>,
-        unpadded_len: usize,
-    ) {
-        let diff = compute_padding_size(unpadded_len);
+    fn assign<F: RichField>(&self, pw: &mut PartialWitness<F>, wires: &KeccakWires<N>) {
+        wires.input_array.assign(pw, &self.data);
+        let diff = compute_padding_size(self.data.real_len);
         pw.set_target(wires.diff, F::from_canonical_usize(diff));
     }
 }
@@ -216,11 +208,10 @@ mod test {
         keccak::compute_size_with_padding,
         utils::{keccak256, read_le_u32},
     };
-    use core::array::from_fn as create_array;
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
-        iop::witness::{PartialWitness, WitnessWrite},
+        iop::witness::PartialWitness,
         plonk::{
             circuit_builder::CircuitBuilder,
             config::{GenericConfig, PoseidonGoldilocksConfig},
@@ -245,15 +236,7 @@ mod test {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            wires
-                .input_array
-                .arr
-                .assign(pw, &create_array(|i| F::from_canonical_u8(self.data[i])));
-            pw.set_target(
-                wires.input_array.real_len,
-                F::from_canonical_usize(self.unpadded_len),
-            );
-            Self::prove_from_array(pw, wires, self.unpadded_len);
+            self.assign(pw, wires);
         }
     }
     impl<F, const D: usize, const BYTES: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
@@ -307,15 +290,7 @@ mod test {
             }
 
             fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-                wires
-                    .input_array
-                    .arr
-                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.c.data[i])));
-                pw.set_target(
-                    wires.input_array.real_len,
-                    F::from_canonical_usize(self.c.unpadded_len),
-                );
-                KeccakCircuit::prove_from_array(pw, wires, self.c.unpadded_len);
+                self.c.assign(pw, wires);
                 let exp_u32 = self
                     .exp
                     .chunks(4)
