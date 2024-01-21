@@ -52,6 +52,9 @@ pub(crate) fn keccak256(data: &[u8]) -> Vec<u8> {
     hasher.update(data);
     hasher.finalize().to_vec()
 }
+
+
+// TODO refactor directly using array
 pub(crate) fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],

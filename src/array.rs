@@ -126,6 +126,7 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
             arr: core::array::from_fn(|_| T::from_target(b.add_virtual_target())),
         }
     }
+
     pub fn assign<F: RichField + Extendable<D>, const D: usize>(
         &self,
         pw: &mut PartialWitness<F>,
@@ -146,9 +147,9 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
     /// if condition is false. Cost is O(SIZE) call to select()
     pub fn select<F: RichField + Extendable<D>, const D: usize>(
         &self,
+        b: &mut CircuitBuilder<F, D>,
         condition: BoolTarget,
         other: &Self,
-        b: &mut CircuitBuilder<F, D>,
     ) -> Self {
         Array {
             arr: core::array::from_fn(|i| {
@@ -237,6 +238,58 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         T::from_target(b.add_many(&nums))
     }
 }
+impl<const SIZE: usize> Array<Target, SIZE>
+where
+    [(); SIZE / 4]:,
+{
+    pub fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) -> Array<U32Target, { SIZE / 4 }> {
+        const TWO_POWER_8: usize = 256;
+        const TWO_POWER_16: usize = 65536;
+        const TWO_POWER_24: usize = 16777216;
+
+        // constants to convert [u8; 4] to u32
+        // u32 = u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
+        let two_power_8: Target = b.constant(F::from_canonical_usize(TWO_POWER_8));
+        let two_power_16: Target = b.constant(F::from_canonical_usize(TWO_POWER_16));
+        let two_power_24: Target = b.constant(F::from_canonical_usize(TWO_POWER_24));
+
+        // convert padded node to u32
+        Array::<U32Target, { SIZE / 4 }> {
+            arr: (0..SIZE)
+                .step_by(4)
+                .map(|i| {
+                    // u8[0]
+                    let mut x = self.arr[i];
+                    // u8[1]
+                    let mut y = self.arr[i + 1];
+                    // u8[1] * 2^8
+                    y = b.mul(y, two_power_8);
+                    // u8[0] + u8[1] * 2^8
+                    x = b.add(x, y);
+                    // u8[2]
+                    y = self.arr[i + 2];
+                    // u8[2] * 2^16
+                    y = b.mul(y, two_power_16);
+                    // u8[0] + u8[1] * 2^8 + u8[2] * 2^16
+                    x = b.add(x, y);
+                    // u8[3]
+                    y = self.arr[i + 3];
+                    // u8[3] * 2^24
+                    y = b.mul(y, two_power_24);
+                    // u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
+                    x = b.add(x, y);
+
+                    U32Target(x)
+                })
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        }
+    }
+}
 
 /// Maximum size of the array where we can call b.random_access() from native
 /// Plonky2 API
@@ -249,7 +302,7 @@ mod test {
         field::extension::Extendable,
         hash::hash_types::RichField,
         iop::{
-            target::Target,
+            target::{BoolTarget, Target},
             witness::{PartialWitness, WitnessWrite},
         },
         plonk::{
@@ -257,17 +310,122 @@ mod test {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
+    use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, Rng};
 
     use crate::{
         array::Array,
         circuit::{test::test_simple_circuit, UserCircuit},
-        utils::find_index_subvector,
+        utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
 
+    #[test]
+    fn test_array_select() {
+        const SIZE: usize = 40;
+        #[derive(Clone, Debug)]
+        struct SelectCircuit<const S: usize> {
+            arr: [u8; S],
+            arr2: [u8; S],
+            cond: bool, // true = arr, false = arr2
+        }
+        impl<F, const D: usize, const S: usize> UserCircuit<F, D> for SelectCircuit<S>
+        where
+            F: RichField + Extendable<D>,
+        {
+            type Wires = (
+                Array<Target, S>,
+                Array<Target, S>,
+                Array<Target, S>,
+                BoolTarget,
+            );
+            fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let array = Array::<Target, S>::new(c);
+                let array2 = Array::<Target, S>::new(c);
+                let exp = Array::<Target, S>::new(c);
+                let cond = c.add_virtual_bool_target_safe();
+                let selected = array.select(c, cond, &array2);
+                let e = exp.equals(c, &selected);
+                let t = c._true();
+                c.connect(e.target, t.target);
+                (array, array2, exp, cond)
+            }
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires
+                    .0
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
+                wires
+                    .1
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr2[i])));
+                let selected_array = if self.cond { &self.arr } else { &self.arr2 };
+                wires.2.assign(
+                    pw,
+                    &create_array(|i| F::from_canonical_u8(selected_array[i])),
+                );
+                pw.set_bool_target(wires.3, self.cond);
+            }
+        }
+        let mut rng = thread_rng();
+        let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..]);
+        let mut arr2 = [0u8; SIZE];
+        rng.fill(&mut arr2[..]);
+        test_simple_circuit::<F, D, C, _>(SelectCircuit {
+            arr,
+            arr2,
+            cond: true,
+        });
+        test_simple_circuit::<F, D, C, _>(SelectCircuit {
+            arr,
+            arr2,
+            cond: false,
+        });
+    }
+    #[test]
+    fn test_convert_u8u32() {
+        const SIZE: usize = 80;
+        #[derive(Clone, Debug)]
+        struct ConvertCircuit<const S: usize>
+        where
+            [(); S / 4]:,
+        {
+            arr: [u8; S],
+        }
+        impl<F, const D: usize, const S: usize> UserCircuit<F, D> for ConvertCircuit<S>
+        where
+            F: RichField + Extendable<D>,
+            [(); S / 4]:,
+        {
+            type Wires = (Array<Target, S>, Array<U32Target, { S / 4 }>);
+            fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let array = Array::<Target, S>::new(c);
+                let tou32 = array.convert_u8_to_u32(c);
+                let exp_u32 = Array::<U32Target, { S / 4 }>::new(c);
+                let tr = c._true();
+                let f = tou32.equals(c, &exp_u32);
+                c.connect(f.target, tr.target);
+                (array, exp_u32)
+            }
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires
+                    .0
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
+                let u32arr: [F; S / 4] = convert_u8_to_u32_slice(&self.arr)
+                    .iter()
+                    .map(|x| F::from_canonical_u32(*x))
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap();
+                wires.1.assign(pw, &u32arr);
+            }
+        }
+        let mut rng = thread_rng();
+        let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..]);
+        test_simple_circuit::<F, D, C, _>(ConvertCircuit { arr });
+    }
     #[test]
     fn test_value_at() {
         const SIZE: usize = 80;

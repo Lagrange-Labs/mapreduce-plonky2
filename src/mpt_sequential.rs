@@ -1,6 +1,6 @@
 use crate::{
-    array::{Vector, VectorWire},
-    keccak::{InputData, KeccakWires},
+    array::{Array, Vector, VectorWire},
+    keccak::{InputData, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     utils::{convert_u8_to_u32, convert_u8_to_u32_slice, find_index_subvector, keccak256},
 };
 use anyhow::{anyhow, Result};
@@ -14,6 +14,7 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 use crate::keccak::{compute_size_with_padding, KeccakCircuit, OutputHash};
 
@@ -93,33 +94,40 @@ where
         let nodes: [VectorWire<_>; DEPTH] =
             create_array(|_| VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(b));
         // hash the leaf first
-        let mut leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]);
+        let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]);
         let mut last_hash_output = leaf_hash.output_array.clone();
         let mut keccak_wires = vec![leaf_hash];
         let t = b._true();
         // we skip the first node which is the leaf
         for i in 1..DEPTH {
             let is_real = should_process[i - 1];
+            b.connect(is_real.target, t.target);
             let at = index_hashes[i - 1];
             // hash the next node first. We do this so we can get the U32 equivalence of the node
             let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
-            // look if hash is inside the node (in u32 format)
-            let found_hash_in_parent = hash_wires
-                .padded_u32 // this is the node but in u32 format
-                .contains_array(b, &last_hash_output, at);
+            // look if hash is inside the node:
+            // extract the hash from u8 array and then convert to u32 and then compare
+            let exp_child_hash: Array<Target, HASH_LEN> = nodes[i].arr.extract_array(b, at);
+            // TODO : try to use the const generics, for some reason it doesn't work here
+            let exp_hash_u32 = Array::<U32Target, PACKED_HASH_LEN> {
+                arr: convert_u8_to_u32(b, &exp_child_hash.arr)
+                    .try_into()
+                    .unwrap(),
+            };
+            let found_hash_in_parent = exp_hash_u32.equals(b, &last_hash_output);
             //b.connect(found_hash_in_parent.target, t.target);
 
             // if we don't have to process it, then circuit should never fail at that step
             // otherwise, we should always enforce finding the hash in the parent node
-            //let is_parent = b.select(is_real, found_hash_in_parent.target, t.target);
-            //b.connect(is_parent, t.target);
+            let is_parent = b.select(is_real, found_hash_in_parent.target, t.target);
+            b.connect(is_parent, t.target);
 
-            last_hash_output = hash_wires.output_array.clone();
-            keccak_wires.push(hash_wires);
+            //last_hash_output = hash_wires.output_array.clone();
             // and select whether we should update or not
-            //last_hash_output = hash_wires
-            //    .output_array
-            //    .select(is_real, &last_hash_output, b);
+            last_hash_output = hash_wires
+                .output_array
+                .select(b, is_real, &last_hash_output);
+            keccak_wires.push(hash_wires);
         }
         (
             last_hash_output,
@@ -160,11 +168,7 @@ where
                 &InputData::Assigned(node),
             );
         }
-        println!(
-            "padded nodes len {}: {:?}",
-            padded_nodes.len(),
-            padded_nodes
-        );
+        println!("padded nodes len {}", padded_nodes.len());
         // find the index of the child hash in the parent nodes for all nodes in the path
         // and set to true the nodes we should process
         for i in 1..DEPTH {
@@ -172,17 +176,14 @@ where
                 // we always process the leaf so we start at index 0 for parent of leaf
                 p.set_bool_target(wires.should_process[i - 1], true);
                 let child_hash = keccak256(&self.nodes[i - 1]);
-                let parent32 = convert_u8_to_u32_slice(&self.nodes[i]);
-                let hash32 = convert_u8_to_u32_slice(&child_hash);
-                //let idx = find_index_subvector(&self.nodes[i], &child_hash)
-                // Since, in circuit, we're looking at the u32 already converted version,
-                // we need to look for the index in the u32 format way
-                let idx = find_index_subvector(&parent32, &hash32)
+                let idx = find_index_subvector(&self.nodes[i], &child_hash)
                     .ok_or(anyhow!("can't find hash in parent node!"))?;
                 p.set_target(wires.child_hash_index[i - 1], F::from_canonical_usize(idx));
-                println!("Index {}: should process true. idx {}", i, idx);
+                println!("Index {}: should process TRUE. (hash idx {})", i, idx);
             } else {
+                println!("Index {}: should process FALSE", i);
                 p.set_bool_target(wires.should_process[i - 1], false);
+                p.set_target(wires.child_hash_index[i - 1], F::ZERO);
             }
         }
         Ok(())
@@ -255,7 +256,7 @@ mod test {
     #[test]
     fn test_mpt_proof_verification() {
         // max depth of the trie
-        const DEPTH: usize = 3;
+        const DEPTH: usize = 4;
         // leave one for padding
         const ACTUAL_DEPTH: usize = DEPTH;
         // max len of a node
@@ -295,13 +296,6 @@ mod test {
             let child_hash = keccak256(&proof[i - 1]);
             let u8idx = find_index_subvector(&proof[i], &child_hash);
             assert!(u8idx.is_some());
-            let ch32 = convert_u8_to_u32_slice(&child_hash);
-            let node32 = convert_u8_to_u32_slice(&proof[i]);
-            assert!(
-                find_index_subvector(&node32, &ch32).is_some(),
-                "u8dx = {:?}",
-                u8idx
-            );
         }
         // println!(
         //     "first item {:?} vs root {:} vs last item {:?}",

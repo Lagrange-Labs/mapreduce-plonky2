@@ -24,9 +24,9 @@ use crate::{
 };
 
 /// Length of a hash in bytes.
-const HASH_LEN: usize = 32;
+pub const HASH_LEN: usize = 32;
 /// Length of a hash in U32
-const PACKED_HASH_LEN: usize = 8;
+pub const PACKED_HASH_LEN: usize = HASH_LEN / 4;
 
 /// Keccak pads data before "hashing" it. This method returns the full size
 /// of the padded data before hashing. This is useful to know the actual number
