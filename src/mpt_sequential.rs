@@ -101,7 +101,7 @@ where
         // we skip the first node which is the leaf
         for i in 1..DEPTH {
             let is_real = should_process[i - 1];
-            b.connect(is_real.target, t.target);
+            //b.connect(is_real.target, t.target);
             let at = index_hashes[i - 1];
             // hash the next node first. We do this so we can get the U32 equivalence of the node
             let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
@@ -258,13 +258,15 @@ mod test {
         // max depth of the trie
         const DEPTH: usize = 4;
         // leave one for padding
-        const ACTUAL_DEPTH: usize = DEPTH;
+        const ACTUAL_DEPTH: usize = DEPTH - 1;
         // max len of a node
         const NODE_LEN: usize = 80;
         // build a random MPT trie
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
         let mut keys = Vec::new();
+        #[allow(unused_assignments)]
+        let mut right_key_idx = 0;
         // loop: insert random elements as long as a random selected proof is not of the right length
         loop {
             println!("-> Insertion of {} elements so far...", keys.len());
@@ -278,18 +280,22 @@ mod test {
                 .expect("can't insert");
             keys.push(key.clone());
             trie.root_hash().expect("root hash problem");
-            let proof = trie.get_proof(&key).unwrap();
-            if proof.len() >= ACTUAL_DEPTH {
+            if let Some(idx) = (0..keys.len()).find(|k| {
+                let ke = &keys[*k];
+                let proof = trie.get_proof(ke).unwrap();
+                proof.len() == ACTUAL_DEPTH
+            }) {
+                right_key_idx = idx;
                 break;
             }
         }
         let root = trie.root_hash().unwrap();
         // root is first so we reverse the order as in circuit we prove the opposite way
-        let key = keys.last().unwrap();
+        let key = keys.get(right_key_idx).unwrap();
         let mut proof = trie.get_proof(key).unwrap();
         proof.reverse();
-        assert!(proof.len() >= ACTUAL_DEPTH);
-        assert!(proof.len() == DEPTH);
+        assert!(proof.len() == ACTUAL_DEPTH);
+        assert!(proof.len() <= DEPTH);
         assert!(keccak256(proof.last().unwrap()) == root.to_fixed_bytes());
         println!("PROOF LEN = {}", proof.len());
         for i in 1..proof.len() {

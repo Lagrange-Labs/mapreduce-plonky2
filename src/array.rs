@@ -174,6 +174,7 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         sub.equals(b, &extracted)
     }
 
+    /// Returns true if self == other, false otherwise.
     pub fn equals<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
@@ -210,6 +211,9 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         }
     }
 
+    /// Extract the value from the array at the index givne by `at`.
+    /// Note the cost is O(SIZE) in general, and less for arrays
+    /// which are powers of two and <= 64.
     pub fn value_at<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
