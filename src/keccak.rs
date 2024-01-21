@@ -57,23 +57,14 @@ pub struct KeccakCircuit<const N: usize> {
 }
 #[derive(Clone, Debug)]
 pub struct KeccakWires<const N: usize>
-where
-    [(); N / 4]:,
 {
     input_array: VectorWire<N>,
-    /// this is the input node but in u32 format and padded.
-    /// It is useful to keep around as we are comparing hashes in u32 format in other
-    /// circuits. Note it's an array here because at this point we don't care
-    /// anymore of the real len.
-    pub padded_u32: Array<U32Target, { N / 4 }>,
     diff: Target,
     // 256/u32 = 8
     pub output_array: OutputHash,
 }
 
 impl<const N: usize> KeccakCircuit<N>
-where
-    [(); N / 4]:,
 {
     pub fn new(mut data: Vec<u8>) -> Result<Self> {
         let total = compute_size_with_padding(data.len());
@@ -175,8 +166,6 @@ where
 
         let hash_output = b.hash_keccak256(&hash_target);
         KeccakWires {
-            // TODO: this is fixed length, should be able to use const generics
-            padded_u32: Array::try_from(node_u32_target).unwrap(),
             input_array: a.clone(),
             diff: diff_target,
             // TODO: this is fixed length should be able to use const generics

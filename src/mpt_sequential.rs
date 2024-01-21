@@ -1,13 +1,14 @@
 use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
-    utils::{convert_u8_to_u32, convert_u8_to_u32_slice, find_index_subvector, keccak256},
+    rlp::{decode_header, decode_tuple},
+    utils::{convert_u8_to_u32, find_index_subvector, keccak256},
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
 use plonky2::{
     field::extension::Extendable,
-    hash::{hash_types::RichField, keccak},
+    hash::hash_types::RichField,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -42,7 +43,6 @@ struct Wires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
-    [(); PAD_LEN(NODE_LEN) / 4]:,
 {
     /// a vector of buffers whose size is the padded size of the maximum node length
     /// the padding may occur anywhere in the array but it can fit the maximum node size
@@ -72,8 +72,6 @@ impl<const DEPTH: usize, const NODE_LEN: usize> Circuit<DEPTH, NODE_LEN>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
-    // bound required from keccak
-    [(); PAD_LEN(NODE_LEN) / 4]:,
 {
     pub fn new(nodes: Vec<Vec<u8>>) -> Self {
         Self { nodes }
@@ -101,7 +99,6 @@ where
         // we skip the first node which is the leaf
         for i in 1..DEPTH {
             let is_real = should_process[i - 1];
-            //b.connect(is_real.target, t.target);
             let at = index_hashes[i - 1];
             // hash the next node first. We do this so we can get the U32 equivalence of the node
             let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
@@ -115,14 +112,12 @@ where
                     .unwrap(),
             };
             let found_hash_in_parent = exp_hash_u32.equals(b, &last_hash_output);
-            //b.connect(found_hash_in_parent.target, t.target);
 
             // if we don't have to process it, then circuit should never fail at that step
             // otherwise, we should always enforce finding the hash in the parent node
             let is_parent = b.select(is_real, found_hash_in_parent.target, t.target);
             b.connect(is_parent, t.target);
 
-            //last_hash_output = hash_wires.output_array.clone();
             // and select whether we should update or not
             last_hash_output = hash_wires
                 .output_array
@@ -157,7 +152,6 @@ where
             .chain((0..pad_len).map(|_| Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(vec![])))
             .collect::<Result<Vec<_>>>()?;
         for (i, (wire, node)) in wires.nodes.iter().zip(padded_nodes.iter()).enumerate() {
-            println!("Assigning node {}", i);
             wire.assign(p, node);
             KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
                 p,
@@ -168,7 +162,6 @@ where
                 &InputData::Assigned(node),
             );
         }
-        println!("padded nodes len {}", padded_nodes.len());
         // find the index of the child hash in the parent nodes for all nodes in the path
         // and set to true the nodes we should process
         for i in 1..DEPTH {
@@ -179,14 +172,25 @@ where
                 let idx = find_index_subvector(&self.nodes[i], &child_hash)
                     .ok_or(anyhow!("can't find hash in parent node!"))?;
                 p.set_target(wires.child_hash_index[i - 1], F::from_canonical_usize(idx));
-                println!("Index {}: should process TRUE. (hash idx {})", i, idx);
             } else {
-                println!("Index {}: should process FALSE", i);
                 p.set_bool_target(wires.should_process[i - 1], false);
                 p.set_target(wires.child_hash_index[i - 1], F::ZERO);
             }
         }
         Ok(())
+    }
+
+    fn extract_key_length_leaf<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        node: &Array<Target, NODE_LEN>,
+    ) -> Target {
+        let zero = b.zero();
+        // First, decode headers of RLP ( RLP (key), RLP(data) )
+        let tuple_headers = decode_tuple(b, &node.arr, zero);
+        let key_offset = tuple_headers.offset[0];
+        let key_header = decode_header(b, &node.arr, key_offset);
+        key_header.len
     }
 }
 

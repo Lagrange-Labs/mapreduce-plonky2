@@ -121,12 +121,19 @@ impl<T, const SIZE: usize> Index<usize> for Array<T, SIZE> {
 }
 
 impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
+    /// Creates new wires of the given SIZE.
     pub fn new<F: RichField + Extendable<D>, const D: usize>(b: &mut CircuitBuilder<F, D>) -> Self {
         Self {
             arr: core::array::from_fn(|_| T::from_target(b.add_virtual_target())),
         }
     }
 
+    /// Encapsulate the native array within the Array struct.
+    pub fn from_array(arr: [T; SIZE]) -> Self {
+        Self { arr }
+    }
+
+    /// Assigns each value in the given array to the respective wire in `self`
     pub fn assign<F: RichField + Extendable<D>, const D: usize>(
         &self,
         pw: &mut PartialWitness<F>,
