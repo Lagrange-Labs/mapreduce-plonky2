@@ -67,8 +67,8 @@ impl<T: Data + Clone> MapOp for Identity<T> {
     }
 
     fn add_constraints<F, const D: usize>(
-        input: &<Self::Input as Data>::WireTarget,
-        builder: &mut CircuitBuilder<F, D>,
+        _input: &<Self::Input as Data>::WireTarget,
+        _builder: &mut CircuitBuilder<F, D>,
     ) where
         F: RichField + Extendable<D>,
     {}

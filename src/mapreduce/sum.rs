@@ -1,14 +1,12 @@
 use plonky2::iop::target::Target;
-use plonky2::iop::witness;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
-    iop::witness::{PartialWitness, WitnessWrite},
     plonk::circuit_builder::CircuitBuilder,
 };
 
 use crate::mapreduce::data_types::U64;
-use crate::mapreduce::ops::{MapOp, ReduceOp};
+use crate::mapreduce::ops::ReduceOp;
 
 struct SumU64;
 
