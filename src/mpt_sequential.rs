@@ -1,8 +1,11 @@
 use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
-    rlp::{decode_compact_encoding, decode_header, decode_tuple, MAX_KEY_NIBBLE_LEN},
-    utils::{convert_u8_to_u32, find_index_subvector, keccak256},
+    rlp::{
+        decode_compact_encoding, decode_fixed_list, decode_header, decode_tuple, MAX_ITEMS_IN_LIST,
+        MAX_KEY_NIBBLE_LEN,
+    },
+    utils::{convert_u8_to_u32, find_index_subvector, keccak256, less_than},
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
@@ -180,22 +183,54 @@ where
         Ok(())
     }
 
-    /// Extract the key from the node. It tries to decode the node as
+    /// Extract the key + value/hash from the node. It tries to decode the node as
     /// a branch node, and as an extension / leaf node, and select the right
     /// key depending on the number of elements found in the node.
-    fn extract_key<F: RichField + Extendable<D>, const D: usize>(
+    /// nibble is used to lookup the right item if it's a branch node
+    /// Return is the (key,value). Key is in nibble format. Value is in bytes,
+    /// and is either the hash of the child node, or the value of the leaf.
+    /// In our case, value of leaf is always 32 bytes.
+    fn advance_key<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, NODE_LEN>,
-    ) -> Target {
+        key: MPTKeyWire,
+    ) -> MPTKeyWire {
         let zero = b.zero();
-        // First, decode header of RLP ( RLP (compact (key)), RLP(data) )
-        let tuple_headers = decode_tuple(b, &node.arr, zero);
-        // Then decode header of RLP ( compact ( key ))
-        let key_offset = tuple_headers.offset[0];
-        let key_header = decode_header(b, &node.arr, key_offset);
-        // Then decode compact encoding
-        //decode_compact_encoding(b, node, offset)
-        key_header.len
+        let one = b.one();
+        let two = b.two();
+        let sixteen = b.constant(F::from_canonical_u8(16));
+        let t = b._true();
+        // It will try to decode a RLP list of the maximum number of items there can be
+        // in a list, which is 16 for a branch node (Excluding value).
+        // It returns the actual number of items decoded.
+        // If it's 2 ==> node's a leaf or an extension
+        //              RLP ( RLP ( enc (key)), RLP( hash / value))
+        // if it's more ==> node's a branch node
+        //              RLP ( RLP(hash1), RLP(hash2), ... RLP(hash16), RLP(value))
+        //              (can be shorter than that ofc)
+        let rlp_headers = decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(b, &node.arr, zero);
+        // -------------------------
+        // leaf / extension part
+        //
+        let is_tuple = b.is_equal(rlp_headers.num_fields, two);
+        let key_header = decode_header(b, &node.arr, rlp_headers.offset[0]);
+        let extracted_key = decode_compact_encoding(b, node, &key_header);
+        let value_header = decode_header(b, &node.arr, rlp_headers.offset[1]);
+        let value_or_value = node.extract_array::<F, D, HASH_LEN>(b, value_header.offset);
+        // check extract key is a subset to the key we're looking for
+
+        // -------------------------
+        // branch node part
+        //
+        let is_node = b.not(is_tuple);
+        let nibble = key.current_nibble(b);
+        // assert that the nibble is less than the number of items !
+        let lt = less_than(b, nibble, rlp_headers.num_fields, 4);
+        let branch_condition = b.and(is_node, lt);
+        let nibble_header = rlp_headers.select(b, nibble);
+        let hash = node.extract_array::<F, D, HASH_LEN>(b, nibble_header.offset);
+        //let new_pointer = key.pointer.add(b, one);
+        key
     }
 }
 
@@ -211,6 +246,12 @@ pub struct MPTKeyWire {
 }
 
 impl MPTKeyWire {
+    pub fn current_nibble<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) -> Target {
+        self.key.value_at(b, self.pointer)
+    }
     /// Create a new fresh key wire
     pub fn new<F: RichField + Extendable<D>, const D: usize>(b: &mut CircuitBuilder<F, D>) -> Self {
         Self {

@@ -53,7 +53,6 @@ pub(crate) fn keccak256(data: &[u8]) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
-
 // TODO refactor directly using array
 pub(crate) fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
@@ -101,6 +100,7 @@ pub(crate) fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
         .collect_vec()
 }
 
+/// Returns the bits of the given number.
 pub fn num_to_bits<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     n: usize,
@@ -123,6 +123,7 @@ pub fn bits_to_num<F: RichField + Extendable<D>, const D: usize>(
     res
 }
 
+/// Returns true if a < b in the first n bits. False otherwise.
 pub fn less_than<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,

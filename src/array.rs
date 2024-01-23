@@ -11,7 +11,7 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use std::{fmt::Debug, ops::Index};
 
-use crate::utils::{less_than_or_equal_to, IntTargetWriter};
+use crate::utils::{less_than, less_than_or_equal_to, IntTargetWriter};
 
 /// ArrayWire contains the wires representing an array of dynamic length
 /// up to MAX_LEN. This is useful when you don't know the exact size in advance
@@ -181,6 +181,29 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         sub.equals(b, &extracted)
     }
 
+    pub fn contains_vector<F: RichField + Extendable<D>, const D: usize, const SUB: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        sub: &VectorWire<SUB>,
+        at: Target,
+    ) -> BoolTarget {
+        let max = b.constant(F::from_canonical_usize(SUB));
+        let mut t = b._true();
+        for i in 0..SUB {
+            let it = b.constant(F::from_canonical_usize(i));
+            let within_range = less_than(b, it, sub.real_len, 6);
+            let not_in_range = b.not(within_range);
+
+            let original_idx = b.add(at, it);
+            let original_value = self.value_at(b, original_idx);
+            let are_equal = b.is_equal(original_value.to_target(), sub.arr.arr[i]);
+            let should_be_true = b.and(are_equal, within_range);
+            let f = b.or(should_be_true, not_in_range);
+            t = b.and(t, f);
+        }
+        t
+    }
+
     /// Returns true if self == other, false otherwise.
     pub fn equals<F: RichField + Extendable<D>, const D: usize>(
         &self,
@@ -325,7 +348,7 @@ mod test {
     use rand::{thread_rng, Rng};
 
     use crate::{
-        array::Array,
+        array::{Array, Vector, VectorWire},
         circuit::{test::test_simple_circuit, UserCircuit},
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
@@ -587,5 +610,54 @@ mod test {
             //println!("len child = {}", child_hash.len());
             //println!("idx = {}", idx);
         }
+    }
+
+    #[test]
+    fn test_contains_vector() {
+        const SIZE: usize = 80;
+        #[derive(Clone, Debug)]
+        struct ContainsVectorCircuit {
+            arr: [u8; SIZE],
+            sub: Vec<u8>,
+            idx: usize,
+            exp: bool,
+        }
+        impl<F, const D: usize> UserCircuit<F, D> for ContainsVectorCircuit
+        where
+            F: RichField + Extendable<D>,
+        {
+            type Wires = (Array<Target, SIZE>, Target, VectorWire<SIZE>, BoolTarget);
+            fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let array = Array::<Target, SIZE>::new(c);
+                let index = c.add_virtual_target();
+                let expected = c.add_virtual_bool_target_safe();
+                let subvector = VectorWire::<SIZE>::new(c);
+                let contains = array.contains_vector::<_, _, SIZE>(c, &subvector, index);
+                c.connect(contains.target, expected.target);
+                (array, index, subvector, expected)
+            }
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires
+                    .0
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
+                pw.set_target(wires.1, F::from_canonical_usize(self.idx));
+                wires
+                    .2
+                    .assign(pw, &Vector::<SIZE>::from_vec(self.sub.clone()).unwrap());
+                pw.set_bool_target(wires.3, self.exp);
+            }
+        }
+        let mut rng = thread_rng();
+        let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..]);
+        let random_size: usize = rng.gen_range(0..SIZE);
+        let idx: usize = rng.gen_range(0..(SIZE - random_size));
+        let sub = arr[idx..idx + random_size].to_vec();
+        test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
+            arr,
+            idx,
+            sub,
+            exp: true,
+        });
     }
 }

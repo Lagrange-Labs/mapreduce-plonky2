@@ -19,6 +19,8 @@ const MAX_ENC_KEY_LEN: usize = 33;
 /// Simply the maximum number of nibbles a key can have.
 pub const MAX_KEY_NIBBLE_LEN: usize = 64;
 
+pub const MAX_ITEMS_IN_LIST: usize = 16;
+
 #[derive(Clone, Copy, Debug)]
 pub struct RlpHeader {
     // Length of the actual data
@@ -30,12 +32,25 @@ pub struct RlpHeader {
 }
 
 /// Contains the header information for all the elements in a list.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct RlpList<const N: usize> {
-    pub offset: [Target; N],
-    pub len: [Target; N],
-    pub data_type: [Target; N],
+    pub offset: Array<Target, N>,
+    pub len: Array<Target, N>,
+    pub data_type: Array<Target, N>,
     pub num_fields: Target,
+}
+
+impl< const N : usize> RlpList<N> {
+    pub fn select<F: RichField + Extendable<D>, const D:usize>(&self, b: &mut CircuitBuilder<F,D>, at: Target) -> RlpHeader {
+        let offset = self.offset.value_at(b, at);
+        let len = self.len.value_at(b, at);
+        let dtype = self.data_type.value_at(b, at);
+        RlpHeader {
+            len,
+            offset,
+            data_type: dtype,
+        }
+    }
 }
 
 /// Decodes the compact encoding defined in Ethereum specs. Specifically, it takes
@@ -257,7 +272,6 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
     // end_idx starts at `data_offset` and  includes the
     // header byte + potential len_len bytes + payload len
     let end_idx = b.add(list_header.offset, list_header.len);
-
     // decode each headers of each items ofthe list
     // remember in a list each item of the list is RLP encoded
     for i in 0..N {
@@ -267,16 +281,8 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
         loop_p = b.not(loop_p);
 
         // read the header starting from the offset
-        let RlpHeader {
-            len: field_len,
-            offset: field_offset,
-            data_type: field_type,
-        } = decode_header(b, data, offset);
-        let new_offset = b.add(field_offset, field_len);
-
-        dec_off[i] = field_offset;
-        dec_len[i] = field_len;
-        dec_type[i] = field_type;
+        let header = decode_header(b, data, offset);
+        let new_offset = b.add(header.offset, header.len);
 
         // move offset to the next field in the list
         offset = b.mul(loop_p.target, new_offset);
@@ -284,9 +290,9 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
     }
 
     RlpList {
-        offset: dec_off,
-        len: dec_len,
-        data_type: dec_type,
+        offset: Array { arr: dec_off },
+        len: Array { arr: dec_len },
+        data_type: Array { arr: dec_type },
         num_fields,
     }
 }
@@ -359,7 +365,7 @@ mod tests {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::array::{Array, Vector, VectorWire};
+    use crate::array::Array;
     use crate::rlp::{
         decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, MAX_ENC_KEY_LEN,
         MAX_LEN_BYTES,
