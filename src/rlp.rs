@@ -17,7 +17,7 @@ const MAX_LEN_BYTES: usize = 2;
 /// 33 bytes because key is compacted encoded, so it can add up to 1 byte more.
 const MAX_ENC_KEY_LEN: usize = 33;
 /// Simply the maximum number of nibbles a key can have.
-const MAX_KEY_NIBBLE_LEN: usize = 64;
+pub const MAX_KEY_NIBBLE_LEN: usize = 64;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RlpHeader {
@@ -43,15 +43,20 @@ pub struct RlpList<const N: usize> {
 /// returns the key extracted, in nibbles, and its actual length, in nibbles.
 /// See https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie#specification
 /// for more info.
+/// * input is the full MPT node data
+/// * key_header is the RLP header of the key. It is useful to know the real length of the key
+/// and the offset from which to read the key.
 pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, const N: usize>(
     b: &mut CircuitBuilder<F, D>,
-    input: &VectorWire<N>,
+    input: &Array<Target, N>,
+    key_header: &RlpHeader,
 ) -> VectorWire<MAX_KEY_NIBBLE_LEN> {
     let zero = b.zero();
     let one = b.one();
     let two = b.two();
 
-    let (most_bits, least_bits) = b.split_low_high(input[0], 4, 8);
+    let first_byte = input.value_at(b, key_header.offset);
+    let (most_bits, least_bits) = b.split_low_high(first_byte, 4, 8);
     // little endian
     let mut prev_nibbles = (least_bits, most_bits);
 
@@ -74,8 +79,10 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     // analyzes pairs of consecutive nibbles, so the second nibble will be seen
     // during the first iteration of this loop.
     for i in 0..MAX_ENC_KEY_LEN - 1 {
+        let it = b.constant(F::from_canonical_usize(i + 1));
+        let i_offset = b.add(it, key_header.offset);
         // look now at the encoded path
-        let x = input[i + 1];
+        let x = input.value_at(b, i_offset);
         // next nibble in little endian
         cur_nibbles = {
             let (most_bits, least_bits) = b.split_low_high(x, 4, 8);
@@ -106,7 +113,7 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     //   this is the nibble telling us that len is odd.
     //   In case len is even, RLP adds another 0 nibble so we take out 2 nibbles
     //   from the length
-    let length_in_nibble = b.mul(two, input.real_len);
+    let length_in_nibble = b.mul(two, key_header.len);
     let pm2 = b.sub(parity, two);
     let key_len: Target = b.add(length_in_nibble, pm2);
 
@@ -228,10 +235,10 @@ pub(crate) fn decode_tuple<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Decodes the header of the list, and then decodes the first N items of the list.
-/// NOTE: the `num_field` is set to N in this case, since it does not read the full array.
-/// Hence, N can be lower than the actual number of fields in the list.
 /// The offsets decoded in the returned list are starting from the 0-index of `data`
 /// not from the `offset` index.
+/// If N is less than the actual number of items, then the number of fields will be N.
+/// Otherwise, the number of fields returned is determined by the header the RLP list.
 pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
@@ -247,12 +254,16 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
 
     let list_header = decode_header(b, data, data_offset);
     let mut offset = list_header.offset;
+    // end_idx starts at `data_offset` and  includes the
+    // header byte + potential len_len bytes + payload len
+    let end_idx = b.add(list_header.offset, list_header.len);
 
     // decode each headers of each items ofthe list
     // remember in a list each item of the list is RLP encoded
     for i in 0..N {
-        // stop when you've looked at the number of expected items
-        let mut loop_p = b.is_equal(num_fields, n_target);
+        // stop when you've looked at exactly the same number of  bytes than
+        // the RLP list header indicates
+        let mut loop_p = b.is_equal(offset, end_idx);
         loop_p = b.not(loop_p);
 
         // read the header starting from the offset
@@ -337,6 +348,8 @@ fn calculate_total<F: RichField + Extendable<D>, const D: usize>(
 #[cfg(test)]
 mod tests {
 
+    use std::array::from_fn as create_array;
+
     use anyhow::Result;
 
     use plonky2::field::types::Field;
@@ -346,7 +359,7 @@ mod tests {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::array::{Vector, VectorWire};
+    use crate::array::{Array, Vector, VectorWire};
     use crate::rlp::{
         decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, MAX_ENC_KEY_LEN,
         MAX_LEN_BYTES,
@@ -679,7 +692,8 @@ mod tests {
         type F = <C as GenericConfig<D>>::F;
 
         struct TestCase {
-            input: Vector<MAX_ENC_KEY_LEN>,
+            input: [u8; MAX_ENC_KEY_LEN],
+            key_len: usize,
             expected: Vec<u8>,
         }
 
@@ -687,9 +701,18 @@ mod tests {
             let config = CircuitConfig::standard_recursion_config();
             let mut pw = PartialWitness::new();
             let mut builder = CircuitBuilder::<F, D>::new(config);
-            let wire1 = VectorWire::<MAX_ENC_KEY_LEN>::new(&mut builder);
-            wire1.assign(&mut pw, &tc.input);
-            let nibbles = decode_compact_encoding(&mut builder, &wire1);
+            let wire1 = Array::<Target, MAX_ENC_KEY_LEN>::new(&mut builder);
+            wire1.assign::<F, D>(
+                &mut pw,
+                &create_array(|i| F::from_canonical_u8(tc.input[i])),
+            );
+            let zero = builder.zero();
+            let key_header = RlpHeader {
+                offset: builder.constant(F::from_canonical_usize(0)),
+                len: builder.constant(F::from_canonical_usize(tc.key_len)),
+                data_type: builder.constant(F::from_canonical_usize(0)),
+            };
+            let nibbles = decode_compact_encoding(&mut builder, &wire1, &key_header);
             let exp_nib_len = builder.constant(F::from_canonical_usize(tc.expected.len()));
             builder.connect(nibbles.real_len, exp_nib_len);
             for (i, nib) in tc.expected.iter().enumerate() {
@@ -701,37 +724,31 @@ mod tests {
             data.verify(proof).unwrap();
         };
         let tc1 = TestCase {
-            input: Vector {
-                arr: [
-                    0x11, 0x23, 0x45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                ],
-                real_len: 3,
-            },
+            input: [
+                0x11, 0x23, 0x45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+            key_len: 3,
             expected: (0..5).map(|i| i + 1).collect::<Vec<u8>>(),
         };
         run_test_case(tc1);
 
         let tc2 = TestCase {
-            input: Vector {
-                arr: [
-                    0x20, 0x0f, 0x1c, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                ],
-                real_len: 4,
-            },
+            input: [
+                0x20, 0x0f, 0x1c, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+            key_len: 4,
             expected: vec![0, 15, 1, 12, 11, 8],
         };
         run_test_case(tc2);
 
         let tc3 = TestCase {
-            input: Vector {
-                arr: [
-                    0x3f, 0x1c, 0xb8, 0x99, 0xab, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                ],
-                real_len: 3,
-            },
+            input: [
+                0x3f, 0x1c, 0xb8, 0x99, 0xab, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+            key_len: 3,
             expected: vec![15, 1, 12, 11, 8],
         };
         run_test_case(tc3);

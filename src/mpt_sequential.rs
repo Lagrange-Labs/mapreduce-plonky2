@@ -1,7 +1,7 @@
 use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
-    rlp::{decode_header, decode_tuple},
+    rlp::{decode_compact_encoding, decode_header, decode_tuple, MAX_KEY_NIBBLE_LEN},
     utils::{convert_u8_to_u32, find_index_subvector, keccak256},
 };
 use anyhow::{anyhow, Result};
@@ -180,17 +180,60 @@ where
         Ok(())
     }
 
-    fn extract_key_length_leaf<F: RichField + Extendable<D>, const D: usize>(
-        &self,
+    /// Extract the key from the node. It tries to decode the node as
+    /// a branch node, and as an extension / leaf node, and select the right
+    /// key depending on the number of elements found in the node.
+    fn extract_key<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, NODE_LEN>,
     ) -> Target {
         let zero = b.zero();
-        // First, decode headers of RLP ( RLP (key), RLP(data) )
+        // First, decode header of RLP ( RLP (compact (key)), RLP(data) )
         let tuple_headers = decode_tuple(b, &node.arr, zero);
+        // Then decode header of RLP ( compact ( key ))
         let key_offset = tuple_headers.offset[0];
         let key_header = decode_header(b, &node.arr, key_offset);
+        // Then decode compact encoding
+        //decode_compact_encoding(b, node, offset)
         key_header.len
+    }
+}
+
+/// A structure that keeps a running pointer to the portion of the key the circuit
+/// already has proven.
+pub struct MPTKeyWire {
+    /// Represents the full key of the value(s) we're looking at in the MPT trie.
+    pub key: Array<Target, MAX_KEY_NIBBLE_LEN>,
+    /// Represents which portion of the key we already processed. The pointer
+    /// goes _backwards_ since circuit starts proving from the leaf up to the root.
+    /// i.e. pointer must be equal to 0 when we reach the root.
+    pub pointer: Target,
+}
+
+impl MPTKeyWire {
+    /// Create a new fresh key wire
+    pub fn new<F: RichField + Extendable<D>, const D: usize>(b: &mut CircuitBuilder<F, D>) -> Self {
+        Self {
+            key: Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b),
+            pointer: b.add_virtual_target(),
+        }
+    }
+    /// Assign the key wire to the circuit.
+    pub fn assign<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        p: &mut PartialWitness<F>,
+        key: &[u8],
+        ptr: usize,
+    ) {
+        let full_key = create_array(|i| {
+            if i < key.len() {
+                F::from_canonical_usize(key[i] as usize)
+            } else {
+                F::ZERO
+            }
+        });
+        self.key.assign(p, &full_key);
+        p.set_target(self.pointer, F::from_canonical_usize(ptr));
     }
 }
 
