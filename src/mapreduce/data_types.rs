@@ -18,14 +18,15 @@ use plonky2_crypto::u32::{
 /// like ([u32; 8], HashTarget) can implement Data.
 pub trait Data: Clone {
     type Value: Clone;
-    type WireTarget;
-
+    type WireTarget: Clone;
+    
+    fn new() -> Self;
     fn create_target<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self::WireTarget;
     fn set_target<F: RichField>(
         target: Self::WireTarget,
-        value: Self::Value,
+        value: &Self::Value,
         pw: &mut PartialWitness<F>,
     );
 }
@@ -37,6 +38,10 @@ impl Data for Bool {
     type Value = bool;
     type WireTarget = BoolTarget;
 
+    fn new() -> Bool {
+        Bool
+    }
+
     fn create_target<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self::WireTarget {
@@ -45,10 +50,10 @@ impl Data for Bool {
 
     fn set_target<F: RichField>(
         target: Self::WireTarget,
-        value: Self::Value,
+        value: &Self::Value,
         pw: &mut PartialWitness<F>,
     ) {
-        pw.set_bool_target(target, value)
+        pw.set_bool_target(target, *value)
     }
 }
 
@@ -59,6 +64,10 @@ impl Data for U8 {
     type Value = u8;
     type WireTarget = Target;
 
+    fn new() -> U8 {
+        U8
+    }
+
     fn create_target<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self::WireTarget {
@@ -67,10 +76,10 @@ impl Data for U8 {
 
     fn set_target<F: RichField>(
         target: Self::WireTarget,
-        value: Self::Value,
+        value: &Self::Value,
         pw: &mut PartialWitness<F>,
     ) {
-        pw.set_target(target, F::from_canonical_u8(value))
+        pw.set_target(target, F::from_canonical_u8(*value))
     }
 }
 
@@ -81,6 +90,10 @@ impl Data for U32 {
     type Value = u32;
     type WireTarget = U32Target;
 
+    fn new() -> U32 {
+        U32
+    }
+
     fn create_target<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self::WireTarget {
@@ -89,10 +102,10 @@ impl Data for U32 {
 
     fn set_target<F: RichField>(
         target: Self::WireTarget,
-        value: Self::Value,
+        value: &Self::Value,
         pw: &mut PartialWitness<F>,
     ) {
-        pw.set_u32_target(target, value)
+        pw.set_u32_target(target, *value)
     }
 }
 
@@ -103,6 +116,10 @@ impl Data for U64 {
     type Value = u64;
     type WireTarget = Target;
 
+    fn new() -> U64 {
+        U64
+    }
+
     fn create_target<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self::WireTarget {
@@ -111,10 +128,10 @@ impl Data for U64 {
 
     fn set_target<F: RichField>(
         target: Self::WireTarget,
-        value: Self::Value,
+        value: &Self::Value,
         pw: &mut PartialWitness<F>,
     ) {
-        pw.set_target(target, F::from_canonical_u64(value))
+        pw.set_target(target, F::from_canonical_u64(*value))
     }
 }
 
@@ -169,7 +186,7 @@ impl<T: Data> Tree<T> {
         targets
             .into_iter()
             .zip(values.into_iter())
-            .for_each(|(t, v)| T::set_target(t, v, pw))
+            .for_each(|(t, v)| T::set_target(t, &v, pw))
     }
 }
 
