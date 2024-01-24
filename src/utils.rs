@@ -170,6 +170,19 @@ pub fn greater_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
     less_than(builder, b, a_plus_1, n)
 }
 
+/// Resize the input vector if needed
+pub(crate) fn convert_u8_to_u32_slice(data: &[u8]) -> Vec<u32> {
+    let mut d = data.to_vec();
+    if data.len() % 4 != 0 {
+        d.resize(data.len() + (4 - (data.len() % 4)), 0);
+    }
+    let mut converted = Vec::new();
+    for chunk in d.chunks_exact(4) {
+        converted.push(u32::from_le_bytes(chunk.try_into().unwrap()));
+    }
+    converted
+}
+
 // taken from rust doc https://doc.rust-lang.org/std/primitive.u32.html#method.from_be_bytes
 pub(crate) fn read_le_u32(input: &mut &[u8]) -> u32 {
     let (int_bytes, rest) = input.split_at(std::mem::size_of::<u32>());
