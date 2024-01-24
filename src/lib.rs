@@ -23,10 +23,10 @@ mod circuit;
 mod hash;
 mod keccak;
 mod mapreduce;
+pub mod merkle;
 mod rlp;
 pub mod transaction;
 mod utils;
-
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.
 /// TODO: This is a temporary tuple. We need to save the verification key separately.
