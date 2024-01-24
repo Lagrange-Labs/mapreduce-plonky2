@@ -181,6 +181,10 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         sub.equals(b, &extracted)
     }
 
+    /// NOTE: this assumes the data always lives at the beginning of the array,
+    /// which is true for MPT nodes since we hash from the start of the array.
+    /// A malicious prover could disrupt this assumption and circuits using this
+    /// function should be aware of this.
     pub fn contains_vector<F: RichField + Extendable<D>, const D: usize, const SUB: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
@@ -658,6 +662,12 @@ mod test {
             idx,
             sub,
             exp: true,
+        }); 
+        test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
+            arr,
+            idx,
+            sub: (0..random_size).map(|_| rng.gen()).collect::<Vec<_>>(),
+            exp: false,
         });
     }
 }

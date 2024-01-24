@@ -2,8 +2,7 @@ use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     rlp::{
-        decode_compact_encoding, decode_fixed_list, decode_header, decode_tuple, MAX_ITEMS_IN_LIST,
-        MAX_KEY_NIBBLE_LEN,
+        decode_compact_encoding, decode_fixed_list, decode_header, decode_tuple, extract_array, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN
     },
     utils::{convert_u8_to_u32, find_index_subvector, keccak256, less_than},
 };
@@ -218,7 +217,11 @@ where
         let value_header = decode_header(b, &node.arr, rlp_headers.offset[1]);
         let value_or_value = node.extract_array::<F, D, HASH_LEN>(b, value_header.offset);
         // check extract key is a subset to the key we're looking for
-
+        // note we are going _backwards_ on the key, so we need to substract the expected key length 
+        // we want to check against
+        let new_leaf_pointer = b.sub(key.pointer,extracted_key.real_len);
+        let is_correct_key = key.key.contains_vector(b, &extracted_key, new_leaf_pointer);
+        let is_all_tuple_good = b.and(is_tuple, is_correct_key);
         // -------------------------
         // branch node part
         //
@@ -229,7 +232,10 @@ where
         let branch_condition = b.and(is_node, lt);
         let nibble_header = rlp_headers.select(b, nibble);
         let hash = node.extract_array::<F, D, HASH_LEN>(b, nibble_header.offset);
-        //let new_pointer = key.pointer.add(b, one);
+        let new_branch_pointer = b.add(key.pointer, one);
+
+        // select between the two outputs
+
         key
     }
 }
@@ -252,6 +258,8 @@ impl MPTKeyWire {
     ) -> Target {
         self.key.value_at(b, self.pointer)
     }
+
+    pub fn 
     /// Create a new fresh key wire
     pub fn new<F: RichField + Extendable<D>, const D: usize>(b: &mut CircuitBuilder<F, D>) -> Self {
         Self {
