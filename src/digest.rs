@@ -1,5 +1,3 @@
-//! MPT Digest Implementation
-
 use crate::{
     circuit::{PCDCircuit, ProofOrDummyTarget, UserCircuit},
     utils::less_than,
@@ -7,9 +5,9 @@ use crate::{
 use plonky2::{
     field::extension::Extendable,
     hash::{
-        hash_types::{HashOutTarget, RichField},
-        hashing::hash_n_to_hash_no_pad,
-        poseidon::{PoseidonHash, PoseidonPermutation},
+        hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+        hashing::{hash_n_to_hash_no_pad, PlonkyPermutation},
+        poseidon::{PoseidonHash, PoseidonPermutation, SPONGE_RATE},
     },
     iop::{
         target::Target,
@@ -17,8 +15,8 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+use std::iter;
 
-/// MPT Digest Wires
 #[derive(Clone, Debug)]
 pub struct DigestWires<const ARITY: usize> {
     inputs: [Target; ARITY],
@@ -26,11 +24,8 @@ pub struct DigestWires<const ARITY: usize> {
     output: HashOutTarget,
 }
 
-/// MPT Digest Circuit
-/// This is a simple version of MPT digest circuit with aggregation, and set
-/// ARITY to 16 as default.
 #[derive(Clone, Debug)]
-pub struct DigestCircuit<F, const D: usize, const ARITY: usize = { 16 }> {
+pub struct DigestCircuit<F, const D: usize, const ARITY: usize = { 64 }> {
     inputs: [F; ARITY],
     real_len: usize,
 }
@@ -60,33 +55,55 @@ where
         let real_len = b.add_virtual_target();
         let inputs = b.add_virtual_target_arr::<ARITY>();
 
-        let padding = b.constant(F::ZERO);
-        let padded_inputs = inputs
-            .iter()
+        let zero = b.zero();
+        let mut state =
+            <PoseidonPermutation<Target> as PlonkyPermutation<Target>>::new(iter::repeat(zero));
+
+        inputs
+            .chunks(SPONGE_RATE)
             .enumerate()
-            .map(|(i, data)| {
-                let i = b.constant(F::from_canonical_usize(i));
+            .for_each(|(i, chunks)| {
+                let chunk_offset = SPONGE_RATE * i;
 
-                // Condition for real data if real_len < ARITY, otherwise it's
-                // padding.
-                let is_data = less_than(b, i, real_len, ARITY);
-                let is_padding = b.not(is_data);
+                chunks.iter().enumerate().for_each(|(i, elt)| {
+                    let elt_offset = b.constant(F::from_canonical_usize(chunk_offset + i));
+                    let is_elt = less_than(b, elt_offset, real_len, 8);
 
-                // Construct the input item.
-                let data = b.mul(is_data.target, *data);
-                let padding = b.mul(is_padding.target, padding);
+                    let elt = b.select(is_elt, *elt, zero);
+                    state.set_elt(elt, i);
+                });
 
-                b.add(data, padding)
-            })
-            .collect();
+                let new_state = b.permute::<PoseidonHash>(state);
+                let chunk_offset = b.constant(F::from_canonical_usize(chunk_offset));
+                let is_new_state = less_than(b, chunk_offset, real_len, 8);
 
-        // TODO: cannot confirm if hash output is right with padding zeros.
-        let output = b.hash_n_to_hash_no_pad::<PoseidonHash>(padded_inputs);
+                let elts: Vec<_> = state
+                    .as_ref()
+                    .iter()
+                    .zip(new_state.as_ref())
+                    .map(|(elt, new_elt)| b.select(is_new_state, *new_elt, *elt))
+                    .collect();
 
-        Self::Wires {
-            inputs,
-            real_len,
-            output,
+                elts.into_iter()
+                    .enumerate()
+                    .for_each(|(i, elt)| state.set_elt(elt, i));
+            });
+
+        let mut outputs = Vec::with_capacity(NUM_HASH_OUT_ELTS);
+        loop {
+            for &s in state.squeeze() {
+                outputs.push(s);
+                if outputs.len() == NUM_HASH_OUT_ELTS {
+                    let output = HashOutTarget::from_vec(outputs);
+
+                    return Self::Wires {
+                        inputs,
+                        real_len,
+                        output,
+                    };
+                }
+            }
+            state = b.permute::<PoseidonHash>(state);
         }
     }
 
@@ -94,8 +111,8 @@ where
         pw.set_target_arr(&wires.inputs, &self.inputs);
         pw.set_target(wires.real_len, F::from_canonical_usize(self.real_len));
 
-        // TODO: should pass into `self.inputs[..self.real_len]`?
-        let output = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&self.inputs);
+        let output =
+            hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&self.inputs[..self.real_len]);
         pw.set_hash_target(wires.output, output);
     }
 }
@@ -106,30 +123,19 @@ where
 {
     fn build_recursive(
         b: &mut CircuitBuilder<F, D>,
-        p: &[ProofOrDummyTarget<D>; ARITY],
+        _: &[ProofOrDummyTarget<D>; ARITY],
     ) -> Self::Wires {
-        // TODO: sorry, cannot confirm if below code is right:
-        // - register wires-inputs as public inputs.
-        // - invoke `proof.conditionally_true` for valid inputs.
-
         let wires = <Self as UserCircuit<F, D>>::build(b);
-        b.register_public_inputs(&wires.inputs);
-
-        p.iter().enumerate().for_each(|(i, proof)| {
-            let i = b.constant(F::from_canonical_usize(i));
-            let is_data = less_than(b, i, wires.real_len, ARITY);
-
-            proof.conditionally_true(b, is_data);
-        });
+        b.register_public_inputs(&wires.output.elements);
 
         wires
     }
 
     fn base_inputs(&self) -> Vec<F> {
-        F::rand_vec(ARITY)
+        F::rand_vec(NUM_HASH_OUT_ELTS)
     }
 
     fn num_io() -> usize {
-        ARITY
+        NUM_HASH_OUT_ELTS
     }
 }
