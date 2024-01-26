@@ -26,7 +26,7 @@ type U = DigestCircuit<F, D, ARITY>;
 #[test]
 fn test_digest_circuit() {
     let circuit = cyclic_circuit();
-    let mut tree = digest_tree();
+    let mut tree = merkle_tree();
 
     prove_all_leaves(&circuit, &mut tree);
     prove_branches_recursive(&circuit, &mut tree);
@@ -43,22 +43,22 @@ fn cyclic_circuit() -> CyclicCircuit<F, C, D, U, ARITY> {
     CyclicCircuit::<F, C, D, U, ARITY>::new(padder)
 }
 
-fn digest_tree() -> DigestTree<F, C, D> {
+fn merkle_tree() -> MerkleTree<F, C, D> {
     let [v1, v2, v3, v4] = [0; 4].map(|_| rand_leaf());
-    let branch = DigestNode::new_branch(vec![v2, v3, v4]);
+    let branch = MerkleNode::new_branch(vec![v2, v3, v4]);
 
-    let root = DigestNode::new_branch(vec![v1, branch]);
+    let root = MerkleNode::new_branch(vec![v1, branch]);
 
-    DigestTree::new(root)
+    MerkleTree::new(root)
 }
 
-fn rand_leaf() -> DigestNode<F, C, D> {
-    DigestNode::new_leaf(U256(rand::thread_rng().gen::<[u64; 4]>()))
+fn rand_leaf() -> MerkleNode<F, C, D> {
+    MerkleNode::new_leaf(U256(rand::thread_rng().gen::<[u64; 4]>()))
 }
 
-fn prove_all_leaves(circuit: &CyclicCircuit<F, C, D, U, ARITY>, tree: &mut DigestTree<F, C, D>) {
+fn prove_all_leaves(circuit: &CyclicCircuit<F, C, D, U, ARITY>, tree: &mut MerkleTree<F, C, D>) {
     tree.all_leaves().iter_mut().for_each(|leaf| {
-        if let DigestNode::Leaf(value, _, proof_result) = leaf {
+        if let MerkleNode::Leaf(value, _, proof_result) = leaf {
             let inputs = value.0.map(F::from_canonical_u64).to_vec();
             *proof_result = Some(circuit.prove_init(U::new(inputs)).unwrap().0);
         } else {
@@ -69,12 +69,12 @@ fn prove_all_leaves(circuit: &CyclicCircuit<F, C, D, U, ARITY>, tree: &mut Diges
 
 fn prove_branches_recursive(
     circuit: &CyclicCircuit<F, C, D, U, ARITY>,
-    tree: &mut DigestTree<F, C, D>,
+    tree: &mut MerkleTree<F, C, D>,
 ) {
     let max_level = tree.max_level();
     (0..max_level).rev().into_iter().for_each(|level| {
         tree.branches_at_level(level).iter_mut().for_each(|branch| {
-            if let DigestNode::Branch(children, .., proof) = branch {
+            if let MerkleNode::Branch(children, .., proof) = branch {
                 let inputs_proofs = children
                     .iter()
                     .map(|node| (node.hash().elements, node.proof().clone().unwrap()))
@@ -113,22 +113,22 @@ fn prove_once(
 }
 
 #[derive(Clone, Debug)]
-struct DigestTree<F, C, const D: usize>
+struct MerkleTree<F, C, const D: usize>
 where
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
 {
-    root: DigestNode<F, C, D>,
+    root: MerkleNode<F, C, D>,
     max_level: u64,
 }
 
-impl DigestTree<F, C, D> {
-    pub fn new(root: DigestNode<F, C, D>) -> Self {
+impl MerkleTree<F, C, D> {
+    pub fn new(root: MerkleNode<F, C, D>) -> Self {
         let max_level = root.max_level(0);
         Self { root, max_level }
     }
 
-    pub fn root(&self) -> &DigestNode<F, C, D> {
+    pub fn root(&self) -> &MerkleNode<F, C, D> {
         &self.root
     }
 
@@ -137,18 +137,18 @@ impl DigestTree<F, C, D> {
     }
 
     // Return all leaves.
-    pub fn all_leaves(&mut self) -> Vec<&mut DigestNode<F, C, D>> {
+    pub fn all_leaves(&mut self) -> Vec<&mut MerkleNode<F, C, D>> {
         self.root.all_leaves()
     }
 
     // Return branches without leaves at the specified level.
-    pub fn branches_at_level(&mut self, level: u64) -> Vec<&mut DigestNode<F, C, D>> {
+    pub fn branches_at_level(&mut self, level: u64) -> Vec<&mut MerkleNode<F, C, D>> {
         self.root.branches_at_level(level)
     }
 }
 
 #[derive(Clone, Debug)]
-enum DigestNode<F, C, const D: usize>
+enum MerkleNode<F, C, const D: usize>
 where
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
@@ -163,7 +163,7 @@ where
     Leaf(U256, HashOut<F>, Option<ProofWithPublicInputs<F, C, D>>),
 }
 
-impl DigestNode<F, C, D> {
+impl MerkleNode<F, C, D> {
     pub fn new_branch(children: Vec<Self>) -> Self {
         assert!(children.len() > 0 && children.len() <= ARITY);
 
@@ -193,7 +193,7 @@ impl DigestNode<F, C, D> {
         }
     }
 
-    pub fn all_leaves(&mut self) -> Vec<&mut DigestNode<F, C, D>> {
+    pub fn all_leaves(&mut self) -> Vec<&mut MerkleNode<F, C, D>> {
         match self {
             Self::Branch(children, ..) => {
                 children.iter_mut().flat_map(|n| n.all_leaves()).collect()
@@ -202,7 +202,7 @@ impl DigestNode<F, C, D> {
         }
     }
 
-    pub fn branches_at_level(&mut self, current: u64) -> Vec<&mut DigestNode<F, C, D>> {
+    pub fn branches_at_level(&mut self, current: u64) -> Vec<&mut MerkleNode<F, C, D>> {
         if current == 0 {
             if let Self::Branch(..) = self {
                 return vec![self];
