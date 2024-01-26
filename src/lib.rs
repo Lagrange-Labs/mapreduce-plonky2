@@ -97,13 +97,18 @@ mod test {
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
+            circuit_data::{CircuitConfig, ProverOnlyCircuitData},
             config::{GenericConfig, PoseidonGoldilocksConfig},
+            prover::prove,
         },
+        util::timing::TimingTree,
     };
-    use plonky2_crypto::hash::{
-        keccak256::{CircuitBuilderHashKeccak, WitnessHashKeccak, KECCAK256_R},
-        CircuitBuilderHash,
+    use plonky2_crypto::{
+        hash::{
+            keccak256::{CircuitBuilderHashKeccak, WitnessHashKeccak, KECCAK256_R},
+            CircuitBuilderHash,
+        },
+        u32::gates::interleave_u32::U32InterleaveGenerator,
     };
     use rand::Rng;
 
@@ -139,6 +144,59 @@ mod test {
         let serialized = ByteProofTuple::from_proof_tuple::<F, C, D>(tuple).unwrap();
         let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&serialized).unwrap();
         assert_eq!(expected, deserialized);
+        Ok(())
+    }
+
+    #[test]
+    fn test_proof_serialization2() -> Result<()> {
+        crate::benches::init_logging();
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::new(config);
+        let mut pw = PartialWitness::new();
+        let hash_input = builder.add_virtual_hash_input_target(1, KECCAK256_R);
+        let hash_output = builder.hash_keccak256(&hash_input);
+        let a = builder.add_virtual_target();
+        let b = builder.add_virtual_target();
+        let c = builder.mul(a, b);
+        builder.register_public_input(c);
+        pw.set_target(a, F::from_canonical_u8(2));
+        pw.set_target(b, F::from_canonical_u8(3));
+        let hin = rand::thread_rng().gen::<[u8; 32]>();
+        let hout = keccak256(&hin[..]);
+        pw.set_keccak256_input_target(&hash_input, &hin);
+        pw.set_keccak256_output_target(&hash_output, &hout);
+        let data = builder.build::<C>();
+        let proof = data.prove(pw.clone()).unwrap();
+
+        let gate_serializer = plonky2_crypto::u32::gates::HashGateSerializer;
+        let generator = plonky2_crypto::u32::gates::HashGeneratorSerializer {
+            _phantom: std::marker::PhantomData::<C>,
+        };
+        let id = plonky2::iop::generator::SimpleGenerator::<F, D>::id(
+            &U32InterleaveGenerator::default(),
+        );
+        if let Err(e) = data.prover_only.to_bytes(&generator, &data.common) {
+            println!("expected id = {}", id);
+            panic!("error: {:?}", e);
+        }
+
+        let prover_data_buff = data.prover_only.to_bytes(&generator, &data.common).unwrap();
+        let prover_data_exp = ProverOnlyCircuitData::<F, C, D>::from_bytes(
+            &prover_data_buff,
+            &generator,
+            &data.common,
+        )
+        .unwrap();
+        let proof = prove(
+            &prover_data_exp,
+            &data.common,
+            pw,
+            &mut TimingTree::default(),
+        )
+        .unwrap();
+
+        let tuple = (proof, data.verifier_only, data.common);
+        verify_proof_tuple(&tuple)?;
         Ok(())
     }
 }

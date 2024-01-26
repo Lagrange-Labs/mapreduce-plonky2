@@ -44,3 +44,4 @@ ci = []
 
 [patch.crates-io]
 plonky2 = { git = "https://github.com/nikkolasg/plonky2" }
+# plonky2 = { path = "../plonky2/plonky2" } 
