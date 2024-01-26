@@ -59,10 +59,8 @@ fn rand_leaf() -> DigestNode<F, C, D> {
 fn prove_all_leaves(circuit: &CyclicCircuit<F, C, D, U, ARITY>, tree: &mut DigestTree<F, C, D>) {
     tree.all_leaves().iter_mut().for_each(|leaf| {
         if let DigestNode::Leaf(value, _, proof_result) = leaf {
-            let input = value.0.map(F::from_canonical_u64);
-            let init_proof = circuit.prove_init(U::new(vec![])).unwrap().0;
-
-            *proof_result = Some(prove_once(circuit, vec![(input, init_proof)]));
+            let inputs = value.0.map(F::from_canonical_u64).to_vec();
+            *proof_result = Some(circuit.prove_init(U::new(inputs)).unwrap().0);
         } else {
             panic!("Must be a leaf of tree");
         }
@@ -95,6 +93,7 @@ fn prove_once(
     inputs_proofs: Vec<([F; 4], ProofWithPublicInputs<F, C, D>)>,
 ) -> ProofWithPublicInputs<F, C, D> {
     let (inputs, proofs): (Vec<_>, Vec<_>) = inputs_proofs.into_iter().unzip();
+    let inputs = inputs.into_iter().flatten().collect();
 
     let dummy_n = ARITY - proofs.len();
     let proofs: [Option<ProofWithPublicInputs<F, C, D>>; ARITY] = proofs
