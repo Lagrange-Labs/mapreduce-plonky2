@@ -23,6 +23,7 @@ use plonky2::{
     },
 };
 use plonky2_bn254::curves::g1curve_target::G1Target;
+use plonky2_crypto::u32::range_check::range_check_u32_circuit;
 use rand::{thread_rng, Rng};
 
 use super::init_logging;
@@ -434,6 +435,8 @@ where
             .map(|_| (G1Target::empty(c), G1Target::empty(c)))
             .collect::<Vec<_>>();
         for (a, b) in points.iter() {
+            range_check_u32_circuit(c, a.x.target.value.limbs.clone());
+            range_check_u32_circuit(c, a.y.target.value.limbs.clone());
             a.add(c, b);
         }
         (poseidon_wires, points)
@@ -505,6 +508,8 @@ fn bench_baseline_poseidon_bn254() {
     );
 }
 
+#[test]
+fn bench_baseline_poseidon_only() {}
 fn bench_pcd_circuit<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F> + 'static,
