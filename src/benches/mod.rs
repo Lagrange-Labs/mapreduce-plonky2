@@ -75,7 +75,7 @@ mod test {
     where
         F: RichField + Extendable<D>,
     {
-        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let mut b = CircuitBuilder::new(CircuitConfig::standard_ecc_config());
         let mut pw = PartialWitness::new();
         let now = time::Instant::now();
         let wires = U::build(&mut b);

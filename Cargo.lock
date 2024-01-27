@@ -88,6 +88,123 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
 
 [[package]]
+name = "ark-bn254"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a22f4561524cd949590d78d7d4c5df8f592430d221f7f3c9497bbafd8972120f"
+dependencies = [
+ "ark-ec",
+ "ark-ff",
+ "ark-std",
+]
+
+[[package]]
+name = "ark-ec"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "defd9a439d56ac24968cca0571f598a61bc8c55f71d50a89cda591cb750670ba"
+dependencies = [
+ "ark-ff",
+ "ark-poly",
+ "ark-serialize",
+ "ark-std",
+ "derivative",
+ "hashbrown 0.13.2",
+ "itertools 0.10.5",
+ "num-traits",
+ "zeroize",
+]
+
+[[package]]
+name = "ark-ff"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec847af850f44ad29048935519032c33da8aa03340876d351dfab5660d2966ba"
+dependencies = [
+ "ark-ff-asm",
+ "ark-ff-macros",
+ "ark-serialize",
+ "ark-std",
+ "derivative",
+ "digest",
+ "itertools 0.10.5",
+ "num-bigint",
+ "num-traits",
+ "paste",
+ "rustc_version",
+ "zeroize",
+]
+
+[[package]]
+name = "ark-ff-asm"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ed4aa4fe255d0bc6d79373f7e31d2ea147bcf486cba1be5ba7ea85abdb92348"
+dependencies = [
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "ark-ff-macros"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7abe79b0e4288889c4574159ab790824d0033b9fdcb2a112a3182fac2e514565"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "ark-poly"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d320bfc44ee185d899ccbadfa8bc31aab923ce1558716e1997a1e74057fe86bf"
+dependencies = [
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
+ "derivative",
+ "hashbrown 0.13.2",
+]
+
+[[package]]
+name = "ark-serialize"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adb7b85a02b83d2f22f89bd5cac66c9c89474240cb6207cb1efc16d098e822a5"
+dependencies = [
+ "ark-serialize-derive",
+ "ark-std",
+ "digest",
+ "num-bigint",
+]
+
+[[package]]
+name = "ark-serialize-derive"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae3281bc6d0fd7e549af32b52511e1302185bd688fd3359fa36423346ff682ea"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "ark-std"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94893f1e0c6eeab764ade8dc4c0db24caf4fe7cbbaafc0eba0a9030f447b5185"
+dependencies = [
+ "num-traits",
+ "rand",
+]
+
+[[package]]
 name = "arrayvec"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -664,6 +781,17 @@ checksum = "8eb30d70a07a3b04884d2677f06bec33509dc67ca60d92949e5535352d3191dc"
 dependencies = [
  "powerfmt",
  "serde",
+]
+
+[[package]]
+name = "derivative"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1475,6 +1603,15 @@ checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 
 [[package]]
 name = "hashbrown"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
+dependencies = [
+ "ahash",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290f1a1d9242c78d09ce40a5e87e7554ee637af1351968159f4952f028f75604"
@@ -1948,6 +2085,8 @@ name = "mapreduce-plonky2"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-bn254",
+ "ark-std",
  "bincode",
  "csv",
  "env_logger",
@@ -1958,6 +2097,7 @@ dependencies = [
  "itertools 0.12.0",
  "log",
  "plonky2",
+ "plonky2-bn254",
  "plonky2_crypto",
  "rand",
  "rlp",
@@ -2412,7 +2552,7 @@ checksum = "26072860ba924cbfa98ea39c8c19b4dd6a4a25423dbdf219c1eca91aa0cf6964"
 [[package]]
 name = "plonky2"
 version = "0.1.4"
-source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
+source = "git+https://github.com/nikkolasg/plonky2#b53b079a2d6caabf317bc65aec2939aa5c72aaf0"
 dependencies = [
  "ahash",
  "anyhow",
@@ -2434,9 +2574,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "plonky2-bn254"
+version = "0.1.0"
+source = "git+https://github.com/nikkolasg/plonky2-bn254#ef681fd36af0003d044360a84392473b5d930760"
+dependencies = [
+ "anyhow",
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff",
+ "ark-std",
+ "bitvec",
+ "hex",
+ "itertools 0.10.5",
+ "log",
+ "num",
+ "num-bigint",
+ "num-traits",
+ "plonky2",
+ "plonky2_crypto",
+ "plonky2_ecdsa",
+ "rand",
+ "serde",
+]
+
+[[package]]
 name = "plonky2_crypto"
 version = "0.1.0"
-source = "git+https://github.com/nikkolasg/plonky2-crypto?branch=feat/serialization#4159ccc2856fc60269973b13da210309654e528d"
+source = "git+https://github.com/nikkolasg/plonky2-crypto?branch=feat/serialization#3eb812cfecdca4d16886af655feed721e58915ec"
 dependencies = [
  "anyhow",
  "hex",
@@ -2452,9 +2616,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "plonky2_ecdsa"
+version = "0.1.0"
+source = "git+https://github.com/nikkolasg/plonky2-ecdsa#650a917a317d0365c6365a3397f86b4a23862231"
+dependencies = [
+ "anyhow",
+ "itertools 0.10.5",
+ "num",
+ "plonky2",
+ "plonky2_crypto",
+ "plonky2_maybe_rayon 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+]
+
+[[package]]
 name = "plonky2_field"
 version = "0.1.1"
-source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
+source = "git+https://github.com/nikkolasg/plonky2#b53b079a2d6caabf317bc65aec2939aa5c72aaf0"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
@@ -2471,11 +2649,14 @@ name = "plonky2_maybe_rayon"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "194db0cbdd974e92d897cd92b74adb3968dc1b967315eb280357c49a7637994e"
+dependencies = [
+ "rayon",
+]
 
 [[package]]
 name = "plonky2_maybe_rayon"
 version = "0.1.1"
-source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
+source = "git+https://github.com/nikkolasg/plonky2#b53b079a2d6caabf317bc65aec2939aa5c72aaf0"
 dependencies = [
  "rayon",
 ]
@@ -2483,7 +2664,7 @@ dependencies = [
 [[package]]
 name = "plonky2_util"
 version = "0.1.1"
-source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
+source = "git+https://github.com/nikkolasg/plonky2#b53b079a2d6caabf317bc65aec2939aa5c72aaf0"
 
 [[package]]
 name = "powerfmt"
@@ -4136,6 +4317,20 @@ name = "zeroize"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "525b4ec142c6b68a2d10f01f7bbf6755599ca3f81ea53b8431b7dd348f5fdb2d"
+dependencies = [
+ "zeroize_derive",
+]
+
+[[package]]
+name = "zeroize_derive"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.41",
+]
 
 [[package]]
 name = "zip"

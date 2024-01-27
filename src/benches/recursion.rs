@@ -22,7 +22,8 @@ use plonky2::{
         proof::ProofWithPublicInputs,
     },
 };
-use rand::Rng;
+use plonky2_bn254::curves::g1curve_target::G1Target;
+use rand::{thread_rng, Rng};
 
 use super::init_logging;
 use super::test::Benchable;
@@ -404,6 +405,103 @@ fn bench_recursive_update_keccak() {
         }
     let trials = bench_pcd!(1, 2);
     run_benchs("bench_recursive_update_keccak.csv".to_string(), trials);
+}
+
+#[derive(Clone, Debug)]
+struct BaselinePoseidonBN254<F, const NB_ELEM: usize, const DEPTH: usize, const N: usize>
+where
+    [(); 2 * DEPTH * (N + 1)]:,
+{
+    poseidon: RepeatedPoseidon<F, NB_ELEM, { 2 * DEPTH * (N + 1) }>,
+}
+
+use ark_bn254::G1Affine;
+use ark_std::UniformRand;
+impl<F, const D: usize, const NB_ELEM: usize, const DEPTH: usize, const N: usize> UserCircuit<F, D>
+    for BaselinePoseidonBN254<F, NB_ELEM, DEPTH, N>
+where
+    F: RichField + Extendable<D>,
+    [(); 2 * DEPTH * (N + 1)]:,
+{
+    type Wires = (
+        <RepeatedPoseidon<F, NB_ELEM, { 2 * DEPTH * (N + 1) }> as UserCircuit<F, D>>::Wires,
+        Vec<(G1Target<F, D>, G1Target<F, D>)>,
+    );
+
+    fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+        let poseidon_wires = RepeatedPoseidon::<F, NB_ELEM, { 2 * DEPTH * (N + 1) }>::build(c);
+        let points = (0..N)
+            .map(|_| (G1Target::empty(c), G1Target::empty(c)))
+            .collect::<Vec<_>>();
+        for (a, b) in points.iter() {
+            a.add(c, b);
+        }
+        (poseidon_wires, points)
+    }
+
+    fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+        self.poseidon.prove(pw, &wires.0);
+        let real_points = (0..N)
+            .map(|_| {
+                (
+                    G1Affine::rand(&mut rand::thread_rng()),
+                    G1Affine::rand(&mut rand::thread_rng()),
+                )
+            })
+            .collect::<Vec<_>>();
+        for ((real_a, real_b), (target_a, target_b)) in real_points.iter().zip(wires.1.iter()) {
+            target_a.set_witness(pw, real_a);
+            target_b.set_witness(pw, real_b);
+        }
+    }
+}
+impl<F, const D: usize, const N: usize, const NINPUT: usize> Benchable
+    for BaselinePoseidonBN254<F, NINPUT, D, N>
+where
+    [(); 2 * D * (N + 1)]:,
+{
+    fn n(&self) -> usize {
+        N
+    }
+}
+#[test]
+fn bench_baseline_poseidon_bn254() {
+    init_logging();
+    const NB_ELEM: usize = 4;
+    macro_rules! bench_baseline_bn254 {
+        ($depth:expr, $($n:expr),+) => { {
+            let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
+           $(
+            {
+            const REPETITION :usize = $depth * 2 * ($n + 1);
+            let individual_circuits = (0..REPETITION)
+                .map(|_| PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap()))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
+                let pos = RepeatedPoseidon::<F, NB_ELEM, REPETITION> {
+                    circuits: individual_circuits,
+                };
+                let circuit = BaselinePoseidonBN254::<F, NB_ELEM, $depth, $n> {
+                    poseidon: pos,
+                };
+                fns.push(Box::new(move || {
+                    bench_simple_circuit::<F,D,C,_>(
+                        format!("baseline_bn254_depth{}_n{}", $depth,$n).to_string(),
+                        circuit,
+                )}));
+            }
+            )+
+            fns
+        }};
+    }
+    // First argument is DEPTH, rest is the number of elements
+    let trials = bench_baseline_bn254!(10, 4, 5);
+    println!("Running {} experiments", trials.len());
+    run_benchs(
+        "bench_recursive_baseline_poseidon_bn254.csv".to_string(),
+        trials,
+    );
 }
 
 fn bench_pcd_circuit<
