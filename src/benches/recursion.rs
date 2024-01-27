@@ -467,7 +467,8 @@ where
 #[test]
 fn bench_baseline_poseidon_bn254() {
     init_logging();
-    const NB_ELEM: usize = 4;
+    // NB of field elements as input to poseidon
+    const NB_ELEM: usize = 8;
     macro_rules! bench_baseline_bn254 {
         ($depth:expr, $($n:expr),+) => { {
             let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
