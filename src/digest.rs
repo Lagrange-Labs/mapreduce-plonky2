@@ -52,33 +52,47 @@ where
     type Wires = DigestWires<ARITY>;
 
     fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+        // This function code references `hash_n_to_m_no_pad` in plonky.
+        // <https://github.com/nikkolasg/plonky2/blob/b53b079a2d6caabf317bc65aec2939aa5c72aaf0/plonky2/src/hash/hashing.rs#L30>
+
         let real_len = b.add_virtual_target();
         let inputs = b.add_virtual_target_arr::<ARITY>();
 
+        // Initialize the poseison state to zeros.
         let zero = b.zero();
         let mut state =
             <PoseidonPermutation<Target> as PlonkyPermutation<Target>>::new(iter::repeat(zero));
 
+        // Absorb all input chunks with a rate, and update the state.
         inputs
             .chunks(SPONGE_RATE)
             .enumerate()
             .for_each(|(i, chunks)| {
-                let chunk_offset = SPONGE_RATE * i;
+                let chunk_start = SPONGE_RATE * i;
 
                 chunks.iter().enumerate().for_each(|(i, elt)| {
-                    let elt_offset = b.constant(F::from_canonical_usize(chunk_offset + i));
+                    // Set the element to state if it's a real data by comparing
+                    // with real length.
+                    let elt_offset = b.constant(F::from_canonical_usize(chunk_start + i));
                     let is_elt = less_than(b, elt_offset, real_len, 8);
 
                     let elt = b.select(is_elt, *elt, state.as_ref()[i]);
                     state.set_elt(elt, i);
                 });
 
-                let old_state = state.clone();
+                // Update to new state if the chunk start position (which is
+                // `SPONGE_RATE * i`, and i starts from 0) is less than the real
+                // data length. If so, the data of
+                // `[chunk_start..chunk_start + SPONGE_RATE]` should be permuted
+                // to the new state. The real data length must satisfies one of
+                // the below conditions:
+                // . real_len > chunk_start + SPONGE_RATE
+                // . real_len > chunk_start && real_len <= chunk_start + SPONGE_RATE
                 let new_state = b.permute::<PoseidonHash>(state);
-                let chunk_offset = b.constant(F::from_canonical_usize(chunk_offset));
-                let is_new_state = less_than(b, chunk_offset, real_len, 8);
+                let chunk_start = b.constant(F::from_canonical_usize(chunk_start));
+                let is_new_state = less_than(b, chunk_start, real_len, 8);
 
-                let elts: Vec<_> = old_state
+                let elts: Vec<_> = state
                     .as_ref()
                     .iter()
                     .zip(new_state.as_ref())
@@ -90,6 +104,7 @@ where
                     .for_each(|(i, elt)| state.set_elt(elt, i));
             });
 
+        // Squeeze outputs from the state.
         let mut outputs = Vec::with_capacity(NUM_HASH_OUT_ELTS);
         loop {
             for &s in state.squeeze() {
