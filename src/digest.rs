@@ -105,21 +105,13 @@ where
             });
 
         // Squeeze outputs from the state.
-        let mut outputs = Vec::with_capacity(NUM_HASH_OUT_ELTS);
-        loop {
-            for &s in state.squeeze() {
-                outputs.push(s);
-                if outputs.len() == NUM_HASH_OUT_ELTS {
-                    let output = HashOutTarget::from_vec(outputs);
+        let output = state.squeeze()[..NUM_HASH_OUT_ELTS].to_vec();
+        let output = HashOutTarget::from_vec(output);
 
-                    return Self::Wires {
-                        inputs,
-                        real_len,
-                        output,
-                    };
-                }
-            }
-            state = b.permute::<PoseidonHash>(state);
+        Self::Wires {
+            inputs,
+            real_len,
+            output,
         }
     }
 
