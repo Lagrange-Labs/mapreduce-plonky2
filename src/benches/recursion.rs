@@ -411,28 +411,33 @@ fn bench_recursive_update_keccak() {
 }
 
 #[derive(Clone, Debug)]
-struct BaselinePoseidonBN254<F, const NB_ELEM: usize, const DEPTH: usize, const N: usize>
-where
-    [(); 2 * DEPTH * (N + 1)]:,
-{
-    poseidon: RepeatedPoseidon<F, NB_ELEM, { 2 * DEPTH * (N + 1) }>,
-}
+struct BaselinePoseidonBN254<const NB_ELEM: usize, const DEPTH: usize, const N: usize> {}
 
 use ark_bn254::G1Affine;
 use ark_std::UniformRand;
 impl<F, const D: usize, const NB_ELEM: usize, const DEPTH: usize, const N: usize> UserCircuit<F, D>
-    for BaselinePoseidonBN254<F, NB_ELEM, DEPTH, N>
+    for BaselinePoseidonBN254<NB_ELEM, DEPTH, N>
 where
     F: RichField + Extendable<D>,
-    [(); 2 * DEPTH * (N + 1)]:,
 {
     type Wires = (
-        <RepeatedPoseidon<F, NB_ELEM, { 2 * DEPTH * (N + 1) }> as UserCircuit<F, D>>::Wires,
+        //<RepeatedPoseidon<F, NB_ELEM, { 2 * DEPTH * (N + 1) }> as UserCircuit<F, D>>::Wires,
+        Vec<Vec<Target>>,
         Vec<(G1Target<F, D>, G1Target<F, D>)>,
     );
 
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-        let poseidon_wires = RepeatedPoseidon::<F, NB_ELEM, { 2 * DEPTH * (N + 1) }>::build(c);
+        let nb_hashing = 2 * DEPTH * (N + 1);
+        let pos_inputs = (0..nb_hashing)
+            .map(|_| {
+                (0..NB_ELEM)
+                    .map(|_| c.add_virtual_target())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        for inputs in pos_inputs.iter() {
+            c.hash_n_to_hash_no_pad::<PoseidonHash>(inputs.clone());
+        }
         let points = (0..N)
             .map(|_| (G1Target::empty(c), G1Target::empty(c)))
             .collect::<Vec<_>>();
@@ -441,11 +446,16 @@ where
             range_check_u32_circuit(c, a.y.target.value.limbs.clone());
             a.add(c, b);
         }
-        (poseidon_wires, points)
+        (pos_inputs, points)
     }
 
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-        self.poseidon.prove(pw, &wires.0);
+        let nb_hashing = 2 * DEPTH * (N + 1);
+        for i in 0..nb_hashing {
+            let inputs = &wires.0[i];
+            let real_inputs = (0..NB_ELEM).map(|_| F::rand()).collect::<Vec<_>>();
+            pw.set_target_arr(inputs, &real_inputs);
+        }
         let real_points = (0..N)
             .map(|_| {
                 (
@@ -460,10 +470,8 @@ where
         }
     }
 }
-impl<F, const D: usize, const N: usize, const NINPUT: usize> Benchable
-    for BaselinePoseidonBN254<F, NINPUT, D, N>
-where
-    [(); 2 * D * (N + 1)]:,
+impl<const D: usize, const N: usize, const NINPUT: usize> Benchable
+    for BaselinePoseidonBN254<NINPUT, D, N>
 {
     fn n(&self) -> usize {
         N
@@ -479,18 +487,7 @@ fn bench_baseline_poseidon_bn254() {
             let mut fns : Vec<Box<dyn FnOnce() -> BenchResult>> = vec![];
            $(
             {
-            const REPETITION :usize = $depth * 2 * ($n + 1);
-            let individual_circuits = (0..REPETITION)
-                .map(|_| PoseidonCircuit::<F, NB_ELEM>::new(F::rand_vec(NB_ELEM).try_into().unwrap()))
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
-                let pos = RepeatedPoseidon::<F, NB_ELEM, REPETITION> {
-                    circuits: individual_circuits,
-                };
-                let circuit = BaselinePoseidonBN254::<F, NB_ELEM, $depth, $n> {
-                    poseidon: pos,
-                };
+                let circuit = BaselinePoseidonBN254::<NB_ELEM, $depth, $n> {};
                 fns.push(Box::new(move || {
                     bench_simple_setup::<F,D,C,_>(
                     //bench_simple_circuit::<F,D,C,_>(
