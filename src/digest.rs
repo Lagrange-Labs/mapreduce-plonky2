@@ -69,15 +69,16 @@ where
                     let elt_offset = b.constant(F::from_canonical_usize(chunk_offset + i));
                     let is_elt = less_than(b, elt_offset, real_len, 8);
 
-                    let elt = b.select(is_elt, *elt, zero);
+                    let elt = b.select(is_elt, *elt, state.as_ref()[i]);
                     state.set_elt(elt, i);
                 });
 
+                let old_state = state.clone();
                 let new_state = b.permute::<PoseidonHash>(state);
                 let chunk_offset = b.constant(F::from_canonical_usize(chunk_offset));
                 let is_new_state = less_than(b, chunk_offset, real_len, 8);
 
-                let elts: Vec<_> = state
+                let elts: Vec<_> = old_state
                     .as_ref()
                     .iter()
                     .zip(new_state.as_ref())

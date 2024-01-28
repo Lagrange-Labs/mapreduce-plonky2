@@ -36,8 +36,7 @@ fn cyclic_circuit() -> CyclicCircuit<F, C, D, U, ARITY> {
     let padder = |b: &mut CircuitBuilder<F, D>| {
         U::build(b);
 
-        // TODO: return right gate number.
-        16
+        ARITY
     };
 
     CyclicCircuit::<F, C, D, U, ARITY>::new(padder)
@@ -60,7 +59,13 @@ fn prove_all_leaves(circuit: &CyclicCircuit<F, C, D, U, ARITY>, tree: &mut Merkl
     tree.all_leaves().iter_mut().for_each(|leaf| {
         if let MerkleNode::Leaf(value, _, proof_result) = leaf {
             let inputs = value.0.map(F::from_canonical_u64).to_vec();
-            *proof_result = Some(circuit.prove_init(U::new(inputs)).unwrap().0);
+            let proof = circuit.prove_init(U::new(inputs)).unwrap().0;
+
+            circuit
+                .verify_proof(proof.clone())
+                .expect("Failed to verify proof");
+
+            *proof_result = Some(proof);
         } else {
             panic!("Must be a leaf of tree");
         }
@@ -74,42 +79,31 @@ fn prove_branches_recursive(
     let max_level = tree.max_level();
     (0..max_level).rev().into_iter().for_each(|level| {
         tree.branches_at_level(level).iter_mut().for_each(|branch| {
-            if let MerkleNode::Branch(children, .., proof) = branch {
-                let inputs_proofs = children
+            if let MerkleNode::Branch(children, .., proof_result) = branch {
+                let inputs = children
                     .iter()
-                    .map(|node| (node.hash().elements, node.proof().clone().unwrap()))
+                    .flat_map(|node| node.hash().elements)
                     .collect();
 
-                *proof = Some(prove_once(circuit, inputs_proofs));
+                let mut last_proofs: Vec<_> =
+                    children.iter().map(|node| node.proof().clone()).collect();
+                last_proofs.extend(
+                    iter::repeat(last_proofs.last().unwrap().clone())
+                        .take(ARITY - last_proofs.len()),
+                );
+                let last_proofs = last_proofs.try_into().unwrap();
+
+                let proof = circuit.prove_step(U::new(inputs), &last_proofs).unwrap().0;
+                circuit
+                    .verify_proof(proof.clone())
+                    .expect("Failed to verify proof");
+
+                *proof_result = Some(proof);
             } else {
                 panic!("Must be a branch of tree");
             }
         });
     });
-}
-
-fn prove_once(
-    circuit: &CyclicCircuit<F, C, D, U, ARITY>,
-    inputs_proofs: Vec<([F; 4], ProofWithPublicInputs<F, C, D>)>,
-) -> ProofWithPublicInputs<F, C, D> {
-    let (inputs, proofs): (Vec<_>, Vec<_>) = inputs_proofs.into_iter().unzip();
-    let inputs = inputs.into_iter().flatten().collect();
-
-    let dummy_n = ARITY - proofs.len();
-    let proofs: [Option<ProofWithPublicInputs<F, C, D>>; ARITY] = proofs
-        .into_iter()
-        .map(Some)
-        .chain(std::iter::repeat(None).take(dummy_n))
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
-
-    let proof = circuit.prove_step(U::new(inputs), &proofs).unwrap().0;
-    circuit
-        .verify_proof(proof.clone())
-        .expect("Failed to verify proof");
-
-    proof
 }
 
 #[derive(Clone, Debug)]
