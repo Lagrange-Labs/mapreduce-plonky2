@@ -85,8 +85,17 @@ fn prove_branches_recursive(
                     .flat_map(|node| node.hash().elements)
                     .collect();
 
+                // Children are always arranged from left to right, there are
+                // only real proofs then followed by dummy ones. For example
+                // cannot be `[real, dummy, dummy, real]`.
                 let mut last_proofs: Vec<_> =
                     children.iter().map(|node| node.proof().clone()).collect();
+
+                // TODO:
+                // For now duplicate the last proof to extend array to ARITY
+                // size, since the below assertion failed if extend with dummy.
+                // <https://github.com/nikkolasg/plonky2/blob/b53b079a2d6caabf317bc65aec2939aa5c72aaf0/plonky2/src/iop/generator.rs#L93>
+                // Need to check why.
                 last_proofs.extend(
                     iter::repeat(last_proofs.last().unwrap().clone())
                         .take(ARITY - last_proofs.len()),
@@ -147,13 +156,13 @@ where
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
 {
-    // children, hash and proof
+    // Child nodes, hash and proof
     Branch(
         Vec<Self>,
         HashOut<F>,
         Option<ProofWithPublicInputs<F, C, D>>,
     ),
-    // value and proof
+    // Node value, hash and proof
     Leaf(U256, HashOut<F>, Option<ProofWithPublicInputs<F, C, D>>),
 }
 
