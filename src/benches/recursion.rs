@@ -503,7 +503,7 @@ fn bench_baseline_poseidon_bn254() {
         }};
     }
     // First argument is DEPTH, rest is the number of elements
-    let trials = bench_baseline_bn254!(10, 4, 5);
+    let trials = bench_baseline_bn254!(19, 2, 4, 16, 64);
     println!("Running {} experiments", trials.len());
     run_benchs(
         "bench_recursive_baseline_poseidon_bn254.csv".to_string(),
