@@ -113,7 +113,7 @@ where
     /// Circuit data related to the first dummy cyclic proof generated
     base_common: CommonCircuitData<F, D>,
     /// CircuitData of this circuit
-    circuit_data: CircuitData<F, CC, D>,
+    pub(crate) circuit_data: CircuitData<F, CC, D>,
     #[cfg(test)]
     pub(crate) num_gates: usize,
 }

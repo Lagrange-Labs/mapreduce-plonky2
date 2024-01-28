@@ -1,6 +1,8 @@
+use crate::benches::test::bench_simple_setup;
 use crate::benches::test::{bench_simple_circuit, run_benchs, BenchResult};
 use crate::circuit::{NoopCircuit, ProofOrDummyTarget};
 use crate::keccak::{self, KeccakWires};
+use crate::serializer::{GateSerializer, GeneratorSerializer};
 use itertools::Itertools;
 use log::info;
 use plonky2::field::types::Sample;
@@ -490,7 +492,8 @@ fn bench_baseline_poseidon_bn254() {
                     poseidon: pos,
                 };
                 fns.push(Box::new(move || {
-                    bench_simple_circuit::<F,D,C,_>(
+                    bench_simple_setup::<F,D,C,_>(
+                    //bench_simple_circuit::<F,D,C,_>(
                         format!("baseline_bn254_depth{}_n{}", $depth,$n).to_string(),
                         circuit,
                 )}));
@@ -528,6 +531,22 @@ where
     let now = time::Instant::now();
     let circuit = CyclicCircuit::<F, C, D, U, ARITY>::new(padder);
     let building_time = now.elapsed().as_millis() as u64;
+    let prover_data_size = circuit
+        .circuit_data
+        .prover_only
+        .to_bytes(
+            &GeneratorSerializer::<C, D>::new(),
+            &circuit.circuit_data.common,
+        )
+        .unwrap()
+        .len();
+    let verifier_data_size = circuit.circuit_data.verifier_only.to_bytes().unwrap().len();
+    let common_data_size = circuit
+        .circuit_data
+        .common
+        .to_bytes(&GateSerializer {})
+        .unwrap()
+        .len();
     let mut last_proofs = iter::repeat(circuit.prove_init(step_fn()).expect("base step failed").0)
         .take(n_leaves)
         .collect::<Vec<_>>();
@@ -587,5 +606,8 @@ where
         building: building_time,
         proving: (proving_time / n_prove) as u64,
         verifying: (verifying_time / n_prove) as u64,
+        prover_data_size,
+        verifier_data_size,
+        common_data_size,
     }
 }

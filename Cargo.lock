@@ -2099,6 +2099,7 @@ dependencies = [
  "plonky2",
  "plonky2-bn254",
  "plonky2_crypto",
+ "plonky2_ecdsa",
  "rand",
  "rlp",
  "rmp-serde",

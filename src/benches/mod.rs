@@ -24,15 +24,21 @@ mod test {
         hash::hash_types::RichField,
         iop::witness::PartialWitness,
         plonk::{
-            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{AlgebraicHasher, GenericConfig},
         },
     };
     use serde::Serialize;
     use std::time;
 
-    use crate::{circuit::UserCircuit, utils::verify_proof_tuple};
+    use crate::{
+        circuit::UserCircuit,
+        serializer::{GateSerializer, GeneratorSerializer},
+        utils::verify_proof_tuple,
+    };
 
-    #[derive(Serialize, Clone, Debug)]
+    #[derive(Serialize, Clone, Debug, Default)]
     pub(crate) struct BenchResult {
         pub circuit: String,
         // n is circuit dependent
@@ -44,6 +50,9 @@ mod test {
         pub proving: u64,
         pub lde: usize,
         pub verifying: u64,
+        pub prover_data_size: usize,
+        pub verifier_data_size: usize,
+        pub common_data_size: usize,
     }
 
     pub fn run_benchs(fname: String, benches: Vec<Box<dyn FnOnce() -> BenchResult>>) {
@@ -63,10 +72,11 @@ mod test {
         }
     }
 
-    pub fn bench_simple_circuit<
+    // TODO refactor with bench_Simple_circuit to avoid code repetition
+    pub fn bench_simple_setup<
         F,
         const D: usize,
-        C: GenericConfig<D, F = F>,
+        C: GenericConfig<D, F = F> + 'static,
         U: UserCircuit<F, D> + Benchable,
     >(
         tname: String,
@@ -74,6 +84,46 @@ mod test {
     ) -> BenchResult
     where
         F: RichField + Extendable<D>,
+        C::Hasher: AlgebraicHasher<F>,
+    {
+        let mut b = CircuitBuilder::new(CircuitConfig::standard_ecc_config());
+        let now = time::Instant::now();
+        let wires = U::build(&mut b);
+        let gate_count = b.num_gates();
+        let circuit_data = b.build::<C>();
+        let building_time = now.elapsed();
+        let gen = GeneratorSerializer::<C, D>::new();
+        let prover_data_size = circuit_data
+            .prover_only
+            .to_bytes(&gen, &circuit_data.common)
+            .unwrap()
+            .len();
+        let verifier_data_size = circuit_data.verifier_only.to_bytes().unwrap().len();
+        let common_data_size = circuit_data
+            .common
+            .to_bytes(&GateSerializer {})
+            .unwrap()
+            .len();
+        BenchResult {
+            building: building_time.as_millis() as u64,
+            verifier_data_size,
+            prover_data_size,
+            common_data_size,
+            ..BenchResult::default()
+        }
+    }
+    pub fn bench_simple_circuit<
+        F,
+        const D: usize,
+        C: GenericConfig<D, F = F> + 'static,
+        U: UserCircuit<F, D> + Benchable,
+    >(
+        tname: String,
+        u: U,
+    ) -> BenchResult
+    where
+        F: RichField + Extendable<D>,
+        C::Hasher: AlgebraicHasher<F>,
     {
         let mut b = CircuitBuilder::new(CircuitConfig::standard_ecc_config());
         let mut pw = PartialWitness::new();
@@ -82,6 +132,17 @@ mod test {
         let gate_count = b.num_gates();
         let circuit_data = b.build::<C>();
         let building_time = now.elapsed();
+        let prover_data_size = circuit_data
+            .prover_only
+            .to_bytes(&GeneratorSerializer::<C, D>::new(), &circuit_data.common)
+            .unwrap()
+            .len();
+        let verifier_data_size = circuit_data.verifier_only.to_bytes().unwrap().len();
+        let common_data_size = circuit_data
+            .common
+            .to_bytes(&GateSerializer {})
+            .unwrap()
+            .len();
         let now = time::Instant::now();
         u.prove(&mut pw, &wires);
         let proof = circuit_data.prove(pw).expect("invalid proof");
@@ -99,6 +160,9 @@ mod test {
             building: building_time.as_millis() as u64,
             proving: proving_time.as_millis() as u64,
             verifying: verifying_time.as_millis() as u64,
+            verifier_data_size,
+            common_data_size,
+            prover_data_size,
         }
     }
 }

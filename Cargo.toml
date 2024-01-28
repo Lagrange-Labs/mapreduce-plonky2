@@ -13,12 +13,13 @@ plonky2 = { version = "0.1.4" }
 
 # supporting latest plonky2
 plonky2_crypto = { git = "https://github.com/nikkolasg/plonky2-crypto" , branch = "feat/serialization" }
+plonky2-bn254 = { git = "https://github.com/nikkolasg/plonky2-bn254" }
+plonky2_ecdsa = { git = "https://github.com/nikkolasg/plonky2-ecdsa" }
 rand = "0.8.5"
 serde = "1.0.193"
 # TODO: see if we can revert to upstream repo: originally used 
 # to fetch proof with "node" instead of already encoded struct
 eth_trie = { git = "https://github.com/nikkolasg/eth-trie.rs" }
-plonky2-bn254 = { git = "https://github.com/nikkolasg/plonky2-bn254" }
 rlp = "0.5.2"
 sha3 = "0.10.8"
 bincode = "1.3.3"
