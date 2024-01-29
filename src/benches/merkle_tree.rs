@@ -21,11 +21,13 @@ use plonky2::{
 use rand::Rng;
 use std::iter;
 
+use super::init_logging;
+
 const D: usize = 2;
 
 /// Set this constant to identify each Merkle tree branch has ARITY children at
 /// maximum.
-const ARITY: usize = 16;
+const ARITY: usize = 4;
 
 type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
@@ -34,6 +36,7 @@ type U = DigestCircuit<F, D, ARITY>;
 /// Benchmark and test the digest circuit.
 #[test]
 fn test_digest_circuit() {
+    init_logging();
     let circuit = cyclic_circuit();
     let mut tree = merkle_tree();
 
@@ -66,7 +69,7 @@ fn cyclic_circuit() -> CyclicCircuit<F, C, D, U, ARITY> {
     let padder = |b: &mut CircuitBuilder<F, D>| {
         U::build(b);
 
-        ARITY
+        14
     };
 
     CyclicCircuit::<F, C, D, U, ARITY>::new(padder)
@@ -90,64 +93,15 @@ fn rand_leaf() -> MerkleNode<F, C, D> {
 /// Prove and generate Poseidon hash for all Merkle tree leaves.
 fn prove_all_leaves(circuit: &CyclicCircuit<F, C, D, U, ARITY>, tree: &mut MerkleTree<F, C, D>) {
     // Iterate all Merkle tree leaves to generate proofs and save to the nodes.
-    tree.all_leaves().iter_mut().for_each(|leaf| {
-        if let MerkleNode::Leaf(value, _, proof_result) = leaf {
-            // Generate the proof.
-            let inputs = value.0.map(F::from_canonical_u64).to_vec();
-            let proof = circuit.prove_init(U::new(inputs)).unwrap().0;
-
-            // Verify the proof for test.
-            circuit
-                .verify_proof(proof.clone())
-                .expect("Failed to verify proof");
-
-            // Save proof to the node for further using when proving parent
-            // branch.
-            *proof_result = Some(proof);
-        } else {
-            panic!("Must be a leaf of tree");
-        }
-    });
-}
-
-/// Prove and generate Poseidon hash for all Merkle tree branches from lowest
-/// levels to high recursively. It should be finished until proving the root.
-fn prove_branches_recursive(
-    circuit: &CyclicCircuit<F, C, D, U, ARITY>,
-    tree: &mut MerkleTree<F, C, D>,
-) {
-    // Prove branches from lowest levels to high.
-    let max_level = tree.max_level();
-    (0..max_level).rev().into_iter().for_each(|level| {
-        // Get branches at the specified level.
-        tree.branches_at_level(level).iter_mut().for_each(|branch| {
-            if let MerkleNode::Branch(children, .., proof_result) = branch {
-                // The children have already been proved before, since we
-                // process from lowest to high.
-                let inputs = children
-                    .iter()
-                    .flat_map(|node| node.hash().elements)
-                    .collect();
-
-                // Children are always arranged from left to right, there are
-                // only real proofs then followed by dummy ones. For example
-                // cannot be `[real, dummy, dummy, real]`.
-                let mut last_proofs: Vec<_> =
-                    children.iter().map(|node| node.proof().clone()).collect();
-
-                // TODO:
-                // For now duplicate the last proof to extend array to ARITY
-                // size, since the below assertion failed if extend with dummy.
-                // <https://github.com/nikkolasg/plonky2/blob/b53b079a2d6caabf317bc65aec2939aa5c72aaf0/plonky2/src/iop/generator.rs#L93>
-                // Need to check why.
-                last_proofs.extend(
-                    iter::repeat(last_proofs.last().unwrap().clone())
-                        .take(ARITY - last_proofs.len()),
-                );
-                let last_proofs = last_proofs.try_into().unwrap();
-
+    tree.all_leaves()
+        .iter_mut()
+        .enumerate()
+        .for_each(|(i, leaf)| {
+            if let MerkleNode::Leaf(value, _, proof_result) = leaf {
+                println!("[+] Proving leaf {} with value {:?}", i, value);
                 // Generate the proof.
-                let proof = circuit.prove_step(U::new(inputs), &last_proofs).unwrap().0;
+                let inputs = value.0.map(F::from_canonical_u64).to_vec();
+                let proof = circuit.prove_init(U::new(inputs)).unwrap().0;
 
                 // Verify the proof for test.
                 circuit
@@ -158,9 +112,73 @@ fn prove_branches_recursive(
                 // branch.
                 *proof_result = Some(proof);
             } else {
-                panic!("Must be a branch of tree");
+                panic!("Must be a leaf of tree");
             }
         });
+}
+
+/// Prove and generate Poseidon hash for all Merkle tree branches from lowest
+/// levels to high recursively. It should be finished until proving the root.
+fn prove_branches_recursive(
+    circuit: &CyclicCircuit<F, C, D, U, ARITY>,
+    tree: &mut MerkleTree<F, C, D>,
+) {
+    // Prove branches from lowest levels to high.
+    let max_level = tree.max_level();
+    (0..max_level).rev().for_each(|level| {
+        // Get branches at the specified level.
+        tree.branches_at_level(level)
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, branch)| {
+                if let MerkleNode::Branch(children, .., proof_result) = branch {
+                    println!("[+] Proving branch {} at level {}", i, level);
+                    // The children have already been proved before, since we
+                    // process from lowest to high.
+                    let inputs = children
+                        .iter()
+                        .flat_map(|node| node.hash().elements)
+                        .collect();
+
+                    // Children are always arranged from left to right, there are
+                    // only real proofs then followed by dummy ones. For example
+                    // cannot be `[real, dummy, dummy, real]`.
+                    //let mut last_proofs: Vec<_> =
+                    //    children.iter().map(|node| node.proof().clone()).collect();
+
+                    //// TODO:
+                    //// For now duplicate the last proof to extend array to ARITY
+                    //// size, since the below assertion failed if extend with dummy.
+                    //// <https://github.com/nikkolasg/plonky2/blob/b53b079a2d6caabf317bc65aec2939aa5c72aaf0/plonky2/src/iop/generator.rs#L93>
+                    //// Need to check why.
+                    //last_proofs.extend(
+                    //    iter::repeat(last_proofs.last().unwrap().clone())
+                    //        .take(ARITY - last_proofs.len()),
+                    //);
+                    //let last_proofs = last_proofs.try_into().unwrap();
+                    let last_proofs = core::array::from_fn(|i| {
+                        if i < children.len() {
+                            children[i].proof().clone()
+                        } else {
+                            None
+                        }
+                    });
+
+                    // Generate the proof.
+                    let proof = circuit.prove_step(U::new(inputs), &last_proofs).unwrap().0;
+
+                    // Verify the proof for test.
+                    circuit
+                        .verify_proof(proof.clone())
+                        .expect("Failed to verify proof");
+
+                    // Save proof to the node for further using when proving parent
+                    // branch.
+                    *proof_result = Some(proof);
+                } else {
+                    panic!("Must be a branch of tree");
+                }
+            });
     });
 }
 

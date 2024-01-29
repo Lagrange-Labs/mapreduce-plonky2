@@ -169,10 +169,10 @@ where
             b.conditionally_verify_cyclic_proof::<CC>(*present, proof_t, &dummy_p, &dummy_vd, &cd)
                 .expect("this should not panic");
         }
-        debug!("Building cyclic circuit data");
+        debug!(" ---- Building cyclic circuit data ---");
         b.print_gate_counts(1);
         let num_gates = b.num_gates();
-        info!("Final cyclic circuit has {} gates", num_gates);
+        info!("[+] Final cyclic circuit has {} gates", num_gates);
         let cyclic_data = b.build::<CC>();
         Self {
             present_proofs: conditions_t,
@@ -206,23 +206,24 @@ where
         debug!("Setting witness");
         let mut pw = PartialWitness::new();
         circuit.prove(&mut pw, &self.user_wires);
+        let mut inputs_map: HashMap<usize, F> = HashMap::new();
+        for (i, v) in circuit.base_inputs().iter().enumerate() {
+            inputs_map.insert(i, *v);
+        }
+        let dummy_proof = cyclic_base_proof(
+            &self.base_common,
+            &self.circuit_data.verifier_only,
+            inputs_map,
+        );
         if init {
             for i in 0..ARITY {
                 pw.set_bool_target(self.present_proofs[i], false);
             }
-            let mut inputs_map: HashMap<usize, F> = HashMap::new();
-            for (i, v) in circuit.base_inputs().iter().enumerate() {
-                inputs_map.insert(i, *v);
-            }
-            let proof = cyclic_base_proof(
-                &self.base_common,
-                &self.circuit_data.verifier_only,
-                inputs_map,
-            );
+
             // we verify ARITY out of them anyway right now. This would change depending on the shape
             // of the graph ?
             for target in self.proofs.iter() {
-                pw.set_proof_with_pis_target::<CC, D>(target, &proof);
+                pw.set_proof_with_pis_target::<CC, D>(target, &dummy_proof);
             }
         } else {
             let last_proofs =
@@ -233,6 +234,7 @@ where
                     pw.set_proof_with_pis_target::<CC, D>(target, proof);
                 } else {
                     pw.set_bool_target(self.present_proofs[i], false);
+                    pw.set_proof_with_pis_target::<CC, D>(target, &dummy_proof);
                 }
             }
         }

@@ -41,7 +41,7 @@ where
 /// This circuit could be used to prove Merkle tree recursively. Each Merkle
 /// tree branch has maximum ARITY children, and it's set to `16` as default.
 #[derive(Clone, Debug)]
-pub struct DigestCircuit<F, const D: usize, const ARITY: usize = { 16 }>
+pub struct DigestCircuit<F, const D: usize, const ARITY: usize>
 where
     [(); ARITY * 4]:,
 {
