@@ -43,4 +43,8 @@ rand = "0.8.5"
 ci = []
 
 [patch.crates-io]
-plonky2 = { git = "https://github.com/nikkolasg/plonky2" }
+#plonky2 = { git = "https://github.com/nikkolasg/plonky2" }
+plonky2 = { path = "../plonky2/plonky2" }
+
+[patch."https://github.com/nikkolasg/eth-trie.rs"]
+eth_trie = { path = "../ethtrie" }

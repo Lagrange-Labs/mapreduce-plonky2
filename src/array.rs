@@ -134,7 +134,7 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
     }
 
     /// Assigns each value in the given array to the respective wire in `self`
-    pub fn assign<F: RichField + Extendable<D>, const D: usize>(
+    pub fn assign<F: RichField>(
         &self,
         pw: &mut PartialWitness<F>,
         array: &[F; SIZE],
@@ -328,6 +328,30 @@ where
         }
     }
 }
+
+//impl<const SIZE:usize> Array<Target,SIZE> {
+//    /// extracts a variable length array from this array. The MAX_SUB_SIZE is
+//     /// the maximum number of target elements will be extracted into the vector.
+//    /// The real_len is used for the VectorWire returned to operate correcctly.
+//    /// The difference with extract_array is that extract_array always assume the
+//    /// returned array contains data up to the end of the array, which is useful
+//    /// when one knows the exact length of data one needs to extract.
+//    pub fn extract_vector<
+//        F: RichField + Extendable<D>,
+//        const D: usize,
+//        const MAX_SUB_SIZE: usize,
+//    >(
+//        &self,
+//        b: &mut CircuitBuilder<F, D>,
+//        at: Target,
+//        real_len: Target,
+//    ) -> VectorWire<MAX_SUB_SIZE> {
+//        VectorWire {
+//            arr: self.extract_array::<F, D, MAX_SUB_SIZE>(b, at),
+//            real_len,
+//        }
+//    }
+//}
 
 /// Maximum size of the array where we can call b.random_access() from native
 /// Plonky2 API
@@ -662,7 +686,7 @@ mod test {
             idx,
             sub,
             exp: true,
-        }); 
+        });
         test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
             arr,
             idx,

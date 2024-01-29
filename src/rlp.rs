@@ -2,7 +2,7 @@ use crate::array::{Array, VectorWire};
 use crate::utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::Target;
+use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 /// The maximum number of bytes the length of data can take.
@@ -40,8 +40,12 @@ pub struct RlpList<const N: usize> {
     pub num_fields: Target,
 }
 
-impl< const N : usize> RlpList<N> {
-    pub fn select<F: RichField + Extendable<D>, const D:usize>(&self, b: &mut CircuitBuilder<F,D>, at: Target) -> RlpHeader {
+impl<const N: usize> RlpList<N> {
+    pub fn select<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        at: Target,
+    ) -> RlpHeader {
         let offset = self.offset.value_at(b, at);
         let len = self.len.value_at(b, at);
         let dtype = self.data_type.value_at(b, at);
@@ -51,6 +55,13 @@ impl< const N : usize> RlpList<N> {
             data_type: dtype,
         }
     }
+    pub fn select_offset<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        at: Target,
+    ) -> Target {
+        self.offset.value_at(b, at)
+    }
 }
 
 /// Decodes the compact encoding defined in Ethereum specs. Specifically, it takes
@@ -58,18 +69,21 @@ impl< const N : usize> RlpList<N> {
 /// returns the key extracted, in nibbles, and its actual length, in nibbles.
 /// See https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie#specification
 /// for more info.
-/// * input is the full MPT node data
+/// * input is the full MPT node data, in bytes format
 /// * key_header is the RLP header of the key. It is useful to know the real length of the key
 /// and the offset from which to read the key.
+/// * Return argument is the key in nibbles and the conditions that should be true
+/// NOTE: it's a condition that we don't enforce here because we may be looking at
+/// a node which doesn't use this compact encoding, since we don't have if/else in circuits.
 pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, const N: usize>(
     b: &mut CircuitBuilder<F, D>,
     input: &Array<Target, N>,
     key_header: &RlpHeader,
-) -> VectorWire<MAX_KEY_NIBBLE_LEN> {
+) -> (VectorWire<MAX_KEY_NIBBLE_LEN>, BoolTarget) {
     let zero = b.zero();
     let one = b.one();
     let two = b.two();
-
+    let mut cond = b._true();
     let first_byte = input.value_at(b, key_header.offset);
     let (most_bits, least_bits) = b.split_low_high(first_byte, 4, 8);
     // little endian
@@ -79,6 +93,7 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     let mut nibbles: [Target; MAX_KEY_NIBBLE_LEN] = [b.zero(); MAX_KEY_NIBBLE_LEN];
 
     let first_nibble = prev_nibbles.0;
+    //let parity = b._true().target;
     let parity = b.split_le(first_nibble, 2)[0].target;
 
     let one_minus_parity = b.sub(one, parity);
@@ -88,7 +103,8 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     //   -> in this case, need to add another nibble, which is supposed to be zero
     //   -> i.e. next_nibble == 0
     let res_multi = b.mul(one_minus_parity, prev_nibbles.1);
-    b.connect(res_multi, zero);
+    let eq = b.is_equal(res_multi, zero);
+    cond = b.and(cond, eq);
 
     // -1 because first nibble is the HP information, and the following loop
     // analyzes pairs of consecutive nibbles, so the second nibble will be seen
@@ -132,10 +148,13 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     let pm2 = b.sub(parity, two);
     let key_len: Target = b.add(length_in_nibble, pm2);
 
-    VectorWire {
-        arr: Array::from_array(nibbles),
-        real_len: key_len,
-    }
+    (
+        VectorWire {
+            arr: Array::from_array(nibbles),
+            real_len: key_len,
+        },
+        cond,
+    )
 }
 // Returns the length from the RLP prefix in case of long string or long list
 // data is the full data starting from the "type" byte of RLP encoding
@@ -260,7 +279,6 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
     data_offset: Target,
 ) -> RlpList<N> {
     let zero = b.zero();
-    let n_target = b.constant(F::from_canonical_usize(N));
 
     let mut num_fields = zero;
     let mut dec_off = [zero; N];
@@ -283,6 +301,10 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
         // read the header starting from the offset
         let header = decode_header(b, data, offset);
         let new_offset = b.add(header.offset, header.len);
+
+        dec_off[i] = header.offset;
+        dec_len[i] = header.len;
+        dec_type[i] = header.data_type;
 
         // move offset to the next field in the list
         offset = b.mul(loop_p.target, new_offset);
@@ -358,6 +380,7 @@ mod tests {
 
     use anyhow::Result;
 
+    use eth_trie::{Nibbles, Trie};
     use plonky2::field::types::Field;
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
@@ -366,6 +389,7 @@ mod tests {
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
     use crate::array::Array;
+    use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::{
         decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, MAX_ENC_KEY_LEN,
         MAX_LEN_BYTES,
@@ -708,17 +732,17 @@ mod tests {
             let mut pw = PartialWitness::new();
             let mut builder = CircuitBuilder::<F, D>::new(config);
             let wire1 = Array::<Target, MAX_ENC_KEY_LEN>::new(&mut builder);
-            wire1.assign::<F, D>(
+            wire1.assign::<F>(
                 &mut pw,
                 &create_array(|i| F::from_canonical_u8(tc.input[i])),
             );
-            let zero = builder.zero();
             let key_header = RlpHeader {
                 offset: builder.constant(F::from_canonical_usize(0)),
                 len: builder.constant(F::from_canonical_usize(tc.key_len)),
                 data_type: builder.constant(F::from_canonical_usize(0)),
             };
-            let nibbles = decode_compact_encoding(&mut builder, &wire1, &key_header);
+            let (nibbles, cond) = decode_compact_encoding(&mut builder, &wire1, &key_header);
+            builder.assert_bool(cond);
             let exp_nib_len = builder.constant(F::from_canonical_usize(tc.expected.len()));
             builder.connect(nibbles.real_len, exp_nib_len);
             for (i, nib) in tc.expected.iter().enumerate() {
@@ -737,7 +761,6 @@ mod tests {
             key_len: 3,
             expected: (0..5).map(|i| i + 1).collect::<Vec<u8>>(),
         };
-        run_test_case(tc1);
 
         let tc2 = TestCase {
             input: [
@@ -747,7 +770,6 @@ mod tests {
             key_len: 4,
             expected: vec![0, 15, 1, 12, 11, 8],
         };
-        run_test_case(tc2);
 
         let tc3 = TestCase {
             input: [
@@ -757,7 +779,39 @@ mod tests {
             key_len: 3,
             expected: vec![15, 1, 12, 11, 8],
         };
+        run_test_case(tc1);
+        run_test_case(tc2);
         run_test_case(tc3);
+
+        {
+            let (mut trie, rlp_key) = generate_random_storage_mpt::<5, 32>();
+            let proof = trie.get_proof(&rlp_key).unwrap();
+            println!(" ------ TEST CASE -----\n");
+            let leaf_node = proof.last().unwrap().clone();
+            let leaf_tuple: Vec<Vec<u8>> = rlp::decode_list(&leaf_node);
+            let partial_key_compact: Vec<u8> = rlp::decode(&leaf_tuple[0]).unwrap();
+            let partial_key_struct = Nibbles::from_compact(&partial_key_compact);
+            let partial_key_nibbles = partial_key_struct.nibbles();
+            let tc = TestCase {
+                input: create_array(|i| {
+                    if i < partial_key_compact.len() {
+                        partial_key_compact[i]
+                    } else {
+                        0
+                    }
+                }),
+                key_len: partial_key_compact.len(),
+                expected: partial_key_nibbles.to_vec(),
+            };
+            println!(
+                "partial key nibbles ({} len): {:02x?} -- input 0x{:02x?}",
+                partial_key_nibbles.len(),
+                hex::encode(partial_key_nibbles).to_string(),
+                hex::encode(tc.input)[..10].to_string()
+            );
+
+            run_test_case(tc);
+        }
         Ok(())
     }
 }
