@@ -163,3 +163,90 @@ impl<F: RichField + Extendable<D>, const D: usize> PlonkyGateSerializer<F, D> fo
         UninterleaveToU32Gate
     }
 }
+
+#[cfg(test)]
+mod test {
+
+    use std::os::unix::thread;
+
+    use anyhow::Result;
+    use ark_bn254::G1Affine;
+    use ark_std::UniformRand;
+    use plonky2::field::types::Field;
+    use plonky2::{
+        iop::witness::{PartialWitness, WitnessWrite},
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::{CircuitConfig, ProverOnlyCircuitData},
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+            prover::prove,
+        },
+        util::timing::TimingTree,
+    };
+    use plonky2_bn254::curves::g1curve_target::G1Target;
+    use plonky2_crypto::hash::keccak256::WitnessHashKeccak;
+    use plonky2_crypto::hash::{
+        keccak256::{CircuitBuilderHashKeccak, KECCAK256_R},
+        CircuitBuilderHash,
+    };
+    use rand::{thread_rng, Rng};
+
+    use crate::utils::{keccak256, verify_proof_tuple};
+
+    use super::{GateSerializer, GeneratorSerializer};
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+    #[test]
+    fn test_proof_serialization2() -> Result<()> {
+        crate::benches::init_logging();
+        let config = CircuitConfig::standard_ecc_config();
+        let mut builder = CircuitBuilder::new(config);
+        let mut pw = PartialWitness::new();
+        let hash_input = builder.add_virtual_hash_input_target(1, KECCAK256_R);
+        let hash_output = builder.hash_keccak256(&hash_input);
+        let a = builder.add_virtual_target();
+        let b = builder.add_virtual_target();
+        let c = builder.mul(a, b);
+        let p1 = G1Target::empty(&mut builder);
+        let p2 = G1Target::empty(&mut builder);
+        p1.add(&mut builder, &p2);
+        builder.register_public_input(c);
+
+        pw.set_target(a, F::from_canonical_u8(2));
+        pw.set_target(b, F::from_canonical_u8(3));
+        p1.set_witness(&mut pw, &G1Affine::rand(&mut thread_rng()));
+        p2.set_witness(&mut pw, &G1Affine::rand(&mut thread_rng()));
+        let hin = rand::thread_rng().gen::<[u8; 32]>();
+        let hout = keccak256(&hin[..]);
+        pw.set_keccak256_input_target(&hash_input, &hin);
+        pw.set_keccak256_output_target(&hash_output, &hout);
+        let data = builder.build::<C>();
+        let proof = data.prove(pw.clone()).unwrap();
+
+        let gate_serializer = GateSerializer {};
+        let generator = GeneratorSerializer::<C, D>::new();
+        if let Err(e) = data.prover_only.to_bytes(&generator, &data.common) {
+            panic!("error: {:?}", e);
+        }
+
+        let prover_data_buff = data.prover_only.to_bytes(&generator, &data.common).unwrap();
+        let prover_data_exp = ProverOnlyCircuitData::<F, C, D>::from_bytes(
+            &prover_data_buff,
+            &generator,
+            &data.common,
+        )
+        .unwrap();
+        let proof = prove(
+            &prover_data_exp,
+            &data.common,
+            pw,
+            &mut TimingTree::default(),
+        )
+        .unwrap();
+
+        let tuple = (proof, data.verifier_only, data.common);
+        verify_proof_tuple(&tuple)?;
+        Ok(())
+    }
+}
