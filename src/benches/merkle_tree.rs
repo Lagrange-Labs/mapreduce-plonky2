@@ -146,16 +146,6 @@ fn prove_branches_recursive(
                     //let mut last_proofs: Vec<_> =
                     //    children.iter().map(|node| node.proof().clone()).collect();
 
-                    //// TODO:
-                    //// For now duplicate the last proof to extend array to ARITY
-                    //// size, since the below assertion failed if extend with dummy.
-                    //// <https://github.com/nikkolasg/plonky2/blob/b53b079a2d6caabf317bc65aec2939aa5c72aaf0/plonky2/src/iop/generator.rs#L93>
-                    //// Need to check why.
-                    //last_proofs.extend(
-                    //    iter::repeat(last_proofs.last().unwrap().clone())
-                    //        .take(ARITY - last_proofs.len()),
-                    //);
-                    //let last_proofs = last_proofs.try_into().unwrap();
                     let last_proofs = core::array::from_fn(|i| {
                         if i < children.len() {
                             children[i].proof().clone()
