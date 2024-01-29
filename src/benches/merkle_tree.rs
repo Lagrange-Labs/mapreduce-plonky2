@@ -12,8 +12,11 @@ use plonky2::{
         hashing::hash_n_to_hash_no_pad,
         poseidon::PoseidonPermutation,
     },
-    plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
-    plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputs},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        config::{GenericConfig, PoseidonGoldilocksConfig},
+        proof::ProofWithPublicInputs,
+    },
 };
 use rand::Rng;
 use std::iter;

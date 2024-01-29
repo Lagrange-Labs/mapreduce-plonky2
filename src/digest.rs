@@ -77,61 +77,12 @@ where
     type Wires = DigestWires<ARITY>;
 
     /// Build the digest circuit.
-    /// This function references `hash_n_to_m_no_pad` function in plonky.
-    /// <https://github.com/nikkolasg/plonky2/blob/b53b079a2d6caabf317bc65aec2939aa5c72aaf0/plonky2/src/hash/hashing.rs#L30>
     fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
         let real_len = b.add_virtual_target();
         let inputs = b.add_virtual_target_arr::<{ ARITY * 4 }>();
 
-        // Initialize the poseison state to zeros.
-        let zero = b.zero();
-        let mut state =
-            <PoseidonPermutation<Target> as PlonkyPermutation<Target>>::new(iter::repeat(zero));
-
-        // Absorb all input chunks with a rate, and update the state.
-        inputs
-            .chunks(SPONGE_RATE)
-            .enumerate()
-            .for_each(|(i, chunks)| {
-                let chunk_start = SPONGE_RATE * i;
-
-                chunks.iter().enumerate().for_each(|(i, elt)| {
-                    // Set the element to state if it's a real data by comparing
-                    // with real length.
-                    let elt_offset = b.constant(F::from_canonical_usize(chunk_start + i));
-                    let is_elt = less_than(b, elt_offset, real_len, 8);
-
-                    let elt = b.select(is_elt, *elt, state.as_ref()[i]);
-                    state.set_elt(elt, i);
-                });
-
-                // Update to new state if the chunk start position (which is
-                // `SPONGE_RATE * i`, and i starts from 0) is less than the real
-                // data length. If so, the data of
-                // `[chunk_start..chunk_start + SPONGE_RATE]` should be permuted
-                // to the new state and the real data length must satisfies one
-                // of the below conditions:
-                // . real_len > chunk_start + SPONGE_RATE
-                // . real_len > chunk_start && real_len <= chunk_start + SPONGE_RATE
-                let new_state = b.permute::<PoseidonHash>(state);
-                let chunk_start = b.constant(F::from_canonical_usize(chunk_start));
-                let is_new_state = less_than(b, chunk_start, real_len, 8);
-
-                let elts: Vec<_> = state
-                    .as_ref()
-                    .iter()
-                    .zip(new_state.as_ref())
-                    .map(|(elt, new_elt)| b.select(is_new_state, *new_elt, *elt))
-                    .collect();
-
-                elts.into_iter()
-                    .enumerate()
-                    .for_each(|(i, elt)| state.set_elt(elt, i));
-            });
-
-        // Squeeze outputs from the state.
-        let output = state.squeeze()[..NUM_HASH_OUT_ELTS].to_vec();
-        let output = HashOutTarget::from_vec(output);
+        // Generate the hash ouput by standard Poseidon.
+        let output = build_standard_poseidon(b, &inputs, real_len);
 
         Self::Wires {
             inputs,
@@ -176,5 +127,123 @@ where
     fn num_io() -> usize {
         // Poseidon hash always has NUM_HASH_OUT_ELTS outputs.
         NUM_HASH_OUT_ELTS
+    }
+}
+
+/// Build the standard Poseidon hash, pass into the inputs and real length
+/// targets, and generate the hash ouput target.
+/// This function references `hash_n_to_m_no_pad` function in plonky.
+/// <https://github.com/nikkolasg/plonky2/blob/b53b079a2d6caabf317bc65aec2939aa5c72aaf0/plonky2/src/hash/hashing.rs#L30>
+fn build_standard_poseidon<F, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    inputs: &[Target],
+    real_len: Target,
+) -> HashOutTarget
+where
+    F: RichField + Extendable<D>,
+{
+    // Initialize the poseison state to zeros.
+    let zero = b.zero();
+    let mut state =
+        <PoseidonPermutation<Target> as PlonkyPermutation<Target>>::new(iter::repeat(zero));
+
+    // Absorb all input chunks with a rate, and update the state.
+    inputs
+        .chunks(SPONGE_RATE)
+        .enumerate()
+        .for_each(|(i, chunks)| {
+            let chunk_start = SPONGE_RATE * i;
+
+            chunks.iter().enumerate().for_each(|(i, elt)| {
+                // Set the element to state if it's a real data by comparing
+                // with real length.
+                let elt_offset = b.constant(F::from_canonical_usize(chunk_start + i));
+                let is_elt = less_than(b, elt_offset, real_len, 8);
+
+                let elt = b.select(is_elt, *elt, state.as_ref()[i]);
+                state.set_elt(elt, i);
+            });
+
+            // Update to new state if the chunk start position (which is
+            // `SPONGE_RATE * i`, and i starts from 0) is less than the real
+            // data length. If so, the data of
+            // `[chunk_start..chunk_start + SPONGE_RATE]` should be permuted
+            // to the new state and the real data length must satisfies one
+            // of the below conditions:
+            // . real_len > chunk_start + SPONGE_RATE
+            // . real_len > chunk_start && real_len <= chunk_start + SPONGE_RATE
+            let new_state = b.permute::<PoseidonHash>(state);
+            let chunk_start = b.constant(F::from_canonical_usize(chunk_start));
+            let is_new_state = less_than(b, chunk_start, real_len, 8);
+
+            let elts: Vec<_> = state
+                .as_ref()
+                .iter()
+                .zip(new_state.as_ref())
+                .map(|(elt, new_elt)| b.select(is_new_state, *new_elt, *elt))
+                .collect();
+
+            elts.into_iter()
+                .enumerate()
+                .for_each(|(i, elt)| state.set_elt(elt, i));
+        });
+
+    // Squeeze outputs from the state.
+    let output = state.squeeze()[..NUM_HASH_OUT_ELTS].to_vec();
+
+    HashOutTarget::from_vec(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use plonky2::{
+        field::types::{Field, Sample},
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
+    use rand::{thread_rng, Rng};
+
+    const ARITY: usize = 16;
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+
+    /// Test standard Poseidon hash function `build_standard_poseidon` which
+    /// could be used in circuit.
+    #[test]
+    fn test_standard_poseidon() -> Result<()> {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut b = CircuitBuilder::<F, D>::new(config);
+
+        // Initialize the input and real length targets.
+        let real_len_target = b.add_virtual_target();
+        let input_targets = b.add_virtual_target_arr::<ARITY>();
+
+        // Build the Poseidon hash and generate hash output target.
+        let output_target = build_standard_poseidon(&mut b, &input_targets, real_len_target);
+
+        // Register public inputs.
+        b.register_public_input(real_len_target);
+        b.register_public_inputs(&input_targets);
+        b.register_public_inputs(&output_target.elements);
+
+        // Generate random input and real length values.
+        let input_values = F::rand_vec(ARITY);
+        let real_len_value = F::from_canonical_usize(rand::thread_rng().gen_range(1..ARITY));
+
+        // Set the values to targets for witness.
+        let mut pw = PartialWitness::new();
+        pw.set_target_arr(&input_targets, &input_values);
+        pw.set_target(real_len_target, real_len_value);
+
+        // Prove and verify.
+        let data = b.build::<C>();
+        let proof = data.prove(pw)?;
+        data.verify(proof)
     }
 }
