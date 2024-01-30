@@ -1,10 +1,11 @@
 //! Digest circuit benchmark and test with the Merkle tree.
 
+use super::init_logging;
 use crate::{
     circuit::{CyclicCircuit, UserCircuit},
     digest::DigestCircuit,
+    utils::read_le_u32,
 };
-use ethers::types::U256;
 use plonky2::{
     field::{extension::Extendable, types::Field},
     hash::{
@@ -20,8 +21,6 @@ use plonky2::{
 };
 use rand::Rng;
 use std::iter;
-
-use super::init_logging;
 
 const D: usize = 2;
 
@@ -87,7 +86,7 @@ fn merkle_tree() -> MerkleTree<F, C, D> {
 
 /// Create a Merkle tree leaf with random value.
 fn rand_leaf() -> MerkleNode<F, C, D> {
-    MerkleNode::new_leaf(U256(rand::thread_rng().gen::<[u64; 4]>()))
+    MerkleNode::new_leaf(rand::thread_rng().gen::<[u8; 32]>())
 }
 
 /// Prove and generate Poseidon hash for all Merkle tree leaves.
@@ -100,8 +99,7 @@ fn prove_all_leaves(circuit: &CyclicCircuit<F, C, D, U, ARITY>, tree: &mut Merkl
             if let MerkleNode::Leaf(value, _, proof_result) = leaf {
                 println!("[+] Proving leaf {} with value {:?}", i, value);
                 // Generate the proof.
-                let inputs = value.0.map(F::from_canonical_u64).to_vec();
-                let proof = circuit.prove_init(U::new(inputs)).unwrap().0;
+                let proof = circuit.prove_init(U::new_leaf(value.clone())).unwrap().0;
 
                 // Verify the proof for test.
                 circuit
@@ -135,10 +133,7 @@ fn prove_branches_recursive(
                     println!("[+] Proving branch {} at level {}", i, level);
                     // The children have already been proved before, since we
                     // process from lowest to high.
-                    let inputs = children
-                        .iter()
-                        .flat_map(|node| node.hash().elements)
-                        .collect();
+                    let inputs = children.iter().map(|node| node.hash().elements).collect();
 
                     // Children are always arranged from left to right, there are
                     // only real proofs then followed by dummy ones. For example
@@ -155,7 +150,10 @@ fn prove_branches_recursive(
                     });
 
                     // Generate the proof.
-                    let proof = circuit.prove_step(U::new(inputs), &last_proofs).unwrap().0;
+                    let proof = circuit
+                        .prove_step(U::new_branch(inputs), &last_proofs)
+                        .unwrap()
+                        .0;
 
                     // Verify the proof for test.
                     circuit
@@ -213,6 +211,9 @@ impl MerkleTree<F, C, D> {
     }
 }
 
+/// Define the value type in Merkle tree leaves.
+type MerkleLeafValue = [u8; 32];
+
 /// Merkle node structure
 #[derive(Clone, Debug)]
 enum MerkleNode<F, C, const D: usize>
@@ -227,7 +228,11 @@ where
         Option<ProofWithPublicInputs<F, C, D>>,
     ),
     /// A Merkle tree leaf including value, hash and proof of this node
-    Leaf(U256, HashOut<F>, Option<ProofWithPublicInputs<F, C, D>>),
+    Leaf(
+        MerkleLeafValue,
+        HashOut<F>,
+        Option<ProofWithPublicInputs<F, C, D>>,
+    ),
 }
 
 impl MerkleNode<F, C, D> {
@@ -246,9 +251,17 @@ impl MerkleNode<F, C, D> {
     }
 
     /// Create a leaf by value.
-    pub fn new_leaf(value: U256) -> Self {
-        // Flatten the value and calculate hash.
-        let inputs: Vec<_> = value.0.into_iter().map(F::from_canonical_u64).collect();
+    pub fn new_leaf(value: MerkleLeafValue) -> Self {
+        // Convert the value of u8 array to u32, then convert to field.
+        let inputs: Vec<_> = value
+            .chunks(4)
+            .into_iter()
+            .map(|mut chunk| {
+                let u32_num = read_le_u32(&mut chunk);
+                F::from_canonical_u32(u32_num)
+            })
+            .collect();
+
         let hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&inputs);
 
         Self::Leaf(value, hash, None)

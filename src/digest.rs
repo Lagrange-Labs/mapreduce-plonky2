@@ -3,7 +3,7 @@
 
 use crate::{
     circuit::{PCDCircuit, ProofOrDummyTarget, UserCircuit},
-    utils::less_than,
+    utils::{convert_u8_targets_to_u32, convert_u8_values_to_u32, less_than},
 };
 use plonky2::{
     field::extension::Extendable,
@@ -24,69 +24,105 @@ use std::iter;
 #[derive(Clone, Debug)]
 pub struct DigestWires<const ARITY: usize>
 where
-    [(); ARITY * 4]:,
+    [(); ARITY * 4 + 28]:,
 {
     /// Input targets
-    /// Each Merkle tree branch has ARITY child nodes at maximum, and each node
-    /// has the value of type `[F; 4]` (which could be an U256 or hash value).
-    inputs: [Target; ARITY * 4],
-    /// Real input length
-    /// The inputs are padded with dummy values to the length of `ARITY * 4`.
-    real_len: Target,
-    /// Output hash target
+    /// The inputs have a constant length of 32 for a Merkle tree leaf, and
+    /// `ARITY * 4` for a branch. This length is at least 32 since `ARITY >= 1`.
+    inputs: [Target; ARITY * 4 + 28],
+    /// Child input length
+    /// This child length is zero if it's a leaf, otherwise it specifies the
+    /// flattened input length of a branch. It's also used to identify if the
+    /// current node is a leaf or branch, since branch have non-empty children.
+    child_input_len: Target,
+    /// Output hash target for a leaf or branch
     output: HashOutTarget,
 }
 
 /// Digest circuit used to prove Poseidon hash
 /// This circuit could be used to prove Merkle tree recursively. Each Merkle
-/// tree branch has maximum ARITY children, and it's set to `16` as default.
+/// tree branch has maximum ARITY children (`ARITY >= 1`).
 #[derive(Clone, Debug)]
 pub struct DigestCircuit<F, const D: usize, const ARITY: usize>
 where
-    [(); ARITY * 4]:,
+    [(); ARITY * 4 + 28]:,
 {
     /// Input values
-    inputs: [F; ARITY * 4],
-    /// Real input length
-    real_len: usize,
+    /// The inputs have a constant length of 32 for a Merkle tree leaf, and
+    /// `ARITY * 4` for a branch. This length is at least 32 since `ARITY >= 1`.
+    inputs: [F; ARITY * 4 + 28],
+    /// Child input length
+    /// This child length is zero if it's a leaf, otherwise it specifies the
+    /// flattened input length of a branch.
+    child_input_len: usize,
 }
 
 impl<F, const D: usize, const ARITY: usize> DigestCircuit<F, D, ARITY>
 where
-    [(); ARITY * 4]:,
+    [(); ARITY * 4 + 28]:,
     F: RichField + Extendable<D>,
 {
-    /// Create the digest circuit.
-    /// The `inputs` argument must be flattened and `ARITY * 4` at maximum.
-    pub fn new(mut inputs: Vec<F>) -> Self {
-        let real_len = inputs.len();
-        assert!(real_len <= ARITY * 4);
-
-        inputs.resize(ARITY * 4, F::ZERO);
+    /// Create a circuit instance for a leaf of Merkle tree.
+    pub fn new_leaf(value: [u8; 32]) -> Self {
+        let mut inputs: Vec<_> = value.into_iter().map(F::from_canonical_u8).collect();
+        inputs.resize(ARITY * 4 + 28, F::ZERO);
         let inputs = inputs.try_into().unwrap();
 
-        Self { inputs, real_len }
+        // Set the child input length to zero for identifying it's a leaf.
+        Self {
+            inputs,
+            child_input_len: 0,
+        }
+    }
+
+    /// Create a circuit instance for a branch of Merkle tree.
+    pub fn new_branch(inputs: Vec<[F; 4]>) -> Self {
+        assert!(inputs.len() > 0 && inputs.len() <= ARITY);
+
+        // Flatten the child hash values.
+        let mut inputs: Vec<_> = inputs.into_iter().flatten().collect();
+        inputs.resize(ARITY * 4 + 28, F::ZERO);
+        let inputs = inputs.try_into().unwrap();
+
+        Self {
+            inputs,
+            child_input_len: inputs.len(),
+        }
     }
 }
 
 impl<F, const D: usize, const ARITY: usize> UserCircuit<F, D> for DigestCircuit<F, D, ARITY>
 where
-    [(); ARITY * 4]:,
+    [(); ARITY * 4 + 28]:,
     F: RichField + Extendable<D>,
 {
     type Wires = DigestWires<ARITY>;
 
     /// Build the digest circuit.
     fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-        let real_len = b.add_virtual_target();
-        let inputs = b.add_virtual_target_arr::<{ ARITY * 4 }>();
+        let child_input_len = b.add_virtual_target();
+        let inputs = b.add_virtual_target_arr::<{ ARITY * 4 + 28 }>();
 
-        // Generate the hash ouput by standard Poseidon.
-        let output = build_standard_poseidon(b, &inputs, real_len);
+        // Generate the hash outputs for both leaf and branch.
+        let leaf_output = build_leaf(b, &inputs);
+        let branch_output = build_branch(b, &inputs, child_input_len);
+
+        // It's a leaf of Merkle tree if the child length is zero.
+        let zero = b.zero();
+        let is_leaf = b.is_equal(child_input_len, zero);
+
+        // Construct the hash output with checking if it's a leaf or branch.
+        let output = leaf_output
+            .elements
+            .into_iter()
+            .zip(branch_output.elements)
+            .map(|(leaf_target, branch_target)| b.select(is_leaf, leaf_target, branch_target))
+            .collect();
+        let output = HashOutTarget::from_vec(output);
 
         Self::Wires {
             inputs,
-            real_len,
+            child_input_len,
             output,
         }
     }
@@ -94,17 +130,27 @@ where
     /// Prove the digest circuit, connect values and targets.
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
         pw.set_target_arr(&wires.inputs, &self.inputs);
-        pw.set_target(wires.real_len, F::from_canonical_usize(self.real_len));
+        pw.set_target(
+            wires.child_input_len,
+            F::from_canonical_usize(self.child_input_len),
+        );
 
-        let output =
-            hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&self.inputs[..self.real_len]);
+        // It's a leaf of Merkle tree if the child length is zero.
+        let output = if self.child_input_len == 0 {
+            // Convert the field values of u8 array to u32.
+            let inputs: Vec<_> = convert_u8_values_to_u32(&self.inputs[..32]);
+            hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&inputs)
+        } else {
+            hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&self.inputs[..self.child_input_len])
+        };
+
         pw.set_hash_target(wires.output, output);
     }
 }
 
 impl<F, const D: usize, const ARITY: usize> PCDCircuit<F, D, ARITY> for DigestCircuit<F, D, ARITY>
 where
-    [(); ARITY * 4]:,
+    [(); ARITY * 4 + 28]:,
     F: RichField + Extendable<D>,
 {
     fn build_recursive(
@@ -128,6 +174,35 @@ where
         // Poseidon hash always has NUM_HASH_OUT_ELTS outputs.
         NUM_HASH_OUT_ELTS
     }
+}
+
+/// Build the Poseidon hash for a leaf of Merkle tree.
+fn build_leaf<F, const D: usize>(b: &mut CircuitBuilder<F, D>, inputs: &[Target]) -> HashOutTarget
+where
+    F: RichField + Extendable<D>,
+{
+    // Convert the u8 target array to u32 target array.
+    let leaf_inputs: Vec<_> = convert_u8_targets_to_u32(b, &inputs[..32])
+        .into_iter()
+        .map(|u32_target| u32_target.0)
+        .collect();
+
+    // The leaf value should be `[U32Target; 8]` after conversion.
+    let leaf_value_len = b.constant(F::from_canonical_usize(8));
+
+    build_standard_poseidon(b, &leaf_inputs, leaf_value_len)
+}
+
+/// Build the Poseidon hash for a branch of Merkle tree.
+fn build_branch<F, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    inputs: &[Target],
+    child_input_len: Target,
+) -> HashOutTarget
+where
+    F: RichField + Extendable<D>,
+{
+    build_standard_poseidon(b, &inputs, child_input_len)
 }
 
 /// Build the standard Poseidon hash, pass into the inputs and real length

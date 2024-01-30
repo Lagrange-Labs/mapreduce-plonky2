@@ -13,6 +13,10 @@ use sha3::Keccak256;
 
 use crate::ProofTuple;
 
+const TWO_POWER_8: usize = 256;
+const TWO_POWER_16: usize = 65536;
+const TWO_POWER_24: usize = 16777216;
+
 pub(crate) fn verify_proof_tuple<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
@@ -52,14 +56,30 @@ pub(crate) fn keccak256(data: &[u8]) -> Vec<u8> {
     hasher.update(data);
     hasher.finalize().to_vec()
 }
-pub(crate) fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
+
+pub(crate) fn convert_u8_values_to_u32<F: RichField>(values: &[F]) -> Vec<F> {
+    assert!(values.len() % 4 == 0);
+
+    let two_power_8 = F::from_canonical_usize(TWO_POWER_8);
+    let two_power_16 = F::from_canonical_usize(TWO_POWER_16);
+    let two_power_24 = F::from_canonical_usize(TWO_POWER_24);
+
+    (0..values.len())
+        .step_by(4)
+        .map(|i| {
+            values[i]
+                + values[i + 1] * two_power_8
+                + values[i + 2] * two_power_16
+                + values[i + 3] * two_power_24
+        })
+        .collect()
+}
+
+pub(crate) fn convert_u8_targets_to_u32<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
 ) -> Vec<U32Target> {
     assert!(data.len() % 4 == 0);
-    const TWO_POWER_8: usize = 256;
-    const TWO_POWER_16: usize = 65536;
-    const TWO_POWER_24: usize = 16777216;
     let padded = data;
 
     // constants to convert [u8; 4] to u32
