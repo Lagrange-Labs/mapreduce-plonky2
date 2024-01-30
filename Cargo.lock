@@ -872,6 +872,7 @@ dependencies = [
 [[package]]
 name = "eth_trie"
 version = "0.4.0"
+source = "git+https://github.com/nikkolasg/eth-trie.rs#00ef8e1002dd7bb862124f4f90f29b3c07d6a2a8"
 dependencies = [
  "ethereum-types",
  "hashbrown 0.14.3",
@@ -2411,6 +2412,7 @@ checksum = "26072860ba924cbfa98ea39c8c19b4dd6a4a25423dbdf219c1eca91aa0cf6964"
 [[package]]
 name = "plonky2"
 version = "0.1.4"
+source = "git+https://github.com/nikkolasg/plonky2#b53b079a2d6caabf317bc65aec2939aa5c72aaf0"
 dependencies = [
  "ahash",
  "anyhow",
@@ -2421,7 +2423,7 @@ dependencies = [
  "log",
  "num",
  "plonky2_field",
- "plonky2_maybe_rayon 0.1.1",
+ "plonky2_maybe_rayon 0.1.1 (git+https://github.com/nikkolasg/plonky2)",
  "plonky2_util",
  "rand",
  "rand_chacha",
@@ -2452,6 +2454,7 @@ dependencies = [
 [[package]]
 name = "plonky2_field"
 version = "0.1.1"
+source = "git+https://github.com/nikkolasg/plonky2#b53b079a2d6caabf317bc65aec2939aa5c72aaf0"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
@@ -2466,19 +2469,21 @@ dependencies = [
 [[package]]
 name = "plonky2_maybe_rayon"
 version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "194db0cbdd974e92d897cd92b74adb3968dc1b967315eb280357c49a7637994e"
+
+[[package]]
+name = "plonky2_maybe_rayon"
+version = "0.1.1"
+source = "git+https://github.com/nikkolasg/plonky2#b53b079a2d6caabf317bc65aec2939aa5c72aaf0"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
-name = "plonky2_maybe_rayon"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "194db0cbdd974e92d897cd92b74adb3968dc1b967315eb280357c49a7637994e"
-
-[[package]]
 name = "plonky2_util"
 version = "0.1.1"
+source = "git+https://github.com/nikkolasg/plonky2#b53b079a2d6caabf317bc65aec2939aa5c72aaf0"
 
 [[package]]
 name = "powerfmt"

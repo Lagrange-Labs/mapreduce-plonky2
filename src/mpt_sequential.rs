@@ -470,8 +470,6 @@ pub mod test {
             .collect::<Vec<_>>();
         node.assign(&mut pw, &leaf_f.try_into().unwrap());
         rlp_key.resize(MAX_KEY_NIBBLE_LEN, 0);
-        println!(" ---! partial key at leaf = {:?}", partial_key_nibbles);
-        println!(" ---! partial key ptr = {}", partial_key_ptr);
         key_wire.assign(&mut pw, &rlp_key.try_into().unwrap(), partial_key_ptr);
         pw.set_target(exp_key_ptr, F::from_canonical_usize(partial_key_ptr));
         exp_value.assign(
