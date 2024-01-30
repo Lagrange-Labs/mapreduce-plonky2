@@ -64,9 +64,13 @@ where
 {
     /// Create a circuit instance for a leaf of Merkle tree.
     pub fn new_leaf(value: [u8; 32]) -> Self {
-        let mut inputs: Vec<_> = value.into_iter().map(F::from_canonical_u8).collect();
-        inputs.resize(ARITY * 4 + 28, F::ZERO);
-        let inputs = inputs.try_into().unwrap();
+        let inputs: [F; ARITY * 4 + 28] = core::array::from_fn(|i| {
+            if i < 32 {
+                F::from_canonical_u8(value[i])
+            } else {
+                F::ZERO
+            }
+        });
 
         // Set the child input length to zero for identifying it's a leaf.
         Self {
