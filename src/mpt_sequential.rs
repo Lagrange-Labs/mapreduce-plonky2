@@ -466,9 +466,6 @@ pub mod test {
                     "[+] Leaf/Extension node: partial key extracted: {:?}",
                     hex::encode(&nibbles_to_bytes(key_nibbles))
                 );
-                println!("\t - 'key part' = {:?}", hex::encode(&node_list[0]));
-                println!("\t - 'value part' = {:?}", hex::encode(&node_list[1]));
-                println!("\t - full leaf node = {:?}", hex::encode(node));
                 partial_key.splice(0..0, key_nibbles.to_vec());
             }
             16 | 17 => {
@@ -479,7 +476,10 @@ pub mod test {
                     .find(|(_, h)| *h == &child_hash)
                     .map(|(i, _)| i)
                     .expect("didn't find hash in parent") as u8;
-                println!("[+] Branch node: partial key (nibble): {:?}", branch_idx);
+                println!(
+                    "[+] Branch node: partial key (nibble): {:?}",
+                    hex::encode(vec![branch_idx]).pop().unwrap()
+                );
                 partial_key.insert(0, branch_idx);
             }
             _ => {
@@ -499,14 +499,13 @@ pub mod test {
         let key_nibbles = bytes_to_nibbles(&key);
         assert_eq!(key_nibbles.len(), MAX_KEY_NIBBLE_LEN);
         println!("[+] key original: {:?}", hex::encode(&key));
-        println!("[+] key nibbles = {:?}", key_nibbles);
         let mut child_hash = vec![];
         let mut partial_key = vec![];
         for node in proof.iter() {
             visit_node(node, &child_hash, &mut partial_key);
             child_hash = keccak256(node);
             println!(
-                "[+] => full partial key: hex {:?}",
+                "\t=> full partial key: hex {:?}",
                 hex::encode(nibbles_to_bytes(&partial_key))
             );
         }
