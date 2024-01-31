@@ -255,7 +255,9 @@ where
         key: &MPTKeyWire,
         rlp_headers: &RlpList<MAX_ITEMS_IN_LIST>,
     ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget) {
-        let key_header = decode_header(b, &node.arr, rlp_headers.offset[0]);
+        let zero = b.zero();
+        //let key_header = decode_header(b, &node.arr, rlp_headers.offset[0]);
+        let key_header = rlp_headers.select(b, zero);
         let (extracted_key, should_true) = decode_compact_encoding(b, node, &key_header);
         let value_header = decode_header(b, &node.arr, rlp_headers.offset[1]);
         // it's either the _value_ of the leaf, OR the _hash_ of the child node if node = ext.
@@ -460,6 +462,8 @@ pub mod test {
                 // extension case: verify the hash is present and lookup the key
                 find_index_subvector(node, child_hash)
                     .expect("extension should contain hash of child");
+                // we don't need to decode the RLP header on top of it, since it is
+                // already done in the decode_list function.
                 let key_nibbles_struct = Nibbles::from_compact(&node_list[0]);
                 let key_nibbles = key_nibbles_struct.nibbles();
                 println!(
@@ -622,11 +626,16 @@ pub mod test {
         // try with a leaf MPT encoded node first
         let mut leaf_node: Vec<u8> = proof.first().unwrap().clone();
         let leaf_tuple: Vec<Vec<u8>> = rlp::decode_list(&leaf_node);
+        // we rlp-decode again because the value itself is rlp-encoded
         let leaf_value: Vec<u8> = rlp::decode(&leaf_tuple[1]).unwrap();
-        let partial_key_compact: Vec<u8> = rlp::decode(&leaf_tuple[0]).unwrap();
-        let partial_key_struct = Nibbles::from_compact(&partial_key_compact);
+        let partial_key_struct = Nibbles::from_compact(&leaf_tuple[0]);
         let partial_key_nibbles = partial_key_struct.nibbles();
         let partial_key_ptr = MAX_KEY_NIBBLE_LEN - 1 - partial_key_nibbles.len();
+        println!(
+            "[+] leaf partial key nibbles = {:?}",
+            hex::encode(nibbles_to_bytes(partial_key_nibbles))
+        );
+        println!("[+] key pointer = {}", partial_key_ptr);
 
         let config = CircuitConfig::standard_recursion_config();
         let mut pw = PartialWitness::new();
