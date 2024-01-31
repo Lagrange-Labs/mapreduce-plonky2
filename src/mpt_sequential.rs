@@ -21,6 +21,12 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 use crate::keccak::{compute_size_with_padding, KeccakCircuit, OutputHash};
+/// Number of items in the RLP encoded list in a leaf node.
+const NB_ITEMS_LEAF: usize = 2;
+/// Currently a constant set to denote the length of the value we are extracting from the MPT trie.
+/// This can later be also be done in a generic way to allow different sizes.
+/// Given we target MPT storage proof, the value is 32 bytes.
+const MAX_LEAF_VALUE: usize = HASH_LEN;
 
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
@@ -69,6 +75,8 @@ where
     /// NOTE: for node at index  i in the path, the index where to find the children hash is
     /// located at index i-1.
     child_hash_index: [Target; DEPTH - 1],
+    /// The leaf value wires. It is provably extracted from the leaf node.
+    leaf: Array<Target, MAX_LEAF_VALUE>,
 }
 
 impl<const DEPTH: usize, const NODE_LEN: usize> Circuit<DEPTH, NODE_LEN>
@@ -88,6 +96,7 @@ where
     where
         F: RichField + Extendable<D>,
     {
+        let zero = b.zero();
         // full key is expected to be given by verifier (done in UserCircuit impl)
         // initial key has the pointer that is set at the maximum length - 1 (it's an index, so 0-based)
         let full_key = b.add_virtual_target_arr::<MAX_KEY_NIBBLE_LEN>();
@@ -101,8 +110,13 @@ where
         // nodes should be ordered from leaf to root and padded at the end
         let nodes: [VectorWire<_>; DEPTH] =
             create_array(|_| VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(b));
-        // hash the leaf first
+        // hash the leaf first and advance the key
         let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]);
+        // we don't anything with the value apart from setting it in the wire so the circuit using this can decide
+        // what to do with it (exposing as public input, computing over it etc)
+        let leaf_headers = decode_fixed_list::<_, _, NB_ITEMS_LEAF>(b, &nodes[0].arr.arr, zero);
+        let (iterative_key, leaf_value, is_leaf) =
+            Self::advance_key_leaf_or_extension(b, &nodes[0].arr, &iterative_key, &leaf_headers);
         let mut last_hash_output = leaf_hash.output_array.clone();
         let mut keccak_wires = vec![leaf_hash];
         let t = b._true();
@@ -141,6 +155,7 @@ where
                 nodes,
                 should_process,
                 child_hash_index: index_hashes,
+                leaf: leaf_value,
             },
         )
     }
@@ -201,7 +216,7 @@ where
     /// ASSUMPTION: value of leaf is always 32 bytes.
     fn advance_key<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-        node: &Array<Target, NODE_LEN>,
+        node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
     ) -> (MPTKeyWire, Array<Target, HASH_LEN>) {
         let zero = b.zero();
@@ -238,7 +253,7 @@ where
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
     fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-        node: &Array<Target, NODE_LEN>,
+        node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
         rlp_headers: &RlpList<MAX_ITEMS_IN_LIST>,
     ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget) {
@@ -262,14 +277,19 @@ where
     }
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
-    fn advance_key_leaf_or_extension<F: RichField + Extendable<D>, const D: usize>(
+    fn advance_key_leaf_or_extension<
+        F: RichField + Extendable<D>,
+        const D: usize,
+        const LIST_LEN: usize,
+    >(
         b: &mut CircuitBuilder<F, D>,
-        node: &Array<Target, NODE_LEN>,
+        node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
-        rlp_headers: &RlpList<MAX_ITEMS_IN_LIST>,
+        rlp_headers: &RlpList<LIST_LEN>,
     ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget) {
         let zero = b.zero();
-        //let key_header = decode_header(b, &node.arr, rlp_headers.offset[0]);
+        let two = b.two();
+        let condition = b.is_equal(rlp_headers.num_fields, two);
         let key_header = rlp_headers.select(b, zero);
         let (extracted_key, should_true) = decode_compact_encoding(b, node, &key_header);
         let value_header = decode_header(b, &node.arr, rlp_headers.offset[1]);
@@ -283,7 +303,8 @@ where
         // from the beginning of the node, and that the hash of the node also starts at the beginning,
         // either the attacker give the right node or it gives an invalid node and hashes will not
         // match.
-        (new_key, leaf_child_hash, should_true)
+        let condition = b.and(condition, should_true);
+        (new_key, leaf_child_hash, condition)
     }
 }
 
@@ -562,7 +583,7 @@ pub mod test {
         let mut pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let zero = builder.zero();
-        let node = Array::<Target, NODE_LEN>::new(&mut builder);
+        let node = Array::<Target, { PAD_LEN(NODE_LEN) }>::new(&mut builder);
         let key_wire = MPTKeyWire::new(&mut builder);
         let rlp_headers =
             decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(&mut builder, &node.arr, zero);
@@ -580,7 +601,7 @@ pub mod test {
         builder.assert_bool(should_be_true);
         let data = builder.build::<C>();
 
-        node_byte.resize(NODE_LEN, 0);
+        node_byte.resize(PAD_LEN(NODE_LEN), 0);
         let node_f = node_byte
             .iter()
             .map(|b| F::from_canonical_u8(*b))
@@ -633,7 +654,7 @@ pub mod test {
         let mut pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let zero = builder.zero();
-        let node = Array::<Target, NODE_LEN>::new(&mut builder);
+        let node = Array::<Target, { PAD_LEN(NODE_LEN) }>::new(&mut builder);
         let key_wire = MPTKeyWire::new(&mut builder);
         let rlp_headers =
             decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(&mut builder, &node.arr, zero);
@@ -652,7 +673,7 @@ pub mod test {
         builder.assert_bool(tt);
         let data = builder.build::<C>();
 
-        leaf_node.resize(NODE_LEN, 0);
+        leaf_node.resize(PAD_LEN(NODE_LEN), 0);
         let leaf_f = leaf_node
             .iter()
             .map(|b| F::from_canonical_u8(*b))
