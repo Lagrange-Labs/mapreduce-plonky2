@@ -347,12 +347,24 @@ fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
     }
     nibbles
 }
+fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
+    let mut padded = nibbles.to_vec();
+    if padded.len() % 2 == 1 {
+        padded.push(0);
+    }
+    let mut bytes = Vec::new();
+    for i in 0..nibbles.len() / 2 {
+        bytes.push((nibbles[i * 2] << 4) | (nibbles[i * 2 + 1] & 0x0F));
+    }
+    bytes
+}
 
 #[cfg(test)]
 pub mod test {
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use itertools::Itertools;
     use plonky2::field::types::Field;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
@@ -367,7 +379,7 @@ pub mod test {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::mpt_sequential::bytes_to_nibbles;
+    use crate::mpt_sequential::{bytes_to_nibbles, nibbles_to_bytes};
     use crate::rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN};
     use crate::{
         array::{Array, VectorWire},
@@ -439,6 +451,66 @@ pub mod test {
             exp_root: root.to_fixed_bytes(),
         };
         test_simple_circuit::<F, D, C, _>(circuit);
+    }
+
+    fn visit_node(node: &[u8], child_hash: &[u8], partial_key: &mut Vec<u8>) {
+        let node_list: Vec<Vec<u8>> = rlp::decode_list(&node);
+        match node_list.len() {
+            2 => {
+                // extension case: verify the hash is present and lookup the key
+                find_index_subvector(node, child_hash)
+                    .expect("extension should contain hash of child");
+                let key_nibbles_struct = Nibbles::from_compact(&node_list[0]);
+                let key_nibbles = key_nibbles_struct.nibbles();
+                println!(
+                    "[+] Leaf/Extension node: partial key extracted: {:?}",
+                    hex::encode(&nibbles_to_bytes(key_nibbles))
+                );
+                println!("\t - 'key part' = {:?}", hex::encode(&node_list[0]));
+                println!("\t - 'value part' = {:?}", hex::encode(&node_list[1]));
+                println!("\t - full leaf node = {:?}", hex::encode(node));
+                partial_key.splice(0..0, key_nibbles.to_vec());
+            }
+            16 | 17 => {
+                // branch case: search the nibble where the hash is present
+                let branch_idx = node_list
+                    .iter()
+                    .enumerate()
+                    .find(|(_, h)| *h == &child_hash)
+                    .map(|(i, _)| i)
+                    .expect("didn't find hash in parent") as u8;
+                println!("[+] Branch node: partial key (nibble): {:?}", branch_idx);
+                partial_key.insert(0, branch_idx);
+            }
+            _ => {
+                panic!("invalid node")
+            }
+        }
+    }
+
+    #[test]
+    fn mpt_comprehension() {
+        const DEPTH: usize = 4;
+        const NODE_LEN: usize = 80;
+        const VALUE_LEN: usize = 32;
+        let (mut trie, mut key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
+        let mut proof = trie.get_proof(&key).unwrap();
+        proof.reverse();
+        let key_nibbles = bytes_to_nibbles(&key);
+        assert_eq!(key_nibbles.len(), MAX_KEY_NIBBLE_LEN);
+        println!("[+] key original: {:?}", hex::encode(&key));
+        println!("[+] key nibbles = {:?}", key_nibbles);
+        let mut child_hash = vec![];
+        let mut partial_key = vec![];
+        for node in proof.iter() {
+            visit_node(node, &child_hash, &mut partial_key);
+            child_hash = keccak256(node);
+            println!(
+                "[+] => full partial key: hex {:?}",
+                hex::encode(nibbles_to_bytes(&partial_key))
+            );
+        }
+        assert_eq!(key_nibbles, partial_key);
     }
 
     #[test]

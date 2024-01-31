@@ -46,5 +46,5 @@ ci = []
 plonky2 = { git = "https://github.com/nikkolasg/plonky2" }
 #plonky2 = { path = "../plonky2/plonky2" }
 
-[patch."https://github.com/nikkolasg/eth-trie.rs"]
-eth_trie = { path = "../ethtrie" } 
+#[patch."https://github.com/nikkolasg/eth-trie.rs"]
+#eth_trie = { path = "../eth-trie.rs" } 
