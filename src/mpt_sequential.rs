@@ -88,6 +88,13 @@ where
     where
         F: RichField + Extendable<D>,
     {
+        // full key is expected to be given by verifier (done in UserCircuit impl)
+        // initial key has the pointer that is set at the maximum length - 1 (it's an index, so 0-based)
+        let full_key = b.add_virtual_target_arr::<MAX_KEY_NIBBLE_LEN>();
+        let mut iterative_key = MPTKeyWire {
+            key: Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b),
+            pointer: b.constant(F::from_canonical_usize(MAX_KEY_NIBBLE_LEN).sub_one()),
+        };
         let should_process: [BoolTarget; DEPTH - 1] =
             create_array(|_| b.add_virtual_bool_target_safe());
         let index_hashes: [Target; DEPTH - 1] = create_array(|_| b.add_virtual_target());
@@ -212,6 +219,12 @@ where
         let leaf_info = Self::advance_key_leaf_or_extension(b, node, key, &rlp_headers);
         let tuple_condition = b.and(is_tuple, leaf_info.2);
         let branch_info = Self::advance_key_branch(b, node, key, &rlp_headers);
+        // Ensures that conditions in a tuple are valid OR conditions in a branch are valid. So we can select the
+        // right output depending only on one condition only.
+        let mut branch_condition = b.not(is_tuple);
+        branch_condition = b.and(branch_condition, branch_info.2);
+        let tuple_or_branch = b.or(branch_condition, tuple_condition);
+        b.assert_bool(tuple_or_branch);
 
         // select between the two outputs
         // Note we assume that if it is not a tuple, it is necessarily a branch node.
