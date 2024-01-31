@@ -1,5 +1,5 @@
 use crate::array::{Array, VectorWire};
-use crate::utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to};
+use crate::utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
@@ -93,8 +93,12 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     let mut nibbles: [Target; MAX_KEY_NIBBLE_LEN] = [b.zero(); MAX_KEY_NIBBLE_LEN];
 
     let first_nibble = prev_nibbles.0;
+    // CHANGED
     //let parity = b._true().target;
-    let parity = b.split_le(first_nibble, 2)[0].target;
+    let first_nibble_as_bits = num_to_bits(b, 4, first_nibble);
+    let parity = first_nibble_as_bits[0].target;
+    // TODO: why this doesn't work always !!
+    //let parity = b.split_le(first_nibble, 2)[0].target;
 
     let one_minus_parity = b.sub(one, parity);
     // if parity is 1 => odd length => (1 - p) * next_nibble = 0
