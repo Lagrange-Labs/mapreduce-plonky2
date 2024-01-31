@@ -104,7 +104,7 @@ where
         // initial key has the pointer that is set at the maximum length - 1 (it's an index, so 0-based)
         let full_key = MPTKeyWire {
             key: Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b),
-            pointer: b.constant(F::NEG_ONE),
+            pointer: b.constant(F::from_canonical_usize(MAX_KEY_NIBBLE_LEN) - F::ONE),
         };
         let should_process: [BoolTarget; DEPTH - 1] =
             create_array(|_| b.add_virtual_bool_target_safe());
