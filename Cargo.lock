@@ -872,7 +872,7 @@ dependencies = [
 [[package]]
 name = "eth_trie"
 version = "0.4.0"
-source = "git+https://github.com/nikkolasg/eth-trie.rs#00ef8e1002dd7bb862124f4f90f29b3c07d6a2a8"
+source = "git+https://github.com/nikkolasg/eth-trie.rs#df8087bba96340b17bb2e40c98a0519cd5b6ba0f"
 dependencies = [
  "ethereum-types",
  "hashbrown 0.14.3",
