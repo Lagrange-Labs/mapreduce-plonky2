@@ -3,7 +3,7 @@
 use super::init_logging;
 use crate::{
     circuit::{CyclicCircuit, UserCircuit},
-    digest::DigestCircuit,
+    digest::{DigestArityCircuit, DigestTreeCircuit},
     utils::read_le_u32,
 };
 use plonky2::{
@@ -30,7 +30,7 @@ const ARITY: usize = 4;
 
 type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
-type U = DigestCircuit<F, D, ARITY>;
+type U = DigestArityCircuit<F, D, ARITY>;
 
 /// Benchmark and test the digest circuit.
 #[test]
