@@ -19,7 +19,7 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use std::iter;
+use std::{array, iter};
 
 /// Arity circuit wires including input and output targets
 #[derive(Clone, Debug)]
@@ -58,7 +58,7 @@ where
     child_input_len: usize,
 }
 
-impl<F, const D: usize, const ARITY: usize> DigestTreeCircuit<F, D>
+impl<F, const D: usize, const ARITY: usize> DigestTreeCircuit<F, D, NUM_HASH_OUT_ELTS>
     for DigestArityCircuit<F, D, ARITY>
 where
     [(); ARITY * 4 + 28]:,
@@ -66,7 +66,7 @@ where
 {
     /// Create a circuit instance for a leaf of Merkle tree.
     fn new_leaf(value: [u8; 32]) -> Self {
-        let inputs: [F; ARITY * 4 + 28] = core::array::from_fn(|i| {
+        let inputs: [F; ARITY * 4 + 28] = array::from_fn(|i| {
             if i < 32 {
                 F::from_canonical_u8(value[i])
             } else {
@@ -82,13 +82,18 @@ where
     }
 
     /// Create a circuit instance for a branch of Merkle tree.
-    fn new_branch(inputs: Vec<[F; 4]>) -> Self {
-        assert!(inputs.len() > 0 && inputs.len() <= ARITY);
+    fn new_branch(children: Vec<[F; NUM_HASH_OUT_ELTS]>) -> Self {
+        let child_len = children.len();
+        assert!(child_len > 0 && child_len <= ARITY);
 
         // Flatten the child hash values.
-        let mut inputs: Vec<_> = inputs.into_iter().flatten().collect();
-        inputs.resize(ARITY * 4 + 28, F::ZERO);
-        let inputs = inputs.try_into().unwrap();
+        let inputs = array::from_fn(|i| {
+            if i < NUM_HASH_OUT_ELTS * child_len {
+                children[i / NUM_HASH_OUT_ELTS][i % NUM_HASH_OUT_ELTS]
+            } else {
+                F::ZERO
+            }
+        });
 
         Self {
             inputs,
@@ -143,7 +148,7 @@ where
 
         // It's a leaf of Merkle tree if the child length is zero.
         let output = if self.child_input_len == 0 {
-            // Convert the field values of u8 array to u32.
+            // Convert the values from u8 array to u32.
             let inputs: Vec<_> = convert_u8_values_to_u32(&self.inputs[..32]);
             hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&inputs)
         } else {

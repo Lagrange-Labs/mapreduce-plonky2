@@ -3,11 +3,12 @@
 use plonky2::{field::extension::Extendable, hash::hash_types::RichField};
 
 mod arity;
-mod hash_to_curve;
+mod multiset_hashing;
 
 pub use arity::DigestArityCircuit;
+pub use multiset_hashing::MultisetHashingCircuit;
 
-pub trait DigestTreeCircuit<F, const D: usize>
+pub trait DigestTreeCircuit<F, const D: usize, const N: usize>
 where
     F: RichField + Extendable<D>,
 {
@@ -15,5 +16,5 @@ where
     fn new_leaf(value: [u8; 32]) -> Self;
 
     /// Create a circuit instance for a branch of Merkle tree.
-    fn new_branch(inputs: Vec<[F; 4]>) -> Self;
+    fn new_branch(children: Vec<[F; N]>) -> Self;
 }
