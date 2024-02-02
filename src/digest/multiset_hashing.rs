@@ -7,7 +7,10 @@ use crate::{
     utils::{convert_u8_targets_to_u32, convert_u8_values_to_u32},
 };
 use plonky2::{
-    field::extension::{Extendable, FieldExtension},
+    field::{
+        extension::{quintic::QuinticExtension, Extendable, FieldExtension},
+        goldilocks_field::GoldilocksField,
+    },
     hash::{
         hash_types::RichField,
         hashing::hash_n_to_m_no_pad,
@@ -18,13 +21,24 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, config::GenericConfig},
 };
+use serde::Serialize;
 use std::array;
+
+/// Configuration for multiset hashing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct MultisetHashingConfig;
+impl GenericConfig<5> for MultisetHashingConfig {
+    type F = GoldilocksField;
+    type FE = QuinticExtension<Self::F>;
+    type Hasher = PoseidonHash;
+    type InnerHasher = PoseidonHash;
+}
 
 /// A point value of extension field including X and Y coordinates
 #[derive(Clone, Debug)]
-struct MultisetHashingPoint<F, const D: usize>
+pub struct MultisetHashingPointValue<F, const D: usize>
 where
     F: RichField + Extendable<D>,
 {
@@ -49,13 +63,14 @@ pub struct MultisetHashingWires<const D: usize> {
     /// Flag target to identify if it's a leaf or branch.
     is_leaf: BoolTarget,
     /// The input targets are considered to be `[U8Target; 32]` if it's a leaf,
-    /// otherwise the first `4*D` targets should be built from `[Target; D]` to
-    /// `[ExtensionTarget; 4]` for branch which is permuted as [X1, Y1, X2, Y2].
+    /// otherwise the first `4*D` targets should be built from `[Target; 4 * D]`
+    /// to `[ExtensionTarget; 4]` for branch, it's permuted as [X1, Y1, X2, Y2].
     /// D should be set to 5 for EcGFp5 curve as default, and must be equal to
     /// or less than 8 (32 / 4).
     inputs: [Target; 32],
     /// The output extension target is a point on the curve. It's converted from
-    /// a Poseidon hash if it's a leaf, and it's the addition of two points.
+    /// the Poseidon hash if it's a leaf, otherwise it's the addition of two
+    /// extension points for branch.
     output: MultisetHashingPointTarget<D>,
 }
 
@@ -65,10 +80,10 @@ pub struct MultisetHashingCircuit<F, const D: usize> {
     /// Flag to identify if it's a leaf or branch.
     is_leaf: bool,
     /// The input values are considered to be `[BaseField; 32]` if it's a leaf,
-    /// otherwise the first `4*D` values should be built from `[BaseField; D]`
-    /// to `[ExtensionField; 4]` for branch which is permuted as
-    /// [X1, Y1, X2, Y2]. D should be set to 5 for EcGFp5 curve as default, and
-    /// must be equal to or less than 8 (32 / 4).
+    /// otherwise the first `4*D` values should be built
+    /// from `[BaseField; 4 * D]` to `[ExtensionField; 4]` for branch, it's
+    /// permuted as [X1, Y1, X2, Y2]. D should be set to 5 for EcGFp5 curve as
+    /// default, and must be equal to or less than 8 (32 / 4).
     inputs: [F; 32],
 }
 
@@ -78,6 +93,7 @@ where
 {
     /// Create a circuit instance for a leaf of Merkle tree.
     fn new_leaf(value: [u8; 32]) -> Self {
+        // Convert the u8 array to a base field array.
         let inputs = value
             .into_iter()
             .map(F::from_canonical_u8)
@@ -93,13 +109,16 @@ where
 
     /// Create a circuit instance for a branch of Merkle tree.
     fn new_branch(children: Vec<[F; D]>) -> Self {
+        // The children argument must have 4 elements and permute as
+        // [X1, Y1, X2, Y2] of two points. Each element is an extension field
+        // value as `[F; D]`.
         // D must be equal to or less than 8 (32 / 4), since the inputs have a
         // constant length of 32.
-        assert!(D <= 8);
+        assert!(D <= 8 && children.len() == 4);
 
         // Flatten the child values.
         let inputs = array::from_fn(|i| {
-            if i < 2 * D {
+            if i < 4 * D {
                 children[i / D][i % D]
             } else {
                 F::ZERO
@@ -123,7 +142,7 @@ where
         let is_leaf = b.add_virtual_bool_target_safe();
         let inputs = b.add_virtual_target_arr::<32>();
 
-        // Generate the extension point output for both leaf and branch.
+        // Generate the output of extension point for both leaf and branch.
         let leaf_output = build_leaf(b, &inputs);
         let branch_output = build_branch(b, &inputs);
 
@@ -153,7 +172,7 @@ where
                 .unwrap();
 
             // Convert the hash to an extension point.
-            hash_to_curve_point_value(hash)
+            hash_to_field_point_value(hash)
         } else {
             let [x1, y1, x2, y2] = self.inputs[..4 * D]
                 .chunks(D)
@@ -162,7 +181,8 @@ where
                 .try_into()
                 .unwrap();
 
-            MultisetHashingPoint {
+            // Calculate the addition of two child points for branch.
+            MultisetHashingPointValue {
                 x: x1 + x2,
                 y: y1 + y2,
             }
@@ -191,15 +211,15 @@ where
     }
 
     fn base_inputs(&self) -> Vec<F> {
-        F::rand_vec(32)
+        F::rand_vec(2 * D)
     }
 
     fn num_io() -> usize {
-        32
+        2 * D
     }
 }
 
-///
+/// Generate the extension point from the inputs of Merkle tree leaf.
 fn build_leaf<F, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     inputs: &[Target],
@@ -218,10 +238,11 @@ where
         .try_into()
         .unwrap();
 
-    hash_to_curve_point_target(hash)
+    hash_to_field_point_target(hash)
 }
 
-///
+/// Generate the addition extension point from the two child point inputs of
+/// Merkle tree branch.
 fn build_branch<F, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     inputs: &[Target],
@@ -242,15 +263,17 @@ where
     }
 }
 
-///
-fn hash_to_curve_point_value<F, const D: usize>(hash: [F; D]) -> MultisetHashingPoint<F, D>
+/// Convert the Poseidon hash value to a curve extension point value.
+fn hash_to_field_point_value<F, const D: usize>(hash: [F; D]) -> MultisetHashingPointValue<F, D>
 where
     F: RichField + Extendable<D>,
 {
+    // gupeng
+    // expand_message
     todo!()
 }
 
-///
-fn hash_to_curve_point_target<F, const D: usize>(hash: [F; D]) -> MultisetHashingPointTarget<D> {
+/// Convert the Poseidon hash target to a curve extension point target.
+fn hash_to_field_point_target<const D: usize>(hash: [Target; D]) -> MultisetHashingPointTarget<D> {
     todo!()
 }

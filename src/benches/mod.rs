@@ -4,7 +4,7 @@ use std::io::Write;
 
 mod array_access;
 #[cfg(test)]
-mod merkle_tree;
+mod digest;
 #[cfg(test)]
 mod recursion;
 
