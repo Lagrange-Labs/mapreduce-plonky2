@@ -9,7 +9,7 @@ use crate::{
 use plonky2::{
     field::extension::Extendable,
     hash::{
-        hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         hashing::{hash_n_to_hash_no_pad, PlonkyPermutation},
         poseidon::{PoseidonHash, PoseidonPermutation, SPONGE_RATE},
     },
@@ -58,7 +58,7 @@ where
     child_input_len: usize,
 }
 
-impl<F, const D: usize, const ARITY: usize> DigestTreeCircuit<F, D, NUM_HASH_OUT_ELTS>
+impl<F, const D: usize, const ARITY: usize> DigestTreeCircuit<HashOut<F>>
     for DigestArityCircuit<F, D, ARITY>
 where
     [(); ARITY * 4 + 28]:,
@@ -82,17 +82,16 @@ where
     }
 
     /// Create a circuit instance for a branch of Merkle tree.
-    fn new_branch(children: Vec<[F; NUM_HASH_OUT_ELTS]>) -> Self {
+    fn new_branch(children: Vec<HashOut<F>>) -> Self {
         let child_len = children.len();
         assert!(child_len > 0 && child_len <= ARITY);
 
         // Flatten the child hash values.
         let inputs = array::from_fn(|i| {
-            if i < NUM_HASH_OUT_ELTS * child_len {
-                children[i / NUM_HASH_OUT_ELTS][i % NUM_HASH_OUT_ELTS]
-            } else {
-                F::ZERO
-            }
+            children
+                .get(i / NUM_HASH_OUT_ELTS)
+                .map(|c| c.elements[i % NUM_HASH_OUT_ELTS])
+                .unwrap_or(F::ZERO)
         });
 
         Self {

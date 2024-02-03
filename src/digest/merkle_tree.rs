@@ -12,6 +12,7 @@ pub struct MerkleTree<F, C, const D: usize, Output>
 where
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
+    Output: Clone,
 {
     /// The root of Merkle tree
     root: MerkleNode<F, C, D, Output>,
@@ -24,6 +25,7 @@ impl<F, C, const D: usize, Output> MerkleTree<F, C, D, Output>
 where
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
+    Output: Clone,
 {
     /// Create a Merkle tree by the root node.
     pub fn new(root: MerkleNode<F, C, D, Output>) -> Self {
