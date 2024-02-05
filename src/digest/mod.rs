@@ -1,13 +1,15 @@
 //! Digest tree circuits used to prove Merkle tree nodes recursively.
 
 mod arity;
+mod hash_to_field;
 mod merkle_tree;
 mod multiset_hashing;
 
 pub use arity::DigestArityCircuit;
+pub use hash_to_field::{hash_to_field_point_target, hash_to_field_point_value};
 pub use merkle_tree::{MerkleLeafValue, MerkleNode, MerkleTree};
 pub use multiset_hashing::{
-    hash_to_field_point_value, MultisetHashingCircuit, MultisetHashingPointValue,
+    MultisetHashingCircuit, MultisetHashingPointTarget, MultisetHashingPointValue,
 };
 
 /// The trait of digest tree circuit

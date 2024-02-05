@@ -21,6 +21,7 @@ pub mod eth;
 
 mod circuit;
 mod digest;
+mod extension;
 mod hash;
 mod keccak;
 pub mod merkle;
