@@ -20,6 +20,7 @@ mod benches;
 pub mod eth;
 
 mod circuit;
+mod digest;
 mod hash;
 mod keccak;
 mod mapreduce;

@@ -346,14 +346,14 @@ fn bench_recursion_single_circuit() {
                         }};
                     fns.push(Box::new(move || {
                         // arity changing but with same number of work at each step
-                        bench_pcd_circuit::<F, C, D, $a, _>(tname($a), $a, step_fn,padder)
+                        bench_pcd_circuit::<F, C, D, $a, _>(tname($a), $a-1, step_fn,padder)
                     }));
                 )+
                 fns
             }
             };
         }
-    let trials = bench_pcd!(1, 2);
+    let trials = bench_pcd!(2);
     run_benchs("bench_recursion_single_circuit.csv".to_string(), trials);
 }
 
@@ -424,9 +424,16 @@ where
     let now = time::Instant::now();
     let circuit = CyclicCircuit::<F, C, D, U, ARITY>::new(padder);
     let building_time = now.elapsed().as_millis() as u64;
-    let mut last_proofs = iter::repeat(circuit.prove_init(step_fn()).expect("base step failed").0)
-        .take(n_leaves)
-        .collect::<Vec<_>>();
+    let mut last_proofs = iter::repeat({
+        println!("[+] Proving leaf proof");
+        let proof = circuit.prove_init(step_fn()).expect("base step failed").0;
+        circuit
+            .verify_proof(proof.clone())
+            .expect("failed verification of intermediate step");
+        proof
+    })
+    .take(n_leaves)
+    .collect::<Vec<_>>();
     let mut n_prove = 0;
     let mut proving_time = 0;
     let mut verifying_time = 0;
@@ -440,6 +447,7 @@ where
             .into_iter()
             .map(|children_proofs| {
                 let children_vec = children_proofs.cloned().collect::<Vec<_>>();
+                let child_len = children_vec.len();
                 let n_dummy = ARITY - children_vec.len();
                 let children_array: [Option<ProofWithPublicInputs<F, C, D>>; ARITY] = children_vec
                     .into_iter()
@@ -449,6 +457,10 @@ where
                     .try_into()
                     .unwrap();
                 let now = time::Instant::now();
+                println!(
+                    "[+] Proving steps with {} / {} children proofs",
+                    child_len, ARITY
+                );
                 let node_proof = circuit
                     .prove_step(step_fn(), &children_array)
                     .expect("invalid step proof")
@@ -458,7 +470,7 @@ where
                 let now = time::Instant::now();
                 circuit
                     .verify_proof(node_proof.clone())
-                    .expect("failed verification of base step");
+                    .expect("failed verification of intermediate step");
                 verifying_time += now.elapsed().as_millis();
                 node_proof
             })
