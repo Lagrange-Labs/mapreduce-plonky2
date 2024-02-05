@@ -20,7 +20,7 @@ use plonky2_crypto::{
 
 use crate::{
     circuit::UserCircuit,
-    utils::{convert_u8_to_u32, less_than, IntTargetWriter},
+    utils::{convert_u8_targets_to_u32, less_than, IntTargetWriter},
 };
 
 /// Keccak pads data before "hashing" it. This method returns the full size
@@ -124,7 +124,7 @@ impl<const N: usize> KeccakCircuit<N> {
             .collect::<Vec<_>>();
 
         // convert padded node to u32
-        let node_u32_target: Vec<U32Target> = convert_u8_to_u32(b, &padded_node);
+        let node_u32_target: Vec<U32Target> = convert_u8_targets_to_u32(b, &padded_node);
 
         // fixed size block delimitation: this is where we tell the hash function gadget
         // to only look at a certain portion of our data, each bool says if the hash function
