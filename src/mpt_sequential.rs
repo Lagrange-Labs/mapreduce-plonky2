@@ -325,12 +325,13 @@ where
 
 /// A structure that keeps a running pointer to the portion of the key the circuit
 /// already has proven.
+#[derive(Clone, Debug)]
 pub struct MPTKeyWire {
     /// Represents the full key of the value(s) we're looking at in the MPT trie.
     pub key: Array<Target, MAX_KEY_NIBBLE_LEN>,
     /// Represents which portion of the key we already processed. The pointer
     /// goes _backwards_ since circuit starts proving from the leaf up to the root.
-    /// i.e. pointer must be equal to 0 when we reach the root.
+    /// i.e. pointer must be equal to F::NEG_ONE when we reach the root.
     pub pointer: Target,
 }
 
@@ -413,6 +414,7 @@ fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 pub mod test {
     use std::sync::Arc;
+    use std::thread::current;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use itertools::Itertools;
@@ -568,6 +570,136 @@ pub mod test {
         assert_eq!(key_nibbles, partial_key);
     }
 
+    #[test]
+    fn test_extract_list_of_nodes() {
+        #[derive(Clone, Debug)]
+        enum NodeType {
+            Tuple,
+            Branch,
+        }
+        const DEPTH: usize = 4;
+        const NODE_LEN: usize = 80;
+        const VALUE_LEN: usize = 32;
+        let (mut trie, key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
+        let mut proof = trie.get_proof(&key).unwrap();
+        proof.reverse();
+        let key_nibbles = bytes_to_nibbles(&key);
+        assert_eq!(key_nibbles.len(), MAX_KEY_NIBBLE_LEN);
+        let initial_ptr = MAX_KEY_NIBBLE_LEN - 1;
+        let mut current_pointer = initial_ptr as i8;
+        let mut all_pointers = vec![];
+        let mut all_types = vec![];
+        println!("[+] Initial pointer: {}", initial_ptr);
+        for (i, node) in proof.iter().enumerate() {
+            let node_tuple: Vec<Vec<u8>> = rlp::decode_list(node);
+            let new_ptr = match node_tuple.len() {
+                2 => {
+                    let partial_key = Nibbles::from_compact(&node_tuple[0]);
+                    let partial_key_nibbles = partial_key.nibbles();
+                    all_types.push(NodeType::Tuple);
+                    current_pointer - partial_key_nibbles.len() as i8
+                }
+                17 => {
+                    all_types.push(NodeType::Branch);
+                    current_pointer - 1
+                }
+                _ => panic!("invalid node"),
+            };
+            println!(
+                "[+] New pointer after node {} - type {:?}: {}",
+                i,
+                all_types.last().unwrap(),
+                new_ptr
+            );
+            current_pointer = new_ptr;
+            all_pointers.push(current_pointer);
+        }
+        assert!(*all_pointers.last().unwrap() < 0);
+        // because root is alwas a branch node (prob. speaking) so we always remove one
+        assert!(*all_pointers.last().unwrap() == -1);
+        let config = CircuitConfig::standard_recursion_config();
+        let mut pw = PartialWitness::new();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let zero = builder.zero();
+        let nodes_wires = (0..DEPTH)
+            .map(|_| Array::<Target, { PAD_LEN(NODE_LEN) }>::new(&mut builder))
+            .collect::<Vec<_>>();
+        let expected_pointers_wire = builder.add_virtual_target_arr::<DEPTH>();
+        let initial_key_wire = MPTKeyWire::new(&mut builder);
+        let mut incremental_key_wire = initial_key_wire.clone();
+        for i in 0..1 {
+            if let NodeType::Tuple = all_types[i] {
+                //if false {
+                let rlp_headers = decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(
+                    &mut builder,
+                    &nodes_wires[i].arr,
+                    zero,
+                );
+                let leaf_info = Circuit::<DEPTH, NODE_LEN>::advance_key_leaf_or_extension(
+                    &mut builder,
+                    &nodes_wires[i],
+                    &incremental_key_wire,
+                    &rlp_headers,
+                );
+                let branch_info = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
+                    &mut builder,
+                    &nodes_wires[i],
+                    &incremental_key_wire,
+                    &rlp_headers,
+                );
+                let tt = builder._true();
+                let tuple_cond = leaf_info.2;
+                let mut branch_condition = builder.not(tuple_cond);
+                branch_condition = builder.and(branch_condition, branch_info.2);
+                let tuple_or_branch = builder.or(branch_condition, tuple_cond);
+                //builder.connect(tt.target, tuple_or_branch.target);
+                let new_key = leaf_info.0.select(&mut builder, tuple_cond, &branch_info.0);
+
+                let new_ptr =
+                    builder.select(tuple_cond, leaf_info.0.pointer, branch_info.0.pointer);
+                let sixtytwo = builder.constant(F::from_canonical_u8(62));
+                let two = builder.two();
+                builder.connect(tt.target, branch_condition.target);
+                builder.connect(rlp_headers.num_fields,two);
+                //builder.connect(tt.target, tuple_cond.target);
+                // builder.connect(branch_info.0.pointer, sixtytwo);
+                // builder.connect(leaf_info.0.pointer, expected_pointers_wire[i]);
+                //builder.connect(new_ptr, leaf_info.0.pointer);
+                //builder.connect(advanced_key.pointer, expected_pointers_wire[i]);
+                //builder.connect(new_key.pointer, expected_pointers_wire[i]);
+                incremental_key_wire = new_key;
+            } else {
+                let (advanced_key, _) = Circuit::<DEPTH, NODE_LEN>::advance_key(
+                    &mut builder,
+                    &nodes_wires[i],
+                    &incremental_key_wire,
+                );
+                builder.connect(advanced_key.pointer, expected_pointers_wire[i]);
+                incremental_key_wire = advanced_key;
+            }
+        }
+        let data = builder.build::<C>();
+
+        for (mut node, wire) in proof.into_iter().zip(nodes_wires.iter()) {
+            node.resize(PAD_LEN(NODE_LEN), 0);
+            let node_f = node
+                .iter()
+                .map(|b| F::from_canonical_u8(*b))
+                .collect::<Vec<_>>();
+            wire.assign(&mut pw, &node_f.try_into().unwrap());
+        }
+        for (ptr_value, ptr_wire) in all_pointers.into_iter().zip(expected_pointers_wire.iter()) {
+            let value = if ptr_value == -1 {
+                F::NEG_ONE
+            } else {
+                F::from_canonical_u8(ptr_value as u8)
+            };
+            pw.set_target(*ptr_wire, value);
+        }
+        initial_key_wire.assign(&mut pw, &key_nibbles.try_into().unwrap(), initial_ptr);
+        let proof = data.prove(pw).unwrap();
+        data.verify(proof).unwrap();
+    }
     #[test]
     fn test_extract_any_node() {
         const DEPTH: usize = 4;
@@ -797,7 +929,10 @@ pub mod test {
         let right_key_idx: usize;
         // loop: insert random elements as long as a random selected proof is not of the right length
         loop {
-            println!("-> Insertion of {} elements so far...", keys.len());
+            println!(
+                "[+] Random mpt: insertion of {} elements so far...",
+                keys.len()
+            );
             let key = thread_rng().gen::<[u8; MAX_KEY_NIBBLE_LEN / 2]>().to_vec();
             let random_bytes = (0..VALUE_LEN)
                 .map(|_| thread_rng().gen::<u8>())
