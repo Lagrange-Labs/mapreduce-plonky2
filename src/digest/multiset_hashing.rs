@@ -1,15 +1,13 @@
 //! Multiset hashing implemention for digest tree circuit used to prove Merkle
 //! tree nodes recursively.
-//! There're two degree parameter D and N in the code, D is used for circuit
-//! builder and generic configuration, and N is used for the extension field, so
-//! the base field F (as GoldilocksField) should implement both Extendable<D>
-//! and Extendable<N>.
 
-use super::{hash_to_field_point_target, hash_to_field_point_value, DigestTreeCircuit};
+use super::{
+    hash_to_curve_point_target, hash_to_curve_point_value, DigestTreeCircuit,
+    ECGFP5_EXT_DEGREE as N,
+};
 use crate::{
     circuit::{PCDCircuit, ProofOrDummyTarget, UserCircuit},
-    extension::{add_ext_targets, add_ext_values, select_ext_target},
-    utils::{convert_u8_targets_to_u32, convert_u8_values_to_u32},
+    utils::{convert_u8_targets_to_u32, convert_u8_values_to_u32, less_than},
 };
 use plonky2::{
     field::extension::Extendable,
@@ -19,215 +17,166 @@ use plonky2::{
         poseidon::{PoseidonHash, PoseidonPermutation},
     },
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use std::{array, ops::Add};
+use plonky2_ecgfp5::{
+    curve::curve::Point,
+    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget, PartialWitnessCurve},
+};
+use std::array;
 
-/// A point value of extension field including X and Y coordinates
-#[derive(Clone, Debug)]
-pub struct MultisetHashingPointValue<F, const N: usize> {
-    /// X coordinate
-    x: [F; N],
-    /// Y coordinate
-    y: [F; N],
-}
+/// The input value of leaf is [u8; 32].
+type LeafValue<F> = [F; 32];
+type LeafTarget = [Target; 32];
 
-/// Implement the Default trait for MultisetHashingPointValue.
-impl<F, const N: usize> Default for MultisetHashingPointValue<F, N>
-where
-    F: RichField + Extendable<N>,
-{
-    fn default() -> Self {
-        Self {
-            x: [F::ZERO; N],
-            y: [F::ZERO; N],
-        }
-    }
-}
-
-/// Implement the addition operator `+` for MultisetHashingPointValue.
-impl<F, const N: usize> Add for &MultisetHashingPointValue<F, N>
-where
-    F: RichField + Extendable<N>,
-{
-    type Output = MultisetHashingPointValue<F, N>;
-
-    fn add(self, other: Self) -> Self::Output {
-        Self::Output {
-            x: add_ext_values(self.x, other.x),
-            y: add_ext_values(self.y, other.y),
-        }
-    }
-}
-
-/// A point target of extension field including X and Y coordinates
-#[derive(Clone, Debug)]
-pub struct MultisetHashingPointTarget<const N: usize> {
-    /// X coordinate
-    x: [Target; N],
-    /// Y coordinate
-    y: [Target; N],
-}
+/// The branch has ARITY children at maximum, each is a curve point.
+type BranchValue<const ARITY: usize> = [Point; ARITY];
+type BranchTarget<const ARITY: usize> = [CurveTarget; ARITY];
 
 /// Multiset hashing circuit wires including input and output targets
 #[derive(Clone, Debug)]
-pub struct MultisetHashingWires<const N: usize> {
-    /// Flag target to identify if it's a leaf or branch.
-    is_leaf: BoolTarget,
-    /// The input targets are considered to be `[U8Target; 32]` if it's a leaf,
-    /// otherwise the first `4*N` targets should be built from `[Target; 4 * N]`
-    /// to `[ExtensionTarget; 4]` for branch, it's permuted as [X1, Y1, X2, Y2].
-    /// N should be set to 5 for EcGFp5 curve as default, and must be equal to
-    /// or less than 8 (32 / 4).
-    inputs: [Target; 32],
-    /// The output extension target is a point on the curve. It's converted from
-    /// the Poseidon hash if it's a leaf, otherwise it's the addition of two
-    /// extension points for branch.
-    output: MultisetHashingPointTarget<N>,
+pub struct MultisetHashingWires<const ARITY: usize> {
+    /// The child number is zero if it's a leaf, otherwise it specifies child
+    /// number of a branch. It's also used to identify if the current node is a
+    /// leaf or branch, since branch has non-empty children.
+    child_num: Target,
+    /// Leaf input
+    leaf_input: LeafTarget,
+    /// Branch input
+    branch_input: BranchTarget<ARITY>,
+    /// The output is a curve point. It's converted from Poseidon hash if it's a
+    /// leaf, otherwise it's the curve point addition for children of branch.
+    output: CurveTarget,
 }
 
 /// Multiset hashing circuit used to prove Merkle tree recursively
-/// There're two degree parameter D and N, D is used for circuit builder and
-/// generic configuration, and N is used for the extension field, so the base
-/// field F (as GoldilocksField) should implement both Extendable<D> and
-/// Extendable<N>.
 #[derive(Clone, Debug)]
-pub struct MultisetHashingCircuit<F, const D: usize, const N: usize> {
-    /// Flag to identify if it's a leaf or branch.
-    is_leaf: bool,
-    /// The input values are considered to be `[BaseField; 32]` if it's a leaf,
-    /// otherwise the first `4*N` values should be built from
-    /// `[BaseField; 4 * N]` to `[ExtensionField; 4]` for branch, it's permuted
-    /// as [X1, Y1, X2, Y2]. N should be set to 5 for EcGFp5 curve as default,
-    /// and must be equal to or less than 8 (32 / 4).
-    inputs: [F; 32],
+pub struct MultisetHashingCircuit<F, const D: usize, const ARITY: usize> {
+    /// The child number is zero if it's a leaf, otherwise it specifies child
+    /// number of a branch. It's also used to identify if the current node is a
+    /// leaf or branch, since branch has non-empty children.
+    child_num: usize,
+    /// Leaf input
+    leaf_input: LeafValue<F>,
+    /// Branch input
+    branch_input: BranchValue<ARITY>,
 }
 
-impl<F, const D: usize, const N: usize> DigestTreeCircuit<MultisetHashingPointValue<F, N>>
-    for MultisetHashingCircuit<F, D, N>
+impl<F, const D: usize, const ARITY: usize> DigestTreeCircuit<Point>
+    for MultisetHashingCircuit<F, D, ARITY>
 where
     F: RichField + Extendable<D> + Extendable<N>,
 {
     /// Create a circuit instance for a leaf of Merkle tree.
     fn new_leaf(value: [u8; 32]) -> Self {
         // Convert the u8 array to a base field array.
-        let inputs = value
-            .into_iter()
-            .map(F::from_canonical_u8)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
+        let leaf_input = value.map(F::from_canonical_u8);
 
         Self {
-            is_leaf: true,
-            inputs,
+            child_num: 0,
+            leaf_input,
+            branch_input: [Point::NEUTRAL; ARITY],
         }
     }
 
     /// Create a circuit instance for a branch of Merkle tree.
-    fn new_branch(children: Vec<MultisetHashingPointValue<F, N>>) -> Self {
-        // N must be equal to or less than 8 (32 / 4), since the inputs have a
-        // constant length of 32.
-        // And the child number must be 1 or 2, since it's a binary tree.
-        assert!(N <= 8 && [1, 2].contains(&children.len()));
+    fn new_branch(children: Vec<Point>) -> Self {
+        // Child number must be greater than 0, and equal to or less than ARITY.
+        let child_num = children.len();
+        assert!((1..=ARITY).contains(&child_num));
 
-        // Flatten the child values as [X1, Y1, X2, Y2].
-        let values: Vec<_> = children
-            .iter()
-            .flat_map(|child| child.x.into_iter().chain(child.y))
-            .collect();
-
-        let inputs = array::from_fn(|i| values.get(i).cloned().unwrap_or(F::ZERO));
+        // Build branch input.
+        let branch_input = array::from_fn(|i| children.get(i).cloned().unwrap_or(Point::NEUTRAL));
 
         Self {
-            is_leaf: false,
-            inputs,
+            child_num,
+            leaf_input: [F::ZERO; 32],
+            branch_input,
         }
     }
 }
 
-impl<F, const D: usize, const N: usize> UserCircuit<F, D> for MultisetHashingCircuit<F, D, N>
+impl<F, const D: usize, const ARITY: usize> UserCircuit<F, D>
+    for MultisetHashingCircuit<F, D, ARITY>
 where
     F: RichField + Extendable<D> + Extendable<N>,
+    CircuitBuilder<F, D>: CircuitBuilderEcGFp5,
+    PartialWitness<F>: PartialWitnessCurve<F>,
 {
-    type Wires = MultisetHashingWires<N>;
+    type Wires = MultisetHashingWires<ARITY>;
 
     fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-        let is_leaf = b.add_virtual_bool_target_safe();
-        let inputs = b.add_virtual_target_arr::<32>();
+        let child_num = b.add_virtual_target();
+        let leaf_input = b.add_virtual_target_arr::<32>();
+        let branch_input = [0; ARITY].map(|_| b.add_virtual_curve_target());
 
-        // Generate the output of extension point for both leaf and branch.
-        let leaf_output = build_leaf(b, &inputs);
-        let branch_output = build_branch(b, &inputs);
+        // Generate the output of curve point for both leaf and branch.
+        let leaf_output = build_leaf(b, &leaf_input);
+        let branch_output = build_branch(b, &branch_input, child_num);
 
-        // Build the output.
-        let output = MultisetHashingPointTarget {
-            x: select_ext_target(b, is_leaf, leaf_output.x, branch_output.x),
-            y: select_ext_target(b, is_leaf, leaf_output.y, branch_output.y),
-        };
+        // It's a leaf of Merkle tree if the child number is zero.
+        let zero = b.zero();
+        let is_leaf = b.is_equal(child_num, zero);
+        let output = b.curve_select(is_leaf, leaf_output, branch_output);
 
         Self::Wires {
-            is_leaf,
-            inputs,
+            child_num,
+            leaf_input,
+            branch_input,
             output,
         }
     }
 
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-        pw.set_bool_target(wires.is_leaf, self.is_leaf);
-        pw.set_target_arr(&wires.inputs, &self.inputs);
+        pw.set_target(wires.child_num, F::from_canonical_usize(self.child_num));
+        pw.set_target_arr(&wires.leaf_input, &self.leaf_input);
+        pw.set_curve_targets(
+            &wires.branch_input,
+            &self.branch_input.map(|point| point.to_weierstrass()),
+        );
 
-        let output = if self.is_leaf {
+        // It's a leaf of Merkle tree if the child number is zero.
+        let output = if self.child_num == 0 {
             // Convert the values from u8 array to u32.
-            let inputs: Vec<_> = convert_u8_values_to_u32(&self.inputs);
+            let inputs: Vec<_> = convert_u8_values_to_u32(&self.leaf_input);
 
             // Calculate the Poseidon hash and output N values of base field.
             let hash: [F; N] = hash_n_to_m_no_pad::<F, PoseidonPermutation<F>>(&inputs, N)
                 .try_into()
                 .unwrap();
 
-            // Convert the hash to an extension point.
-            hash_to_field_point_value(hash)
+            // Convert the hash to a curve point.
+            hash_to_curve_point_value(hash)
         } else {
-            let [x1, y1, x2, y2] = array::from_fn(|i| array::from_fn(|j| self.inputs[i * N + j]));
-
-            // Calculate the addition of two child points for branch.
-            MultisetHashingPointValue {
-                x: add_ext_values(x1, x2),
-                y: add_ext_values(y1, y2),
-            }
+            // Calculate the curve point addition for children of branch.
+            // <https://github.com/Lagrange-Labs/plonky2-ecgfp5/blob/08feaa03a006923fa721f2f5a26578d13bc25fa6/src/curve/curve.rs#L709>
+            self.branch_input[..self.child_num]
+                .iter()
+                .cloned()
+                .reduce(|acc, p| acc + p)
+                .unwrap()
         };
 
-        wires
-            .output
-            .x
-            .into_iter()
-            .zip(output.x)
-            .for_each(|(t, v)| pw.set_target(t, v));
-        wires
-            .output
-            .y
-            .into_iter()
-            .zip(output.y)
-            .for_each(|(t, v)| pw.set_target(t, v));
+        pw.set_curve_target(wires.output, output.to_weierstrass());
     }
 }
 
-impl<F, const D: usize, const N: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
-    for MultisetHashingCircuit<F, D, N>
+impl<F, const D: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
+    for MultisetHashingCircuit<F, D, ARITY>
 where
     F: RichField + Extendable<D> + Extendable<N>,
+    CircuitBuilder<F, D>: CircuitBuilderEcGFp5,
+    PartialWitness<F>: PartialWitnessCurve<F>,
 {
     fn build_recursive(
         b: &mut CircuitBuilder<F, D>,
         _: &[ProofOrDummyTarget<D>; ARITY],
     ) -> Self::Wires {
         let wires = <Self as UserCircuit<F, D>>::build(b);
-        b.register_public_inputs(&wires.output.x);
-        b.register_public_inputs(&wires.output.y);
+        b.register_curve_public_input(wires.output);
 
         // TODO: check the proof public inputs match what is expected.
 
@@ -243,15 +192,12 @@ where
     }
 }
 
-/// Generate the extension point from the inputs of Merkle tree leaf.
-fn build_leaf<F, const D: usize, const N: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    inputs: &[Target],
-) -> MultisetHashingPointTarget<N>
+/// Generate the curve point from the inputs of Merkle tree leaf.
+fn build_leaf<F, const D: usize>(b: &mut CircuitBuilder<F, D>, inputs: &[Target]) -> CurveTarget
 where
     F: RichField + Extendable<D> + Extendable<N>,
 {
-    // Convert the u8 target array to u32 target array.
+    // Convert the u8 target array to an u32 target array.
     let inputs: Vec<_> = convert_u8_targets_to_u32(b, &inputs)
         .into_iter()
         .map(|u32_target| u32_target.0)
@@ -262,22 +208,37 @@ where
         .try_into()
         .unwrap();
 
-    hash_to_field_point_target(hash)
+    hash_to_curve_point_target(hash)
 }
 
-/// Generate the addition extension point from the two child point inputs of
-/// Merkle tree branch.
-fn build_branch<F, const D: usize, const N: usize>(
+/// Calculate the curve point addition for children of a Merkle tree branch.
+fn build_branch<F, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
-    inputs: &[Target],
-) -> MultisetHashingPointTarget<N>
+    inputs: &[CurveTarget],
+    valid_len: Target,
+) -> CurveTarget
 where
     F: RichField + Extendable<D> + Extendable<N>,
+    CircuitBuilder<F, D>: CircuitBuilderEcGFp5,
 {
-    let [x1, y1, x2, y2] = array::from_fn(|i| array::from_fn(|j| inputs[i * N + j]));
+    assert!(!inputs.is_empty());
 
-    MultisetHashingPointTarget {
-        x: add_ext_targets(b, x1, x2),
-        y: add_ext_targets(b, y1, y2),
-    }
+    inputs
+        .iter()
+        .cloned()
+        .enumerate()
+        .reduce(|acc, (i, p)| {
+            // Check if the point of current index is valid.
+            let offset = b.constant(F::from_canonical_usize(i));
+            let is_valid_point = less_than(b, offset, valid_len, 8);
+
+            // Calculation the addition if it's a valid point.
+            let old_sum = acc.1;
+            let new_sum = b.curve_add(old_sum, p);
+            let sum = b.curve_select(is_valid_point, new_sum, old_sum);
+
+            (i, sum)
+        })
+        .unwrap()
+        .1
 }

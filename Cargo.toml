@@ -12,7 +12,8 @@ ethers = { version ="2.0.11", default-features = false, features = ["rustls"]}
 plonky2 = { version = "0.1.4" }
 
 # supporting latest plonky2
-plonky2_crypto = { git = "https://github.com/nikkolasg/plonky2-crypto" , branch = "feat/serialization" }
+plonky2_crypto = { git = "https://github.com/nikkolasg/plonky2-crypto", branch = "feat/serialization" }
+plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
 rand = "0.8.5"
 serde = "1.0.193"
 # TODO: see if we can revert to upstream repo: originally used 

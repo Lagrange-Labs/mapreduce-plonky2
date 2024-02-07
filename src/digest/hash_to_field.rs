@@ -1,19 +1,18 @@
 //! Hash to field functions
 
-use super::{MultisetHashingPointTarget, MultisetHashingPointValue};
+use super::ECGFP5_EXT_DEGREE as N;
 use plonky2::{field::extension::Extendable, hash::hash_types::RichField, iop::target::Target};
+use plonky2_ecgfp5::{curve::curve::Point, gadgets::curve::CurveTarget};
 
-/// Convert the Poseidon hash value to a curve extension point value.
-pub fn hash_to_field_point_value<F, const N: usize>(hash: [F; N]) -> MultisetHashingPointValue<F, N>
+/// Convert the Poseidon hash to a curve point value.
+pub fn hash_to_curve_point_value<F>(hash: [F; N]) -> Point
 where
     F: RichField + Extendable<N>,
 {
     todo!()
 }
 
-/// Convert the Poseidon hash target to a curve extension point target.
-pub fn hash_to_field_point_target<const N: usize>(
-    hash: [Target; N],
-) -> MultisetHashingPointTarget<N> {
+/// Convert the Poseidon hash to a curve point target.
+pub fn hash_to_curve_point_target(hash: [Target; N]) -> CurveTarget {
     todo!()
 }
