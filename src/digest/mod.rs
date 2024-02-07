@@ -11,7 +11,7 @@ pub use merkle_tree::{MerkleLeafValue, MerkleNode, MerkleTree};
 pub use multiset_hashing::MultisetHashingCircuit;
 
 /// Extension degree of EcGFp5 curve
-const ECGFP5_EXT_DEGREE: usize = 5;
+pub const ECGFP5_EXT_DEGREE: usize = 5;
 
 /// The trait of digest tree circuit
 /// With this trait, both the arity circuit and multiset hashing circuit could

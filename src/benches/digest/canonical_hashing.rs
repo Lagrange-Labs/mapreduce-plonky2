@@ -25,7 +25,7 @@ type Node = MerkleNode<F, C, D, HashOut<F>>;
 type TestCircuit = DigestArityCircuit<F, D, ARITY>;
 type RecursiveCircuit = CyclicCircuit<F, C, D, TestCircuit, ARITY>;
 
-/// Benchmark and test the digest arity circuit.
+/// Benchmark and test the canonical hashing circuit.
 #[test]
 fn test_digest_arity_circuit() {
     init_logging();

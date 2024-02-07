@@ -6,7 +6,7 @@ use crate::{
 };
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-mod arity;
+mod canonical_hashing;
 mod multiset_hashing;
 
 /// The degree of circuit builder and generic configuration

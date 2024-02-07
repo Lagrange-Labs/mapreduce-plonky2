@@ -5,8 +5,8 @@ use crate::{
     benches::init_logging,
     circuit::{CyclicCircuit, UserCircuit},
     digest::{
-        hash_to_field_point_value, MerkleLeafValue, MerkleNode, MerkleTree, MultisetHashingCircuit,
-        MultisetHashingPointValue,
+        hash_to_curve_point_value, MerkleLeafValue, MerkleNode, MerkleTree, MultisetHashingCircuit,
+        ECGFP5_EXT_DEGREE as N,
     },
     utils::read_le_u32,
 };
@@ -15,21 +15,18 @@ use plonky2::{
     hash::{hashing::hash_n_to_m_no_pad, poseidon::PoseidonPermutation},
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_ecgfp5::curve::curve::Point;
 use rand::Rng;
 
-/// The Merkle tree for testing multiset hashing is a binary tree.
-const ARITY: usize = 2;
-
-/// The extension degree, it's different with generic configuration degree (D).
-const N: usize = 5;
+/// The maximum child number of a Merkle tree branch
+const ARITY: usize = 4;
 
 /// The Merkle tree types
-type Value = MultisetHashingPointValue<F, N>;
-type Tree = MerkleTree<F, C, D, Value>;
-type Node = MerkleNode<F, C, D, Value>;
+type Tree = MerkleTree<F, C, D, Point>;
+type Node = MerkleNode<F, C, D, Point>;
 
 /// The user circuit and recursive circuit
-type TestCircuit = MultisetHashingCircuit<F, D, N>;
+type TestCircuit = MultisetHashingCircuit<F, D, ARITY>;
 type RecursiveCircuit = CyclicCircuit<F, C, D, TestCircuit, ARITY>;
 
 /// Benchmark and test the multiset hashing circuit.
@@ -42,8 +39,8 @@ fn test_multiset_hashing_circuit() {
     let circuit = recursive_circuit();
     let mut tree = merkle_tree();
 
-    // Prove the Merkle tree (binary tree) from lowest leaves to high branches
-    // until root, for example we have the below Merkle tree:
+    // Prove the Merkle tree from lowest leaves to high branches until root, for
+    // example we have the below Merkle tree (binary tree for testing):
     //
     //          root
     //          /  \
@@ -57,13 +54,13 @@ fn test_multiset_hashing_circuit() {
     // . The four leaves have values of v1, v2, v3 and v4.
     // . `prove_all_leaves` function proves and generates Poseidon hashes for
     //   leaves as H(v1), H(v2), H(v3) and H(v4), then converts each hash value
-    //   to an extension point as (X, Y).
-    // . `prove_branches_recursive` function adds the extension points of two
-    //   children as its value for all branches recursively. There're two
-    //   branches in this Merkle tree. The value of branch1 should be
-    //   (X1 + X2, Y1 + Y2), and branch2 should be (X3 + X4, Y3 + Y4).
-    // . `prove_branches_recursive` function calculates the extension point for
-    //   the root finially. It should be (X1 + X2 + X3 + X4, Y1 + Y2 + Y3 + Y4).
+    //   to a curve point P.
+    // . `prove_branches_recursive` function adds the curve points of children
+    //   as its value for all branches recursively. There're two branches in
+    //   this Merkle tree. The value of branch1 should be `curve_add(P1, P2)`,
+    //   and branch2 should be `curve_add(P3, P4)`.
+    // . `prove_branches_recursive` function calculates the curve point value of
+    //   the root finially. It should be `curve_add(P1, P2, P3, P4)`.
     prove_all_leaves(&circuit, &mut tree);
     prove_branches_recursive(&circuit, &mut tree);
 }
@@ -79,7 +76,7 @@ fn recursive_circuit() -> RecursiveCircuit {
     RecursiveCircuit::new(padder)
 }
 
-/// Create a Merkle tree (binary tree) with testing branches and leaves.
+/// Create a Merkle tree with testing branches and leaves.
 fn merkle_tree() -> Tree {
     let [v1, v2, v3, v4] = [0; 4].map(|_| rand_leaf());
     let branch1 = new_branch(vec![v1, v2]);
@@ -92,12 +89,16 @@ fn merkle_tree() -> Tree {
 
 /// Create a branch of Merkle tree by child nodes.
 fn new_branch(children: Vec<Node>) -> Node {
-    assert!(children.len() > 0 && children.len() <= ARITY);
+    assert!((1..=ARITY).contains(&children.len()));
 
-    // Add the child extension points as the value of this branch.
+    // Calculate the curve point addition for children of branch.
+    // <https://github.com/Lagrange-Labs/plonky2-ecgfp5/blob/08feaa03a006923fa721f2f5a26578d13bc25fa6/src/curve/curve.rs#L709>
     let addition = children
         .iter()
-        .fold(Value::default(), |acc, node| &acc + node.output());
+        .map(|node| node.output())
+        .cloned()
+        .reduce(|acc, point| acc + point)
+        .unwrap();
 
     Node::Branch(children, addition, None)
 }
@@ -119,8 +120,8 @@ fn new_leaf(value: MerkleLeafValue) -> Node {
         .try_into()
         .unwrap();
 
-    // Convert the hash to an extension point.
-    let point = hash_to_field_point_value(hash);
+    // Convert the hash to a curve point.
+    let point = hash_to_curve_point_value(hash);
 
     Node::Leaf(value, point, None)
 }
