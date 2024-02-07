@@ -169,10 +169,10 @@ where
             b.conditionally_verify_cyclic_proof::<CC>(*present, proof_t, &dummy_p, &dummy_vd, &cd)
                 .expect("this should not panic");
         }
-        debug!("Building cyclic circuit data");
+        debug!(" ---- Building cyclic circuit data ---");
         b.print_gate_counts(1);
         let num_gates = b.num_gates();
-        info!("Final cyclic circuit has {} gates", num_gates);
+        info!("[+] Final cyclic circuit has {} gates", num_gates);
         let cyclic_data = b.build::<CC>();
         Self {
             present_proofs: conditions_t,
@@ -206,23 +206,24 @@ where
         debug!("Setting witness");
         let mut pw = PartialWitness::new();
         circuit.prove(&mut pw, &self.user_wires);
+        let mut inputs_map: HashMap<usize, F> = HashMap::new();
+        for (i, v) in circuit.base_inputs().iter().enumerate() {
+            inputs_map.insert(i, *v);
+        }
+        let dummy_proof = cyclic_base_proof(
+            &self.base_common,
+            &self.circuit_data.verifier_only,
+            inputs_map,
+        );
         if init {
             for i in 0..ARITY {
                 pw.set_bool_target(self.present_proofs[i], false);
             }
-            let mut inputs_map: HashMap<usize, F> = HashMap::new();
-            for (i, v) in circuit.base_inputs().iter().enumerate() {
-                inputs_map.insert(i, *v);
-            }
-            let proof = cyclic_base_proof(
-                &self.base_common,
-                &self.circuit_data.verifier_only,
-                inputs_map,
-            );
+
             // we verify ARITY out of them anyway right now. This would change depending on the shape
             // of the graph ?
             for target in self.proofs.iter() {
-                pw.set_proof_with_pis_target::<CC, D>(target, &proof);
+                pw.set_proof_with_pis_target::<CC, D>(target, &dummy_proof);
             }
         } else {
             let last_proofs =
@@ -233,6 +234,7 @@ where
                     pw.set_proof_with_pis_target::<CC, D>(target, proof);
                 } else {
                     pw.set_bool_target(self.present_proofs[i], false);
+                    pw.set_proof_with_pis_target::<CC, D>(target, &dummy_proof);
                 }
             }
         }
@@ -320,63 +322,5 @@ where
     }
     fn num_io() -> usize {
         0
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod test {
-    use std::time;
-
-    use plonky2::{
-        field::extension::Extendable,
-        hash::hash_types::RichField,
-        iop::witness::PartialWitness,
-        plonk::{
-            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
-        },
-    };
-
-    use crate::utils::verify_proof_tuple;
-
-    use super::UserCircuit;
-
-    pub(crate) struct BenchResult {
-        pub gate_count: usize,
-        pub building: u64,
-        pub proving: u64,
-        pub lde: usize,
-        pub verifying: u64,
-    }
-
-    pub(crate) fn test_simple_circuit<
-        F: RichField + Extendable<D>,
-        const D: usize,
-        C: GenericConfig<D, F = F>,
-        U: UserCircuit<F, D>,
-    >(
-        u: U,
-    ) -> BenchResult {
-        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-        let mut pw = PartialWitness::new();
-        let now = time::Instant::now();
-        let wires = U::build(&mut b);
-        let gate_count = b.num_gates();
-        let circuit_data = b.build::<C>();
-        let building_time = now.elapsed();
-        let now = time::Instant::now();
-        u.prove(&mut pw, &wires);
-        let proof = circuit_data.prove(pw).expect("invalid proof");
-        let proving_time = now.elapsed();
-        let lde = circuit_data.common.lde_size();
-        let now = time::Instant::now();
-        verify_proof_tuple(&(proof, circuit_data.verifier_only, circuit_data.common)).unwrap();
-        let verifying_time = now.elapsed();
-        BenchResult {
-            gate_count,
-            lde,
-            building: building_time.as_millis() as u64,
-            proving: proving_time.as_millis() as u64,
-            verifying: verifying_time.as_millis() as u64,
-        }
     }
 }
