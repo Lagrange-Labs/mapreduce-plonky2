@@ -21,7 +21,7 @@ use crate::{
         mpt::{verify_children_proofs, MAX_INTERMEDIATE_NODE_LENGTH},
         HASH_LEN, PACKED_HASH_LEN,
     },
-    utils::{convert_u8_to_u32, less_than, IntTargetWriter},
+    utils::{convert_u8_targets_to_u32, less_than, IntTargetWriter},
     ProofTuple,
 };
 
@@ -174,7 +174,7 @@ where
     // We compare on packed u32 because going from u8 -> u32 is cheap, but reverse
     // is less.
     let packed_root_hash = hash_array(&mut b, &mut pw, &node_targets, node_len_tgt, node_length);
-    let exp_packed_root_hash = convert_u8_to_u32(&mut b, &root_hash_target);
+    let exp_packed_root_hash = convert_u8_targets_to_u32(&mut b, &root_hash_target);
     for i in 0..PACKED_HASH_LEN {
         b.connect(packed_root_hash[i], exp_packed_root_hash[i].0);
     }
@@ -202,7 +202,7 @@ where
     // be able to link the previous header proof with a different hash (which is constrained in the circuit).
     let uncompressed_previous_hash =
         &header_targets[PARENT_HASH_INDEX..PARENT_HASH_INDEX + HASH_LEN];
-    let packed_prev_hash = convert_u8_to_u32(&mut b, uncompressed_previous_hash);
+    let packed_prev_hash = convert_u8_targets_to_u32(&mut b, uncompressed_previous_hash);
     let one = b.one();
     HeaderProofInputs::<Target>::insert(
         &mut b,

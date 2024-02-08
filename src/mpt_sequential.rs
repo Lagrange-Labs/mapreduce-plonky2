@@ -5,7 +5,7 @@ use crate::{
         decode_compact_encoding, decode_fixed_list, decode_header, decode_tuple, extract_array,
         RlpList, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN,
     },
-    utils::{convert_u8_to_u32, find_index_subvector, keccak256, less_than},
+    utils::{convert_u8_targets_to_u32, find_index_subvector, keccak256, less_than},
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
@@ -135,7 +135,7 @@ where
             let (new_key, extracted_child_hash) =
                 Self::advance_key(b, &nodes[i].arr, &iterative_key);
             // transform hash from bytes to u32 targets (since this is the hash output format)
-            let extracted_hash_u32 = convert_u8_to_u32(b, &extracted_child_hash.arr);
+            let extracted_hash_u32 = convert_u8_targets_to_u32(b, &extracted_child_hash.arr);
             let found_hash_in_parent = last_hash_output.equals(
                 b,
                 &Array::<U32Target, PACKED_HASH_LEN> {
@@ -627,9 +627,9 @@ pub mod test {
         let expected_pointers_wire = builder.add_virtual_target_arr::<DEPTH>();
         let initial_key_wire = MPTKeyWire::new(&mut builder);
         let mut incremental_key_wire = initial_key_wire.clone();
-        for i in 0..1 {
-            if let NodeType::Tuple = all_types[i] {
-                //if false {
+        for i in 0..DEPTH {
+            //if let NodeType::Tuple = all_types[i] {
+            if false {
                 let rlp_headers = decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(
                     &mut builder,
                     &nodes_wires[i].arr,
@@ -659,8 +659,8 @@ pub mod test {
                     builder.select(tuple_cond, leaf_info.0.pointer, branch_info.0.pointer);
                 let sixtytwo = builder.constant(F::from_canonical_u8(62));
                 let two = builder.two();
-                builder.connect(tt.target, branch_condition.target);
-                builder.connect(rlp_headers.num_fields,two);
+                //builder.connect(tt.target, branch_condition.target);
+                builder.connect(rlp_headers.num_fields, two);
                 //builder.connect(tt.target, tuple_cond.target);
                 // builder.connect(branch_info.0.pointer, sixtytwo);
                 // builder.connect(leaf_info.0.pointer, expected_pointers_wire[i]);

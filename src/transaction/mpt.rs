@@ -18,7 +18,7 @@ use plonky2::{
 use crate::{
     hash::hash_array,
     rlp::{decode_fixed_list, decode_tuple, extract_array},
-    utils::convert_u8_to_u32,
+    utils::convert_u8_targets_to_u32,
     ProofTuple,
 };
 
@@ -284,7 +284,7 @@ pub(super) fn verify_children_proofs<
         // connect the lookup hash to the proof hash
         // hash is exposed as 8 target elements so need to convert from u8 array to u32
         // 32 bytes hash output = 256 bits = 32 bits * 8 => 8 u32 targets exposed
-        let extracted_hash = convert_u8_to_u32(b, &children_hash);
+        let extracted_hash = convert_u8_targets_to_u32(b, &children_hash);
         let (inner_proof, inner_vd, inner_cd) = prooft;
         let pt = b.add_virtual_proof_with_pis(inner_cd);
         pw.set_proof_with_pis_target(&pt, inner_proof);

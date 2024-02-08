@@ -20,7 +20,7 @@ use plonky2_crypto::{
 
 use crate::{
     array::{Array, Vector, VectorWire},
-    utils::{convert_u8_to_u32, less_than},
+    utils::{convert_u8_targets_to_u32, less_than},
 };
 
 /// Length of a hash in bytes.
@@ -56,16 +56,14 @@ pub struct KeccakCircuit<const N: usize> {
     data: Vector<N>,
 }
 #[derive(Clone, Debug)]
-pub struct KeccakWires<const N: usize>
-{
+pub struct KeccakWires<const N: usize> {
     input_array: VectorWire<N>,
     diff: Target,
     // 256/u32 = 8
     pub output_array: OutputHash,
 }
 
-impl<const N: usize> KeccakCircuit<N>
-{
+impl<const N: usize> KeccakCircuit<N> {
     pub fn new(mut data: Vec<u8>) -> Result<Self> {
         let total = compute_size_with_padding(data.len());
         ensure!(
@@ -138,7 +136,7 @@ impl<const N: usize> KeccakCircuit<N>
             .collect::<Vec<_>>();
 
         // convert padded node to u32
-        let node_u32_target: Vec<U32Target> = convert_u8_to_u32(b, &padded_node);
+        let node_u32_target: Vec<U32Target> = convert_u8_targets_to_u32(b, &padded_node);
 
         // fixed size block delimitation: this is where we tell the hash function gadget
         // to only look at a certain portion of our data, each bool says if the hash function

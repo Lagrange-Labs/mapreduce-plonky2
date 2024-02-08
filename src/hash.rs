@@ -18,7 +18,7 @@ use plonky2_crypto::{
     u32::arithmetic_u32::U32Target,
 };
 
-use crate::utils::{convert_u8_to_u32, less_than, read_le_u32};
+use crate::utils::{convert_u8_targets_to_u32, less_than, read_le_u32};
 
 pub(crate) fn hash_to_fields<F: RichField>(expected: &[u8]) -> Vec<F> {
     let iter_u32 = expected.iter().chunks(4);
@@ -119,7 +119,7 @@ pub(crate) fn hash_array<F: RichField + Extendable<D>, const D: usize>(
     assert!(total_len % 4 == 0);
 
     // convert padded node to u32
-    let node_u32_target: Vec<U32Target> = convert_u8_to_u32(b, &padded_node);
+    let node_u32_target: Vec<U32Target> = convert_u8_targets_to_u32(b, &padded_node);
 
     // fixed size block delimitation: this is where we tell the hash function gadget
     // to only look at a certain portion of our data, each bool says if the hash function
