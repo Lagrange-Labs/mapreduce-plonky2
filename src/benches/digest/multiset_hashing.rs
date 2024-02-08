@@ -5,13 +5,16 @@ use crate::{
     benches::init_logging,
     circuit::{CyclicCircuit, UserCircuit},
     digest::{
-        hash_to_curve_point_value, MerkleLeafValue, MerkleNode, MerkleTree, MultisetHashingCircuit,
-        ECGFP5_EXT_DEGREE as N,
+        MerkleLeafValue, MerkleNode, MerkleTree, MultisetHashingCircuit, ECGFP5_EXT_DEGREE as N,
     },
+    map_to_curve::ToCurvePoint,
     utils::read_le_u32,
 };
 use plonky2::{
-    field::types::Field,
+    field::{
+        extension::{quintic::QuinticExtension, FieldExtension},
+        types::Field,
+    },
     hash::{hashing::hash_n_to_m_no_pad, poseidon::PoseidonPermutation},
     plonk::circuit_builder::CircuitBuilder,
 };
@@ -121,7 +124,7 @@ fn new_leaf(value: MerkleLeafValue) -> Node {
         .unwrap();
 
     // Convert the hash to a curve point.
-    let point = hash_to_curve_point_value(hash);
+    let point = QuinticExtension::from_basefield_array(hash).map_to_curve_point();
 
     Node::Leaf(value, point, None)
 }

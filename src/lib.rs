@@ -21,9 +21,9 @@ pub mod eth;
 
 mod circuit;
 mod digest;
-mod extension;
 mod hash;
 mod keccak;
+mod map_to_curve;
 pub mod merkle;
 mod rlp;
 pub mod transaction;

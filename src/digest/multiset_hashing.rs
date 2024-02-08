@@ -1,16 +1,14 @@
 //! Multiset hashing implemention for digest tree circuit used to prove Merkle
 //! tree nodes recursively.
 
-use super::{
-    hash_to_curve_point_target, hash_to_curve_point_value, DigestTreeCircuit,
-    ECGFP5_EXT_DEGREE as N,
-};
+use super::{DigestTreeCircuit, ECGFP5_EXT_DEGREE as N};
 use crate::{
     circuit::{PCDCircuit, ProofOrDummyTarget, UserCircuit},
+    map_to_curve::{map_to_curve_target, ToCurvePoint},
     utils::{convert_u8_targets_to_u32, convert_u8_values_to_u32, less_than},
 };
 use plonky2::{
-    field::extension::Extendable,
+    field::extension::{quintic::QuinticExtension, Extendable, FieldExtension},
     hash::{
         hash_types::RichField,
         hashing::hash_n_to_m_no_pad,
@@ -103,6 +101,7 @@ impl<F, const D: usize, const ARITY: usize> UserCircuit<F, D>
     for MultisetHashingCircuit<F, D, ARITY>
 where
     F: RichField + Extendable<D> + Extendable<N>,
+    QuinticExtension<F>: ToCurvePoint,
     CircuitBuilder<F, D>: CircuitBuilderEcGFp5,
     PartialWitness<F>: PartialWitnessCurve<F>,
 {
@@ -149,7 +148,7 @@ where
                 .unwrap();
 
             // Convert the hash to a curve point.
-            hash_to_curve_point_value(hash)
+            QuinticExtension::from_basefield_array(hash).map_to_curve_point()
         } else {
             // Calculate the curve point addition for children of branch.
             // <https://github.com/Lagrange-Labs/plonky2-ecgfp5/blob/08feaa03a006923fa721f2f5a26578d13bc25fa6/src/curve/curve.rs#L709>
@@ -168,6 +167,7 @@ impl<F, const D: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
     for MultisetHashingCircuit<F, D, ARITY>
 where
     F: RichField + Extendable<D> + Extendable<N>,
+    QuinticExtension<F>: ToCurvePoint,
     CircuitBuilder<F, D>: CircuitBuilderEcGFp5,
     PartialWitness<F>: PartialWitnessCurve<F>,
 {
@@ -203,12 +203,14 @@ where
         .map(|u32_target| u32_target.0)
         .collect();
 
+    // Calculate the Poseidon hash.
     let hash = b
         .hash_n_to_m_no_pad::<PoseidonHash>(inputs, N)
         .try_into()
         .unwrap();
 
-    hash_to_curve_point_target(hash)
+    // Convert the hash to a curve target.
+    map_to_curve_target(hash)
 }
 
 /// Calculate the curve point addition for children of a Merkle tree branch.
