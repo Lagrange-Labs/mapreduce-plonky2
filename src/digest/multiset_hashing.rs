@@ -4,7 +4,7 @@
 use super::{DigestTreeCircuit, ECGFP5_EXT_DEGREE as N};
 use crate::{
     circuit::{PCDCircuit, ProofOrDummyTarget, UserCircuit},
-    map_to_curve::{map_to_curve_target, ToCurvePoint},
+    map_to_curve::{ToCurvePoint, ToCurveTarget},
     utils::{convert_u8_targets_to_u32, convert_u8_values_to_u32, less_than},
 };
 use plonky2::{
@@ -22,7 +22,10 @@ use plonky2::{
 };
 use plonky2_ecgfp5::{
     curve::curve::Point,
-    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget, PartialWitnessCurve},
+    gadgets::{
+        base_field::{CircuitBuilderGFp5, QuinticExtensionTarget},
+        curve::{CircuitBuilderEcGFp5, CurveTarget, PartialWitnessCurve},
+    },
 };
 use std::array;
 
@@ -102,7 +105,7 @@ impl<F, const D: usize, const ARITY: usize> UserCircuit<F, D>
 where
     F: RichField + Extendable<D> + Extendable<N>,
     QuinticExtension<F>: ToCurvePoint,
-    CircuitBuilder<F, D>: CircuitBuilderEcGFp5,
+    CircuitBuilder<F, D>: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
     PartialWitness<F>: PartialWitnessCurve<F>,
 {
     type Wires = MultisetHashingWires<ARITY>;
@@ -168,7 +171,7 @@ impl<F, const D: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
 where
     F: RichField + Extendable<D> + Extendable<N>,
     QuinticExtension<F>: ToCurvePoint,
-    CircuitBuilder<F, D>: CircuitBuilderEcGFp5,
+    CircuitBuilder<F, D>: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
     PartialWitness<F>: PartialWitnessCurve<F>,
 {
     fn build_recursive(
@@ -196,6 +199,7 @@ where
 fn build_leaf<F, const D: usize>(b: &mut CircuitBuilder<F, D>, inputs: &[Target]) -> CurveTarget
 where
     F: RichField + Extendable<D> + Extendable<N>,
+    CircuitBuilder<F, D>: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
 {
     // Convert the u8 target array to an u32 target array.
     let inputs: Vec<_> = convert_u8_targets_to_u32(b, &inputs)
@@ -210,7 +214,7 @@ where
         .unwrap();
 
     // Convert the hash to a curve target.
-    map_to_curve_target(hash)
+    QuinticExtensionTarget(hash).map_to_curve_target(b)
 }
 
 /// Calculate the curve point addition for children of a Merkle tree branch.
@@ -221,7 +225,7 @@ fn build_branch<F, const D: usize>(
 ) -> CurveTarget
 where
     F: RichField + Extendable<D> + Extendable<N>,
-    CircuitBuilder<F, D>: CircuitBuilderEcGFp5,
+    CircuitBuilder<F, D>: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
 {
     assert!(!inputs.is_empty());
 

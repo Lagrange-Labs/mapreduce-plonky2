@@ -33,7 +33,6 @@ type TestCircuit = MultisetHashingCircuit<F, D, ARITY>;
 type RecursiveCircuit = CyclicCircuit<F, C, D, TestCircuit, ARITY>;
 
 /// Benchmark and test the multiset hashing circuit.
-#[ignore]
 #[test]
 fn test_multiset_hashing_circuit() {
     init_logging();
