@@ -5,10 +5,8 @@ use super::{
     ToCurvePoint,
 };
 use plonky2::field::{
-    extension::quintic::QuinticExtension,
-    goldilocks_field::GoldilocksField,
-    ops::Square,
-    types::{Field, PrimeField64},
+    extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField, ops::Square,
+    types::Field,
 };
 use plonky2_ecgfp5::curve::{
     base_field::{Sgn0, SquareRoot},

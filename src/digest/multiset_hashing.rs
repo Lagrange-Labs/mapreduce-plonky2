@@ -187,11 +187,12 @@ where
     }
 
     fn base_inputs(&self) -> Vec<F> {
-        F::rand_vec(2 * N)
+        F::rand_vec(Self::num_io())
     }
 
     fn num_io() -> usize {
-        2 * N
+        // The curve target contains 2 extension targets and 1 bool target.
+        2 * N + 1
     }
 }
 
