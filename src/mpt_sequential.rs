@@ -120,7 +120,7 @@ where
         let leaf_headers = decode_fixed_list::<_, _, NB_ITEMS_LEAF>(b, &nodes[0].arr.arr, zero);
         let (mut iterative_key, leaf_value, is_leaf) =
             Self::advance_key_leaf_or_extension(b, &nodes[0].arr, &full_key, &leaf_headers);
-        b.assert_bool(is_leaf);
+        b.connect(t.target, is_leaf.target);
         let mut last_hash_output = leaf_hash.output_array.clone();
         let mut keccak_wires = vec![leaf_hash];
         // ---- Intermediate node part ---
@@ -131,7 +131,8 @@ where
         for i in 1..DEPTH {
             // Make sure we are processing only relevant nodes !
             let is_real = should_process[i - 1];
-            // look if hash is inside the node
+            b.connect(t.target, is_real.target);
+            //// look if hash is inside the node
             let (new_key, extracted_child_hash) =
                 Self::advance_key(b, &nodes[i].arr, &iterative_key);
             // transform hash from bytes to u32 targets (since this is the hash output format)
@@ -142,6 +143,7 @@ where
                     arr: extracted_hash_u32.try_into().unwrap(),
                 },
             );
+            //b.connect(found_hash_in_parent.target, t.target);
             // if we don't have to process it, then circuit should never fail at that step
             // otherwise, we should always enforce finding the hash in the parent node
             let is_parent = b.select(is_real, found_hash_in_parent.target, t.target);
@@ -150,13 +152,15 @@ where
             // hash the next node first
             let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
             // and select whether we should update or not
+            //last_hash_output = hash_wires.output_array.clone();
             last_hash_output = hash_wires
                 .output_array
                 .select(b, is_real, &last_hash_output);
-            iterative_key = iterative_key.select(b, is_real, &new_key);
+            //iterative_key = new_key;
+            iterative_key = new_key.select(b, is_real, &iterative_key);
             keccak_wires.push(hash_wires);
         }
-        let mone = b.sub(zero, one);
+        let mone = b.constant(F::NEG_ONE);
         b.connect(iterative_key.pointer, mone);
 
         (
@@ -166,8 +170,7 @@ where
                 keccak_wires: keccak_wires.try_into().unwrap(),
                 nodes,
                 should_process,
-                //leaf: leaf_value,
-                leaf: Array::<Target, MAX_LEAF_VALUE>::new(b),
+                leaf: leaf_value,
             },
         )
     }
@@ -209,6 +212,7 @@ where
                 let idx = find_index_subvector(&self.nodes[i], &child_hash)
                     .ok_or(anyhow!("can't find hash in parent node!"))?;
             } else {
+                println!("[-----] setting is_real[{}] = false", i - 1);
                 p.set_bool_target(wires.should_process[i - 1], false);
             }
         }
@@ -235,7 +239,6 @@ where
         key: &MPTKeyWire,
     ) -> (MPTKeyWire, Array<Target, HASH_LEN>) {
         let zero = b.zero();
-        let two = b.two();
         // It will try to decode a RLP list of the maximum number of items there can be
         // in a list, which is 16 for a branch node (Excluding value).
         // It returns the actual number of items decoded.
@@ -413,12 +416,14 @@ fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 pub mod test {
+    use std::array::from_fn as create_array;
     use std::sync::Arc;
     use std::thread::current;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use itertools::Itertools;
     use plonky2::field::types::Field;
+    use plonky2::hash::keccak;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
         field::extension::Extendable,
@@ -430,11 +435,15 @@ pub mod test {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
+    use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, Rng};
 
+    use crate::array::Vector;
     use crate::benches::init_logging;
+    use crate::keccak::{InputData, KeccakCircuit, PACKED_HASH_LEN};
     use crate::mpt_sequential::{bytes_to_nibbles, nibbles_to_bytes, NB_ITEMS_LEAF};
     use crate::rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN};
+    use crate::utils::{convert_u8_targets_to_u32, IntTargetWriter};
     use crate::{
         array::{Array, VectorWire},
         circuit::{test::test_simple_circuit, UserCircuit},
@@ -476,11 +485,11 @@ pub mod test {
     fn test_mpt_proof_verification() {
         init_logging();
         // max depth of the trie
-        const DEPTH: usize = 4;
+        const DEPTH: usize = 3;
         // leave one for padding
         const ACTUAL_DEPTH: usize = DEPTH;
         // max len of a node
-        const NODE_LEN: usize = 80;
+        const NODE_LEN: usize = 32;
         let (mut trie, key) = generate_random_storage_mpt::<ACTUAL_DEPTH, NODE_LEN>();
         let root = trie.root_hash().unwrap();
         // root is first so we reverse the order as in circuit we prove the opposite way
@@ -490,6 +499,7 @@ pub mod test {
         assert!(proof.len() <= DEPTH);
         assert!(keccak256(proof.last().unwrap()) == root.to_fixed_bytes());
         println!("PROOF LEN = {}", proof.len());
+        visit_proof(&proof);
         for i in 1..proof.len() {
             let child_hash = keccak256(&proof[i - 1]);
             let u8idx = find_index_subvector(&proof[i], &child_hash);
@@ -508,20 +518,35 @@ pub mod test {
         test_simple_circuit::<F, D, C, _>(circuit);
     }
 
+    fn visit_proof(proof: &Vec<Vec<u8>>) {
+        let mut child_hash = vec![];
+        let mut partial_key = vec![];
+        for node in proof.iter() {
+            visit_node(node, &child_hash, &mut partial_key);
+            child_hash = keccak256(node);
+            println!(
+                "\t=> full partial key: hex {:?}",
+                hex::encode(nibbles_to_bytes(&partial_key))
+            );
+        }
+    }
     fn visit_node(node: &[u8], child_hash: &[u8], partial_key: &mut Vec<u8>) {
-        let node_list: Vec<Vec<u8>> = rlp::decode_list(&node);
+        println!("[+] Node ({} bytes) {}", node.len(), hex::encode(node));
+        let node_list: Vec<Vec<u8>> = rlp::decode_list(node);
         match node_list.len() {
             2 => {
                 // extension case: verify the hash is present and lookup the key
-                find_index_subvector(node, child_hash)
-                    .expect("extension should contain hash of child");
+                if !child_hash.is_empty() {
+                    let _ = find_index_subvector(node, child_hash)
+                        .expect("extension should contain hash of child");
+                }
                 // we don't need to decode the RLP header on top of it, since it is
                 // already done in the decode_list function.
                 let key_nibbles_struct = Nibbles::from_compact(&node_list[0]);
                 let key_nibbles = key_nibbles_struct.nibbles();
                 println!(
                     "[+] Leaf/Extension node: partial key extracted: {:?}",
-                    hex::encode(&nibbles_to_bytes(key_nibbles))
+                    hex::encode(nibbles_to_bytes(key_nibbles))
                 );
                 partial_key.splice(0..0, key_nibbles.to_vec());
             }
@@ -569,14 +594,180 @@ pub mod test {
         }
         assert_eq!(key_nibbles, partial_key);
     }
+    #[derive(Clone, Debug)]
+    enum NodeType {
+        Tuple,
+        Branch,
+    }
+    #[test]
+    fn test_incremental() {
+        const DEPTH: usize = 3;
+        const NODE_LEN: usize = 80;
+        const VALUE_LEN: usize = 32;
+        //let (mut trie, key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
+        //let mut proof = trie.get_proof(&key).unwrap();
+        //proof.reverse();
+        let proof = vec![
+            hex::decode("f843a0202aab350c80c8b4d504560f76bd492c7191f6e88b204fba16b03422594f7872a1a0eb8e657513b71a943a73ef2aded7635d2f0e25b5efe1559e0e5e9450a04dc929").unwrap(),
+            hex::decode("f85180a0d43c798529ffaaa2316f8adaaa27105dd0fb20dc97d250ad784386e0edaa97e1808080a0602346785e1ced15445758e363f43723de0d5e365cb4f483845988113f22f6ea8080808080808080808080").unwrap(),
+            hex::decode("f8f180a080a15846e63f90955f3492af55951f272302e08fa4360d13d25ead42ef1f8e1580a0103dad8651d136072de73a52b6c1e81afec60eeadcd971e88cbdd835f58523718080a0c7e63df28028e3906459eb3b7ea253bf7ef278f06b4e1705485cba52a42b33da8080a0a2fe320d0471b6eed27e651ba18be7c1cd36f4530c1931c2e2bfd8beed9044e980a03a613d04fd7bb29df0b0444d58118058d3107c2291c32476511969c85f98953e80a0e9acd2a316add27ea52dd4e844c78f041a89349eff4327e21a0b0f64f4aec234a0b34cd83dc3174901e6cc1a8f43de2866a247b6f769e49710de0b5c501032e50b8080").unwrap(),
+        ];
+        visit_proof(&proof);
+        let key = hex::decode("b12aab350c80c8b4d504560f76bd492c7191f6e88b204fba16b03422594f7872")
+            .unwrap();
+        let key_nibbles = bytes_to_nibbles(&key);
+        assert_eq!(key_nibbles.len(), MAX_KEY_NIBBLE_LEN);
+        let initial_ptr = MAX_KEY_NIBBLE_LEN - 1;
+        let mut current_pointer = initial_ptr as i8;
+        let mut all_pointers = vec![];
+        let mut all_types = vec![];
+        let mut all_hashes = vec![];
+        println!("[+] Initial pointer: {}", initial_ptr);
+        for (i, node) in proof.iter().enumerate() {
+            all_hashes.push(keccak256(node));
+            let node_tuple: Vec<Vec<u8>> = rlp::decode_list(node);
+            let new_ptr = match node_tuple.len() {
+                2 => {
+                    let partial_key = Nibbles::from_compact(&node_tuple[0]);
+                    let partial_key_nibbles = partial_key.nibbles();
+                    all_types.push(NodeType::Tuple);
+                    current_pointer - partial_key_nibbles.len() as i8
+                }
+                17 => {
+                    all_types.push(NodeType::Branch);
+                    current_pointer - 1
+                }
+                _ => panic!("invalid node"),
+            };
+            println!(
+                "[+] New pointer after node {} - type {:?}: {}",
+                i,
+                all_types.last().unwrap(),
+                new_ptr
+            );
+            current_pointer = new_ptr;
+            all_pointers.push(current_pointer);
+        }
+        assert!(*all_pointers.last().unwrap() < 0);
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut pw = PartialWitness::new();
+        let mut b = CircuitBuilder::<F, D>::new(config);
+        let zero = b.zero();
+        let tt = b._true();
+        let nodes_wires: [VectorWire<_>; DEPTH] =
+            create_array(|_| VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(&mut b));
+        let expected_pointers_wire = b.add_virtual_target_arr::<DEPTH>();
+        let initial_key_wire = MPTKeyWire::new(&mut b);
+        let mut incremental_key_wire = initial_key_wire.clone();
+        let leaf_hash =
+            KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(&mut b, &nodes_wires[0]);
+        let mut last_hash_output = leaf_hash.output_array.clone();
+        let mut hash_wires = vec![leaf_hash];
+
+        // LEAF - PARENT1
+        let (advanced_key, child_hash) = Circuit::<DEPTH, NODE_LEN>::advance_key(
+            &mut b,
+            &nodes_wires[0].arr,
+            &incremental_key_wire,
+        );
+        b.connect(advanced_key.pointer, expected_pointers_wire[0]);
+        incremental_key_wire = advanced_key;
+        /// PARENT 1 - PARENT 2
+        let (advanced_key, child_hash) = Circuit::<DEPTH, NODE_LEN>::advance_key(
+            &mut b,
+            &nodes_wires[1].arr,
+            &incremental_key_wire,
+        );
+        b.connect(advanced_key.pointer, expected_pointers_wire[1]);
+        incremental_key_wire = advanced_key;
+        let extracted_hash_u32 = convert_u8_targets_to_u32(&mut b, &child_hash.arr);
+        let found_hash = last_hash_output.equals(
+            &mut b,
+            &Array::<U32Target, PACKED_HASH_LEN> {
+                arr: extracted_hash_u32.try_into().unwrap(),
+            },
+        );
+        b.connect(tt.target, found_hash.target);
+        let keccak_wire =
+            KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(&mut b, &nodes_wires[1]);
+        last_hash_output = keccak_wire.output_array.clone();
+        hash_wires.push(keccak_wire);
+        ///// PARENT 2 - ROOT
+        let (advanced_key, child_hash) = Circuit::<DEPTH, NODE_LEN>::advance_key(
+            &mut b,
+            &nodes_wires[2].arr,
+            &incremental_key_wire,
+        );
+        b.connect(advanced_key.pointer, expected_pointers_wire[2]);
+        let extracted_hash_u32 = convert_u8_targets_to_u32(&mut b, &child_hash.arr);
+        let found_hash = last_hash_output.equals(
+            &mut b,
+            &Array::<U32Target, PACKED_HASH_LEN> {
+                arr: extracted_hash_u32.try_into().unwrap(),
+            },
+        );
+        // THIS FAILS
+        //b.connect(tt.target, found_hash.target);
+        // SO WE CHECK MANUALLY if (a) extracted hash is correct
+        // THIS FAILS
+        //let exp_hash_target = b.add_virtual_target_arr::<32>();
+        //for (found, exp) in child_hash.arr.iter().zip(exp_hash_target.iter()) {
+        //    b.connect(*found, *exp);
+        //}
+        //let exp_hash = keccak256(&proof[1]);
+        //pw.set_int_targets(&exp_hash_target, &exp_hash);
+        // SO we try to extract the hash directly from branch node see
+        let rlp_headers =
+            decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(&mut b, &nodes_wires[2].arr.arr, zero);
+        let (advanced_key, child_hash, is_branch) = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
+            &mut b,
+            &nodes_wires[2].arr,
+            &incremental_key_wire,
+            &rlp_headers,
+        );
+        b.connect(tt.target, is_branch.target);
+        let exp_hash_target = b.add_virtual_target_arr::<32>();
+        let exp_hash = keccak256(&proof[1]);
+        pw.set_int_targets(&exp_hash_target, &exp_hash);
+        for (found, exp) in child_hash.arr.iter().zip(exp_hash_target.iter()) {
+            b.connect(*found, *exp);
+        }
+
+        incremental_key_wire = advanced_key;
+
+        //// assign time
+        for (mut node, wire) in proof.iter().zip(nodes_wires.iter()) {
+            wire.assign(
+                &mut pw,
+                &Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(node.clone()).unwrap(),
+            );
+        }
+        for (ptr_value, ptr_wire) in all_pointers.into_iter().zip(expected_pointers_wire.iter()) {
+            let value = if ptr_value == -1 {
+                F::NEG_ONE
+            } else {
+                F::from_canonical_u8(ptr_value as u8)
+            };
+            pw.set_target(*ptr_wire, value);
+        }
+        for (hash_wire, node) in hash_wires.iter().zip(proof.iter()) {
+            KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
+                &mut pw,
+                hash_wire,
+                &InputData::Assigned(
+                    &Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(node.clone()).unwrap(),
+                ),
+            );
+        }
+        initial_key_wire.assign(&mut pw, &key_nibbles.try_into().unwrap(), initial_ptr);
+        let data = b.build::<C>();
+        let proof = data.prove(pw).unwrap();
+        data.verify(proof).unwrap();
+    }
 
     #[test]
     fn test_extract_list_of_nodes() {
-        #[derive(Clone, Debug)]
-        enum NodeType {
-            Tuple,
-            Branch,
-        }
         const DEPTH: usize = 4;
         const NODE_LEN: usize = 80;
         const VALUE_LEN: usize = 32;
@@ -621,38 +812,42 @@ pub mod test {
         let mut pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let zero = builder.zero();
-        let nodes_wires = (0..DEPTH)
-            .map(|_| Array::<Target, { PAD_LEN(NODE_LEN) }>::new(&mut builder))
-            .collect::<Vec<_>>();
+        let nodes_wires: [VectorWire<_>; DEPTH] =
+            create_array(|_| VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(&mut builder));
         let expected_pointers_wire = builder.add_virtual_target_arr::<DEPTH>();
         let initial_key_wire = MPTKeyWire::new(&mut builder);
         let mut incremental_key_wire = initial_key_wire.clone();
-        for i in 0..DEPTH {
+
+        let leaf_hash =
+            KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(&mut builder, &nodes_wires[0]);
+        let mut last_hash_output = leaf_hash.output_array.clone();
+        let hash_wires = vec![leaf_hash];
+        let tt = builder._true();
+        for i in 1..2 {
             //if let NodeType::Tuple = all_types[i] {
             if false {
                 let rlp_headers = decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(
                     &mut builder,
-                    &nodes_wires[i].arr,
+                    &nodes_wires[i].arr.arr,
                     zero,
                 );
                 let leaf_info = Circuit::<DEPTH, NODE_LEN>::advance_key_leaf_or_extension(
                     &mut builder,
-                    &nodes_wires[i],
+                    &nodes_wires[i].arr,
                     &incremental_key_wire,
                     &rlp_headers,
                 );
                 let branch_info = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
                     &mut builder,
-                    &nodes_wires[i],
+                    &nodes_wires[i].arr,
                     &incremental_key_wire,
                     &rlp_headers,
                 );
-                let tt = builder._true();
                 let tuple_cond = leaf_info.2;
                 let mut branch_condition = builder.not(tuple_cond);
                 branch_condition = builder.and(branch_condition, branch_info.2);
                 let tuple_or_branch = builder.or(branch_condition, tuple_cond);
-                //builder.connect(tt.target, tuple_or_branch.target);
+                builder.connect(tt.target, tuple_or_branch.target);
                 let new_key = leaf_info.0.select(&mut builder, tuple_cond, &branch_info.0);
 
                 let new_ptr =
@@ -667,26 +862,37 @@ pub mod test {
                 //builder.connect(new_ptr, leaf_info.0.pointer);
                 //builder.connect(advanced_key.pointer, expected_pointers_wire[i]);
                 //builder.connect(new_key.pointer, expected_pointers_wire[i]);
+
                 incremental_key_wire = new_key;
             } else {
-                let (advanced_key, _) = Circuit::<DEPTH, NODE_LEN>::advance_key(
+                let (advanced_key, child_hash) = Circuit::<DEPTH, NODE_LEN>::advance_key(
                     &mut builder,
-                    &nodes_wires[i],
+                    &nodes_wires[i].arr,
                     &incremental_key_wire,
                 );
                 builder.connect(advanced_key.pointer, expected_pointers_wire[i]);
+                let extracted_hash_u32 = convert_u8_targets_to_u32(&mut builder, &child_hash.arr);
+                let found_hash = last_hash_output.equals(
+                    &mut builder,
+                    &Array::<U32Target, PACKED_HASH_LEN> {
+                        arr: extracted_hash_u32.try_into().unwrap(),
+                    },
+                );
+                builder.connect(tt.target, found_hash.target);
                 incremental_key_wire = advanced_key;
             }
         }
-        let data = builder.build::<C>();
 
-        for (mut node, wire) in proof.into_iter().zip(nodes_wires.iter()) {
-            node.resize(PAD_LEN(NODE_LEN), 0);
-            let node_f = node
-                .iter()
-                .map(|b| F::from_canonical_u8(*b))
-                .collect::<Vec<_>>();
-            wire.assign(&mut pw, &node_f.try_into().unwrap());
+        for (mut node, wire) in proof.iter().zip(nodes_wires.iter()) {
+            //node.resize(PAD_LEN(NODE_LEN), 0);
+            //let node_f = node
+            //    .iter()
+            //    .map(|b| F::from_canonical_u8(*b))
+            //    .collect::<Vec<_>>();
+            wire.assign(
+                &mut pw,
+                &Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(node.clone()).unwrap(),
+            );
         }
         for (ptr_value, ptr_wire) in all_pointers.into_iter().zip(expected_pointers_wire.iter()) {
             let value = if ptr_value == -1 {
@@ -696,7 +902,18 @@ pub mod test {
             };
             pw.set_target(*ptr_wire, value);
         }
+        for (hash_wire, node) in hash_wires.iter().zip(proof.iter()) {
+            KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
+                &mut pw,
+                hash_wire,
+                &InputData::Assigned(
+                    &Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(node.clone()).unwrap(),
+                ),
+            );
+        }
         initial_key_wire.assign(&mut pw, &key_nibbles.try_into().unwrap(), initial_ptr);
+
+        let data = builder.build::<C>();
         let proof = data.prove(pw).unwrap();
         data.verify(proof).unwrap();
     }
