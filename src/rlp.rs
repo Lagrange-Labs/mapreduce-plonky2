@@ -19,7 +19,7 @@ const MAX_ENC_KEY_LEN: usize = 33;
 /// Simply the maximum number of nibbles a key can have.
 pub const MAX_KEY_NIBBLE_LEN: usize = 64;
 
-pub const MAX_ITEMS_IN_LIST: usize = 16;
+pub const MAX_ITEMS_IN_LIST: usize = 17;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RlpHeader {
@@ -452,8 +452,61 @@ mod tests {
         decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, RlpList,
         MAX_ENC_KEY_LEN, MAX_LEN_BYTES,
     };
-    use crate::utils::IntTargetWriter;
+    use crate::utils::{keccak256, IntTargetWriter};
 
+    #[test]
+    fn test_specific_rlp() -> Result<()> {
+        let child = hex::decode("f85180a0d43c798529ffaaa2316f8adaaa27105dd0fb20dc97d250ad784386e0edaa97e1808080a0602346785e1ced15445758e363f43723de0d5e365cb4f483845988113f22f6ea8080808080808080808080").unwrap();
+        let root = hex::decode("f8f180a080a15846e63f90955f3492af55951f272302e08fa4360d13d25ead42ef1f8e1580a0103dad8651d136072de73a52b6c1e81afec60eeadcd971e88cbdd835f58523718080a0c7e63df28028e3906459eb3b7ea253bf7ef278f06b4e1705485cba52a42b33da8080a0a2fe320d0471b6eed27e651ba18be7c1cd36f4530c1931c2e2bfd8beed9044e980a03a613d04fd7bb29df0b0444d58118058d3107c2291c32476511969c85f98953e80a0e9acd2a316add27ea52dd4e844c78f041a89349eff4327e21a0b0f64f4aec234a0b34cd83dc3174901e6cc1a8f43de2866a247b6f769e49710de0b5c501032e50b8080").unwrap();
+        println!("[+] Child hash {}", hex::encode(keccak256(&child)));
+        let root_rlp = rlp::Rlp::new(&root);
+        let root_nb_items = root_rlp.item_count().unwrap();
+        let mut inc_index = root_rlp.payload_info().unwrap().header_len;
+        let exp_offsets = (0..root_nb_items)
+            .map(|nibble| {
+                let sub_rlp = root_rlp.at(nibble).unwrap();
+                let sub_header = sub_rlp.payload_info().unwrap();
+                let sub_index = inc_index + sub_header.header_len;
+                inc_index = sub_index + sub_header.value_len;
+                println!(
+                    "[+] Root nibble {} - index {} - value {}",
+                    nibble,
+                    sub_index,
+                    hex::encode(sub_rlp.data().unwrap())
+                );
+                (nibble, sub_index)
+            })
+            .collect::<Vec<_>>();
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        const N_ITEMS: usize = 17;
+        let config = CircuitConfig::standard_recursion_config();
+        let mut pw = PartialWitness::new();
+        let mut b = CircuitBuilder::<F, D>::new(config);
+        let node_t = b.add_virtual_targets(root.len());
+        let zero = b.zero();
+        let rlp_headers = decode_fixed_list::<_, _, N_ITEMS>(&mut b, &node_t, zero);
+        let exp_nb_items = b.constant(F::from_canonical_usize(N_ITEMS));
+        b.connect(rlp_headers.num_fields, exp_nb_items);
+
+        // check each offsets
+        for (nibble, offset) in exp_offsets {
+            let nibble_t = b.constant(F::from_canonical_usize(nibble));
+            let offset_t = b.constant(F::from_canonical_usize(offset));
+            let header = rlp_headers.select(&mut b, nibble_t);
+            b.connect(header.offset, offset_t);
+            if nibble == 11 {
+                let onefourtwo = b.constant(F::from_canonical_usize(142));
+                b.connect(header.offset, onefourtwo);
+            }
+        }
+        let data = b.build::<C>();
+        pw.set_int_targets(&node_t, &root);
+        let proof = data.prove(pw)?;
+        data.verify(proof)?;
+        Ok(())
+    }
     #[test]
     fn test_custom_rlp_list() -> Result<()> {
         const D: usize = 2;
