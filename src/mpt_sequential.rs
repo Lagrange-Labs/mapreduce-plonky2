@@ -131,8 +131,7 @@ where
         for i in 1..DEPTH {
             // Make sure we are processing only relevant nodes !
             let is_real = should_process[i - 1];
-            b.connect(t.target, is_real.target);
-            //// look if hash is inside the node
+            // look if hash is inside the node
             let (new_key, extracted_child_hash) =
                 Self::advance_key(b, &nodes[i].arr, &iterative_key);
             // transform hash from bytes to u32 targets (since this is the hash output format)
@@ -143,7 +142,6 @@ where
                     arr: extracted_hash_u32.try_into().unwrap(),
                 },
             );
-            //b.connect(found_hash_in_parent.target, t.target);
             // if we don't have to process it, then circuit should never fail at that step
             // otherwise, we should always enforce finding the hash in the parent node
             let is_parent = b.select(is_real, found_hash_in_parent.target, t.target);
@@ -156,7 +154,6 @@ where
             last_hash_output = hash_wires
                 .output_array
                 .select(b, is_real, &last_hash_output);
-            //iterative_key = new_key;
             iterative_key = new_key.select(b, is_real, &iterative_key);
             keccak_wires.push(hash_wires);
         }
@@ -499,9 +496,9 @@ pub mod test {
     fn test_mpt_proof_verification() {
         init_logging();
         // max depth of the trie
-        const DEPTH: usize = 3;
+        const DEPTH: usize = 4;
         // leave one for padding
-        const ACTUAL_DEPTH: usize = DEPTH;
+        const ACTUAL_DEPTH: usize = DEPTH - 1;
         // max len of a node
         const NODE_LEN: usize = 544;
         const VALUE_LEN: usize = 32;
