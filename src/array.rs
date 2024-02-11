@@ -134,11 +134,7 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
     }
 
     /// Assigns each value in the given array to the respective wire in `self`
-    pub fn assign<F: RichField>(
-        &self,
-        pw: &mut PartialWitness<F>,
-        array: &[F; SIZE],
-    ) {
+    pub fn assign<F: RichField>(&self, pw: &mut PartialWitness<F>, array: &[F; SIZE]) {
         #[allow(clippy::needless_range_loop)]
         for i in 0..SIZE {
             pw.set_target(self.arr[i].to_target(), array[i])

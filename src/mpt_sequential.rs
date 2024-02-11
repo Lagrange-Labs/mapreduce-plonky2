@@ -620,7 +620,7 @@ pub mod test {
         }
         assert_eq!(key_nibbles, partial_key);
     }
-    
+
     #[test]
     fn test_extract_any_node() {
         const DEPTH: usize = 4;
