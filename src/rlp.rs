@@ -454,15 +454,12 @@ mod tests {
     };
     use crate::utils::{keccak256, IntTargetWriter};
 
-    #[test]
-    fn test_specific_rlp() -> Result<()> {
-        let child = hex::decode("f85180a0d43c798529ffaaa2316f8adaaa27105dd0fb20dc97d250ad784386e0edaa97e1808080a0602346785e1ced15445758e363f43723de0d5e365cb4f483845988113f22f6ea8080808080808080808080").unwrap();
-        let root = hex::decode("f8f180a080a15846e63f90955f3492af55951f272302e08fa4360d13d25ead42ef1f8e1580a0103dad8651d136072de73a52b6c1e81afec60eeadcd971e88cbdd835f58523718080a0c7e63df28028e3906459eb3b7ea253bf7ef278f06b4e1705485cba52a42b33da8080a0a2fe320d0471b6eed27e651ba18be7c1cd36f4530c1931c2e2bfd8beed9044e980a03a613d04fd7bb29df0b0444d58118058d3107c2291c32476511969c85f98953e80a0e9acd2a316add27ea52dd4e844c78f041a89349eff4327e21a0b0f64f4aec234a0b34cd83dc3174901e6cc1a8f43de2866a247b6f769e49710de0b5c501032e50b8080").unwrap();
-        println!("[+] Child hash {}", hex::encode(keccak256(&child)));
-        let root_rlp = rlp::Rlp::new(&root);
+    fn visit_branch_node(node: &[u8]) -> Vec<(usize, usize)> {
+        println!("[+] Visiting branch node of {} bytes", node.len());
+        let root_rlp = rlp::Rlp::new(node);
         let root_nb_items = root_rlp.item_count().unwrap();
         let mut inc_index = root_rlp.payload_info().unwrap().header_len;
-        let exp_offsets = (0..root_nb_items)
+        (0..root_nb_items)
             .map(|nibble| {
                 let sub_rlp = root_rlp.at(nibble).unwrap();
                 let sub_header = sub_rlp.payload_info().unwrap();
@@ -476,7 +473,16 @@ mod tests {
                 );
                 (nibble, sub_index)
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+    }
+    #[test]
+    fn test_branch_node_rlp_decoding() -> Result<()> {
+        //let child = hex::decode("f85180a0d43c798529ffaaa2316f8adaaa27105dd0fb20dc97d250ad784386e0edaa97e1808080a0602346785e1ced15445758e363f43723de0d5e365cb4f483845988113f22f6ea8080808080808080808080").unwrap();
+        //let root = hex::decode("f8f180a080a15846e63f90955f3492af55951f272302e08fa4360d13d25ead42ef1f8e1580a0103dad8651d136072de73a52b6c1e81afec60eeadcd971e88cbdd835f58523718080a0c7e63df28028e3906459eb3b7ea253bf7ef278f06b4e1705485cba52a42b33da8080a0a2fe320d0471b6eed27e651ba18be7c1cd36f4530c1931c2e2bfd8beed9044e980a03a613d04fd7bb29df0b0444d58118058d3107c2291c32476511969c85f98953e80a0e9acd2a316add27ea52dd4e844c78f041a89349eff4327e21a0b0f64f4aec234a0b34cd83dc3174901e6cc1a8f43de2866a247b6f769e49710de0b5c501032e50b8080").unwrap();
+        let child = hex::decode("f843a02067c48d3958a3b9335247b9a6d430ecfd7ec47d2795b4094f779cda9f6700caa1a0f585f458b52f38dcab96f07d5cc6406dd4e8c8007f0ec9c6af3175e7886d8bc5").unwrap();
+        let root = hex::decode("f851a0afd82fd956b6402e358eb2e18ed40295a4d819a3e473282f257b41d913f70476808080808080808080808080a0c63a5260ddf114504213daf4b15a236fd2d33726768f44e896487326f7c136f6808080").unwrap();
+        println!("[+] Child hash {}", hex::encode(keccak256(&child)));
+        let exp_offsets = visit_branch_node(&root);
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -496,10 +502,6 @@ mod tests {
             let offset_t = b.constant(F::from_canonical_usize(offset));
             let header = rlp_headers.select(&mut b, nibble_t);
             b.connect(header.offset, offset_t);
-            if nibble == 11 {
-                let onefourtwo = b.constant(F::from_canonical_usize(142));
-                b.connect(header.offset, onefourtwo);
-            }
         }
         let data = b.build::<C>();
         pw.set_int_targets(&node_t, &root);
