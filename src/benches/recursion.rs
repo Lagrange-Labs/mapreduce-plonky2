@@ -355,7 +355,7 @@ fn bench_recursion_single_circuit() {
             }
             };
         }
-    let trials = bench_pcd!(1, 2);
+    let trials = bench_pcd!(2);
     run_benchs("bench_recursion_single_circuit.csv".to_string(), trials);
 }
 
