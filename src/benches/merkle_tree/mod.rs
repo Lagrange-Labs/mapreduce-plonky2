@@ -2,12 +2,11 @@
 
 use crate::{
     circuit::{CyclicCircuit, PCDCircuit},
-    digest::{DigestTreeCircuit, MerkleNode, MerkleTree},
+    merkle_tree::{DigestTreeCircuit, MerkleNode, MerkleTree},
 };
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
 mod canonical_hashing;
-mod multiset_hashing;
 
 /// The degree of circuit builder and generic configuration
 const D: usize = 2;

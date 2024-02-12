@@ -1,15 +1,10 @@
 //! Digest tree circuits used to prove Merkle tree nodes recursively.
 
-mod arity;
+mod backup;
 mod merkle_tree;
-mod multiset_hashing;
 
-pub use arity::DigestArityCircuit;
+pub use backup::DigestArityCircuit;
 pub use merkle_tree::{MerkleLeafValue, MerkleNode, MerkleTree};
-pub use multiset_hashing::MultisetHashingCircuit;
-
-/// Extension degree of EcGFp5 curve
-pub const ECGFP5_EXT_DEGREE: usize = 5;
 
 /// The trait of digest tree circuit
 /// With this trait, both the arity circuit and multiset hashing circuit could

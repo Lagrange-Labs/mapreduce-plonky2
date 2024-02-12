@@ -1,6 +1,3 @@
-//! Multiset hashing implemention for digest tree circuit used to prove Merkle
-//! tree nodes recursively.
-
 use super::{DigestTreeCircuit, ECGFP5_EXT_DEGREE as N};
 use crate::{
     circuit::{PCDCircuit, ProofOrDummyTarget, UserCircuit},
@@ -95,36 +92,6 @@ where
     }
 }
 
-impl<F, const D: usize, const ARITY: usize> UserCircuit<F, D>
-    for MultisetHashingCircuit<F, D, ARITY>
-where
-    F: RichField + Extendable<D> + Extendable<N>,
-    QuinticExtension<F>: ToCurvePoint,
-    CircuitBuilder<F, D>: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
-    PartialWitness<F>: PartialWitnessCurve<F>,
-{
-    type Wires = MultisetHashingWires<ARITY>;
-
-    fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-        let is_leaf = b.add_virtual_bool_target_safe();
-        let leaf_input = b.add_virtual_target_arr::<32>();
-        let branch_input = [0; ARITY].map(|_| b.add_virtual_curve_target());
-
-        // Generate the output of curve point for both leaf and branch.
-        let leaf_output = build_leaf(b, &leaf_input);
-        let branch_output = build_branch(b, &branch_input);
-
-        // Select the output according to the flag.
-        let output = b.curve_select(is_leaf, leaf_output, branch_output);
-
-        Self::Wires {
-            is_leaf,
-            leaf_input,
-            branch_input,
-            output,
-        }
-    }
-
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
         pw.set_bool_target(wires.is_leaf, self.is_leaf);
         pw.set_target_arr(&wires.leaf_input, &self.leaf_input);
@@ -163,74 +130,3 @@ where
     }
 }
 
-impl<F, const D: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
-    for MultisetHashingCircuit<F, D, ARITY>
-where
-    F: RichField + Extendable<D> + Extendable<N>,
-    QuinticExtension<F>: ToCurvePoint,
-    CircuitBuilder<F, D>: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
-    PartialWitness<F>: PartialWitnessCurve<F>,
-{
-    fn build_recursive(
-        b: &mut CircuitBuilder<F, D>,
-        _: &[ProofOrDummyTarget<D>; ARITY],
-    ) -> Self::Wires {
-        let wires = <Self as UserCircuit<F, D>>::build(b);
-        b.register_curve_public_input(wires.output);
-
-        // TODO: check the proof public inputs match what is expected.
-
-        wires
-    }
-
-    fn base_inputs(&self) -> Vec<F> {
-        F::rand_vec(Self::num_io())
-    }
-
-    fn num_io() -> usize {
-        // The curve target contains 2 extension targets and 1 bool target.
-        2 * N + 1
-    }
-}
-
-/// Generate the curve point from the inputs of Merkle tree leaf.
-fn build_leaf<F, const D: usize>(b: &mut CircuitBuilder<F, D>, inputs: &[Target]) -> CurveTarget
-where
-    F: RichField + Extendable<D> + Extendable<N>,
-    CircuitBuilder<F, D>: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
-{
-    // Convert the u8 target array to an u32 target array.
-    let inputs: Vec<_> = convert_u8_targets_to_u32(b, &inputs)
-        .into_iter()
-        .map(|u32_target| u32_target.0)
-        .collect();
-
-    // Calculate the Poseidon hash.
-    let hash = b
-        .hash_n_to_m_no_pad::<PoseidonHash>(inputs, N)
-        .try_into()
-        .unwrap();
-
-    // Convert the hash to a curve target.
-    QuinticExtensionTarget(hash).map_to_curve_target(b)
-}
-
-/// Calculate the curve point addition for children of a Merkle tree branch.
-fn build_branch<F, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    inputs: &[CurveTarget],
-) -> CurveTarget
-where
-    F: RichField + Extendable<D> + Extendable<N>,
-    CircuitBuilder<F, D>: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
-{
-    assert!(!inputs.is_empty());
-
-    // The ARITY inputs are set to NEUTRAL point as default, which has no impact
-    // for the addition.
-    inputs
-        .iter()
-        .cloned()
-        .reduce(|acc, point| b.curve_add(acc, point))
-        .unwrap()
-}

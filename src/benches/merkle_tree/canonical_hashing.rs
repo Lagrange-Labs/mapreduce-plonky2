@@ -1,10 +1,10 @@
-//! Digest arity circuit benchmark and test with Merkle tree.
+//! Canonical hashing circuit benchmark and test with Merkle tree.
 
 use super::{prove_all_leaves, prove_branches_recursive, C, D, F};
 use crate::{
     benches::init_logging,
     circuit::{CyclicCircuit, UserCircuit},
-    digest::{DigestArityCircuit, MerkleLeafValue, MerkleNode, MerkleTree},
+    merkle_tree::{DigestArityCircuit, MerkleLeafValue, MerkleNode, MerkleTree},
     utils::read_le_u32,
 };
 use plonky2::{
@@ -27,7 +27,7 @@ type RecursiveCircuit = CyclicCircuit<F, C, D, TestCircuit, ARITY>;
 
 /// Benchmark and test the canonical hashing circuit.
 #[test]
-fn test_digest_arity_circuit() {
+fn test_canonical_hashing_circuit() {
     init_logging();
 
     // Initialize the recursive circuit and testing Merkle tree.

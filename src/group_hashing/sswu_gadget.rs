@@ -2,9 +2,8 @@
 
 use super::{
     utils::{a_sw, b_sw, neg_b_div_a_sw, neg_z_inv_sw, two_thirds, z_sw},
-    ToCurveTarget,
+    ToCurveTarget, ECGFP5_EXT_DEGREE as N,
 };
-use crate::digest::ECGFP5_EXT_DEGREE as N;
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,
     plonk::circuit_builder::CircuitBuilder,
@@ -100,7 +99,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map_to_curve::curve;
+    use crate::group_hashing::sswu_value;
     use anyhow::Result;
     use plonky2::{
         field::{
@@ -147,7 +146,7 @@ mod tests {
         }));
 
         // Calculate the output value.
-        let output_value = curve::simple_swu(input_value);
+        let output_value = sswu_value::simple_swu(input_value);
 
         // Set the value to target for witness.
         let mut pw = PartialWitness::new();
