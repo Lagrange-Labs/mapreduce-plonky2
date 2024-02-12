@@ -86,13 +86,9 @@ where
         let child_len = children.len();
         assert!(child_len > 0 && child_len <= ARITY);
 
-        // Flatten the child hash values.
-        let inputs = array::from_fn(|i| {
-            children
-                .get(i / NUM_HASH_OUT_ELTS)
-                .map(|c| c.elements[i % NUM_HASH_OUT_ELTS])
-                .unwrap_or(F::ZERO)
-        });
+        // Flatten the child hash values and construct inputs.
+        let children: Vec<_> = children.into_iter().flat_map(|c| c.elements).collect();
+        let inputs = array::from_fn(|i| children.get(i).cloned().unwrap_or(F::ZERO));
 
         Self {
             inputs,
