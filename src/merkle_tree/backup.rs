@@ -1,5 +1,4 @@
-//! Arity implemention for digest tree circuit used to prove Merkle tree nodes
-//! recursively.
+//! Backup arity circuit implemention for proving Merkle tree nodes recursively.
 
 use super::DigestTreeCircuit;
 use crate::{

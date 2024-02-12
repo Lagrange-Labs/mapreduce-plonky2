@@ -18,12 +18,12 @@ mod utils;
 /// Extension degree of EcGFp5 curve
 pub(crate) const N: usize = 5;
 
-/// Field to curve point and curve point addition functions
-pub use curve_add::add_curve_points;
+/// Field-to-curve and curve point addition functions
+pub use curve_add::add_multiple_curve_points;
 pub use field_to_curve::field_to_curve_point;
 
-/// Trait for adding field to curve target and curve target addition functions
-/// to circuit builder
+/// Trait for adding field-to-curve and curve point addition functions to
+/// circuit builder
 pub trait CircuitBuilderGroupHashing {
     /// Calculate the curve target addition.
     fn add_multiple_curve_targets(&mut self, targets: &[CurveTarget]) -> CurveTarget;
@@ -38,10 +38,10 @@ where
     Self: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
 {
     fn add_multiple_curve_targets(&mut self, targets: &[CurveTarget]) -> CurveTarget {
-        curve_add::add_curve_targets(self, targets)
+        curve_add::add_multiple_curve_targets(self, targets)
     }
 
     fn field_to_curve_target(&mut self, targets: &[Target]) -> CurveTarget {
-        field_to_curve::field_to_curve_target(self, targets.to_vec())
+        field_to_curve::field_to_curve_target(self, targets)
     }
 }

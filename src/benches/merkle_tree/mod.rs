@@ -1,4 +1,4 @@
-//! Merkle tree recursive tests
+//! This module tests for a Merkle Tree with recursive proofs.
 
 use crate::{
     circuit::{CyclicCircuit, PCDCircuit},

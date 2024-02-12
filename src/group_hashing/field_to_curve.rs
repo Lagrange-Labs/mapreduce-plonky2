@@ -1,4 +1,4 @@
-//! Field to curve point conversion arithmetic and circuit functions
+//! Field-to-curve point conversion arithmetic and circuit functions
 
 use super::N;
 use plonky2::{
@@ -50,9 +50,9 @@ where
 }
 
 /// Convert the field targets to a curve target.
-pub fn field_to_curve_target<F, const D: usize>(
+pub(crate) fn field_to_curve_target<F, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
-    targets: Vec<Target>,
+    targets: &[Target],
 ) -> CurveTarget
 where
     F: RichField + Extendable<D> + Extendable<N>,
@@ -60,7 +60,7 @@ where
 {
     // Calculate the Poseidon hash for inputs.
     let hash = b
-        .hash_n_to_m_no_pad::<PoseidonHash>(targets, N)
+        .hash_n_to_m_no_pad::<PoseidonHash>(targets.to_vec(), N)
         .try_into()
         .unwrap();
 

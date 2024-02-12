@@ -1,4 +1,4 @@
-//! Digest tree circuits used to prove Merkle tree nodes recursively.
+//! Circuits for proving Merkle Tree nodes recursively.
 
 mod backup;
 mod merkle_tree;
