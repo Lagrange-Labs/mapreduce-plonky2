@@ -127,6 +127,11 @@ mod tests {
             .for_each(|(it, iv)| pw.set_target(it, iv));
         pw.set_curve_target(output_target, output_value.to_weierstrass());
 
+        println!(
+            "[+] This test field-to-curve gadget has {} gates",
+            b.num_gates()
+        );
+
         // Prove and verify.
         let data = b.build::<C>();
         let proof = data.prove(pw)?;

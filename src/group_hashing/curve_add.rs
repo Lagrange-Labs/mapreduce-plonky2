@@ -98,6 +98,11 @@ mod tests {
             .for_each(|(it, iv)| pw.set_curve_target(it, iv.to_weierstrass()));
         pw.set_curve_target(output_target, output_value.to_weierstrass());
 
+        println!(
+            "[+] This test curve point addition gadget has {} gates",
+            b.num_gates()
+        );
+
         // Prove and verify.
         let data = b.build::<C>();
         let proof = data.prove(pw)?;
