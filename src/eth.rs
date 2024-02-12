@@ -332,23 +332,6 @@ impl ProofQuery {
         Ok(())
     }
 }
-//impl StorageSlot {
-//    pub fn from_hex(address: &str, slot: usize) -> Result<Self> {
-//        let add = Address::from_str(address)?;
-//        Ok(Self(add, slot))
-//    }
-//    /// key associated with the value at the storage slot
-//    pub fn storage_key(&self) -> Vec<u8> {
-//        let address = left_pad32(self.0.as_bytes());
-//        let slot = left_pad32(&self.1.to_be_bytes());
-//        let input = address.into_iter().chain(slot).collect::<Vec<u8>>();
-//        keccak256(&input)
-//    }
-//    /// Actual key used in the MPT storage trie
-//    pub fn mpt_storage_key(&self) -> Vec<u8> {
-//        keccak256(&self.storage_key())
-//    }
-//}
 
 #[cfg(test)]
 mod test {
