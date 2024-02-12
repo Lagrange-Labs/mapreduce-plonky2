@@ -5,7 +5,7 @@ use super::{DigestTreeCircuit, ECGFP5_EXT_DEGREE as N};
 use crate::{
     circuit::{PCDCircuit, ProofOrDummyTarget, UserCircuit},
     map_to_curve::{ToCurvePoint, ToCurveTarget},
-    utils::{convert_u8_targets_to_u32, convert_u8_values_to_u32, less_than},
+    utils::{convert_u8_targets_to_u32, convert_u8_values_to_u32},
 };
 use plonky2::{
     field::extension::{quintic::QuinticExtension, Extendable, FieldExtension},
@@ -15,7 +15,7 @@ use plonky2::{
         poseidon::{PoseidonHash, PoseidonPermutation},
     },
     iop::{
-        target::Target,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
@@ -40,10 +40,8 @@ type BranchTarget<const ARITY: usize> = [CurveTarget; ARITY];
 /// Multiset hashing circuit wires including input and output targets
 #[derive(Clone, Debug)]
 pub struct MultisetHashingWires<const ARITY: usize> {
-    /// The child number is zero if it's a leaf, otherwise it specifies child
-    /// number of a branch. It's also used to identify if the current node is a
-    /// leaf or branch, since branch has non-empty children.
-    child_num: Target,
+    /// The flag is used to identify if the current node is a leaf or branch.
+    is_leaf: BoolTarget,
     /// Leaf input
     leaf_input: LeafTarget,
     /// Branch input
@@ -56,10 +54,8 @@ pub struct MultisetHashingWires<const ARITY: usize> {
 /// Multiset hashing circuit used to prove Merkle tree recursively
 #[derive(Clone, Debug)]
 pub struct MultisetHashingCircuit<F, const D: usize, const ARITY: usize> {
-    /// The child number is zero if it's a leaf, otherwise it specifies child
-    /// number of a branch. It's also used to identify if the current node is a
-    /// leaf or branch, since branch has non-empty children.
-    child_num: usize,
+    /// The flag is used to identify if the current node is a leaf or branch.
+    is_leaf: bool,
     /// Leaf input
     leaf_input: LeafValue<F>,
     /// Branch input
@@ -77,7 +73,7 @@ where
         let leaf_input = value.map(F::from_canonical_u8);
 
         Self {
-            child_num: 0,
+            is_leaf: true,
             leaf_input,
             branch_input: [Point::NEUTRAL; ARITY],
         }
@@ -86,14 +82,13 @@ where
     /// Create a circuit instance for a branch of Merkle tree.
     fn new_branch(children: Vec<Point>) -> Self {
         // Child number must be greater than 0, and equal to or less than ARITY.
-        let child_num = children.len();
-        assert!((1..=ARITY).contains(&child_num));
+        assert!((1..=ARITY).contains(&children.len()));
 
         // Build branch input.
         let branch_input = array::from_fn(|i| children.get(i).cloned().unwrap_or(Point::NEUTRAL));
 
         Self {
-            child_num,
+            is_leaf: false,
             leaf_input: [F::ZERO; 32],
             branch_input,
         }
@@ -111,21 +106,19 @@ where
     type Wires = MultisetHashingWires<ARITY>;
 
     fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-        let child_num = b.add_virtual_target();
+        let is_leaf = b.add_virtual_bool_target_safe();
         let leaf_input = b.add_virtual_target_arr::<32>();
         let branch_input = [0; ARITY].map(|_| b.add_virtual_curve_target());
 
         // Generate the output of curve point for both leaf and branch.
         let leaf_output = build_leaf(b, &leaf_input);
-        let branch_output = build_branch(b, &branch_input, child_num);
+        let branch_output = build_branch(b, &branch_input);
 
-        // It's a leaf of Merkle tree if the child number is zero.
-        let zero = b.zero();
-        let is_leaf = b.is_equal(child_num, zero);
+        // Select the output according to the flag.
         let output = b.curve_select(is_leaf, leaf_output, branch_output);
 
         Self::Wires {
-            child_num,
+            is_leaf,
             leaf_input,
             branch_input,
             output,
@@ -133,15 +126,15 @@ where
     }
 
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-        pw.set_target(wires.child_num, F::from_canonical_usize(self.child_num));
+        pw.set_bool_target(wires.is_leaf, self.is_leaf);
         pw.set_target_arr(&wires.leaf_input, &self.leaf_input);
         pw.set_curve_targets(
             &wires.branch_input,
             &self.branch_input.map(|point| point.to_weierstrass()),
         );
 
-        // It's a leaf of Merkle tree if the child number is zero.
-        let output = if self.child_num == 0 {
+        // Calculate the output.
+        let output = if self.is_leaf {
             // Convert the values from u8 array to u32.
             let inputs: Vec<_> = convert_u8_values_to_u32(&self.leaf_input);
 
@@ -155,7 +148,7 @@ where
         } else {
             // Calculate the curve point addition for children of branch.
             // <https://github.com/Lagrange-Labs/plonky2-ecgfp5/blob/08feaa03a006923fa721f2f5a26578d13bc25fa6/src/curve/curve.rs#L709>
-            self.branch_input[..self.child_num]
+            self.branch_input
                 .iter()
                 .cloned()
                 .reduce(|acc, p| acc + p)
@@ -222,7 +215,6 @@ where
 fn build_branch<F, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     inputs: &[CurveTarget],
-    valid_len: Target,
 ) -> CurveTarget
 where
     F: RichField + Extendable<D> + Extendable<N>,
@@ -230,22 +222,11 @@ where
 {
     assert!(!inputs.is_empty());
 
+    // The ARITY inputs are set to NEUTRAL point as default, which has no impact
+    // for the addition.
     inputs
         .iter()
         .cloned()
-        .enumerate()
-        .reduce(|acc, (i, p)| {
-            // Check if the point of current index is valid.
-            let offset = b.constant(F::from_canonical_usize(i));
-            let is_valid_point = less_than(b, offset, valid_len, 8);
-
-            // Calculation the addition if it's a valid point.
-            let old_sum = acc.1;
-            let new_sum = b.curve_add(old_sum, p);
-            let sum = b.curve_select(is_valid_point, new_sum, old_sum);
-
-            (i, sum)
-        })
+        .reduce(|acc, point| b.curve_add(acc, point))
         .unwrap()
-        .1
 }
