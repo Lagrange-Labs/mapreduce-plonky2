@@ -60,3 +60,23 @@ pub fn z_sw<F: RichField + Extendable<N>>() -> QuinticExtension<F> {
         F::ZERO,
     ])
 }
+
+pub fn neg_z_inv_sw<F: RichField + Extendable<N>>() -> QuinticExtension<F> {
+    QuinticExtension::<F>::from_basefield_array([
+        F::from_canonical_u64(4795794222525505369),
+        F::from_canonical_u64(3412737461722269738),
+        F::from_canonical_u64(8370187669276724726),
+        F::from_canonical_u64(7130825117388110979),
+        F::from_canonical_u64(12052351772713910496),
+    ])
+}
+
+pub fn neg_b_div_a_sw<F: RichField + Extendable<N>>() -> QuinticExtension<F> {
+    QuinticExtension::<F>::from_basefield_array([
+        F::from_canonical_u64(6585749426319121644),
+        F::from_canonical_u64(16990361517133133838),
+        F::from_canonical_u64(3264760655763595284),
+        F::from_canonical_u64(16784740989273302855),
+        F::from_canonical_u64(13434657726302040770),
+    ])
+}

@@ -1,7 +1,7 @@
 //! Map to curve field arithmetic functions
 
 use super::{
-    utils::{a_sw, b_sw, two_thirds, z_sw},
+    utils::{a_sw, b_sw, neg_b_div_a_sw, neg_z_inv_sw, two_thirds, z_sw},
     ToCurvePoint,
 };
 use plonky2::field::{
@@ -9,7 +9,7 @@ use plonky2::field::{
     types::Field,
 };
 use plonky2_ecgfp5::curve::{
-    base_field::{Sgn0, SquareRoot},
+    base_field::{InverseOrZero, Sgn0, SquareRoot},
     curve::Point,
 };
 
@@ -30,19 +30,26 @@ impl ToCurvePoint for GFp5 {
 /// curve point.
 fn simple_swu(u: GFp5) -> Point {
     // Initialize constants.
-    let [two_thirds, a_sw, b_sw, z_sw] = [a_sw(), b_sw(), z_sw(), two_thirds()];
+    let [two_thirds, a_sw, b_sw, z_sw, neg_z_inv_sw, neg_b_div_a_sw] = [
+        two_thirds(),
+        a_sw(),
+        b_sw(),
+        z_sw(),
+        neg_z_inv_sw(),
+        neg_b_div_a_sw(),
+    ];
 
     // Calculate tv1.
     let denom_part = z_sw * u.square();
     let denom = denom_part.square() + denom_part;
-    let tv1 = denom.inverse();
+    let tv1 = denom.inverse_or_zero();
 
     // Calculate x1.
     let x1 = if tv1.is_zero() {
-        b_sw / (z_sw * a_sw)
+        neg_z_inv_sw
     } else {
-        (-b_sw / a_sw) * (tv1 + GFp5::ONE)
-    };
+        tv1 + GFp5::ONE
+    } * neg_b_div_a_sw;
 
     // Calculate x2.
     let x2 = denom_part * x1;
@@ -67,4 +74,22 @@ fn simple_swu(u: GFp5) -> Point {
 
     // Decode to a curve point.
     Point::decode(y_cand / x_cand).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plonky2::field::extension::FieldExtension;
+    use std::array;
+
+    /// Test simplified SWU method for mapping to curve point.
+    #[test]
+    fn test_simple_swu_for_curve_point() {
+        let field = QuinticExtension::from_basefield_array(array::from_fn::<_, 5, _>(|i| {
+            GoldilocksField(i as u64)
+        }));
+
+        let point = simple_swu(field).to_weierstrass();
+        println!("Curve point from test conversion: {point:?}");
+    }
 }

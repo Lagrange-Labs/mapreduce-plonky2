@@ -1,7 +1,7 @@
 //! Map to curve circuit functions
 
 use super::{
-    utils::{a_sw, b_sw, two_thirds, z_sw},
+    utils::{a_sw, b_sw, neg_b_div_a_sw, neg_z_inv_sw, two_thirds, z_sw},
     ToCurveTarget,
 };
 use crate::digest::ECGFP5_EXT_DEGREE as N;
@@ -40,8 +40,15 @@ where
     // Initialize constants.
     let zero = b.zero_quintic_ext();
     let one = b.one_quintic_ext();
-    let [two_thirds, a_sw, b_sw, z_sw] =
-        [a_sw(), b_sw(), z_sw(), two_thirds()].map(|val| b.constant_quintic_ext(val));
+    let [two_thirds, a_sw, b_sw, z_sw, neg_z_inv_sw, neg_b_div_a_sw] = [
+        two_thirds(),
+        a_sw(),
+        b_sw(),
+        z_sw(),
+        neg_z_inv_sw(),
+        neg_b_div_a_sw(),
+    ]
+    .map(|val| b.constant_quintic_ext(val));
 
     // Calculate tv1.
     let u_square = b.square_quintic_ext(u);
@@ -51,17 +58,10 @@ where
     let tv1 = b.inverse_quintic_ext(denom);
 
     // Calculate x1.
-    // x1_lhs = b_sw / (z_sw * a_sw)
-    let z_sw_mul_a_sw = b.mul_quintic_ext(z_sw, a_sw);
-    let x1_lhs = b.div_quintic_ext(b_sw, z_sw_mul_a_sw);
-    // x1_rhs = (-b_sw / a_sw) * (tv1 + 1)
-    let neg_b_sw = b.neg_quintic_ext(b_sw);
-    let neg_b_sw_div_a_sw = b.div_quintic_ext(neg_b_sw, a_sw);
     let tv1_add_one = b.add_quintic_ext(tv1, one);
-    let x1_rhs = b.mul_quintic_ext(neg_b_sw_div_a_sw, tv1_add_one);
-    // x1 = x1_lhs if tv1 == 0, else x1 = x1_rhs.
     let is_tv1_zero = b.is_equal_quintic_ext(tv1, zero);
-    let x1 = b.select_quintic_ext(is_tv1_zero, x1_lhs, x1_rhs);
+    let x1 = b.select_quintic_ext(is_tv1_zero, neg_z_inv_sw, tv1_add_one);
+    let x1 = b.mul_quintic_ext(x1, neg_b_div_a_sw);
 
     // Calculate x2.
     let x2 = b.mul_quintic_ext(denom_part, x1);
@@ -96,4 +96,61 @@ where
     // Decode to a curve point.
     let y_cand_div_x_cand = b.div_quintic_ext(y_cand, x_cand);
     b.curve_decode_from_quintic_ext(y_cand_div_x_cand)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use plonky2::{
+        field::{
+            extension::{quintic::QuinticExtension, FieldExtension},
+            goldilocks_field::GoldilocksField,
+            types::{Field, Sample},
+        },
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
+    use plonky2_ecgfp5::gadgets::base_field::PartialWitnessQuinticExt;
+    use rand::{thread_rng, Rng};
+    use std::array;
+
+    const ARITY: usize = 16;
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+
+    /// Test simplified SWU method.
+    #[test]
+    fn test_simple_swu_gadget() -> Result<()> {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut b = CircuitBuilder::<F, D>::new(config);
+
+        // Build the input and output targets.
+        let input_target = b.add_virtual_quintic_ext_target();
+        let output_target = simple_swu(&mut b, input_target);
+
+        // Register public inputs.
+        b.register_quintic_ext_public_input(input_target);
+        b.register_curve_public_input(output_target);
+
+        // Generate a random input value.
+        let mut rng = thread_rng();
+        let input_value = QuinticExtension::from_basefield_array(array::from_fn::<_, 5, _>(|_| {
+            GoldilocksField::sample(&mut rng)
+        }));
+
+        // Set the value to target for witness.
+        let mut pw = PartialWitness::new();
+        pw.set_quintic_ext_target(input_target, input_value);
+
+        // Prove and verify.
+        let data = b.build::<C>();
+        let proof = data.prove(pw)?;
+        data.verify(proof)
+    }
 }
