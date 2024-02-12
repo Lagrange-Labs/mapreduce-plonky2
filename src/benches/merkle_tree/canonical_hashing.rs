@@ -1,4 +1,11 @@
-//! Canonical hashing circuit benchmark and test with Merkle tree.
+//! This module implements a Merkle Tree with recursive proofs that handle a
+//! maximum number of children proofs. It is meant as a fallback in case group
+//! hashing does not work as expected. Specifically, this tree allows to prove
+//! it contains the same set of leaves than another MPT tree without requiring
+//! order agnostic canonical hashing. The downside is that it requires the
+//! structure to mimick exactly the same as the MPT one. It still gains on the
+//! avoidance of RLP and keccak, but keeps the extra cost of verifying a maximum
+//! number of proofs.
 
 use super::{prove_all_leaves, prove_branches_recursive, C, D, F};
 use crate::{

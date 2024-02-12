@@ -1,4 +1,4 @@
-//! Digest circuit tests
+//! Merkle tree recursive tests
 
 use crate::{
     circuit::{CyclicCircuit, PCDCircuit},
