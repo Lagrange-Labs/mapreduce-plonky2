@@ -29,7 +29,7 @@ where
 
 /// Simplified SWU mapping function for conversion from an extension target to a
 /// curve target.
-fn simple_swu<F, const D: usize>(
+pub(crate) fn simple_swu<F, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     u: QuinticExtensionTarget,
 ) -> CurveTarget
@@ -86,12 +86,11 @@ where
 
     // Calculate X_cand and Y_cand.
     let x_cand = b.sub_quintic_ext(x_sw, two_thirds);
-    // y_cand = y_pos if y_pos_sgn0 == u_sgn0, else y_cand = -y_pos.
-    let y_pos_sgn0 = b.sgn0_quintic_ext(y_pos);
-    let u_sgn0 = b.sgn0_quintic_ext(u);
-    let y_cand_lhs = b.select_quintic_ext(u_sgn0, y_pos, neg_y_pos);
-    let y_cand_rhs = b.select_quintic_ext(u_sgn0, neg_y_pos, y_pos);
-    let y_cand = b.select_quintic_ext(y_pos_sgn0, y_cand_lhs, y_cand_rhs);
+    // y_cand = y_pos if u_sgn == y_pos_sgn, else y_cand = -y_pos.
+    let u_sgn = b.sgn0_quintic_ext(u);
+    let y_pos_sgn = b.sgn0_quintic_ext(y_pos);
+    let is_sgn_equal = b.is_equal(u_sgn.target, y_pos_sgn.target);
+    let y_cand = b.select_quintic_ext(is_sgn_equal, y_pos, neg_y_pos);
 
     // Decode to a curve point.
     let y_cand_div_x_cand = b.div_quintic_ext(y_cand, x_cand);
@@ -101,6 +100,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map_to_curve::curve;
     use anyhow::Result;
     use plonky2::{
         field::{
@@ -115,7 +115,9 @@ mod tests {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
-    use plonky2_ecgfp5::gadgets::base_field::PartialWitnessQuinticExt;
+    use plonky2_ecgfp5::gadgets::{
+        base_field::PartialWitnessQuinticExt, curve::PartialWitnessCurve,
+    };
     use rand::{thread_rng, Rng};
     use std::array;
 
@@ -144,9 +146,13 @@ mod tests {
             GoldilocksField::sample(&mut rng)
         }));
 
+        // Calculate the output value.
+        let output_value = curve::simple_swu(input_value);
+
         // Set the value to target for witness.
         let mut pw = PartialWitness::new();
         pw.set_quintic_ext_target(input_target, input_value);
+        pw.set_curve_target(output_target, output_value.to_weierstrass());
 
         // Prove and verify.
         let data = b.build::<C>();

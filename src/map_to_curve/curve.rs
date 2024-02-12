@@ -28,7 +28,7 @@ impl ToCurvePoint for GFp5 {
 
 /// Simplified SWU mapping function for conversion from an extension field to a
 /// curve point.
-fn simple_swu(u: GFp5) -> Point {
+pub(crate) fn simple_swu(u: GFp5) -> Point {
     // Initialize constants.
     let [two_thirds, a_sw, b_sw, z_sw, neg_z_inv_sw, neg_b_div_a_sw] = [
         two_thirds(),
@@ -66,7 +66,7 @@ fn simple_swu(u: GFp5) -> Point {
 
     // Calculate X_cand and Y_cand.
     let x_cand = x_sw - two_thirds;
-    let y_cand = if y_pos.sgn0() == u.sgn0() {
+    let y_cand = if u.sgn0() == y_pos.sgn0() {
         y_pos
     } else {
         -y_pos

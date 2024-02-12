@@ -2469,7 +2469,7 @@ dependencies = [
 [[package]]
 name = "plonky2_ecgfp5"
 version = "0.1.0"
-source = "git+https://github.com/Lagrange-Labs/plonky2-ecgfp5#08feaa03a006923fa721f2f5a26578d13bc25fa6"
+source = "git+https://github.com/Lagrange-Labs/plonky2-ecgfp5?branch=bug/sgn0_quintic_ext#fd752ff37eba2d5557f7e8120c2f246753b9a8b4"
 dependencies = [
  "itertools 0.10.5",
  "num",
