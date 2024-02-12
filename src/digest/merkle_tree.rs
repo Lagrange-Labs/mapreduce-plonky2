@@ -94,6 +94,8 @@ where
     }
 
     /// Get the all leaf nodes.
+    /// The return nodes are mutable and could be used to set the proof result
+    /// to the nodes.
     pub fn all_leaves(&mut self) -> Vec<&mut MerkleNode<F, C, D, Output>> {
         match self {
             Self::Branch(children, ..) => {
@@ -105,6 +107,8 @@ where
     }
 
     /// Get branches at the specified level.
+    /// The return nodes are mutable and could be used to set the proof result
+    /// to the nodes.
     pub fn branches_at_level(&mut self, current: u64) -> Vec<&mut MerkleNode<F, C, D, Output>> {
         // Return this branch directly if the current level is zero.
         if current == 0 {

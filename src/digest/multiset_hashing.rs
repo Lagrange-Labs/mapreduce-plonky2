@@ -133,6 +133,7 @@ where
             &self.branch_input.map(|point| point.to_weierstrass()),
         );
 
+        // The output target could be set to check consistency for debugging.
         #[cfg(debug_assertions)]
         {
             // Calculate the output.
