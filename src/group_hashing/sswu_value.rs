@@ -1,8 +1,8 @@
 //! Map to curve field arithmetic functions
 
 use super::{
+    field_to_curve::ToCurvePoint,
     utils::{a_sw, b_sw, neg_b_div_a_sw, neg_z_inv_sw, two_thirds, z_sw},
-    ToCurvePoint,
 };
 use plonky2::field::{
     extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField, ops::Square,

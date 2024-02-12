@@ -1,8 +1,9 @@
 //! Map to curve circuit functions
 
 use super::{
+    field_to_curve::ToCurveTarget,
     utils::{a_sw, b_sw, neg_b_div_a_sw, neg_z_inv_sw, two_thirds, z_sw},
-    ToCurveTarget, ECGFP5_EXT_DEGREE as N,
+    N,
 };
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,

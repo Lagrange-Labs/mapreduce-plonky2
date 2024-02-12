@@ -1,5 +1,14 @@
 //! Group hashing arithmetic and circuit functions
 
+use plonky2::{
+    field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
+    plonk::circuit_builder::CircuitBuilder,
+};
+use plonky2_ecgfp5::gadgets::{
+    base_field::CircuitBuilderGFp5,
+    curve::{CircuitBuilderEcGFp5, CurveTarget},
+};
+
 mod curve_add;
 mod field_to_curve;
 mod sswu_gadget;
@@ -7,9 +16,32 @@ mod sswu_value;
 mod utils;
 
 /// Extension degree of EcGFp5 curve
-pub const ECGFP5_EXT_DEGREE: usize = 5;
+pub(crate) const N: usize = 5;
 
-pub use curve_add::{add_curve_points, add_curve_targets};
-pub use field_to_curve::{
-    field_to_curve_point, field_to_curve_target, ToCurvePoint, ToCurveTarget,
-};
+/// Field to curve point and curve point addition functions
+pub use curve_add::add_curve_points;
+pub use field_to_curve::field_to_curve_point;
+
+/// Trait for adding field to curve target and curve target addition functions
+/// to circuit builder
+pub trait CircuitBuilderGroupHashing {
+    /// Calculate the curve target addition.
+    fn add_multiple_curve_targets(&mut self, targets: &[CurveTarget]) -> CurveTarget;
+
+    /// Convert the field targets to a curve target.
+    fn field_to_curve_target(&mut self, targets: &[Target]) -> CurveTarget;
+}
+
+impl<F, const D: usize> CircuitBuilderGroupHashing for CircuitBuilder<F, D>
+where
+    F: RichField + Extendable<D> + Extendable<N>,
+    Self: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
+{
+    fn add_multiple_curve_targets(&mut self, targets: &[CurveTarget]) -> CurveTarget {
+        curve_add::add_curve_targets(self, targets)
+    }
+
+    fn field_to_curve_target(&mut self, targets: &[Target]) -> CurveTarget {
+        field_to_curve::field_to_curve_target(self, targets.to_vec())
+    }
+}

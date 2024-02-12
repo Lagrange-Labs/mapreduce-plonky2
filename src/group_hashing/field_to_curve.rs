@@ -1,6 +1,6 @@
 //! Field to curve point conversion arithmetic and circuit functions
 
-use super::ECGFP5_EXT_DEGREE as N;
+use super::N;
 use plonky2::{
     field::extension::{quintic::QuinticExtension, Extendable, FieldExtension},
     hash::{
@@ -71,6 +71,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::group_hashing::CircuitBuilderGroupHashing;
     use anyhow::Result;
     use plonky2::{
         field::{
@@ -104,7 +105,7 @@ mod tests {
 
         // Build the input and output targets.
         let input_targets = [0; ARITY].map(|_| b.add_virtual_target());
-        let output_target = field_to_curve_target(&mut b, input_targets.to_vec());
+        let output_target = b.field_to_curve_target(&input_targets);
 
         // Register public inputs.
         b.register_public_inputs(&input_targets);

@@ -1,6 +1,6 @@
 //! Curve point addition arithmetic and circuit functions
 
-use super::ECGFP5_EXT_DEGREE as N;
+use super::N;
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,
     plonk::circuit_builder::CircuitBuilder,
@@ -41,6 +41,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::group_hashing::CircuitBuilderGroupHashing;
     use anyhow::Result;
     use plonky2::{
         field::{
@@ -74,7 +75,7 @@ mod tests {
 
         // Build the input and output targets.
         let input_targets = [0; ARITY].map(|_| b.add_virtual_curve_target());
-        let output_target = add_curve_targets(&mut b, &input_targets);
+        let output_target = b.add_multiple_curve_targets(&input_targets);
 
         // Register public inputs.
         input_targets
