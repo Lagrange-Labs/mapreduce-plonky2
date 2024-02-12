@@ -133,29 +133,32 @@ where
             &self.branch_input.map(|point| point.to_weierstrass()),
         );
 
-        // Calculate the output.
-        let output = if self.is_leaf {
-            // Convert the values from u8 array to u32.
-            let inputs: Vec<_> = convert_u8_values_to_u32(&self.leaf_input);
+        #[cfg(debug_assertions)]
+        {
+            // Calculate the output.
+            let output = if self.is_leaf {
+                // Convert the values from u8 array to u32.
+                let inputs: Vec<_> = convert_u8_values_to_u32(&self.leaf_input);
 
-            // Calculate the Poseidon hash and output N values of base field.
-            let hash: [F; N] = hash_n_to_m_no_pad::<F, PoseidonPermutation<F>>(&inputs, N)
-                .try_into()
-                .unwrap();
+                // Calculate the Poseidon hash and output N values of base field.
+                let hash: [F; N] = hash_n_to_m_no_pad::<F, PoseidonPermutation<F>>(&inputs, N)
+                    .try_into()
+                    .unwrap();
 
-            // Convert the hash to a curve point.
-            QuinticExtension::from_basefield_array(hash).map_to_curve_point()
-        } else {
-            // Calculate the curve point addition for children of branch.
-            // <https://github.com/Lagrange-Labs/plonky2-ecgfp5/blob/08feaa03a006923fa721f2f5a26578d13bc25fa6/src/curve/curve.rs#L709>
-            self.branch_input
-                .iter()
-                .cloned()
-                .reduce(|acc, p| acc + p)
-                .unwrap()
-        };
+                // Convert the hash to a curve point.
+                QuinticExtension::from_basefield_array(hash).map_to_curve_point()
+            } else {
+                // Calculate the curve point addition for children of branch.
+                // <https://github.com/Lagrange-Labs/plonky2-ecgfp5/blob/08feaa03a006923fa721f2f5a26578d13bc25fa6/src/curve/curve.rs#L709>
+                self.branch_input
+                    .iter()
+                    .cloned()
+                    .reduce(|acc, p| acc + p)
+                    .unwrap()
+            };
 
-        pw.set_curve_target(wires.output, output.to_weierstrass());
+            pw.set_curve_target(wires.output, output.to_weierstrass());
+        }
     }
 }
 
