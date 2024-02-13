@@ -268,6 +268,11 @@ pub(crate) fn decode_tuple<F: RichField + Extendable<D>, const D: usize>(
     decode_fixed_list::<F, D, 2>(b, data, data_offset)
 }
 
+/// Decodes the header of the list, and then decodes the first N items of the list.
+/// The offsets decoded in the returned list are starting from the 0-index of `data`
+/// not from the `offset` index.
+/// If N is less than the actual number of items, then the number of fields will be N.
+/// Otherwise, the number of fields returned is determined by the header the RLP list.
 pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
@@ -312,56 +317,6 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
         // move offset to the next field in the list
         offset = b.mul(before_the_end.target, new_offset);
         num_fields = b.add(num_fields, before_the_end.target);
-    }
-
-    RlpList {
-        offset: Array { arr: dec_off },
-        len: Array { arr: dec_len },
-        data_type: Array { arr: dec_type },
-        num_fields,
-    }
-}
-/// Decodes the header of the list, and then decodes the first N items of the list.
-/// The offsets decoded in the returned list are starting from the 0-index of `data`
-/// not from the `offset` index.
-/// If N is less than the actual number of items, then the number of fields will be N.
-/// Otherwise, the number of fields returned is determined by the header the RLP list.
-pub fn decode_fixed_list3<F: RichField + Extendable<D>, const D: usize, const N: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    data: &[Target],
-    data_offset: Target,
-) -> RlpList<N> {
-    let zero = b.zero();
-
-    let mut num_fields = zero;
-    let mut dec_off = [zero; N];
-    let mut dec_len = [zero; N];
-    let mut dec_type = [zero; N];
-
-    let list_header = decode_header(b, data, data_offset);
-    let mut offset = list_header.offset;
-    // end_idx starts at `data_offset` and  includes the
-    // header byte + potential len_len bytes + payload len
-    let end_idx = b.add(list_header.offset, list_header.len);
-    // decode each headers of each items ofthe list
-    // remember in a list each item of the list is RLP encoded
-    for i in 0..N {
-        // stop when you've looked at exactly the same number of  bytes than
-        // the RLP list header indicates
-        let mut loop_p = b.is_equal(offset, end_idx);
-        loop_p = b.not(loop_p);
-
-        // read the header starting from the offset
-        let header = decode_header(b, data, offset);
-        let new_offset = b.add(header.offset, header.len);
-
-        dec_off[i] = header.offset;
-        dec_len[i] = header.len;
-        dec_type[i] = header.data_type;
-
-        // move offset to the next field in the list
-        offset = b.mul(loop_p.target, new_offset);
-        num_fields = b.add(num_fields, loop_p.target);
     }
 
     RlpList {
@@ -510,139 +465,21 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        const N: usize = 16;
         let (mut trie, key) = generate_random_storage_mpt::<4, 32>();
         let mut proof = trie.get_proof(&key).unwrap();
         proof.reverse();
         let encoded_leaf = proof.first().unwrap();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(encoded_leaf);
         assert!(leaf_list.len() == 2);
-        let p = rlp::Rlp::new(encoded_leaf);
-        let header = p.payload_info().unwrap();
-        let key_header = p.at(0).unwrap();
-        let leaf_header = p.at(1).unwrap();
-        let value_headers = [
-            key_header.payload_info().unwrap(),
-            leaf_header.payload_info().unwrap(),
-        ];
         let config = CircuitConfig::standard_recursion_config();
         let mut pw = PartialWitness::new();
         let mut b = CircuitBuilder::<F, D>::new(config);
         let rlp_targets = b.add_virtual_targets(encoded_leaf.len());
         let zero = b.zero();
-        let one = b.one();
         let two = b.two();
 
         let decoded_headers = decode_fixed_list::<_, _, 4>(&mut b, &rlp_targets, zero);
         b.connect(decoded_headers.num_fields, two);
-        //let mut num_fields = zero;
-        //let mut dec_off = [zero; N];
-        //let mut dec_len = [zero; N];
-        //let mut dec_type = [zero; N];
-
-        //let list_header = decode_header(&mut b, &rlp_targets, zero);
-        //////// LIST HEADER
-        //let exp_header_offset = b.constant(F::from_canonical_usize(header.header_len));
-        //let exp_header_len = b.constant(F::from_canonical_usize(header.value_len));
-        //b.connect(list_header.offset, exp_header_offset);
-        //b.connect(list_header.len, exp_header_len);
-        //let end_idx = b.add(list_header.offset, list_header.len);
-        //let mut offset = list_header.offset;
-        /////
-        ///// if loop_p { stop_counting = true }
-        ///// ...
-        ///// let cond = !loop_p && stop_counting
-        ///// num_fields = b.add(num_fields, !loop_p && stop_counting )
-        //let stop_counting = b._false();
-        ///////
-        ////// KEY HEADER
-        /////
-        //let mut loop_p = b.is_equal(offset, end_idx);
-        //loop_p = b.not(loop_p);
-        //let header = decode_header(&mut b, &rlp_targets, offset);
-        //let new_offset = b.add(header.offset, header.len);
-        //dec_off[0] = header.offset;
-        //dec_len[0] = header.len;
-        //dec_type[0] = header.data_type;
-        //offset = b.mul(loop_p.target, new_offset);
-        //num_fields = b.add(num_fields, loop_p.target);
-        //////
-        ////// LEAF
-        //////
-        //let mut loop_p = b.is_equal(offset, end_idx);
-        //loop_p = b.not(loop_p);
-        //let header = decode_header(&mut b, &rlp_targets, offset);
-        //let new_offset = b.add(header.offset, header.len);
-
-        //dec_off[1] = header.offset;
-        //dec_len[1] = header.len;
-        //dec_type[1] = header.data_type;
-        //offset = b.mul(loop_p.target, new_offset);
-        //num_fields = b.add(num_fields, loop_p.target);
-        ///////
-        ////// INVALID HEADER
-        //////
-        //let mut loop_p = b.is_equal(offset, end_idx);
-        //loop_p = b.not(loop_p);
-        //let header = decode_header(&mut b, &rlp_targets, offset);
-        //let new_offset = b.add(header.offset, header.len);
-        //dec_off[2] = header.offset;
-        //dec_len[2] = header.len;
-        //dec_type[2] = header.data_type;
-        //offset = b.mul(loop_p.target, new_offset);
-        //num_fields = b.add(num_fields, loop_p.target);
-
-        //b.connect(num_fields, two);
-        ///////
-        //////// INVALID HEADER2
-        //////
-        //let mut loop_p = b.is_equal(offset, end_idx);
-        //loop_p = b.not(loop_p);
-        //let header = decode_header(&mut b, &rlp_targets, offset);
-        //let new_offset = b.add(header.offset, header.len);
-        //dec_off[3] = header.offset;
-        //dec_len[3] = header.len;
-        //dec_type[3] = header.data_type;
-        //offset = b.mul(loop_p.target, new_offset);
-        //num_fields = b.add(num_fields, loop_p.target);
-        ////b.connect(num_fields, two);
-        ////// decode each headers of each items ofthe list
-        ////// remember in a list each item of the list is RLP encoded
-        ////for i in 0..N {
-        ////    // stop when you've looked at exactly the same number of  bytes than
-        ////    // the RLP list header indicates
-        ////    let mut loop_p = b.is_equal(offset, end_idx);
-        ////    loop_p = b.not(loop_p);
-
-        ////    // read the header starting from the offset
-        ////    let header = decode_header(&mut b, &rlp_targets, offset);
-        ////    let new_offset = b.add(header.offset, header.len);
-
-        ////    dec_off[i] = header.offset;
-        ////    dec_len[i] = header.len;
-        ////    dec_type[i] = header.data_type;
-
-        ////    ////
-        ////    if i == 0 {
-        ////
-        ////    }
-        ////    ////
-        ////    // move offset to the next field in the list
-        ////    offset = b.mul(loop_p.target, new_offset);
-        ////    num_fields = b.add(num_fields, loop_p.target);
-        ////}
-
-        ////let list = RlpList {
-        ////    offset: Array { arr: dec_off },
-        ////    len: Array { arr: dec_len },
-        ////    data_type: Array { arr: dec_type },
-        ////    num_fields,
-        ////};
-
-        ////let exp_end_idx = b.constant(F::from_canonical_usize(encoded_leaf.len()));
-        ////b.connect(exp_end_idx, end_idx);
-        ////let exp_len = b.constant(F::from_canonical_usize(2));
-        ////b.connect(list.num_fields, exp_len);
         let data = b.build::<C>();
         pw.set_int_targets(&rlp_targets, encoded_leaf);
         let proof = data.prove(pw)?;
