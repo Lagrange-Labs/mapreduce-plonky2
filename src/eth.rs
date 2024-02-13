@@ -259,10 +259,11 @@ pub(crate) enum StorageSlot {
     Mapping(Vec<u8>, usize),
 }
 impl StorageSlot {
-    pub fn api_key(&self) -> H256 {
+    pub fn location(&self) -> H256 {
         match self {
-            StorageSlot::Simple(slot) => H256::from_low_u64_be(0),
+            StorageSlot::Simple(slot) => H256::from_low_u64_be(*slot as u64),
             StorageSlot::Mapping(mapping_key, mapping_slot) => {
+                // H( pad32(address), pad32(mapping_slot))
                 let padded_mkey = left_pad32(mapping_key);
                 let padded_slot = left_pad32(&[*mapping_slot as u8]);
                 let concat = padded_mkey
@@ -274,7 +275,7 @@ impl StorageSlot {
         }
     }
     pub fn mpt_key(&self) -> Vec<u8> {
-        keccak256(&self.api_key().to_fixed_bytes())
+        keccak256(&self.location().to_fixed_bytes())
     }
 }
 impl ProofQuery {
@@ -297,7 +298,7 @@ impl ProofQuery {
         let res = provider
             .get_proof(
                 self.contract,
-                vec![self.slot.api_key()],
+                vec![self.slot.location()],
                 Some(BlockNumber::Latest.into()),
             )
             .await?;
@@ -346,6 +347,8 @@ mod test {
     #[tokio::test]
     async fn test_kashish_contract() -> Result<()> {
         // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
+        // uint256 public n_registered; // storage slot 0
+        // mapping(address => uint256) public holders; // storage slot 1
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
