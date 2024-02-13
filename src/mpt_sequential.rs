@@ -2,14 +2,13 @@ use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     rlp::{
-        decode_compact_encoding, decode_fixed_list, decode_header, decode_tuple, extract_array,
-        RlpList, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN,
+        decode_compact_encoding, decode_fixed_list, decode_header, RlpList, MAX_ITEMS_IN_LIST,
+        MAX_KEY_NIBBLE_LEN,
     },
     utils::{convert_u8_targets_to_u32, find_index_subvector, keccak256, less_than},
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
-use ethers::providers::bytes_32ify;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -53,6 +52,37 @@ struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
     /// whose length == MAX_KEY_NIBBLE_LEN
     key: [u8; MAX_KEY_NIBBLE_LEN / 2],
 }
+struct InputWires<const DEPTH: usize, const NODE_LEN: usize>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+    [(); DEPTH - 1]:,
+{
+    key: MPTKeyWire,
+    /// a vector of buffers whose size is the padded size of the maximum node length
+    /// the padding may occur anywhere in the array but it can fit the maximum node size
+    /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
+    /// way to define everything according to max size of the data and
+    /// "not care" about the padding size (almost!)
+    nodes: [VectorWire<{ PAD_LEN(NODE_LEN) }>; DEPTH],
+    /// in the case of a fixed circuit, the actual tree depth might be smaller.
+    /// In this case, we set false on the part of the path we should not process.
+    /// NOTE: for node at index i in the path, the boolean indicating if we should
+    /// process it is at index i-1
+    should_process: [BoolTarget; DEPTH - 1],
+}
+struct OutputWires<const DEPTH: usize, const NODE_LEN: usize>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+    [(); DEPTH - 1]:,
+{
+    /// We need to keep around the hashes wires because keccak needs to assign
+    /// some additional wires for each input (see keccak circuit for more info.).
+    keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; DEPTH],
+    /// The leaf value wires. It is provably extracted from the leaf node.
+    leaf: Array<Target, MAX_LEAF_VALUE>,
+    /// The root hash value wire.
+    root: OutputHash,
+}
 
 struct Wires<const DEPTH: usize, const NODE_LEN: usize>
 where
@@ -88,18 +118,13 @@ where
     pub fn new(key: [u8; MAX_KEY_NIBBLE_LEN / 2], proof: Vec<Vec<u8>>) -> Self {
         Self { nodes: proof, key }
     }
-    /// Build the sequential hashing of nodes. It returns the wires that contains
-    /// the root hash (according to the "should_process" array) and the wires
-    /// to assign during proving time, including each of the nodes in the path.
-    pub fn build<F, const D: usize>(
+
+    pub fn create_input_wires<F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-    ) -> (OutputHash, Wires<DEPTH, NODE_LEN>)
+    ) -> InputWires<DEPTH, NODE_LEN>
     where
         F: RichField + Extendable<D>,
     {
-        let zero = b.zero();
-        let one = b.one();
-        let t = b._true();
         // full key is expected to be given by verifier (done in UserCircuit impl)
         // initial key has the pointer that is set at the maximum length - 1 (it's an index, so 0-based)
         let full_key = MPTKeyWire {
@@ -111,15 +136,38 @@ where
         // nodes should be ordered from leaf to root and padded at the end
         let nodes: [VectorWire<_>; DEPTH] =
             create_array(|_| VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(b));
+        InputWires {
+            key: full_key,
+            nodes,
+            should_process,
+        }
+    }
+    /// Build the sequential hashing of nodes. It returns the wires that contains
+    /// the root hash (according to the "should_process" array) and the wires
+    /// to assign during proving time, including each of the nodes in the path.
+    pub fn verify_mpt_proof<F, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        inputs: &InputWires<DEPTH, NODE_LEN>,
+    ) -> OutputWires<DEPTH, NODE_LEN>
+    where
+        F: RichField + Extendable<D>,
+    {
+        let zero = b.zero();
+        let t = b._true();
         // ---- LEAF part ---
         // 1. Hash the leaf
         // 2. Extract the value and the portion of the key of this node. Get the "updated partial key".
         // 3. Make sure it's a leaf
-        let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]);
+        let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &inputs.nodes[0]);
         // small optimization here as we only need to decode two items for a leaf, since we know it's a leaf
-        let leaf_headers = decode_fixed_list::<_, _, NB_ITEMS_LEAF>(b, &nodes[0].arr.arr, zero);
-        let (mut iterative_key, leaf_value, is_leaf) =
-            Self::advance_key_leaf_or_extension(b, &nodes[0].arr, &full_key, &leaf_headers);
+        let leaf_headers =
+            decode_fixed_list::<_, _, NB_ITEMS_LEAF>(b, &inputs.nodes[0].arr.arr, zero);
+        let (mut iterative_key, leaf_value, is_leaf) = Self::advance_key_leaf_or_extension(
+            b,
+            &inputs.nodes[0].arr,
+            &inputs.key,
+            &leaf_headers,
+        );
         b.connect(t.target, is_leaf.target);
         let mut last_hash_output = leaf_hash.output_array.clone();
         let mut keccak_wires = vec![leaf_hash];
@@ -130,10 +178,10 @@ where
         // 4. Hash the node and iterate
         for i in 1..DEPTH {
             // Make sure we are processing only relevant nodes !
-            let is_real = should_process[i - 1];
+            let is_real = inputs.should_process[i - 1];
             // look if hash is inside the node
             let (new_key, extracted_child_hash) =
-                Self::advance_key(b, &nodes[i].arr, &iterative_key);
+                Self::advance_key(b, &inputs.nodes[i].arr, &iterative_key);
             // transform hash from bytes to u32 targets (since this is the hash output format)
             let extracted_hash_u32 = convert_u8_targets_to_u32(b, &extracted_child_hash.arr);
             let found_hash_in_parent = last_hash_output.equals(
@@ -148,7 +196,8 @@ where
             b.connect(is_parent, t.target);
 
             // hash the next node first
-            let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
+            let hash_wires =
+                KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &inputs.nodes[i]);
             // and select whether we should update or not
             //last_hash_output = hash_wires.output_array.clone();
             last_hash_output = hash_wires
@@ -160,25 +209,21 @@ where
         let mone = b.constant(F::NEG_ONE);
         b.connect(iterative_key.pointer, mone);
 
-        (
-            last_hash_output,
-            Wires {
-                key: full_key,
-                keccak_wires: keccak_wires.try_into().unwrap(),
-                nodes,
-                should_process,
-                leaf: leaf_value,
-            },
-        )
+        OutputWires {
+            keccak_wires: keccak_wires.try_into().unwrap(),
+            leaf: leaf_value,
+            root: last_hash_output,
+        }
     }
 
-    /// Assign the nodes to the wires, assign which nodes in the full length array
-    /// should we look at (i.e. padding), and the indices where to find the children
-    /// hash in the parent hashes.
-    fn assign<F: RichField + Extendable<D>, const D: usize>(
+    /// Assign the nodes to the wires. The reason we have the output wires
+    /// as well is due to the keccak circuit that requires some special assignement
+    /// from the raw vectors.
+    fn assign_wires<F: RichField + Extendable<D>, const D: usize>(
         &self,
         p: &mut PartialWitness<F>,
-        wires: &Wires<DEPTH, NODE_LEN>,
+        inputs: &InputWires<DEPTH, NODE_LEN>,
+        outputs: &OutputWires<DEPTH, NODE_LEN>,
     ) -> Result<()> {
         let pad_len = DEPTH - self.nodes.len();
         // convert nodes to array and pad with empty array if needed
@@ -188,11 +233,11 @@ where
             .map(|n| Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(n.clone()))
             .chain((0..pad_len).map(|_| Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(vec![])))
             .collect::<Result<Vec<_>>>()?;
-        for (i, (wire, node)) in wires.nodes.iter().zip(padded_nodes.iter()).enumerate() {
+        for (i, (wire, node)) in inputs.nodes.iter().zip(padded_nodes.iter()).enumerate() {
             wire.assign(p, node);
             KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
                 p,
-                &wires.keccak_wires[i],
+                &outputs.keccak_wires[i],
                 // Given we already assign the input data elsewhere, we notify to keccak circuit
                 // that it doesn't need to assign it again, just its add. wires.
                 // TODO: this might be doable via a generator implementation with Plonky2...?
@@ -204,17 +249,17 @@ where
         for i in 1..DEPTH {
             if i < self.nodes.len() {
                 // we always process the leaf so we start at index 0 for parent of leaf
-                p.set_bool_target(wires.should_process[i - 1], true);
+                p.set_bool_target(inputs.should_process[i - 1], true);
                 let child_hash = keccak256(&self.nodes[i - 1]);
                 let idx = find_index_subvector(&self.nodes[i], &child_hash)
                     .ok_or(anyhow!("can't find hash in parent node!"))?;
             } else {
                 println!("[-----] setting is_real[{}] = false", i - 1);
-                p.set_bool_target(wires.should_process[i - 1], false);
+                p.set_bool_target(inputs.should_process[i - 1], false);
             }
         }
         let full_key_nibbles = bytes_to_nibbles(&self.key);
-        wires.key.key.assign(
+        inputs.key.key.assign(
             p,
             &create_array(|i| F::from_canonical_u8(full_key_nibbles[i])),
         );
@@ -449,7 +494,7 @@ pub mod test {
         utils::{find_index_subvector, keccak256},
     };
 
-    use super::{Circuit, Wires, PAD_LEN};
+    use super::{Circuit, InputWires, OutputWires, Wires, PAD_LEN};
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
@@ -468,24 +513,28 @@ pub mod test {
         [(); PAD_LEN(NODE_LEN) / 4]:,
         [(); HASH_LEN / 4]:,
     {
-        type Wires = (OutputHash, Wires<DEPTH, NODE_LEN>, Array<Target, HASH_LEN>);
+        type Wires = (
+            InputWires<DEPTH, NODE_LEN>,
+            OutputWires<DEPTH, NODE_LEN>,
+            Array<Target, HASH_LEN>,
+        );
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let leaf = VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(c);
             let expected_root = Array::<Target, HASH_LEN>::new(c);
             let packed_exp_root = convert_u8_targets_to_u32(c, &expected_root.arr);
             let arr = Array::<U32Target, PACKED_HASH_LEN>::from_array(
                 packed_exp_root.try_into().unwrap(),
             );
-            let (root, mpt_wires) = Circuit::build(c);
-            let is_equal = root.equals(c, &arr);
+            let input_wires = Circuit::create_input_wires(c);
+            let output_wires = Circuit::verify_mpt_proof(c, &input_wires);
+            let is_equal = output_wires.root.equals(c, &arr);
             let tt = c._true();
             c.connect(is_equal.target, tt.target);
-            (root, mpt_wires, expected_root)
+            (input_wires, output_wires, expected_root)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.c.assign(pw, &wires.1).unwrap();
+            self.c.assign_wires(pw, &wires.0, &wires.1).unwrap();
             wires.2.assign(
                 pw,
                 &create_array(|i| F::from_canonical_u8(self.exp_root[i])),
@@ -578,7 +627,7 @@ pub mod test {
                 let branch_idx = node_list
                     .iter()
                     .enumerate()
-                    .find(|(_, h)| *h == &child_hash)
+                    .find(|(_, h)| *h == child_hash)
                     .map(|(i, _)| i)
                     .expect("didn't find hash in parent") as u8;
                 println!(
