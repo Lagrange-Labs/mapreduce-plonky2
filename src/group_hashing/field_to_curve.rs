@@ -35,7 +35,7 @@ where
 }
 
 /// Convert the field values to a curve points.
-pub fn field_to_curve_point<F>(values: &[F]) -> Point
+pub fn map_to_curve_point<F>(values: &[F]) -> Point
 where
     F: RichField + Extendable<N>,
     QuinticExtension<F>: ToCurvePoint,
@@ -50,7 +50,7 @@ where
 }
 
 /// Convert the field targets to a curve target.
-pub(crate) fn field_to_curve_target<F, const D: usize>(
+pub(crate) fn map_to_curve_target<F, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     targets: &[Target],
 ) -> CurveTarget
@@ -105,7 +105,7 @@ mod tests {
 
         // Build the input and output targets.
         let input_targets = [0; ARITY].map(|_| b.add_virtual_target());
-        let output_target = b.field_to_curve_target(&input_targets);
+        let output_target = b.map_to_curve_point(&input_targets);
 
         // Register public inputs.
         b.register_public_inputs(&input_targets);
@@ -117,7 +117,7 @@ mod tests {
             .map(F::from_canonical_u64);
 
         // Calculate the output curve point.
-        let output_value = field_to_curve_point(&input_values);
+        let output_value = map_to_curve_point(&input_values);
 
         // Set the value to target for witness.
         let mut pw = PartialWitness::new();

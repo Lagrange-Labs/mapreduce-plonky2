@@ -14,14 +14,14 @@ use plonky2_ecgfp5::{
 };
 
 /// Calculate the curve point addition.
-pub fn add_multiple_curve_points(inputs: &[Point]) -> Point {
+pub fn add_curve_point(inputs: &[Point]) -> Point {
     assert!(!inputs.is_empty());
 
     inputs.iter().cloned().reduce(|acc, p| acc + p).unwrap()
 }
 
 /// Calculate the curve target addition.
-pub(crate) fn add_multiple_curve_targets<F, const D: usize>(
+pub(crate) fn add_curve_target<F, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     inputs: &[CurveTarget],
 ) -> CurveTarget
@@ -75,7 +75,7 @@ mod tests {
 
         // Build the input and output targets.
         let input_targets = [0; ARITY].map(|_| b.add_virtual_curve_target());
-        let output_target = b.add_multiple_curve_targets(&input_targets);
+        let output_target = b.add_curve_point(&input_targets);
 
         // Register public inputs.
         input_targets
@@ -88,7 +88,7 @@ mod tests {
         let input_values = [0; ARITY].map(|_| Point::sample(&mut rng));
 
         // Calculate the output curve point.
-        let output_value = add_multiple_curve_points(&input_values);
+        let output_value = add_curve_point(&input_values);
 
         // Set the value to target for witness.
         let mut pw = PartialWitness::new();

@@ -19,17 +19,17 @@ mod utils;
 pub(crate) const N: usize = 5;
 
 /// Field-to-curve and curve point addition functions
-pub use curve_add::add_multiple_curve_points;
-pub use field_to_curve::field_to_curve_point;
+pub use curve_add::add_curve_point;
+pub use field_to_curve::map_to_curve_point;
 
 /// Trait for adding field-to-curve and curve point addition functions to
 /// circuit builder
 pub trait CircuitBuilderGroupHashing {
     /// Calculate the curve target addition.
-    fn add_multiple_curve_targets(&mut self, targets: &[CurveTarget]) -> CurveTarget;
+    fn add_curve_point(&mut self, targets: &[CurveTarget]) -> CurveTarget;
 
     /// Convert the field targets to a curve target.
-    fn field_to_curve_target(&mut self, targets: &[Target]) -> CurveTarget;
+    fn map_to_curve_point(&mut self, targets: &[Target]) -> CurveTarget;
 }
 
 impl<F, const D: usize> CircuitBuilderGroupHashing for CircuitBuilder<F, D>
@@ -37,11 +37,11 @@ where
     F: RichField + Extendable<D> + Extendable<N>,
     Self: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
 {
-    fn add_multiple_curve_targets(&mut self, targets: &[CurveTarget]) -> CurveTarget {
-        curve_add::add_multiple_curve_targets(self, targets)
+    fn add_curve_point(&mut self, targets: &[CurveTarget]) -> CurveTarget {
+        curve_add::add_curve_target(self, targets)
     }
 
-    fn field_to_curve_target(&mut self, targets: &[Target]) -> CurveTarget {
-        field_to_curve::field_to_curve_target(self, targets)
+    fn map_to_curve_point(&mut self, targets: &[Target]) -> CurveTarget {
+        field_to_curve::map_to_curve_target(self, targets)
     }
 }
