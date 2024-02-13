@@ -83,7 +83,6 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     let zero = b.zero();
     let one = b.one();
     let two = b.two();
-    let mut cond = b._true();
     let first_byte = input.value_at(b, key_header.offset);
     let (most_bits, least_bits) = b.split_low_high(first_byte, 4, 8);
     // little endian
@@ -93,8 +92,6 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     let mut nibbles: [Target; MAX_KEY_NIBBLE_LEN] = [b.zero(); MAX_KEY_NIBBLE_LEN];
 
     let first_nibble = prev_nibbles.0;
-    // CHANGED
-    //let parity = b._true().target;
     let first_nibble_as_bits = num_to_bits(b, 4, first_nibble);
     let parity = first_nibble_as_bits[0].target;
     // TODO: why this doesn't work always !!
@@ -107,8 +104,7 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     //   -> in this case, need to add another nibble, which is supposed to be zero
     //   -> i.e. next_nibble == 0
     let res_multi = b.mul(one_minus_parity, prev_nibbles.1);
-    let eq = b.is_equal(res_multi, zero);
-    cond = b.and(cond, eq);
+    let cond = b.is_equal(res_multi, zero);
 
     // -1 because first nibble is the HP information, and the following loop
     // analyzes pairs of consecutive nibbles, so the second nibble will be seen

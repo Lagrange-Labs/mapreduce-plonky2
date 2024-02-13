@@ -84,32 +84,6 @@ where
     root: OutputHash,
 }
 
-struct Wires<const DEPTH: usize, const NODE_LEN: usize>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-    [(); DEPTH - 1]:,
-{
-    key: MPTKeyWire,
-    /// a vector of buffers whose size is the padded size of the maximum node length
-    /// the padding may occur anywhere in the array but it can fit the maximum node size
-    /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
-    /// way to define everything according to max size of the data and
-    /// "not care" about the padding size (almost!)
-    nodes: [VectorWire<{ PAD_LEN(NODE_LEN) }>; DEPTH],
-
-    /// We need to keep around the hashes wires because keccak needs to assign
-    /// some additional wires for each input (see keccak circuit for more info.).
-    keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; DEPTH],
-
-    /// in the case of a fixed circuit, the actual tree depth might be smaller.
-    /// In this case, we set false on the part of the path we should not process.
-    /// NOTE: for node at index i in the path, the boolean indicating if we should
-    /// process it is at index i-1
-    should_process: [BoolTarget; DEPTH - 1],
-    /// The leaf value wires. It is provably extracted from the leaf node.
-    leaf: Array<Target, MAX_LEAF_VALUE>,
-}
-
 impl<const DEPTH: usize, const NODE_LEN: usize> Circuit<DEPTH, NODE_LEN>
 where
     [(); PAD_LEN(NODE_LEN)]:,
@@ -219,7 +193,7 @@ where
     /// Assign the nodes to the wires. The reason we have the output wires
     /// as well is due to the keccak circuit that requires some special assignement
     /// from the raw vectors.
-    fn assign_wires<F: RichField + Extendable<D>, const D: usize>(
+    pub fn assign_wires<F: RichField + Extendable<D>, const D: usize>(
         &self,
         p: &mut PartialWitness<F>,
         inputs: &InputWires<DEPTH, NODE_LEN>,
@@ -250,8 +224,10 @@ where
             if i < self.nodes.len() {
                 // we always process the leaf so we start at index 0 for parent of leaf
                 p.set_bool_target(inputs.should_process[i - 1], true);
+                // Safety measure to make sure we're proving a correct MPT proof
+                // It helps rather than debugging plonky2 output.
                 let child_hash = keccak256(&self.nodes[i - 1]);
-                let idx = find_index_subvector(&self.nodes[i], &child_hash)
+                find_index_subvector(&self.nodes[i], &child_hash)
                     .ok_or(anyhow!("can't find hash in parent node!"))?;
             } else {
                 println!("[-----] setting is_real[{}] = false", i - 1);
@@ -275,12 +251,13 @@ where
     /// Return is the (key,value). Key is in nibble format. Value is in bytes,
     /// and is either the hash of the child node, or the value of the leaf.
     /// ASSUMPTION: value of leaf is always 32 bytes.
-    fn advance_key<F: RichField + Extendable<D>, const D: usize>(
+    pub fn advance_key<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
     ) -> (MPTKeyWire, Array<Target, HASH_LEN>) {
         let zero = b.zero();
+        let tt = b._true();
         // It will try to decode a RLP list of the maximum number of items there can be
         // in a list, which is 16 for a branch node (Excluding value).
         // It returns the actual number of items decoded.
@@ -298,7 +275,7 @@ where
         let mut branch_condition = b.not(tuple_condition);
         branch_condition = b.and(branch_condition, branch_info.2);
         let tuple_or_branch = b.or(branch_condition, tuple_condition);
-        b.assert_bool(tuple_or_branch);
+        b.connect(tt.target, tuple_or_branch.target);
 
         // select between the two outputs
         // Note we assume that if it is not a tuple, it is necessarily a branch node.
@@ -311,7 +288,7 @@ where
 
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
-    fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
+    pub fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
@@ -447,7 +424,7 @@ fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
 fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
     let mut padded = nibbles.to_vec();
     if padded.len() % 2 == 1 {
-        padded.push(0);
+        padded.insert(0, 0);
     }
     let mut bytes = Vec::new();
     for i in 0..nibbles.len() / 2 {
@@ -460,12 +437,9 @@ fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
 pub mod test {
     use std::array::from_fn as create_array;
     use std::sync::Arc;
-    use std::thread::current;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
-    use itertools::Itertools;
     use plonky2::field::types::Field;
-    use plonky2::hash::keccak;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
         field::extension::Extendable,
@@ -494,7 +468,7 @@ pub mod test {
         utils::{find_index_subvector, keccak256},
     };
 
-    use super::{Circuit, InputWires, OutputWires, Wires, PAD_LEN};
+    use super::{Circuit, InputWires, OutputWires, PAD_LEN};
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
@@ -703,10 +677,10 @@ pub mod test {
         let (advanced_key, value) =
             Circuit::<DEPTH, NODE_LEN>::advance_key(&mut builder, &node, &key_wire);
         let exp_key_ptr = builder.add_virtual_target();
-        //builder.connect(advanced_key.pointer, exp_key_ptr);
+        builder.connect(advanced_key.pointer, exp_key_ptr);
         let exp_value = Array::<Target, VALUE_LEN>::new(&mut builder);
         let should_be_true = exp_value.equals(&mut builder, &value);
-        //builder.assert_bool(should_be_true);
+        builder.assert_bool(should_be_true);
         let data = builder.build::<C>();
 
         node_byte.resize(PAD_LEN(NODE_LEN), 0);
@@ -768,6 +742,7 @@ pub mod test {
         let mut pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let zero = builder.zero();
+        let tt = builder._true();
         let node = Array::<Target, { PAD_LEN(NODE_LEN) }>::new(&mut builder);
         let key_wire = MPTKeyWire::new(&mut builder);
         let rlp_headers =
@@ -778,7 +753,7 @@ pub mod test {
             &key_wire,
             &rlp_headers,
         );
-        builder.assert_bool(should_true);
+        builder.connect(tt.target, should_true.target);
         let exp_key_ptr = builder.add_virtual_target();
         builder.connect(advanced_key.pointer, exp_key_ptr);
         let exp_value = Array::<Target, VALUE_LEN>::new(&mut builder);
@@ -839,6 +814,7 @@ pub mod test {
         let mut pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let zero = builder.zero();
+        let tt = builder._true();
         let node = Array::<Target, { PAD_LEN(NODE_LEN) }>::new(&mut builder);
         let key_wire = MPTKeyWire::new(&mut builder);
         let rlp_headers = decode_fixed_list::<F, D, NB_ITEMS_LEAF>(&mut builder, &node.arr, zero);
@@ -853,8 +829,8 @@ pub mod test {
         builder.connect(advanced_key.pointer, exp_key_ptr);
         let exp_value = Array::<Target, VALUE_LEN>::new(&mut builder);
         let should_be_true = exp_value.equals(&mut builder, &value);
-        let tt = builder.and(should_be_true, should_true);
-        builder.assert_bool(tt);
+        let all_true = builder.and(should_be_true, should_true);
+        builder.connect(tt.target, all_true.target);
         let data = builder.build::<C>();
 
         leaf_node.resize(PAD_LEN(NODE_LEN), 0);
