@@ -57,6 +57,19 @@ pub(crate) fn keccak256(data: &[u8]) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
+pub(crate) fn convert_u8_slice_to_u32_fields<F: RichField>(values: &[u8]) -> Vec<F> {
+    assert!(values.len() % 4 == 0);
+
+    values
+        .chunks(4)
+        .into_iter()
+        .map(|mut chunk| {
+            let u32_num = read_le_u32(&mut chunk);
+            F::from_canonical_u32(u32_num)
+        })
+        .collect()
+}
+
 pub(crate) fn convert_u8_values_to_u32<F: RichField>(values: &[F]) -> Vec<F> {
     assert!(values.len() % 4 == 0);
 

@@ -26,7 +26,7 @@ const NB_ITEMS_LEAF: usize = 2;
 /// Currently a constant set to denote the length of the value we are extracting from the MPT trie.
 /// This can later be also be done in a generic way to allow different sizes.
 /// Given we target MPT storage proof, the value is 32 bytes.
-const MAX_LEAF_VALUE: usize = HASH_LEN;
+pub const MAX_LEAF_VALUE: usize = HASH_LEN;
 
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
@@ -52,7 +52,7 @@ pub struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
     /// whose length == MAX_KEY_NIBBLE_LEN
     key: [u8; MAX_KEY_NIBBLE_LEN / 2],
 }
-struct InputWires<const DEPTH: usize, const NODE_LEN: usize>
+pub struct InputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
@@ -70,7 +70,7 @@ where
     /// process it is at index i-1
     should_process: [BoolTarget; DEPTH - 1],
 }
-struct OutputWires<const DEPTH: usize, const NODE_LEN: usize>
+pub struct OutputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
@@ -79,9 +79,9 @@ where
     /// some additional wires for each input (see keccak circuit for more info.).
     keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; DEPTH],
     /// The leaf value wires. It is provably extracted from the leaf node.
-    leaf: Array<Target, MAX_LEAF_VALUE>,
+    pub leaf: Array<Target, MAX_LEAF_VALUE>,
     /// The root hash value wire.
-    root: OutputHash,
+    pub root: OutputHash,
 }
 
 impl<const DEPTH: usize, const NODE_LEN: usize> Circuit<DEPTH, NODE_LEN>
