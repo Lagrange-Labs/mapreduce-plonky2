@@ -270,11 +270,8 @@ where
         let leaf_info = Self::advance_key_leaf_or_extension(b, node, key, &rlp_headers);
         let tuple_condition = leaf_info.2;
         let branch_info = Self::advance_key_branch(b, node, key, &rlp_headers);
-        // Ensures that conditions in a tuple are valid OR conditions in a branch are valid. So we can select the
-        // right output depending only on one condition only.
-        let mut branch_condition = b.not(tuple_condition);
-        branch_condition = b.and(branch_condition, branch_info.2);
-        let tuple_or_branch = b.or(branch_condition, tuple_condition);
+        // ensures it's either a branch or leaf/extension
+        let tuple_or_branch = b.or(leaf_info.2, branch_info.2);
         b.connect(tt.target, tuple_or_branch.target);
 
         // select between the two outputs
@@ -298,13 +295,16 @@ where
         // assume it's a node and return the boolean condition that must be true if
         // it is a node - decided in advance_key function
         let is_node = b._true();
+        let seventeen = b.constant(F::from_canonical_usize(MAX_ITEMS_IN_LIST));
+        let branch_condition = b.is_equal(seventeen, rlp_headers.num_fields);
+
         // Given we are reading the nibble from the key itself, we don't need to do
         // any more checks on it. The key and pointer will be given by the verifier so
         // attacker can't indicate a different nibble
         let nibble = key.current_nibble(b);
         // assert that the nibble is less than the number of items since it's given by prover
-        let lt = less_than(b, nibble, rlp_headers.num_fields, 5);
-        let branch_condition = b.and(is_node, lt);
+        //let lt = less_than(b, nibble, rlp_headers.num_fields, 5);
+        //let branch_condition = b.and(is_node, lt);
 
         // we advance the pointer for the next iteration
         let new_key = key.advance_by(b, one);
@@ -413,7 +413,7 @@ impl MPTKeyWire {
     }
 }
 
-fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
+pub(crate) fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
     let mut nibbles = Vec::new();
     for b in bytes {
         nibbles.push(b >> 4);
@@ -421,7 +421,7 @@ fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
     }
     nibbles
 }
-fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
+pub(crate) fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
     let mut padded = nibbles.to_vec();
     if padded.len() % 2 == 1 {
         padded.insert(0, 0);
@@ -458,7 +458,10 @@ pub mod test {
     use crate::benches::init_logging;
     use crate::keccak::{InputData, KeccakCircuit, HASH_LEN, PACKED_HASH_LEN};
     use crate::mpt_sequential::{bytes_to_nibbles, nibbles_to_bytes, NB_ITEMS_LEAF};
-    use crate::rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN};
+    use crate::rlp::{
+        decode_compact_encoding, decode_fixed_list, decode_header, MAX_ITEMS_IN_LIST,
+        MAX_KEY_NIBBLE_LEN,
+    };
     use crate::utils::{convert_u8_targets_to_u32, less_than, IntTargetWriter};
     use crate::{
         array::{Array, VectorWire},
@@ -646,18 +649,36 @@ pub mod test {
         const DEPTH: usize = 4;
         const NODE_LEN: usize = 80;
         const VALUE_LEN: usize = 32;
-        let (mut trie, key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
-        let mut proof = trie.get_proof(&key).unwrap();
-        proof.reverse();
+        let (proof, key) = if false {
+            let (mut trie, key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
+            let mut proof = trie.get_proof(&key).unwrap();
+            proof.reverse();
+            for (i, node) in proof.iter().enumerate() {
+                println!("[+] node {}: {} ", i, hex::encode(node));
+            }
+            println!("[+] key: {}", hex::encode(&key));
+            (proof, key)
+        } else {
+            let p = vec![
+                    hex::decode("f8429f3431b2e752584dc8f23f97296e74ace388e151784ea46ea5116cb181d24447a1a03809853702eda96ba488726e21d9db475e015699e72d8b68c4f351ed06d5ea48").unwrap(),
+                    hex::decode("f851808080a07e26fa1e62c0e597f8104bf0cd7f981b0242e774eca02087b96943d79b0efa17808080a08ae23e9fc5b6e1996b8e385f6e5c953c3e8265c9113b4ff512b6bef5df1280c0808080808080808080").unwrap(),
+                    hex::decode("e216a0bc83511826ad55afda0be0270d48c7c3cf35b99194dadadda245e1897ada669f").unwrap(),
+                    hex::decode("f901f1a02eaf10ab027da4095861a1910aadda86aec0bbd9f0b5dde96115d2391cf77e0fa04d0bbf8b469ad1bc52343e60e43861e659e071d3a7e6807445074ac7e17716b3a00026cf68bf98deb83597e66f37e27fcb22c0b0b99d628adaa05d3a0a211c2947a0cead0a91bc528265b13c3ffffa7783797b63c74bf929ea822f826fe5c1e118c2a0b3b90191c5210ee665682a38914ef57dccc89c341e9e49a81e182cc9fe954d92a03b985a86eb1dbc68c1c52381418f90e5d302fc34a62240ded3f0710e48f713a6a07cd187ef20f920a65f24b0ee4735a59ca7ecd621ab0b079f13066b3eb5b99d08a0f768bbbea3b740be9094599f600ca5a8ba2fa96fc1bd72bc046622a8f39d69eba08c5224918042cc71c40f345a2f635ec2a44ea49aad9f9118da8a114302190136a0081b80f4be7d3e068eb144ee4d220a33318ff5ebdfd56e20c277a2b701da6a80a0d0acdfd4face7cd28ef1dc1de934c624de32a367c7a5107d675091a7483793bba010447d8ffa4b5172f6de173e86a32ff7599da23b1de74be2d5d3797ff04190a9a0ccc224e8055ce1d63cbd89dd1f82314a46c1e451cc5166f59e59308be2e61c65a03fd8cf5459f2e648b21b93cb862968b29b01cc5b460d9b7fb07245c8621827f3a02dbbf9100570f9b8c3da34bfe97a791b0c0d59f0e492a72bf96f882bd516a5208080").unwrap(),
+                ];
+            let key =
+                hex::decode("667431b2e752584dc8f23f97296e74ace388e151784ea46ea5116cb181d24447")
+                    .unwrap();
+            (p, key)
+        };
         let key_nibbles = bytes_to_nibbles(&key);
         assert_eq!(key_nibbles.len(), MAX_KEY_NIBBLE_LEN);
         // try with the parent of the leaf
-        let mut node_byte: Vec<u8> = proof[1].clone();
+        let node_byte: Vec<u8> = proof[1].clone();
         let node_list: Vec<Vec<u8>> = rlp::decode_list(&node_byte);
         // make sure the node is a branch node
         assert_eq!(node_list.len(), 17);
         // first see the leaf to determine the partial key length
-        let mut leaf_node: Vec<u8> = proof[0].clone();
+        let leaf_node: Vec<u8> = proof[0].clone();
         // RLP ( RLP (compact(partial_key_in_nibble)), RLP(value))
         let leaf_tuple: Vec<Vec<u8>> = rlp::decode_list(&leaf_node);
         assert_eq!(leaf_tuple.len(), 2);
@@ -669,46 +690,123 @@ pub mod test {
         let node_partial_key_ptr = leaf_partial_key_ptr - 1;
         println!("[+] Node partial key ptr = {}", node_partial_key_ptr);
 
-        let config = CircuitConfig::standard_recursion_config();
-        let mut pw = PartialWitness::new();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-        let node = Array::<Target, { PAD_LEN(NODE_LEN) }>::new(&mut builder);
-        let key_wire = MPTKeyWire::new(&mut builder);
-        let (advanced_key, value) =
-            Circuit::<DEPTH, NODE_LEN>::advance_key(&mut builder, &node, &key_wire);
-        let exp_key_ptr = builder.add_virtual_target();
-        builder.connect(advanced_key.pointer, exp_key_ptr);
-        let exp_value = Array::<Target, VALUE_LEN>::new(&mut builder);
-        let should_be_true = exp_value.equals(&mut builder, &value);
-        builder.assert_bool(should_be_true);
-        let data = builder.build::<C>();
+        let try_with =
+            |mut chosen_node: Vec<u8>, exp_byte_value: Vec<u8>, input_ptr: i32, output_ptr: i32| {
+                let config = CircuitConfig::standard_recursion_config();
+                let mut pw = PartialWitness::new();
+                let mut b = CircuitBuilder::<F, D>::new(config);
+                let tr = b._true();
+                let zero = b.zero();
+                let node = Array::<Target, { PAD_LEN(NODE_LEN) }>::new(&mut b);
+                let key_wire = MPTKeyWire::new(&mut b);
+                let (advanced_key, value) =
+                    Circuit::<DEPTH, NODE_LEN>::advance_key(&mut b, &node, &key_wire);
+                let exp_key_ptr = b.add_virtual_target();
+                b.connect(advanced_key.pointer, exp_key_ptr);
+                let exp_value = Array::<Target, VALUE_LEN>::new(&mut b);
+                let should_be_true = value.contains_array(&mut b, &exp_value, zero);
+                //b.connect(tr.target, should_be_true.target);
+                {
+                    // explore why the above didn't work
+                    let rlp_headers =
+                        decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(&mut b, &node.arr, zero);
+                    let branch_info = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
+                        &mut b,
+                        &node,
+                        &key_wire,
+                        &rlp_headers,
+                    );
 
-        node_byte.resize(PAD_LEN(NODE_LEN), 0);
-        let node_f = node_byte
-            .iter()
-            .map(|b| F::from_canonical_u8(*b))
-            .collect::<Vec<_>>();
-        node.assign(&mut pw, &node_f.try_into().unwrap());
-        let mut key_nibbles = bytes_to_nibbles(&key);
-        key_nibbles.resize(MAX_KEY_NIBBLE_LEN, 0);
-        key_wire.assign(
-            &mut pw,
-            &key_nibbles.try_into().unwrap(),
-            // we start from the pointer that should have been updated by processing the leaf
-            leaf_partial_key_ptr,
-        );
-        pw.set_target(exp_key_ptr, F::from_canonical_usize(node_partial_key_ptr));
-        exp_value.assign(
-            &mut pw,
-            &leaf_value
-                .into_iter()
-                .map(F::from_canonical_u8)
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        );
-        let proof = data.prove(pw).unwrap();
-        data.verify(proof).unwrap();
+                    let leaf_info = {
+                        let two = b.two();
+                        let condition = b.is_equal(rlp_headers.num_fields, two);
+                        let key_header = rlp_headers.select(&mut b, zero);
+                        let (extracted_key, should_true) =
+                            decode_compact_encoding(&mut b, &node, &key_header);
+                        let value_header = decode_header(&mut b, &node.arr, rlp_headers.offset[1]);
+                        let leaf_child_hash =
+                            node.extract_array::<F, D, HASH_LEN>(&mut b, value_header.offset);
+                        let new_key = key_wire.advance_by(&mut b, extracted_key.real_len);
+                        let condition = b.and(condition, should_true);
+                        (new_key, leaf_child_hash, condition)
+                    };
+                    // ensures it's either a branch or leaf/extension
+                    let tuple_or_branch = b.or(leaf_info.2, branch_info.2);
+                    b.connect(tr.target, tuple_or_branch.target);
+                    b.connect(leaf_info.2.target, tr.target);
+                    let child_hash = leaf_info.1.select(&mut b, leaf_info.2, &branch_info.1);
+                    let new_key = leaf_info.0.select(&mut b, leaf_info.2, &branch_info.0);
+                    b.connect(new_key.pointer, exp_key_ptr);
+                    let should_be_true = leaf_info.1.contains_array(&mut b, &exp_value, zero);
+                    b.connect(tr.target, should_be_true.target);
+                }
+                let data = b.build::<C>();
+                chosen_node.resize(PAD_LEN(NODE_LEN), 0);
+                let node_f = chosen_node
+                    .iter()
+                    .map(|b| F::from_canonical_u8(*b))
+                    .collect::<Vec<_>>();
+                node.assign(&mut pw, &node_f.try_into().unwrap());
+                let mut key_nibbles = bytes_to_nibbles(&key);
+                key_nibbles.resize(MAX_KEY_NIBBLE_LEN, 0);
+                key_wire.assign(
+                    &mut pw,
+                    &key_nibbles.try_into().unwrap(),
+                    // we start from the pointer that should have been updated by processing the leaf
+                    input_ptr as usize,
+                );
+                if output_ptr < 0 {
+                    pw.set_target(exp_key_ptr, F::NEG_ONE);
+                } else {
+                    pw.set_target(exp_key_ptr, F::from_canonical_usize(output_ptr as usize));
+                }
+                exp_value.assign(
+                    &mut pw,
+                    &exp_byte_value
+                        .into_iter()
+                        .map(F::from_canonical_u8)
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .unwrap(),
+                );
+                let proof = data.prove(pw).unwrap();
+                data.verify(proof).unwrap();
+            };
+
+        println!("[+] Trying out with leaf");
+        //try_with(
+        //    leaf_node.clone(),
+        //    // works because value is 32 byte same as a hash, otherwisewould need to use vector
+        //    leaf_value,
+        //    (MAX_KEY_NIBBLE_LEN - 1) as i32,
+        //    leaf_partial_key_ptr as i32,
+        //);
+        let mut curr_pointer = leaf_partial_key_ptr as i32;
+        let mut exp_value = keccak256(&leaf_node);
+        for (i, node) in proof[1..].iter().enumerate() {
+            let node_list: Vec<Vec<u8>> = rlp::decode_list(node);
+            let output_ptr = if node_list.len() == 17 {
+                println!("[+] trying out with branch node {} in proof", i + 1);
+                curr_pointer - 1
+            } else if node_list.len() == 2 {
+                let nibbles = Nibbles::from_compact(&node_list[0]);
+                let nibbles_bytes = nibbles.nibbles();
+                println!(
+                    "[+] trying out with extension node {} in proof - key portion {}",
+                    i + 1,
+                    hex::encode(nibbles_to_bytes(nibbles_bytes))
+                );
+                curr_pointer - nibbles_bytes.len() as i32
+            } else {
+                panic!("invalid node");
+            };
+            if i + 1 == 2 {
+                println!("[+] Launching Proof Generation");
+                try_with(node.clone(), exp_value.clone(), curr_pointer, output_ptr);
+            }
+            curr_pointer = output_ptr;
+            exp_value = keccak256(node);
+        }
     }
     #[test]
     fn test_extract_hash_intermediate() {

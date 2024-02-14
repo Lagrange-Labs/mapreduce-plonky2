@@ -63,7 +63,85 @@ impl<const N: usize> RlpList<N> {
         self.offset.value_at(b, at)
     }
 }
+pub fn decode_compact_encoding2<F: RichField + Extendable<D>, const D: usize, const N: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    input: &Array<Target, N>,
+    key_header: &RlpHeader,
+) -> (VectorWire<MAX_KEY_NIBBLE_LEN>, BoolTarget) {
+    let zero = b.zero();
+    let one = b.one();
+    let two = b.two();
+    let first_byte = input.value_at(b, key_header.offset);
+    let (most_bits, least_bits) = b.split_low_high(first_byte, 4, 8);
+    // little endian
+    let mut prev_nibbles = (least_bits, most_bits);
 
+    let mut cur_nibbles: (Target, Target);
+    let mut nibbles: [Target; MAX_KEY_NIBBLE_LEN] = [b.zero(); MAX_KEY_NIBBLE_LEN];
+
+    let first_nibble = prev_nibbles.0;
+    let first_nibble_as_bits = num_to_bits(b, 4, first_nibble);
+    let parity = first_nibble_as_bits[0].target;
+    // TODO: why this doesn't work always !!
+    //let parity = b.split_le(first_nibble, 2)[0].target;
+
+    let one_minus_parity = b.sub(one, parity);
+    // if parity is 1 => odd length => (1 - p) * next_nibble = 0
+    //   -> in this case, no need to add another nibble (since the rest of key + 1 == even now)
+    // if parity is 0 => even length => (1 - p) * next_nibble = next_nibble
+    //   -> in this case, need to add another nibble, which is supposed to be zero
+    //   -> i.e. next_nibble == 0
+    let res_multi = b.mul_sub(parity, prev_nibbles.1, prev_nibbles.1);
+    let cond = b.is_equal(res_multi, zero);
+
+    // -1 because first nibble is the HP information, and the following loop
+    // analyzes pairs of consecutive nibbles, so the second nibble will be seen
+    // during the first iteration of this loop.
+    for i in 0..MAX_ENC_KEY_LEN - 1 {
+        let it = b.constant(F::from_canonical_usize(i + 1));
+        let i_offset = b.add(it, key_header.offset);
+        // look now at the encoded path
+        let x = input.value_at(b, i_offset);
+        // next nibble in little endian
+        cur_nibbles = {
+            let (most_bits, least_bits) = b.split_low_high(x, 4, 8);
+            (least_bits, most_bits)
+        };
+
+        // nibble[2*i] = parity*prev_nibbles.1 + (1 - parity)*cur_nibbles.0;
+        // => if parity == 1, we take the previous last nibble, because that's the next in line
+        // => if parity == 0, we take lowest significant nibble because the previous last nibble is
+        //                    the special "0" nibble to make overall length even
+        let parity_mul_nib = b.mul(parity, prev_nibbles.1);
+        nibbles[2 * i] = b.mul_add(one_minus_parity, cur_nibbles.0, parity_mul_nib);
+
+        // nibble[2*i + 1] = parity*cur_nibbles.0 + (1 - parity)*cur_nibbles.1;
+        // => if parity == 1, take lowest significant nibble as successor of previous.highest_nibble
+        // => if parity == 0, take highest significant nibble as success of current.lowest_nibble
+        let parity_mul_curr_nib = b.mul(parity, cur_nibbles.0);
+        nibbles[2 * i + 1] = b.mul_add(one_minus_parity, cur_nibbles.1, parity_mul_curr_nib);
+
+        prev_nibbles = cur_nibbles;
+    }
+
+    // 2 * length + parity - 2
+    // - 2*length because it's the length in nibble not in bytes
+    // - parity - 2 means that we take out only one nibble when len is odd, because
+    //   this is the nibble telling us that len is odd.
+    //   In case len is even, RLP adds another 0 nibble so we take out 2 nibbles
+    //   from the length
+    let length_in_nibble = b.mul(two, key_header.len);
+    let pm2 = b.sub(parity, two);
+    let key_len: Target = b.add(length_in_nibble, pm2);
+
+    (
+        VectorWire {
+            arr: Array::from_array(nibbles),
+            real_len: key_len,
+        },
+        cond,
+    )
+}
 /// Decodes the compact encoding defined in Ethereum specs. Specifically, it takes
 /// the input which represents the Enc(key) part from RLP-header || Enc(key), and
 /// returns the key extracted, in nibbles, and its actual length, in nibbles.
@@ -391,13 +469,15 @@ mod tests {
 
     use eth_trie::{Nibbles, Trie};
     use plonky2::field::types::Field;
-    use plonky2::iop::target::Target;
+    use plonky2::iop::target::{BoolTarget, Target};
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
     use crate::array::Array;
+    use crate::keccak::HASH_LEN;
+    use crate::mpt_sequential::bytes_to_nibbles;
     use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::{
         decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, RlpList,
@@ -904,5 +984,85 @@ mod tests {
             run_test_case(tc);
         }
         Ok(())
+    }
+
+    #[test]
+    fn custom_compact() {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let node =
+            hex::decode("e216a0bc83511826ad55afda0be0270d48c7c3cf35b99194dadadda245e1897ada669f")
+                .unwrap();
+        let ext_tuple: Vec<Vec<u8>> = rlp::decode_list(&node);
+        assert_eq!(ext_tuple.len(),2);
+        let ext_hash = ext_tuple[1].clone();
+        let rlp = rlp::Rlp::new(&node);
+        let main_header = rlp.payload_info().unwrap();
+        let curr_offset = main_header.header_len;
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut pw = PartialWitness::new();
+        let mut b = CircuitBuilder::<F, D>::new(config);
+        let node_wire = Array::<Target, HASH_LEN>::new(&mut b);
+        let zero = b.zero();
+        let two = b.two();
+        const N: usize = 17;
+        //let rlp_headers = decode_fixed_list::<F, D, N>(&mut b, &node_wire.arr, zero);
+        //b.connect(rlp_headers.num_fields, two);
+
+        let list_header = decode_header(&mut b, &node_wire.arr, zero);
+        let mut offset = list_header.offset;
+        let eo = b.constant(F::from_canonical_usize(curr_offset));
+        b.connect(eo, offset);
+        // end_idx starts at `data_offset` and  includes the
+        // header byte + potential len_len bytes + payload len
+        let end_idx = b.add(list_header.offset, list_header.len);
+        let mut stop_counting = b._false();
+        let tru = b._true();
+        let fal = b._false();
+        let mut num_fields = zero;
+        // decode each headers of each items ofthe list
+        // remember in a list each item of the list is RLP encoded
+        // i = 0
+        {
+            let at_the_end = b.is_equal(offset, end_idx);
+            let at_end_or_past = b.or(at_the_end, stop_counting);
+            stop_counting =
+                BoolTarget::new_unsafe(b.select(at_end_or_past, tru.target, fal.target));
+            let before_the_end = b.not(at_end_or_past);
+            let header = decode_header(&mut b, &node_wire.arr, offset);
+            let new_offset = b.add(header.offset, header.len);
+            offset = b.mul(before_the_end.target, new_offset);
+            num_fields = b.add(num_fields, before_the_end.target);
+        }
+        // i == 1
+        {
+            let at_the_end = b.is_equal(offset, end_idx);
+            let at_end_or_past = b.or(at_the_end, stop_counting);
+            stop_counting =
+                BoolTarget::new_unsafe(b.select(at_end_or_past, tru.target, fal.target));
+            let before_the_end = b.not(at_end_or_past);
+            let header = decode_header(&mut b, &node_wire.arr, offset);
+            let new_offset = b.add(header.offset, header.len);
+            offset = b.mul(before_the_end.target, new_offset);
+            num_fields = b.add(num_fields, before_the_end.target);
+        }
+        let at_the_end = b.is_equal(offset, end_idx);
+        //b.connect(at_the_end.target, tru.target);
+
+        //
+        node_wire.assign(
+            &mut pw,
+            &ext_hash
+                .iter()
+                .map(|b| F::from_canonical_u8(*b))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        );
+        let data = b.build::<C>();
+        let proof = data.prove(pw).unwrap();
+        data.verify(proof).unwrap();
     }
 }
