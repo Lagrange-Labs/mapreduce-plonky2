@@ -78,18 +78,55 @@ pub(crate) fn simple_swu(u: GFp5) -> Point {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{super::N, *};
     use plonky2::field::extension::FieldExtension;
     use std::array;
+
+    const TEST_INPUTS_OUTPUTS: [[[u64; N]; 2]; 3] = [
+        [
+            [1, 2, 3, 4, 5],
+            [
+                14787531356491256379,
+                11461637202037498289,
+                4291527673026618528,
+                4746471857872952759,
+                13337224262829952359,
+            ],
+        ],
+        [
+            [100, 100, 100, 100, 100],
+            [
+                5101977855671705567,
+                18259369900233540211,
+                4964766086423821262,
+                6349865835816149910,
+                13164635315267603389,
+            ],
+        ],
+        [
+            [0, u64::MAX, 0, u64::MAX, u64::MAX],
+            [
+                15406267945121757331,
+                8614084671648873762,
+                2366015382156010603,
+                14529344599099006840,
+                15466818755358183082,
+            ],
+        ],
+    ];
 
     /// Test simplified SWU method for mapping to curve point.
     #[test]
     fn test_simple_swu_for_curve_point() {
-        let field = QuinticExtension::from_basefield_array(array::from_fn::<_, 5, _>(|i| {
-            GoldilocksField(i as u64)
-        }));
+        TEST_INPUTS_OUTPUTS.iter().for_each(|inputs_outputs| {
+            let [inputs, expected_outputs] = inputs_outputs.map(ext_field_from_array);
+            let real_outputs = simple_swu(inputs).encode();
 
-        let point = simple_swu(field).to_weierstrass();
-        println!("Curve point from test conversion: {point:?}");
+            assert_eq!(real_outputs, expected_outputs);
+        });
+    }
+
+    fn ext_field_from_array(values: [u64; N]) -> GFp5 {
+        GFp5::from_basefield_array(array::from_fn::<_, N, _>(|i| GoldilocksField(values[i])))
     }
 }
