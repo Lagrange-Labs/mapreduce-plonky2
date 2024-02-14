@@ -82,6 +82,9 @@ mod tests {
     use plonky2::field::extension::FieldExtension;
     use std::array;
 
+    /// The array of input and output pairs is used for testing. The input is
+    /// the raw values of an extension field, and output is the encoded
+    /// extension field of a curve point (less data than a Weierstrass point).
     const TEST_INPUTS_OUTPUTS: [[[u64; N]; 2]; 3] = [
         [
             [1, 2, 3, 4, 5],
@@ -118,11 +121,14 @@ mod tests {
     /// Test simplified SWU method for mapping to curve point.
     #[test]
     fn test_simple_swu_for_curve_point() {
-        TEST_INPUTS_OUTPUTS.iter().for_each(|inputs_outputs| {
-            let [inputs, expected_outputs] = inputs_outputs.map(ext_field_from_array);
-            let real_outputs = simple_swu(inputs).encode();
+        TEST_INPUTS_OUTPUTS.iter().for_each(|input_output| {
+            let [input, expected_output] = input_output.map(ext_field_from_array);
+            let real_output = simple_swu(input).encode();
 
-            assert_eq!(real_outputs, expected_outputs);
+            assert_eq!(
+                real_output, expected_output,
+                "The encoded extension field must be equal"
+            );
         });
     }
 

@@ -115,8 +115,9 @@ mod tests {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
-    use plonky2_ecgfp5::gadgets::{
-        base_field::PartialWitnessQuinticExt, curve::PartialWitnessCurve,
+    use plonky2_ecgfp5::{
+        curve::curve::WeierstrassPoint,
+        gadgets::{base_field::PartialWitnessQuinticExt, curve::PartialWitnessCurve},
     };
     use rand::{thread_rng, Rng};
     use std::array;
@@ -136,9 +137,10 @@ mod tests {
         let input_target = b.add_virtual_quintic_ext_target();
         let output_target = simple_swu(&mut b, input_target);
 
-        // Register public inputs.
-        b.register_quintic_ext_public_input(input_target);
+        // Register the public inputs, register the output first since it's easy
+        // to index in proof for testing.
         b.register_curve_public_input(output_target);
+        b.register_quintic_ext_public_input(input_target);
 
         // Generate a random input value.
         let mut rng = thread_rng();
@@ -146,17 +148,32 @@ mod tests {
             GoldilocksField::sample(&mut rng)
         }));
 
-        // Calculate the output value.
-        let output_value = sswu_value::simple_swu(input_value);
-
         // Set the value to target for witness.
         let mut pw = PartialWitness::new();
         pw.set_quintic_ext_target(input_target, input_value);
-        pw.set_curve_target(output_target, output_value.to_weierstrass());
 
-        // Prove and verify.
+        println!(
+            "[+] This test simplied SWU gadget has {} gates",
+            b.num_gates()
+        );
+
+        // Generate the proof.
         let data = b.build::<C>();
         let proof = data.prove(pw)?;
+
+        // Calculate the output point and check with proof.
+        let expected_point = sswu_value::simple_swu(input_value).to_weierstrass();
+        let real_point = WeierstrassPoint {
+            x: QuinticExtension(proof.public_inputs[..N].try_into().unwrap()),
+            y: QuinticExtension(proof.public_inputs[N..N + N].try_into().unwrap()),
+            is_inf: proof.public_inputs[N + N].is_nonzero(),
+        };
+        assert_eq!(
+            real_point, expected_point,
+            "Expected output point must be same with proof"
+        );
+
+        // Verify the proof.
         data.verify(proof)
     }
 }

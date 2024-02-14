@@ -56,8 +56,9 @@ mod tests {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
-    use plonky2_ecgfp5::gadgets::{
-        base_field::PartialWitnessQuinticExt, curve::PartialWitnessCurve,
+    use plonky2_ecgfp5::{
+        curve::curve::WeierstrassPoint,
+        gadgets::{base_field::PartialWitnessQuinticExt, curve::PartialWitnessCurve},
     };
     use rand::{thread_rng, Rng};
     use std::array;
@@ -77,18 +78,16 @@ mod tests {
         let input_targets = [0; ARITY].map(|_| b.add_virtual_curve_target());
         let output_target = b.add_curve_point(&input_targets);
 
-        // Register public inputs.
+        // Register the public inputs, register the output first since it's easy
+        // to index in proof for testing.
+        b.register_curve_public_input(output_target);
         input_targets
             .into_iter()
             .for_each(|it| b.register_curve_public_input(it));
-        b.register_curve_public_input(output_target);
 
         // Generate random curve points as inputs.
         let mut rng = thread_rng();
         let input_values = [0; ARITY].map(|_| Point::sample(&mut rng));
-
-        // Calculate the output curve point.
-        let output_value = add_curve_point(&input_values);
 
         // Set the value to target for witness.
         let mut pw = PartialWitness::new();
@@ -96,16 +95,29 @@ mod tests {
             .into_iter()
             .zip(input_values)
             .for_each(|(it, iv)| pw.set_curve_target(it, iv.to_weierstrass()));
-        pw.set_curve_target(output_target, output_value.to_weierstrass());
 
         println!(
             "[+] This test curve point addition gadget has {} gates",
             b.num_gates()
         );
 
-        // Prove and verify.
+        // Generate the proof.
         let data = b.build::<C>();
         let proof = data.prove(pw)?;
+
+        // Calculate the output point and check with proof.
+        let expected_point = add_curve_point(&input_values).to_weierstrass();
+        let real_point = WeierstrassPoint {
+            x: QuinticExtension(proof.public_inputs[..N].try_into().unwrap()),
+            y: QuinticExtension(proof.public_inputs[N..N + N].try_into().unwrap()),
+            is_inf: proof.public_inputs[N + N].is_nonzero(),
+        };
+        assert_eq!(
+            real_point, expected_point,
+            "Expected output point must be same with proof"
+        );
+
+        // Verify the proof.
         data.verify(proof)
     }
 }
