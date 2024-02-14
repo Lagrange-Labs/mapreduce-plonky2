@@ -20,11 +20,12 @@ mod benches;
 pub mod eth;
 
 mod circuit;
-mod digest;
+mod group_hashing;
 mod hash;
 mod keccak;
 mod mapreduce;
 pub mod merkle;
+mod merkle_tree;
 mod rlp;
 pub mod transaction;
 mod utils;
