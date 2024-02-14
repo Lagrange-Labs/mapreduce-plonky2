@@ -475,7 +475,7 @@ mod tests {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::array::Array;
+    use crate::array::{Array, Vector, VectorWire};
     use crate::keccak::HASH_LEN;
     use crate::mpt_sequential::bytes_to_nibbles;
     use crate::mpt_sequential::test::generate_random_storage_mpt;
@@ -995,8 +995,7 @@ mod tests {
             hex::decode("e216a0bc83511826ad55afda0be0270d48c7c3cf35b99194dadadda245e1897ada669f")
                 .unwrap();
         let ext_tuple: Vec<Vec<u8>> = rlp::decode_list(&node);
-        assert_eq!(ext_tuple.len(),2);
-        let ext_hash = ext_tuple[1].clone();
+        assert_eq!(ext_tuple.len(), 2);
         let rlp = rlp::Rlp::new(&node);
         let main_header = rlp.payload_info().unwrap();
         let curr_offset = main_header.header_len;
@@ -1004,57 +1003,64 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut pw = PartialWitness::new();
         let mut b = CircuitBuilder::<F, D>::new(config);
-        let node_wire = Array::<Target, HASH_LEN>::new(&mut b);
+        let node_wire = VectorWire::<100>::new(&mut b);
         let zero = b.zero();
         let two = b.two();
-        const N: usize = 17;
-        //let rlp_headers = decode_fixed_list::<F, D, N>(&mut b, &node_wire.arr, zero);
-        //b.connect(rlp_headers.num_fields, two);
-
-        let list_header = decode_header(&mut b, &node_wire.arr, zero);
-        let mut offset = list_header.offset;
-        let eo = b.constant(F::from_canonical_usize(curr_offset));
-        b.connect(eo, offset);
-        // end_idx starts at `data_offset` and  includes the
-        // header byte + potential len_len bytes + payload len
-        let end_idx = b.add(list_header.offset, list_header.len);
-        let mut stop_counting = b._false();
         let tru = b._true();
-        let fal = b._false();
-        let mut num_fields = zero;
-        // decode each headers of each items ofthe list
-        // remember in a list each item of the list is RLP encoded
-        // i = 0
-        {
-            let at_the_end = b.is_equal(offset, end_idx);
-            let at_end_or_past = b.or(at_the_end, stop_counting);
-            stop_counting =
-                BoolTarget::new_unsafe(b.select(at_end_or_past, tru.target, fal.target));
-            let before_the_end = b.not(at_end_or_past);
-            let header = decode_header(&mut b, &node_wire.arr, offset);
-            let new_offset = b.add(header.offset, header.len);
-            offset = b.mul(before_the_end.target, new_offset);
-            num_fields = b.add(num_fields, before_the_end.target);
-        }
-        // i == 1
-        {
-            let at_the_end = b.is_equal(offset, end_idx);
-            let at_end_or_past = b.or(at_the_end, stop_counting);
-            stop_counting =
-                BoolTarget::new_unsafe(b.select(at_end_or_past, tru.target, fal.target));
-            let before_the_end = b.not(at_end_or_past);
-            let header = decode_header(&mut b, &node_wire.arr, offset);
-            let new_offset = b.add(header.offset, header.len);
-            offset = b.mul(before_the_end.target, new_offset);
-            num_fields = b.add(num_fields, before_the_end.target);
-        }
-        let at_the_end = b.is_equal(offset, end_idx);
-        //b.connect(at_the_end.target, tru.target);
+        const N: usize = 17;
+        let rlp_headers = decode_fixed_list::<F, D, N>(&mut b, &node_wire.arr.arr, zero);
+        b.connect(rlp_headers.num_fields, two);
+        let hash_offset = rlp_headers.offset[1];
+        let ext_hash = node_wire.arr.extract_array::<F, D, 32>(&mut b, hash_offset);
+        let exp_hash = Array::<Target, 32>::new(&mut b);
+        let t = ext_hash.equals(&mut b, &exp_hash);
+        b.connect(tru.target, t.target);
+
+        //let list_header = decode_header(&mut b, &node_wire.arr.arr, zero);
+        //let mut offset = list_header.offset;
+        //let eo = b.constant(F::from_canonical_usize(curr_offset));
+        //b.connect(eo, offset);
+        //// end_idx starts at `data_offset` and  includes the
+        //// header byte + potential len_len bytes + payload len
+        //let end_idx = b.add(list_header.offset, list_header.len);
+        //let mut stop_counting = b._false();
+        //let tru = b._true();
+        //let fal = b._false();
+        //let mut num_fields = zero;
+        //// decode each headers of each items ofthe list
+        //// remember in a list each item of the list is RLP encoded
+        //// i = 0
+        //{
+        //    let at_the_end = b.is_equal(offset, end_idx);
+        //    let at_end_or_past = b.or(at_the_end, stop_counting);
+        //    stop_counting =
+        //        BoolTarget::new_unsafe(b.select(at_end_or_past, tru.target, fal.target));
+        //    let before_the_end = b.not(at_end_or_past);
+        //    let header = decode_header(&mut b, &node_wire.arr.arr, offset);
+        //    let new_offset = b.add(header.offset, header.len);
+        //    offset = b.mul(before_the_end.target, new_offset);
+        //    num_fields = b.add(num_fields, before_the_end.target);
+        //}
+        //// i == 1
+        //{
+        //    let at_the_end = b.is_equal(offset, end_idx);
+        //    let at_end_or_past = b.or(at_the_end, stop_counting);
+        //    stop_counting =
+        //        BoolTarget::new_unsafe(b.select(at_end_or_past, tru.target, fal.target));
+        //    let before_the_end = b.not(at_end_or_past);
+        //    let header = decode_header(&mut b, &node_wire.arr.arr, offset);
+        //    let new_offset = b.add(header.offset, header.len);
+        //    offset = b.mul(before_the_end.target, new_offset);
+        //    num_fields = b.add(num_fields, before_the_end.target);
+        //}
+        //let at_the_end = b.is_equal(offset, end_idx);
+        ////b.connect(at_the_end.target, tru.target);
 
         //
-        node_wire.assign(
+        node_wire.assign(&mut pw, &Vector::<100>::from_vec(node.clone()).unwrap());
+        exp_hash.assign(
             &mut pw,
-            &ext_hash
+            &ext_tuple[1]
                 .iter()
                 .map(|b| F::from_canonical_u8(*b))
                 .collect::<Vec<_>>()
