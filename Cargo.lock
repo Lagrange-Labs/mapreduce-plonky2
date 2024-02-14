@@ -1959,6 +1959,7 @@ dependencies = [
  "log",
  "plonky2",
  "plonky2_crypto",
+ "plonky2_ecgfp5",
  "rand",
  "rlp",
  "rmp-serde",
@@ -2412,7 +2413,7 @@ checksum = "26072860ba924cbfa98ea39c8c19b4dd6a4a25423dbdf219c1eca91aa0cf6964"
 [[package]]
 name = "plonky2"
 version = "0.1.4"
-source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
+source = "git+https://github.com/nikkolasg/plonky2#7a7649e55d68fe0e6bb924b00d7675e19a7f2a0a"
 dependencies = [
  "ahash",
  "anyhow",
@@ -2436,7 +2437,7 @@ dependencies = [
 [[package]]
 name = "plonky2_crypto"
 version = "0.1.0"
-source = "git+https://github.com/nikkolasg/plonky2-crypto?branch=feat/serialization#4159ccc2856fc60269973b13da210309654e528d"
+source = "git+https://github.com/nikkolasg/plonky2-crypto?branch=feat/serialization#3eb812cfecdca4d16886af655feed721e58915ec"
 dependencies = [
  "anyhow",
  "hex",
@@ -2452,9 +2453,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "plonky2_ecdsa"
+version = "0.1.0"
+source = "git+https://github.com/nikkolasg/plonky2-ecdsa#650a917a317d0365c6365a3397f86b4a23862231"
+dependencies = [
+ "anyhow",
+ "itertools 0.10.5",
+ "num",
+ "plonky2",
+ "plonky2_crypto",
+ "plonky2_maybe_rayon 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+]
+
+[[package]]
+name = "plonky2_ecgfp5"
+version = "0.1.0"
+source = "git+https://github.com/Lagrange-Labs/plonky2-ecgfp5#14fb32810b4ac31a4501e54b8d8babef82e0568e"
+dependencies = [
+ "itertools 0.10.5",
+ "num",
+ "plonky2",
+ "plonky2_crypto",
+ "plonky2_ecdsa",
+ "plonky2_field",
+ "rand",
+ "serde",
+]
+
+[[package]]
 name = "plonky2_field"
 version = "0.1.1"
-source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
+source = "git+https://github.com/nikkolasg/plonky2#7a7649e55d68fe0e6bb924b00d7675e19a7f2a0a"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
@@ -2475,7 +2505,7 @@ checksum = "194db0cbdd974e92d897cd92b74adb3968dc1b967315eb280357c49a7637994e"
 [[package]]
 name = "plonky2_maybe_rayon"
 version = "0.1.1"
-source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
+source = "git+https://github.com/nikkolasg/plonky2#7a7649e55d68fe0e6bb924b00d7675e19a7f2a0a"
 dependencies = [
  "rayon",
 ]
@@ -2483,7 +2513,7 @@ dependencies = [
 [[package]]
 name = "plonky2_util"
 version = "0.1.1"
-source = "git+https://github.com/nikkolasg/plonky2#f0f7b4a24f7483f99405c9ae02ded661c31e4e7f"
+source = "git+https://github.com/nikkolasg/plonky2#7a7649e55d68fe0e6bb924b00d7675e19a7f2a0a"
 
 [[package]]
 name = "powerfmt"
