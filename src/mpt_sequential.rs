@@ -525,7 +525,7 @@ pub mod test {
         // max len of a node
         const NODE_LEN: usize = 544;
         const VALUE_LEN: usize = 32;
-        let (proof, key, root) = if true {
+        let (proof, key, root, value) = if false {
             let (mut trie, key) = generate_random_storage_mpt::<ACTUAL_DEPTH, VALUE_LEN>();
             let root = trie.root_hash().unwrap();
             // root is first so we reverse the order as in circuit we prove the opposite way
@@ -534,20 +534,22 @@ pub mod test {
             assert!(proof.len() == ACTUAL_DEPTH);
             assert!(proof.len() <= DEPTH);
             assert!(keccak256(proof.last().unwrap()) == root.to_fixed_bytes());
-            (proof, key, root.to_fixed_bytes())
+            let value = trie.get(&key).unwrap().unwrap();
+            (proof, key, root.to_fixed_bytes(), value)
         } else {
             // easy switch case for specific proofs that were not validated by the circuits
             // to debug
-            let proof = vec![
-            hex::decode("f843a02067c48d3958a3b9335247b9a6d430ecfd7ec47d2795b4094f779cda9f6700caa1a0f585f458b52f38dcab96f07d5cc6406dd4e8c8007f0ec9c6af3175e7886d8bc5").unwrap(),
-            hex::decode("f851a0afd82fd956b6402e358eb2e18ed40295a4d819a3e473282f257b41d913f70476808080808080808080808080a0c63a5260ddf114504213daf4b15a236fd2d33726768f44e896487326f7c136f6808080").unwrap(),
-            hex::decode("f871a097a33f6ac3504f25d69c7012c6f2aa5fcab32d127583e61d7b88a450bd3d9255a02dd67b96bd730dac0c64a11ac0fe12d9bcaafc2d1d4ccc86aabc66e7af827b328080808080808080808080a0a58595a9d40a0bf5a93996f81b5338555ecd4ea441069576ad21f186a6a3532c808080").unwrap(),
-            ];
+            let p = vec![
+                hex::decode("f842a020ac931c0565bcf8dae7f3c47f474033bc59cfa0779d95915c8be47e54b2a7eaa03e49459d835b45480f665734072c215077c2e47b50b4d00924e12af93a783e64").unwrap(),
+                hex::decode("f85180808080808080808080a029767ccc229b9de90f860d127ecd43bcf52bce1a2411325f6a404b62ab88fd9a808080a08abe136d0af8f9c2c0d199ba338b0f5998d8a878842d020a0aba80322159db328080").unwrap(),
+                hex::decode("e21ba0ec450eb88a0e3357e72daee1a35e06df534309e73bfbf2d9707db683e1804982").unwrap(),
+                ];
             let key =
-                hex::decode("0067c48d3958a3b9335247b9a6d430ecfd7ec47d2795b4094f779cda9f6700ca")
+                hex::decode("baac931c0565bcf8dae7f3c47f474033bc59cfa0779d95915c8be47e54b2a7ea")
                     .unwrap();
-            let root = keccak256(&proof[2]).try_into().unwrap();
-            (proof, key, root)
+            let root = keccak256(p.last().unwrap()).try_into().unwrap();
+            let tuple: Vec<Vec<u8>> = rlp::decode_list(p.first().unwrap());
+            (p, key, root, tuple[1].clone())
         };
         println!("KEY = {}", hex::encode(&key));
         println!("PROOF LEN = {}", proof.len());
