@@ -19,10 +19,11 @@ pub mod eth;
 
 mod array;
 mod circuit;
-mod digest;
+mod group_hashing;
 mod hash;
 mod keccak;
 pub mod merkle;
+mod merkle_tree;
 mod mpt_sequential;
 mod rlp;
 pub mod transaction;
