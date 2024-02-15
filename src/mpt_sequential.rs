@@ -154,7 +154,7 @@ where
             // Make sure we are processing only relevant nodes !
             let is_real = inputs.should_process[i - 1];
             // look if hash is inside the node
-            let (new_key, extracted_child_hash) =
+            let (new_key, extracted_child_hash, valid_node) =
                 Self::advance_key(b, &inputs.nodes[i].arr, &iterative_key);
             // transform hash from bytes to u32 targets (since this is the hash output format)
             let extracted_hash_u32 = convert_u8_targets_to_u32(b, &extracted_child_hash.arr);
@@ -164,9 +164,11 @@ where
                     arr: extracted_hash_u32.try_into().unwrap(),
                 },
             );
+            // condition that must be true if we're processing a real node
+            let cond = b.and(valid_node, found_hash_in_parent);
             // if we don't have to process it, then circuit should never fail at that step
             // otherwise, we should always enforce finding the hash in the parent node
-            let is_parent = b.select(is_real, found_hash_in_parent.target, t.target);
+            let is_parent = b.select(is_real, cond.target, t.target);
             b.connect(is_parent, t.target);
 
             // hash the next node first
@@ -255,7 +257,7 @@ where
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
-    ) -> (MPTKeyWire, Array<Target, HASH_LEN>) {
+    ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget) {
         let zero = b.zero();
         let tt = b._true();
         // It will try to decode a RLP list of the maximum number of items there can be
@@ -272,7 +274,6 @@ where
         let branch_info = Self::advance_key_branch(b, node, key, &rlp_headers);
         // ensures it's either a branch or leaf/extension
         let tuple_or_branch = b.or(leaf_info.2, branch_info.2);
-        b.connect(tt.target, tuple_or_branch.target);
 
         // select between the two outputs
         // Note we assume that if it is not a tuple, it is necessarily a branch node.
@@ -280,7 +281,7 @@ where
         let child_hash = leaf_info.1.select(b, tuple_condition, &branch_info.1);
         let new_key = leaf_info.0.select(b, tuple_condition, &branch_info.0);
 
-        (new_key, child_hash)
+        (new_key, child_hash, tuple_or_branch)
     }
 
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
@@ -708,8 +709,9 @@ pub mod test {
                 let zero = b.zero();
                 let node = Array::<Target, { PAD_LEN(NODE_LEN) }>::new(&mut b);
                 let key_wire = MPTKeyWire::new(&mut b);
-                let (advanced_key, value) =
+                let (advanced_key, value, valid_node) =
                     Circuit::<DEPTH, NODE_LEN>::advance_key(&mut b, &node, &key_wire);
+                b.connect(tr.target, valid_node.target);
                 let exp_key_ptr = b.add_virtual_target();
                 b.connect(advanced_key.pointer, exp_key_ptr);
                 let exp_value = Array::<Target, VALUE_LEN>::new(&mut b);
