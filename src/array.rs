@@ -187,11 +187,17 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         sub: &VectorWire<SUB>,
         at: Target,
     ) -> BoolTarget {
-        let max = b.constant(F::from_canonical_usize(SUB));
         let mut t = b._true();
         for i in 0..SUB {
             let it = b.constant(F::from_canonical_usize(i));
-            let within_range = less_than(b, it, sub.real_len, 6);
+            let within_range = less_than(
+                b,
+                it,
+                sub.real_len,
+                // it's a constant wrt SUB
+                // from https://stackoverflow.com/questions/72251467/computing-ceil-of-log2-in-rust
+                (usize::BITS - SUB.leading_zeros()) as usize,
+            );
             let not_in_range = b.not(within_range);
 
             let original_idx = b.add(at, it);
@@ -674,9 +680,16 @@ mod test {
         let mut rng = thread_rng();
         let mut arr = [0u8; SIZE];
         rng.fill(&mut arr[..]);
-        let random_size: usize = rng.gen_range(0..SIZE);
+        let random_size: usize = rng.gen_range(1..SIZE);
         let idx: usize = rng.gen_range(0..(SIZE - random_size));
         let sub = arr[idx..idx + random_size].to_vec();
+
+        test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
+            arr,
+            idx: 0,
+            sub: arr.to_vec(),
+            exp: true,
+        });
         test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
             arr,
             idx,

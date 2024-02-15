@@ -63,18 +63,6 @@ impl<const N: usize> RlpList<N> {
         self.offset.value_at(b, at)
     }
 }
-
-/// Decodes the compact encoding defined in Ethereum specs. Specifically, it takes
-/// the input which represents the Enc(key) part from RLP-header || Enc(key), and
-/// returns the key extracted, in nibbles, and its actual length, in nibbles.
-/// See https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie#specification
-/// for more info.
-/// * input is the full MPT node data, in bytes format
-/// * key_header is the RLP header of the key. It is useful to know the real length of the key
-/// and the offset from which to read the key.
-/// * Return argument is the key in nibbles and the conditions that should be true
-/// NOTE: it's a condition that we don't enforce here because we may be looking at
-/// a node which doesn't use this compact encoding, since we don't have if/else in circuits.
 pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, const N: usize>(
     b: &mut CircuitBuilder<F, D>,
     input: &Array<Target, N>,
@@ -103,7 +91,7 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     // if parity is 0 => even length => (1 - p) * next_nibble = next_nibble
     //   -> in this case, need to add another nibble, which is supposed to be zero
     //   -> i.e. next_nibble == 0
-    let res_multi = b.mul(one_minus_parity, prev_nibbles.1);
+    let res_multi = b.mul_sub(parity, prev_nibbles.1, prev_nibbles.1);
     let cond = b.is_equal(res_multi, zero);
 
     // -1 because first nibble is the HP information, and the following loop
@@ -125,15 +113,13 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
         // => if parity == 0, we take lowest significant nibble because the previous last nibble is
         //                    the special "0" nibble to make overall length even
         let parity_mul_nib = b.mul(parity, prev_nibbles.1);
-        let minus_party_mul_curr = b.mul(one_minus_parity, cur_nibbles.0);
-        nibbles[2 * i] = b.add(parity_mul_nib, minus_party_mul_curr);
+        nibbles[2 * i] = b.mul_add(one_minus_parity, cur_nibbles.0, parity_mul_nib);
 
         // nibble[2*i + 1] = parity*cur_nibbles.0 + (1 - parity)*cur_nibbles.1;
         // => if parity == 1, take lowest significant nibble as successor of previous.highest_nibble
         // => if parity == 0, take highest significant nibble as success of current.lowest_nibble
         let parity_mul_curr_nib = b.mul(parity, cur_nibbles.0);
-        let res_shift_parity_product = b.mul(one_minus_parity, cur_nibbles.1);
-        nibbles[2 * i + 1] = b.add(parity_mul_curr_nib, res_shift_parity_product);
+        nibbles[2 * i + 1] = b.mul_add(one_minus_parity, cur_nibbles.1, parity_mul_curr_nib);
 
         prev_nibbles = cur_nibbles;
     }
@@ -391,13 +377,15 @@ mod tests {
 
     use eth_trie::{Nibbles, Trie};
     use plonky2::field::types::Field;
-    use plonky2::iop::target::Target;
+    use plonky2::iop::target::{BoolTarget, Target};
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::array::Array;
+    use crate::array::{Array, Vector, VectorWire};
+    use crate::keccak::HASH_LEN;
+    use crate::mpt_sequential::bytes_to_nibbles;
     use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::{
         decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, RlpList,
