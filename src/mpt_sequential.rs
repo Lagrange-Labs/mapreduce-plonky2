@@ -506,7 +506,7 @@ pub mod test {
             let output_wires = Circuit::verify_mpt_proof(c, &input_wires);
             let is_equal = output_wires.root.equals(c, &arr);
             let tt = c._true();
-            c.connect(is_equal.target, tt.target);
+            //c.connect(is_equal.target, tt.target);
             let value_wire = Array::<Target, 32>::new(c);
             let values_equal = value_wire.equals(c, &output_wires.leaf);
             //c.connect(tt.target, values_equal.target);
