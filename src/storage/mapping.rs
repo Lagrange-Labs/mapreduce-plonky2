@@ -21,6 +21,9 @@ use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTa
 
 pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {}
 
+// This is a wrapper around an array of targets set as public inputs
+// of any proof generated in this module. They all share the same
+// structure.
 // `K` Full key for a leaf inside this subtree
 // `T` Index of the part “processed” on the full key
 // `S`  storage slot of the mapping
@@ -44,6 +47,7 @@ impl<'a> PublicInputs<'a> {
     pub fn from(arr: &'a [Target]) -> Self {
         Self { proof_inputs: arr }
     }
+    /// Returns the MPT key defined over the public inputs
     pub fn mpt_key(&self) -> MPTKeyWire {
         let key_range = Self::KEY_IDX..Self::KEY_IDX + MAX_KEY_NIBBLE_LEN;
         let key = &self.proof_inputs[key_range];
@@ -56,9 +60,11 @@ impl<'a> PublicInputs<'a> {
             pointer: ptr,
         }
     }
+    /// Returns the accumulator digest defined over the public inputs
     pub fn accumulator(&self) -> CurveTarget {
         curve_target_from_slice(&self.proof_inputs[Self::D_IDX..])
     }
+    /// Returns the merkle hash C of the subtree this proof has processed.
     pub fn root_hash(&self) -> OutputHash {
         // poseidon merkle root hash is 4 F elements
         let hash_range = Self::C_IDX..Self::C_IDX + PACKED_HASH_LEN;
@@ -67,6 +73,8 @@ impl<'a> PublicInputs<'a> {
     }
 }
 
+// small utility function to transform a list of target to a curvetarget.
+// TODO: move that to ecgfp5 repo
 fn curve_target_from_slice(slice: &[Target]) -> CurveTarget {
     const EXTENSION: usize = 5;
     // 5 F for each coordinates + 1 bool flag
@@ -82,9 +90,12 @@ pub struct Wires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    // TODO replace by proof when we have the framework in place
+    /// TODO replace by proof when we have the framework in place
     inputs: Vec<Target>,
+    /// input node - right now only branch
     node: VectorWire<{ PAD_LEN(NODE_LEN) }>,
+    /// key provided by prover as a "point of reference" to verify
+    /// all children proofs's exposed keys
     common_prefix: MPTKeyWire,
 }
 
