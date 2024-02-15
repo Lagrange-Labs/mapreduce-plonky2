@@ -31,7 +31,7 @@ const MAX_LEAF_VALUE: usize = HASH_LEN;
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
 #[allow(non_snake_case)]
-const fn PAD_LEN(d: usize) -> usize {
+pub(crate) const fn PAD_LEN(d: usize) -> usize {
     compute_size_with_padding(d)
 }
 /// Circuit that simoply proves the inclusion of a value inside a MPT tree.
@@ -43,7 +43,7 @@ const fn PAD_LEN(d: usize) -> usize {
 ///     - Note since it uses keccak, the array being hashed is larger because
 /// keccak requires padding.
 #[derive(Clone, Debug)]
-struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
+pub struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
     /// for ease of usage, we take vector here and the circuit is doing the padding
     nodes: Vec<Vec<u8>>,
     /// the full key that we are trying to prove in this trie
@@ -286,6 +286,9 @@ where
 
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
+    /// * key where to lookup the next nibble and thus the hash stored at the
+    /// `nibble` position in the branch node
+    /// * headers of the current node
     pub fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
@@ -409,6 +412,19 @@ impl MPTKeyWire {
         let f_nibbles = create_array(|i| F::from_canonical_u8(key_nibbles[i]));
         self.key.assign(p, &f_nibbles);
         p.set_target(self.pointer, F::from_canonical_usize(ptr));
+    }
+
+    /// Proves the prefix of this key and other's key up to pointer are the same.
+    /// Proves both pointers are the same.
+    pub fn is_prefix_equal<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        other: &Self,
+    ) -> BoolTarget {
+        let ptr_equal = b.is_equal(self.pointer, other.pointer);
+        let prefix_equal = self.key.slice_equals(b, &other.key, self.pointer);
+        let both = b.and(ptr_equal, prefix_equal);
+        both
     }
 }
 

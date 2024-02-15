@@ -224,6 +224,26 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         res
     }
 
+    pub fn slice_equals<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        other: &Self,
+        end_idx: Target,
+    ) -> BoolTarget {
+        let mut res = b._true();
+        let tru = b._true();
+        for (i, (our, other)) in self.arr.iter().zip(other.arr.iter()).enumerate() {
+            let it = b.constant(F::from_canonical_usize(i));
+            // TODO: fixed to 6 becaues max nibble len = 64 - TO CHANGE
+            let before_end = less_than(b, it, end_idx, 6);
+            let eq = b.is_equal(our.to_target(), other.to_target());
+            let should_be_true =
+                BoolTarget::new_unsafe(b.select(before_end, eq.target, tru.target));
+            res = b.and(res, should_be_true);
+        }
+        res
+    }
+
     /// Returns self[at..at+SUB_SIZE].
     /// Cost is O(SIZE * SIZE) due to SIZE calls to value_at()
     pub fn extract_array<F: RichField + Extendable<D>, const D: usize, const SUB_SIZE: usize>(
