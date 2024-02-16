@@ -64,6 +64,14 @@ impl<const MAX_LEN: usize> VectorWire<MAX_LEN> {
         // TODO: find a more elegant / generic way to assign any value into an Array
         pw.set_int_targets(&self.arr.arr, &value.arr);
     }
+    // Asserts the full vector is composed of bytes. The array must be
+    // filled with valid bytes after the `real_len` pointer.
+    pub fn assert_bytes<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) {
+        self.arr.assert_bytes(b)
+    }
 }
 
 /// Fixed size array in circuit of any type (Target or U32Target for example!)
@@ -117,6 +125,17 @@ impl<T, const SIZE: usize> Index<usize> for Array<T, SIZE> {
     type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
         self.arr.index(index)
+    }
+}
+
+impl<const SIZE: usize> Array<Target, SIZE> {
+    pub fn assert_bytes<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) {
+        for byte in self.arr {
+            b.range_check(byte, 3)
+        }
     }
 }
 
@@ -296,6 +315,13 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         // SUM_i (i == n (idx) ) * element
         // -> sum = element
         T::from_target(b.add_many(&nums))
+    }
+
+    pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) {
+        b.register_public_inputs(&self.arr.iter().map(|t| t.to_target()).collect::<Vec<_>>());
     }
 }
 impl<const SIZE: usize> Array<Target, SIZE>

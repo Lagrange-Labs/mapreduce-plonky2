@@ -10,7 +10,7 @@ use plonky2_ecgfp5::gadgets::{
 };
 
 mod curve_add;
-mod field_to_curve;
+pub(crate) mod field_to_curve;
 mod sswu_gadget;
 mod sswu_value;
 mod utils;

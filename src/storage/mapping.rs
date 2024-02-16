@@ -3,14 +3,16 @@
 
 use crate::{
     array::{Array, VectorWire},
-    keccak::{KeccakCircuit, OutputHash, HASH_LEN, PACKED_HASH_LEN},
+    group_hashing::{self, CircuitBuilderGroupHashing},
+    keccak::{KeccakCircuit, KeccakWires, OutputHash, HASH_LEN, PACKED_HASH_LEN},
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
     utils::convert_u8_targets_to_u32,
 };
 use core::array::from_fn as create_array;
+use ethers::types::spoof::Storage;
 use plonky2::{
-    field::{extension::Extendable, goldilocks_field::GoldilocksField},
+    field::{extension::Extendable, goldilocks_field::GoldilocksField, types::Field},
     hash::hash_types::{RichField, NUM_HASH_OUT_ELTS},
     iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,
@@ -46,6 +48,31 @@ impl<'a> PublicInputs<'a> {
     const D_IDX: usize = 71;
     pub fn from(arr: &'a [Target]) -> Self {
         Self { proof_inputs: arr }
+    }
+
+    pub fn register(
+        b: &mut CircuitBuilder<GoldilocksField, 2>,
+        key: &MPTKeyWire,
+        slot: Target,
+        n: Target,
+        c: &OutputHash,
+        d: &CurveTarget,
+    ) {
+        key.register_as_input(b);
+        b.register_public_input(slot);
+        b.register_public_input(n);
+        c.register_as_input(b);
+        b.register_curve_public_input(*d);
+    }
+    /// Returns the mapping slot used to prove the derivation of the
+    /// MPT keys
+    pub fn mapping_slot(&self) -> Target {
+        self.proof_inputs[Self::S_IDX]
+    }
+    /// Returns the number of mapping leaf entries seen so
+    /// far up to the givne node.
+    pub fn n(&self) -> Target {
+        self.proof_inputs[Self::N_IDX]
     }
     /// Returns the MPT key defined over the public inputs
     pub fn mpt_key(&self) -> MPTKeyWire {
@@ -86,7 +113,7 @@ fn curve_target_from_slice(slice: &[Target]) -> CurveTarget {
     CurveTarget(([x, y], flag))
 }
 
-pub struct Wires<const NODE_LEN: usize>
+pub struct BranchWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
@@ -110,7 +137,13 @@ where
             .map(|_| b.add_virtual_targets(PublicInputs::MAX_ELEMENTS))
             .collect::<Vec<_>>();
         let node = VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(b);
+        // always ensure the node is bytes at the beginning
+        node.assert_bytes(b);
+        // WIll be exposed as common prefix. We need to make sure all children proofs share the same common prefix
         let common_prefix = MPTKeyWire::new(b);
+        // mapping slot will be exposed as public input. Need to make sure all
+        // children proofs are valid with respect to the same mapping slot.
+        let mapping_slot = b.add_virtual_target();
 
         let one = b.one();
         let zero = b.zero();
@@ -130,7 +163,8 @@ where
             let proof_inputs = PublicInputs::from(&inputs[i]);
             let child_accumulator = proof_inputs.accumulator();
             accumulator = b.curve_add(accumulator, child_accumulator);
-            n = b.add(n, one);
+            // add the number of leaves this proof has processed
+            n = b.add(n, proof_inputs.n());
             let child_key = proof_inputs.mpt_key();
             let (new_key, hash, is_valid) =
                 MPTCircuit::<1, NODE_LEN>::advance_key_branch(b, &node.arr, &child_key, &headers);
@@ -151,6 +185,156 @@ where
             // to `common_prefix`, they're all equal.
             let have_common_prefix = common_prefix.is_prefix_equal(b, &new_key);
             b.connect(have_common_prefix.target, tru.target);
+            // We also check proof is valid for the _same_ mapping slot
+            b.connect(mapping_slot, proof_inputs.mapping_slot());
+        }
+
+        // we now extract the public input to register for this proofs
+        let c = root.output_array;
+        PublicInputs::register(b, &common_prefix, mapping_slot, n, &c, &accumulator);
+    }
+}
+
+const MAPPING_KEY_LEN: usize = 32;
+
+struct LeafCircuit<const NODE_LEN: usize, const MAPPING_INPUT: usize> {}
+
+struct LeafWires<const NODE_LEN: usize> {
+    mapping_key: Array<Target, MAPPING_KEY_LEN>,
+}
+
+impl<const NODE_LEN: usize> LeafCircuit<NODE_LEN, MAPPING_INPUT_TOTAL_LEN>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(MAPPING_INPUT_TOTAL_LEN)]:,
+{
+    pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) {
+        let zero = b.zero();
+        let tru = b._true();
+        let node = VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(b);
+        // always ensure theThanks all node is bytes at the beginning
+        node.assert_bytes(b);
+        // mapping slot will be exposed as public input.
+        let mapping_storage = StorageSlot::new_mapping_slot(b);
+
+        // First expose the keccak root of this subtree starting at this node
+        let root = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &node);
+
+        // Then derives the correct MPT key from this (mappingkey,mappingslot) pair
+        let slot_wires = mapping_storage.mpt_key(b);
+
+        // Then advance the key and extract the value
+        // only decode two headers in the case of leaf
+        let rlp_headers = decode_fixed_list::<_, _, 2>(b, &node.arr.arr, zero);
+        let (new_key, value, is_valid) = MPTCircuit::<1, NODE_LEN>::advance_key_leaf_or_extension(
+            b,
+            &node.arr,
+            &slot_wires.mpt_key,
+            &rlp_headers,
+        );
+        b.connect(tru.target, is_valid.target);
+        // Then creates the initial accumulator from the (mapping_key, value)
+        let (mapping_key, mapping_slot) = mapping_storage.mapping_information();
+        let mut inputs = [b.zero(); HASH_LEN * 2];
+        inputs[0..HASH_LEN].copy_from_slice(&mapping_key.arr);
+        inputs[HASH_LEN..2 * HASH_LEN].copy_from_slice(&value.arr);
+        let leaf_accumulator = b.map_to_curve_point(&inputs);
+
+        // and register the public inputs
+        let n = b.one(); // only one leaf seen in that leaf !
+        PublicInputs::register(
+            b,
+            &new_key,
+            mapping_slot,
+            n,
+            &root.output_array,
+            &leaf_accumulator,
+        );
+    }
+}
+
+/// Represents any possibilities of storage slot that we support proving.
+/// In particular, it proves the correct derivation of the MPT key from a given
+/// storage slot and associated data ( like mapping key ).
+#[derive(Clone, Debug)]
+enum StorageSlot {
+    /// mapping key, mapping storage slot
+    Mapping(Array<Target, MAPPING_KEY_LEN>, Target),
+}
+
+/// Deriving a MPT from mapping slot is done like:
+/// keccak(left_pad32(key), left_pad32(slot))
+const MAPPING_INPUT_TOTAL_LEN: usize = 2 * MAPPING_KEY_LEN;
+/// Value but with the padding taken into account.
+const MAPPING_INPUT_PADDED_LEN: usize = PAD_LEN(MAPPING_INPUT_TOTAL_LEN);
+impl StorageSlot {
+    pub fn new_mapping_slot<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+    ) -> Self {
+        let mapping_key = Array::<Target, MAPPING_KEY_LEN>::new(b);
+        let mapping_slot = b.add_virtual_target();
+        // always ensure whatever goes into hash function, it's bytes
+        mapping_key.assert_bytes(b);
+        StorageSlot::Mapping(mapping_key, mapping_slot)
+    }
+    pub fn mapping_information(&self) -> (Array<Target, MAPPING_KEY_LEN>, Target) {
+        match self {
+            StorageSlot::Mapping(a, b) => (a.clone(), *b),
+            _ => panic!("unexpected call of mapping on different storage slot"),
         }
     }
+    /// Derives the mpt_key in circuit according to which type of storage slot
+    pub fn mpt_key<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) -> StorageSlotWire<MAPPING_INPUT_PADDED_LEN>
+    where
+        [(); MAPPING_INPUT_PADDED_LEN]:,
+        [(); 2 * HASH_LEN]:,
+        [(); HASH_LEN]:,
+    {
+        match self {
+            StorageSlot::Mapping(key, slot) => {
+                // keccak(left_pad32(key), left_pad32(slot))
+                let mut input = [b.zero(); MAPPING_INPUT_PADDED_LEN];
+                input[0..MAPPING_KEY_LEN].copy_from_slice(&key.arr);
+                input[2 * MAPPING_KEY_LEN - 1] = *slot;
+                let vector = VectorWire::<MAPPING_INPUT_PADDED_LEN> {
+                    real_len: b.constant(F::from_canonical_usize(MAPPING_INPUT_TOTAL_LEN)),
+                    arr: Array::<Target, MAPPING_INPUT_PADDED_LEN> { arr: input },
+                };
+                let keccak = KeccakCircuit::<{ MAPPING_INPUT_PADDED_LEN }>::hash_vector(b, &vector);
+                // compare with expected result in bytes
+                let exp = Array::<Target, HASH_LEN>::new(b);
+                let exp_u32 = convert_u8_targets_to_u32(b, &exp.arr);
+                let exp_arr = Array::<U32Target, PACKED_HASH_LEN> {
+                    arr: exp_u32.try_into().unwrap(),
+                };
+                let is_good_hash = exp_arr.equals(b, &keccak.output_array);
+                let tru = b._true();
+                b.connect(is_good_hash.target, tru.target);
+
+                // make sure we transform from the bytes to the nibbles
+                // TODO: actually maybe better to give the nibbles directly and pack them into U32
+                // in one go. For the future...
+                let mpt_key = MPTKeyWire::init_from_bytes(b, &exp);
+                StorageSlotWire {
+                    keccak,
+                    exp,
+                    mpt_key,
+                }
+            }
+        }
+    }
+}
+
+struct StorageSlotWire<const N: usize> {
+    /// Actual keccak wires created for the computation of the MPT key
+    keccak: KeccakWires<N>,
+    /// Expected hash in bytes. This is used to facilitate the comparison between the
+    /// hash we compute in circuit, which is in U32 format and the one we can use in the rest of
+    /// the circuit which needs to be in bytes.
+    /// TODO: use generator to do that
+    exp: Array<Target, HASH_LEN>,
+    mpt_key: MPTKeyWire,
 }

@@ -289,7 +289,7 @@ where
     /// * key where to lookup the next nibble and thus the hash stored at the
     /// `nibble` position in the branch node
     /// * headers of the current node
-    pub fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
+    pub(crate) fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
@@ -314,7 +314,7 @@ where
     }
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
-    fn advance_key_leaf_or_extension<
+    pub(crate) fn advance_key_leaf_or_extension<
         F: RichField + Extendable<D>,
         const D: usize,
         const LIST_LEN: usize,
@@ -425,6 +425,39 @@ impl MPTKeyWire {
         let prefix_equal = self.key.slice_equals(b, &other.key, self.pointer);
         let both = b.and(ptr_equal, prefix_equal);
         both
+    }
+    /// Register the key and pointer as public inputs.
+    pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) {
+        self.key.register_as_input(b);
+        b.register_public_input(self.pointer);
+    }
+    /// Initialize a new MPTKeyWire from the array of bytes. It is expected the bytes
+    /// are checked to be bytes before this calling this function.
+    /// It returns a MPTKeyWire with the pointer set to the last nibble, as in an initial
+    /// case.
+    pub fn init_from_bytes<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        arr: &Array<Target, HASH_LEN>,
+    ) -> Self {
+        Self {
+            key: Array::<Target, MAX_KEY_NIBBLE_LEN> {
+                arr: arr
+                    .arr
+                    .iter()
+                    .map(|byte| {
+                        let (low, high) = b.split_low_high(*byte, 4, 8);
+                        [low, high]
+                    })
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            },
+            pointer: b.constant(F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)),
+        }
     }
 }
 
