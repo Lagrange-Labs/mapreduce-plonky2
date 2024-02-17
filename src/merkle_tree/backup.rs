@@ -1,6 +1,6 @@
-//! Digest circuit implemention used to prove Poseidon hash of Merkle tree nodes
-//! recursively.
+//! Backup arity circuit implemention for proving Merkle tree nodes recursively.
 
+use super::DigestTreeCircuit;
 use crate::{
     circuit::{PCDCircuit, ProofOrDummyTarget, UserCircuit},
     utils::{convert_u8_targets_to_u32, convert_u8_values_to_u32, less_than},
@@ -8,7 +8,7 @@ use crate::{
 use plonky2::{
     field::extension::Extendable,
     hash::{
-        hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         hashing::{hash_n_to_hash_no_pad, PlonkyPermutation},
         poseidon::{PoseidonHash, PoseidonPermutation, SPONGE_RATE},
     },
@@ -18,11 +18,11 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use std::iter;
+use std::{array, iter};
 
-/// Digest circuit wires including input and output targets
+/// Arity circuit wires including input and output targets
 #[derive(Clone, Debug)]
-pub struct DigestWires<const ARITY: usize>
+pub struct DigestArityWires<const ARITY: usize>
 where
     [(); ARITY * 4 + 28]:,
 {
@@ -39,11 +39,11 @@ where
     output: HashOutTarget,
 }
 
-/// Digest circuit used to prove Poseidon hash
+/// Arity circuit used to prove Merkle tree
 /// This circuit could be used to prove Merkle tree recursively. Each Merkle
 /// tree branch has maximum ARITY children (`ARITY >= 1`).
 #[derive(Clone, Debug)]
-pub struct DigestCircuit<F, const D: usize, const ARITY: usize>
+pub struct DigestArityCircuit<F, const D: usize, const ARITY: usize>
 where
     [(); ARITY * 4 + 28]:,
 {
@@ -57,14 +57,15 @@ where
     child_input_len: usize,
 }
 
-impl<F, const D: usize, const ARITY: usize> DigestCircuit<F, D, ARITY>
+impl<F, const D: usize, const ARITY: usize> DigestTreeCircuit<HashOut<F>>
+    for DigestArityCircuit<F, D, ARITY>
 where
     [(); ARITY * 4 + 28]:,
     F: RichField + Extendable<D>,
 {
     /// Create a circuit instance for a leaf of Merkle tree.
-    pub fn new_leaf(value: [u8; 32]) -> Self {
-        let inputs: [F; ARITY * 4 + 28] = core::array::from_fn(|i| {
+    fn new_leaf(value: [u8; 32]) -> Self {
+        let inputs: [F; ARITY * 4 + 28] = array::from_fn(|i| {
             if i < 32 {
                 F::from_canonical_u8(value[i])
             } else {
@@ -80,13 +81,13 @@ where
     }
 
     /// Create a circuit instance for a branch of Merkle tree.
-    pub fn new_branch(inputs: Vec<[F; 4]>) -> Self {
-        assert!(inputs.len() > 0 && inputs.len() <= ARITY);
+    fn new_branch(children: Vec<HashOut<F>>) -> Self {
+        let child_len = children.len();
+        assert!(child_len > 0 && child_len <= ARITY);
 
-        // Flatten the child hash values.
-        let mut inputs: Vec<_> = inputs.into_iter().flatten().collect();
-        inputs.resize(ARITY * 4 + 28, F::ZERO);
-        let inputs = inputs.try_into().unwrap();
+        // Flatten the child hash values and construct inputs.
+        let children: Vec<_> = children.into_iter().flat_map(|c| c.elements).collect();
+        let inputs = array::from_fn(|i| children.get(i).cloned().unwrap_or(F::ZERO));
 
         Self {
             inputs,
@@ -95,12 +96,12 @@ where
     }
 }
 
-impl<F, const D: usize, const ARITY: usize> UserCircuit<F, D> for DigestCircuit<F, D, ARITY>
+impl<F, const D: usize, const ARITY: usize> UserCircuit<F, D> for DigestArityCircuit<F, D, ARITY>
 where
     [(); ARITY * 4 + 28]:,
     F: RichField + Extendable<D>,
 {
-    type Wires = DigestWires<ARITY>;
+    type Wires = DigestArityWires<ARITY>;
 
     /// Build the digest circuit.
     fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
@@ -141,7 +142,7 @@ where
 
         // It's a leaf of Merkle tree if the child length is zero.
         let output = if self.child_input_len == 0 {
-            // Convert the field values of u8 array to u32.
+            // Convert the values from u8 array to u32.
             let inputs: Vec<_> = convert_u8_values_to_u32(&self.inputs[..32]);
             hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&inputs)
         } else {
@@ -152,7 +153,8 @@ where
     }
 }
 
-impl<F, const D: usize, const ARITY: usize> PCDCircuit<F, D, ARITY> for DigestCircuit<F, D, ARITY>
+impl<F, const D: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
+    for DigestArityCircuit<F, D, ARITY>
 where
     [(); ARITY * 4 + 28]:,
     F: RichField + Extendable<D>,
