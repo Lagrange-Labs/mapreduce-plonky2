@@ -166,12 +166,14 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
     pub fn assign_bytes<F: RichField>(&self, pw: &mut PartialWitness<F>, array: &[u8; SIZE]) {
         self.assign(pw, &create_array(|i| F::from_canonical_u8(array[i])))
     }
+    /// Registers every element as a public input consecutively
     pub fn register_as_public_input<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
     ) {
         b.register_public_inputs(&self.arr.iter().map(|v| v.to_target()).collect::<Vec<_>>());
     }
+
     /// Conditionally select this array if condition is true or the other array
     /// if condition is false. Cost is O(SIZE) call to select()
     pub fn select<F: RichField + Extendable<D>, const D: usize>(

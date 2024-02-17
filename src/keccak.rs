@@ -200,7 +200,7 @@ impl<const N: usize> KeccakCircuit<N> {
                 .unwrap(),
         };
         let t = packed_hash.equals(b, &wires.output_array);
-        b.connect(tru.target, t.target);
+        //b.connect(tru.target, t.target);
         ByteKeccakWires::<N> {
             keccak: wires,
             output: hash_bytes,

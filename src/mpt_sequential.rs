@@ -447,11 +447,10 @@ impl MPTKeyWire {
                 arr: arr
                     .arr
                     .iter()
-                    .map(|byte| {
+                    .flat_map(|byte| {
                         let (low, high) = b.split_low_high(*byte, 4, 8);
                         [low, high]
                     })
-                    .flatten()
                     .collect::<Vec<_>>()
                     .try_into()
                     .unwrap(),
