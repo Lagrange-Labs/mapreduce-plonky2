@@ -484,9 +484,14 @@ pub(crate) fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 pub mod test {
     use std::array::from_fn as create_array;
+    use std::env;
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use ethers::providers::{Http, Provider};
+    use ethers::types::Address;
+    use itertools::Itertools;
     use plonky2::field::types::Field;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
@@ -504,6 +509,7 @@ pub mod test {
 
     use crate::array::Vector;
     use crate::benches::init_logging;
+    use crate::eth::ProofQuery;
     use crate::keccak::{InputData, KeccakCircuit, HASH_LEN, PACKED_HASH_LEN};
     use crate::mpt_sequential::{bytes_to_nibbles, nibbles_to_bytes, NB_ITEMS_LEAF};
     use crate::rlp::{
@@ -574,6 +580,58 @@ pub mod test {
                 &create_array(|i| F::from_canonical_u8(self.exp_value[i])),
             );
         }
+    }
+    use anyhow::Result;
+
+    #[tokio::test]
+    async fn test_kashish_contract_simple_slot() -> Result<()> {
+        // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://sepolia.infura.io/v3/d22da7908d80409b95cee2f3fbfddb3b";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // sepolia contract
+        let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
+        // simple storage test
+        let query = ProofQuery::new_simple_slot(contract, 0);
+        let res = query.query_mpt_proof(&provider).await?;
+        let value = res.storage_proof[0].value;
+        let mut value_bytes = [0u8; 32];
+        value.to_little_endian(&mut value_bytes);
+        ProofQuery::verify_storage_proof(&res)?;
+        let mpt_proof = res.storage_proof[0]
+            .proof
+            .iter()
+            .rev() // we want the leaf first and root last
+            .map(|b| b.to_vec())
+            .collect::<Vec<Vec<u8>>>();
+        let root = keccak256(mpt_proof.last().unwrap());
+        let mpt_key = query.slot.mpt_key();
+        println!("proof depth : {}", mpt_proof.len());
+        println!(
+            "proof max len node : {}",
+            mpt_proof.iter().map(|node| node.len()).max().unwrap()
+        );
+        // Written as constant from ^
+        const DEPTH: usize = 2;
+        const NODE_LEN: usize = 150;
+        visit_proof(&mpt_proof);
+        for i in 1..mpt_proof.len() {
+            let child_hash = keccak256(&mpt_proof[i - 1]);
+            let u8idx = find_index_subvector(&mpt_proof[i], &child_hash);
+            assert!(u8idx.is_some());
+        }
+        let circuit = TestCircuit::<DEPTH, NODE_LEN> {
+            c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
+            exp_root: root.try_into().unwrap(),
+            exp_value: value_bytes,
+        };
+        test_simple_circuit::<F, D, C, _>(circuit);
+
+        Ok(())
     }
     #[test]
     fn test_mpt_proof_verification() {

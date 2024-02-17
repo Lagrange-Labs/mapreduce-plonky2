@@ -1,16 +1,20 @@
 //! Module containing several structure definitions for Ethereum related operations
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
-use anyhow::{Ok, Result};
+use anyhow::{bail, Ok, Result};
 use eth_trie::{EthTrie, MemoryDB, Node, Trie};
 use ethers::{
-    providers::{Http, Middleware, Provider},
-    types::{Block, BlockId, Bytes, Transaction, TransactionReceipt, U64},
+    providers::{Http, JsonRpcClient, Middleware, Provider},
+    types::{
+        spoof::Storage, Address, Block, BlockId, BlockNumber, Bytes, EIP1186ProofResponse,
+        Transaction, TransactionReceipt, H256, U256, U64,
+    },
     utils::hex,
 };
+use plonky2::hash::keccak;
 use rlp::{Encodable, Rlp, RlpStream};
 #[cfg(feature = "ci")]
 use std::env;
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use crate::utils::keccak256;
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
@@ -227,15 +231,150 @@ pub(crate) fn compute_key_length(path: &[Node]) -> usize {
     }
     key_len
 }
+
+fn left_pad32(slice: &[u8]) -> [u8; 32] {
+    match slice.len() {
+        a if a > 32 => panic!("left_pad32 must not be called with higher slice len than 32"),
+        32 => slice.try_into().unwrap(),
+        a => {
+            let mut output = [0u8; 32];
+            output[32 - a..].copy_from_slice(slice);
+            output
+        }
+    }
+}
+
+pub(crate) struct ProofQuery {
+    contract: Address,
+    pub(crate) slot: StorageSlot,
+}
+pub(crate) enum StorageSlot {
+    /// simple storage slot like a uin256 etc that fits in 32bytes
+    /// Argument is the slot location in the contract
+    Simple(usize),
+    /// Mapping storage slot - to get the proof, one needs to know
+    /// the entry, the "mapping key" to derive the MPT key
+    /// Second argument is the slot location inthe contract
+    /// (mapping_key, mapping_slot)
+    Mapping(Vec<u8>, usize),
+}
+impl StorageSlot {
+    pub fn location(&self) -> H256 {
+        match self {
+            StorageSlot::Simple(slot) => H256::from_low_u64_be(*slot as u64),
+            StorageSlot::Mapping(mapping_key, mapping_slot) => {
+                // H( pad32(address), pad32(mapping_slot))
+                let padded_mkey = left_pad32(mapping_key);
+                let padded_slot = left_pad32(&[*mapping_slot as u8]);
+                let concat = padded_mkey
+                    .into_iter()
+                    .chain(padded_slot)
+                    .collect::<Vec<_>>();
+                H256::from_slice(&keccak256(&concat))
+            }
+        }
+    }
+    pub fn mpt_key(&self) -> Vec<u8> {
+        keccak256(&self.location().to_fixed_bytes())
+    }
+}
+impl ProofQuery {
+    pub fn new_simple_slot(address: Address, slot: usize) -> Self {
+        Self {
+            contract: address,
+            slot: StorageSlot::Simple(slot),
+        }
+    }
+    pub fn new_mapping_slot(address: Address, slot: usize, mapping_key: Vec<u8>) -> Self {
+        Self {
+            contract: address,
+            slot: StorageSlot::Mapping(mapping_key, slot),
+        }
+    }
+    pub async fn query_mpt_proof<P: Middleware + 'static>(
+        &self,
+        provider: &P,
+    ) -> Result<EIP1186ProofResponse> {
+        let res = provider
+            .get_proof(
+                self.contract,
+                vec![self.slot.location()],
+                Some(BlockNumber::Latest.into()),
+            )
+            .await?;
+        Ok(res)
+    }
+    pub fn verify_storage_proof(proof: &EIP1186ProofResponse) -> Result<()> {
+        let memdb = Arc::new(MemoryDB::new(true));
+        let tx_trie = EthTrie::new(Arc::clone(&memdb));
+        let proof_key_bytes = proof.storage_proof[0].key.to_fixed_bytes();
+        let mpt_key = keccak256(&proof_key_bytes[..]);
+        let is_valid = tx_trie.verify_proof(
+            proof.storage_hash,
+            &mpt_key,
+            proof.storage_proof[0]
+                .proof
+                .iter()
+                .map(|b| b.to_vec())
+                .collect(),
+        );
+        // key must be valid, proof must be valid and value must exist
+        if is_valid.is_err() {
+            bail!("proof is not valid");
+        }
+        if let Some(ext_value) = is_valid.unwrap() {
+            let found = U256::from_big_endian(&ext_value);
+            if found != proof.storage_proof[0].value {
+                bail!("proof does not return right value");
+            }
+        } else {
+            bail!("proof says the value associated with that key does not exist");
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
 
-    use ethers::types::H256;
+    use ethers::types::{BlockNumber, H256, U256};
     use rand::{thread_rng, Rng};
 
     use crate::utils::find_index_subvector;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_kashish_contract() -> Result<()> {
+        // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
+        // uint256 public n_registered; // storage slot 0
+        // mapping(address => uint256) public holders; // storage slot 1
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://sepolia.infura.io/v3/d22da7908d80409b95cee2f3fbfddb3b";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // sepolia contract
+        let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
+        // simple storage test
+        {
+            let query = ProofQuery::new_simple_slot(contract, 0);
+            let res = query.query_mpt_proof(&provider).await?;
+            ProofQuery::verify_storage_proof(&res)?;
+        }
+        // mapping storage test
+        {
+            // mapping key
+            let mapping_key =
+                hex::decode("000000000000000000000000000000000000000000000000000000000000abcd")?;
+            let query = ProofQuery::new_mapping_slot(contract, 1, mapping_key);
+            let res = query.query_mpt_proof(&provider).await?;
+            ProofQuery::verify_storage_proof(&res)?;
+        }
+        Ok(())
+    }
 
     #[tokio::test]
     async fn fetch_block() -> Result<()> {
