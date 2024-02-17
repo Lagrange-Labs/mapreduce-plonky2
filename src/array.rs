@@ -9,7 +9,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use std::{fmt::Debug, ops::Index};
+use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
 use crate::utils::{less_than, less_than_or_equal_to, IntTargetWriter};
 
@@ -158,6 +158,13 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         for i in 0..SIZE {
             pw.set_target(self.arr[i].to_target(), array[i])
         }
+    }
+
+    /// Assigns a vector of bytes to this array.
+    /// NOTE: in circuit, one must call `array.assert_bytes()` to ensure the "byteness" of the input
+    /// being assigned to it, if it's expected to be bytes.
+    pub fn assign_bytes<F: RichField>(&self, pw: &mut PartialWitness<F>, array: &[u8; SIZE]) {
+        self.assign(pw, &create_array(|i| F::from_canonical_u8(array[i])))
     }
     pub fn register_as_public_input<F: RichField + Extendable<D>, const D: usize>(
         &self,
