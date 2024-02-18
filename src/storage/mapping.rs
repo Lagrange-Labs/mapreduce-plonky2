@@ -140,6 +140,7 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     node: VectorWire<{ PAD_LEN(NODE_LEN) }>,
+    root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     mapping_slot: MappingSlotWires,
 }
 impl<const N: usize> LeafWires<N>
@@ -200,6 +201,7 @@ where
         );
         LeafWires {
             node,
+            root,
             mapping_slot: mapping_slot_wires,
         }
     }
@@ -208,6 +210,11 @@ where
         let pad_node = Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(self.node.clone())
             .expect("invalid node given");
         wires.node.assign(pw, &pad_node);
+        KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
+            pw,
+            &wires.root,
+            &InputData::Assigned(&pad_node),
+        );
         self.slot.assign(pw, &wires.mapping_slot);
     }
 }
@@ -217,19 +224,23 @@ mod test {
     use eth_trie::Trie;
     use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::iop::witness::PartialWitness;
+    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use plonky2::{
         field::extension::Extendable, hash::hash_types::RichField,
         plonk::circuit_builder::CircuitBuilder,
     };
     use rand::{thread_rng, Rng};
 
+    use crate::circuit::test::run_circuit;
     use crate::eth::StorageSlot;
+    use crate::storage::key::MappingSlot;
     use crate::storage::mapping::PAD_LEN;
     use crate::{circuit::UserCircuit, mpt_sequential::test::generate_random_storage_mpt};
 
     use super::{LeafCircuit, LeafWires};
-    type F = GoldilocksField;
     const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
 
     impl<const NODE_LEN: usize> UserCircuit<F, D> for LeafCircuit<NODE_LEN>
     where
@@ -254,8 +265,12 @@ mod test {
         let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
         let mut random_value = [0u8; 32];
         thread_rng().fill(&mut random_value);
-        trie.insert(&slot.mpt_key(), &random_value);
+        trie.insert(&slot.mpt_key(), &random_value).unwrap();
         trie.root_hash().unwrap();
-        trie.get_proof(&slot.mpt_key());
+        let proof = trie.get_proof(&slot.mpt_key()).unwrap();
+        let node = proof.last().unwrap().clone(); // proof from RPC gives leaf as last
+        let slot = MappingSlot::new(mapping_slot as u8, mapping_key);
+        let circuit = LeafCircuit::<80> { node, slot };
+        run_circuit::<F, D, C, _>(circuit);
     }
 }

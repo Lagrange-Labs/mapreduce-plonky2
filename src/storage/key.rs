@@ -42,6 +42,15 @@ pub struct MappingSlot {
     mapping_key: Vec<u8>,
 }
 
+impl MappingSlot {
+    pub fn new(slot: u8, key: Vec<u8>) -> Self {
+        Self {
+            mapping_slot: slot,
+            mapping_key: key,
+        }
+    }
+}
+
 /// Contains the wires associated with the storage slot's mpt key
 /// derivation logic.
 /// NOTE: currently specific only for mapping slots.
