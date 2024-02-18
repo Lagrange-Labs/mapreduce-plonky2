@@ -1,6 +1,7 @@
 //! Module handling the recursive proving of mapping entries specically
 //! inside a storage trie.
 
+use crate::storage::key::MappingSlotWires;
 use crate::{
     array::{Array, Vector, VectorWire},
     eth::left_pad32,
@@ -30,6 +31,8 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
+
+use super::key::{MappingSlot, MAPPING_KEY_LEN};
 
 pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {}
 
@@ -126,6 +129,7 @@ fn curve_target_from_slice(slice: &[Target]) -> CurveTarget {
 /// Circuit implementing the circuit to prove the correct derivation of the
 /// MPT key from a mapping key and mapping slot. It also do the usual recursive
 /// MPT proof verification logic.
+#[derive(Clone, Debug)]
 struct LeafCircuit<const NODE_LEN: usize> {
     node: Vec<u8>,
     slot: MappingSlot,
@@ -138,9 +142,12 @@ where
     node: VectorWire<{ PAD_LEN(NODE_LEN) }>,
     mapping_slot: MappingSlotWires,
 }
-impl<const N: usize> LeafWires<N> {
+impl<const N: usize> LeafWires<N>
+where
+    [(); PAD_LEN(N)]:,
+{
     pub fn mapping_key(&self) -> Array<Target, MAPPING_KEY_LEN> {
-        self.storage_wires.mapping_key
+        self.mapping_slot.mapping_key.clone()
     }
 
     pub fn mapping_slot(&self) -> Target {
@@ -177,7 +184,7 @@ where
         b.connect(tru.target, is_valid.target);
         // Then creates the initial accumulator from the (mapping_key, value)
         let mut inputs = [b.zero(); HASH_LEN * 2];
-        inputs[0..HASH_LEN].copy_from_slice(&mapping_slot_wires.mapping_key().arr);
+        inputs[0..HASH_LEN].copy_from_slice(&mapping_slot_wires.mapping_key.arr);
         inputs[HASH_LEN..2 * HASH_LEN].copy_from_slice(&value.arr);
         let leaf_accumulator = b.map_to_curve_point(&inputs);
 
@@ -186,7 +193,7 @@ where
         PublicInputs::register(
             b,
             &new_key,
-            *mapping_slot_wires.mapping_slot(),
+            mapping_slot_wires.mapping_slot,
             n,
             &root.output_array,
             &leaf_accumulator,
@@ -201,23 +208,37 @@ where
         let pad_node = Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(self.node.clone())
             .expect("invalid node given");
         wires.node.assign(pw, &pad_node);
-        wires.slot.assign(pw, &wires.mapping_slot);
+        self.slot.assign(pw, &wires.mapping_slot);
     }
 }
 
 #[cfg(test)]
 mod test {
     use eth_trie::Trie;
+    use plonky2::field::goldilocks_field::GoldilocksField;
+    use plonky2::iop::witness::PartialWitness;
+    use plonky2::{
+        field::extension::Extendable, hash::hash_types::RichField,
+        plonk::circuit_builder::CircuitBuilder,
+    };
+    use rand::{thread_rng, Rng};
 
+    use crate::eth::StorageSlot;
+    use crate::storage::mapping::PAD_LEN;
     use crate::{circuit::UserCircuit, mpt_sequential::test::generate_random_storage_mpt};
 
     use super::{LeafCircuit, LeafWires};
+    type F = GoldilocksField;
+    const D: usize = 2;
 
-    impl<F, const D: usize, const NODE_LEN: usize> UserCircuit<F, D> for LeafCircuit<NODE_LEN> {
-        type Wires = LeafWires;
+    impl<const NODE_LEN: usize> UserCircuit<F, D> for LeafCircuit<NODE_LEN>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+    {
+        type Wires = LeafWires<NODE_LEN>;
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            Self::build(b);
+            Self::build(b)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -230,11 +251,11 @@ mod test {
         let mapping_key = hex::decode("1234").unwrap();
         let mapping_slot = 2;
         let slot = StorageSlot::Mapping(mapping_key.clone(), mapping_slot);
-        let (mut trie, _) = generate_random_storage_mpt();
-        let mut random_value = vec![0u8; 32];
+        let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
+        let mut random_value = [0u8; 32];
         thread_rng().fill(&mut random_value);
-        trie.insert(slot.mpt_key(), &random_value);
+        trie.insert(&slot.mpt_key(), &random_value);
         trie.root_hash().unwrap();
-        trie.get_proof(slot.mpt_key());
+        trie.get_proof(&slot.mpt_key());
     }
 }

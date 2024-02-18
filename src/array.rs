@@ -9,7 +9,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use std::{fmt::Debug, ops::Index};
+use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
 use crate::utils::{less_than, less_than_or_equal_to, IntTargetWriter};
 
@@ -63,6 +63,14 @@ impl<const MAX_LEN: usize> VectorWire<MAX_LEN> {
         // small hack to specialize Array for assigning u8 inside
         // TODO: find a more elegant / generic way to assign any value into an Array
         pw.set_int_targets(&self.arr.arr, &value.arr);
+    }
+    // Asserts the full vector is composed of bytes. The array must be
+    // filled with valid bytes after the `real_len` pointer.
+    pub fn assert_bytes<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) {
+        self.arr.assert_bytes(b)
     }
 }
 
@@ -120,6 +128,17 @@ impl<T, const SIZE: usize> Index<usize> for Array<T, SIZE> {
     }
 }
 
+impl<const SIZE: usize> Array<Target, SIZE> {
+    pub fn assert_bytes<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) {
+        for byte in self.arr {
+            b.range_check(byte, 8)
+        }
+    }
+}
+
 impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
     /// Creates new wires of the given SIZE.
     pub fn new<F: RichField + Extendable<D>, const D: usize>(b: &mut CircuitBuilder<F, D>) -> Self {
@@ -140,12 +159,21 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
             pw.set_target(self.arr[i].to_target(), array[i])
         }
     }
+
+    /// Assigns a vector of bytes to this array.
+    /// NOTE: in circuit, one must call `array.assert_bytes()` to ensure the "byteness" of the input
+    /// being assigned to it, if it's expected to be bytes.
+    pub fn assign_bytes<F: RichField>(&self, pw: &mut PartialWitness<F>, array: &[u8; SIZE]) {
+        self.assign(pw, &create_array(|i| F::from_canonical_u8(array[i])))
+    }
+    /// Registers every element as a public input consecutively
     pub fn register_as_public_input<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
     ) {
         b.register_public_inputs(&self.arr.iter().map(|v| v.to_target()).collect::<Vec<_>>());
     }
+
     /// Conditionally select this array if condition is true or the other array
     /// if condition is false. Cost is O(SIZE) call to select()
     pub fn select<F: RichField + Extendable<D>, const D: usize>(
@@ -224,6 +252,26 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         res
     }
 
+    pub fn slice_equals<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        other: &Self,
+        end_idx: Target,
+    ) -> BoolTarget {
+        let mut res = b._true();
+        let tru = b._true();
+        for (i, (our, other)) in self.arr.iter().zip(other.arr.iter()).enumerate() {
+            let it = b.constant(F::from_canonical_usize(i));
+            // TODO: fixed to 6 becaues max nibble len = 64 - TO CHANGE
+            let before_end = less_than(b, it, end_idx, 6);
+            let eq = b.is_equal(our.to_target(), other.to_target());
+            let should_be_true =
+                BoolTarget::new_unsafe(b.select(before_end, eq.target, tru.target));
+            res = b.and(res, should_be_true);
+        }
+        res
+    }
+
     /// Returns self[at..at+SUB_SIZE].
     /// Cost is O(SIZE * SIZE) due to SIZE calls to value_at()
     pub fn extract_array<F: RichField + Extendable<D>, const D: usize, const SUB_SIZE: usize>(
@@ -276,6 +324,13 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         // SUM_i (i == n (idx) ) * element
         // -> sum = element
         T::from_target(b.add_many(&nums))
+    }
+
+    pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) {
+        b.register_public_inputs(&self.arr.iter().map(|t| t.to_target()).collect::<Vec<_>>());
     }
 }
 impl<const SIZE: usize> Array<Target, SIZE>
@@ -698,5 +753,34 @@ mod test {
             sub: (0..random_size).map(|_| rng.gen()).collect::<Vec<_>>(),
             exp: false,
         });
+    }
+
+    #[test]
+    fn test_assert_bytes() {
+        #[derive(Clone, Debug)]
+        struct TestAssertBytes<const N: usize> {
+            vector: Vec<u8>,
+        }
+        impl<F, const D: usize, const N: usize> UserCircuit<F, D> for TestAssertBytes<N>
+        where
+            F: RichField + Extendable<D>,
+        {
+            type Wires = Array<Target, N>;
+
+            fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let arr = Array::<Target, N>::new(b);
+                arr.assert_bytes(b);
+                arr
+            }
+
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires.assign_bytes(pw, &self.vector.clone().try_into().unwrap());
+            }
+        }
+
+        const N: usize = 47;
+        let vector = (0..N).map(|_| thread_rng().gen::<u8>()).collect::<Vec<_>>();
+        let circuit = TestAssertBytes::<N> { vector };
+        run_circuit::<F, D, C, _>(circuit);
     }
 }

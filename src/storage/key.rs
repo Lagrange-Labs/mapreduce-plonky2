@@ -37,7 +37,7 @@ use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTa
 /// 2. mpt_key = keccak(location)
 /// WARNING: Currently takes the assumption that the storage slot number fits inside a single byte.
 #[derive(Clone, Debug)]
-struct MappingSlot {
+pub struct MappingSlot {
     mapping_slot: u8,
     mapping_key: Vec<u8>,
 }
@@ -45,26 +45,26 @@ struct MappingSlot {
 /// Contains the wires associated with the storage slot's mpt key
 /// derivation logic.
 /// NOTE: currently specific only for mapping slots.
-struct MappingSlotWires {
+pub struct MappingSlotWires {
     /// "input" mapping key which is maxed out at 32 bytes
-    mapping_key: Array<Target, MAPPING_KEY_LEN>,
+    pub mapping_key: Array<Target, MAPPING_KEY_LEN>,
     /// "input" mapping slot which is assumed to fit in a single byte
-    mapping_slot: Target,
+    pub mapping_slot: Target,
     /// Actual keccak wires created for the computation of the "location"
     /// for the mapping storage slot
-    keccak_location: ByteKeccakWires<MAPPING_INPUT_PADDED_LEN>,
+    pub keccak_location: ByteKeccakWires<MAPPING_INPUT_PADDED_LEN>,
     /// Actual keccak wires created for the computation of the final MPT key
     /// from the location. THIS is the one to use to look up a key in the
     /// associated MPT trie
-    keccak_mpt: ByteKeccakWires<{ PAD_LEN(HASH_LEN) }>,
+    pub keccak_mpt: ByteKeccakWires<{ PAD_LEN(HASH_LEN) }>,
     /// The MPT key derived in circuit from the storage slot, in NIBBLES
     /// TODO: it represents the same information as "exp" but in nibbles.
     /// It doesn't need to be assigned, but is used in the higher level circuits
-    mpt_key: MPTKeyWire,
+    pub mpt_key: MPTKeyWire,
 }
 
 /// Maximum size of the key for a mapping
-const MAPPING_KEY_LEN: usize = 32;
+pub const MAPPING_KEY_LEN: usize = 32;
 const MAPPING_INPUT_TOTAL_LEN: usize = 2 * MAPPING_KEY_LEN;
 /// Value but with the padding taken into account.
 const MAPPING_INPUT_PADDED_LEN: usize = PAD_LEN(MAPPING_INPUT_TOTAL_LEN);

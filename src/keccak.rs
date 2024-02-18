@@ -20,7 +20,7 @@ use plonky2_crypto::{
 
 use crate::{
     array::{Array, Vector, VectorWire},
-    utils::{convert_u8_targets_to_u32, less_than},
+    utils::{convert_u8_targets_to_u32, keccak256, less_than},
 };
 
 /// Length of a hash in bytes.
@@ -44,9 +44,14 @@ pub const fn compute_padding_size(data_len: usize) -> usize {
     compute_size_with_padding(data_len) - data_len
 }
 
-/// Represents the output of the keccak hash function.
-/// It's a wrapper to implement some utility functions on top.
+/// Represents the output of the keccak hash function. This output
+/// is in a packed representation where bytes are packed into
+/// 32bits.
 pub type OutputHash = Array<U32Target, PACKED_HASH_LEN>;
+
+/// Represents the output of the keccak hash function. This output
+/// is in a byte representation.
+pub type OutputByteHash = Array<Target, HASH_LEN>;
 
 /// Circuit able to hash any arrays of bytes of dynamic sizes as long as its
 /// padded version length is less than N. In other words, N is the maximal size
@@ -55,12 +60,19 @@ pub type OutputHash = Array<U32Target, PACKED_HASH_LEN>;
 pub struct KeccakCircuit<const N: usize> {
     data: Vector<N>,
 }
+/// Wires containing the output of the hash function as well as the intermediate
+/// wires created. It requires assigning during proving time because of a small
+/// computation done outside the circuit that requires the original input data.
 #[derive(Clone, Debug)]
 pub struct KeccakWires<const N: usize> {
     input_array: VectorWire<N>,
     diff: Target,
     // 256/u32 = 8
     pub output_array: OutputHash,
+}
+pub struct ByteKeccakWires<const N: usize> {
+    keccak: KeccakWires<N>,
+    pub output: OutputByteHash,
 }
 
 impl<const N: usize> KeccakCircuit<N> {
@@ -171,6 +183,30 @@ impl<const N: usize> KeccakCircuit<N> {
         }
     }
 
+    /// hash_to_bytes hashes the vector as usual but also returns an
+    /// output array which is in bytes. This is useful to compare things
+    /// with an expected byte location in some nodes or to re-use in a
+    /// subsequent hashing operation etc.
+    pub fn hash_to_bytes<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        a: &VectorWire<N>,
+    ) -> ByteKeccakWires<N> {
+        let tru = b._true();
+        let wires = Self::hash_vector(b, a);
+        let hash_bytes = Array::<Target, HASH_LEN>::new(b);
+        let packed_hash = Array {
+            arr: convert_u8_targets_to_u32(b, &hash_bytes.arr)
+                .try_into()
+                .unwrap(),
+        };
+        let t = packed_hash.equals(b, &wires.output_array);
+        b.connect(tru.target, t.target);
+        ByteKeccakWires::<N> {
+            keccak: wires,
+            output: hash_bytes,
+        }
+    }
+
     /// This
     /// Usually the input data is already assigned in other places of our circuits.
     /// This method takes the data and aHowever, we do need the
@@ -189,6 +225,21 @@ impl<const N: usize> KeccakCircuit<N> {
         }
         let diff = compute_padding_size(data.real_len());
         pw.set_target(wires.diff, F::from_canonical_usize(diff));
+    }
+    /// TODO: naming not great. Probably worth refactoring on its own gadget
+    pub fn assign_byte_keccak<F: RichField>(
+        pw: &mut PartialWitness<F>,
+        wires: &ByteKeccakWires<N>,
+        data: &InputData<N>,
+    ) {
+        Self::assign(pw, &wires.keccak, data);
+        let expected_hash = match data {
+            InputData::Assigned(a) => keccak256(&a.arr[0..a.real_len]),
+            InputData::NonAssigned(a) => keccak256(&a.arr[0..a.real_len]),
+        };
+        wires
+            .output
+            .assign_bytes(pw, &expected_hash.try_into().unwrap());
     }
 }
 
@@ -219,15 +270,15 @@ impl<'a, const N: usize> InputData<'a, N> {
 mod test {
     use super::{InputData, KeccakCircuit, KeccakWires};
     use crate::{
-        array::VectorWire,
+        array::{Array, VectorWire},
         circuit::{test::run_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit},
-        keccak::compute_size_with_padding,
+        keccak::{compute_size_with_padding, ByteKeccakWires, OutputByteHash, HASH_LEN},
         utils::{keccak256, read_le_u32},
     };
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
-        iop::witness::PartialWitness,
+        iop::{target::Target, witness::PartialWitness},
         plonk::{
             circuit_builder::CircuitBuilder,
             config::{GenericConfig, PoseidonGoldilocksConfig},
@@ -314,6 +365,60 @@ mod test {
                     .collect::<Vec<_>>();
 
                 wires.output_array.assign(pw, &exp_u32.try_into().unwrap());
+            }
+        }
+
+        let mut rng = thread_rng();
+        let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..SIZE]);
+        let exp = keccak256(&arr[..SIZE]);
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let circuit = TestKeccak::<PADDED_LEN> {
+            c: KeccakCircuit::<PADDED_LEN>::new(arr.to_vec()).unwrap(),
+            exp,
+        };
+        run_circuit::<F, D, C, _>(circuit);
+    }
+
+    #[test]
+    fn test_keccak_bytes_output() {
+        const SIZE: usize = 45;
+        const PADDED_LEN: usize = compute_size_with_padding(SIZE);
+
+        #[derive(Clone, Debug)]
+        struct TestKeccak<const N: usize> {
+            c: KeccakCircuit<N>,
+            exp: Vec<u8>,
+        }
+
+        impl<F, const D: usize, const N: usize> UserCircuit<F, D> for TestKeccak<N>
+        where
+            F: RichField + Extendable<D>,
+            [(); N / 4]:,
+        {
+            type Wires = (ByteKeccakWires<N>, Array<Target, HASH_LEN>);
+
+            fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let input_array = VectorWire::<N>::new(b);
+                let wires = KeccakCircuit::hash_to_bytes(b, &input_array);
+                let exp_output = OutputByteHash::new(b);
+                let t = exp_output.equals(b, &wires.output);
+                let tru = b._true();
+                b.connect(tru.target, t.target);
+                (wires, exp_output)
+            }
+
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                KeccakCircuit::<N>::assign_byte_keccak(
+                    pw,
+                    &wires.0,
+                    &InputData::NonAssigned(&self.c.data),
+                );
+                wires
+                    .1
+                    .assign_bytes(pw, &self.exp.clone().try_into().unwrap());
             }
         }
 

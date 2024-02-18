@@ -26,6 +26,7 @@ pub mod merkle;
 mod merkle_tree;
 mod mpt_sequential;
 mod rlp;
+mod storage;
 pub mod transaction;
 mod utils;
 /// Bundle containing the raw proof, the verification key, and some common data

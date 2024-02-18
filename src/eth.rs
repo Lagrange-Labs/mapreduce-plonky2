@@ -232,7 +232,7 @@ pub(crate) fn compute_key_length(path: &[Node]) -> usize {
     key_len
 }
 
-fn left_pad32(slice: &[u8]) -> [u8; 32] {
+pub(crate) fn left_pad32(slice: &[u8]) -> [u8; 32] {
     match slice.len() {
         a if a > 32 => panic!("left_pad32 must not be called with higher slice len than 32"),
         32 => slice.try_into().unwrap(),

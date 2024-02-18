@@ -45,3 +45,6 @@ ci = []
 
 [patch.crates-io]
 plonky2 = { git = "https://github.com/nikkolasg/plonky2" }
+
+# [patch."https://github.com/Lagrange-Labs/plonky2-ecgfp5"]
+# plonky2_ecgfp5 = { path = "../plonky2-ecgfp5" }
