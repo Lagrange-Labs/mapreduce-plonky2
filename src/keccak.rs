@@ -220,7 +220,7 @@ mod test {
     use super::{InputData, KeccakCircuit, KeccakWires};
     use crate::{
         array::VectorWire,
-        circuit::{test::test_simple_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit},
+        circuit::{test::run_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit},
         keccak::compute_size_with_padding,
         utils::{keccak256, read_le_u32},
     };
@@ -328,6 +328,6 @@ mod test {
             c: KeccakCircuit::<PADDED_LEN>::new(arr.to_vec()).unwrap(),
             exp,
         };
-        test_simple_circuit::<F, D, C, _>(circuit);
+        run_circuit::<F, D, C, _>(circuit);
     }
 }

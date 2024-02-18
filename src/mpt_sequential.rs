@@ -470,7 +470,7 @@ pub mod test {
     use crate::utils::{convert_u8_targets_to_u32, less_than, IntTargetWriter};
     use crate::{
         array::{Array, VectorWire},
-        circuit::{test::test_simple_circuit, UserCircuit},
+        circuit::{test::run_circuit, UserCircuit},
         keccak::OutputHash,
         mpt_sequential::MPTKeyWire,
         utils::{find_index_subvector, keccak256},
@@ -580,7 +580,7 @@ pub mod test {
             exp_root: root.try_into().unwrap(),
             exp_value: value_bytes,
         };
-        test_simple_circuit::<F, D, C, _>(circuit);
+        run_circuit::<F, D, C, _>(circuit);
 
         Ok(())
     }
@@ -633,7 +633,7 @@ pub mod test {
             exp_root: root,
             exp_value: value.try_into().unwrap(),
         };
-        test_simple_circuit::<F, D, C, _>(circuit);
+        run_circuit::<F, D, C, _>(circuit);
     }
 
     fn visit_proof(proof: &[Vec<u8>]) {

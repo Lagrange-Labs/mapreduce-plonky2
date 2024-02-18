@@ -170,7 +170,7 @@ mod test {
 
     use crate::{
         array::Array,
-        circuit::{test::test_simple_circuit, UserCircuit},
+        circuit::{test::run_circuit, UserCircuit},
         eth::StorageSlot,
         keccak::HASH_LEN,
         mpt_sequential::bytes_to_nibbles,
@@ -262,6 +262,6 @@ mod test {
             exp_mpt_key_nibbles: bytes_to_nibbles(&mpt_key),
             exp_keccak_location: slot.location().as_bytes().to_vec(),
         };
-        test_simple_circuit::<F, D, C, _>(circuit);
+        run_circuit::<F, D, C, _>(circuit);
     }
 }
