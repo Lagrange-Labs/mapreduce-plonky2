@@ -97,9 +97,10 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     // -1 because first nibble is the HP information, and the following loop
     // analyzes pairs of consecutive nibbles, so the second nibble will be seen
     // during the first iteration of this loop.
+    let one = b.one();
+    let mut i_offset = key_header.offset;
     for i in 0..MAX_ENC_KEY_LEN - 1 {
-        let it = b.constant(F::from_canonical_usize(i + 1));
-        let i_offset = b.add(it, key_header.offset);
+        i_offset = b.add(i_offset, one);
         // look now at the encoded path
         let x = input.value_at(b, i_offset);
         // next nibble in little endian
