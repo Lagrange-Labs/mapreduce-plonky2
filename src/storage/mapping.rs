@@ -1,6 +1,7 @@
 //! Module handling the recursive proving of mapping entries specically
 //! inside a storage trie.
 
+use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
 use crate::storage::key::MappingSlotWires;
 use crate::utils::convert_u32_to_u8_slice;
 use crate::{
@@ -64,11 +65,11 @@ impl<'a> PublicInputs<'a, Target> {
         c: &OutputHash,
         d: &CurveTarget,
     ) {
+        b.register_curve_public_input(*d);
         key.register_as_input(b);
         b.register_public_input(slot);
         b.register_public_input(n);
         c.register_as_input(b);
-        b.register_curve_public_input(*d);
     }
     /// Returns the MPT key defined over the public inputs
     pub fn mpt_key(&self) -> MPTKeyWire {
@@ -81,9 +82,15 @@ impl<'a> PublicInputs<'a, Target> {
         }
     }
     /// Returns the accumulator digest defined over the public inputs
+    // TODO: move that to ecgfp5 repo
     pub fn accumulator(&self) -> CurveTarget {
-        curve_target_from_slice(&self.proof_inputs[Self::D_IDX..])
+        let (x, y, is_inf) = self.accumulator_info();
+        let x = QuinticExtensionTarget(x);
+        let y = QuinticExtensionTarget(y);
+        let flag = BoolTarget::new_unsafe(is_inf);
+        CurveTarget(([x, y], flag))
     }
+
     /// Returns the merkle hash C of the subtree this proof has processed.
     pub fn root_hash(&self) -> OutputHash {
         let hash = self.root_hash_info();
@@ -96,33 +103,45 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
         // TODO: put that in ecgfp5 crate publicly
         pub(crate) type GFp5 = QuinticExtension<GoldilocksField>;
         let ptr = Self::D_IDX;
-        let x = &self.proof_inputs[ptr..ptr + 5];
-        let y = &self.proof_inputs[ptr + 5..ptr + 10];
-        let is_inf = self.proof_inputs[ptr + 10];
+        let (x, y, is_inf) = self.accumulator_info();
         WeierstrassPoint {
             x: GFp5::from_basefield_array(create_array::<GoldilocksField, 5, _>(|i| x[i])),
             y: GFp5::from_basefield_array(create_array::<GoldilocksField, 5, _>(|i| y[i])),
             is_inf: is_inf.is_nonzero(),
         }
     }
-    // Returns in bytes
-    pub fn root_hash(&self) -> Vec<u8> {
+    // Returns in packed representation
+    pub fn root_hash(&self) -> Vec<u32> {
         let hash = self.root_hash_info();
-        convert_u32_to_u8_slice(hash.iter().map(|t| t.0 as u32))
+        hash.iter().map(|t| t.0 as u32).collect()
     }
 }
 impl<'a, T: Copy> PublicInputs<'a, T> {
-    const MAX_ELEMENTS: usize = 81;
-    const KEY_IDX: usize = 0;
-    const T_IDX: usize = 64;
-    const S_IDX: usize = 65;
-    const N_IDX: usize = 66;
-    const C_IDX: usize = 67;
-    const D_IDX: usize = 71;
+    const D_IDX: usize = 0; // 5F for each coordinates + 1 bool flag
+    const KEY_IDX: usize = 11; // 64 nibbles
+    const T_IDX: usize = 75; // 1 index
+    const S_IDX: usize = 76; // 1 index
+    const N_IDX: usize = 77; // 1 index
+    const C_IDX: usize = 78; // packed hash = 4 F elements
+    const EXTENSION: usize = 5;
     pub fn from(arr: &'a [T]) -> Self {
         Self { proof_inputs: arr }
     }
 
+    // small utility function to transform a list of target to a curvetarget.
+    fn accumulator_info(&self) -> ([T; 5], [T; 5], T) {
+        // 5 F for each coordinates + 1 bool flag
+        let slice = &self.proof_inputs[Self::D_IDX..];
+        #[allow(clippy::int_plus_one)]
+        let within_bound = slice.len() >= 5 * 2 + 1;
+        assert!(within_bound);
+        let x = slice[0..Self::EXTENSION].try_into().unwrap();
+        let y = slice[Self::EXTENSION..2 * Self::EXTENSION]
+            .try_into()
+            .unwrap();
+        let flag = slice[2 * Self::EXTENSION];
+        (x, y, flag)
+    }
     fn mpt_key_info(&self) -> (&[T], T) {
         let key_range = Self::KEY_IDX..Self::KEY_IDX + MAX_KEY_NIBBLE_LEN;
         let key = &self.proof_inputs[key_range];
@@ -147,20 +166,6 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 }
 
-// small utility function to transform a list of target to a curvetarget.
-// TODO: move that to ecgfp5 repo
-fn curve_target_from_slice(slice: &[Target]) -> CurveTarget {
-    const EXTENSION: usize = 5;
-    // 5 F for each coordinates + 1 bool flag
-    #[allow(clippy::int_plus_one)]
-    let within_bound = slice.len() >= 5 * 2 + 1;
-    assert!(within_bound);
-    let x = QuinticExtensionTarget(slice[0..EXTENSION].try_into().unwrap());
-    let y = QuinticExtensionTarget(slice[EXTENSION..2 * EXTENSION].try_into().unwrap());
-    let flag = BoolTarget::new_unsafe(slice[2 * EXTENSION]);
-    CurveTarget(([x, y], flag))
-}
-
 /// Circuit implementing the circuit to prove the correct derivation of the
 /// MPT key from a mapping key and mapping slot. It also do the usual recursive
 /// MPT proof verification logic.
@@ -177,6 +182,7 @@ where
     node: VectorWire<{ PAD_LEN(NODE_LEN) }>,
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     mapping_slot: MappingSlotWires,
+    value: Array<Target, MAX_LEAF_VALUE_LEN>,
 }
 impl<const N: usize> LeafWires<N>
 where
@@ -238,6 +244,7 @@ where
             node,
             root,
             mapping_slot: mapping_slot_wires,
+            value,
         }
     }
 
@@ -256,39 +263,153 @@ where
 
 #[cfg(test)]
 mod test {
-    use eth_trie::Trie;
+    use std::array::from_fn as create_array;
+
+    use crate::rlp::MAX_KEY_NIBBLE_LEN;
+    use crate::utils::keccak256;
+    use eth_trie::{Nibbles, Trie};
     use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::iop::witness::PartialWitness;
+    use plonky2::iop::target::Target;
+    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use plonky2::{
         field::extension::Extendable, hash::hash_types::RichField,
         plonk::circuit_builder::CircuitBuilder,
     };
+    use plonky2_crypto::u32::arithmetic_u32::U32Target;
+    use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
+    use plonky2_ecgfp5::gadgets::curve::CurveTarget;
     use rand::{thread_rng, Rng};
+    use rlp::Rlp;
 
+    use super::{LeafCircuit, LeafWires, PublicInputs};
+    use crate::array::Array;
     use crate::circuit::test::run_circuit;
-    use crate::eth::StorageSlot;
+    use crate::eth::{left_pad32, StorageSlot};
+    use crate::group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing};
+    use crate::keccak::PACKED_HASH_LEN;
+    use crate::mpt_sequential::{bytes_to_nibbles, MPTKeyWire, MAX_LEAF_VALUE_LEN};
     use crate::storage::key::MappingSlot;
     use crate::storage::mapping::PAD_LEN;
+    use crate::utils::convert_u8_to_u32_slice;
+    use crate::utils::test::random_vector;
     use crate::{circuit::UserCircuit, mpt_sequential::test::generate_random_storage_mpt};
-
-    use super::{LeafCircuit, LeafWires};
+    use plonky2::field::types::Field;
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
 
-    impl<const NODE_LEN: usize> UserCircuit<F, D> for LeafCircuit<NODE_LEN>
-    where
-        [(); PAD_LEN(NODE_LEN)]:,
-    {
-        type Wires = LeafWires<NODE_LEN>;
+    #[derive(Clone, Debug)]
+    struct TestPublicInputs {
+        key: Vec<u8>,
+        ptr: usize,
+        slot: usize,
+        n: usize,
+        c: Vec<u32>,
+    }
 
+    impl UserCircuit<F, D> for TestPublicInputs {
+        type Wires = (
+            MPTKeyWire,
+            Target,
+            Target,
+            Array<U32Target, PACKED_HASH_LEN>,
+            CurveTarget,
+        );
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            Self::build(b)
+            let key = MPTKeyWire::new(b);
+            let slot = b.add_virtual_target();
+            let n = b.add_virtual_target();
+            let c = Array::<U32Target, PACKED_HASH_LEN>::new(b);
+            let one = b.one();
+            let accumulator = b.map_to_curve_point(&[one]);
+            PublicInputs::register(b, &key, slot, n, &c, &accumulator);
+            (key, slot, n, c, accumulator)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.assign(pw, wires)
+            wires
+                .0
+                .assign(pw, &self.key.clone().try_into().unwrap(), self.ptr);
+            pw.set_target(wires.1, F::from_canonical_usize(self.slot));
+            pw.set_target(wires.2, F::from_canonical_usize(self.n));
+            wires
+                .3
+                .assign(pw, &create_array(|i| F::from_canonical_u32(self.c[i])));
+        }
+    }
+    #[test]
+    fn test_public_inputs() {
+        let p = map_to_curve_point(&[F::ONE]).to_weierstrass();
+        let key = random_vector::<u8>(64);
+        let ptr = 2;
+        let slot = 3;
+        let n = 4;
+        let c = random_vector::<u32>(8);
+        let test = TestPublicInputs {
+            key: key.clone(),
+            ptr,
+            slot,
+            n,
+            c: c.clone(),
+        };
+        let proof = run_circuit::<F, D, C, _>(test);
+        let pi = PublicInputs::<F>::from(&proof.public_inputs);
+        {
+            let (found_key, found_ptr) = pi.mpt_key_info();
+            let key = key
+                .iter()
+                .cloned()
+                .map(F::from_canonical_u8)
+                .collect::<Vec<_>>();
+            let ptr = F::from_canonical_usize(ptr);
+            assert_eq!(found_key, key);
+            assert_eq!(found_ptr, ptr);
+        }
+        {
+            let found_slot = pi.mapping_slot();
+            assert_eq!(found_slot, F::from_canonical_usize(slot));
+        }
+        {
+            let found_n = pi.n();
+            assert_eq!(found_n, F::from_canonical_usize(n));
+        }
+        {
+            let found_c = pi.root_hash();
+            assert_eq!(found_c, c);
+        }
+        {
+            let found_p = pi.accumulator();
+            assert_eq!(found_p, p);
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestLeafCircuit<const NODE_LEN: usize> {
+        c: LeafCircuit<NODE_LEN>,
+        exp_value: Vec<u8>,
+    }
+    impl<const NODE_LEN: usize> UserCircuit<F, D> for TestLeafCircuit<NODE_LEN>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+    {
+        // normal wires + expected extracted value
+        type Wires = (LeafWires<NODE_LEN>, Array<Target, MAX_LEAF_VALUE_LEN>);
+
+        fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let exp_value = Array::<Target, MAX_LEAF_VALUE_LEN>::new(b);
+            let leaf_wires = LeafCircuit::<NODE_LEN>::build(b);
+            let eq = leaf_wires.value.equals(b, &exp_value);
+            let tt = b._true();
+            b.connect(tt.target, eq.target);
+            (leaf_wires, exp_value)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.c.assign(pw, &wires.0);
+            wires
+                .1
+                .assign_bytes(pw, &self.exp_value.clone().try_into().unwrap());
         }
     }
 
@@ -304,8 +425,60 @@ mod test {
         trie.root_hash().unwrap();
         let proof = trie.get_proof(&slot.mpt_key()).unwrap();
         let node = proof.last().unwrap().clone(); // proof from RPC gives leaf as last
-        let slot = MappingSlot::new(mapping_slot as u8, mapping_key);
-        let circuit = LeafCircuit::<80> { node, slot };
-        run_circuit::<F, D, C, _>(circuit);
+        let mpt_key = slot.mpt_key();
+        let slot = MappingSlot::new(mapping_slot as u8, mapping_key.clone());
+        let circuit = LeafCircuit::<80> {
+            node: node.clone(),
+            slot,
+        };
+        let test = TestLeafCircuit {
+            c: circuit,
+            exp_value: random_value.to_vec(),
+        };
+        let proof = run_circuit::<F, D, C, _>(test);
+        let pi = PublicInputs::<F>::from(&proof.public_inputs);
+        {
+            // expected accumulator Acc((mappping_key,value))
+            let inputs_field = left_pad32(&mapping_key)
+                .into_iter()
+                .chain(left_pad32(&random_value))
+                .map(F::from_canonical_u8)
+                .collect::<Vec<_>>();
+            let exp_accumulator = map_to_curve_point(&inputs_field).to_weierstrass();
+            let found_accumulator = pi.accumulator();
+            assert_eq!(exp_accumulator, found_accumulator);
+        }
+        {
+            // expected MPT hash
+            let exp_hash = keccak256(&node);
+            let found_hash = pi.root_hash();
+            let exp_packed = convert_u8_to_u32_slice(&exp_hash);
+            assert_eq!(exp_packed, found_hash);
+        }
+        {
+            // expected mpt key wire
+            let (key, ptr) = pi.mpt_key_info();
+            let exp_key = bytes_to_nibbles(&mpt_key)
+                .into_iter()
+                .map(F::from_canonical_u8)
+                .collect::<Vec<_>>();
+            assert_eq!(key, exp_key);
+            let leaf_key: Vec<Vec<u8>> = rlp::decode_list(&node);
+            let nib = Nibbles::from_compact(&leaf_key[0].clone());
+            let exp_ptr = F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1 - nib.nibbles().len());
+            assert_eq!(exp_ptr, ptr);
+        }
+        {
+            // expected mapping slot
+            let ms = pi.mapping_slot();
+            let exp_ms = F::from_canonical_usize(mapping_slot);
+            assert_eq!(ms, exp_ms);
+        }
+        {
+            // expected number of leaf seen
+            let n = pi.n();
+            let exp_n = F::ONE;
+            assert_eq!(n, exp_n);
+        }
     }
 }

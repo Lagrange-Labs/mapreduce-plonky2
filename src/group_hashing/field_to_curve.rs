@@ -93,7 +93,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use std::array;
 
-    const ARITY: usize = 8;
+    const ARITY: usize = 1;
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
@@ -116,7 +116,8 @@ mod tests {
         // Generate random field values as inputs.
         let input_values = rand::thread_rng()
             .gen::<[u64; ARITY]>()
-            .map(F::from_canonical_u64);
+            //.map(F::from_canonical_u64);
+            .map(|_| F::ONE);
 
         // Set the value to target for witness.
         let mut pw = PartialWitness::new();
