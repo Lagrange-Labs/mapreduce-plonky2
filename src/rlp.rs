@@ -85,7 +85,6 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     // TODO: why this doesn't work always !!
     //let parity = b.split_le(first_nibble, 2)[0].target;
 
-    let one_minus_parity = b.sub(one, parity);
     // if parity is 1 => odd length => (1 - p) * next_nibble = 0
     //   -> in this case, no need to add another nibble (since the rest of key + 1 == even now)
     // if parity is 0 => even length => (1 - p) * next_nibble = next_nibble
@@ -113,14 +112,16 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
         // => if parity == 1, we take the previous last nibble, because that's the next in line
         // => if parity == 0, we take lowest significant nibble because the previous last nibble is
         //                    the special "0" nibble to make overall length even
-        let parity_mul_nib = b.mul(parity, prev_nibbles.1);
-        nibbles[2 * i] = b.mul_add(one_minus_parity, cur_nibbles.0, parity_mul_nib);
+        // when developped, expression equals p*(prev.1 - curr.0) + curr.0
+        let diff = b.sub(prev_nibbles.1, cur_nibbles.0);
+        nibbles[2 * i] = b.mul_add(parity, diff, cur_nibbles.0);
 
         // nibble[2*i + 1] = parity*cur_nibbles.0 + (1 - parity)*cur_nibbles.1;
         // => if parity == 1, take lowest significant nibble as successor of previous.highest_nibble
         // => if parity == 0, take highest significant nibble as success of current.lowest_nibble
-        let parity_mul_curr_nib = b.mul(parity, cur_nibbles.0);
-        nibbles[2 * i + 1] = b.mul_add(one_minus_parity, cur_nibbles.1, parity_mul_curr_nib);
+        // when developped, expression equals p*(curr.0 - curr.1) + curr.1
+        let diff = b.sub(cur_nibbles.0, cur_nibbles.1);
+        nibbles[2 * i + 1] = b.mul_add(parity, diff, cur_nibbles.1);
 
         prev_nibbles = cur_nibbles;
     }

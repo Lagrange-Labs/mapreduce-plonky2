@@ -119,6 +119,8 @@ where
     /// Build the sequential hashing of nodes. It returns the wires that contains
     /// the root hash (according to the "should_process" array) and the wires
     /// to assign during proving time, including each of the nodes in the path.
+    /// WARNING: the nodes in the inputs are NOT range checked to be bytes. This has
+    /// to be done by the caller.
     pub fn verify_mpt_proof<F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         inputs: &InputWires<DEPTH, NODE_LEN>,
@@ -660,7 +662,7 @@ pub mod test {
         const DEPTH: usize = 4;
         const NODE_LEN: usize = 500;
         const VALUE_LEN: usize = 32;
-        let (proof, key) = if false {
+        let (proof, key) = if true {
             let (mut trie, key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
             let mut proof = trie.get_proof(&key).unwrap();
             proof.reverse();
@@ -717,39 +719,6 @@ pub mod test {
                 let exp_value = Array::<Target, VALUE_LEN>::new(&mut b);
                 let should_be_true = value.contains_array(&mut b, &exp_value, zero);
                 b.connect(tr.target, should_be_true.target);
-                if false {
-                    // explore why the above didn't work
-                    //let rlp_headers =
-                    //    decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(&mut b, &node.arr, zero);
-                    //let branch_info = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
-                    //    &mut b,
-                    //    &node,
-                    //    &key_wire,
-                    //    &rlp_headers,
-                    //);
-
-                    //let leaf_info = {
-                    //    let two = b.two();
-                    //    let condition = b.is_equal(rlp_headers.num_fields, two);
-                    //    let key_header = rlp_headers.select(&mut b, zero);
-                    //    let (extracted_key, should_true) =
-                    //        decode_compact_encoding(&mut b, &node, &key_header);
-                    //    let leaf_child_hash =
-                    //        node.extract_array::<F, D, HASH_LEN>(&mut b, value_header.offset);
-                    //    let new_key = key_wire.advance_by(&mut b, extracted_key.real_len);
-                    //    let condition = b.and(condition, should_true);
-                    //    (new_key, leaf_child_hash, condition)
-                    //};
-                    //// ensures it's either a branch or leaf/extension
-                    //let tuple_or_branch = b.or(leaf_info.2, branch_info.2);
-                    //b.connect(tr.target, tuple_or_branch.target);
-                    //b.connect(leaf_info.2.target, tr.target);
-                    //let child_hash = leaf_info.1.select(&mut b, leaf_info.2, &branch_info.1);
-                    //let new_key = leaf_info.0.select(&mut b, leaf_info.2, &branch_info.0);
-                    //b.connect(new_key.pointer, exp_key_ptr);
-                    //let should_be_true = leaf_info.1.contains_array(&mut b, &exp_value, zero);
-                    //b.connect(tr.target, should_be_true.target);
-                }
                 let data = b.build::<C>();
                 chosen_node.resize(PAD_LEN(NODE_LEN), 0);
                 let node_f = chosen_node
@@ -757,8 +726,7 @@ pub mod test {
                     .map(|b| F::from_canonical_u8(*b))
                     .collect::<Vec<_>>();
                 node.assign(&mut pw, &node_f.try_into().unwrap());
-                let mut key_nibbles = bytes_to_nibbles(&key);
-                key_nibbles.resize(MAX_KEY_NIBBLE_LEN, 0);
+                let key_nibbles = bytes_to_nibbles(&key);
                 key_wire.assign(
                     &mut pw,
                     &key_nibbles.try_into().unwrap(),
