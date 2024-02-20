@@ -188,7 +188,7 @@ impl<const N: usize> KeccakCircuit<N> {
     /// with an expected byte location in some nodes or to re-use in a
     /// subsequent hashing operation etc.
     /// WARNING: if the output is used in a subsequent hashing operation,
-    /// then no need to range check the node output. If it is needed for 
+    /// then no need to range check the node output. If it is needed for
     /// other purposes, like comparing with a given hash, then the output
     /// _needs_ to be range checked to be bytes.
     pub fn hash_to_bytes<F: RichField + Extendable<D>, const D: usize>(
@@ -230,7 +230,6 @@ impl<const N: usize> KeccakCircuit<N> {
         let diff = compute_padding_size(data.real_len());
         pw.set_target(wires.diff, F::from_canonical_usize(diff));
     }
-
 
     /// TODO: naming not great. Probably worth refactoring on its own gadget
     pub fn assign_byte_keccak<F: RichField>(
