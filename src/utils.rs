@@ -205,6 +205,11 @@ pub(crate) fn convert_u8_to_u32_slice(data: &[u8]) -> Vec<u32> {
     converted
 }
 
+/// Returns the given iterator interpreted as a slice of bytes in big endian order
+pub(crate) fn convert_u32_to_u8_slice<T: IntoIterator<Item = u32>>(data: T) -> Vec<u8> {
+    data.into_iter().flat_map(|val| val.to_be_bytes()).collect()
+}
+
 // taken from rust doc https://doc.rust-lang.org/std/primitive.u32.html#method.from_be_bytes
 pub(crate) fn read_le_u32(input: &mut &[u8]) -> u32 {
     let (int_bytes, rest) = input.split_at(std::mem::size_of::<u32>());
