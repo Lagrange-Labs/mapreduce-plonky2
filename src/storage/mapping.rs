@@ -3,7 +3,6 @@
 
 use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
 use crate::storage::key::MappingSlotWires;
-use crate::utils::convert_u32_to_u8_slice;
 use crate::{
     array::{Array, Vector, VectorWire},
     eth::left_pad32,
