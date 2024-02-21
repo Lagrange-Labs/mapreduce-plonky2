@@ -171,7 +171,6 @@ mod test {
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
 
-   
     use crate::storage::mapping::leaf::PAD_LEN;
     #[derive(Clone, Debug)]
     struct TestLeafCircuit<const NODE_LEN: usize> {
