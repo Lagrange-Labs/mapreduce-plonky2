@@ -49,8 +49,6 @@ pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {}
 // `n` number of items seen so far up to this node
 // `C` MPT root (of the current node)
 // `D` Accumulator digest of the values
-// K = 64, T = 1, S = 1, n = 1, C = 4, D = 5*2
-// total = 81
 pub struct PublicInputs<'a, T> {
     proof_inputs: &'a [T],
 }
