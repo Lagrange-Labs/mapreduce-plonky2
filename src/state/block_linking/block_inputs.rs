@@ -1,10 +1,10 @@
 //! This is the block-inputs gadget. It builds the circuit to prove that the
-//! hash of state MPT should be included in block header.
+//! hash of state MPT root should be included in the block header.
 
 use crate::{
     array::{Array, Vector, VectorWire},
     eth::RLPBlock,
-    keccak::{OutputHash, PACKED_HASH_LEN},
+    keccak::{OutputByteHash, OutputHash},
     utils::{convert_u8_slice_to_u32_fields, find_index_subvector, less_than},
 };
 use anyhow::Result;
@@ -18,7 +18,6 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use std::array;
 
 /// The block input values
 #[derive(Clone, Debug)]
@@ -29,23 +28,25 @@ pub struct BlockInputs {
     hash: H256,
     /// Block parent hash
     parent_hash: H256,
-    /// The offset of MPT root hash located in RLP encoded bytes
-    root_hash_offset: usize,
+    /// The offset of state MPT root hash located in RLP encoded block header
+    state_root_offset: usize,
     /// RLP encoded bytes of block header
-    rlp_bytes: Vec<u8>,
+    header_rlp: Vec<u8>,
 }
 
 impl BlockInputs {
-    pub fn new(block: Block<H256>, root_hash: &[u8]) -> Self {
-        let rlp_bytes = rlp::encode(&RLPBlock(&block)).to_vec();
-        let root_hash_offset = find_index_subvector(&rlp_bytes, root_hash).unwrap();
+    pub fn new(block: Block<H256>, state_root_hash: &[u8]) -> Self {
+        let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
+
+        // Find the state root hash from block header.
+        let state_root_offset = find_index_subvector(&header_rlp, state_root_hash).unwrap();
 
         Self {
             number: block.number.unwrap().as_u64(),
             hash: block.hash.unwrap(),
             parent_hash: block.parent_hash,
-            root_hash_offset,
-            rlp_bytes,
+            state_root_offset,
+            header_rlp,
         }
     }
 }
@@ -55,13 +56,13 @@ pub struct BlockInputsWires<const MAX_LEN: usize> {
     /// Block number
     pub number: Target,
     /// Block hash
-    pub hash: Array<Target, PACKED_HASH_LEN>,
+    pub hash: OutputHash,
     /// Block parent hash
-    pub parent_hash: Array<Target, PACKED_HASH_LEN>,
-    /// The offset of MPT root hash located in RLP encoded bytes
-    pub root_hash_offset: Target,
+    pub parent_hash: OutputHash,
+    /// The offset of state MPT root hash located in RLP encoded block header
+    pub state_root_offset: Target,
     /// RLP encoded bytes of block header
-    pub rlp_bytes: VectorWire<MAX_LEN>,
+    pub header_rlp: VectorWire<MAX_LEN>,
 }
 
 impl<const MAX_LEN: usize> BlockInputsWires<MAX_LEN> {
@@ -73,8 +74,8 @@ impl<const MAX_LEN: usize> BlockInputsWires<MAX_LEN> {
             number: cb.add_virtual_target(),
             hash: Array::new(cb),
             parent_hash: Array::new(cb),
-            root_hash_offset: cb.add_virtual_target(),
-            rlp_bytes: VectorWire::new(cb),
+            state_root_offset: cb.add_virtual_target(),
+            header_rlp: VectorWire::new(cb),
         }
     }
 
@@ -83,10 +84,10 @@ impl<const MAX_LEN: usize> BlockInputsWires<MAX_LEN> {
     where
         F: RichField,
     {
-        // Assign block number.
+        // Assign the block number.
         pw.set_target(self.number, F::from_canonical_u64(value.number));
 
-        // Assign block hash and parent hash.
+        // Assign the block hash and parent hash.
         [
             (&self.hash, value.hash),
             (&self.parent_hash, value.parent_hash),
@@ -99,38 +100,40 @@ impl<const MAX_LEN: usize> BlockInputsWires<MAX_LEN> {
             )
         });
 
-        // Assign the MPT root offset.
+        // Assign the offset of state MPT root hash located in RLP encoded block
+        // header.
         pw.set_target(
-            self.root_hash_offset,
-            F::from_canonical_usize(value.root_hash_offset),
+            self.state_root_offset,
+            F::from_canonical_usize(value.state_root_offset),
         );
 
-        // Assign the block RLP bytes.
-        self.rlp_bytes
-            .assign(pw, &Vector::from_vec(value.rlp_bytes.clone())?);
+        // Assign the RLP encoded block header.
+        self.header_rlp
+            .assign(pw, &Vector::from_vec(value.header_rlp.clone())?);
 
         Ok(())
     }
 
-    /// Verify the block header includes the hash of MPT root.
-    pub fn verify_root_hash_inclusion<F, const D: usize>(
+    /// Verify the block header includes the hash of state MPT root.
+    pub fn verify_state_root_hash_inclusion<F, const D: usize>(
         &self,
         cb: &mut CircuitBuilder<F, D>,
-        root_hash: &OutputHash,
+        state_root_hash: &OutputHash,
     ) where
         F: RichField + Extendable<D>,
     {
-        // Verify the offset of MPT root hash is within range.
         let tt = cb._true();
-        let within_range = less_than(cb, self.root_hash_offset, self.rlp_bytes.real_len, 10);
+
+        // Verify the offset of state MPT root hash is within range.
+        let within_range = less_than(cb, self.state_root_offset, self.header_rlp.real_len, 10);
         cb.connect(tt.target, within_range.target);
 
-        // Verify the block header includes the hash of MPT root.
-        let root_hash = Array::<_, PACKED_HASH_LEN>::from(array::from_fn(|i| root_hash[i].0));
-        let is_root_included =
-            self.rlp_bytes
+        // Verify the block header includes the state MPT root hash.
+        let state_root_hash = OutputByteHash::from_u32_array(cb, state_root_hash);
+        let is_included =
+            self.header_rlp
                 .arr
-                .contains_array(cb, &root_hash, self.root_hash_offset);
-        cb.connect(is_root_included.target, tt.target);
+                .contains_array(cb, &state_root_hash, self.state_root_offset);
+        cb.connect(is_included.target, tt.target);
     }
 }

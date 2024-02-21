@@ -11,7 +11,7 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
-use crate::utils::{less_than, less_than_or_equal_to, IntTargetWriter};
+use crate::utils::{convert_u8_targets_to_u32, less_than, less_than_or_equal_to, IntTargetWriter};
 
 /// Utility trait to convert any value into its field representation equivalence
 pub(crate) trait ToField<F: RichField> {
@@ -403,51 +403,29 @@ impl<const SIZE: usize> Array<Target, SIZE>
 where
     [(); SIZE / 4]:,
 {
-    pub fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
-        &self,
+    pub fn from_u32_array<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-    ) -> Array<U32Target, { SIZE / 4 }> {
-        const TWO_POWER_8: usize = 256;
-        const TWO_POWER_16: usize = 65536;
-        const TWO_POWER_24: usize = 16777216;
-
-        // constants to convert [u8; 4] to u32
-        // u32 = u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
-        let two_power_8: Target = b.constant(F::from_canonical_usize(TWO_POWER_8));
-        let two_power_16: Target = b.constant(F::from_canonical_usize(TWO_POWER_16));
-        let two_power_24: Target = b.constant(F::from_canonical_usize(TWO_POWER_24));
-
-        // convert padded node to u32
-        Array::<U32Target, { SIZE / 4 }> {
-            arr: (0..SIZE)
-                .step_by(4)
-                .map(|i| {
-                    // u8[0]
-                    let mut x = self.arr[i];
-                    // u8[1]
-                    let mut y = self.arr[i + 1];
-                    // u8[1] * 2^8
-                    y = b.mul(y, two_power_8);
-                    // u8[0] + u8[1] * 2^8
-                    x = b.add(x, y);
-                    // u8[2]
-                    y = self.arr[i + 2];
-                    // u8[2] * 2^16
-                    y = b.mul(y, two_power_16);
-                    // u8[0] + u8[1] * 2^8 + u8[2] * 2^16
-                    x = b.add(x, y);
-                    // u8[3]
-                    y = self.arr[i + 3];
-                    // u8[3] * 2^24
-                    y = b.mul(y, two_power_24);
-                    // u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
-                    x = b.add(x, y);
-
-                    U32Target(x)
-                })
+        u32_array: &Array<U32Target, { SIZE / 4 }>,
+    ) -> Self {
+        // Convert each u32 to [u8; 4].
+        Self {
+            arr: u32_array
+                .arr
+                .iter()
+                .flat_map(|elem| b.split_le_base::<2>(elem.0, 4))
                 .collect::<Vec<_>>()
                 .try_into()
                 .unwrap(),
+        }
+    }
+
+    pub fn to_u32_array<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) -> Array<U32Target, { SIZE / 4 }> {
+        // convert padded node to u32
+        Array::<U32Target, { SIZE / 4 }> {
+            arr: convert_u8_targets_to_u32(b, &self.arr).try_into().unwrap(),
         }
     }
 }
@@ -587,7 +565,7 @@ mod test {
             type Wires = (Array<Target, S>, Array<U32Target, { S / 4 }>);
             fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
                 let array = Array::<Target, S>::new(c);
-                let tou32 = array.convert_u8_to_u32(c);
+                let tou32 = array.to_u32_array(c);
                 let exp_u32 = Array::<U32Target, { S / 4 }>::new(c);
                 let tr = c._true();
                 let f = tou32.equals(c, &exp_u32);

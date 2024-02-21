@@ -26,7 +26,7 @@ const NB_ITEMS_LEAF: usize = 2;
 /// Currently a constant set to denote the length of the value we are extracting from the MPT trie.
 /// This can later be also be done in a generic way to allow different sizes.
 /// Given we target MPT storage proof, the value is 32 bytes.
-pub const MAX_LEAF_VALUE: usize = HASH_LEN;
+const MAX_LEAF_VALUE: usize = HASH_LEN;
 
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
@@ -63,7 +63,7 @@ where
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
     /// way to define everything according to max size of the data and
     /// "not care" about the padding size (almost!)
-    nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
+    pub nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
     /// in the case of a fixed circuit, the actual tree depth might be smaller.
     /// In this case, we set false on the part of the path we should not process.
     /// NOTE: for node at index i in the path, the boolean indicating if we should
@@ -79,7 +79,7 @@ where
     /// some additional wires for each input (see keccak circuit for more info.).
     keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; DEPTH],
     /// The leaf value wires. It is provably extracted from the leaf node.
-    pub leaf: Array<Target, MAX_LEAF_VALUE>,
+    leaf: Array<Target, MAX_LEAF_VALUE>,
     /// The root hash value wire.
     pub root: OutputHash,
 }
@@ -645,7 +645,7 @@ pub mod test {
         const NODE_LEN: usize = 500;
         const VALUE_LEN: usize = 32;
         let (proof, key, root, value) = if true {
-            let (mut trie, key) = generate_random_storage_mpt::<ACTUAL_DEPTH, VALUE_LEN>();
+            let (mut trie, key) = generate_random_mpt::<ACTUAL_DEPTH, VALUE_LEN>();
             let root = trie.root_hash().unwrap();
             // root is first so we reverse the order as in circuit we prove the opposite way
             let mut proof = trie.get_proof(&key).unwrap();
@@ -744,7 +744,7 @@ pub mod test {
         const DEPTH: usize = 4;
         const NODE_LEN: usize = 80;
         const VALUE_LEN: usize = 32;
-        let (mut trie, mut key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
+        let (mut trie, mut key) = generate_random_mpt::<DEPTH, VALUE_LEN>();
         let mut proof = trie.get_proof(&key).unwrap();
         proof.reverse();
         let key_nibbles = bytes_to_nibbles(&key);
@@ -897,7 +897,7 @@ pub mod test {
         const DEPTH: usize = 4;
         const NODE_LEN: usize = 80;
         const VALUE_LEN: usize = 32;
-        let (mut trie, key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
+        let (mut trie, key) = generate_random_mpt::<DEPTH, VALUE_LEN>();
         let mut proof = trie.get_proof(&key).unwrap();
         proof.reverse();
         let key_nibbles = bytes_to_nibbles(&key);
@@ -975,7 +975,7 @@ pub mod test {
         const DEPTH: usize = 4;
         const NODE_LEN: usize = 80;
         const VALUE_LEN: usize = 32;
-        let (mut trie, mut key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
+        let (mut trie, mut key) = generate_random_mpt::<DEPTH, VALUE_LEN>();
         let mut proof = trie.get_proof(&key).unwrap();
         proof.reverse();
         // try with a leaf MPT encoded node first
@@ -1068,7 +1068,7 @@ pub mod test {
     // that key is guaranteed to be of DEPTH length. Each leaves in the trie
     // is of NODE_LEN length.
     // The returned key is RLP encoded
-    pub fn generate_random_storage_mpt<const DEPTH: usize, const VALUE_LEN: usize>(
+    pub fn generate_random_mpt<const DEPTH: usize, const VALUE_LEN: usize>(
     ) -> (EthTrie<MemoryDB>, Vec<u8>) {
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
