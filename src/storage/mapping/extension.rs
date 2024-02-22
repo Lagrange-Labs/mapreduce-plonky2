@@ -18,11 +18,14 @@ use super::public_inputs::PublicInputs;
 const MAX_EXTENSION_NODE_LEN: usize = 69;
 const PADDED_LEN: usize = PAD_LEN(MAX_EXTENSION_NODE_LEN);
 
+/// Circuit proving the processing of an extension node as part of the recursive
+/// MPT proof verification circuits. 
 #[derive(Clone, Debug)]
 pub struct ExtensionNodeCircuit {
     node: Vec<u8>,
 }
 
+/// Wires associated with this processing.
 pub struct ExtensionWires {
     pub node: VectorWire<PADDED_LEN>,
     keccak: KeccakWires<PADDED_LEN>,
@@ -60,7 +63,7 @@ impl ExtensionNodeCircuit {
         let equals = packed_child_hash.equals(b, &given_child_hash);
         b.connect(tru.target, equals.target);
 
-        // now it's only a matter of exposing the right public inpubts
+        // now it's only a matter of exposing the right public inputs
         PublicInputs::register(
             b,
             // we pass the "advanced" key
