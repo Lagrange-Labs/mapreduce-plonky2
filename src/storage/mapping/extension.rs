@@ -19,7 +19,7 @@ const MAX_EXTENSION_NODE_LEN: usize = 69;
 const PADDED_LEN: usize = PAD_LEN(MAX_EXTENSION_NODE_LEN);
 
 /// Circuit proving the processing of an extension node as part of the recursive
-/// MPT proof verification circuits. 
+/// MPT proof verification circuits.
 #[derive(Clone, Debug)]
 pub struct ExtensionNodeCircuit {
     node: Vec<u8>,
@@ -27,7 +27,7 @@ pub struct ExtensionNodeCircuit {
 
 /// Wires associated with this processing.
 pub struct ExtensionWires {
-    pub node: VectorWire<PADDED_LEN>,
+    pub node: VectorWire<Target, PADDED_LEN>,
     keccak: KeccakWires<PADDED_LEN>,
 }
 
@@ -39,7 +39,7 @@ impl ExtensionNodeCircuit {
     ) -> ExtensionWires {
         let zero = b.zero();
         let tru = b._true();
-        let node = VectorWire::<PADDED_LEN>::new(b);
+        let node = VectorWire::<Target, PADDED_LEN>::new(b);
         // first check node is bytes and then hash the nodes
         node.assert_bytes(b);
         let root = KeccakCircuit::<PADDED_LEN>::hash_vector(b, &node);
@@ -79,7 +79,7 @@ impl ExtensionNodeCircuit {
     }
 
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &ExtensionWires) {
-        let vec = Vector::<PADDED_LEN>::from_vec(self.node.clone()).unwrap();
+        let vec = Vector::<u8, PADDED_LEN>::from_vec(&self.node).unwrap();
         wires.node.assign(pw, &vec);
         KeccakCircuit::<PADDED_LEN>::assign(pw, &wires.keccak, &InputData::Assigned(&vec));
     }
