@@ -67,9 +67,8 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     b: &mut CircuitBuilder<F, D>,
     input: &Array<Target, N>,
     key_header: &RlpHeader,
-) -> (VectorWire<MAX_KEY_NIBBLE_LEN>, BoolTarget) {
+) -> (VectorWire<Target, MAX_KEY_NIBBLE_LEN>, BoolTarget) {
     let zero = b.zero();
-    let one = b.one();
     let two = b.two();
     let first_byte = input.value_at(b, key_header.offset);
     let (most_bits, least_bits) = b.split_low_high(first_byte, 4, 8);
@@ -278,21 +277,15 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
     // end_idx starts at `data_offset` and  includes the
     // header byte + potential len_len bytes + payload len
     let end_idx = b.add(list_header.offset, list_header.len);
-    let mut stop_counting = b._false();
-    let tru = b._true();
-    let fal = b._false();
     // decode each headers of each items ofthe list
     // remember in a list each item of the list is RLP encoded
     for i in 0..N {
         // stop when you've looked at exactly the same number of  bytes than
         // the RLP list header indicates
         let at_the_end = b.is_equal(offset, end_idx);
-        // NOTE: we could use less_than(offset,end_idx) but it is a complex
-        // operation requiring bitfield decomposition etc. Here we simply keep
-        // a variable that gets set to true once we reached the threshold.
-        let at_end_or_past = b.or(at_the_end, stop_counting);
-        stop_counting = BoolTarget::new_unsafe(b.select(at_end_or_past, tru.target, fal.target));
-        let before_the_end = b.not(at_end_or_past);
+        // offset always equals offset after we've reached end_idx so before_the_end
+        // is only true when we haven't reached the end yet
+        let before_the_end = b.not(at_the_end);
 
         // read the header starting from the offset
         let header = decode_header(b, data, offset);
@@ -303,7 +296,10 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
         dec_type[i] = header.data_type;
 
         // move offset to the next field in the list
-        offset = b.mul(before_the_end.target, new_offset);
+        // updates offset such that is is either < end_idx or after that
+        // always equals to end_idx
+        let diff = b.sub(new_offset, offset);
+        offset = b.mul_add(before_the_end.target, diff, offset);
         num_fields = b.add(num_fields, before_the_end.target);
     }
 
