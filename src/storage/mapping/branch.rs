@@ -1,6 +1,9 @@
 use plonky2::{
-    field::goldilocks_field::GoldilocksField,
-    iop::{target::Target, witness::PartialWitness},
+    field::{goldilocks_field::GoldilocksField, types::Field},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
@@ -8,7 +11,7 @@ use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 
 use crate::{
     array::{Array, Vector, VectorWire},
-    keccak::{KeccakCircuit, HASH_LEN, PACKED_HASH_LEN},
+    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     mpt_sequential::{bytes_to_nibbles, Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     utils::convert_u8_targets_to_u32,
@@ -21,6 +24,7 @@ pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {
     // in bytes
     common_prefix: Vec<u8>,
     expected_pointer: usize,
+    mapping_slot: usize,
 }
 
 pub struct BranchWires<const NODE_LEN: usize>
@@ -32,6 +36,8 @@ where
     /// key provided by prover as a "point of reference" to verify
     /// all children proofs's exposed keys
     common_prefix: MPTKeyWire,
+    keccak: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
+    mapping_slot: Target,
 }
 
 impl<const NODE_LEN: usize, const N_CHILDREN: usize> BranchCircuit<NODE_LEN, N_CHILDREN>
@@ -92,17 +98,19 @@ where
             // that _all_ keys share the _same_ prefix, so if they're all equal
             // to `common_prefix`, they're all equal.
             let have_common_prefix = common_prefix.is_prefix_equal(b, &new_key);
-            //b.connect(have_common_prefix.target, tru.target);
+            b.connect(have_common_prefix.target, tru.target);
             // We also check proof is valid for the _same_ mapping slot
-            //b.connect(mapping_slot, proof_inputs.mapping_slot());
+            b.connect(mapping_slot, proof_inputs.mapping_slot());
         }
 
         // we now extract the public input to register for this proofs
-        let c = root.output_array;
+        let c = root.output_array.clone();
         PublicInputs::register(b, &common_prefix, mapping_slot, n, &c, &accumulator);
         BranchWires {
             node,
             common_prefix,
+            keccak: root,
+            mapping_slot,
         }
     }
     fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &BranchWires<NODE_LEN>) {
@@ -113,6 +121,15 @@ where
             &bytes_to_nibbles(&self.common_prefix).try_into().unwrap(),
             self.expected_pointer,
         );
+        KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
+            pw,
+            &wires.keccak,
+            &InputData::Assigned(&vec),
+        );
+        pw.set_target(
+            wires.mapping_slot,
+            GoldilocksField::from_canonical_usize(self.mapping_slot),
+        );
     }
 }
 
@@ -121,6 +138,7 @@ mod test {
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use ethers::abi::ethereum_types::Public;
     use plonky2::field::types::Field;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
@@ -176,6 +194,7 @@ mod test {
             self.c.assign(pw, &wires.0);
             assert_eq!(self.inputs.len(), wires.1.len());
             for i in 0..N_CHILDREN {
+                assert_eq!(wires.1[i].len(), self.inputs[i].proof_inputs.len());
                 pw.set_target_arr(&wires.1[i], self.inputs[i].proof_inputs);
             }
         }
@@ -216,14 +235,17 @@ mod test {
         };
         let ptr1 = compute_key(leaf1);
         let ptr2 = compute_key(leaf2);
+        println!("ptr1: {}, ptr2: {}", ptr1, ptr2);
         assert_eq!(ptr1, ptr2);
+        let slot = 10;
         let branch_circuit = BranchCircuit::<NODE_LEN, N_CHILDREN> {
             node,
             // any of the two keys will do since we only care about the common prefix
             common_prefix: key1.clone(),
-            expected_pointer: ptr1,
+            // - 1 because we compare pointers _after_ advancing the key for each leaf
+            expected_pointer: ptr1 - 1,
+            mapping_slot: slot,
         };
-        let slot = 10;
         // create the public inputs
         let compute_pi = |key: &[u8], leaf: &[u8], value: &[u8]| {
             let c = convert_u8_to_u32_slice(&keccak256(leaf));
@@ -246,5 +268,38 @@ mod test {
             inputs: [PublicInputs::from(&pi1)],
         };
         let proof = run_circuit::<F, 2, C, _>(circuit);
+        let pi = PublicInputs::<F>::from(&proof.public_inputs);
+        // now we check the expected outputs
+        {
+            // Accumulator check: since we can not add WeiressPoint, together, we recreate the
+            // expected leafs accumulator and add them
+            let acc1 = map_to_curve_point(
+                &value1
+                    .iter()
+                    .map(|b| F::from_canonical_u8(*b))
+                    .collect::<Vec<_>>(),
+            );
+            let acc2 = map_to_curve_point(
+                &value2
+                    .iter()
+                    .map(|b| F::from_canonical_u8(*b))
+                    .collect::<Vec<_>>(),
+            );
+            let branch_acc = acc1 + acc2;
+            println!("branch_acc: {:?}", pi.accumulator_info());
+            println!(
+                "pi1  expected: {:?}",
+                PublicInputs::from(&pi1).accumulator_info()
+            );
+            println!(
+                "pi2  expected: {:?}",
+                PublicInputs::from(&pi2).accumulator_info()
+            );
+
+            assert_eq!(branch_acc.to_weierstrass(), pi.accumulator());
+        }
+        {
+            // n check should be equal to N_CHILDREN == 2
+        }
     }
 }

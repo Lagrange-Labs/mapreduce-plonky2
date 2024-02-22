@@ -143,7 +143,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     // small utility function to transform a list of target to a curvetarget.
-    fn accumulator_info(&self) -> ([T; 5], [T; 5], T) {
+    pub(super) fn accumulator_info(&self) -> ([T; 5], [T; 5], T) {
         // 5 F for each coordinates + 1 bool flag
         let slice = &self.proof_inputs[Self::D_IDX..];
         #[allow(clippy::int_plus_one)]
