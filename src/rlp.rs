@@ -67,9 +67,8 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     b: &mut CircuitBuilder<F, D>,
     input: &Array<Target, N>,
     key_header: &RlpHeader,
-) -> (VectorWire<MAX_KEY_NIBBLE_LEN>, BoolTarget) {
+) -> (VectorWire<Target, MAX_KEY_NIBBLE_LEN>, BoolTarget) {
     let zero = b.zero();
-    let one = b.one();
     let two = b.two();
     let first_byte = input.value_at(b, key_header.offset);
     let (most_bits, least_bits) = b.split_low_high(first_byte, 4, 8);
@@ -85,7 +84,6 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     // TODO: why this doesn't work always !!
     //let parity = b.split_le(first_nibble, 2)[0].target;
 
-    let one_minus_parity = b.sub(one, parity);
     // if parity is 1 => odd length => (1 - p) * next_nibble = 0
     //   -> in this case, no need to add another nibble (since the rest of key + 1 == even now)
     // if parity is 0 => even length => (1 - p) * next_nibble = next_nibble
@@ -97,9 +95,10 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     // -1 because first nibble is the HP information, and the following loop
     // analyzes pairs of consecutive nibbles, so the second nibble will be seen
     // during the first iteration of this loop.
+    let one = b.one();
+    let mut i_offset = key_header.offset;
     for i in 0..MAX_ENC_KEY_LEN - 1 {
-        let it = b.constant(F::from_canonical_usize(i + 1));
-        let i_offset = b.add(it, key_header.offset);
+        i_offset = b.add(i_offset, one);
         // look now at the encoded path
         let x = input.value_at(b, i_offset);
         // next nibble in little endian
@@ -112,14 +111,16 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
         // => if parity == 1, we take the previous last nibble, because that's the next in line
         // => if parity == 0, we take lowest significant nibble because the previous last nibble is
         //                    the special "0" nibble to make overall length even
-        let parity_mul_nib = b.mul(parity, prev_nibbles.1);
-        nibbles[2 * i] = b.mul_add(one_minus_parity, cur_nibbles.0, parity_mul_nib);
+        // when developped, expression equals p*(prev.1 - curr.0) + curr.0
+        let diff = b.sub(prev_nibbles.1, cur_nibbles.0);
+        nibbles[2 * i] = b.mul_add(parity, diff, cur_nibbles.0);
 
         // nibble[2*i + 1] = parity*cur_nibbles.0 + (1 - parity)*cur_nibbles.1;
         // => if parity == 1, take lowest significant nibble as successor of previous.highest_nibble
         // => if parity == 0, take highest significant nibble as success of current.lowest_nibble
-        let parity_mul_curr_nib = b.mul(parity, cur_nibbles.0);
-        nibbles[2 * i + 1] = b.mul_add(one_minus_parity, cur_nibbles.1, parity_mul_curr_nib);
+        // when developped, expression equals p*(curr.0 - curr.1) + curr.1
+        let diff = b.sub(cur_nibbles.0, cur_nibbles.1);
+        nibbles[2 * i + 1] = b.mul_add(parity, diff, cur_nibbles.1);
 
         prev_nibbles = cur_nibbles;
     }
@@ -276,21 +277,15 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
     // end_idx starts at `data_offset` and  includes the
     // header byte + potential len_len bytes + payload len
     let end_idx = b.add(list_header.offset, list_header.len);
-    let mut stop_counting = b._false();
-    let tru = b._true();
-    let fal = b._false();
     // decode each headers of each items ofthe list
     // remember in a list each item of the list is RLP encoded
     for i in 0..N {
         // stop when you've looked at exactly the same number of  bytes than
         // the RLP list header indicates
         let at_the_end = b.is_equal(offset, end_idx);
-        // NOTE: we could use less_than(offset,end_idx) but it is a complex
-        // operation requiring bitfield decomposition etc. Here we simply keep
-        // a variable that gets set to true once we reached the threshold.
-        let at_end_or_past = b.or(at_the_end, stop_counting);
-        stop_counting = BoolTarget::new_unsafe(b.select(at_end_or_past, tru.target, fal.target));
-        let before_the_end = b.not(at_end_or_past);
+        // offset always equals offset after we've reached end_idx so before_the_end
+        // is only true when we haven't reached the end yet
+        let before_the_end = b.not(at_the_end);
 
         // read the header starting from the offset
         let header = decode_header(b, data, offset);
@@ -301,7 +296,10 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
         dec_type[i] = header.data_type;
 
         // move offset to the next field in the list
-        offset = b.mul(before_the_end.target, new_offset);
+        // updates offset such that is is either < end_idx or after that
+        // always equals to end_idx
+        let diff = b.sub(new_offset, offset);
+        offset = b.mul_add(before_the_end.target, diff, offset);
         num_fields = b.add(num_fields, before_the_end.target);
     }
 

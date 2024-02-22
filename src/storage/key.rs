@@ -88,7 +88,7 @@ impl MappingSlot {
         input[2 * MAPPING_KEY_LEN - 1] = mapping_slot;
 
         // keccak(left_pad32(mapping_key), left_pad32(mapping_slot))
-        let vector = VectorWire::<MAPPING_INPUT_PADDED_LEN> {
+        let vector = VectorWire::<Target, MAPPING_INPUT_PADDED_LEN> {
             real_len: b.constant(F::from_canonical_usize(MAPPING_INPUT_TOTAL_LEN)),
             arr: Array { arr: input },
         };
@@ -143,7 +143,7 @@ impl MappingSlot {
             &wires.keccak_location,
             // no need to create a new input wire array since we create it in circuit
             &InputData::Assigned(
-                &Vector::from_vec(input).expect("can't create vector input for keccak_location"),
+                &Vector::from_vec(&input).expect("can't create vector input for keccak_location"),
             ),
         );
         // assign the keccak necessary values for keccak_mpt = H(keccak_location)
@@ -151,7 +151,7 @@ impl MappingSlot {
             pw,
             &wires.keccak_mpt,
             &InputData::Assigned(
-                &Vector::from_vec(exp_location).expect("can't create vector input for keccak_mpt"),
+                &Vector::from_vec(&exp_location).expect("can't create vector input for keccak_mpt"),
             ),
         )
     }

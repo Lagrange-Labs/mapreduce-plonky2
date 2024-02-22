@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use plonky2::{
-    field::extension::Extendable,
+    field::{extension::Extendable, goldilocks_field::GoldilocksField},
     hash::hash_types::RichField,
     iop::{
         target::{BoolTarget, Target},
@@ -13,57 +13,111 @@ use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
 use crate::utils::{less_than, less_than_or_equal_to, IntTargetWriter};
 
-/// ArrayWire contains the wires representing an array of dynamic length
+/// Utility trait to convert any value into its field representation equivalence
+pub(crate) trait ToField<F: RichField> {
+    fn to_field(&self) -> F;
+}
+
+impl<F: RichField> ToField<F> for u8 {
+    fn to_field(&self) -> F {
+        F::from_canonical_u8(*self)
+    }
+}
+impl<F: RichField> ToField<F> for u32 {
+    fn to_field(&self) -> F {
+        F::from_canonical_u32(*self)
+    }
+}
+impl<F: RichField> ToField<F> for usize {
+    fn to_field(&self) -> F {
+        F::from_canonical_usize(*self)
+    }
+}
+/// VectorWire contains the wires representing an array of dynamic length
 /// up to MAX_LEN. This is useful when you don't know the exact size in advance
 /// of your data, for example in hashing MPT nodes.
 #[derive(Debug, Clone)]
-pub struct VectorWire<const MAX_LEN: usize> {
-    pub arr: Array<Target, MAX_LEN>,
+pub struct VectorWire<T: Targetable, const MAX_LEN: usize> {
+    pub arr: Array<T, MAX_LEN>,
     pub real_len: Target,
 }
 
-/// A fixed buffer array containing dynammic length data, the equivalent of
-/// `ArrayWire` outside circuit.
+/// A fixed buffer array containing dynammic length data. This structs contains
+/// the values that are assigned inside a VectorWire.
 #[derive(Clone, Debug, Copy)]
-pub struct Vector<const MAX_LEN: usize> {
+pub struct Vector<F, const MAX_LEN: usize> {
     // hardcoding to be bytes srently only use case
-    pub arr: [u8; MAX_LEN],
+    pub arr: [F; MAX_LEN],
     pub real_len: usize,
 }
 
-impl<const MAX_LEN: usize> Vector<MAX_LEN> {
-    pub fn from_vec(mut d: Vec<u8>) -> Result<Self> {
+impl<T: Default + Clone + Debug, const MAX_LEN: usize> Vector<T, MAX_LEN> {
+    /// Utility wrapper around vector of bytes
+    pub fn to_fields<F: RichField>(&self) -> Vector<F, MAX_LEN>
+    where
+        T: ToField<F>,
+    {
+        Vector {
+            arr: self
+                .arr
+                .iter()
+                .map(|x| x.to_field())
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+            real_len: self.real_len,
+        }
+    }
+    pub fn from_vec(d: &[T]) -> Result<Self> {
+        let mut fields = d
+            .iter()
+            .cloned()
+            .chain(std::iter::repeat(T::default()))
+            .take(MAX_LEN) // pad to MAX_LEN with zeros
+            .collect::<Vec<_>>();
         let len = d.len();
-        d.resize(MAX_LEN, 0);
         Ok(Self {
-            arr: d.try_into().map_err(|e| anyhow!("{:?}", e))?,
+            arr: fields.try_into().map_err(|e| anyhow!("{:?}", e))?,
             real_len: len,
         })
     }
+    pub fn empty() -> Self {
+        Self {
+            arr: create_array(|_| T::default()),
+            real_len: 0,
+        }
+    }
 }
 
-impl<const SIZE: usize> Index<usize> for VectorWire<SIZE> {
-    type Output = Target;
+impl<F: RichField, const MAX_LEN: usize> Vector<F, MAX_LEN> {}
+
+impl<const SIZE: usize, T: Targetable> Index<usize> for VectorWire<T, SIZE> {
+    type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
         self.arr.index(index)
     }
 }
 
-impl<const MAX_LEN: usize> VectorWire<MAX_LEN> {
+impl<const MAX_LEN: usize, T: Targetable> VectorWire<T, MAX_LEN> {
     pub fn new<F, const D: usize>(b: &mut CircuitBuilder<F, D>) -> Self
     where
         F: RichField + Extendable<D>,
     {
         let real_len = b.add_virtual_target();
-        let arr = Array::<Target, MAX_LEN>::new(b);
+        let arr = Array::<T, MAX_LEN>::new(b);
         Self { arr, real_len }
     }
-    pub fn assign<F: RichField>(&self, pw: &mut PartialWitness<F>, value: &Vector<MAX_LEN>) {
+    pub fn assign<F: RichField, V: ToField<F>>(
+        &self,
+        pw: &mut PartialWitness<F>,
+        value: &Vector<V, MAX_LEN>,
+    ) {
         pw.set_target(self.real_len, F::from_canonical_usize(value.real_len));
-        // small hack to specialize Array for assigning u8 inside
-        // TODO: find a more elegant / generic way to assign any value into an Array
-        pw.set_int_targets(&self.arr.arr, &value.arr);
+        self.arr
+            .assign(pw, &create_array(|i| value.arr[i].to_field()));
     }
+}
+impl<const MAX_LEN: usize> VectorWire<Target, MAX_LEN> {
     // Asserts the full vector is composed of bytes. The array must be
     // filled with valid bytes after the `real_len` pointer.
     pub fn assert_bytes<F: RichField + Extendable<D>, const D: usize>(
@@ -159,6 +213,18 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
             pw.set_target(self.arr[i].to_target(), array[i])
         }
     }
+    /// Assigns each value in the given array to the respective wire in `self`. Each value is first
+    /// converted to a field element.
+    pub fn assign_from_data<V: ToField<F>, F: RichField>(
+        &self,
+        pw: &mut PartialWitness<F>,
+        array: &[V; SIZE],
+    ) {
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..SIZE {
+            pw.set_target(self.arr[i].to_target(), array[i].to_field())
+        }
+    }
 
     /// Assigns a vector of bytes to this array.
     /// NOTE: in circuit, one must call `array.assert_bytes()` to ensure the "byteness" of the input
@@ -212,7 +278,7 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
     pub fn contains_vector<F: RichField + Extendable<D>, const D: usize, const SUB: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
-        sub: &VectorWire<SUB>,
+        sub: &VectorWire<T, SUB>,
         at: Target,
     ) -> BoolTarget {
         let mut t = b._true();
@@ -230,7 +296,7 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
 
             let original_idx = b.add(at, it);
             let original_value = self.value_at(b, original_idx);
-            let are_equal = b.is_equal(original_value.to_target(), sub.arr.arr[i]);
+            let are_equal = b.is_equal(original_value.to_target(), sub.arr.arr[i].to_target());
             let should_be_true = b.and(are_equal, within_range);
             let f = b.or(should_be_true, not_in_range);
             t = b.and(t, f);
@@ -274,6 +340,8 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
 
     /// Returns self[at..at+SUB_SIZE].
     /// Cost is O(SIZE * SIZE) due to SIZE calls to value_at()
+    /// WARNING: the index `at` must fulfill the condition `self.len() - at >= SUB_SIZE`
+    /// If this condition is not met, this function does not guarantee anything on the result.
     pub fn extract_array<F: RichField + Extendable<D>, const D: usize, const SUB_SIZE: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
@@ -313,17 +381,15 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
             ));
         }
         // Otherwise, need to make it manually
-        let mut nums: Vec<Target> = vec![];
+        let mut acc = b.zero();
         for (i, el) in self.arr.iter().enumerate() {
             let i_target = b.constant(F::from_canonical_usize(i));
             let is_eq = b.is_equal(i_target, at);
-            // (i == n (idx) ) * element
-            let product = b.mul(is_eq.target, el.to_target());
-            nums.push(product);
+            // SUM_i (i == n (idx) ) * element
+            // -> sum = element
+            acc = b.mul_add(is_eq.target, el.to_target(), acc);
         }
-        // SUM_i (i == n (idx) ) * element
-        // -> sum = element
-        T::from_target(b.add_many(&nums))
+        T::from_target(acc)
     }
 
     pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
@@ -433,7 +499,7 @@ mod test {
     use rand::{thread_rng, Rng};
 
     use crate::{
-        array::{Array, Vector, VectorWire},
+        array::{Array, ToField, Vector, VectorWire},
         circuit::{test::test_simple_circuit, UserCircuit},
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
@@ -690,10 +756,25 @@ mod test {
                 idx,
                 exp: child_hash.try_into().unwrap(),
             });
-
-            //println!("len node = {}", node.len());
-            //println!("len child = {}", child_hash.len());
-            //println!("idx = {}", idx);
+        }
+        {
+            // test when the array is not found
+            const SIZE: usize = 81;
+            const SUBSIZE: usize = 41;
+            let mut arr = [0u8; SIZE];
+            rng.fill(&mut arr[..]);
+            let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
+            let exp = create_array(|_| rng.gen::<u8>());
+            use std::panic;
+            // a bit hardcore method to test for failure but it works for now
+            let r = panic::catch_unwind(|| {
+                test_simple_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
+                    arr,
+                    idx,
+                    exp,
+                })
+            });
+            assert!(r.is_err());
         }
     }
 
@@ -711,12 +792,17 @@ mod test {
         where
             F: RichField + Extendable<D>,
         {
-            type Wires = (Array<Target, SIZE>, Target, VectorWire<SIZE>, BoolTarget);
+            type Wires = (
+                Array<Target, SIZE>,
+                Target,
+                VectorWire<Target, SIZE>,
+                BoolTarget,
+            );
             fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
                 let array = Array::<Target, SIZE>::new(c);
                 let index = c.add_virtual_target();
                 let expected = c.add_virtual_bool_target_safe();
-                let subvector = VectorWire::<SIZE>::new(c);
+                let subvector = VectorWire::<Target, SIZE>::new(c);
                 let contains = array.contains_vector::<_, _, SIZE>(c, &subvector, index);
                 c.connect(contains.target, expected.target);
                 (array, index, subvector, expected)
@@ -728,7 +814,7 @@ mod test {
                 pw.set_target(wires.1, F::from_canonical_usize(self.idx));
                 wires
                     .2
-                    .assign(pw, &Vector::<SIZE>::from_vec(self.sub.clone()).unwrap());
+                    .assign(pw, &Vector::<u8, SIZE>::from_vec(&self.sub).unwrap());
                 pw.set_bool_target(wires.3, self.exp);
             }
         }
