@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use super::data_types::Data;
+use crate::circuit::{UserCircuit, PCDCircuit};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -74,14 +75,14 @@ impl<T: Data + Clone> MapOp for Identity<T> {
     {}
 }
 
-pub struct Reduce<Op>(pub Op);
+pub struct Reduce<O: ReduceOp>(pub O);
 
-impl<Op: ReduceOp> Reduce<Op> {
+impl<O: ReduceOp> Reduce<O> {
     pub fn generate_partial_witness<F: RichField>(
         &self, 
         input_size: usize,
-        input_values: Vec<<<Op as ReduceOp>::Input as Data>::Value>,
-        targets: Vec<<<Op as ReduceOp>::Input as Data>::WireTarget>,
+        input_values: Vec<<O::Input as Data>::Value>,
+        targets: Vec<<O::Input as Data>::WireTarget>,
     ) -> PartialWitness<F> {
         assert_eq!(input_size, input_values.len());
         let padded_values = Self::pad_with_neutral_value(&input_values);
@@ -91,7 +92,7 @@ impl<Op: ReduceOp> Reduce<Op> {
         values
             .iter()
             .zip(targets)
-            .for_each(|(v, t)| <Op::Input as Data>::set_target(t, v, &mut pw));
+            .for_each(|(v, t)| <O::Input as Data>::set_target(t, v, &mut pw));
         pw
     }
 
@@ -101,13 +102,13 @@ impl<Op: ReduceOp> Reduce<Op> {
         &self,
         input_size: usize,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> (Vec<<Op as ReduceOp>::Input>, Vec<<Op::Input as Data>::WireTarget>) {
+    ) -> (Vec<O::Input>, Vec<<O::Input as Data>::WireTarget>) {
         let padded_input_size = input_size.next_power_of_two();
-        let input_targets: Vec<<Op::Input as Data>::WireTarget> = (0..padded_input_size)
-            .map(|_| <Op::Input as Data>::create_target(builder))
+        let input_targets: Vec<<O::Input as Data>::WireTarget> = (0..padded_input_size)
+            .map(|_| <O::Input as Data>::create_target(builder))
             .collect();
 
-        let all_data = vec![<<Op as ReduceOp>::Input as Data>::new(); 2 * padded_input_size - 1];
+        let all_data = vec![<O::Input as Data>::new(); 2 * padded_input_size - 1];
         let all_targets = Self::generate_targets(input_targets, builder);
 
         (all_data, all_targets)
@@ -115,24 +116,24 @@ impl<Op: ReduceOp> Reduce<Op> {
 
     // pads the values to a power of two with the "neutral" element
     // required of every reduce operation
-    fn pad_with_neutral_value(valueset: &[<Op::Input as Data>::Value]) -> Vec<<Op::Input as Data>::Value> {
+    fn pad_with_neutral_value(valueset: &[<O::Input as Data>::Value]) -> Vec<<O::Input as Data>::Value> {
         if valueset.len().is_power_of_two() {
             valueset.to_vec()
         } else {
             let new_length_with_pad = valueset.len().next_power_of_two();
             let padding_length = new_length_with_pad - valueset.len();
-            let padding = vec![<Op as ReduceOp>::neutral(); padding_length];
+            let padding = vec![O::neutral(); padding_length];
             [valueset, &padding].concat()
         }
     }
 
     // computes one reduction computation step, producing a vector 1/2 the length of the original,
-    fn get_intermediate_values(values: &[<Op::Input as Data>::Value]) -> Vec<<Op::Input as Data>::Value> {
+    fn get_intermediate_values(values: &[<O::Input as Data>::Value]) -> Vec<<O::Input as Data>::Value> {
         // length should always be greater than two
         assert!(values.len() >= 2);
 
         if values.len() == 2 {
-            vec![<Op as ReduceOp>::eval(&values[0], &values[1])]
+            vec![O::eval(&values[0], &values[1])]
         } else {
             let (left, right) = values.split_at(values.len() / 2);
             [
@@ -144,7 +145,7 @@ impl<Op: ReduceOp> Reduce<Op> {
     }
 
     // recursively generates all values from a list of input values
-    fn generate_values(values: Vec<<Op::Input as Data>::Value>) -> Vec<<Op::Input as Data>::Value> {
+    fn generate_values(values: Vec<<O::Input as Data>::Value>) -> Vec<<O::Input as Data>::Value> {
         let intermediates = Self::get_intermediate_values(&values);
         if intermediates.len() == 1 {
             [values, intermediates].concat()
@@ -154,14 +155,14 @@ impl<Op: ReduceOp> Reduce<Op> {
     }
 
     fn get_intermediate_targets<F: RichField + Extendable<D>, const D: usize>(
-        targets: &[<Op::Input as Data>::WireTarget],
+        targets: &[<O::Input as Data>::WireTarget],
         builder: &mut CircuitBuilder<F, D>,
-    ) -> Vec<<Op::Input as Data>::WireTarget> {
+    ) -> Vec<<O::Input as Data>::WireTarget> {
         // length should always be greater than two
         assert!(targets.len() >= 2);
 
         if targets.len() == 2 {
-            vec![<Op as ReduceOp>::add_constraints(&targets[0], &targets[1], builder)]
+            vec![O::add_constraints(&targets[0], &targets[1], builder)]
         } else {
             let (left, right) = targets.split_at(targets.len() / 2);
             [
@@ -174,9 +175,9 @@ impl<Op: ReduceOp> Reduce<Op> {
 
     // recursively computes all targets from a list of input targets
     fn generate_targets<F: RichField + Extendable<D>, const D: usize>(
-        targets: Vec<<Op::Input as Data>::WireTarget>,
+        targets: Vec<<O::Input as Data>::WireTarget>,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> Vec<<Op::Input as Data>::WireTarget> {
+    ) -> Vec<<O::Input as Data>::WireTarget> {
         let reduced = Self::get_intermediate_targets(&targets, builder);
         if reduced.len() == 1 {
             [targets, reduced].concat()

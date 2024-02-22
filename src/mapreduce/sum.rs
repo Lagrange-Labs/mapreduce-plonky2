@@ -8,6 +8,7 @@ use plonky2::{
 use crate::mapreduce::data_types::U64;
 use crate::mapreduce::ops::ReduceOp;
 
+#[derive(Clone)]
 struct SumU64;
 
 impl ReduceOp for SumU64 {
@@ -46,8 +47,8 @@ mod test {
 
     #[test]
     fn test_sum_circuit() -> Result<()> {
+        let input_values: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         let sum_u64 = Reduce(SumU64);
-        const SIZE: usize = 10;
 
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
@@ -57,12 +58,12 @@ mod test {
 
         // building phase
         let mut builder = CircuitBuilder::<F, D>::new(config);
-        let (data, targets) = sum_u64.write_circuit(SIZE, &mut builder);
+        let (data, targets) = sum_u64.write_circuit(input_values.len(), &mut builder);
         let circuit_data = builder.build::<C>();
 
         // witness generation and proving
-        let input_values: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        let pw = sum_u64.generate_partial_witness(SIZE, input_values, targets);
+        
+        let pw = sum_u64.generate_partial_witness(input_values.len(), input_values, targets);
         let proof = circuit_data.prove(pw)?;
 
         // verification
