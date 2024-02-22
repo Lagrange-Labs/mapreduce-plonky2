@@ -352,7 +352,8 @@ mod test {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
-        let url = "https://sepolia.infura.io/v3/d22da7908d80409b95cee2f3fbfddb3b";
+        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
@@ -368,7 +369,7 @@ mod test {
         {
             // mapping key
             let mapping_key =
-                hex::decode("000000000000000000000000000000000000000000000000000000000000abcd")?;
+                hex::decode("000000000000000000000000000000000000000000000000000000000001abcd")?;
             let query = ProofQuery::new_mapping_slot(contract, 1, mapping_key);
             let res = query.query_mpt_proof(&provider).await?;
             ProofQuery::verify_storage_proof(&res)?;
