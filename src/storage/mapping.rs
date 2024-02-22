@@ -176,7 +176,7 @@ struct LeafWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    node: VectorWire<{ PAD_LEN(NODE_LEN) }>,
+    node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     mapping_slot: MappingSlotWires,
     value: Array<Target, MAX_LEAF_VALUE_LEN>,
@@ -201,7 +201,7 @@ where
     pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires<NODE_LEN> {
         let zero = b.zero();
         let tru = b._true();
-        let node = VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(b);
+        let node = VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b);
         // always ensure theThanks all node is bytes at the beginning
         node.assert_bytes(b);
 
@@ -246,8 +246,8 @@ where
     }
 
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &LeafWires<NODE_LEN>) {
-        let pad_node = Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(self.node.clone())
-            .expect("invalid node given");
+        let pad_node =
+            Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(&self.node).expect("invalid node given");
         wires.node.assign(pw, &pad_node);
         KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
             pw,
@@ -265,7 +265,6 @@ mod test {
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
     use crate::utils::keccak256;
     use eth_trie::{Nibbles, Trie};
-    use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
