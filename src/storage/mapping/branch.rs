@@ -1,16 +1,34 @@
-use crate::mpt_sequential::PAD_LEN;
+use plonky2::{
+    field::goldilocks_field::GoldilocksField,
+    iop::{target::Target, witness::PartialWitness},
+    plonk::circuit_builder::CircuitBuilder,
+};
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+
+use crate::{
+    array::{Array, Vector, VectorWire},
+    keccak::{KeccakCircuit, HASH_LEN, PACKED_HASH_LEN},
+    mpt_sequential::{bytes_to_nibbles, Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
+    rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
+    utils::convert_u8_targets_to_u32,
+};
+
+use super::public_inputs::PublicInputs;
+#[derive(Clone, Debug)]
 pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {
     node: Vec<u8>,
+    // in bytes
+    common_prefix: Vec<u8>,
+    expected_pointer: usize,
 }
 
 pub struct BranchWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    /// TODO replace by proof when we have the framework in place
-    inputs: Vec<Target>,
     /// input node - right now only branch
-    node: VectorWire<{ PAD_LEN(NODE_LEN) }>,
+    node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
     /// key provided by prover as a "point of reference" to verify
     /// all children proofs's exposed keys
     common_prefix: MPTKeyWire,
@@ -22,20 +40,21 @@ where
     [(); HASH_LEN / 4]:,
     [(); HASH_LEN]:,
 {
-    pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) {
-        let inputs = (0..N_CHILDREN)
-            .map(|_| b.add_virtual_targets(PublicInputs::MAX_ELEMENTS))
-            .collect::<Vec<_>>();
+    /// TODO: replace the inputs by the inputs of the proofs to verify when integrating with universal
+    /// verifier / recursion framework.
+    pub fn build(
+        b: &mut CircuitBuilder<GoldilocksField, 2>,
+        inputs: &[Vec<Target>],
+    ) -> BranchWires<NODE_LEN> {
         let node = VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b);
         // always ensure the node is bytes at the beginning
         node.assert_bytes(b);
-        // WIll be exposed as common prefix. We need to make sure all children proofs share the same common prefix
+        // Key exposed as common prefix. We need to make sure all children proofs share the same common prefix
         let common_prefix = MPTKeyWire::new(b);
         // mapping slot will be exposed as public input. Need to make sure all
         // children proofs are valid with respect to the same mapping slot.
         let mapping_slot = b.add_virtual_target();
 
-        let one = b.one();
         let zero = b.zero();
         let tru = b._true();
         // First expose the keccak root of this subtree starting at this node
@@ -58,8 +77,7 @@ where
             let child_key = proof_inputs.mpt_key();
             let (new_key, hash, is_valid) =
                 MPTCircuit::<1, NODE_LEN>::advance_key_branch(b, &node.arr, &child_key, &headers);
-            // we always enforce it's a branch node
-            // TODO: this is a redundant check and should be moved out from ^
+            // we always enforce it's a branch node, i.e. that it has 17 entries
             b.connect(is_valid.target, tru.target);
             // we check the hash is the one exposed by the proof
             // first convert the extracted hash to packed one to compare
@@ -82,5 +100,150 @@ where
         // we now extract the public input to register for this proofs
         let c = root.output_array;
         PublicInputs::register(b, &common_prefix, mapping_slot, n, &c, &accumulator);
+        BranchWires {
+            node,
+            common_prefix,
+        }
+    }
+    fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &BranchWires<NODE_LEN>) {
+        let vec = Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(&self.node).unwrap();
+        wires.node.assign(pw, &vec);
+        wires.common_prefix.assign(
+            pw,
+            &bytes_to_nibbles(&self.common_prefix).try_into().unwrap(),
+            self.expected_pointer,
+        );
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use plonky2::field::types::Field;
+    use plonky2::iop::witness::WitnessWrite;
+    use plonky2::{
+        field::goldilocks_field::GoldilocksField,
+        iop::target::Target,
+        plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
+    };
+    use rand::{thread_rng, Rng};
+
+    use crate::circuit::test::run_circuit;
+    use crate::mpt_sequential::bytes_to_nibbles;
+    use crate::{
+        circuit::UserCircuit,
+        group_hashing::map_to_curve_point,
+        mpt_sequential::PAD_LEN,
+        rlp::MAX_KEY_NIBBLE_LEN,
+        storage::mapping::public_inputs::PublicInputs,
+        utils::{convert_u8_to_u32_slice, keccak256, test::random_vector},
+    };
+
+    use super::{BranchCircuit, BranchWires};
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+    #[derive(Clone, Debug)]
+    struct TestBranchCircuit<'a, const NODE_LEN: usize, const N_CHILDREN: usize> {
+        c: BranchCircuit<NODE_LEN, N_CHILDREN>,
+        inputs: [PublicInputs<'a, F>; N_CHILDREN],
+    }
+
+    impl<'a, const NODE_LEN: usize, const N_CHILDREN: usize> UserCircuit<F, D>
+        for TestBranchCircuit<'a, NODE_LEN, N_CHILDREN>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+    {
+        type Wires = (BranchWires<NODE_LEN>, [Vec<Target>; N_CHILDREN]);
+
+        fn build(
+            c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<GoldilocksField, 2>,
+        ) -> Self::Wires {
+            let inputs = (0..N_CHILDREN)
+                .map(|_| c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN))
+                .collect::<Vec<_>>();
+            let wires = BranchCircuit::<NODE_LEN, N_CHILDREN>::build(c, &inputs);
+            (wires, inputs.try_into().unwrap())
+        }
+
+        fn prove(
+            &self,
+            pw: &mut plonky2::iop::witness::PartialWitness<GoldilocksField>,
+            wires: &Self::Wires,
+        ) {
+            self.c.assign(pw, &wires.0);
+            assert_eq!(self.inputs.len(), wires.1.len());
+            for i in 0..N_CHILDREN {
+                pw.set_target_arr(&wires.1[i], self.inputs[i].proof_inputs);
+            }
+        }
+    }
+
+    #[test]
+    fn test_branch_circuit() {
+        const NODE_LEN: usize = 100;
+        const N_CHILDREN: usize = 2;
+        // We need to create a trie that for sure contains an branch node:
+        // We insert two values under two keys which only differ by their last nibble/byte
+        // Normally, the trie should look like :
+        // root = extension node
+        // branch = point of different between the two keys
+        // two leaves
+        let memdb = Arc::new(MemoryDB::new(true));
+        let mut trie = EthTrie::new(Arc::clone(&memdb));
+        let key1 = random_vector(32);
+        let mut key2 = key1.clone();
+        key2[31] = thread_rng().gen();
+        let value1 = random_vector(32);
+        let value2 = random_vector(32);
+        trie.insert(&key1, &value1).unwrap();
+        trie.insert(&key2, &value2).unwrap();
+        trie.root_hash().unwrap();
+        let proof1 = trie.get_proof(&key1).unwrap();
+        let proof2 = trie.get_proof(&key2).unwrap();
+        assert!(proof1.len() == 3);
+        assert_eq!(proof1[1], proof2[1]);
+        let node = proof1[1].clone();
+        let leaf1 = proof1.last().unwrap();
+        let leaf2 = proof2.last().unwrap();
+        let compute_key = |leaf: &[u8]| {
+            let tuple: Vec<Vec<u8>> = rlp::decode_list(&leaf);
+            let partial_nibbles = Nibbles::from_compact(&tuple[0]);
+            let partial_key_len = partial_nibbles.nibbles().len();
+            MAX_KEY_NIBBLE_LEN - 1 - partial_key_len
+        };
+        let ptr1 = compute_key(leaf1);
+        let ptr2 = compute_key(leaf2);
+        assert_eq!(ptr1, ptr2);
+        let branch_circuit = BranchCircuit::<NODE_LEN, N_CHILDREN> {
+            node,
+            // any of the two keys will do since we only care about the common prefix
+            common_prefix: key1.clone(),
+            expected_pointer: ptr1,
+        };
+        let slot = 10;
+        // create the public inputs
+        let compute_pi = |key: &[u8], leaf: &[u8], value: &[u8]| {
+            let c = convert_u8_to_u32_slice(&keccak256(leaf));
+            let d = map_to_curve_point(
+                &value
+                    .iter()
+                    .map(|b| F::from_canonical_u8(*b))
+                    .collect::<Vec<_>>(),
+            )
+            .to_weierstrass();
+            // both ptr should be the same
+            PublicInputs::create_public_inputs_arr(&bytes_to_nibbles(key), ptr1, slot, 1, &c, &d)
+        };
+        let pi1 = compute_pi(&key1, &leaf1, &value1);
+        let pi2 = compute_pi(&key2, &leaf2, &value2);
+        assert_eq!(pi1.len(), PublicInputs::<F>::TOTAL_LEN);
+        let circuit = TestBranchCircuit {
+            c: branch_circuit,
+            inputs: [PublicInputs::from(&pi1), PublicInputs::from(&pi2)],
+        };
+        let proof = run_circuit::<F, 2, C, _>(circuit);
     }
 }
