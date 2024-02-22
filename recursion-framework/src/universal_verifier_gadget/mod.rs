@@ -7,7 +7,8 @@ mod circuit_set;
 pub(crate) mod wrap_circuit;
 pub(crate) mod verifier_gadget;
 
-pub(crate) use circuit_set::{CircuitSet, CircuitSetDigest, CircuitSetTarget};
+pub(crate) use circuit_set::{CircuitSet, CircuitSetTarget};
+pub use circuit_set::CircuitSetDigest;
 
 // cap height for the Merkle-tree employed to represent the set of circuits that can be aggregated with
 // `MergeCircuit`; it is now set to 0 for simplicity, which is equivalent to a traditional

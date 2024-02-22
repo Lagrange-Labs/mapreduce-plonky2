@@ -39,20 +39,20 @@ impl<const D: usize> UniversalVerifierTargets<D> {
 
 pub(crate) struct UniversalVerifierBuilder<
     F: RichField + Extendable<D>, 
-    const D: usize
+    const D: usize,
+    const NUM_PUBLIC_INPUTS: usize,
 > {
     rec_data: CommonCircuitData<F,D>,
-    num_public_inputs: usize,
     circuit_set_size: usize,
 }
 
 impl<
     F: RichField + Extendable<D>, 
-    const D: usize
-> UniversalVerifierBuilder<F,D> {
+    const D: usize,
+    const NUM_PUBLIC_INPUTS: usize,
+> UniversalVerifierBuilder<F,D, NUM_PUBLIC_INPUTS> {
     pub(crate) fn new<C: GenericConfig<D, F = F>>(
         config: CircuitConfig, 
-        num_public_inputs: usize, 
         circuit_set_size: usize
     ) -> Self 
     where 
@@ -60,12 +60,43 @@ impl<
         [(); C::Hasher::HASH_SIZE]:,
     {
         let rec_data =
-        build_data_for_recursive_aggregation::<F, C, D>(config, num_public_inputs);
+        build_data_for_recursive_aggregation::<F, C, D>(config, NUM_PUBLIC_INPUTS);
         Self {
             rec_data,
-            num_public_inputs,
             circuit_set_size,
         }
+    }
+
+    pub(crate) fn get_circuit_set_size(&self) -> usize {
+        self.circuit_set_size
+    }
+
+    pub(crate) fn verify_proof_for_universal_verifier<
+        C: GenericConfig<D, F = F>,
+    >(
+        &self,
+        builder: &mut CircuitBuilder<F, D>,
+        verifier_data: &VerifierCircuitTarget,
+    ) -> ProofWithPublicInputsTarget<D> 
+    where 
+        C::Hasher: AlgebraicHasher<F>,
+        [(); C::Hasher::HASH_SIZE]:,
+    {
+        let proof = builder.add_virtual_proof_with_pis(&self.rec_data);
+        builder.verify_proof::<C>(&proof, &verifier_data, &self.rec_data);
+        proof
+    }
+
+    // check that `circuit_set_target` is the same as the one exposed by the `proof`
+    pub(crate) fn check_circuit_set_equality(
+        builder: &mut CircuitBuilder<F, D>,
+        circuit_set_target: &CircuitSetTarget,
+        proof: &ProofWithPublicInputsTarget<D>,
+    ) {
+        let circuit_set_targets = circuit_set_target.to_targets();
+        
+        circuit_set_targets.iter().zip(proof.public_inputs.iter().skip(NUM_PUBLIC_INPUTS))
+        .for_each(|(&cs_t, &pi_t)| builder.connect(cs_t, pi_t));
     }
 
     pub(crate) fn universal_verifier_circuit<
@@ -80,15 +111,14 @@ impl<
     [(); C::Hasher::HASH_SIZE]:,
     {
         
-        // allocate proof targets
-        let proof = builder.add_virtual_proof_with_pis(&self.rec_data);
+        // allocate verifier data targets
         let verifier_data = VerifierCircuitTarget {
                         constants_sigmas_cap: builder
                             .add_virtual_cap(self.rec_data.config.fri_config.cap_height),
                         circuit_digest: builder.add_virtual_hash(),
                     };
         // verify proof
-        builder.verify_proof::<C>(&proof, &verifier_data, &self.rec_data);
+        let proof = self.verify_proof_for_universal_verifier::<C>(builder, &verifier_data);
         check_circuit_digest_target::<_, C, D>(builder, &verifier_data, RECURSION_THRESHOLD);
         let proof_membership_target = CircuitSetTarget::check_circuit_digest_membership::<F, C, D>(
             builder,
@@ -96,10 +126,8 @@ impl<
             &verifier_data.circuit_digest,
             self.circuit_set_size,
         );
-        let circuit_set_targets = circuit_set_target.to_targets();
-        // check that the circuit set employed as public input in the recursively verified proof is the saem as the one exposed by the recursive proof
-        circuit_set_targets.iter().zip(proof.public_inputs.iter().skip(self.num_public_inputs))
-        .for_each(|(&cs_t, &pi_t)| builder.connect(cs_t, pi_t));
+        // check that the circuit set employed as public input in the recursively verified proof is the same as the one exposed by the recursive proof
+        Self::check_circuit_set_equality(builder, circuit_set_target, &proof);
 
         UniversalVerifierTargets {
             circuit_set_membership: proof_membership_target,

@@ -37,23 +37,23 @@ pub trait CircuitLogic<
 /// `CircuitWithUniversalVerifierBuilder` is a data structure that can be employed to build circuits that 
 /// either employ the universal verifier or whose proofs needs to be verified by a circuit employing the 
 /// universal verifier
-pub struct CircuitWithUniversalVerifierBuilder<F: RichField + Extendable<D>, const D: usize> {
-    verifier_builder: UniversalVerifierBuilder<F,D>,
+pub struct CircuitWithUniversalVerifierBuilder<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize> {
+    verifier_builder: UniversalVerifierBuilder<F,D, NUM_PUBLIC_INPUTS>,
     config: CircuitConfig,
 }
 
-impl<F: RichField + Extendable<D>, const D: usize> CircuitWithUniversalVerifierBuilder<F,D> {
+impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize> CircuitWithUniversalVerifierBuilder<F,D, NUM_PUBLIC_INPUTS> {
     /// Instantiate a `CircuitWithUniversalVerifierBuilder` to build circuits with `num_public_inputs`
     /// employing the configuration `config`. Besides verifying proofs, the universal verifier, 
     /// which is a fundamental building block of circuits built with data structure, will also check 
     /// that the verifier data employed for proof verification belongs to a set of admissible verifier data; 
     /// the size of such a set corresponds to `circuit_set_size`, which must be provided as input.  
-    pub fn new<C: GenericConfig<D, F = F>>(config: CircuitConfig, circuit_set_size: usize, num_public_inputs: usize) -> Self 
+    pub fn new<C: GenericConfig<D, F = F>>(config: CircuitConfig, circuit_set_size: usize) -> Self 
     where 
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
     {
-        let verifier_builder = UniversalVerifierBuilder::new::<C>(config.clone(), num_public_inputs, circuit_set_size);
+        let verifier_builder = UniversalVerifierBuilder::new::<C>(config.clone(), circuit_set_size);
         Self {
             verifier_builder,
             config,
@@ -105,6 +105,9 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitWithUniversalVerifierB
         }
     }
 
+    pub(crate) fn get_circuit_set_size(&self) -> usize {
+        self.verifier_builder.get_circuit_set_size()
+    }
 
 }
 /// `CircuitWithUniversalVerifier` is a data structure representing a circuit containing `NUM_VERIFIERS`
@@ -204,6 +207,8 @@ pub(crate) mod tests {
 
     use serial_test::serial;
 
+    pub(crate) const NUM_PUBLIC_INPUTS_TEST_CIRCUITS: usize = NUM_HASH_OUT_ELTS;
+
     pub(crate) struct LeafCircuit<const INPUT_SIZE: usize> {
         inputs: [Target; INPUT_SIZE],
         generator: Target,
@@ -219,7 +224,7 @@ pub(crate) mod tests {
 
         type Inputs = ([F; INPUT_SIZE], F);
 
-        const NUM_PUBLIC_INPUTS: usize = NUM_HASH_OUT_ELTS;
+        const NUM_PUBLIC_INPUTS: usize = NUM_PUBLIC_INPUTS_TEST_CIRCUITS;
 
         fn circuit_logic(
             builder: &mut CircuitBuilder<F,D>,
@@ -265,7 +270,7 @@ pub(crate) mod tests {
     > CircuitLogic<F,D,NUM_VERIFIERS> for RecursiveCircuit<INPUT_SIZE> {
         type CircuitBuilderParams = ();
         type Inputs = [F; INPUT_SIZE];
-        const NUM_PUBLIC_INPUTS: usize = NUM_HASH_OUT_ELTS;
+        const NUM_PUBLIC_INPUTS: usize = NUM_PUBLIC_INPUTS_TEST_CIRCUITS;
 
         fn circuit_logic(
             builder: &mut CircuitBuilder<F,D>,
@@ -301,13 +306,11 @@ pub(crate) mod tests {
     {
         const INPUT_SIZE: usize = 8;
         let config = CircuitConfig::standard_recursion_config();
-        let num_public_inputs = <LeafCircuit::<INPUT_SIZE> as CircuitLogic<F,D,0>>::NUM_PUBLIC_INPUTS;
-        let circuit_builder = CircuitWithUniversalVerifierBuilder::<F,D>::new::<C>(config, 2, num_public_inputs);
+        const NUM_PUBLIC_INPUTS: usize = NUM_PUBLIC_INPUTS_TEST_CIRCUITS;
+        let circuit_builder = CircuitWithUniversalVerifierBuilder::<F,D, NUM_PUBLIC_INPUTS>::new::<C>(config, 2);
         let leaf_circuit = circuit_builder.build_circuit::<C, 0, LeafCircuit<INPUT_SIZE>>(1usize << 12);
 
         let recursive_circuit = circuit_builder.build_circuit::<C, NUM_VERIFIERS, RecursiveCircuit<INPUT_SIZE>>(());
-
-        let num_public_inputs = <LeafCircuit::<INPUT_SIZE> as CircuitLogic<F,D,0>>::NUM_PUBLIC_INPUTS;
 
         let circuit_set = CircuitSet::<F,C, D>::build_circuit_set(vec![
             leaf_circuit.circuit_data().verifier_only.circuit_digest,
@@ -329,7 +332,7 @@ pub(crate) mod tests {
            recursive_circuits_input,
         ).unwrap();
 
-        assert_eq!(&rec_proof.public_inputs[num_public_inputs..], circuit_set_digest.flatten().as_slice());
+        assert_eq!(&rec_proof.public_inputs[NUM_PUBLIC_INPUTS..], circuit_set_digest.flatten().as_slice());
         
     
         let recursive_circuits_input = array::from_fn(|_| F::rand());
@@ -343,7 +346,7 @@ pub(crate) mod tests {
            recursive_circuits_input,
         ).unwrap();
 
-        assert_eq!(&rec_proof.public_inputs[num_public_inputs..], circuit_set_digest.flatten().as_slice());
+        assert_eq!(&rec_proof.public_inputs[NUM_PUBLIC_INPUTS..], circuit_set_digest.flatten().as_slice());
         
         recursive_circuit.circuit_data().verify(rec_proof).unwrap();
     }

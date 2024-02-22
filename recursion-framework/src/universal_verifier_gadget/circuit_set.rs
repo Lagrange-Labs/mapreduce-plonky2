@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use plonky2::{field::extension::Extendable, hash::{hash_types::{HashOutTarget, MerkleCapTarget, RichField}, 
+use plonky2::{field::extension::Extendable, hash::{hash_types::{HashOut, HashOutTarget, MerkleCapTarget, RichField}, 
     merkle_proofs::MerkleProofTarget, merkle_tree::{MerkleCap, MerkleTree}}, iop::{target::{BoolTarget, Target}, witness::{PartialWitness, WitnessWrite}}, 
     plonk::{circuit_builder::CircuitBuilder, circuit_data::{CircuitConfig, VerifierCircuitTarget}, config::{AlgebraicHasher, GenericConfig, GenericHashOut, Hasher}}, 
     util::log2_ceil
@@ -35,6 +35,21 @@ impl CircuitSetTarget {
 
     pub(crate) fn to_targets(&self) -> Vec<Target> {
         merkle_cap_to_targets(&self.0)
+    }
+
+    pub(crate) fn from_circuit_set_digest<
+        F: RichField + Extendable<D>,
+        H: Hasher<F, Hash = HashOut<F>>,
+        C: GenericConfig<D, Hasher = H, F=F>,
+        const D: usize,
+    >(
+        builder: &mut CircuitBuilder<F, D>,
+        digest: CircuitSetDigest<F,C,D>,
+    ) -> Self 
+    {
+        Self(
+            builder.constant_merkle_cap(&digest.0)
+        )
     }
 
     // Enforce that `circuit_digest_target` is a leaf in the merkle-tree
@@ -76,7 +91,6 @@ impl CircuitSetTarget {
     }
 }
 
-
 pub(crate) fn num_targets_for_circuit_set<F: RichField + Extendable<D>, const D: usize>(
     config: CircuitConfig,
 ) -> usize {
@@ -110,7 +124,7 @@ pub(crate) fn check_circuit_digest_target<
     );
     builder.connect_hashes(verifier_data.circuit_digest, cap_hash);
 }
-
+#[derive(Clone, Debug)]
 // Data structure employed by the recursion framework to store and manage the set of circuits that can
 // be verified with the universal verifier
 pub(crate) struct CircuitSet<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> {
@@ -182,12 +196,16 @@ where
 
         Ok(())
     }
+
+    pub(crate) fn circuit_set_size(&self) -> usize {
+        self.circuit_digests_to_leaf_indexes.len()
+    }
 }
 
 // A short representation (e.g., a digest) of the set of circuits that can be aggregated by
 // `MergeCircuit`; this should represent values assignable to a `CircuitSetTarget`
 #[derive(Debug, Clone)]
-pub(crate) struct CircuitSetDigest<
+pub struct CircuitSetDigest<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,
@@ -206,7 +224,7 @@ where
         pw.set_cap_target(&target.0, &self.0);
     }
 
-    pub(crate) fn flatten(&self) -> Vec<F> {
+    pub fn flatten(&self) -> Vec<F> {
         self.0.flatten()
     }
 }
