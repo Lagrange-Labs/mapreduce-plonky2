@@ -497,6 +497,7 @@ mod test {
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, Rng};
+    use std::panic;
 
     use crate::{
         array::{Array, ToField, Vector, VectorWire},
@@ -848,12 +849,13 @@ mod test {
     #[test]
     fn test_assert_bytes() {
         #[derive(Clone, Debug)]
-        struct TestAssertBytes<const N: usize> {
-            vector: Vec<u8>,
+        struct TestAssertBytes<T, const N: usize> {
+            vector: Vec<T>,
         }
-        impl<F, const D: usize, const N: usize> UserCircuit<F, D> for TestAssertBytes<N>
+        impl<T, F, const D: usize, const N: usize> UserCircuit<F, D> for TestAssertBytes<T, N>
         where
             F: RichField + Extendable<D>,
+            T: Clone + ToField<F>,
         {
             type Wires = Array<Target, N>;
 
@@ -864,13 +866,24 @@ mod test {
             }
 
             fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-                wires.assign_bytes(pw, &self.vector.clone().try_into().unwrap());
+                let fields = self.vector.iter().map(|x| x.to_field()).collect::<Vec<_>>();
+                wires.assign(pw, &fields.try_into().unwrap());
             }
         }
 
         const N: usize = 47;
         let vector = (0..N).map(|_| thread_rng().gen::<u8>()).collect::<Vec<_>>();
-        let circuit = TestAssertBytes::<N> { vector };
+        let circuit = TestAssertBytes::<u8, N> { vector };
         test_simple_circuit::<F, D, C, _>(circuit);
+
+        // circuit should fail with non bytes entries
+        let vector = (0..N)
+            .map(|_| thread_rng().gen::<u32>() + u8::MAX as u32)
+            .collect::<Vec<_>>();
+        let res = panic::catch_unwind(|| {
+            let circuit = TestAssertBytes::<u32, N> { vector };
+            test_simple_circuit::<F, D, C, _>(circuit);
+        });
+        assert!(res.is_err());
     }
 }
