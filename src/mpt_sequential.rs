@@ -63,7 +63,7 @@ where
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
     /// way to define everything according to max size of the data and
     /// "not care" about the padding size (almost!)
-    nodes: [VectorWire<{ PAD_LEN(NODE_LEN) }>; DEPTH],
+    nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
     /// in the case of a fixed circuit, the actual tree depth might be smaller.
     /// In this case, we set false on the part of the path we should not process.
     /// NOTE: for node at index i in the path, the boolean indicating if we should
@@ -108,8 +108,8 @@ where
         let should_process: [BoolTarget; DEPTH - 1] =
             create_array(|_| b.add_virtual_bool_target_safe());
         // nodes should be ordered from leaf to root and padded at the end
-        let nodes: [VectorWire<_>; DEPTH] =
-            create_array(|_| VectorWire::<{ PAD_LEN(NODE_LEN) }>::new(b));
+        let nodes: [VectorWire<Target, _>; DEPTH] =
+            create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b));
         InputWires {
             key: full_key,
             nodes,
@@ -208,8 +208,8 @@ where
         let padded_nodes = self
             .nodes
             .iter()
-            .map(|n| Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(n.clone()))
-            .chain((0..pad_len).map(|_| Vector::<{ PAD_LEN(NODE_LEN) }>::from_vec(vec![])))
+            .map(|n| Vector::<F, { PAD_LEN(NODE_LEN) }>::from_vec(n))
+            .chain((0..pad_len).map(|_| Ok(Vector::<F, { PAD_LEN(NODE_LEN) }>::empty())))
             .collect::<Result<Vec<_>>>()?;
         for (i, (wire, node)) in inputs.nodes.iter().zip(padded_nodes.iter()).enumerate() {
             wire.assign(p, node);
