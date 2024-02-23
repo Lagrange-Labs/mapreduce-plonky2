@@ -132,20 +132,23 @@ mod tests {
     use crate::{
         benches::init_logging,
         circuit::{test::test_simple_circuit, UserCircuit},
-        eth::RLPBlock,
+        eth::{ProofQuery, RLPBlock},
         keccak::HASH_LEN,
         utils::{convert_u8_slice_to_u32_fields, keccak256},
     };
     use anyhow::Result;
     use eth_trie::{EthTrie, MemoryDB, Trie};
-    use ethers::types::H160;
+    use ethers::{
+        providers::{Http, Provider},
+        types::{Address, H160},
+    };
     use plonky2::plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::CircuitConfig,
         config::{GenericConfig, PoseidonGoldilocksConfig},
     };
     use rand::{thread_rng, Rng};
-    use std::sync::Arc;
+    use std::{str::FromStr, sync::Arc};
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -184,9 +187,11 @@ mod tests {
         }
     }
 
-    /// Test the block-linking circuit.
+    /// Test the block-linking circuit with a generated random MPT.
     #[test]
-    fn test_block_linking_circuit() {
+    fn test_block_linking_circuit_with_random_mpt() {
+        init_logging();
+
         // Set maximum depth of the trie and Leave one for padding.
         const DEPTH: usize = 4;
         const ACTUAL_DEPTH: usize = DEPTH - 1;
@@ -194,8 +199,6 @@ mod tests {
         const BLOCK_LEN: usize = 600;
         const NODE_LEN: usize = 500;
         const VALUE_LEN: usize = 100;
-
-        init_logging();
 
         let state_mpt = generate_state_mpt::<DEPTH, VALUE_LEN>();
         let block = generate_block(&state_mpt);
@@ -205,6 +208,56 @@ mod tests {
             c: BlockLinkingCircuit::new(block, storage_proof, state_mpt.nodes),
         };
         test_simple_circuit::<F, D, C, _>(test_circuit);
+    }
+
+    /// Test the block-linking circuit with RPC `eth_getProof`.
+    #[tokio::test]
+    async fn test_block_linking_circuit_with_rpc() -> Result<()> {
+        init_logging();
+
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://sepolia.infura.io/v3/d22da7908d80409b95cee2f3fbfddb3b";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // Sepolia contract
+        let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
+        // Simple storage test
+        let query = ProofQuery::new_simple_slot(contract, 0);
+        let res = query.query_mpt_proof(&provider).await?;
+
+        // Written as constant from ^.
+        const DEPTH: usize = 8;
+        const BLOCK_LEN: usize = 600;
+        const NODE_LEN: usize = 532;
+        const VALUE_LEN: usize = 100;
+
+        // Construct the state MPT via the RPC response.
+        let account_address = query.contract;
+        let nodes = res
+            .account_proof
+            .iter()
+            .rev() // we want the leaf first and root last
+            .map(|b| b.to_vec())
+            .collect::<Vec<Vec<u8>>>();
+        let root_hash = H256(keccak256(nodes.last().unwrap()).try_into().unwrap());
+        let state_mpt = TestStateMPT {
+            account_address,
+            root_hash,
+            nodes,
+        };
+
+        let block = generate_block(&state_mpt);
+        let storage_proof = generate_storage_proof(&state_mpt);
+
+        let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
+            c: BlockLinkingCircuit::new(block, storage_proof, state_mpt.nodes),
+        };
+        test_simple_circuit::<F, D, C, _>(test_circuit);
+
+        Ok(())
     }
 
     /// Generate a random state MPT. The account address is generated for MPT

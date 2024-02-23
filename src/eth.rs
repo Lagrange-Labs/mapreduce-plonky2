@@ -351,11 +351,17 @@ impl ProofQuery {
         if is_valid.is_err() {
             bail!("Account proof is invalid");
         }
-        if let Some(ext_value) = is_valid.unwrap() {
-            println!("Account node value: {:?}", hex::encode(ext_value));
+        if let Some(_) = is_valid.unwrap() {
+            println!("Found account value");
         } else {
             bail!("Account proof says the value associated with that key does not exist");
         }
+
+        // The length of acount node must be 104 bytes (8 + 32 + 32 + 32) as:
+        // [nonce (U64), balance (U256), storage_hash (H256), code_hash (H256)]
+        let account_node = res.account_proof.last().unwrap();
+        assert_eq!(account_node.len(), 104);
+
         Ok(())
     }
 }
@@ -390,7 +396,6 @@ mod test {
             let query = ProofQuery::new_simple_slot(contract, 0);
             let res = query.query_mpt_proof(&provider).await?;
             ProofQuery::verify_storage_proof(&res)?;
-
             query.verify_state_proof(&res)?;
         }
         {
@@ -400,6 +405,7 @@ mod test {
             let query = ProofQuery::new_mapping_slot(contract, 1, mapping_key);
             let res = query.query_mpt_proof(&provider).await?;
             ProofQuery::verify_storage_proof(&res)?;
+            query.verify_state_proof(&res)?;
         }
         Ok(())
     }

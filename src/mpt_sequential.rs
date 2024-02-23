@@ -498,7 +498,10 @@ pub mod test {
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
-        iop::{target::Target, witness::PartialWitness},
+        iop::{
+            target::{BoolTarget, Target},
+            witness::PartialWitness,
+        },
         plonk::{
             circuit_builder::CircuitBuilder,
             circuit_data::CircuitConfig,
@@ -536,6 +539,9 @@ pub mod test {
         c: Circuit<DEPTH, NODE_LEN>,
         exp_root: [u8; 32],
         exp_value: [u8; 32],
+        // The flag identifies if need to check the expected leaf value, it's
+        // set to true for storage proof, and false for state proof (unconcern).
+        checking_value: bool,
     }
     impl<F, const D: usize, const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D>
         for TestCircuit<DEPTH, NODE_LEN>
@@ -551,6 +557,7 @@ pub mod test {
             OutputWires<DEPTH, NODE_LEN>,
             Array<Target, HASH_LEN>, // root
             Array<Target, 32>,       // value
+            BoolTarget,              // checking_value
         );
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
@@ -566,9 +573,16 @@ pub mod test {
             c.connect(is_equal.target, tt.target);
             let value_wire = Array::<Target, 32>::new(c);
             let values_equal = value_wire.equals(c, &output_wires.leaf);
-            // TODO for state proof.
-            // c.connect(tt.target, values_equal.target);
-            (input_wires, output_wires, expected_root, value_wire)
+            let checking_value = c.add_virtual_bool_target_safe();
+            let values_equal = c.select(checking_value, values_equal.target, tt.target);
+            c.connect(tt.target, values_equal);
+            (
+                input_wires,
+                output_wires,
+                expected_root,
+                value_wire,
+                checking_value,
+            )
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -581,6 +595,7 @@ pub mod test {
                 pw,
                 &create_array(|i| F::from_canonical_u8(self.exp_value[i])),
             );
+            pw.set_bool_target(wires.4, self.checking_value);
         }
     }
     use anyhow::Result;
@@ -602,7 +617,7 @@ pub mod test {
         let res = query.query_mpt_proof(&provider).await?;
 
         // Verify both storage and state proofs by this MPT circuit.
-        // verify_storage_proof_from_query(&query, &res)?;
+        verify_storage_proof_from_query(&query, &res)?;
         verify_state_proof_from_query(&query, &res)
     }
 
@@ -642,6 +657,7 @@ pub mod test {
             c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
             exp_root: root.try_into().unwrap(),
             exp_value: value_bytes,
+            checking_value: true,
         };
         test_simple_circuit::<F, D, C, _>(circuit);
 
@@ -678,6 +694,7 @@ pub mod test {
             c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
             exp_root: root.try_into().unwrap(),
             exp_value: [0; 32],
+            checking_value: false,
         };
         test_simple_circuit::<F, D, C, _>(circuit);
 
@@ -732,6 +749,7 @@ pub mod test {
             c: Circuit::<DEPTH, NODE_LEN>::new(key.try_into().unwrap(), proof),
             exp_root: root,
             exp_value: value.try_into().unwrap(),
+            checking_value: true,
         };
         test_simple_circuit::<F, D, C, _>(circuit);
     }

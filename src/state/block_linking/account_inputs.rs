@@ -128,10 +128,11 @@ where
         let tt = cb._true();
         let account_node = &self.state_mpt_input.nodes[0];
 
-        // Verify the offset of storage MPT root hash is within range. We use 10
-        // bits for the range check since any nodes in the MPT proof will not go
-        // above 544 bytes.
-        let within_range = less_than(cb, self.storage_root_offset, account_node.real_len, 10);
+        // Verify the offset of storage MPT root hash is within range. We use 8
+        // bits for the range check since the account node is composed by
+        // [nonce (U64), balance (U256), storage_hash (H256), code_hash (H256)]
+        // and it has 104 bytes.
+        let within_range = less_than(cb, self.storage_root_offset, account_node.real_len, 8);
         cb.connect(within_range.target, tt.target);
 
         // Verify the account node includes the storage MPT root hash.
