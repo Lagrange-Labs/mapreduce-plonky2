@@ -119,8 +119,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     const T_IDX: usize = 75; // 1 index
     const S_IDX: usize = 76; // 1 index
     const N_IDX: usize = 77; // 1 index
-    const C_IDX: usize = 78; // packed hash = 4 F elements
-    const EXTENSION: usize = 5;
+    const C_IDX: usize = 78; // packed hash = 8 F elements
+    const EXTENSION: usize = group_hashing::N;
     pub fn from(arr: &'a [T]) -> Self {
         Self { proof_inputs: arr }
     }

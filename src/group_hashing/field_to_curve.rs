@@ -116,8 +116,7 @@ mod tests {
         // Generate random field values as inputs.
         let input_values = rand::thread_rng()
             .gen::<[u64; ARITY]>()
-            //.map(F::from_canonical_u64);
-            .map(|_| F::ONE);
+            .map(F::from_canonical_u64);
 
         // Set the value to target for witness.
         let mut pw = PartialWitness::new();
