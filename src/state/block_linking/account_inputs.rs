@@ -45,9 +45,10 @@ where
         let storage_root_offset =
             find_index_subvector(&state_mpt_nodes[0], &storage_root_hash.0).unwrap();
 
-        // Build the full MPT key as `keccak256(keccak256(contract_address)` and
-        // convert it to bytes.
-        let state_mpt_key = nibbles_to_bytes(&keccak256(&keccak256(&contract_address.0)))
+        // Build the full MPT key as `keccak256(contract_address)` and convert
+        // it to bytes.
+        // Check with [ProofQuery::verify_state_proof] for details.
+        let state_mpt_key = nibbles_to_bytes(&keccak256(&contract_address.0))
             .try_into()
             .unwrap();
 

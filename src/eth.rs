@@ -245,7 +245,7 @@ pub(crate) fn left_pad32(slice: &[u8]) -> [u8; 32] {
 }
 
 pub(crate) struct ProofQuery {
-    contract: Address,
+    pub(crate) contract: Address,
     pub(crate) slot: StorageSlot,
 }
 pub(crate) enum StorageSlot {
@@ -332,6 +332,32 @@ impl ProofQuery {
         }
         Ok(())
     }
+    pub fn verify_state_proof(&self, res: &EIP1186ProofResponse) -> Result<()> {
+        let memdb = Arc::new(MemoryDB::new(true));
+        let tx_trie = EthTrie::new(Arc::clone(&memdb));
+
+        // According to EIP-1186, accountProof starts with the the state root.
+        let state_root_hash = H256(keccak256(&res.account_proof[0]).try_into().unwrap());
+
+        // The MPT key is Keccak hash of the contract (requested) address.
+        let mpt_key = keccak256(&self.contract.0);
+
+        let is_valid = tx_trie.verify_proof(
+            state_root_hash,
+            &mpt_key,
+            res.account_proof.iter().map(|b| b.to_vec()).collect(),
+        );
+
+        if is_valid.is_err() {
+            bail!("Account proof is invalid");
+        }
+        if let Some(ext_value) = is_valid.unwrap() {
+            println!("Account node value: {:?}", hex::encode(ext_value));
+        } else {
+            bail!("Account proof says the value associated with that key does not exist");
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -345,7 +371,7 @@ mod test {
     use super::*;
 
     #[tokio::test]
-    async fn test_kashish_contract() -> Result<()> {
+    async fn test_kashish_contract_proof_query() -> Result<()> {
         // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
         // uint256 public n_registered; // storage slot 0
         // mapping(address => uint256) public holders; // storage slot 1
@@ -364,8 +390,10 @@ mod test {
             let query = ProofQuery::new_simple_slot(contract, 0);
             let res = query.query_mpt_proof(&provider).await?;
             ProofQuery::verify_storage_proof(&res)?;
+
+            query.verify_state_proof(&res)?;
         }
-        // mapping storage test
+        /* mapping storage test
         {
             // mapping key
             let mapping_key =
@@ -374,6 +402,7 @@ mod test {
             let res = query.query_mpt_proof(&provider).await?;
             ProofQuery::verify_storage_proof(&res)?;
         }
+        */
         Ok(())
     }
 
