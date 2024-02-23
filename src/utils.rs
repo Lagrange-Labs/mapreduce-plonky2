@@ -97,15 +97,15 @@ pub(crate) fn convert_u8_targets_to_u32<F: RichField + Extendable<D>, const D: u
             // u8[1]
             let mut y = padded[i + 1];
             // u8[0] + u8[1] * 2^8
-            x = b.mul_add(y,two_power_8, x);
+            x = b.mul_add(y, two_power_8, x);
             // u8[2]
             y = padded[i + 2];
             // u8[0] + u8[1] * 2^8 + u8[2] * 2^16
-            x = b.mul_add(y,two_power_16, x);
+            x = b.mul_add(y, two_power_16, x);
             // u8[3]
             y = padded[i + 3];
             // u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
-            x = b.mul_add(y,two_power_24, x);
+            x = b.mul_add(y, two_power_24, x);
 
             U32Target(x)
         })
