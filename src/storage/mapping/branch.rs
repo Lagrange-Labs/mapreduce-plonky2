@@ -138,7 +138,6 @@ mod test {
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
-    use ethers::abi::ethereum_types::Public;
     use plonky2::field::types::Field;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
@@ -191,19 +190,20 @@ mod test {
             pw: &mut plonky2::iop::witness::PartialWitness<GoldilocksField>,
             wires: &Self::Wires,
         ) {
-            self.c.assign(pw, &wires.0);
             assert_eq!(self.inputs.len(), wires.1.len());
             for i in 0..N_CHILDREN {
                 assert_eq!(wires.1[i].len(), self.inputs[i].proof_inputs.len());
+                println!("Assign time: inputs[{}] = {:?}", i, self.inputs[i]);
                 pw.set_target_arr(&wires.1[i], self.inputs[i].proof_inputs);
             }
+            self.c.assign(pw, &wires.0);
         }
     }
 
     #[test]
     fn test_branch_circuit() {
         const NODE_LEN: usize = 100;
-        const N_CHILDREN: usize = 1;
+        const N_CHILDREN: usize = 2;
         // We need to create a trie that for sure contains an branch node:
         // We insert two values under two keys which only differ by their last nibble/byte
         // Normally, the trie should look like :
@@ -239,7 +239,7 @@ mod test {
         assert_eq!(ptr1, ptr2);
         let slot = 10;
         let branch_circuit = BranchCircuit::<NODE_LEN, N_CHILDREN> {
-            node,
+            node: node.clone(),
             // any of the two keys will do since we only care about the common prefix
             common_prefix: key1.clone(),
             // - 1 because we compare pointers _after_ advancing the key for each leaf
@@ -257,6 +257,7 @@ mod test {
             )
             .to_weierstrass();
             // both ptr should be the same
+            // set 1 becaues it' s leaf
             PublicInputs::create_public_inputs_arr(&bytes_to_nibbles(key), ptr1, slot, 1, &c, &d)
         };
         let pi1 = compute_pi(&key1, &leaf1, &value1);
@@ -264,13 +265,13 @@ mod test {
         assert_eq!(pi1.len(), PublicInputs::<F>::TOTAL_LEN);
         let circuit = TestBranchCircuit {
             c: branch_circuit,
-            //inputs: [PublicInputs::from(&pi1), PublicInputs::from(&pi2)],
-            inputs: [PublicInputs::from(&pi1)],
+            inputs: [PublicInputs::from(&pi1), PublicInputs::from(&pi2)],
+            //inputs: [PublicInputs::from(&pi1)],
         };
         let proof = run_circuit::<F, 2, C, _>(circuit);
         let pi = PublicInputs::<F>::from(&proof.public_inputs);
         // now we check the expected outputs
-        {
+        if true {
             // Accumulator check: since we can not add WeiressPoint, together, we recreate the
             // expected leafs accumulator and add them
             let acc1 = map_to_curve_point(
@@ -296,10 +297,33 @@ mod test {
                 PublicInputs::from(&pi2).accumulator_info()
             );
 
+            // FAILING
             assert_eq!(branch_acc.to_weierstrass(), pi.accumulator());
         }
         {
-            // n check should be equal to N_CHILDREN == 2
+            // n check should be equal to 2 since it processed two leaves
+            assert_eq!(pi.n(), F::from_canonical_usize(N_CHILDREN));
+        }
+        {
+            // check mpt root hash
+            let root = convert_u8_to_u32_slice(&keccak256(&node));
+            assert_eq!(&pi.root_hash(), &root);
+        }
+        {
+            // check key and pointer
+            let common_prefix = bytes_to_nibbles(&key1)
+                .into_iter()
+                .map(F::from_canonical_u8)
+                .collect::<Vec<_>>();
+            let (fkey, fptr) = pi.mpt_key_info();
+            assert_eq!(fkey, common_prefix);
+            let exp_ptr = ptr1 - 1;
+            assert_eq!(fptr, F::from_canonical_usize(exp_ptr));
+        }
+        {
+            // check mapping slot
+            let exp_mapping = F::from_canonical_usize(slot);
+            assert_eq!(pi.mapping_slot(), exp_mapping);
         }
     }
 }

@@ -109,9 +109,9 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
         let mut arr = vec![];
         arr.extend_from_slice(&d.x.0.iter().chain(&d.y.0).cloned().collect::<Vec<_>>());
         arr.push(if d.is_inf {
-            GoldilocksField::ZERO
-        } else {
             GoldilocksField::ONE
+        } else {
+            GoldilocksField::ZERO
         });
         arr.extend_from_slice(
             &key.iter()
