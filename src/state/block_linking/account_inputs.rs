@@ -5,8 +5,7 @@
 use crate::{
     keccak::{OutputByteHash, OutputHash},
     mpt_sequential::{
-        nibbles_to_bytes, Circuit as MPTCircuit, InputWires as MPTInputWires,
-        OutputWires as MPTOutputWires, PAD_LEN,
+        Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
     },
     utils::{find_index_subvector, keccak256, less_than},
 };
@@ -48,9 +47,7 @@ where
         // Build the full MPT key as `keccak256(contract_address)` and convert
         // it to bytes.
         // Check with [ProofQuery::verify_state_proof] for details.
-        let state_mpt_key = nibbles_to_bytes(&keccak256(&contract_address.0))
-            .try_into()
-            .unwrap();
+        let state_mpt_key = keccak256(&contract_address.0).try_into().unwrap();
 
         // Build the MPT circuit for state Merkle Tree.
         let state_mpt_circuit = MPTCircuit::new(state_mpt_key, state_mpt_nodes);
@@ -135,7 +132,7 @@ where
         // bits for the range check since any nodes in the MPT proof will not go
         // above 544 bytes.
         let within_range = less_than(cb, self.storage_root_offset, account_node.real_len, 10);
-        cb.connect(tt.target, within_range.target);
+        cb.connect(within_range.target, tt.target);
 
         // Verify the account node includes the storage MPT root hash.
         let storage_root_hash = OutputByteHash::from_u32_array(cb, storage_root_hash);

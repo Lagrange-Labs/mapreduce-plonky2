@@ -384,7 +384,7 @@ mod tests {
     use crate::array::{Array, Vector, VectorWire};
     use crate::keccak::HASH_LEN;
     use crate::mpt_sequential::bytes_to_nibbles;
-    use crate::mpt_sequential::test::generate_random_mpt;
+    use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::{
         decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, RlpList,
         MAX_ENC_KEY_LEN, MAX_LEN_BYTES,
@@ -451,7 +451,7 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        let (mut trie, key) = generate_random_mpt::<4, 32>();
+        let (mut trie, key) = generate_random_storage_mpt::<4, 32>();
         let mut proof = trie.get_proof(&key).unwrap();
         proof.reverse();
         let encoded_leaf = proof.first().unwrap();
@@ -861,7 +861,7 @@ mod tests {
         run_test_case(tc3);
 
         {
-            let (mut trie, rlp_key) = generate_random_mpt::<5, 32>();
+            let (mut trie, rlp_key) = generate_random_storage_mpt::<5, 32>();
             let proof = trie.get_proof(&rlp_key).unwrap();
             println!(" ------ TEST CASE -----\n");
             let leaf_node = proof.last().unwrap().clone();

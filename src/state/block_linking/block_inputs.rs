@@ -35,11 +35,11 @@ pub struct BlockInputs {
 }
 
 impl BlockInputs {
-    pub fn new(block: Block<H256>, state_root_hash: &[u8]) -> Self {
+    pub fn new(block: Block<H256>, state_root_hash: H256) -> Self {
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
 
         // Find the state root hash from block header.
-        let state_root_offset = find_index_subvector(&header_rlp, state_root_hash).unwrap();
+        let state_root_offset = find_index_subvector(&header_rlp, &state_root_hash.0).unwrap();
 
         Self {
             number: block.number.unwrap().as_u64(),
@@ -62,7 +62,7 @@ pub struct BlockInputsWires<const MAX_LEN: usize> {
     /// The offset of state MPT root hash located in RLP encoded block header
     pub state_root_offset: Target,
     /// RLP encoded bytes of block header
-    pub header_rlp: VectorWire<MAX_LEN>,
+    pub header_rlp: VectorWire<Target, MAX_LEN>,
 }
 
 impl<const MAX_LEN: usize> BlockInputsWires<MAX_LEN> {
@@ -109,7 +109,7 @@ impl<const MAX_LEN: usize> BlockInputsWires<MAX_LEN> {
 
         // Assign the RLP encoded block header.
         self.header_rlp
-            .assign(pw, &Vector::from_vec(value.header_rlp.clone())?);
+            .assign(pw, &Vector::from_vec(&value.header_rlp)?);
 
         Ok(())
     }
@@ -126,7 +126,7 @@ impl<const MAX_LEN: usize> BlockInputsWires<MAX_LEN> {
 
         // Verify the offset of state MPT root hash is within range.
         let within_range = less_than(cb, self.state_root_offset, self.header_rlp.real_len, 10);
-        cb.connect(tt.target, within_range.target);
+        cb.connect(within_range.target, tt.target);
 
         // Verify the block header includes the state MPT root hash.
         let state_root_hash = OutputByteHash::from_u32_array(cb, state_root_hash);

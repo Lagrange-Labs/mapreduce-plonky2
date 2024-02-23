@@ -23,18 +23,18 @@ use std::array;
 /// - `M` Storage slot of the mapping
 /// - `S` Storage slot of the variable holding the length
 /// D = 5*2+1, C1 = C2 = 8, A = 5, M = 8, S = 1
-const D_IDX: usize = 0;
-const C1_IDX: usize = 11;
-const C2_IDX: usize = 19;
-const A_IDX: usize = 27;
-const M_IDX: usize = 32;
-const S_IDX: usize = 40;
-const STORAGE_INPUT_LEN: usize = 41;
+pub const D_IDX: usize = 0;
+pub const C1_IDX: usize = 11;
+pub const C2_IDX: usize = 19;
+pub const A_IDX: usize = 27;
+pub const M_IDX: usize = 32;
+pub const S_IDX: usize = 40;
+pub const STORAGE_INPUT_LEN: usize = 41;
 
 /// The public input values of previous storage proof
 #[derive(Clone, Debug)]
 pub struct StorageInputs<T> {
-    inner: [T; STORAGE_INPUT_LEN],
+    pub inner: [T; STORAGE_INPUT_LEN],
 }
 
 /// Common functions

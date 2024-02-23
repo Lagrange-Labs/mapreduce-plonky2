@@ -695,7 +695,7 @@ pub mod test {
         const NODE_LEN: usize = 500;
         const VALUE_LEN: usize = 32;
         let (proof, key, root, value) = if true {
-            let (mut trie, key) = generate_random_mpt::<ACTUAL_DEPTH, VALUE_LEN>();
+            let (mut trie, key) = generate_random_storage_mpt::<ACTUAL_DEPTH, VALUE_LEN>();
             let root = trie.root_hash().unwrap();
             // root is first so we reverse the order as in circuit we prove the opposite way
             let mut proof = trie.get_proof(&key).unwrap();
@@ -794,7 +794,7 @@ pub mod test {
         const DEPTH: usize = 4;
         const NODE_LEN: usize = 80;
         const VALUE_LEN: usize = 32;
-        let (mut trie, mut key) = generate_random_mpt::<DEPTH, VALUE_LEN>();
+        let (mut trie, mut key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
         let mut proof = trie.get_proof(&key).unwrap();
         proof.reverse();
         let key_nibbles = bytes_to_nibbles(&key);
@@ -947,7 +947,7 @@ pub mod test {
         const DEPTH: usize = 4;
         const NODE_LEN: usize = 80;
         const VALUE_LEN: usize = 32;
-        let (mut trie, key) = generate_random_mpt::<DEPTH, VALUE_LEN>();
+        let (mut trie, key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
         let mut proof = trie.get_proof(&key).unwrap();
         proof.reverse();
         let key_nibbles = bytes_to_nibbles(&key);
@@ -1025,7 +1025,7 @@ pub mod test {
         const DEPTH: usize = 4;
         const NODE_LEN: usize = 80;
         const VALUE_LEN: usize = 32;
-        let (mut trie, mut key) = generate_random_mpt::<DEPTH, VALUE_LEN>();
+        let (mut trie, mut key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
         let mut proof = trie.get_proof(&key).unwrap();
         proof.reverse();
         // try with a leaf MPT encoded node first
@@ -1118,7 +1118,7 @@ pub mod test {
     // that key is guaranteed to be of DEPTH length. Each leaves in the trie
     // is of NODE_LEN length.
     // The returned key is RLP encoded
-    pub fn generate_random_mpt<const DEPTH: usize, const VALUE_LEN: usize>(
+    pub fn generate_random_storage_mpt<const DEPTH: usize, const VALUE_LEN: usize>(
     ) -> (EthTrie<MemoryDB>, Vec<u8>) {
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));

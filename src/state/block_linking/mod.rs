@@ -6,7 +6,7 @@ mod block_inputs;
 mod public_inputs;
 mod storage_proof;
 
-use crate::mpt_sequential::PAD_LEN;
+use crate::{mpt_sequential::PAD_LEN, utils::keccak256};
 use account_inputs::{AccountInputs, AccountInputsWires};
 use anyhow::Result;
 use block_inputs::{BlockInputs, BlockInputsWires};
@@ -18,51 +18,6 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use storage_proof::StorageInputs;
-
-/// This is a wrapper around an array of targets set as public inputs of any
-/// proof generated in this module. They all share the same structure.
-/// `H` Block header hash
-/// `N` Block number
-/// `PREV_H` Header hash of the previous block (parent hash)
-/// `A` Smart contract address
-/// `D` Digest of the values
-/// `M` Storage slot of the mapping
-/// `S` Storage slot of the variable holding the length
-/// `C` Merkle root of the storage database
-pub struct PublicInputs<'a> {
-    proof_inputs: &'a [Target],
-}
-
-impl<'a> PublicInputs<'a> {
-    pub fn register<
-        F,
-        const D: usize,
-        const DEPTH: usize,
-        const NODE_LEN: usize,
-        const BLOCK_LEN: usize,
-    >(
-        cb: &mut CircuitBuilder<F, D>,
-        wires: &BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>,
-    ) where
-        F: RichField + Extendable<D>,
-        [(); PAD_LEN(NODE_LEN)]:,
-        [(); DEPTH - 1]:,
-    {
-        wires.block_inputs.hash.register_as_public_input(cb);
-        cb.register_public_input(wires.block_inputs.number);
-        wires.block_inputs.parent_hash.register_as_public_input(cb);
-        cb.register_public_inputs(wires.storage_proof.a());
-        cb.register_public_inputs(wires.storage_proof.d());
-        cb.register_public_inputs(wires.storage_proof.m());
-        cb.register_public_inputs(wires.storage_proof.s());
-
-        // Only expose the equivalent storage tree root here, NOT the one from
-        // blockchain.
-        cb.register_public_inputs(wires.storage_proof.merkle_root());
-    }
-
-    // TODO: add functions to get public inputs for next circuit.
-}
 
 /// Main block-linking wires
 pub struct BlockLinkingWires<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>
@@ -106,7 +61,11 @@ where
         state_mpt_nodes: Vec<Vec<u8>>,
     ) -> Self {
         // Get the hash of state MPT root and create the block inputs gadget.
-        let state_mpt_root = state_mpt_nodes.last().unwrap();
+        let state_mpt_root = H256(
+            keccak256(state_mpt_nodes.last().unwrap())
+                .try_into()
+                .unwrap(),
+        );
         let block_inputs = BlockInputs::new(block, state_mpt_root);
 
         // Get the contract address and hash of storage MPT root, and create the
@@ -166,23 +125,41 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::benches::init_logging;
+    use super::{
+        storage_proof::{A_IDX, C1_IDX, C2_IDX, M_IDX, STORAGE_INPUT_LEN},
+        *,
+    };
     use crate::{
+        benches::init_logging,
         circuit::{test::test_simple_circuit, UserCircuit},
-        mpt_sequential::test::generate_random_mpt,
+        eth::RLPBlock,
+        keccak::HASH_LEN,
+        utils::{convert_u8_slice_to_u32_fields, keccak256},
     };
     use anyhow::Result;
+    use eth_trie::{EthTrie, MemoryDB, Trie};
     use ethers::types::H160;
     use plonky2::plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::CircuitConfig,
         config::{GenericConfig, PoseidonGoldilocksConfig},
     };
+    use rand::{thread_rng, Rng};
+    use std::sync::Arc;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
+
+    /// Test state MPT
+    struct TestStateMPT {
+        /// Account address used to generate MPT key as `keccak(address)`
+        account_address: H160,
+        /// MPT root hash
+        root_hash: H256,
+        /// MPT nodes
+        nodes: Vec<Vec<u8>>,
+    }
 
     /// Test circuit
     #[derive(Clone, Debug)]
@@ -210,61 +187,116 @@ mod tests {
     /// Test the block-linking circuit.
     #[test]
     fn test_block_linking_circuit() {
-        // Maximum depth of the trie
+        // Set maximum depth of the trie and Leave one for padding.
         const DEPTH: usize = 4;
-        // Leave one for padding
         const ACTUAL_DEPTH: usize = DEPTH - 1;
-        // Maximum length of a node
+
+        const BLOCK_LEN: usize = 600;
         const NODE_LEN: usize = 500;
         const VALUE_LEN: usize = 100;
-        /* gupeng
 
         init_logging();
 
-        let mpt_nodes = state_mpt_nodes();
+        let state_mpt = generate_state_mpt::<DEPTH, VALUE_LEN>();
+        let block = generate_block(&state_mpt);
+        let storage_proof = generate_storage_proof(&state_mpt);
 
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
-            c: Circuit::new(block, storage_proof, mpt_nodes),
+            c: BlockLinkingCircuit::new(block, storage_proof, state_mpt.nodes),
         };
         test_simple_circuit::<F, D, C, _>(test_circuit);
-        */
     }
 
-    /// Generate the test nodes of state MPT.
-    fn state_mpt_nodes() -> (Vec<Vec<u8>>, u8) {
-        todo!()
-        /*
-        let (trie, key) = generate_random_mpt::<ACTUAL_DEPTH, VALUE_LEN>();
+    /// Generate a random state MPT. The account address is generated for MPT
+    /// key as `keccak(address)`. The MPT nodes corresponding to that key is
+    /// guaranteed to be of DEPTH length. Each leaves in the trie is of NODE_LEN
+    /// length.
+    fn generate_state_mpt<const DEPTH: usize, const VALUE_LEN: usize>() -> TestStateMPT {
+        let mut address_key_pairs = Vec::new();
+        let memdb = Arc::new(MemoryDB::new(true));
+        let mut trie = EthTrie::new(Arc::clone(&memdb));
 
-                block: Block<H256>,
-                storage_proof: StorageInputs<F>,
-                // Nodes of state MPT, it's ordered from leaf to root.
-                state_mpt_nodes: Vec<Vec<u8>>,
-        */
+        // Loop to insert random elements as long as a random selected proof is
+        // not of the right length.
+        let mut rng = thread_rng();
+        let (account_address, mpt_key) = loop {
+            println!(
+                "[+] Random mpt: insertion of {} elements so far...",
+                address_key_pairs.len(),
+            );
 
-        /*
-                let (proof, key, root, value) = {
+            // Generate a MPT key from an address.
+            let address = rng.gen::<[u8; 20]>();
+            let key = keccak256(&address);
 
-                    let root = trie.root_hash().unwrap();
-                    // root is first so we reverse the order as in circuit we prove the opposite way
-                    let mut proof = trie.get_proof(&key).unwrap();
-                    proof.reverse();
-                    assert!(proof.len() == ACTUAL_DEPTH);
-                    assert!(proof.len() <= DEPTH);
-                    assert!(keccak256(proof.last().unwrap()) == root.to_fixed_bytes());
-                    let value = trie.get(&key).unwrap().unwrap();
-                    (proof, key, root.to_fixed_bytes(), value)
-                };
-        */
+            // Insert the key and value.
+            let value: Vec<_> = (0..VALUE_LEN).map(|_| rng.gen::<u8>()).collect();
+            trie.insert(&key, &value).unwrap();
+            trie.root_hash().unwrap();
+
+            // Save the address and key temporarily.
+            address_key_pairs.push((H160(address), key));
+
+            // Check if any node has the DEPTH elements.
+            if let Some((address, key)) = address_key_pairs
+                .iter()
+                .find(|(_, key)| trie.get_proof(key).unwrap().len() == DEPTH)
+            {
+                break (*address, key);
+            }
+        };
+
+        let root_hash = trie.root_hash().unwrap();
+        let mut nodes = trie.get_proof(mpt_key).unwrap();
+        nodes.reverse();
+        assert!(keccak256(nodes.last().unwrap()) == root_hash.to_fixed_bytes());
+
+        TestStateMPT {
+            account_address,
+            root_hash,
+            nodes,
+        }
     }
 
     /// Generate the test block header.
-    fn block(state_root_hash: H256) -> Block<H256> {
-        todo!()
+    fn generate_block(mpt: &TestStateMPT) -> Block<H256> {
+        // Set to the MPT root hash.
+        let state_root = mpt.root_hash;
+
+        // Generate random block values.
+        let mut rng = thread_rng();
+        let number = Some(rng.gen::<u64>().into());
+        let hash = Some(rng.gen::<[u8; 32]>().into());
+        let parent_hash = rng.gen::<[u8; 32]>().into();
+
+        Block {
+            state_root,
+            number,
+            hash,
+            parent_hash,
+            ..Default::default()
+        }
     }
 
     /// Generate the test storage proof.
-    fn storage_proof<F>(contract_address: H160, storage_root_hash: H256) -> StorageInputs<F> {
-        todo!()
+    fn generate_storage_proof<F: RichField>(mpt: &TestStateMPT) -> StorageInputs<F> {
+        let mut inner: [F; STORAGE_INPUT_LEN] = (0..STORAGE_INPUT_LEN)
+            .map(|_| F::from_canonical_u64(thread_rng().gen::<u64>()))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        // Set the contract address to the public inputs of storage proof.
+        let contract_address = convert_u8_slice_to_u32_fields(&mpt.account_address.0);
+        inner[A_IDX..M_IDX].copy_from_slice(&contract_address);
+
+        // Set the storage root hash to the public inputs of storage proof.
+        let account_node = &mpt.nodes[0];
+        let start = thread_rng().gen_range(0..account_node.len() - HASH_LEN);
+        let storage_root_hash =
+            convert_u8_slice_to_u32_fields(&account_node[start..start + HASH_LEN]);
+        inner[C1_IDX..C2_IDX].copy_from_slice(&storage_root_hash);
+
+        StorageInputs { inner }
     }
 }

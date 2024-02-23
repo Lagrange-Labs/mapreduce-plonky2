@@ -163,19 +163,19 @@ impl<'a, X> rlp::Encodable for RLPBlock<'a, X> {
         s.begin_unbounded_list();
         s.append(&self.0.parent_hash);
         s.append(&self.0.uncles_hash);
-        s.append(&self.0.author.unwrap());
+        s.append(&self.0.author.unwrap_or_default());
         s.append(&self.0.state_root);
         s.append(&self.0.transactions_root);
         s.append(&self.0.receipts_root);
-        s.append(&self.0.logs_bloom.unwrap());
+        s.append(&self.0.logs_bloom.unwrap_or_default());
         s.append(&self.0.difficulty);
-        s.append(&self.0.number.unwrap());
+        s.append(&self.0.number.unwrap_or_default());
         s.append(&self.0.gas_limit);
         s.append(&self.0.gas_used);
         s.append(&self.0.timestamp);
         s.append(&self.0.extra_data.to_vec());
-        s.append(&self.0.mix_hash.unwrap());
-        s.append(&self.0.nonce.unwrap());
+        s.append(&self.0.mix_hash.unwrap_or_default());
+        s.append(&self.0.nonce.unwrap_or_default());
         rlp_opt(s, &self.0.base_fee_per_gas);
         rlp_opt(s, &self.0.withdrawals_root);
         rlp_opt(s, &self.0.blob_gas_used);
@@ -393,7 +393,6 @@ mod test {
 
             query.verify_state_proof(&res)?;
         }
-        /* mapping storage test
         {
             // mapping key
             let mapping_key =
@@ -402,7 +401,6 @@ mod test {
             let res = query.query_mpt_proof(&provider).await?;
             ProofQuery::verify_storage_proof(&res)?;
         }
-        */
         Ok(())
     }
 
