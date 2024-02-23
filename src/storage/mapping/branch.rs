@@ -193,7 +193,6 @@ mod test {
             assert_eq!(self.inputs.len(), wires.1.len());
             for i in 0..N_CHILDREN {
                 assert_eq!(wires.1[i].len(), self.inputs[i].proof_inputs.len());
-                println!("Assign time: inputs[{}] = {:?}", i, self.inputs[i]);
                 pw.set_target_arr(&wires.1[i], self.inputs[i].proof_inputs);
             }
             self.c.assign(pw, &wires.0);
@@ -271,7 +270,7 @@ mod test {
         let proof = run_circuit::<F, 2, C, _>(circuit);
         let pi = PublicInputs::<F>::from(&proof.public_inputs);
         // now we check the expected outputs
-        if true {
+        {
             // Accumulator check: since we can not add WeiressPoint, together, we recreate the
             // expected leafs accumulator and add them
             let acc1 = map_to_curve_point(
@@ -287,17 +286,6 @@ mod test {
                     .collect::<Vec<_>>(),
             );
             let branch_acc = acc1 + acc2;
-            println!("branch_acc: {:?}", pi.accumulator_info());
-            println!(
-                "pi1  expected: {:?}",
-                PublicInputs::from(&pi1).accumulator_info()
-            );
-            println!(
-                "pi2  expected: {:?}",
-                PublicInputs::from(&pi2).accumulator_info()
-            );
-
-            // FAILING
             assert_eq!(branch_acc.to_weierstrass(), pi.accumulator());
         }
         {
