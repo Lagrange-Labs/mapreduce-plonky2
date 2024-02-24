@@ -115,6 +115,8 @@ impl<const MAX_LEN: usize> BlockInputsWires<MAX_LEN> {
     }
 
     /// Verify the block header includes the hash of state MPT root.
+    /// We use a offset given as wire to indicate where the hash resides in the encoded block header.
+    /// The circuit doesn't need to decode the RLP headers as we rely on the security of the hash function.
     pub fn verify_state_root_hash_inclusion<F, const D: usize>(
         &self,
         cb: &mut CircuitBuilder<F, D>,
