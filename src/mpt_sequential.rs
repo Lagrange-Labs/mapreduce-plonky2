@@ -31,7 +31,7 @@ const MAX_LEAF_VALUE: usize = HASH_LEN;
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
 #[allow(non_snake_case)]
-const fn PAD_LEN(d: usize) -> usize {
+pub(crate) const fn PAD_LEN(d: usize) -> usize {
     compute_size_with_padding(d)
 }
 /// Circuit that simoply proves the inclusion of a value inside a MPT tree.
@@ -43,7 +43,7 @@ const fn PAD_LEN(d: usize) -> usize {
 ///     - Note since it uses keccak, the array being hashed is larger because
 /// keccak requires padding.
 #[derive(Clone, Debug)]
-struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
+pub struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
     /// for ease of usage, we take vector here and the circuit is doing the padding
     nodes: Vec<Vec<u8>>,
     /// the full key that we are trying to prove in this trie
@@ -208,8 +208,8 @@ where
         let padded_nodes = self
             .nodes
             .iter()
-            .map(|n| Vector::<F, { PAD_LEN(NODE_LEN) }>::from_vec(n))
-            .chain((0..pad_len).map(|_| Ok(Vector::<F, { PAD_LEN(NODE_LEN) }>::empty())))
+            .map(|n| Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(n))
+            .chain((0..pad_len).map(|_| Ok(Vector::<u8, { PAD_LEN(NODE_LEN) }>::empty())))
             .collect::<Result<Vec<_>>>()?;
         for (i, (wire, node)) in inputs.nodes.iter().zip(padded_nodes.iter()).enumerate() {
             wire.assign(p, node);
@@ -288,7 +288,10 @@ where
 
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
-    pub fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
+    /// * key where to lookup the next nibble and thus the hash stored at the
+    /// `nibble` position in the branch node
+    /// * headers of the current node
+    pub(crate) fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
@@ -313,7 +316,7 @@ where
     }
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
-    fn advance_key_leaf_or_extension<
+    pub(crate) fn advance_key_leaf_or_extension<
         F: RichField + Extendable<D>,
         const D: usize,
         const LIST_LEN: usize,
@@ -412,6 +415,51 @@ impl MPTKeyWire {
         self.key.assign(p, &f_nibbles);
         p.set_target(self.pointer, F::from_canonical_usize(ptr));
     }
+
+    /// Proves the prefix of this key and other's key up to pointer are the same.
+    /// Proves both pointers are the same.
+    pub fn is_prefix_equal<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        other: &Self,
+    ) -> BoolTarget {
+        let ptr_equal = b.is_equal(self.pointer, other.pointer);
+        let prefix_equal = self.key.slice_equals(b, &other.key, self.pointer);
+        let both = b.and(ptr_equal, prefix_equal);
+        both
+    }
+    /// Register the key and pointer as public inputs.
+    pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) {
+        self.key.register_as_input(b);
+        b.register_public_input(self.pointer);
+    }
+    /// Initialize a new MPTKeyWire from the array of bytes. It is expected the bytes
+    /// are checked to be bytes before this calling this function.
+    /// It returns a MPTKeyWire with the pointer set to the last nibble, as in an initial
+    /// case.
+    pub fn init_from_bytes<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        arr: &Array<Target, HASH_LEN>,
+    ) -> Self {
+        Self {
+            key: Array {
+                arr: arr
+                    .arr
+                    .iter()
+                    .flat_map(|byte| {
+                        let (low, high) = b.split_low_high(*byte, 4, 8);
+                        [high, low]
+                    })
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            },
+            pointer: b.constant(F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)),
+        }
+    }
 }
 
 pub(crate) fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
@@ -437,9 +485,14 @@ pub(crate) fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 pub mod test {
     use std::array::from_fn as create_array;
+    use std::env;
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use ethers::providers::{Http, Provider};
+    use ethers::types::Address;
+    use itertools::Itertools;
     use plonky2::field::types::Field;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
@@ -453,10 +506,11 @@ pub mod test {
         },
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
-    use rand::{thread_rng, Rng};
+    use rand::{thread_rng, Rng, RngCore};
 
     use crate::array::Vector;
     use crate::benches::init_logging;
+    use crate::eth::ProofQuery;
     use crate::keccak::{InputData, KeccakCircuit, HASH_LEN, PACKED_HASH_LEN};
     use crate::mpt_sequential::{bytes_to_nibbles, nibbles_to_bytes, NB_ITEMS_LEAF};
     use crate::rlp::{
@@ -527,6 +581,58 @@ pub mod test {
                 &create_array(|i| F::from_canonical_u8(self.exp_value[i])),
             );
         }
+    }
+    use anyhow::Result;
+
+    #[tokio::test]
+    async fn test_kashish_contract_simple_slot() -> Result<()> {
+        // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://sepolia.infura.io/v3/d22da7908d80409b95cee2f3fbfddb3b";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // sepolia contract
+        let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
+        // simple storage test
+        let query = ProofQuery::new_simple_slot(contract, 0);
+        let res = query.query_mpt_proof(&provider).await?;
+        let value = res.storage_proof[0].value;
+        let mut value_bytes = [0u8; 32];
+        value.to_little_endian(&mut value_bytes);
+        ProofQuery::verify_storage_proof(&res)?;
+        let mpt_proof = res.storage_proof[0]
+            .proof
+            .iter()
+            .rev() // we want the leaf first and root last
+            .map(|b| b.to_vec())
+            .collect::<Vec<Vec<u8>>>();
+        let root = keccak256(mpt_proof.last().unwrap());
+        let mpt_key = query.slot.mpt_key();
+        println!("proof depth : {}", mpt_proof.len());
+        println!(
+            "proof max len node : {}",
+            mpt_proof.iter().map(|node| node.len()).max().unwrap()
+        );
+        // Written as constant from ^
+        const DEPTH: usize = 2;
+        const NODE_LEN: usize = 150;
+        visit_proof(&mpt_proof);
+        for i in 1..mpt_proof.len() {
+            let child_hash = keccak256(&mpt_proof[i - 1]);
+            let u8idx = find_index_subvector(&mpt_proof[i], &child_hash);
+            assert!(u8idx.is_some());
+        }
+        let circuit = TestCircuit::<DEPTH, NODE_LEN> {
+            c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
+            exp_root: root.try_into().unwrap(),
+            exp_value: value_bytes,
+        };
+        test_simple_circuit::<F, D, C, _>(circuit);
+
+        Ok(())
     }
     #[test]
     fn test_mpt_proof_verification() {
@@ -935,6 +1041,29 @@ pub mod test {
         data.verify(proof).unwrap();
     }
 
+    #[test]
+    fn test_mpt_key_from_bytes() {
+        // test the from bytes capacity
+        let config = CircuitConfig::standard_recursion_config();
+        let mut pw = PartialWitness::new();
+        let mut b = CircuitBuilder::<F, D>::new(config);
+        let tt = b._true();
+        let key_bytes = Array::<Target, HASH_LEN>::new(&mut b);
+        let key_nibbles = MPTKeyWire::init_from_bytes(&mut b, &key_bytes);
+        let exp_nibbles = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(&mut b);
+        let eq = key_nibbles.key.equals(&mut b, &exp_nibbles);
+        b.connect(tt.target, eq.target);
+
+        let mut mpt_key = vec![0u8; 32];
+        thread_rng().fill_bytes(&mut mpt_key);
+        let mpt_nibbles = bytes_to_nibbles(&mpt_key);
+        key_bytes.assign_bytes(&mut pw, &mpt_key.try_into().unwrap());
+        exp_nibbles.assign_bytes(&mut pw, &mpt_nibbles.try_into().unwrap());
+
+        let data = b.build::<C>();
+        let proof = data.prove(pw).unwrap();
+        data.verify(proof).unwrap();
+    }
     // generate a random storage trie and a key. The MPT proof corresponding to
     // that key is guaranteed to be of DEPTH length. Each leaves in the trie
     // is of NODE_LEN length.
