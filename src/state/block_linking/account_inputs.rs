@@ -132,6 +132,8 @@ where
         cb.connect(within_range.target, tt.target);
 
         // Verify the account node includes the storage MPT root hash.
+        // TODO: the `from_u32_array` function is expensive, suppose to replace
+        // it with a custom plonky2 generator to set an u8 array as witness.
         let storage_root_hash = OutputByteHash::from_u32_array(cb, storage_root_hash);
         let is_included =
             account_node

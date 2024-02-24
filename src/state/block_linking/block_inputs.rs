@@ -139,6 +139,8 @@ impl BlockInputs {
         cb.connect(within_range.target, tt.target);
 
         // Verify the block header includes the state MPT root hash.
+        // TODO: the `from_u32_array` function is expensive, suppose to replace
+        // it with a custom plonky2 generator to set an u8 array as witness.
         let state_root_hash = OutputByteHash::from_u32_array(cb, state_root_hash);
         let is_included =
             wires
