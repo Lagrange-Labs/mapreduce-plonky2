@@ -878,7 +878,7 @@ mod test {
 
         // circuit should fail with non bytes entries
         let vector = (0..N)
-            .map(|_| thread_rng().gen::<u32>() + u8::MAX as u32)
+            .map(|_| thread_rng().gen_range(u8::MAX as u32..u32::MAX))
             .collect::<Vec<_>>();
         let res = panic::catch_unwind(|| {
             let circuit = TestAssertBytes::<u32, N> { vector };
