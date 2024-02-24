@@ -694,6 +694,8 @@ pub mod test {
             c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
             exp_root: root.try_into().unwrap(),
             exp_value: [0; 32],
+            // the reason we don't check the value is the circuit is made for storage proof and it extracts a 32bytes
+            // value. In the case of state trie, the value is 104 bytes so value is never gonna be equal.
             checking_value: false,
         };
         test_simple_circuit::<F, D, C, _>(circuit);
