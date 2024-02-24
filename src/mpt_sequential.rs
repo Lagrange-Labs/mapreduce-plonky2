@@ -606,7 +606,8 @@ pub mod test {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
-        let url = "https://sepolia.infura.io/v3/d22da7908d80409b95cee2f3fbfddb3b";
+        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
