@@ -1,14 +1,12 @@
 //! Plonky2 documentation
 #![warn(missing_docs)]
 #![feature(generic_const_exprs)]
-
+#![feature(generic_arg_infer)]
 use anyhow::Result;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
-    iop::witness::PartialWitness,
     plonk::{
-        circuit_builder::CircuitBuilder,
         circuit_data::{CommonCircuitData, VerifierOnlyCircuitData},
         config::GenericConfig,
         proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs},
@@ -19,12 +17,14 @@ use serde::{Deserialize, Serialize};
 mod benches;
 pub mod eth;
 
+mod array;
 mod circuit;
 mod group_hashing;
 mod hash;
 mod keccak;
 pub mod merkle;
 mod merkle_tree;
+mod mpt_sequential;
 mod rlp;
 pub mod transaction;
 mod utils;

@@ -96,28 +96,23 @@ pub(crate) fn convert_u8_targets_to_u32<F: RichField + Extendable<D>, const D: u
             let mut x = padded[i];
             // u8[1]
             let mut y = padded[i + 1];
-            // u8[1] * 2^8
-            y = b.mul(y, two_power_8);
             // u8[0] + u8[1] * 2^8
-            x = b.add(x, y);
+            x = b.mul_add(y, two_power_8, x);
             // u8[2]
             y = padded[i + 2];
-            // u8[2] * 2^16
-            y = b.mul(y, two_power_16);
             // u8[0] + u8[1] * 2^8 + u8[2] * 2^16
-            x = b.add(x, y);
+            x = b.mul_add(y, two_power_16, x);
             // u8[3]
             y = padded[i + 3];
-            // u8[3] * 2^24
-            y = b.mul(y, two_power_24);
             // u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
-            x = b.add(x, y);
+            x = b.mul_add(y, two_power_24, x);
 
             U32Target(x)
         })
         .collect_vec()
 }
 
+/// Returns the bits of the given number.
 pub fn num_to_bits<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     n: usize,
@@ -140,6 +135,7 @@ pub fn bits_to_num<F: RichField + Extendable<D>, const D: usize>(
     res
 }
 
+/// Returns true if a < b in the first n bits. False otherwise.
 pub fn less_than<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,
@@ -213,8 +209,8 @@ pub(crate) fn read_le_u32(input: &mut &[u8]) -> u32 {
 #[cfg(test)]
 pub(crate) mod test {
     use crate::utils::{
-        bits_to_num, greater_than, greater_than_or_equal_to, less_than, less_than_or_equal_to,
-        num_to_bits,
+        bits_to_num, convert_u8_to_u32_slice, greater_than, greater_than_or_equal_to, less_than,
+        less_than_or_equal_to, num_to_bits,
     };
     use anyhow::Result;
     use itertools::Itertools;
@@ -226,6 +222,7 @@ pub(crate) mod test {
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use rand::RngCore;
 
     use super::read_le_u32;
 
@@ -261,6 +258,21 @@ pub(crate) mod test {
             .collect()
     }
 
+    #[test]
+    fn test_convert_u8_to_u32_slice() {
+        const SIZE: usize = 45; // size of the byte array
+        let mut rng = rand::thread_rng();
+
+        // Generate a random array of bytes
+        let mut data = vec![0u8; SIZE];
+        rng.fill_bytes(&mut data);
+
+        // Convert the byte array to a u32 slice
+        let u32_slice = convert_u8_to_u32_slice(&data);
+
+        // Check if the length of the u32 slice is correct
+        assert_eq!(u32_slice.len(), (SIZE + (4 - (SIZE % 4))) / 4);
+    }
     #[test]
     fn test_bits_to_num() -> Result<()> {
         const D: usize = 2;

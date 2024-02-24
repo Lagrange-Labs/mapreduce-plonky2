@@ -19,9 +19,14 @@ use plonky2_crypto::{
 };
 
 use crate::{
-    circuit::UserCircuit,
-    utils::{convert_u8_targets_to_u32, less_than, IntTargetWriter},
+    array::{Array, ToField, Vector, VectorWire},
+    utils::{convert_u8_targets_to_u32, less_than},
 };
+
+/// Length of a hash in bytes.
+pub const HASH_LEN: usize = 32;
+/// Length of a hash in U32
+pub const PACKED_HASH_LEN: usize = HASH_LEN / 4;
 
 /// Keccak pads data before "hashing" it. This method returns the full size
 /// of the padded data before hashing. This is useful to know the actual number
@@ -38,28 +43,36 @@ pub const fn compute_size_with_padding(data_len: usize) -> usize {
 pub const fn compute_padding_size(data_len: usize) -> usize {
     compute_size_with_padding(data_len) - data_len
 }
-#[derive(Clone, Copy, Debug)]
+
+/// Represents the output of the keccak hash function.
+/// It's a wrapper to implement some utility functions on top.
+pub type OutputHash = Array<U32Target, PACKED_HASH_LEN>;
+
+/// Circuit able to hash any arrays of bytes of dynamic sizes as long as its
+/// padded version length is less than N. In other words, N is the maximal size
+/// of the array + padding to hash.
+#[derive(Clone, Debug)]
 pub struct KeccakCircuit<const N: usize> {
-    data: [u8; N],
-    unpadded_len: usize,
+    data: Vec<u8>,
 }
 #[derive(Clone, Debug)]
 pub struct KeccakWires<const N: usize> {
-    input_array: ArrayWire<N>,
+    input_array: VectorWire<Target, N>,
     diff: Target,
     // 256/u32 = 8
-    output_array: [Target; 8],
+    pub output_array: OutputHash,
 }
 
-#[derive(Debug, Clone)]
-struct ArrayWire<const N: usize> {
-    arr: [Target; N],
-    real_len: Target,
-}
 impl<const N: usize> KeccakCircuit<N> {
-    pub fn new(mut data: Vec<u8>) -> Result<Self> {
+    pub fn new(data: Vec<u8>) -> Result<Self> {
         let total = compute_size_with_padding(data.len());
-        ensure!(total <= N, "{}bytes can't fit in {} with padding", total, N);
+        ensure!(
+            total <= N,
+            "{} bytes can't fit in {} bytes with padding (data len {})",
+            total,
+            N,
+            data.len(),
+        );
         // NOTE we don't pad anymore because we enforce that the resulting length is already a multiple
         // of 4 so it will fit the conversion to u32 and circuit vk would stay the same for different
         // data length
@@ -68,18 +81,15 @@ impl<const N: usize> KeccakCircuit<N> {
             "Fixed array size must be 0 mod 4 for conversion with u32"
         );
 
-        let unpadded_len = data.len();
-        data.resize(N, 0);
-        Ok(Self {
-            data: data.try_into().unwrap(),
-            unpadded_len,
-        })
+        Ok(Self { data })
     }
 
-    fn build_from_array<F: RichField + Extendable<D>, const D: usize>(
+    /// Takes an array which is _already_ at the right padded length.
+    /// The circuit fills the padding part and hash it.
+    pub fn hash_vector<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-        a: &ArrayWire<N>,
-    ) -> <Self as UserCircuit<F, D>>::Wires {
+        a: &VectorWire<Target, N>,
+    ) -> KeccakWires<N> {
         let diff_target = b.add_virtual_target();
         let end_padding = b.add(a.real_len, diff_target);
         let one = b.one();
@@ -91,7 +101,8 @@ impl<const N: usize> KeccakCircuit<N> {
                                                                  // TODO : make that const generic
         let padded_node = a
             .arr
-            .iter()
+            .arr
+            .iter() // TODO: implement iterable for Vector & Array
             .enumerate()
             .map(|(i, byte)| {
                 let i_target = b.constant(F::from_canonical_usize(i));
@@ -144,76 +155,110 @@ impl<const N: usize> KeccakCircuit<N> {
 
         let hash_target = HashInputTarget {
             input: BigUintTarget {
-                limbs: node_u32_target,
+                limbs: node_u32_target.clone(),
             },
             input_bits: 0,
             blocks,
         };
 
         let hash_output = b.hash_keccak256(&hash_target);
-        let output_array: [Target; 8] = hash_output
-            .limbs
-            .iter()
-            .map(|limb| limb.0)
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("keccak256 should have 8 u32 limbs");
         KeccakWires {
             input_array: a.clone(),
             diff: diff_target,
-            output_array,
+            // TODO: this is fixed length should be able to use const generics
+            output_array: OutputHash::try_from(hash_output.limbs).unwrap(),
         }
     }
-    fn prove_from_array<F: RichField>(
+
+    /// This
+    /// Usually the input data is already assigned in other places of our circuits.
+    /// This method takes the data and aHowever, we do need the
+    /// unpadded length to correctly compute the padding currently.
+    /// NOTE: we could remove this requirement but it would mean computing the
+    /// padding size in circuit, which is annoying. Computing off circuit is
+    /// usually secure in our cases because we use it to check consistency with
+    /// a known hash, so if one tweaks the len, it will give invalid output hash.
+    pub fn assign<F: RichField>(
         pw: &mut PartialWitness<F>,
         wires: &KeccakWires<N>,
-        unpadded_len: usize,
+        data: &InputData<F, N>,
     ) {
-        let diff = compute_padding_size(unpadded_len);
+        if let InputData::NonAssigned(vector) = data {
+            wires.input_array.assign(pw, vector);
+        }
+        let diff = compute_padding_size(data.real_len());
         pw.set_target(wires.diff, F::from_canonical_usize(diff));
     }
 }
 
-impl<F, const D: usize, const N: usize> UserCircuit<F, D> for KeccakCircuit<N>
-where
-    F: RichField + Extendable<D>,
-{
-    type Wires = KeccakWires<N>;
+/// InputData holds the information if the input data wire is already assigned or not.
+/// Usually in most cases the input data is already assigned in other places of our circuits.
+/// For some cases like only hashing or bench or tests, we need to assign the data to the
+/// wires still.
+pub enum InputData<'a, F, const N: usize> {
+    /// During assignement time (proving time), keccak circuit assumes the data
+    /// is already assigned to the respective input wires. However, it still needs
+    /// to assign the padding size difference, an internal keccak wire.
+    Assigned(&'a Vector<F, N>),
+    /// In this mode, keccak circuit will assign both the data and the padding difference
+    /// size. Useful in case the input data is not created elsewhere.
+    NonAssigned(&'a Vector<F, N>),
+}
 
-    fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-        let real_len = b.add_virtual_target();
-        let array = b.add_virtual_target_arr::<N>();
-        Self::build_from_array(
-            b,
-            &ArrayWire {
-                arr: array,
-                real_len,
-            },
-        )
-    }
-
-    fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-        pw.set_int_targets(&wires.input_array.arr, &self.data);
-        pw.set_target(
-            wires.input_array.real_len,
-            F::from_canonical_usize(self.unpadded_len),
-        );
-        Self::prove_from_array(pw, wires, self.unpadded_len);
+impl<'a, F: RichField, const N: usize> InputData<'a, F, N> {
+    pub fn real_len(&self) -> usize {
+        match self {
+            InputData::Assigned(v) => v.real_len,
+            InputData::NonAssigned(v) => v.real_len,
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::KeccakCircuit;
-    use crate::circuit::{PCDCircuit, ProofOrDummyTarget, UserCircuit};
-    use plonky2::{
-        field::extension::Extendable, hash::hash_types::RichField,
-        plonk::circuit_builder::CircuitBuilder,
+    use super::{InputData, KeccakCircuit, KeccakWires};
+    use crate::{
+        array::{Vector, VectorWire},
+        circuit::{test::test_simple_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit},
+        keccak::compute_size_with_padding,
+        utils::{keccak256, read_le_u32},
     };
+    use plonky2::{
+        field::extension::Extendable,
+        hash::hash_types::RichField,
+        iop::{target::Target, witness::PartialWitness},
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
+    use rand::{thread_rng, Rng};
 
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+
+    impl<F, const D: usize, const N: usize> UserCircuit<F, D> for KeccakCircuit<N>
+    where
+        F: RichField + Extendable<D>,
+        [(); N / 4]:,
+    {
+        type Wires = KeccakWires<N>;
+
+        fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let input_array = VectorWire::<Target, N>::new(b);
+            Self::hash_vector(b, &input_array)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            let vector = Vector::<F, N>::from_vec(&self.data).unwrap();
+            KeccakCircuit::<N>::assign(pw, wires, &InputData::NonAssigned(&vector));
+        }
+    }
     impl<F, const D: usize, const BYTES: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
         for KeccakCircuit<BYTES>
     where
+        [(); BYTES / 4]:,
         F: RichField + Extendable<D>,
     {
         fn build_recursive(
@@ -221,7 +266,7 @@ mod test {
             _: &[ProofOrDummyTarget<D>; ARITY],
         ) -> Self::Wires {
             let wires = <Self as UserCircuit<F, D>>::build(b);
-            b.register_public_inputs(&wires.output_array);
+            wires.output_array.register_as_public_input(b);
             wires
             // TODO: check the proof public input match what is in the hash node for example for MPT
         }
@@ -235,5 +280,55 @@ mod test {
         fn num_io() -> usize {
             8
         }
+    }
+
+    #[test]
+    fn test_keccak_output() {
+        const SIZE: usize = 64;
+        const PADDED_LEN: usize = compute_size_with_padding(SIZE);
+
+        #[derive(Clone, Debug)]
+        struct TestKeccak<const N: usize> {
+            c: KeccakCircuit<N>,
+            exp: Vec<u8>,
+        }
+
+        impl<F, const D: usize, const N: usize> UserCircuit<F, D> for TestKeccak<N>
+        where
+            F: RichField + Extendable<D>,
+            [(); N / 4]:,
+        {
+            type Wires = KeccakWires<N>;
+
+            fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let input_array = VectorWire::<Target, N>::new(b);
+                KeccakCircuit::hash_vector(b, &input_array)
+            }
+
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                let vec = Vector::<F, N>::from_vec(&self.c.data).unwrap();
+                KeccakCircuit::<N>::assign(pw, wires, &InputData::NonAssigned(&vec));
+                let exp_u32 = self
+                    .exp
+                    .chunks(4)
+                    .map(|c| F::from_canonical_u32(read_le_u32(&mut c.clone())))
+                    .collect::<Vec<_>>();
+
+                wires.output_array.assign(pw, &exp_u32.try_into().unwrap());
+            }
+        }
+
+        let mut rng = thread_rng();
+        let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..SIZE]);
+        let exp = keccak256(&arr[..SIZE]);
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let circuit = TestKeccak::<PADDED_LEN> {
+            c: KeccakCircuit::<PADDED_LEN>::new(arr.to_vec()).unwrap(),
+            exp,
+        };
+        test_simple_circuit::<F, D, C, _>(circuit);
     }
 }

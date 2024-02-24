@@ -1,7 +1,8 @@
-use crate::utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to};
+use crate::array::{Array, VectorWire};
+use crate::utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::Target;
+use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 /// The maximum number of bytes the length of data can take.
@@ -11,6 +12,14 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 /// 2 is the usual in practice for eth MPT related data.
 /// nikko: verify that assumption.
 const MAX_LEN_BYTES: usize = 2;
+
+/// Maximum size a key can have inside a MPT node.
+/// 33 bytes because key is compacted encoded, so it can add up to 1 byte more.
+const MAX_ENC_KEY_LEN: usize = 33;
+/// Simply the maximum number of nibbles a key can have.
+pub const MAX_KEY_NIBBLE_LEN: usize = 64;
+
+pub const MAX_ITEMS_IN_LIST: usize = 17;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RlpHeader {
@@ -23,14 +32,117 @@ pub struct RlpHeader {
 }
 
 /// Contains the header information for all the elements in a list.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct RlpList<const N: usize> {
-    pub offset: [Target; N],
-    pub len: [Target; N],
-    pub data_type: [Target; N],
+    pub offset: Array<Target, N>,
+    pub len: Array<Target, N>,
+    pub data_type: Array<Target, N>,
     pub num_fields: Target,
 }
 
+impl<const N: usize> RlpList<N> {
+    pub fn select<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        at: Target,
+    ) -> RlpHeader {
+        let offset = self.offset.value_at(b, at);
+        let len = self.len.value_at(b, at);
+        let dtype = self.data_type.value_at(b, at);
+        RlpHeader {
+            len,
+            offset,
+            data_type: dtype,
+        }
+    }
+    pub fn select_offset<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        at: Target,
+    ) -> Target {
+        self.offset.value_at(b, at)
+    }
+}
+pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, const N: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    input: &Array<Target, N>,
+    key_header: &RlpHeader,
+) -> (VectorWire<Target, MAX_KEY_NIBBLE_LEN>, BoolTarget) {
+    let zero = b.zero();
+    let two = b.two();
+    let first_byte = input.value_at(b, key_header.offset);
+    let (most_bits, least_bits) = b.split_low_high(first_byte, 4, 8);
+    // little endian
+    let mut prev_nibbles = (least_bits, most_bits);
+
+    let mut cur_nibbles: (Target, Target);
+    let mut nibbles: [Target; MAX_KEY_NIBBLE_LEN] = [b.zero(); MAX_KEY_NIBBLE_LEN];
+
+    let first_nibble = prev_nibbles.0;
+    let first_nibble_as_bits = num_to_bits(b, 4, first_nibble);
+    let parity = first_nibble_as_bits[0].target;
+    // TODO: why this doesn't work always !!
+    //let parity = b.split_le(first_nibble, 2)[0].target;
+
+    // if parity is 1 => odd length => (1 - p) * next_nibble = 0
+    //   -> in this case, no need to add another nibble (since the rest of key + 1 == even now)
+    // if parity is 0 => even length => (1 - p) * next_nibble = next_nibble
+    //   -> in this case, need to add another nibble, which is supposed to be zero
+    //   -> i.e. next_nibble == 0
+    let res_multi = b.mul_sub(parity, prev_nibbles.1, prev_nibbles.1);
+    let cond = b.is_equal(res_multi, zero);
+
+    // -1 because first nibble is the HP information, and the following loop
+    // analyzes pairs of consecutive nibbles, so the second nibble will be seen
+    // during the first iteration of this loop.
+    let one = b.one();
+    let mut i_offset = key_header.offset;
+    for i in 0..MAX_ENC_KEY_LEN - 1 {
+        i_offset = b.add(i_offset, one);
+        // look now at the encoded path
+        let x = input.value_at(b, i_offset);
+        // next nibble in little endian
+        cur_nibbles = {
+            let (most_bits, least_bits) = b.split_low_high(x, 4, 8);
+            (least_bits, most_bits)
+        };
+
+        // nibble[2*i] = parity*prev_nibbles.1 + (1 - parity)*cur_nibbles.0;
+        // => if parity == 1, we take the previous last nibble, because that's the next in line
+        // => if parity == 0, we take lowest significant nibble because the previous last nibble is
+        //                    the special "0" nibble to make overall length even
+        // when developped, expression equals p*(prev.1 - curr.0) + curr.0
+        let diff = b.sub(prev_nibbles.1, cur_nibbles.0);
+        nibbles[2 * i] = b.mul_add(parity, diff, cur_nibbles.0);
+
+        // nibble[2*i + 1] = parity*cur_nibbles.0 + (1 - parity)*cur_nibbles.1;
+        // => if parity == 1, take lowest significant nibble as successor of previous.highest_nibble
+        // => if parity == 0, take highest significant nibble as success of current.lowest_nibble
+        // when developped, expression equals p*(curr.0 - curr.1) + curr.1
+        let diff = b.sub(cur_nibbles.0, cur_nibbles.1);
+        nibbles[2 * i + 1] = b.mul_add(parity, diff, cur_nibbles.1);
+
+        prev_nibbles = cur_nibbles;
+    }
+
+    // 2 * length + parity - 2
+    // - 2*length because it's the length in nibble not in bytes
+    // - parity - 2 means that we take out only one nibble when len is odd, because
+    //   this is the nibble telling us that len is odd.
+    //   In case len is even, RLP adds another 0 nibble so we take out 2 nibbles
+    //   from the length
+    let length_in_nibble = b.mul(two, key_header.len);
+    let pm2 = b.sub(parity, two);
+    let key_len: Target = b.add(length_in_nibble, pm2);
+
+    (
+        VectorWire {
+            arr: Array::from_array(nibbles),
+            real_len: key_len,
+        },
+        cond,
+    )
+}
 // Returns the length from the RLP prefix in case of long string or long list
 // data is the full data starting from the "type" byte of RLP encoding
 // data length needs to be a power of 2
@@ -144,17 +256,16 @@ pub(crate) fn decode_tuple<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Decodes the header of the list, and then decodes the first N items of the list.
-/// NOTE: the `num_field` is set to N in this case, since it does not read the full array.
-/// Hence, N can be lower than the actual number of fields in the list.
 /// The offsets decoded in the returned list are starting from the 0-index of `data`
 /// not from the `offset` index.
+/// If N is less than the actual number of items, then the number of fields will be N.
+/// Otherwise, the number of fields returned is determined by the header the RLP list.
 pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
     data_offset: Target,
 ) -> RlpList<N> {
     let zero = b.zero();
-    let n_target = b.constant(F::from_canonical_usize(N));
 
     let mut num_fields = zero;
     let mut dec_off = [zero; N];
@@ -163,35 +274,39 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
 
     let list_header = decode_header(b, data, data_offset);
     let mut offset = list_header.offset;
-
+    // end_idx starts at `data_offset` and  includes the
+    // header byte + potential len_len bytes + payload len
+    let end_idx = b.add(list_header.offset, list_header.len);
     // decode each headers of each items ofthe list
     // remember in a list each item of the list is RLP encoded
     for i in 0..N {
-        // stop when you've looked at the number of expected items
-        let mut loop_p = b.is_equal(num_fields, n_target);
-        loop_p = b.not(loop_p);
+        // stop when you've looked at exactly the same number of  bytes than
+        // the RLP list header indicates
+        let at_the_end = b.is_equal(offset, end_idx);
+        // offset always equals offset after we've reached end_idx so before_the_end
+        // is only true when we haven't reached the end yet
+        let before_the_end = b.not(at_the_end);
 
         // read the header starting from the offset
-        let RlpHeader {
-            len: field_len,
-            offset: field_offset,
-            data_type: field_type,
-        } = decode_header(b, data, offset);
-        let new_offset = b.add(field_offset, field_len);
+        let header = decode_header(b, data, offset);
+        let new_offset = b.add(header.offset, header.len);
 
-        dec_off[i] = field_offset;
-        dec_len[i] = field_len;
-        dec_type[i] = field_type;
+        dec_off[i] = header.offset;
+        dec_len[i] = header.len;
+        dec_type[i] = header.data_type;
 
         // move offset to the next field in the list
-        offset = b.mul(loop_p.target, new_offset);
-        num_fields = b.add(num_fields, loop_p.target);
+        // updates offset such that is is either < end_idx or after that
+        // always equals to end_idx
+        let diff = b.sub(new_offset, offset);
+        offset = b.mul_add(before_the_end.target, diff, offset);
+        num_fields = b.add(num_fields, before_the_end.target);
     }
 
     RlpList {
-        offset: dec_off,
-        len: dec_len,
-        data_type: dec_type,
+        offset: Array { arr: dec_off },
+        len: Array { arr: dec_len },
+        data_type: Array { arr: dec_type },
         num_fields,
     }
 }
@@ -253,17 +368,110 @@ fn calculate_total<F: RichField + Extendable<D>, const D: usize>(
 #[cfg(test)]
 mod tests {
 
+    use core::num;
+    use std::array::from_fn as create_array;
+
     use anyhow::Result;
 
+    use eth_trie::{Nibbles, Trie};
     use plonky2::field::types::Field;
-    use plonky2::iop::target::Target;
+    use plonky2::iop::target::{BoolTarget, Target};
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::rlp::{decode_fixed_list, decode_header, RlpHeader, MAX_LEN_BYTES};
-    use crate::utils::IntTargetWriter;
+    use crate::array::{Array, Vector, VectorWire};
+    use crate::keccak::HASH_LEN;
+    use crate::mpt_sequential::bytes_to_nibbles;
+    use crate::mpt_sequential::test::generate_random_storage_mpt;
+    use crate::rlp::{
+        decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, RlpList,
+        MAX_ENC_KEY_LEN, MAX_LEN_BYTES,
+    };
+    use crate::utils::{keccak256, IntTargetWriter};
+
+    fn visit_branch_node(node: &[u8]) -> Vec<(usize, usize)> {
+        println!("[+] Visiting branch node of {} bytes", node.len());
+        let root_rlp = rlp::Rlp::new(node);
+        let root_nb_items = root_rlp.item_count().unwrap();
+        let mut inc_index = root_rlp.payload_info().unwrap().header_len;
+        (0..root_nb_items)
+            .map(|nibble| {
+                let sub_rlp = root_rlp.at(nibble).unwrap();
+                let sub_header = sub_rlp.payload_info().unwrap();
+                let sub_index = inc_index + sub_header.header_len;
+                inc_index = sub_index + sub_header.value_len;
+                println!(
+                    "[+] Root nibble {} - index {} - value {}",
+                    nibble,
+                    sub_index,
+                    hex::encode(sub_rlp.data().unwrap())
+                );
+                (nibble, sub_index)
+            })
+            .collect::<Vec<_>>()
+    }
+    #[test]
+    fn test_branch_node_rlp_decoding() -> Result<()> {
+        //let child = hex::decode("f85180a0d43c798529ffaaa2316f8adaaa27105dd0fb20dc97d250ad784386e0edaa97e1808080a0602346785e1ced15445758e363f43723de0d5e365cb4f483845988113f22f6ea8080808080808080808080").unwrap();
+        //let root = hex::decode("f8f180a080a15846e63f90955f3492af55951f272302e08fa4360d13d25ead42ef1f8e1580a0103dad8651d136072de73a52b6c1e81afec60eeadcd971e88cbdd835f58523718080a0c7e63df28028e3906459eb3b7ea253bf7ef278f06b4e1705485cba52a42b33da8080a0a2fe320d0471b6eed27e651ba18be7c1cd36f4530c1931c2e2bfd8beed9044e980a03a613d04fd7bb29df0b0444d58118058d3107c2291c32476511969c85f98953e80a0e9acd2a316add27ea52dd4e844c78f041a89349eff4327e21a0b0f64f4aec234a0b34cd83dc3174901e6cc1a8f43de2866a247b6f769e49710de0b5c501032e50b8080").unwrap();
+        let child = hex::decode("f843a02067c48d3958a3b9335247b9a6d430ecfd7ec47d2795b4094f779cda9f6700caa1a0f585f458b52f38dcab96f07d5cc6406dd4e8c8007f0ec9c6af3175e7886d8bc5").unwrap();
+        let root = hex::decode("f851a0afd82fd956b6402e358eb2e18ed40295a4d819a3e473282f257b41d913f70476808080808080808080808080a0c63a5260ddf114504213daf4b15a236fd2d33726768f44e896487326f7c136f6808080").unwrap();
+        println!("[+] Child hash {}", hex::encode(keccak256(&child)));
+        let exp_offsets = visit_branch_node(&root);
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        const N_ITEMS: usize = 17;
+        let config = CircuitConfig::standard_recursion_config();
+        let mut pw = PartialWitness::new();
+        let mut b = CircuitBuilder::<F, D>::new(config);
+        let node_t = b.add_virtual_targets(root.len());
+        let zero = b.zero();
+        let rlp_headers = decode_fixed_list::<_, _, N_ITEMS>(&mut b, &node_t, zero);
+        let exp_nb_items = b.constant(F::from_canonical_usize(N_ITEMS));
+        b.connect(rlp_headers.num_fields, exp_nb_items);
+
+        // check each offsets
+        for (nibble, offset) in exp_offsets {
+            let nibble_t = b.constant(F::from_canonical_usize(nibble));
+            let offset_t = b.constant(F::from_canonical_usize(offset));
+            let header = rlp_headers.select(&mut b, nibble_t);
+            b.connect(header.offset, offset_t);
+        }
+        let data = b.build::<C>();
+        pw.set_int_targets(&node_t, &root);
+        let proof = data.prove(pw)?;
+        data.verify(proof)?;
+        Ok(())
+    }
+    #[test]
+    fn test_custom_rlp_list() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        let (mut trie, key) = generate_random_storage_mpt::<4, 32>();
+        let mut proof = trie.get_proof(&key).unwrap();
+        proof.reverse();
+        let encoded_leaf = proof.first().unwrap();
+        let leaf_list: Vec<Vec<u8>> = rlp::decode_list(encoded_leaf);
+        assert!(leaf_list.len() == 2);
+        let config = CircuitConfig::standard_recursion_config();
+        let mut pw = PartialWitness::new();
+        let mut b = CircuitBuilder::<F, D>::new(config);
+        let rlp_targets = b.add_virtual_targets(encoded_leaf.len());
+        let zero = b.zero();
+        let two = b.two();
+
+        let decoded_headers = decode_fixed_list::<_, _, 4>(&mut b, &rlp_targets, zero);
+        b.connect(decoded_headers.num_fields, two);
+        let data = b.build::<C>();
+        pw.set_int_targets(&rlp_targets, encoded_leaf);
+        let proof = data.prove(pw)?;
+        data.verify(proof)?;
+        Ok(())
+    }
     #[test]
     fn test_decode_header_long_list() -> Result<()> {
         let n_items = 5;
@@ -583,5 +791,104 @@ mod tests {
         let data = builder.build::<C>();
         let proof = data.prove(pw)?;
         data.verify(proof)
+    }
+    #[test]
+    fn test_compact_decode() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        struct TestCase {
+            input: [u8; MAX_ENC_KEY_LEN],
+            key_len: usize,
+            expected: Vec<u8>,
+        }
+
+        let run_test_case = |tc: TestCase| {
+            let config = CircuitConfig::standard_recursion_config();
+            let mut pw = PartialWitness::new();
+            let mut builder = CircuitBuilder::<F, D>::new(config);
+            let wire1 = Array::<Target, MAX_ENC_KEY_LEN>::new(&mut builder);
+            wire1.assign::<F>(
+                &mut pw,
+                &create_array(|i| F::from_canonical_u8(tc.input[i])),
+            );
+            let key_header = RlpHeader {
+                offset: builder.constant(F::from_canonical_usize(0)),
+                len: builder.constant(F::from_canonical_usize(tc.key_len)),
+                data_type: builder.constant(F::from_canonical_usize(0)),
+            };
+            let (nibbles, cond) = decode_compact_encoding(&mut builder, &wire1, &key_header);
+            builder.assert_bool(cond);
+            let exp_nib_len = builder.constant(F::from_canonical_usize(tc.expected.len()));
+            builder.connect(nibbles.real_len, exp_nib_len);
+            for (i, nib) in tc.expected.iter().enumerate() {
+                let num = builder.constant(F::from_canonical_u8(*nib));
+                builder.connect(nibbles.arr[i], num);
+            }
+            let data = builder.build::<C>();
+            let proof = data.prove(pw).unwrap();
+            data.verify(proof).unwrap();
+        };
+        let tc1 = TestCase {
+            input: [
+                0x11, 0x23, 0x45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+            key_len: 3,
+            expected: (0..5).map(|i| i + 1).collect::<Vec<u8>>(),
+        };
+
+        let tc2 = TestCase {
+            input: [
+                0x20, 0x0f, 0x1c, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+            key_len: 4,
+            expected: vec![0, 15, 1, 12, 11, 8],
+        };
+
+        let tc3 = TestCase {
+            input: [
+                0x3f, 0x1c, 0xb8, 0x99, 0xab, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+            key_len: 3,
+            expected: vec![15, 1, 12, 11, 8],
+        };
+        run_test_case(tc1);
+        run_test_case(tc2);
+        run_test_case(tc3);
+
+        {
+            let (mut trie, rlp_key) = generate_random_storage_mpt::<5, 32>();
+            let proof = trie.get_proof(&rlp_key).unwrap();
+            println!(" ------ TEST CASE -----\n");
+            let leaf_node = proof.last().unwrap().clone();
+            let leaf_tuple: Vec<Vec<u8>> = rlp::decode_list(&leaf_node);
+            let partial_key_compact: Vec<u8> = rlp::decode(&leaf_tuple[0]).unwrap();
+            let partial_key_struct = Nibbles::from_compact(&partial_key_compact);
+            let partial_key_nibbles = partial_key_struct.nibbles();
+            let tc = TestCase {
+                input: create_array(|i| {
+                    if i < partial_key_compact.len() {
+                        partial_key_compact[i]
+                    } else {
+                        0
+                    }
+                }),
+                key_len: partial_key_compact.len(),
+                expected: partial_key_nibbles.to_vec(),
+            };
+            println!(
+                "partial key nibbles ({} len): {:02x?} -- input 0x{:02x?}",
+                partial_key_nibbles.len(),
+                hex::encode(partial_key_nibbles).to_string(),
+                hex::encode(tc.input)[..10].to_string()
+            );
+
+            run_test_case(tc);
+        }
+        Ok(())
     }
 }

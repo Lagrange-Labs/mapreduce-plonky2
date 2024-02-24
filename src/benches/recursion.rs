@@ -23,6 +23,7 @@ use plonky2::{
     },
 };
 use rand::Rng;
+use std::array::from_fn as create_array;
 
 use super::init_logging;
 use super::test::Benchable;
@@ -232,6 +233,7 @@ impl<F, const D: usize, const BYTES: usize, const N: usize> UserCircuit<F, D>
     for RepeatedKeccak<BYTES, N>
 where
     F: RichField + Extendable<D>,
+    [(); BYTES / 4]:,
 {
     type Wires = [KeccakWires<BYTES>; N];
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
@@ -257,6 +259,7 @@ impl<F, const D: usize, const ARITY: usize, const N: usize, const BYTES: usize>
     PCDCircuit<F, D, ARITY> for RepeatedKeccak<BYTES, N>
 where
     F: RichField + Extendable<D>,
+    [(); BYTES / 4]:,
 {
     // TODO: remove  assumption about public inputs, in this case we don't
     // need to expose as pub inputs all the intermediate hashing
@@ -301,8 +304,8 @@ fn bench_keccak_repeated() {
                 fns.push(Box::new(move || {
                     bench_simple_circuit::<F, D, C, _>(
                         name,
-                        RepeatedKeccak {
-                            circuits: [circuit; $a],
+                        RepeatedKeccak::<BYTES,$a> {
+                            circuits: create_array(|i| circuit.clone()),
                         },
                     )
                     }));
@@ -390,11 +393,12 @@ fn bench_recursive_update_keccak() {
                             _ => panic!("unrecognized size - fill manually"),
                         }
                     };
+                    let circuit = single_circuit.clone();
                     fns.push(Box::new(move || {
                         // always 1 arity because we only verify one proof
                         // but verify multiple hashes
                         bench_pcd_circuit::<F, C, D, 1, _>(tname($a), 1, || RepeatedKeccak::<BYTES,$a> {
-                            circuits: [single_circuit; $a]
+                            circuits: create_array(|_| circuit.clone()),
                         },padder)
                     }));
                 )+
