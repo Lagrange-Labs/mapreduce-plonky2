@@ -39,7 +39,8 @@ impl BlockInputs {
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
 
         // Find the state root hash from block header.
-        let state_root_offset = find_index_subvector(&header_rlp, &state_root_hash.0).unwrap();
+        let state_root_offset = find_index_subvector(&header_rlp, &state_root_hash.0)
+            .expect("Failed to find the root hash of state MPT in the RLP encoded block header");
 
         Self {
             number: block.number.unwrap().as_u64(),

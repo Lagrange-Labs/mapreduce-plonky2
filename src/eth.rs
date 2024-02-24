@@ -351,9 +351,7 @@ impl ProofQuery {
         if is_valid.is_err() {
             bail!("Account proof is invalid");
         }
-        if let Some(_) = is_valid.unwrap() {
-            println!("Found account value");
-        } else {
+        if is_valid.unwrap().is_none() {
             bail!("Account proof says the value associated with that key does not exist");
         }
 

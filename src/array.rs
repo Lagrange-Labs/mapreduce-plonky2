@@ -428,12 +428,12 @@ where
                     u2_elements
                         .chunks(4)
                         .map(|u| {
-                            let tmp = b.mul(u[1], four);
-                            let acc = b.add(u[0], tmp);
-                            let tmp = b.mul(u[2], four_square);
-                            let acc = b.add(acc, tmp);
-                            let tmp = b.mul(u[3], four_cube);
-                            b.add(acc, tmp)
+                            // acc = u[0] + u[1] * 4
+                            let acc = b.mul_add(u[1], four, u[0]);
+                            // acc += [u2] * 4^2
+                            let acc = b.mul_add(u[2], four_square, acc);
+                            // acc += [u3] * 4^3
+                            b.mul_add(u[3], four_cube, acc)
                         })
                         .collect::<Vec<_>>()
                 })
