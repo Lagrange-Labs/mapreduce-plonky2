@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use plonky2::{
-    field::extension::Extendable,
+    field::{extension::Extendable, goldilocks_field::GoldilocksField},
     hash::hash_types::RichField,
     iop::{
         target::{BoolTarget, Target},
@@ -51,18 +51,28 @@ pub struct Vector<F, const MAX_LEN: usize> {
     pub real_len: usize,
 }
 
-impl<F: RichField, const MAX_LEN: usize> Vector<F, MAX_LEN> {
-    pub fn empty() -> Self {
-        Self {
-            arr: [F::ZERO; MAX_LEN],
-            real_len: 0,
+impl<T: Default + Clone + Debug, const MAX_LEN: usize> Vector<T, MAX_LEN> {
+    /// Utility wrapper around vector of bytes
+    pub fn to_fields<F: RichField>(&self) -> Vector<F, MAX_LEN>
+    where
+        T: ToField<F>,
+    {
+        Vector {
+            arr: self
+                .arr
+                .iter()
+                .map(|x| x.to_field())
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+            real_len: self.real_len,
         }
     }
-    pub fn from_vec<T: ToField<F>>(d: &[T]) -> Result<Self> {
+    pub fn from_vec(d: &[T]) -> Result<Self> {
         let mut fields = d
             .iter()
-            .map(|x| x.to_field())
-            .chain(std::iter::repeat(F::ZERO))
+            .cloned()
+            .chain(std::iter::repeat(T::default()))
             .take(MAX_LEN) // pad to MAX_LEN with zeros
             .collect::<Vec<_>>();
         let len = d.len();
@@ -71,7 +81,15 @@ impl<F: RichField, const MAX_LEN: usize> Vector<F, MAX_LEN> {
             real_len: len,
         })
     }
+    pub fn empty() -> Self {
+        Self {
+            arr: create_array(|_| T::default()),
+            real_len: 0,
+        }
+    }
 }
+
+impl<F: RichField, const MAX_LEN: usize> Vector<F, MAX_LEN> {}
 
 impl<const SIZE: usize, T: Targetable> Index<usize> for VectorWire<T, SIZE> {
     type Output = T;
@@ -89,9 +107,14 @@ impl<const MAX_LEN: usize, T: Targetable> VectorWire<T, MAX_LEN> {
         let arr = Array::<T, MAX_LEN>::new(b);
         Self { arr, real_len }
     }
-    pub fn assign<F: RichField>(&self, pw: &mut PartialWitness<F>, value: &Vector<F, MAX_LEN>) {
+    pub fn assign<F: RichField, V: ToField<F>>(
+        &self,
+        pw: &mut PartialWitness<F>,
+        value: &Vector<V, MAX_LEN>,
+    ) {
         pw.set_target(self.real_len, F::from_canonical_usize(value.real_len));
-        self.arr.assign(pw, &value.arr);
+        self.arr
+            .assign(pw, &create_array(|i| value.arr[i].to_field()));
     }
 }
 impl<const MAX_LEN: usize> VectorWire<Target, MAX_LEN> {
@@ -474,9 +497,10 @@ mod test {
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, Rng};
+    use std::panic;
 
     use crate::{
-        array::{Array, Vector, VectorWire},
+        array::{Array, ToField, Vector, VectorWire},
         circuit::{test::test_simple_circuit, UserCircuit},
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
@@ -791,7 +815,7 @@ mod test {
                 pw.set_target(wires.1, F::from_canonical_usize(self.idx));
                 wires
                     .2
-                    .assign(pw, &Vector::<F, SIZE>::from_vec(&self.sub).unwrap());
+                    .assign(pw, &Vector::<u8, SIZE>::from_vec(&self.sub).unwrap());
                 pw.set_bool_target(wires.3, self.exp);
             }
         }
@@ -825,12 +849,13 @@ mod test {
     #[test]
     fn test_assert_bytes() {
         #[derive(Clone, Debug)]
-        struct TestAssertBytes<const N: usize> {
-            vector: Vec<u8>,
+        struct TestAssertBytes<T, const N: usize> {
+            vector: Vec<T>,
         }
-        impl<F, const D: usize, const N: usize> UserCircuit<F, D> for TestAssertBytes<N>
+        impl<T, F, const D: usize, const N: usize> UserCircuit<F, D> for TestAssertBytes<T, N>
         where
             F: RichField + Extendable<D>,
+            T: Clone + ToField<F>,
         {
             type Wires = Array<Target, N>;
 
@@ -841,13 +866,24 @@ mod test {
             }
 
             fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-                wires.assign_bytes(pw, &self.vector.clone().try_into().unwrap());
+                let fields = self.vector.iter().map(|x| x.to_field()).collect::<Vec<_>>();
+                wires.assign(pw, &fields.try_into().unwrap());
             }
         }
 
         const N: usize = 47;
         let vector = (0..N).map(|_| thread_rng().gen::<u8>()).collect::<Vec<_>>();
-        let circuit = TestAssertBytes::<N> { vector };
+        let circuit = TestAssertBytes::<u8, N> { vector };
         test_simple_circuit::<F, D, C, _>(circuit);
+
+        // circuit should fail with non bytes entries
+        let vector = (0..N)
+            .map(|_| thread_rng().gen_range(u8::MAX as u32..u32::MAX))
+            .collect::<Vec<_>>();
+        let res = panic::catch_unwind(|| {
+            let circuit = TestAssertBytes::<u32, N> { vector };
+            test_simple_circuit::<F, D, C, _>(circuit);
+        });
+        assert!(res.is_err());
     }
 }
