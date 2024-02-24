@@ -12,12 +12,10 @@ use anyhow::Result;
 use block_inputs::{BlockInputs, BlockInputsWires};
 use ethers::types::{Block, H256};
 use plonky2::{
-    field::extension::Extendable,
-    hash::hash_types::RichField,
-    iop::{target::Target, witness::PartialWitness},
+    field::extension::Extendable, hash::hash_types::RichField, iop::witness::PartialWitness,
     plonk::circuit_builder::CircuitBuilder,
 };
-use storage_proof::StorageInputs;
+use storage_proof::{StorageInputs, StorageInputsWires};
 
 /// Main block-linking wires
 pub struct BlockLinkingWires<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>
@@ -31,7 +29,7 @@ where
     block_inputs: BlockInputsWires<BLOCK_LEN>,
     /// Previous storage proof
     /// TODO : to replace with real proof once recursion framework done
-    storage_proof: StorageInputs<Target>,
+    storage_proof: StorageInputsWires,
 }
 
 /// Block-linking circuit used to prove the pre-computed state root proof is
@@ -83,7 +81,7 @@ where
     }
 
     /// Build for circuit.
-    pub fn build_circuit<const D: usize>(
+    pub fn build<const D: usize>(
         cb: &mut CircuitBuilder<F, D>,
     ) -> BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>
     where
@@ -91,15 +89,23 @@ where
         [(); PAD_LEN(NODE_LEN)]:,
         [(); DEPTH - 1]:,
     {
-        let account_inputs = AccountInputsWires::new(cb);
-        let block_inputs = BlockInputsWires::new(cb);
-        let storage_proof = StorageInputs::new(cb);
+        let account_inputs = AccountInputs::build(cb);
+        let block_inputs = BlockInputs::build(cb);
+        let storage_proof = StorageInputs::build(cb);
 
         // Verify the account node includes the hash of storage MPT root.
-        account_inputs.verify_storage_root_hash_inclusion(cb, &storage_proof.mpt_root_target());
+        AccountInputs::verify_storage_root_hash_inclusion(
+            cb,
+            &account_inputs,
+            &storage_proof.mpt_root_target(),
+        );
 
         // Verify the block header includes the hash of state MPT root.
-        block_inputs.verify_state_root_hash_inclusion(cb, &account_inputs.state_mpt_output.root);
+        BlockInputs::verify_state_root_hash_inclusion(
+            cb,
+            &block_inputs,
+            &account_inputs.state_mpt_output.root,
+        );
 
         BlockLinkingWires {
             account_inputs,
@@ -109,7 +115,7 @@ where
     }
 
     /// Assign the wires.
-    pub fn assign_wires<const D: usize>(
+    pub fn assign<const D: usize>(
         &self,
         pw: &mut PartialWitness<F>,
         wires: &BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>,
@@ -117,9 +123,9 @@ where
     where
         F: RichField + Extendable<D>,
     {
-        wires.storage_proof.assign(pw, &self.storage_proof);
-        wires.account_inputs.assign(pw, &self.account_inputs)?;
-        wires.block_inputs.assign(pw, &self.block_inputs)
+        self.storage_proof.assign(pw, &wires.storage_proof);
+        self.account_inputs.assign(pw, &wires.account_inputs)?;
+        self.block_inputs.assign(pw, &wires.block_inputs)
     }
 }
 
@@ -179,11 +185,11 @@ mod tests {
         type Wires = BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>;
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            BlockLinkingCircuit::build_circuit(cb)
+            BlockLinkingCircuit::build(cb)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.c.assign_wires::<D>(pw, wires).unwrap();
+            self.c.assign::<D>(pw, wires).unwrap();
         }
     }
 

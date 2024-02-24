@@ -63,11 +63,40 @@ impl<T> StorageInputs<T> {
         &self.inner[S_IDX..]
     }
 }
-/// Field special functions
+
+pub type StorageInputsWires = StorageInputs<Target>;
+
+impl StorageInputsWires {
+    /// Get the hash target of storage MPT root (C1).
+    pub fn mpt_root_target(&self) -> OutputHash {
+        let data = self.mpt_root();
+        array::from_fn(|i| U32Target(data[i])).into()
+    }
+}
+
+/// The storage input gadget
 impl<F> StorageInputs<F>
 where
     F: RichField,
 {
+    /// Build for circuit.
+    pub fn build<const D: usize>(cb: &mut CircuitBuilder<F, D>) -> StorageInputsWires
+    where
+        F: Extendable<D>,
+    {
+        StorageInputs {
+            inner: array::from_fn(|_| cb.add_virtual_target()),
+        }
+    }
+
+    /// Assign the wires.
+    pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &StorageInputsWires) {
+        self.inner
+            .iter()
+            .zip(wires.inner)
+            .for_each(|(value, target)| pw.set_target(target, *value));
+    }
+
     /// Get the contract address (A).
     pub fn contract_address(&self) -> H160 {
         // The contract address is packed as [u32; 5] in public inputs. This
@@ -84,33 +113,5 @@ where
         let bytes = convert_u32_fields_to_u8_vec(&self.mpt_root());
 
         H256(bytes.try_into().unwrap())
-    }
-}
-
-/// Target special functions
-impl StorageInputs<Target> {
-    pub fn new<F, const D: usize>(cb: &mut CircuitBuilder<F, D>) -> Self
-    where
-        F: RichField + Extendable<D>,
-    {
-        Self {
-            inner: array::from_fn(|_| cb.add_virtual_target()),
-        }
-    }
-
-    pub fn assign<F>(&self, pw: &mut PartialWitness<F>, value: &StorageInputs<F>)
-    where
-        F: RichField,
-    {
-        self.inner
-            .iter()
-            .zip(value.inner)
-            .for_each(|(t, v)| pw.set_target(*t, v));
-    }
-
-    /// Get the hash target of storage MPT root (C1).
-    pub fn mpt_root_target(&self) -> OutputHash {
-        let data = self.mpt_root();
-        array::from_fn(|i| U32Target(data[i])).into()
     }
 }

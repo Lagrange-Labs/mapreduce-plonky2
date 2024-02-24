@@ -21,7 +21,21 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
-/// The account input values
+/// The account input wires
+pub struct AccountInputsWires<const DEPTH: usize, const NODE_LEN: usize>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+    [(); DEPTH - 1]:,
+{
+    /// The offset of storage MPT root hash located in RLP encoded account node
+    pub storage_root_offset: Target,
+    /// Input wires of state MPT circuit
+    pub state_mpt_input: MPTInputWires<DEPTH, NODE_LEN>,
+    /// Output wires of state MPT circuit
+    pub state_mpt_output: MPTOutputWires<DEPTH, NODE_LEN>,
+}
+
+/// The account input gadget
 #[derive(Clone, Debug)]
 pub struct AccountInputs<const DEPTH: usize, const NODE_LEN: usize> {
     /// The offset of storage root hash located in RLP encoded account node
@@ -57,28 +71,11 @@ where
             state_mpt_circuit,
         }
     }
-}
 
-/// The account input wires
-pub struct AccountInputsWires<const DEPTH: usize, const NODE_LEN: usize>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-    [(); DEPTH - 1]:,
-{
-    /// The offset of storage MPT root hash located in RLP encoded account node
-    pub storage_root_offset: Target,
-    /// Input wires of state MPT circuit
-    pub state_mpt_input: MPTInputWires<DEPTH, NODE_LEN>,
-    /// Output wires of state MPT circuit
-    pub state_mpt_output: MPTOutputWires<DEPTH, NODE_LEN>,
-}
-
-impl<const DEPTH: usize, const NODE_LEN: usize> AccountInputsWires<DEPTH, NODE_LEN>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-    [(); DEPTH - 1]:,
-{
-    pub fn new<F, const D: usize>(cb: &mut CircuitBuilder<F, D>) -> Self
+    /// Build for circuit.
+    pub fn build<F, const D: usize>(
+        cb: &mut CircuitBuilder<F, D>,
+    ) -> AccountInputsWires<DEPTH, NODE_LEN>
     where
         F: RichField + Extendable<D>,
     {
@@ -88,7 +85,7 @@ where
         let state_mpt_input = MPTCircuit::create_input_wires(cb);
         let state_mpt_output = MPTCircuit::verify_mpt_proof(cb, &state_mpt_input);
 
-        Self {
+        AccountInputsWires {
             storage_root_offset,
             state_mpt_input,
             state_mpt_output,
@@ -99,7 +96,7 @@ where
     pub fn assign<F, const D: usize>(
         &self,
         pw: &mut PartialWitness<F>,
-        value: &AccountInputs<DEPTH, NODE_LEN>,
+        wires: &AccountInputsWires<DEPTH, NODE_LEN>,
     ) -> Result<()>
     where
         F: RichField + Extendable<D>,
@@ -107,32 +104,31 @@ where
         // Assign the offset of storage MPT root hash located in RLP encoded
         // account node.
         pw.set_target(
-            self.storage_root_offset,
-            F::from_canonical_usize(value.storage_root_offset),
+            wires.storage_root_offset,
+            F::from_canonical_usize(self.storage_root_offset),
         );
 
         // Assign the input and output wires of state MPT circuit.
-        value
-            .state_mpt_circuit
-            .assign_wires(pw, &self.state_mpt_input, &self.state_mpt_output)
+        self.state_mpt_circuit
+            .assign_wires(pw, &wires.state_mpt_input, &wires.state_mpt_output)
     }
 
     /// Verify the account node includes the hash of storage MPT root.
     pub fn verify_storage_root_hash_inclusion<F, const D: usize>(
-        &self,
         cb: &mut CircuitBuilder<F, D>,
+        wires: &AccountInputsWires<DEPTH, NODE_LEN>,
         storage_root_hash: &OutputHash,
     ) where
         F: RichField + Extendable<D>,
     {
         let tt = cb._true();
-        let account_node = &self.state_mpt_input.nodes[0];
+        let account_node = &wires.state_mpt_input.nodes[0];
 
         // Verify the offset of storage MPT root hash is within range. We use 8
         // bits for the range check since the account node is composed by
         // [nonce (U64), balance (U256), storage_hash (H256), code_hash (H256)]
         // and it has 104 bytes.
-        let within_range = less_than(cb, self.storage_root_offset, account_node.real_len, 8);
+        let within_range = less_than(cb, wires.storage_root_offset, account_node.real_len, 8);
         cb.connect(within_range.target, tt.target);
 
         // Verify the account node includes the storage MPT root hash.
@@ -140,7 +136,7 @@ where
         let is_included =
             account_node
                 .arr
-                .contains_array(cb, &storage_root_hash, self.storage_root_offset);
+                .contains_array(cb, &storage_root_hash, wires.storage_root_offset);
         cb.connect(is_included.target, tt.target);
     }
 }
