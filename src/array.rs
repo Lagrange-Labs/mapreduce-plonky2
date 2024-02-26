@@ -403,46 +403,6 @@ impl<const SIZE: usize> Array<Target, SIZE>
 where
     [(); SIZE / 4]:,
 {
-    pub fn from_u32_array<F: RichField + Extendable<D>, const D: usize>(
-        b: &mut CircuitBuilder<F, D>,
-        u32_array: &Array<U32Target, { SIZE / 4 }>,
-    ) -> Self {
-        let four = b.constant(F::from_canonical_usize(4));
-        let four_square = b.constant(F::from_canonical_usize(16));
-        let four_cube = b.constant(F::from_canonical_usize(64));
-
-        // Convert each u32 to [u8; 4].
-        Self {
-            arr: u32_array
-                .arr
-                .iter()
-                .flat_map(|u32_element| {
-                    // Convert an u32 to [u2; 16], each limb is an u2, it means
-                    // BASE is 4 (2^2), and total 16 limbs.
-                    // We cannot set base to 16 (2^4), otherwise an error of too
-                    // high degree occurred.
-                    let u2_elements = b.split_le_base::<4>(u32_element.0, 16);
-
-                    // Convert each [u2; 4] to an u8 as:
-                    // u[0] + u[1] * 4 + u[2] * 16 + u[3] * 64
-                    u2_elements
-                        .chunks(4)
-                        .map(|u| {
-                            // acc = u[0] + u[1] * 4
-                            let acc = b.mul_add(u[1], four, u[0]);
-                            // acc += [u2] * 4^2
-                            let acc = b.mul_add(u[2], four_square, acc);
-                            // acc += [u3] * 4^3
-                            b.mul_add(u[3], four_cube, acc)
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        }
-    }
-
     pub fn to_u32_array<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
@@ -595,11 +555,6 @@ mod test {
                 let to_u32 = origin_u8.to_u32_array(c);
                 let exp_u32 = Array::<U32Target, { S / 4 }>::new(c);
                 let is_equal = to_u32.equals(c, &exp_u32);
-                c.connect(is_equal.target, tr.target);
-
-                // Verify `from_u32_array`.
-                let u8_from_u32 = Array::from_u32_array(c, &exp_u32);
-                let is_equal = u8_from_u32.equals(c, &origin_u8);
                 c.connect(is_equal.target, tr.target);
 
                 (origin_u8, exp_u32)
