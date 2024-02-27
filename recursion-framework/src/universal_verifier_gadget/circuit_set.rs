@@ -1,13 +1,26 @@
 use std::collections::HashMap;
 
-use plonky2::{field::extension::Extendable, hash::{hash_types::{HashOut, HashOutTarget, MerkleCapTarget, RichField}, 
-    merkle_proofs::MerkleProofTarget, merkle_tree::{MerkleCap, MerkleTree}}, iop::{target::{BoolTarget, Target}, witness::{PartialWitness, WitnessWrite}}, 
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::{CircuitConfig, VerifierCircuitTarget}, config::{AlgebraicHasher, GenericConfig, GenericHashOut, Hasher}}, 
-    util::log2_ceil
+use plonky2::{
+    field::extension::Extendable,
+    hash::{
+        hash_types::{HashOut, HashOutTarget, MerkleCapTarget, RichField},
+        merkle_proofs::MerkleProofTarget,
+        merkle_tree::{MerkleCap, MerkleTree},
+    },
+    iop::{
+        target::{BoolTarget, Target},
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, VerifierCircuitTarget},
+        config::{AlgebraicHasher, GenericConfig, GenericHashOut, Hasher},
+    },
+    util::log2_ceil,
 };
 
 use super::CIRCUIT_SET_CAP_HEIGHT;
-use anyhow::{Result, Error};
+use anyhow::{Error, Result};
 
 // get the list of targets composing a `MerkleCapTarget`
 pub(crate) fn merkle_cap_to_targets(merkle_cap: &MerkleCapTarget) -> Vec<Target> {
@@ -40,16 +53,13 @@ impl CircuitSetTarget {
     pub(crate) fn from_circuit_set_digest<
         F: RichField + Extendable<D>,
         H: Hasher<F, Hash = HashOut<F>>,
-        C: GenericConfig<D, Hasher = H, F=F>,
+        C: GenericConfig<D, Hasher = H, F = F>,
         const D: usize,
     >(
         builder: &mut CircuitBuilder<F, D>,
-        digest: CircuitSetDigest<F,C,D>,
-    ) -> Self 
-    {
-        Self(
-            builder.constant_merkle_cap(&digest.0)
-        )
+        digest: CircuitSetDigest<F, C, D>,
+    ) -> Self {
+        Self(builder.constant_merkle_cap(&digest.0))
     }
 
     // Enforce that `circuit_digest_target` is a leaf in the merkle-tree
@@ -127,7 +137,11 @@ pub(crate) fn check_circuit_digest_target<
 #[derive(Clone, Debug)]
 // Data structure employed by the recursion framework to store and manage the set of circuits that can
 // be verified with the universal verifier
-pub(crate) struct CircuitSet<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> {
+pub(crate) struct CircuitSet<
+    F: RichField + Extendable<D>,
+    C: GenericConfig<D, F = F>,
+    const D: usize,
+> {
     circuit_digests_to_leaf_indexes: HashMap<Vec<F>, usize>,
     mt: MerkleTree<F, C::Hasher>,
 }
@@ -260,8 +274,8 @@ mod tests {
     use crate::framework::tests::check_panic;
 
     use super::*;
-    use plonky2::plonk::config::PoseidonGoldilocksConfig;
     use plonky2::field::types::Sample;
+    use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -274,36 +288,46 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
         let circuit_set_target = CircuitSetTarget::build_target(&mut builder);
         let element_targets = builder.add_virtual_hashes(NUM_ELEMENTS);
-        let circuit_membership_targets = element_targets.iter().map(|t| 
-            CircuitSetTarget::check_circuit_digest_membership::<F,C,D>(
-                &mut builder, 
-                &circuit_set_target, 
-                t, 
-            NUM_ELEMENTS)
-        ).collect::<Vec<_>>();
+        let circuit_membership_targets = element_targets
+            .iter()
+            .map(|t| {
+                CircuitSetTarget::check_circuit_digest_membership::<F, C, D>(
+                    &mut builder,
+                    &circuit_set_target,
+                    t,
+                    NUM_ELEMENTS,
+                )
+            })
+            .collect::<Vec<_>>();
         builder.register_public_inputs(&circuit_set_target.to_targets());
 
         let circuit = builder.build::<C>();
 
-        let elements = (0..NUM_ELEMENTS).map(|_| {
-            let hash_input = vec![F::rand(); 4];
-            <C as GenericConfig<D>>::Hasher::hash_no_pad(hash_input.as_slice())
-        }).collect::<Vec<_>>();
+        let elements = (0..NUM_ELEMENTS)
+            .map(|_| {
+                let hash_input = vec![F::rand(); 4];
+                <C as GenericConfig<D>>::Hasher::hash_no_pad(hash_input.as_slice())
+            })
+            .collect::<Vec<_>>();
 
         let circuit_set = CircuitSet::<F, C, D>::build_circuit_set(elements);
 
         let circuit_set_digest = CircuitSetDigest::<F, C, D>::from(&circuit_set);
 
-        let prove_circuit = |circuit_set: &CircuitSet<F,C, D>| {
+        let prove_circuit = |circuit_set: &CircuitSet<F, C, D>| {
             let mut pw = PartialWitness::<F>::new();
             let elements = circuit_set.circuit_digests_to_leaf_indexes.keys();
             circuit_set_digest.set_circuit_set_target(&mut pw, &circuit_set_target);
-            element_targets.iter().zip(circuit_membership_targets.iter().zip(elements))
+            element_targets
+                .iter()
+                .zip(circuit_membership_targets.iter().zip(elements))
                 .for_each(|(&el_t, (membership_t, el))| {
-                let el =  HashOut::from_vec(el.clone());
-                pw.set_hash_target(el_t, el);
-                circuit_set.set_circuit_membership_target(&mut pw, membership_t, el).unwrap()
-            });
+                    let el = HashOut::from_vec(el.clone());
+                    pw.set_hash_target(el_t, el);
+                    circuit_set
+                        .set_circuit_membership_target(&mut pw, membership_t, el)
+                        .unwrap()
+                });
 
             circuit.prove(pw)
         };
@@ -314,13 +338,18 @@ mod tests {
 
         circuit.verify(proof).unwrap();
 
-        let elements = (0..NUM_ELEMENTS).map(|_| {
-            let hash_input = vec![F::rand(); 4];
-            <C as GenericConfig<D>>::Hasher::hash_no_pad(hash_input.as_slice())
-        }).collect::<Vec<_>>();
+        let elements = (0..NUM_ELEMENTS)
+            .map(|_| {
+                let hash_input = vec![F::rand(); 4];
+                <C as GenericConfig<D>>::Hasher::hash_no_pad(hash_input.as_slice())
+            })
+            .collect::<Vec<_>>();
 
         let wrong_circuit_set = CircuitSet::<F, C, D>::build_circuit_set(elements);
 
-        check_panic!(|| prove_circuit(&wrong_circuit_set).unwrap(), "circuit set membership didn't fail when employing wrong circuit set");
-    } 
+        check_panic!(
+            || prove_circuit(&wrong_circuit_set).unwrap(),
+            "circuit set membership didn't fail when employing wrong circuit set"
+        );
+    }
 }

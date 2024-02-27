@@ -1,14 +1,22 @@
-use plonky2::{field::extension::Extendable, gates::noop::NoopGate, hash::hash_types::RichField, plonk::{circuit_builder::CircuitBuilder, 
-    circuit_data::{CircuitConfig, CircuitData, CommonCircuitData}, config::{AlgebraicHasher, GenericConfig, Hasher}}};
+use plonky2::{
+    field::extension::Extendable,
+    gates::noop::NoopGate,
+    hash::hash_types::RichField,
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData},
+        config::{AlgebraicHasher, GenericConfig, Hasher},
+    },
+};
 
 use self::{circuit_set::num_targets_for_circuit_set, wrap_circuit::WrapCircuit};
 
 mod circuit_set;
-pub(crate) mod wrap_circuit;
 pub(crate) mod verifier_gadget;
+pub(crate) mod wrap_circuit;
 
-pub(crate) use circuit_set::{CircuitSet, CircuitSetTarget};
 pub use circuit_set::CircuitSetDigest;
+pub(crate) use circuit_set::{CircuitSet, CircuitSetTarget};
 
 // cap height for the Merkle-tree employed to represent the set of circuits that can be aggregated with
 // `MergeCircuit`; it is now set to 0 for simplicity, which is equivalent to a traditional
@@ -26,8 +34,7 @@ fn dummy_circuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const
     config: CircuitConfig,
     num_gates: usize,
     num_public_inputs: usize,
-) -> CircuitData<F, C, D>
-{
+) -> CircuitData<F, C, D> {
     let mut builder = CircuitBuilder::new(config);
     for _ in 0..num_public_inputs {
         let target = builder.add_virtual_target();
@@ -69,10 +76,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use plonky2::plonk::{circuit_data::CircuitConfig, config::{GenericConfig, PoseidonGoldilocksConfig}};
+    use plonky2::plonk::{
+        circuit_data::CircuitConfig,
+        config::{GenericConfig, PoseidonGoldilocksConfig},
+    };
 
     use super::{build_data_for_recursive_aggregation, RECURSION_THRESHOLD};
-
 
     #[test]
     fn test_common_data_for_recursion() {

@@ -1,22 +1,38 @@
-use plonky2::{field::extension::Extendable, hash::hash_types::{MerkleCapTarget, RichField}, iop::witness::{PartialWitness, WitnessWrite}, plonk::{circuit_builder::CircuitBuilder, circuit_data::{CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData}, 
-    config::{AlgebraicHasher, GenericConfig, Hasher}, proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget}}
+use plonky2::{
+    field::extension::Extendable,
+    hash::hash_types::{MerkleCapTarget, RichField},
+    iop::witness::{PartialWitness, WitnessWrite},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{
+            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget,
+            VerifierOnlyCircuitData,
+        },
+        config::{AlgebraicHasher, GenericConfig, Hasher},
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+    },
 };
 
-use crate::universal_verifier_gadget::{circuit_set::check_circuit_digest_target, RECURSION_THRESHOLD};
+use crate::universal_verifier_gadget::{
+    circuit_set::check_circuit_digest_target, RECURSION_THRESHOLD,
+};
 
 use anyhow::Result;
 
 // Data structure with all input/output targets and the `CircuitData` for each circuit employed
 // to recursively wrap a proof up to the recursion threshold. The data structure contains a set
 // of targets and a `CircuitData` for each wrap step.
-pub(crate) struct WrapCircuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> {
+pub(crate) struct WrapCircuit<
+    F: RichField + Extendable<D>,
+    C: GenericConfig<D, F = F>,
+    const D: usize,
+> {
     proof_targets: Vec<ProofWithPublicInputsTarget<D>>,
     circuit_data: Vec<CircuitData<F, C, D>>,
     inner_data: Vec<VerifierCircuitTarget>,
 }
 
-impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
-    WrapCircuit<F, C, D>
+impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> WrapCircuit<F, C, D>
 where
     C::Hasher: AlgebraicHasher<F>,
     [(); C::Hasher::HASH_SIZE]:,
@@ -128,7 +144,6 @@ where
     }
 }
 
-
 #[cfg(test)]
 pub(crate) mod test {
     use std::array;
@@ -138,7 +153,10 @@ pub(crate) mod test {
     use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
     use super::*;
-    use crate::{circuit_builder::{tests::LeafCircuit, CircuitLogic}, framework::tests::check_panic};
+    use crate::{
+        circuit_builder::{tests::LeafCircuit, CircuitLogic},
+        framework::tests::check_panic,
+    };
 
     use serial_test::serial;
 
@@ -152,43 +170,46 @@ pub(crate) mod test {
         circuit.circuit_data.last_mut().unwrap()
     }
 
-
     struct TestCircuit<
         F: RichField + Extendable<D>,
-        C: GenericConfig<D, F=F>,
+        C: GenericConfig<D, F = F>,
         const D: usize,
-        const INPUT_SIZE: usize
+        const INPUT_SIZE: usize,
     > {
         targets: LeafCircuit<F, INPUT_SIZE>,
-        circuit_data: CircuitData<F,C,D>,
+        circuit_data: CircuitData<F, C, D>,
         wrap_circuit: WrapCircuit<F, C, D>,
     }
 
     impl<
-        F: RichField + Extendable<D>,
-        C: GenericConfig<D, F=F>,
-        const D: usize,
-        const INPUT_SIZE: usize
-    > TestCircuit<F, C, D, INPUT_SIZE> 
-    where 
+            F: RichField + Extendable<D>,
+            C: GenericConfig<D, F = F>,
+            const D: usize,
+            const INPUT_SIZE: usize,
+        > TestCircuit<F, C, D, INPUT_SIZE>
+    where
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
     {
-        
-        fn build_circuit(config: CircuitConfig, build_parameters: <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::CircuitBuilderParams) -> Self {
-            let mut builder = CircuitBuilder::<F,D>::new(config.clone());
-            let targets = <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::circuit_logic(
-                &mut builder, [], build_parameters
+        fn build_circuit(
+            config: CircuitConfig,
+            build_parameters: <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::CircuitBuilderParams,
+        ) -> Self {
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            let targets = <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::circuit_logic(
+                &mut builder,
+                [],
+                build_parameters,
             );
-            
+
             let circuit_data = builder.build::<C>();
 
             let wrap_circuit = WrapCircuit::<F, C, D>::build_wrap_circuit(
                 &circuit_data.verifier_only,
                 &circuit_data.common,
-                &config
+                &config,
             );
-            
+
             Self {
                 targets,
                 circuit_data,
@@ -196,14 +217,24 @@ pub(crate) mod test {
             }
         }
 
-        fn generate_base_proof(&self, inputs: <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::Inputs) -> Result<ProofWithPublicInputs<F,C,D>> {
+        fn generate_base_proof(
+            &self,
+            inputs: <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::Inputs,
+        ) -> Result<ProofWithPublicInputs<F, C, D>> {
             let mut pw = PartialWitness::<F>::new();
-            <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::assign_input(&self.targets, inputs, &mut pw)?;
+            <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::assign_input(
+                &self.targets,
+                inputs,
+                &mut pw,
+            )?;
 
             self.circuit_data.prove(pw)
         }
 
-        fn generate_proof(&self, inputs: <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::Inputs) -> Result<ProofWithPublicInputs<F,C,D>> {
+        fn generate_proof(
+            &self,
+            inputs: <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::Inputs,
+        ) -> Result<ProofWithPublicInputs<F, C, D>> {
             let proof = self.generate_base_proof(inputs)?;
 
             self.wrap_circuit.wrap_proof(proof)
@@ -225,33 +256,29 @@ pub(crate) mod test {
         let config = CircuitConfig::standard_recursion_config();
         const NUM_HASHES_IN_TEST_CIRCUIT: usize = 1usize << 12;
         let test_circuit = TestCircuit::<F, C, D, INPUT_SIZE>::build_circuit(
-            config.clone(), 
+            config.clone(),
             (NUM_HASHES_IN_TEST_CIRCUIT, false),
         );
 
-        let wrap_proof = test_circuit.generate_proof((
-            array::from_fn(|_| F::rand()),
-            F::rand(),
-        )).unwrap();
+        let wrap_proof = test_circuit
+            .generate_proof((array::from_fn(|_| F::rand()), F::rand()))
+            .unwrap();
 
         let test_circuit_variant = TestCircuit::<F, C, D, INPUT_SIZE>::build_circuit(
-            config.clone(), 
-            (NUM_HASHES_IN_TEST_CIRCUIT, true)
+            config.clone(),
+            (NUM_HASHES_IN_TEST_CIRCUIT, true),
         );
 
-        let wrap_proof_swap = test_circuit_variant.generate_proof((
-            array::from_fn(|_| F::rand()),
-            F::rand(),
-        )).unwrap();
+        let wrap_proof_swap = test_circuit_variant
+            .generate_proof((array::from_fn(|_| F::rand()), F::rand()))
+            .unwrap();
 
         assert_eq!(
             test_circuit.circuit_data.common.degree_bits(),
             test_circuit_variant.circuit_data.common.degree_bits(),
         );
 
-        test_circuit.get_circuit_data()
-            .verify(wrap_proof)
-            .unwrap();
+        test_circuit.get_circuit_data().verify(wrap_proof).unwrap();
 
         test_circuit_variant
             .get_circuit_data()
@@ -265,18 +292,16 @@ pub(crate) mod test {
 
         assert_ne!(
             test_circuit.get_circuit_data().verifier_only,
-            test_circuit_variant
-                .get_circuit_data()
-                .verifier_only
+            test_circuit_variant.get_circuit_data().verifier_only
         );
 
         // check that wrapping a proof with the wrong wrapping circuit does not work
-        let base_proof_variant_circuit = test_circuit_variant.generate_base_proof((
-            array::from_fn(|_| F::rand()),
-            F::rand(),
-        )).unwrap();
+        let base_proof_variant_circuit = test_circuit_variant
+            .generate_base_proof((array::from_fn(|_| F::rand()), F::rand()))
+            .unwrap();
         check_panic!(
-            || test_circuit.wrap_circuit
+            || test_circuit
+                .wrap_circuit
                 .wrap_proof(base_proof_variant_circuit)
                 .unwrap(),
             "wrapping proof with wrong circuit did not panic"
@@ -302,11 +327,8 @@ pub(crate) mod test {
 
         assert_eq!(data.common.degree_bits(), 13);
 
-        let wrap_circuit = WrapCircuit::build_wrap_circuit(
-            &data.verifier_only,
-            &data.common,
-            &config,
-        );
+        let wrap_circuit =
+            WrapCircuit::build_wrap_circuit(&data.verifier_only, &data.common, &config);
 
         let mut pw = PartialWitness::new();
         let public_input = F::rand();
@@ -314,9 +336,7 @@ pub(crate) mod test {
 
         let proof = data.prove(pw).unwrap();
 
-        let wrapped_proof = wrap_circuit
-            .wrap_proof(proof)
-            .unwrap();
+        let wrapped_proof = wrap_circuit.wrap_proof(proof).unwrap();
 
         assert_eq!(wrapped_proof.public_inputs[0], public_input);
 
