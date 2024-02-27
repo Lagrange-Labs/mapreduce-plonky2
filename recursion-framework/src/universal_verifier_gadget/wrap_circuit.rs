@@ -127,3 +127,202 @@ where
         self.circuit_data.last().unwrap()
     }
 }
+
+
+#[cfg(test)]
+pub(crate) mod test {
+    use std::array;
+
+    use plonky2::field::types::Sample;
+    use plonky2::gates::noop::NoopGate;
+    use plonky2::plonk::config::PoseidonGoldilocksConfig;
+
+    use super::*;
+    use crate::{circuit_builder::{tests::LeafCircuit, CircuitLogic}, framework::tests::check_panic};
+
+    use serial_test::serial;
+
+    pub(crate) fn mutable_final_proof_circuit_data<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        const D: usize,
+    >(
+        circuit: &mut WrapCircuit<F, C, D>,
+    ) -> &mut CircuitData<F, C, D> {
+        circuit.circuit_data.last_mut().unwrap()
+    }
+
+
+    struct TestCircuit<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F=F>,
+        const D: usize,
+        const INPUT_SIZE: usize
+    > {
+        targets: LeafCircuit<F, INPUT_SIZE>,
+        circuit_data: CircuitData<F,C,D>,
+        wrap_circuit: WrapCircuit<F, C, D>,
+    }
+
+    impl<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F=F>,
+        const D: usize,
+        const INPUT_SIZE: usize
+    > TestCircuit<F, C, D, INPUT_SIZE> 
+    where 
+        C::Hasher: AlgebraicHasher<F>,
+        [(); C::Hasher::HASH_SIZE]:,
+    {
+        
+        fn build_circuit(config: CircuitConfig, build_parameters: <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::CircuitBuilderParams) -> Self {
+            let mut builder = CircuitBuilder::<F,D>::new(config.clone());
+            let targets = <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::circuit_logic(
+                &mut builder, [], build_parameters
+            );
+            
+            let circuit_data = builder.build::<C>();
+
+            let wrap_circuit = WrapCircuit::<F, C, D>::build_wrap_circuit(
+                &circuit_data.verifier_only,
+                &circuit_data.common,
+                &config
+            );
+            
+            Self {
+                targets,
+                circuit_data,
+                wrap_circuit,
+            }
+        }
+
+        fn generate_base_proof(&self, inputs: <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::Inputs) -> Result<ProofWithPublicInputs<F,C,D>> {
+            let mut pw = PartialWitness::<F>::new();
+            <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::assign_input(&self.targets, inputs, &mut pw)?;
+
+            self.circuit_data.prove(pw)
+        }
+
+        fn generate_proof(&self, inputs: <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::Inputs) -> Result<ProofWithPublicInputs<F,C,D>> {
+            let proof = self.generate_base_proof(inputs)?;
+
+            self.wrap_circuit.wrap_proof(proof)
+        }
+
+        fn get_circuit_data(&self) -> &CircuitData<F, C, D> {
+            &self.wrap_circuit.final_proof_circuit_data()
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_wrap_circuit_keys() {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+        const INPUT_SIZE: usize = 8;
+
+        let config = CircuitConfig::standard_recursion_config();
+        const NUM_HASHES_IN_TEST_CIRCUIT: usize = 1usize << 12;
+        let test_circuit = TestCircuit::<F, C, D, INPUT_SIZE>::build_circuit(
+            config.clone(), 
+            (NUM_HASHES_IN_TEST_CIRCUIT, false),
+        );
+
+        let wrap_proof = test_circuit.generate_proof((
+            array::from_fn(|_| F::rand()),
+            F::rand(),
+        )).unwrap();
+
+        let test_circuit_variant = TestCircuit::<F, C, D, INPUT_SIZE>::build_circuit(
+            config.clone(), 
+            (NUM_HASHES_IN_TEST_CIRCUIT, true)
+        );
+
+        let wrap_proof_swap = test_circuit_variant.generate_proof((
+            array::from_fn(|_| F::rand()),
+            F::rand(),
+        )).unwrap();
+
+        assert_eq!(
+            test_circuit.circuit_data.common.degree_bits(),
+            test_circuit_variant.circuit_data.common.degree_bits(),
+        );
+
+        test_circuit.get_circuit_data()
+            .verify(wrap_proof)
+            .unwrap();
+
+        test_circuit_variant
+            .get_circuit_data()
+            .verify(wrap_proof_swap)
+            .unwrap();
+
+        assert_ne!(
+            test_circuit.circuit_data.verifier_only,
+            test_circuit_variant.circuit_data.verifier_only
+        );
+
+        assert_ne!(
+            test_circuit.get_circuit_data().verifier_only,
+            test_circuit_variant
+                .get_circuit_data()
+                .verifier_only
+        );
+
+        // check that wrapping a proof with the wrong wrapping circuit does not work
+        let base_proof_variant_circuit = test_circuit_variant.generate_base_proof((
+            array::from_fn(|_| F::rand()),
+            F::rand(),
+        )).unwrap();
+        check_panic!(
+            || test_circuit.wrap_circuit
+                .wrap_proof(base_proof_variant_circuit)
+                .unwrap(),
+            "wrapping proof with wrong circuit did not panic"
+        );
+    }
+
+    #[test]
+    fn test_wrapping_base_circuit_with_domain_separator() {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let config = CircuitConfig::standard_recursion_config();
+
+        let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+        for _ in 0..=(1 << 12) {
+            builder.add_gate(NoopGate, vec![]);
+        }
+        builder.set_domain_separator(vec![F::rand()]);
+        let pi_t = builder.add_virtual_public_input();
+
+        let data = builder.build::<C>();
+
+        assert_eq!(data.common.degree_bits(), 13);
+
+        let wrap_circuit = WrapCircuit::build_wrap_circuit(
+            &data.verifier_only,
+            &data.common,
+            &config,
+        );
+
+        let mut pw = PartialWitness::new();
+        let public_input = F::rand();
+        pw.set_target(pi_t, public_input);
+
+        let proof = data.prove(pw).unwrap();
+
+        let wrapped_proof = wrap_circuit
+            .wrap_proof(proof)
+            .unwrap();
+
+        assert_eq!(wrapped_proof.public_inputs[0], public_input);
+
+        wrap_circuit
+            .final_proof_circuit_data()
+            .verify(wrapped_proof)
+            .unwrap()
+    }
+}

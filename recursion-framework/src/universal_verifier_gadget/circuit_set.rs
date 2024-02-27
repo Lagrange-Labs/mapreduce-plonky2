@@ -254,3 +254,73 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         Self(circuit_set.mt.cap.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::framework::tests::check_panic;
+
+    use super::*;
+    use plonky2::plonk::config::PoseidonGoldilocksConfig;
+    use plonky2::field::types::Sample;
+
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+
+    #[test]
+    fn test_circuit_set_gadgets() {
+        const NUM_ELEMENTS: usize = 42;
+
+        let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
+        let circuit_set_target = CircuitSetTarget::build_target(&mut builder);
+        let element_targets = builder.add_virtual_hashes(NUM_ELEMENTS);
+        let circuit_membership_targets = element_targets.iter().map(|t| 
+            CircuitSetTarget::check_circuit_digest_membership::<F,C,D>(
+                &mut builder, 
+                &circuit_set_target, 
+                t, 
+            NUM_ELEMENTS)
+        ).collect::<Vec<_>>();
+        builder.register_public_inputs(&circuit_set_target.to_targets());
+
+        let circuit = builder.build::<C>();
+
+        let elements = (0..NUM_ELEMENTS).map(|_| {
+            let hash_input = vec![F::rand(); 4];
+            <C as GenericConfig<D>>::Hasher::hash_no_pad(hash_input.as_slice())
+        }).collect::<Vec<_>>();
+
+        let circuit_set = CircuitSet::<F, C, D>::build_circuit_set(elements);
+
+        let circuit_set_digest = CircuitSetDigest::<F, C, D>::from(&circuit_set);
+
+        let prove_circuit = |circuit_set: &CircuitSet<F,C, D>| {
+            let mut pw = PartialWitness::<F>::new();
+            let elements = circuit_set.circuit_digests_to_leaf_indexes.keys();
+            circuit_set_digest.set_circuit_set_target(&mut pw, &circuit_set_target);
+            element_targets.iter().zip(circuit_membership_targets.iter().zip(elements))
+                .for_each(|(&el_t, (membership_t, el))| {
+                let el =  HashOut::from_vec(el.clone());
+                pw.set_hash_target(el_t, el);
+                circuit_set.set_circuit_membership_target(&mut pw, membership_t, el).unwrap()
+            });
+
+            circuit.prove(pw)
+        };
+
+        let proof = prove_circuit(&circuit_set).unwrap();
+
+        assert_eq!(&proof.public_inputs, &circuit_set_digest.flatten());
+
+        circuit.verify(proof).unwrap();
+
+        let elements = (0..NUM_ELEMENTS).map(|_| {
+            let hash_input = vec![F::rand(); 4];
+            <C as GenericConfig<D>>::Hasher::hash_no_pad(hash_input.as_slice())
+        }).collect::<Vec<_>>();
+
+        let wrong_circuit_set = CircuitSet::<F, C, D>::build_circuit_set(elements);
+
+        check_panic!(|| prove_circuit(&wrong_circuit_set).unwrap(), "circuit set membership didn't fail when employing wrong circuit set");
+    } 
+}

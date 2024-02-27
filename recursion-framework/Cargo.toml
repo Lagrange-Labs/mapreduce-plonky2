@@ -11,6 +11,8 @@ log = "0.4.20"
 plonky2 = { version = "0.1.4" }
 
 [dev-dependencies]
+env_logger = "0.11.2"
+plonky2_monolith = "0.1.0"
 rstest = "0.18.2"
 serial_test = "3.0.0"
 

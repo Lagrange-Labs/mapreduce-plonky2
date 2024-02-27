@@ -353,10 +353,10 @@ pub(crate) mod tests {
         const CIRCUIT_SET_SIZE: usize = 5;
         let config = CircuitConfig::standard_recursion_config();
 
-        const NUM_PUBLIC_INPUTS: usize = <LeafCircuit::<INPUT_SIZE> as CircuitLogic<F,D,0>>::NUM_PUBLIC_INPUTS;
+        const NUM_PUBLIC_INPUTS: usize = <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::NUM_PUBLIC_INPUTS;
         let circuit_builder = CircuitWithUniversalVerifierBuilder::<F,D, NUM_PUBLIC_INPUTS>::new::<C>(config, CIRCUIT_SET_SIZE);
         
-        let leaf_circuit = circuit_builder.build_circuit::<C, 0, LeafCircuit<INPUT_SIZE>>(1usize << 12);
+        let leaf_circuit = circuit_builder.build_circuit::<C, 0, LeafCircuit<F, INPUT_SIZE>>((1usize << 12, false));
 
         let recursive_circuit_one = circuit_builder.build_circuit::<C, 1, RecursiveCircuit<INPUT_SIZE>>(());
 
@@ -434,11 +434,11 @@ pub(crate) mod tests {
         const CIRCUIT_SET_SIZE: usize = 2;
         let config = CircuitConfig::standard_recursion_config();
 
-        const NUM_PUBLIC_INPUTS: usize = <LeafCircuit::<INPUT_SIZE> as CircuitLogic<F,D,0>>::NUM_PUBLIC_INPUTS;
+        const NUM_PUBLIC_INPUTS: usize = <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::NUM_PUBLIC_INPUTS;
         // build a set of recursive circuits employing the `RecursiveCircuits` framework
         let circuit_builder = CircuitWithUniversalVerifierBuilder::<F,D, NUM_PUBLIC_INPUTS>::new::<C>(config.clone(), CIRCUIT_SET_SIZE);
         
-        let leaf_circuit = circuit_builder.build_circuit::<C, 0, LeafCircuit<INPUT_SIZE>>(1usize << 12);
+        let leaf_circuit = circuit_builder.build_circuit::<C, 0, LeafCircuit<F, INPUT_SIZE>>((1usize << 12, false));
 
         let recursive_circuit = circuit_builder.build_circuit::<C, 1, RecursiveCircuit<INPUT_SIZE>>(());
 

@@ -1,10 +1,13 @@
-use plonky2::{field::extension::Extendable, hash::hash_types::RichField, iop::{target::Target, witness::PartialWitness}, 
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::{CircuitConfig, CircuitData, VerifierOnlyCircuitData}, 
+use plonky2::{field::extension::Extendable, gates::noop::NoopGate, hash::hash_types::RichField, iop::{target::Target, witness::PartialWitness}, plonk::{circuit_builder::CircuitBuilder, circuit_data::{CircuitConfig, CircuitData, VerifierOnlyCircuitData}, 
     config::{AlgebraicHasher, GenericConfig, Hasher}, proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget}}};
 
 use crate::universal_verifier_gadget::{verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTargets}, wrap_circuit::WrapCircuit, CircuitSet, CircuitSetDigest, CircuitSetTarget};
 
 use anyhow::Result;
+
+/// Minimum number of gates for a circuit whose proofs needs to be verified by the universal verifier
+pub const MIN_CIRCUIT_SIZE: usize = 64;
+
 /// `CircuitLogic` trait must be implemented to specify the additional logic to be enforced in a circuit 
 /// besides verifying proofs with the universal verifier 
 pub trait CircuitLogic<
@@ -64,7 +67,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     /// - Verify `NUM_VERIFIERS` proofs employing the universal verifier. 
     /// - Execute the custom logic specified by the `CL` implementation
     /// Note that the output data structure will contain also the wrapping circuit necessary to
-    /// generate proofs that can be verified recursively with a universal verifier
+    /// generate proofs that can be verified recursively with a universal verifier. 
     pub fn build_circuit<
         C: GenericConfig<D, F = F>,
         const NUM_VERIFIERS: usize,
@@ -77,7 +80,41 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
     {
-        let mut builder =  CircuitBuilder::<F,D>::new(self.config.clone());
+        self.build_circuit_internal(&self.config, input_parameters)
+    }
+
+    /// Same functionality as `build_circuit`, but employing a custom circuit configuration (provided as input) 
+    /// to build the circuit 
+    pub fn build_circuit_with_custom_config<
+        C: GenericConfig<D, F = F>,
+        const NUM_VERIFIERS: usize,
+        CL: CircuitLogic<F,D, NUM_VERIFIERS>,
+    >(
+        &self,
+        custom_config: CircuitConfig,
+        input_parameters: CL::CircuitBuilderParams,
+    ) -> CircuitWithUniversalVerifier<F,C,D,NUM_VERIFIERS,CL> 
+    where 
+        C::Hasher: AlgebraicHasher<F>,
+        [(); C::Hasher::HASH_SIZE]:,
+    {
+        self.build_circuit_internal(&custom_config, input_parameters)
+    }
+
+    fn build_circuit_internal<
+        C: GenericConfig<D, F = F>,
+        const NUM_VERIFIERS: usize,
+        CL: CircuitLogic<F,D, NUM_VERIFIERS>,
+    >(
+        &self,
+        config: &CircuitConfig,
+        input_parameters: CL::CircuitBuilderParams,
+    ) -> CircuitWithUniversalVerifier<F,C,D,NUM_VERIFIERS,CL> 
+    where 
+        C::Hasher: AlgebraicHasher<F>,
+        [(); C::Hasher::HASH_SIZE]:,
+    {
+        let mut builder = CircuitBuilder::<F,D>::new(config.clone());
         let circuit_set_target = CircuitSetTarget::build_target(&mut builder);
         let universal_verifier_targets: [UniversalVerifierTargets<D>; NUM_VERIFIERS] = (0..NUM_VERIFIERS).map(
             |_| self.verifier_builder.universal_verifier_circuit(&mut builder, &circuit_set_target)
@@ -87,6 +124,10 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
         ).collect::<Vec<_>>();
         let circuit_logic = CL::circuit_logic(&mut builder, proof_targets.try_into().unwrap(), input_parameters);
         builder.register_public_inputs(circuit_set_target.to_targets().as_slice());
+
+        while builder.num_gates() <= MIN_CIRCUIT_SIZE/2 {
+            builder.add_gate(NoopGate, vec![]);
+        }
 
         let data = builder.build::<C>();
 
@@ -197,10 +238,12 @@ C::Hasher: AlgebraicHasher<F>,
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::{array, iter::{once, repeat}};
+    use std::{array, cmp, iter::{once, repeat}, marker::PhantomData};
 
     use plonky2::{hash::{hash_types::NUM_HASH_OUT_ELTS, poseidon::PoseidonHash}, iop::{target::Target, witness::WitnessWrite}, 
-    plonk::config::PoseidonGoldilocksConfig};
+    plonk::config::PoseidonGoldilocksConfig, gates::gate::Gate};
+
+    use plonky2_monolith::{monolith_hash::MonolithHash, gates::monolith::MonolithGate};
 
 
     use super::*;
@@ -209,9 +252,17 @@ pub(crate) mod tests {
 
     pub(crate) const NUM_PUBLIC_INPUTS_TEST_CIRCUITS: usize = NUM_HASH_OUT_ELTS;
 
-    pub(crate) struct LeafCircuit<const INPUT_SIZE: usize> {
+    pub(crate) type LeafCircuit<F, const INPUT_SIZE: usize> = LeafCircuitWithCustomHasher<F, INPUT_SIZE, PoseidonHash>; 
+
+    pub(crate) struct LeafCircuitWithCustomHasher<
+        F: RichField,
+        const INPUT_SIZE: usize, 
+        H: AlgebraicHasher<F>,
+    > {
         inputs: [Target; INPUT_SIZE],
         generator: Target,
+        _f: PhantomData<F>,
+        _h: PhantomData<H>,
     }
 
     impl<
@@ -219,8 +270,13 @@ pub(crate) mod tests {
         const D: usize,
         const NUM_VERIFIERS: usize,
         const INPUT_SIZE: usize,
-    > CircuitLogic<F,D,NUM_VERIFIERS> for LeafCircuit<INPUT_SIZE> {
-        type CircuitBuilderParams = usize;
+        H: AlgebraicHasher<F>,
+    > CircuitLogic<F,D,NUM_VERIFIERS> for LeafCircuitWithCustomHasher<F, INPUT_SIZE, H> {
+        /* 
+        - First parameter specifies the number of hashes to be performed
+        - Second one is a flag to specify how the input payload of each hash is computed
+        */ 
+        type CircuitBuilderParams = (usize, bool); 
 
         type Inputs = ([F; INPUT_SIZE], F);
 
@@ -235,9 +291,16 @@ pub(crate) mod tests {
             let generator = builder.add_virtual_target();
             let mut state = inputs.to_vec();
             let mut generated = generator;
-            for _ in 0..builder_parameters {
-                let hash_input = state.into_iter().chain(once(generated)).collect::<Vec<_>>();
-                state = builder.hash_or_noop::<PoseidonHash>(hash_input).elements.to_vec();
+            for _ in 0..builder_parameters.0 {
+                let hash_input = {
+                    let hash_input_iter = state.into_iter().chain(once(generated));
+                    if builder_parameters.1 {
+                        hash_input_iter.rev().collect::<Vec<_>>()
+                    } else {
+                        hash_input_iter.collect::<Vec<_>>()
+                    }
+                };
+                state = builder.hash_n_to_hash_no_pad::<H>(hash_input).elements.to_vec();
                 generated = builder.mul(generated, generator)
             }
 
@@ -246,6 +309,8 @@ pub(crate) mod tests {
             Self {
                 inputs,
                 generator,
+                _f: PhantomData::default(),
+                _h: PhantomData::default(),
             }
         }
 
@@ -277,12 +342,11 @@ pub(crate) mod tests {
             verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_VERIFIERS],
             _: Self::CircuitBuilderParams,
         ) -> Self {
-            let num_public_inputs = NUM_HASH_OUT_ELTS;
             let to_be_hashed_payload = builder.add_virtual_target_arr::<INPUT_SIZE>();
             let hash_input = verified_proofs.into_iter().flat_map(|pt| 
-                &pt.public_inputs[..num_public_inputs]
+                &pt.public_inputs[..<Self as CircuitLogic<F, D, NUM_VERIFIERS>>::NUM_PUBLIC_INPUTS]
             ).chain(to_be_hashed_payload.iter()).cloned().collect::<Vec<_>>();
-            let state = builder.hash_or_noop::<PoseidonHash>(hash_input);
+            let state = builder.hash_n_to_hash_no_pad::<PoseidonHash>(hash_input);
             builder.register_public_inputs(state.elements.as_slice());
 
             Self {
@@ -299,16 +363,29 @@ pub(crate) mod tests {
 
   
     
-    fn test_circuit_with_universal_verifier<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize, const NUM_VERIFIERS: usize>() 
+    fn test_circuit_with_universal_verifier<
+        F: RichField + Extendable<D>, 
+        C: GenericConfig<D, F = F>, 
+        const D: usize, 
+        const NUM_VERIFIERS: usize,
+        H: AlgebraicHasher<F>,
+    >(
+        config: Option<CircuitConfig>,
+    ) 
     where
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
     {
         const INPUT_SIZE: usize = 8;
-        let config = CircuitConfig::standard_recursion_config();
         const NUM_PUBLIC_INPUTS: usize = NUM_PUBLIC_INPUTS_TEST_CIRCUITS;
-        let circuit_builder = CircuitWithUniversalVerifierBuilder::<F,D, NUM_PUBLIC_INPUTS>::new::<C>(config, 2);
-        let leaf_circuit = circuit_builder.build_circuit::<C, 0, LeafCircuit<INPUT_SIZE>>(1usize << 12);
+        let std_config = CircuitConfig::standard_recursion_config();
+        let circuit_builder = CircuitWithUniversalVerifierBuilder::<F,D, NUM_PUBLIC_INPUTS>::new::<C>(std_config.clone(), 2);
+        let leaf_circuit = if let Some(custom_config) = config {
+            circuit_builder.build_circuit_with_custom_config::<C, 0, LeafCircuitWithCustomHasher<F, INPUT_SIZE, H>>(custom_config, (1usize << 12, false))
+        } else {
+            circuit_builder.build_circuit::<C, 0, LeafCircuitWithCustomHasher<F, INPUT_SIZE, H>>((1usize << 7, false))
+        };
+        println!("leaf circuit built: {}", leaf_circuit.wrapped_circuit_size());
 
         let recursive_circuit = circuit_builder.build_circuit::<C, NUM_VERIFIERS, RecursiveCircuit<INPUT_SIZE>>(());
 
@@ -355,33 +432,51 @@ pub(crate) mod tests {
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
 
+    fn generate_config_for_monolith() -> CircuitConfig {
+        let needed_wires = cmp::max(MonolithGate::<F,D>::new().num_wires(), CircuitConfig::standard_recursion_config().num_wires);
+        CircuitConfig {
+            num_wires: needed_wires,
+            num_routed_wires: needed_wires,
+            ..CircuitConfig::standard_recursion_config()
+        }
+    }
+
     #[test]
     #[serial]
     fn test_circuit_with_one_universal_verifier() {
-        test_circuit_with_universal_verifier::<F,C,D,1>();
+        test_circuit_with_universal_verifier::<F,C,D,1, PoseidonHash>(None);
     }
 
     #[test]
     #[serial]
     fn test_circuit_with_two_universal_verifier() {
-        test_circuit_with_universal_verifier::<F,C,D,2>();
+        test_circuit_with_universal_verifier::<F,C,D,2, PoseidonHash>(None);
     }
 
     #[test]
     #[serial]
     fn test_circuit_with_three_universal_verifier() {
-        test_circuit_with_universal_verifier::<F,C,D,3>();
+        test_circuit_with_universal_verifier::<F,C,D,3, PoseidonHash>(None);
     }
 
     #[test]
     #[serial]
     fn test_circuit_with_four_universal_verifier() {
-        test_circuit_with_universal_verifier::<F,C,D,4>();
+        test_circuit_with_universal_verifier::<F,C,D,4, PoseidonHash>(None);
     }
 
     #[test]
     #[serial]
     fn test_circuit_with_five_universal_verifier() {
-        test_circuit_with_universal_verifier::<F,C,D,5>();
+        test_circuit_with_universal_verifier::<F,C,D,5, PoseidonHash>(None);
+    }
+
+    #[test]
+    #[serial]
+    fn test_circuit_with_lookup_gates() {
+        env_logger::init();
+        // To employ `MonolithHash` we need a custom circuit configuration
+        let config = generate_config_for_monolith();
+        test_circuit_with_universal_verifier::<F, C, D, 2, MonolithHash>(Some(config));
     }
 }
