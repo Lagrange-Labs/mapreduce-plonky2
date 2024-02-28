@@ -426,22 +426,16 @@ where
                     let mut x = self.arr[i];
                     // u8[1]
                     let mut y = self.arr[i + 1];
-                    // u8[1] * 2^8
-                    y = b.mul(y, two_power_8);
                     // u8[0] + u8[1] * 2^8
-                    x = b.add(x, y);
+                    x = b.mul_add(y, two_power_8, x);
                     // u8[2]
                     y = self.arr[i + 2];
-                    // u8[2] * 2^16
-                    y = b.mul(y, two_power_16);
                     // u8[0] + u8[1] * 2^8 + u8[2] * 2^16
-                    x = b.add(x, y);
+                    x = b.mul_add(y, two_power_16, x);
                     // u8[3]
                     y = self.arr[i + 3];
-                    // u8[3] * 2^24
-                    y = b.mul(y, two_power_24);
                     // u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
-                    x = b.add(x, y);
+                    x = b.mul_add(y, two_power_24, x);
 
                     U32Target(x)
                 })
