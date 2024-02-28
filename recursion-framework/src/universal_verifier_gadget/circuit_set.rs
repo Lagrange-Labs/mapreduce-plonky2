@@ -28,7 +28,7 @@ pub(crate) fn merkle_cap_to_targets(merkle_cap: &MerkleCapTarget) -> Vec<Target>
 }
 
 // Set of targets employed to prove that the circuit employed to generate a proof being recursively
-// verified belongs to the set of circuits whose proofs can be verified with the universal verifier 
+// verified belongs to the set of circuits whose proofs can be verified with the universal verifier
 // bound to such a set
 #[derive(Debug)]
 pub(crate) struct CircuitSetMembershipTargets {
@@ -36,7 +36,7 @@ pub(crate) struct CircuitSetMembershipTargets {
     leaf_index_bits: Vec<BoolTarget>,
 }
 
-// The target employed to represent the set of circuits whose proofs can be verified with the 
+// The target employed to represent the set of circuits whose proofs can be verified with the
 // universal verifier bound to such a set
 pub(crate) struct CircuitSetTarget(MerkleCapTarget);
 
@@ -136,7 +136,7 @@ pub(crate) fn check_circuit_digest_target<
     builder.connect_hashes(verifier_data.circuit_digest, cap_hash);
 }
 #[derive(Clone, Debug)]
-// Data structure employed by the recursion framework to store and manage the set of circuits whose proofs 
+// Data structure employed by the recursion framework to store and manage the set of circuits whose proofs
 // can be verified with the universal verifier bound to such a set
 pub(crate) struct CircuitSet<
     F: RichField + Extendable<D>,
@@ -217,7 +217,7 @@ where
     }
 }
 
-// A short representation (e.g., a digest) of the set of circuits whose proofs can be verified with the 
+// A short representation (e.g., a digest) of the set of circuits whose proofs can be verified with the
 // universal verifier bound to such a set; this should represent values assignable to a `CircuitSetTarget`
 #[derive(Debug, Clone)]
 pub struct CircuitSetDigest<

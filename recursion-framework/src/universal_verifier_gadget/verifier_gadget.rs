@@ -24,8 +24,8 @@ use anyhow::Result;
 
 #[derive(Debug)]
 // `UniversalVerifierTarget` comprises all the targets that are employed by the universal verifier
-// to recusively verify a proof and to check the membership of the digest of the verifier data employed 
-// to verify the proof in the set of circuits bound to the universal verifier instance at hand 
+// to recusively verify a proof and to check the membership of the digest of the verifier data employed
+// to verify the proof in the set of circuits bound to the universal verifier instance at hand
 pub(crate) struct UniversalVerifierTarget<const D: usize> {
     circuit_set_membership: CircuitSetMembershipTargets,
     verified_proof: ProofWithPublicInputsTarget<D>,
@@ -63,9 +63,9 @@ impl<const D: usize> UniversalVerifierTarget<D> {
         )
     }
 }
-// `UniversalVerifierBuilder` is a data structure necessary to build instances of the universal verifier 
-// in a circuit. It is mostly employed to cache the `CommonCircuitData` that are shared among all the 
-// proofs being verified by the universal verifier, which are computed just once when initializing 
+// `UniversalVerifierBuilder` is a data structure necessary to build instances of the universal verifier
+// in a circuit. It is mostly employed to cache the `CommonCircuitData` that are shared among all the
+// proofs being verified by the universal verifier, which are computed just once when initializing
 // `UniversalVerifierBuilder`
 pub(crate) struct UniversalVerifierBuilder<
     F: RichField + Extendable<D>,
@@ -127,8 +127,8 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
             .zip(proof.public_inputs.iter().skip(NUM_PUBLIC_INPUTS))
             .for_each(|(&cs_t, &pi_t)| builder.connect(cs_t, pi_t));
     }
-    // Gadget to add an instance of the universal verifier, bound to the circuit set specified in `circuit_set_target`, 
-    // to a circuit that is being built with `builder` 
+    // Gadget to add an instance of the universal verifier, bound to the circuit set specified in `circuit_set_target`,
+    // to a circuit that is being built with `builder`
     pub(crate) fn universal_verifier_circuit<C: GenericConfig<D, F = F>>(
         &self,
         builder: &mut CircuitBuilder<F, D>,

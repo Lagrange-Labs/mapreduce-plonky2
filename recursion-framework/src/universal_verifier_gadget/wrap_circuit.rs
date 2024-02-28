@@ -107,8 +107,8 @@ where
         wrap_circuit
     }
 
-    /// Creates the intermediary wrapping proof over the given `inner_proof` and enforcing their correctness 
-    /// according to the wrap circuit defined in `build_wrap_circuit`. 
+    /// Creates the intermediary wrapping proof over the given `inner_proof` and enforcing their correctness
+    /// according to the wrap circuit defined in `build_wrap_circuit`.
     pub(crate) fn wrap_proof(
         &self,
         inner_proof: ProofWithPublicInputs<F, C, D>,

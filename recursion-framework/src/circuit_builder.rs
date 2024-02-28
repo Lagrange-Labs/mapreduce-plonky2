@@ -37,8 +37,8 @@ pub trait CircuitLogic<F: RichField + Extendable<D>, const D: usize, const NUM_V
     const NUM_PUBLIC_INPUTS: usize;
 
     /// `circuit_logic` allows to specify an additional logic to be enforced in a circuit besides
-    /// verifying proofs with the universal verifier. 
-    /// It returns an instance of itself, that must contain the wires that will get assigned during proving time. 
+    /// verifying proofs with the universal verifier.
+    /// It returns an instance of itself, that must contain the wires that will get assigned during proving time.
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
         verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_VERIFIERS],
@@ -153,7 +153,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
             proof_targets.try_into().unwrap(),
             input_parameters,
         );
-        // Register the circuit set digest as the last public inputs of the proof. The universal verifier checks that 
+        // Register the circuit set digest as the last public inputs of the proof. The universal verifier checks that
         // it corresponds to the expect circuit set digest.
         builder.register_public_inputs(circuit_set_target.to_targets().as_slice());
 
@@ -180,15 +180,15 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     }
 
     /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
-    /// a circuit built by `Self`, returns the set of targets corresponding to all the public inputs of 
+    /// a circuit built by `Self`, returns the set of targets corresponding to all the public inputs of
     /// the proof except for the ones representing the digest of the circuit set
     pub fn get_public_inputs_from_proof(proof: &ProofWithPublicInputsTarget<D>) -> &[Target] {
         &proof.public_inputs[..NUM_PUBLIC_INPUTS]
     }
 
     /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
-    /// a circuit built by `Self`, returns the set of targets that represent the digest 
-    /// of the circuit set exposed as public input by the proof, which might be necessary when the proof 
+    /// a circuit built by `Self`, returns the set of targets that represent the digest
+    /// of the circuit set exposed as public input by the proof, which might be necessary when the proof
     /// is recursively verified in another circuit
     pub fn get_circuit_set_targets_from_proof(proof: &ProofWithPublicInputsTarget<D>) -> &[Target] {
         &proof.public_inputs[NUM_PUBLIC_INPUTS..]
@@ -196,31 +196,31 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
 }
 
 /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
-/// a `CircuitWithUniversalVerifier` circuit, returns the set of `NUM_PUBLIC_INPUTS` targets corresponding to 
+/// a `CircuitWithUniversalVerifier` circuit, returns the set of `NUM_PUBLIC_INPUTS` targets corresponding to
 /// all the public inputs of the proof except for the ones representing the digest of the circuit set
 pub fn get_public_inputs_from_proof<
     F: RichField + Extendable<D>,
     const D: usize,
-    const NUM_PUBLIC_INPUTS: usize, 
+    const NUM_PUBLIC_INPUTS: usize,
 >(
-    proof: &ProofWithPublicInputsTarget<D>
-) -> &[Target] 
-{
-    CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::get_public_inputs_from_proof(proof)
+    proof: &ProofWithPublicInputsTarget<D>,
+) -> &[Target] {
+    CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::get_public_inputs_from_proof(
+        proof,
+    )
 }
 
 /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
-/// a `CircuitWithUniversalVerifier` circuit, returns the set of targets that represent the digest 
-/// of the circuit set exposed as public input by the proof, which might be necessary when the proof 
+/// a `CircuitWithUniversalVerifier` circuit, returns the set of targets that represent the digest
+/// of the circuit set exposed as public input by the proof, which might be necessary when the proof
 /// is recursively verified in another circuit
 pub fn get_circuit_set_targets_from_proof<
     F: RichField + Extendable<D>,
     const D: usize,
-    const NUM_PUBLIC_INPUTS: usize, 
+    const NUM_PUBLIC_INPUTS: usize,
 >(
-    proof: &ProofWithPublicInputsTarget<D>
-) -> &[Target] 
-{
+    proof: &ProofWithPublicInputsTarget<D>,
+) -> &[Target] {
     CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::get_circuit_set_targets_from_proof(proof)
 }
 
@@ -514,7 +514,10 @@ pub(crate) mod tests {
             circuit_set_digest.flatten().as_slice()
         );
 
-        recursive_circuit.circuit_data().verify(rec_proof.clone()).unwrap();
+        recursive_circuit
+            .circuit_data()
+            .verify(rec_proof.clone())
+            .unwrap();
 
         let recursive_circuits_input = array::from_fn(|_| F::rand());
         let input_proofs = base_proofs

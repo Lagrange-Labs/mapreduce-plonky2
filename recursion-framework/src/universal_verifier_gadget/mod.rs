@@ -25,20 +25,20 @@ pub(crate) use circuit_set::{CircuitSet, CircuitSetTarget};
 const CIRCUIT_SET_CAP_HEIGHT: usize = 0;
 
 // Minimum `degree_bits` of a circuit recursively verifying a Plonky2 proof. This corresponds to the
-// expected `degree_bits` of every circuit whose proofs can be recursively verified by a universal 
-// verifier, given that for every Plonky2 circuit it should always be possible to obtain a circuit 
-// with `RECURSION_THRESHOLD` `degree_bits` proving the same statement (referred to as `WrapCircuit` 
-// in this framework)  
+// expected `degree_bits` of every circuit whose proofs can be recursively verified by a universal
+// verifier, given that for every Plonky2 circuit it should always be possible to obtain a circuit
+// with `RECURSION_THRESHOLD` `degree_bits` proving the same statement (referred to as `WrapCircuit`
+// in this framework)
 pub(crate) const RECURSION_THRESHOLD: usize = 12;
 
-// `degree_bits` for a base circuit guaranteeing that 2 wrap steps are necessary to obtain an equivalent 
+// `degree_bits` for a base circuit guaranteeing that 2 wrap steps are necessary to obtain an equivalent
 // version of the base circuit with `RECURSION_THRESHOLD` `degree_bits`; this limit is only employed to
-// generate the base circuit employed to compute the `CommonCircuitData` shared among all wrap circuits 
+// generate the base circuit employed to compute the `CommonCircuitData` shared among all wrap circuits
 // whose proofs can be verified by a universal verifier for a given circuit set
 const SHRINK_LIMIT: usize = 15;
 
-// This function builds the base circuit employed to compute the `CommonCircuitData` shared among all 
-// wrap circuits whose proofs can be verified by a universal verifier for a set of circuits with 
+// This function builds the base circuit employed to compute the `CommonCircuitData` shared among all
+// wrap circuits whose proofs can be verified by a universal verifier for a set of circuits with
 // `num_public_inputs`
 fn dummy_circuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
     config: CircuitConfig,
@@ -60,7 +60,7 @@ fn dummy_circuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const
 }
 
 // It returns the `CommonCircuitData` which is shared across all circuits whose proofs can be
-// verified by a universal verifier for a set of circuits with `num_public_inputs`. 
+// verified by a universal verifier for a set of circuits with `num_public_inputs`.
 // It is only called for testing purposes or during build time.
 pub(crate) fn build_data_for_recursive_aggregation<
     F: RichField + Extendable<D>,
