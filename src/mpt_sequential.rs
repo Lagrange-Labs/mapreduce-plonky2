@@ -418,15 +418,13 @@ impl MPTKeyWire {
 
     /// Proves the prefix of this key and other's key up to pointer are the same.
     /// Proves both pointers are the same.
-    pub fn is_prefix_equal<F: RichField + Extendable<D>, const D: usize>(
+    pub fn enforce_prefix_equal<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
         other: &Self,
-    ) -> BoolTarget {
-        let ptr_equal = b.is_equal(self.pointer, other.pointer);
-        let prefix_equal = self.key.slice_equals(b, &other.key, self.pointer);
-        let both = b.and(ptr_equal, prefix_equal);
-        both
+    ) {
+        b.connect(self.pointer, other.pointer);
+        self.key.enforce_slice_equals(b, &other.key, self.pointer);
     }
     /// Register the key and pointer as public inputs.
     pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(

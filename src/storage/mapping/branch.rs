@@ -97,8 +97,7 @@ where
             // by the prover. Reason why it is secure is because this circuit only cares
             // that _all_ keys share the _same_ prefix, so if they're all equal
             // to `common_prefix`, they're all equal.
-            let have_common_prefix = common_prefix.is_prefix_equal(b, &new_key);
-            b.connect(have_common_prefix.target, tru.target);
+            common_prefix.enforce_prefix_equal(b, &new_key);
             // We also check proof is valid for the _same_ mapping slot
             b.connect(mapping_slot, proof_inputs.mapping_slot());
         }
@@ -227,7 +226,7 @@ mod test {
         let leaf1 = proof1.last().unwrap();
         let leaf2 = proof2.last().unwrap();
         let compute_key = |leaf: &[u8]| {
-            let tuple: Vec<Vec<u8>> = rlp::decode_list(&leaf);
+            let tuple: Vec<Vec<u8>> = rlp::decode_list(leaf);
             let partial_nibbles = Nibbles::from_compact(&tuple[0]);
             let partial_key_len = partial_nibbles.nibbles().len();
             MAX_KEY_NIBBLE_LEN - 1 - partial_key_len
@@ -259,8 +258,8 @@ mod test {
             // set 1 becaues it' s leaf
             PublicInputs::create_public_inputs_arr(&bytes_to_nibbles(key), ptr1, slot, 1, &c, &d)
         };
-        let pi1 = compute_pi(&key1, &leaf1, &value1);
-        let pi2 = compute_pi(&key2, &leaf2, &value2);
+        let pi1 = compute_pi(&key1, leaf1, &value1);
+        let pi2 = compute_pi(&key2, leaf2, &value2);
         assert_eq!(pi1.len(), PublicInputs::<F>::TOTAL_LEN);
         let circuit = TestBranchCircuit {
             c: branch_circuit,
