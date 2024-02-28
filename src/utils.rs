@@ -222,10 +222,15 @@ pub(crate) mod test {
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use rand::RngCore;
+    use rand::{thread_rng, Rng, RngCore};
 
     use super::read_le_u32;
-
+    pub(crate) fn random_vector<T>(size: usize) -> Vec<T>
+    where
+        rand::distributions::Standard: rand::distributions::Distribution<T>,
+    {
+        (0..size).map(|_| thread_rng().gen::<T>()).collect()
+    }
     pub(crate) fn hash_output_to_field<F: RichField>(expected: &[u8]) -> Vec<F> {
         let iter_u32 = expected.iter().chunks(4);
         iter_u32

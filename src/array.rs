@@ -501,7 +501,7 @@ mod test {
 
     use crate::{
         array::{Array, ToField, Vector, VectorWire},
-        circuit::{test::test_simple_circuit, UserCircuit},
+        circuit::{test::run_circuit, UserCircuit},
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
     const D: usize = 2;
@@ -558,12 +558,12 @@ mod test {
         rng.fill(&mut arr[..]);
         let mut arr2 = [0u8; SIZE];
         rng.fill(&mut arr2[..]);
-        test_simple_circuit::<F, D, C, _>(SelectCircuit {
+        run_circuit::<F, D, C, _>(SelectCircuit {
             arr,
             arr2,
             cond: true,
         });
-        test_simple_circuit::<F, D, C, _>(SelectCircuit {
+        run_circuit::<F, D, C, _>(SelectCircuit {
             arr,
             arr2,
             cond: false,
@@ -610,7 +610,7 @@ mod test {
         let mut rng = thread_rng();
         let mut arr = [0u8; SIZE];
         rng.fill(&mut arr[..]);
-        test_simple_circuit::<F, D, C, _>(ConvertCircuit { arr });
+        run_circuit::<F, D, C, _>(ConvertCircuit { arr });
     }
     #[test]
     fn test_value_at() {
@@ -647,7 +647,7 @@ mod test {
         rng.fill(&mut arr[..]);
         let idx: usize = rng.gen_range(0..SIZE);
         let exp = arr[idx];
-        test_simple_circuit::<F, D, C, _>(ValueAtCircuit { arr, idx, exp });
+        run_circuit::<F, D, C, _>(ValueAtCircuit { arr, idx, exp });
     }
 
     #[test]
@@ -690,7 +690,7 @@ mod test {
         rng.fill(&mut arr[..]);
         let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
         let exp = create_array(|i| arr[idx + i]);
-        test_simple_circuit::<F, D, C, _>(ExtractArrayCircuit { arr, idx, exp });
+        run_circuit::<F, D, C, _>(ExtractArrayCircuit { arr, idx, exp });
     }
 
     #[test]
@@ -734,11 +734,7 @@ mod test {
             rng.fill(&mut arr[..]);
             let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
             let exp = create_array(|i| arr[idx + i]);
-            test_simple_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
-                arr,
-                idx,
-                exp,
-            });
+            run_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> { arr, idx, exp });
         }
         {
             // trying where the subarray is at the end
@@ -752,7 +748,7 @@ mod test {
                 hex::decode("6b4a71765e17649ab73c5e176281619faf173519718e6e95a40a8768685a26c6")
                     .unwrap();
             let idx = find_index_subvector(&node, &child_hash).unwrap();
-            test_simple_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
+            run_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
                 arr: node.try_into().unwrap(),
                 idx,
                 exp: child_hash.try_into().unwrap(),
@@ -769,12 +765,13 @@ mod test {
             use std::panic;
             // a bit hardcore method to test for failure but it works for now
             let r = panic::catch_unwind(|| {
-                test_simple_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
-                    arr,
+                run_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
                     idx,
                     exp,
+                    arr,
                 })
             });
+
             assert!(r.is_err());
         }
     }
@@ -826,19 +823,13 @@ mod test {
         let idx: usize = rng.gen_range(0..(SIZE - random_size));
         let sub = arr[idx..idx + random_size].to_vec();
 
-        test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
-            arr,
-            idx: 0,
-            sub: arr.to_vec(),
-            exp: true,
-        });
-        test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
+        run_circuit::<F, D, C, _>(ContainsVectorCircuit {
             arr,
             idx,
             sub,
             exp: true,
         });
-        test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
+        run_circuit::<F, D, C, _>(ContainsVectorCircuit {
             arr,
             idx,
             sub: (0..random_size).map(|_| rng.gen()).collect::<Vec<_>>(),
@@ -874,15 +865,15 @@ mod test {
         const N: usize = 47;
         let vector = (0..N).map(|_| thread_rng().gen::<u8>()).collect::<Vec<_>>();
         let circuit = TestAssertBytes::<u8, N> { vector };
-        test_simple_circuit::<F, D, C, _>(circuit);
+        run_circuit::<F, D, C, _>(circuit);
 
         // circuit should fail with non bytes entries
         let vector = (0..N)
-            .map(|_| thread_rng().gen_range(u8::MAX as u32..u32::MAX))
+            .map(|_| thread_rng().gen::<u32>() + u8::MAX as u32)
             .collect::<Vec<_>>();
         let res = panic::catch_unwind(|| {
             let circuit = TestAssertBytes::<u32, N> { vector };
-            test_simple_circuit::<F, D, C, _>(circuit);
+            run_circuit::<F, D, C, _>(circuit);
         });
         assert!(res.is_err());
     }
