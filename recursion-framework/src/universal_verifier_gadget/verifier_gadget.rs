@@ -23,13 +23,16 @@ use super::{
 use anyhow::Result;
 
 #[derive(Debug)]
-pub(crate) struct UniversalVerifierTargets<const D: usize> {
+// `UniversalVerifierTarget` comprises all the targets that are employed by the universal verifier
+// to recusively verify a proof and to check the membership of the digest of the verifier data employed 
+// to verify the proof in the set of circuits bound to the universal verifier instance at hand 
+pub(crate) struct UniversalVerifierTarget<const D: usize> {
     circuit_set_membership: CircuitSetMembershipTargets,
     verified_proof: ProofWithPublicInputsTarget<D>,
     verifier_data: VerifierCircuitTarget,
 }
 
-impl<const D: usize> UniversalVerifierTargets<D> {
+impl<const D: usize> UniversalVerifierTarget<D> {
     pub(crate) fn get_proof_target(&self) -> &ProofWithPublicInputsTarget<D> {
         &self.verified_proof
     }
@@ -60,7 +63,10 @@ impl<const D: usize> UniversalVerifierTargets<D> {
         )
     }
 }
-
+// `UniversalVerifierBuilder` is a data structure necessary to build instances of the universal verifier 
+// in a circuit. It is mostly employed to cache the `CommonCircuitData` that are shared among all the 
+// proofs being verified by the universal verifier, which are computed just once when initializing 
+// `UniversalVerifierBuilder`
 pub(crate) struct UniversalVerifierBuilder<
     F: RichField + Extendable<D>,
     const D: usize,
@@ -121,12 +127,13 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
             .zip(proof.public_inputs.iter().skip(NUM_PUBLIC_INPUTS))
             .for_each(|(&cs_t, &pi_t)| builder.connect(cs_t, pi_t));
     }
-
+    // Gadget to add an instance of the universal verifier, bound to the circuit set specified in `circuit_set_target`, 
+    // to a circuit that is being built with `builder` 
     pub(crate) fn universal_verifier_circuit<C: GenericConfig<D, F = F>>(
         &self,
         builder: &mut CircuitBuilder<F, D>,
         circuit_set_target: &CircuitSetTarget,
-    ) -> UniversalVerifierTargets<D>
+    ) -> UniversalVerifierTarget<D>
     where
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
@@ -149,7 +156,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
         // check that the circuit set employed as public input in the recursively verified proof is the same as the one exposed by the recursive proof
         Self::check_circuit_set_equality(builder, circuit_set_target, &proof);
 
-        UniversalVerifierTargets {
+        UniversalVerifierTarget {
             circuit_set_membership: proof_membership_target,
             verified_proof: proof,
             verifier_data,
@@ -281,7 +288,7 @@ mod tests {
         const D: usize,
         const INPUT_SIZE: usize,
     > {
-        verifier_targets: UniversalVerifierTargets<D>,
+        verifier_targets: UniversalVerifierTarget<D>,
         input_targets: RecursiveCircuit<INPUT_SIZE>,
         circuit_set_target: CircuitSetTarget,
         circuit_data: CircuitData<F, C, D>,

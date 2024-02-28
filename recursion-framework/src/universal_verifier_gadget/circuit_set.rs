@@ -27,16 +27,17 @@ pub(crate) fn merkle_cap_to_targets(merkle_cap: &MerkleCapTarget) -> Vec<Target>
     merkle_cap.0.iter().flat_map(|h| h.elements).collect()
 }
 
-// Set of targets employed to prove that the circuit employed to generate a proof being aggregated
-// by `MergeCircuit` belongs to the set of circuits that can be aggregated by the `MergeCircuit`
-// itself
+// Set of targets employed to prove that the circuit employed to generate a proof being recursively
+// verified belongs to the set of circuits whose proofs can be verified with the universal verifier 
+// bound to such a set
 #[derive(Debug)]
 pub(crate) struct CircuitSetMembershipTargets {
     merkle_proof_target: MerkleProofTarget,
     leaf_index_bits: Vec<BoolTarget>,
 }
 
-// The target employed to represent the set of circuits that can be aggregated by the `MergeCircuit`
+// The target employed to represent the set of circuits whose proofs can be verified with the 
+// universal verifier bound to such a set
 pub(crate) struct CircuitSetTarget(MerkleCapTarget);
 
 impl CircuitSetTarget {
@@ -135,8 +136,8 @@ pub(crate) fn check_circuit_digest_target<
     builder.connect_hashes(verifier_data.circuit_digest, cap_hash);
 }
 #[derive(Clone, Debug)]
-// Data structure employed by the recursion framework to store and manage the set of circuits that can
-// be verified with the universal verifier
+// Data structure employed by the recursion framework to store and manage the set of circuits whose proofs 
+// can be verified with the universal verifier bound to such a set
 pub(crate) struct CircuitSet<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
@@ -176,7 +177,7 @@ where
     }
 
     // set a `CircuitSetMembershipTargets` to prove membership of `circuit_digest` in the set of
-    // circuits that can be aggregated by the `MergeCircuit`
+    // circuits whose proofs can be verified with the universal verifier bound to such a set
     pub(crate) fn set_circuit_membership_target(
         &self,
         pw: &mut PartialWitness<F>,
@@ -216,8 +217,8 @@ where
     }
 }
 
-// A short representation (e.g., a digest) of the set of circuits that can be aggregated by
-// `MergeCircuit`; this should represent values assignable to a `CircuitSetTarget`
+// A short representation (e.g., a digest) of the set of circuits whose proofs can be verified with the 
+// universal verifier bound to such a set; this should represent values assignable to a `CircuitSetTarget`
 #[derive(Debug, Clone)]
 pub struct CircuitSetDigest<
     F: RichField + Extendable<D>,

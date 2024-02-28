@@ -12,7 +12,7 @@ use plonky2::{
 };
 
 use crate::universal_verifier_gadget::{
-    verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTargets},
+    verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
     wrap_circuit::WrapCircuit,
     CircuitSet, CircuitSetDigest, CircuitSetTarget,
 };
@@ -135,7 +135,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     {
         let mut builder = CircuitBuilder::<F, D>::new(config.clone());
         let circuit_set_target = CircuitSetTarget::build_target(&mut builder);
-        let universal_verifier_targets: [UniversalVerifierTargets<D>; NUM_VERIFIERS] = (0
+        let universal_verifier_targets: [UniversalVerifierTarget<D>; NUM_VERIFIERS] = (0
             ..NUM_VERIFIERS)
             .map(|_| {
                 self.verifier_builder
@@ -189,7 +189,7 @@ pub struct CircuitWithUniversalVerifier<
     const NUM_VERIFIERS: usize,
     CL: CircuitLogic<F, D, NUM_VERIFIERS>,
 > {
-    universal_verifier_targets: [UniversalVerifierTargets<D>; NUM_VERIFIERS],
+    universal_verifier_targets: [UniversalVerifierTarget<D>; NUM_VERIFIERS],
     circuit_data: CircuitData<F, C, D>,
     circuit_logic: CL,
     circuit_set_target: CircuitSetTarget,

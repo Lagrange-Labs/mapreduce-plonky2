@@ -13,7 +13,7 @@ use plonky2::{
 use crate::{
     circuit_builder::{CircuitLogic, CircuitWithUniversalVerifier},
     universal_verifier_gadget::{
-        verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTargets},
+        verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
         CircuitSet, CircuitSetDigest, CircuitSetTarget,
     },
 };
@@ -141,7 +141,7 @@ pub fn prepare_recursive_circuit_for_circuit_set<
 
 /// Targets instantiated by the `RecursiveCircuitsVerifierGadget` which needs to be assigned with a
 /// witness value by the prover
-pub struct RecursiveCircuitsVerifierTargets<const D: usize>(UniversalVerifierTargets<D>);
+pub struct RecursiveCircuitsVerifierTargets<const D: usize>(UniversalVerifierTarget<D>);
 
 impl<const D: usize> RecursiveCircuitsVerifierTargets<D> {
     /// Assign witness values to the targets in `self`, employing the following input data:
