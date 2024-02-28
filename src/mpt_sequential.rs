@@ -63,7 +63,7 @@ where
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
     /// way to define everything according to max size of the data and
     /// "not care" about the padding size (almost!)
-    pub nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
+    pub(crate) nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
     /// in the case of a fixed circuit, the actual tree depth might be smaller.
     /// In this case, we set false on the part of the path we should not process.
     /// NOTE: for node at index i in the path, the boolean indicating if we should
@@ -81,7 +81,7 @@ where
     /// The leaf value wires. It is provably extracted from the leaf node.
     leaf: Array<Target, MAX_LEAF_VALUE>,
     /// The root hash value wire.
-    pub root: OutputHash,
+    pub(crate) root: OutputHash,
 }
 
 impl<const DEPTH: usize, const NODE_LEN: usize> Circuit<DEPTH, NODE_LEN>

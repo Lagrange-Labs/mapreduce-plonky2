@@ -31,11 +31,11 @@ where
     /// The hash bytes of storage root
     storage_root_bytes: OutputByteHash,
     /// The offset of storage MPT root hash located in RLP encoded account node
-    pub storage_root_offset: Target,
+    pub(crate) storage_root_offset: Target,
     /// Input wires of state MPT circuit
-    pub state_mpt_input: MPTInputWires<DEPTH, NODE_LEN>,
+    pub(crate) state_mpt_input: MPTInputWires<DEPTH, NODE_LEN>,
     /// Output wires of state MPT circuit
-    pub state_mpt_output: MPTOutputWires<DEPTH, NODE_LEN>,
+    pub(crate) state_mpt_output: MPTOutputWires<DEPTH, NODE_LEN>,
 }
 
 /// The account input gadget
