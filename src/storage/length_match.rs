@@ -10,15 +10,10 @@ use crate::{
     utils::{PackedAddressTarget, PACKED_ADDRESS_LEN},
 };
 use plonky2::{
-    field::{extension::Extendable, goldilocks_field::GoldilocksField},
-    hash::hash_types::RichField,
-    iop::{
-        target::Target,
-        witness::{PartialWitness, WitnessWrite},
-    },
+    field::goldilocks_field::GoldilocksField, iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget, PartialWitnessCurve};
+use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 
 /// This is a wrapper around an array of targets set as public inputs of any
 /// proof generated in this module. They all share the same structure.
@@ -82,145 +77,49 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 }
 
-/// The elements to check equivalent for both length and mapping entries proofs
-struct EqualElements {
-    /// The length value (V) saved in length proof and the number of entries up
-    /// to the given node (n) saved in mapping entries proof
-    length: Target,
-    /// MPT root hash (C) saved in both proofs
-    mpt_root_hash: OutputHash,
-}
-
-impl EqualElements {
-    fn new<F, const D: usize>(cb: &mut CircuitBuilder<F, D>) -> Self
-    where
-        F: RichField + Extendable<D>,
-    {
-        Self {
-            length: cb.add_virtual_target(),
-            mpt_root_hash: OutputHash::new(cb),
-        }
-    }
-
-    fn assign<F>(&self, pw: &mut PartialWitness<F>, length: F, mpt_root_hash: &[F; PACKED_HASH_LEN])
-    where
-        F: RichField,
-    {
-        pw.set_target(self.length, length);
-        self.mpt_root_hash.assign(pw, mpt_root_hash);
-    }
-
-    /// Constrain this is equal to the elements of another proof.
-    fn assert_equal<F, const D: usize>(&self, cb: &mut CircuitBuilder<F, D>, other: &Self)
-    where
-        F: RichField + Extendable<D>,
-    {
-        // Constrain the entry lengths are equal.
-        cb.connect(self.length, other.length);
-
-        // Constrain the MPT root hashes are same.
-        self.mpt_root_hash.enforce_equal(cb, &other.mpt_root_hash);
-    }
-}
-
-/// Length match wires
-struct LengthMatchWires {
-    /// The current MPT key pointer of entries proof, it should be equal to -1
-    /// after traversing from leaf to root.
-    mpt_key_pointer: Target,
-    /// The storage slot of the mapping entries
-    mapping_slot: Target,
-    /// The storage slot of the variable holding the length
-    length_slot: Target,
-    /// Contract address
-    contract_address: PackedAddressTarget,
-    /// Digest of the all mapping entries
-    digest: CurveTarget,
-    /// The elements of length proof to check equivalent
-    length_elements: EqualElements,
-    /// The elements of mapping entries proof to check equivalent
-    mapping_elements: EqualElements,
-}
-
 /// Length match circuit
 #[derive(Clone, Debug)]
-struct LengthMatchCircuit<F> {
-    /// The public inputs of previous length extract proof
-    length_proof: Vec<F>,
-    /// The public inputs of previous mapping entries proof
-    mapping_proof: Vec<F>,
-}
+struct LengthMatchCircuit;
 
-impl<F> LengthMatchCircuit<F> {
-    pub fn new(length_proof: Vec<F>, mapping_proof: Vec<F>) -> Self {
-        Self {
-            length_proof,
-            mapping_proof,
-        }
-    }
-}
-
-impl LengthMatchCircuit<GoldilocksField> {
+impl LengthMatchCircuit {
     /// Build for circuit.
-    pub fn build(cb: &mut CircuitBuilder<GoldilocksField, 2>) -> LengthMatchWires {
-        let mpt_key_pointer = cb.add_virtual_target();
-        let mapping_slot = cb.add_virtual_target();
-        let length_slot = cb.add_virtual_target();
-        let contract_address = PackedAddressTarget::new(cb);
-        let digest = cb.add_virtual_curve_target();
-        let length_elements = EqualElements::new(cb);
-        let mapping_elements = EqualElements::new(cb);
+    pub fn build(
+        cb: &mut CircuitBuilder<GoldilocksField, 2>,
+        length_pi: &[Target],
+        mapping_pi: &[Target],
+    ) {
+        let length_pi = LengthPublicInputs::from(length_pi);
+        let mapping_pi = MappingPublicInputs::from(mapping_pi);
+
+        let mapping_slot = mapping_pi.mapping_slot();
+        let length_slot = length_pi.storage_slot();
+        let contract_address = length_pi.contract_address();
+        let digest = mapping_pi.accumulator();
 
         // The MPT key pointer must be equal to -1 after traversing from leaf to
         // root.
+        let (_, mpt_key_pointer) = mapping_pi.mpt_key_info();
         let neg_one = cb.neg_one();
         cb.connect(mpt_key_pointer, neg_one);
 
-        // Constrain the elements are equal for both length and entries proofs.
-        length_elements.assert_equal(cb, &mapping_elements);
+        // Constrain the entry lengths are equal.
+        let length_value = length_pi.length_value();
+        let n = mapping_pi.n();
+        cb.connect(length_value, n);
+
+        // Constrain the MPT root hashes are same.
+        let length_root_hash = length_pi.root_hash();
+        let mapping_root_hash = mapping_pi.root_hash();
+        length_root_hash.enforce_equal(cb, &mapping_root_hash);
 
         // Register the public inputs.
         PublicInputs::register(
             cb,
             &digest,
             &contract_address,
-            &length_elements.mpt_root_hash,
+            &length_root_hash,
             mapping_slot,
             length_slot,
-        );
-
-        LengthMatchWires {
-            mpt_key_pointer,
-            mapping_slot,
-            length_slot,
-            contract_address,
-            digest,
-            length_elements,
-            mapping_elements,
-        }
-    }
-
-    /// Assign the wires.
-    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &LengthMatchWires) {
-        let length_pi = LengthPublicInputs::from(&self.length_proof);
-        let mapping_pi = MappingPublicInputs::from(&self.mapping_proof);
-
-        pw.set_target(wires.mpt_key_pointer, mapping_pi.mpt_key_info().1);
-        pw.set_target(wires.mapping_slot, mapping_pi.mapping_slot());
-        pw.set_target(wires.length_slot, length_pi.storage_slot());
-        wires
-            .contract_address
-            .assign(pw, length_pi.contract_address().try_into().unwrap());
-        pw.set_curve_target(wires.digest, mapping_pi.accumulator());
-        wires.length_elements.assign(
-            pw,
-            length_pi.length_value(),
-            length_pi.mpt_root_hash().try_into().unwrap(),
-        );
-        wires.mapping_elements.assign(
-            pw,
-            mapping_pi.n(),
-            mapping_pi.root_hash_info().try_into().unwrap(),
         );
     }
 }
@@ -250,18 +149,25 @@ mod tests {
     /// Test circuit
     #[derive(Clone, Debug)]
     struct TestCircuit {
-        c: LengthMatchCircuit<F>,
+        length_pi: Vec<F>,
+        mapping_pi: Vec<F>,
     }
 
     impl UserCircuit<F, D> for TestCircuit {
-        type Wires = LengthMatchWires;
+        type Wires = (Vec<Target>, Vec<Target>);
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            LengthMatchCircuit::build(cb)
+            let length_pi = cb.add_virtual_targets(LengthPublicInputs::<Target>::TOTAL_LEN);
+            let mapping_pi = cb.add_virtual_targets(MappingPublicInputs::<Target>::TOTAL_LEN);
+
+            LengthMatchCircuit::build(cb, &length_pi, &mapping_pi);
+
+            (length_pi, mapping_pi)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.c.assign(pw, wires);
+            pw.set_target_arr(&wires.0, &self.length_pi);
+            pw.set_target_arr(&wires.1, &self.mapping_pi);
         }
     }
 
@@ -279,7 +185,8 @@ mod tests {
         let mapping_pi = generate_mapping_public_inputs(length_value, &mpt_root_hash);
 
         let test_circuit = TestCircuit {
-            c: LengthMatchCircuit::new(length_pi, mapping_pi),
+            length_pi,
+            mapping_pi,
         };
         run_circuit::<F, D, C, _>(test_circuit);
     }
