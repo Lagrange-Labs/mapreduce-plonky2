@@ -137,11 +137,11 @@ where
         let tt = cb._true();
         let account_node = &wires.state_mpt_input.nodes[0];
 
-        // Verify the offset of storage MPT root hash is within range. We use 8
+        // Verify the offset of storage MPT root hash is within range. We use 7
         // bits for the range check since the account node is composed by
         // [nonce (U64), balance (U256), storage_hash (H256), code_hash (H256)]
         // and it has 104 bytes.
-        let within_range = less_than(cb, wires.storage_root_offset, account_node.real_len, 8);
+        let within_range = less_than(cb, wires.storage_root_offset, account_node.real_len, 7);
         cb.connect(within_range.target, tt.target);
 
         // Convert the hash bytes of storage root to an u32 array, and verify
