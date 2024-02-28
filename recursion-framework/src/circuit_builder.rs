@@ -37,7 +37,8 @@ pub trait CircuitLogic<F: RichField + Extendable<D>, const D: usize, const NUM_V
     const NUM_PUBLIC_INPUTS: usize;
 
     /// `circuit_logic` allows to specify an additional logic to be enforced in a circuit besides
-    /// verifying proofs with the universal verifier
+    /// verifying proofs with the universal verifier. 
+    /// It returns an instance of itself, that must contain the wires that will get assigned during proving time. 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
         verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_VERIFIERS],
@@ -66,7 +67,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
 {
     /// Instantiate a `CircuitWithUniversalVerifierBuilder` to build circuits with `num_public_inputs`
     /// employing the configuration `config`. Besides verifying proofs, the universal verifier,
-    /// which is a fundamental building block of circuits built with data structure, will also check
+    /// which is a fundamental building block of circuits built with such data structure, also checks
     /// that the verifier data employed for proof verification belongs to a set of admissible verifier data;
     /// the size of such a set corresponds to `circuit_set_size`, which must be provided as input.  
     pub fn new<C: GenericConfig<D, F = F>>(config: CircuitConfig, circuit_set_size: usize) -> Self
@@ -84,7 +85,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     /// `build_circuit` builds a Plonky2 circuit which:
     /// - Verify `NUM_VERIFIERS` proofs employing the universal verifier.
     /// - Execute the custom logic specified by the `CL` implementation
-    /// Note that the output data structure will contain also the wrapping circuit necessary to
+    /// Note that the output data structure contains also the wrapping circuit necessary to
     /// generate proofs that can be verified recursively with a universal verifier.
     pub fn build_circuit<
         C: GenericConfig<D, F = F>,
@@ -152,6 +153,8 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
             proof_targets.try_into().unwrap(),
             input_parameters,
         );
+        // Register the circuit set digest as the last public inputs of the proof. The universal verifier checks that 
+        // it corresponds to the expect circuit set digest.
         builder.register_public_inputs(circuit_set_target.to_targets().as_slice());
 
         while builder.num_gates() <= MIN_CIRCUIT_SIZE / 2 {

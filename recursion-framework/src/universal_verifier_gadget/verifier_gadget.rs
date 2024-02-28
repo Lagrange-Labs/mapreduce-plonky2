@@ -34,6 +34,9 @@ impl<const D: usize> UniversalVerifierTargets<D> {
         &self.verified_proof
     }
 
+    /// Assigns the proofs and verifier data associated with the proof to the universal verifier targets. In particular,
+    /// it generates the Merkle proof showing the circuit that generated this proof belongs to the set of circuits
+    /// configured for this universal verifier.
     pub(crate) fn set_universal_verifier_targets<
         F: RichField + Extendable<D>,
         C: GenericConfig<D, F = F>,
@@ -89,6 +92,8 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
         self.circuit_set_size
     }
 
+    /// Creates a proof target and verifies it using the given verifier data and the common circuit data (shared by all
+    /// proofs that are in the circuit set). It returns the proof targets.
     pub(crate) fn verify_proof_for_universal_verifier<C: GenericConfig<D, F = F>>(
         &self,
         builder: &mut CircuitBuilder<F, D>,

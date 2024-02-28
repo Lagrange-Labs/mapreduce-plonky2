@@ -49,6 +49,8 @@ fn dummy_circuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const
     builder.build::<C>()
 }
 
+/// It returns the common data which is shared across all wrapping proofs for a given circuit set. It is only
+/// called for testing purposes or during build time.
 pub(crate) fn build_data_for_recursive_aggregation<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
