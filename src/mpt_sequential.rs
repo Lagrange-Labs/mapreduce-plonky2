@@ -110,9 +110,6 @@ where
         // nodes should be ordered from leaf to root and padded at the end
         let nodes: [VectorWire<Target, _>; DEPTH] =
             create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b));
-        // Range check to constrain only bytes for each node.
-        nodes.iter().for_each(|n| n.assert_bytes(b));
-
         InputWires {
             key: full_key,
             nodes,

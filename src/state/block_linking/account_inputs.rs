@@ -92,6 +92,12 @@ where
         let state_mpt_input = MPTCircuit::create_input_wires(cb);
         let state_mpt_output = MPTCircuit::verify_mpt_proof(cb, &state_mpt_input);
 
+        // Range check to constrain only bytes for each node of state MPT input.
+        state_mpt_input
+            .nodes
+            .iter()
+            .for_each(|n| n.assert_bytes(cb));
+
         AccountInputsWires {
             storage_root_bytes,
             storage_root_offset,
