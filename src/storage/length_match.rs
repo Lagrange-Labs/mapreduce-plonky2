@@ -117,15 +117,11 @@ impl EqualElements {
     where
         F: RichField + Extendable<D>,
     {
-        let ttrue = cb._true().target;
-
         // Constrain the entry lengths are equal.
-        let is_equal = cb.is_equal(self.length, other.length);
-        cb.connect(is_equal.target, ttrue);
+        cb.connect(self.length, other.length);
 
         // Constrain the MPT root hashes are same.
-        let is_equal = self.mpt_root_hash.equals(cb, &other.mpt_root_hash);
-        cb.connect(is_equal.target, ttrue);
+        self.mpt_root_hash.enforce_equal(cb, &other.mpt_root_hash);
     }
 }
 
