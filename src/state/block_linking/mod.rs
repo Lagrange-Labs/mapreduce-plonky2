@@ -351,7 +351,9 @@ mod tests {
 
         // Set the storage root hash to the public inputs of storage proof.
         let account_node = &mpt.nodes[0];
-        let start = thread_rng().gen_range(0..account_node.len() - HASH_LEN);
+        // The real account node has 104 bytes and it's composed by
+        // [nonce (U64), balance (U256), storage_hash (H256), code_hash (H256)]
+        let start = thread_rng().gen_range(0..104 - HASH_LEN);
         let storage_root_hash =
             convert_u8_slice_to_u32_fields(&account_node[start..start + HASH_LEN]);
         inner[C1_IDX..C2_IDX].copy_from_slice(&storage_root_hash);
