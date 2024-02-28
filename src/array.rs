@@ -823,7 +823,7 @@ mod test {
         let idx: usize = rng.gen_range(0..(SIZE - random_size));
         let sub = arr[idx..idx + random_size].to_vec();
 
-        test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
+        run_circuit::<F, D, C, _>(ContainsVectorCircuit {
             arr,
             idx,
             sub,
