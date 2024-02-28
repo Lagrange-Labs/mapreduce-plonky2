@@ -178,7 +178,52 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     pub(crate) fn get_circuit_set_size(&self) -> usize {
         self.verifier_builder.get_circuit_set_size()
     }
+
+    /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
+    /// a circuit built by `Self`, returns the set of targets corresponding to all the public inputs of 
+    /// the proof except for the ones representing the digest of the circuit set
+    pub fn get_public_inputs_from_proof(proof: &ProofWithPublicInputsTarget<D>) -> &[Target] {
+        &proof.public_inputs[..NUM_PUBLIC_INPUTS]
+    }
+
+    /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
+    /// a circuit built by `Self`, returns the set of targets that represent the digest 
+    /// of the circuit set exposed as public input by the proof, which might be necessary when the proof 
+    /// is recursively verified in another circuit
+    pub fn get_circuit_set_targets_from_proof(proof: &ProofWithPublicInputsTarget<D>) -> &[Target] {
+        &proof.public_inputs[NUM_PUBLIC_INPUTS..]
+    }
 }
+
+/// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
+/// a `CircuitWithUniversalVerifier` circuit, returns the set of `NUM_PUBLIC_INPUTS` targets corresponding to 
+/// all the public inputs of the proof except for the ones representing the digest of the circuit set
+pub fn get_public_inputs_from_proof<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    const NUM_PUBLIC_INPUTS: usize, 
+>(
+    proof: &ProofWithPublicInputsTarget<D>
+) -> &[Target] 
+{
+    CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::get_public_inputs_from_proof(proof)
+}
+
+/// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
+/// a `CircuitWithUniversalVerifier` circuit, returns the set of targets that represent the digest 
+/// of the circuit set exposed as public input by the proof, which might be necessary when the proof 
+/// is recursively verified in another circuit
+pub fn get_circuit_set_targets_from_proof<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    const NUM_PUBLIC_INPUTS: usize, 
+>(
+    proof: &ProofWithPublicInputsTarget<D>
+) -> &[Target] 
+{
+    CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::get_circuit_set_targets_from_proof(proof)
+}
+
 /// `CircuitWithUniversalVerifier` is a data structure representing a circuit containing `NUM_VERIFIERS`
 /// instances of the universal verifier altogether with the additional logic specified by the specific
 /// `CL` implementor
@@ -243,14 +288,6 @@ where
         let base_proof = self.circuit_data.prove(pw)?;
 
         self.wrap_circuit.wrap_proof(base_proof)
-    }
-
-    /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
-    /// this circuit, returns the set of targets that represent the digest of the circuit set exposed as
-    /// public input by the proof, which might be necessary when the proof is recursively verified in
-    /// another circuit
-    pub fn get_circuit_set_targets(proof: &ProofWithPublicInputsTarget<D>) -> &[Target] {
-        &proof.public_inputs[CL::NUM_PUBLIC_INPUTS..]
     }
 
     /// Returns a reference to the `CircuitData` of the wrapping circuit, that is the circuit whose proofs
@@ -390,8 +427,7 @@ pub(crate) mod tests {
             let hash_input = verified_proofs
                 .into_iter()
                 .flat_map(|pt| {
-                    &pt.public_inputs
-                        [..<Self as CircuitLogic<F, D, NUM_VERIFIERS>>::NUM_PUBLIC_INPUTS]
+                    get_public_inputs_from_proof::<F, D, NUM_PUBLIC_INPUTS_TEST_CIRCUITS>(pt)
                 })
                 .chain(to_be_hashed_payload.iter())
                 .cloned()
@@ -477,6 +513,8 @@ pub(crate) mod tests {
             &rec_proof.public_inputs[NUM_PUBLIC_INPUTS..],
             circuit_set_digest.flatten().as_slice()
         );
+
+        recursive_circuit.circuit_data().verify(rec_proof.clone()).unwrap();
 
         let recursive_circuits_input = array::from_fn(|_| F::rand());
         let input_proofs = base_proofs
