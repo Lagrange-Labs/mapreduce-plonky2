@@ -7,9 +7,7 @@ use super::{
 };
 use crate::{
     keccak::{OutputHash, PACKED_HASH_LEN},
-    utils::{
-        PackedAddressTarget, PackedStorageSlotTarget, PACKED_ADDRESS_LEN, PACKED_STORAGE_SLOT_LEN,
-    },
+    utils::{PackedAddressTarget, PACKED_ADDRESS_LEN},
 };
 use plonky2::{
     field::{extension::Extendable, goldilocks_field::GoldilocksField},
@@ -40,14 +38,14 @@ impl<'a> PublicInputs<'a, Target> {
         digest: &CurveTarget,
         contract_address: &PackedAddressTarget,
         mpt_root_hash: &OutputHash,
-        mapping_slot: &Target,
-        length_slot: &PackedStorageSlotTarget,
+        mapping_slot: Target,
+        length_slot: Target,
     ) {
         cb.register_curve_public_input(*digest);
         contract_address.register_as_input(cb);
         mpt_root_hash.register_as_input(cb);
-        cb.register_public_input(*mapping_slot);
-        length_slot.register_as_input(cb);
+        cb.register_public_input(mapping_slot);
+        cb.register_public_input(length_slot);
     }
 }
 
@@ -57,7 +55,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     const C_IDX: usize = Self::A_IDX + PACKED_ADDRESS_LEN;
     const M_IDX: usize = Self::C_IDX + PACKED_HASH_LEN;
     const S_IDX: usize = Self::M_IDX + 1;
-    pub(crate) const TOTAL_LEN: usize = Self::S_IDX + PACKED_STORAGE_SLOT_LEN;
+    pub(crate) const TOTAL_LEN: usize = Self::S_IDX + 1;
 
     pub fn from(arr: &'a [T]) -> Self {
         Self { proof_inputs: arr }
@@ -75,12 +73,12 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         &self.proof_inputs[Self::C_IDX..Self::M_IDX]
     }
 
-    pub fn mapping_storage_slot(&self) -> &[T] {
-        &self.proof_inputs[Self::M_IDX..Self::S_IDX]
+    pub fn mapping_storage_slot(&self) -> T {
+        self.proof_inputs[Self::M_IDX]
     }
 
-    pub fn length_storage_slot(&self) -> &[T] {
-        &self.proof_inputs[Self::S_IDX..]
+    pub fn length_storage_slot(&self) -> T {
+        self.proof_inputs[Self::S_IDX]
     }
 }
 
@@ -133,7 +131,7 @@ struct LengthMatchWires {
     /// The storage slot of the mapping entries
     mapping_slot: Target,
     /// The storage slot of the variable holding the length
-    length_slot: PackedStorageSlotTarget,
+    length_slot: Target,
     /// Contract address
     contract_address: PackedAddressTarget,
     /// Digest of the all mapping entries
@@ -167,7 +165,7 @@ impl LengthMatchCircuit<GoldilocksField> {
     pub fn build(cb: &mut CircuitBuilder<GoldilocksField, 2>) -> LengthMatchWires {
         let mpt_key_pointer = cb.add_virtual_target();
         let mapping_slot = cb.add_virtual_target();
-        let length_slot = PackedStorageSlotTarget::new(cb);
+        let length_slot = cb.add_virtual_target();
         let contract_address = PackedAddressTarget::new(cb);
         let digest = cb.add_virtual_curve_target();
         let length_elements = EqualElements::new(cb);
@@ -187,8 +185,8 @@ impl LengthMatchCircuit<GoldilocksField> {
             &digest,
             &contract_address,
             &length_elements.mpt_root_hash,
-            &mapping_slot,
-            &length_slot,
+            mapping_slot,
+            length_slot,
         );
 
         LengthMatchWires {
@@ -209,9 +207,7 @@ impl LengthMatchCircuit<GoldilocksField> {
 
         pw.set_target(wires.mpt_key_pointer, mapping_pi.mpt_key_info().1);
         pw.set_target(wires.mapping_slot, mapping_pi.mapping_slot());
-        wires
-            .length_slot
-            .assign(pw, length_pi.storage_slot().try_into().unwrap());
+        pw.set_target(wires.length_slot, length_pi.storage_slot());
         wires
             .contract_address
             .assign(pw, length_pi.contract_address().try_into().unwrap());
@@ -295,7 +291,7 @@ mod tests {
             .collect();
 
         pi[LengthPublicInputs::<F>::V_IDX] = length_value;
-        pi[LengthPublicInputs::<F>::C_IDX..LengthPublicInputs::<F>::S_IDX]
+        pi[LengthPublicInputs::<F>::C_IDX..LengthPublicInputs::<F>::A_IDX]
             .copy_from_slice(mpt_root_hash);
 
         pi

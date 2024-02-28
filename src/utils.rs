@@ -24,15 +24,6 @@ pub const PACKED_ADDRESS_LEN: usize = ADDRESS_LEN / 4;
 /// Pack representation of an address
 pub type PackedAddressTarget = Array<U32Target, PACKED_ADDRESS_LEN>;
 
-/// Length of a storage slot (U256 = [u8; 32])
-pub const STORAGE_SLOT_LEN: usize = 32;
-/// Length of a storage slot in U32
-pub const PACKED_STORAGE_SLOT_LEN: usize = STORAGE_SLOT_LEN / 4;
-/// Representation of a storage slot
-pub type StorageSlotTarget = Array<Target, STORAGE_SLOT_LEN>;
-/// Pack representation of a storage slot
-pub type PackedStorageSlotTarget = Array<U32Target, PACKED_STORAGE_SLOT_LEN>;
-
 pub(crate) fn verify_proof_tuple<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
