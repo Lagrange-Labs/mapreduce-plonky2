@@ -95,23 +95,24 @@ where
 
     pub fn create_input_wires<F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
+        key: Option<MPTKeyWire>,
     ) -> InputWires<DEPTH, NODE_LEN>
     where
         F: RichField + Extendable<D>,
     {
         // full key is expected to be given by verifier (done in UserCircuit impl)
         // initial key has the pointer that is set at the maximum length - 1 (it's an index, so 0-based)
-        let full_key = MPTKeyWire {
+        let key = key.unwrap_or_else(|| MPTKeyWire {
             key: Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b),
             pointer: b.constant(F::from_canonical_usize(MAX_KEY_NIBBLE_LEN) - F::ONE),
-        };
+        });
         let should_process: [BoolTarget; DEPTH - 1] =
             create_array(|_| b.add_virtual_bool_target_safe());
         // nodes should be ordered from leaf to root and padded at the end
         let nodes: [VectorWire<Target, _>; DEPTH] =
             create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b));
         InputWires {
-            key: full_key,
+            key,
             nodes,
             should_process,
         }
@@ -557,7 +558,7 @@ pub mod test {
             let arr = Array::<U32Target, PACKED_HASH_LEN>::from_array(
                 packed_exp_root.try_into().unwrap(),
             );
-            let input_wires = Circuit::create_input_wires(c);
+            let input_wires = Circuit::create_input_wires(c, None);
             let output_wires = Circuit::verify_mpt_proof(c, &input_wires);
             let is_equal = output_wires.root.equals(c, &arr);
             let tt = c._true();

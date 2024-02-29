@@ -129,7 +129,7 @@ where
         let packed_contract_address = slot.contract_address.convert_u8_to_u32(cb);
 
         // Generate the input and output wires of MPT circuit.
-        let mpt_input = MPTCircuit::create_input_wires(cb);
+        let mpt_input = MPTCircuit::create_input_wires(cb, Some(slot.mpt_key.clone()));
         let mpt_output = MPTCircuit::verify_mpt_proof(cb, &mpt_input);
 
         // Range check to constrain only bytes for each node of state MPT input.
