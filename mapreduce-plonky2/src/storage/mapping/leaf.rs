@@ -1,8 +1,10 @@
 //! Module handling the recursive proving of mapping entries specically
 //! inside a storage trie.
 
+use crate::circuit::UserCircuit;
 use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
 use crate::storage::key::MappingSlotWires;
+use crate::storage::mapping::extension::MAX_EXTENSION_NODE_LEN;
 use crate::{
     array::{Array, Vector, VectorWire},
     eth::left_pad32,
@@ -35,20 +37,22 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
+use recursion_framework::circuit_builder::CircuitLogicWires;
 
 use super::super::key::{MappingSlot, MAPPING_KEY_LEN};
 use crate::storage::mapping::public_inputs::PublicInputs;
 
+pub(super) const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
 /// Circuit implementing the circuit to prove the correct derivation of the
 /// MPT key from a mapping key and mapping slot. It also do the usual recursive
 /// MPT proof verification logic.
 #[derive(Clone, Debug)]
-struct LeafCircuit<const NODE_LEN: usize> {
+pub(crate) struct LeafCircuit<const NODE_LEN: usize> {
     node: Vec<u8>,
     slot: MappingSlot,
 }
 
-struct LeafWires<const NODE_LEN: usize>
+pub(crate) struct LeafWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
@@ -134,7 +138,35 @@ where
     }
 }
 
-#[cfg(test)]
+/// D = 2,
+/// Num of children = 0
+impl<const N: usize> CircuitLogicWires<GoldilocksField, 2, 0> for LeafWires<N>
+where
+    [(); PAD_LEN(N)]:,
+{
+    type CircuitBuilderParams = ();
+
+    type Inputs = LeafCircuit<N>;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GoldilocksField>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<GoldilocksField, 2>,
+        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; 0],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        LeafCircuit::build(builder)
+    }
+
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut PartialWitness<GoldilocksField>,
+    ) -> anyhow::Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
+    }
+}
 mod test {
     use std::array::from_fn as create_array;
 

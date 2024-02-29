@@ -18,6 +18,7 @@ use plonky2::{
     },
     util::log2_ceil,
 };
+use serde::Serialize;
 
 use super::CIRCUIT_SET_CAP_HEIGHT;
 use anyhow::{Error, Result};
