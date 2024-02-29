@@ -318,24 +318,21 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         res
     }
 
-    pub fn slice_equals<F: RichField + Extendable<D>, const D: usize>(
+    pub fn enforce_slice_equals<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
         other: &Self,
         end_idx: Target,
-    ) -> BoolTarget {
-        let mut res = b._true();
+    ) {
         let tru = b._true();
         for (i, (our, other)) in self.arr.iter().zip(other.arr.iter()).enumerate() {
             let it = b.constant(F::from_canonical_usize(i));
             // TODO: fixed to 6 becaues max nibble len = 64 - TO CHANGE
             let before_end = less_than(b, it, end_idx, 6);
             let eq = b.is_equal(our.to_target(), other.to_target());
-            let should_be_true =
-                BoolTarget::new_unsafe(b.select(before_end, eq.target, tru.target));
-            res = b.and(res, should_be_true);
+            let res = b.select(before_end, eq.target, tru.target);
+            b.connect(res, tru.target);
         }
-        res
     }
 
     /// Returns self[at..at+SUB_SIZE].
@@ -436,7 +433,6 @@ where
                     y = self.arr[i + 3];
                     // u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
                     x = b.mul_add(y, two_power_24, x);
-
                     U32Target(x)
                 })
                 .collect::<Vec<_>>()
@@ -496,7 +492,7 @@ mod test {
     use crate::{
         array::{Array, ToField, Vector, VectorWire},
         circuit::{test::run_circuit, UserCircuit},
-        utils::{convert_u8_to_u32_slice, find_index_subvector},
+        utils::{convert_u8_to_u32_slice, find_index_subvector, test::random_vector},
     };
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -867,6 +863,62 @@ mod test {
             .collect::<Vec<_>>();
         let res = panic::catch_unwind(|| {
             let circuit = TestAssertBytes::<u32, N> { vector };
+            run_circuit::<F, D, C, _>(circuit);
+        });
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_enforce_slice_equals() {
+        #[derive(Clone, Debug)]
+        struct TestSliceEqual<const N: usize> {
+            arr: [u8; N],
+            arr2: [u8; N],
+            ptr: usize,
+        }
+
+        impl<F, const D: usize, const N: usize> UserCircuit<F, D> for TestSliceEqual<N>
+        where
+            F: RichField + Extendable<D>,
+        {
+            type Wires = (Array<Target, N>, Target, Array<Target, N>);
+
+            fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let arr = Array::<Target, N>::new(c);
+                let ptr = c.add_virtual_target();
+                let prefix = Array::<Target, N>::new(c);
+                arr.enforce_slice_equals(c, &prefix, ptr);
+                (arr, ptr, prefix)
+            }
+
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires
+                    .0
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
+                wires
+                    .2
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr2[i])));
+                pw.set_target(wires.1, F::from_canonical_usize(self.ptr));
+            }
+        }
+        const N: usize = 45;
+        let arr: [u8; N] = random_vector(N).try_into().unwrap();
+        let mut arr2: [u8; N] = random_vector(N).try_into().unwrap();
+        let pointer = thread_rng().gen_range(0..N);
+        arr2[0..pointer].copy_from_slice(&arr[0..pointer]);
+        let circuit = TestSliceEqual {
+            arr,
+            arr2,
+            ptr: pointer,
+        };
+        run_circuit::<F, D, C, _>(circuit);
+
+        let res = panic::catch_unwind(|| {
+            let circuit = TestSliceEqual {
+                arr,
+                arr2: random_vector(N).try_into().unwrap(),
+                ptr: pointer,
+            };
             run_circuit::<F, D, C, _>(circuit);
         });
         assert!(res.is_err());

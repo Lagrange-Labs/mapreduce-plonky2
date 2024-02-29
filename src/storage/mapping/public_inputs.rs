@@ -109,9 +109,9 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
         let mut arr = vec![];
         arr.extend_from_slice(&d.x.0.iter().chain(&d.y.0).cloned().collect::<Vec<_>>());
         arr.push(if d.is_inf {
-            GoldilocksField::ZERO
-        } else {
             GoldilocksField::ONE
+        } else {
+            GoldilocksField::ZERO
         });
         arr.extend_from_slice(
             &key.iter()
@@ -143,7 +143,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     // small utility function to transform a list of target to a curvetarget.
-    fn accumulator_info(&self) -> ([T; 5], [T; 5], T) {
+    pub(super) fn accumulator_info(&self) -> ([T; 5], [T; 5], T) {
         // 5 F for each coordinates + 1 bool flag
         let slice = &self.proof_inputs[Self::D_IDX..];
         #[allow(clippy::int_plus_one)]
