@@ -261,6 +261,7 @@ mod tests {
             nodes,
         };
 
+        // TODO: test with a real block.
         let block = generate_block(&state_mpt);
         let storage_proof = generate_storage_proof(&state_mpt);
 
