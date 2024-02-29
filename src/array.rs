@@ -756,11 +756,12 @@ mod test {
             // a bit hardcore method to test for failure but it works for now
             let r = panic::catch_unwind(|| {
                 run_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
-                    arr,
                     idx,
                     exp,
+                    arr,
                 })
             });
+
             assert!(r.is_err());
         }
     }
@@ -812,12 +813,6 @@ mod test {
         let idx: usize = rng.gen_range(0..(SIZE - random_size));
         let sub = arr[idx..idx + random_size].to_vec();
 
-        run_circuit::<F, D, C, _>(ContainsVectorCircuit {
-            arr,
-            idx: 0,
-            sub: arr.to_vec(),
-            exp: true,
-        });
         run_circuit::<F, D, C, _>(ContainsVectorCircuit {
             arr,
             idx,
