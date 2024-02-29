@@ -27,7 +27,7 @@ pub struct ExtensionNodeCircuit {
 
 /// Wires associated with this processing.
 pub struct ExtensionWires {
-    pub node: VectorWire<Target, PADDED_LEN>,
+    pub(super) node: VectorWire<Target, PADDED_LEN>,
     keccak: KeccakWires<PADDED_LEN>,
 }
 
@@ -87,6 +87,7 @@ impl ExtensionNodeCircuit {
 
 #[cfg(test)]
 mod test {
+    use std::panic;
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
@@ -103,6 +104,7 @@ mod test {
 
     use crate::circuit::test::run_circuit;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
+    use crate::storage::mapping::extension::MAX_EXTENSION_NODE_LEN;
     use crate::utils::{convert_u8_to_u32_slice, keccak256};
     use crate::{
         circuit::UserCircuit, group_hashing::map_to_curve_point,
@@ -119,7 +121,7 @@ mod test {
         let k: Vec<u8> = random_vector(32);
         let v: Vec<u8> = random_vector(32);
         let encoded = rlp::encode_list::<Vec<u8>, _>(&[k, v]);
-        println!("encoded: {:?}", encoded.len());
+        assert!(encoded.len() <= MAX_EXTENSION_NODE_LEN);
     }
 
     #[derive(Clone, Debug)]
@@ -234,5 +236,23 @@ mod test {
             assert_eq!(ext_pi.n(), pi.n());
             assert_eq!(ext_pi.mapping_slot(), pi.mapping_slot());
         }
+        // trying with a wrong hash
+        let inv_child_hash = convert_u8_to_u32_slice(&keccak256(&random_vector(32)));
+        let inv_arr = PublicInputs::create_public_inputs_arr(
+            &key,
+            ptr,
+            slot,
+            n,
+            &inv_child_hash,
+            &accumulator,
+        );
+        let circuit = TestExtCircuit {
+            c: ExtensionNodeCircuit { node: node.clone() },
+            inputs: PublicInputs::from(&inv_arr),
+        };
+        let res = panic::catch_unwind(|| {
+            run_circuit::<F, 2, C, _>(circuit);
+        });
+        //assert!(res.is_err());
     }
 }

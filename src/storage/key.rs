@@ -56,20 +56,20 @@ impl MappingSlot {
 /// NOTE: currently specific only for mapping slots.
 pub struct MappingSlotWires {
     /// "input" mapping key which is maxed out at 32 bytes
-    pub mapping_key: Array<Target, MAPPING_KEY_LEN>,
+    pub(super) mapping_key: Array<Target, MAPPING_KEY_LEN>,
     /// "input" mapping slot which is assumed to fit in a single byte
-    pub mapping_slot: Target,
+    pub(super) mapping_slot: Target,
     /// Actual keccak wires created for the computation of the "location"
     /// for the mapping storage slot
-    pub keccak_location: ByteKeccakWires<MAPPING_INPUT_PADDED_LEN>,
+    pub(super) keccak_location: ByteKeccakWires<MAPPING_INPUT_PADDED_LEN>,
     /// Actual keccak wires created for the computation of the final MPT key
     /// from the location. THIS is the one to use to look up a key in the
     /// associated MPT trie
-    pub keccak_mpt: ByteKeccakWires<{ PAD_LEN(HASH_LEN) }>,
+    pub(super) keccak_mpt: ByteKeccakWires<{ PAD_LEN(HASH_LEN) }>,
     /// The MPT key derived in circuit from the storage slot, in NIBBLES
     /// TODO: it represents the same information as "exp" but in nibbles.
     /// It doesn't need to be assigned, but is used in the higher level circuits
-    pub mpt_key: MPTKeyWire,
+    pub(super) mpt_key: MPTKeyWire,
 }
 
 /// Maximum size of the key for a mapping
