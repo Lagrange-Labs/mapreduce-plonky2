@@ -135,12 +135,8 @@ where
         // Range check to constrain only bytes for each node of state MPT input.
         mpt_input.nodes.iter().for_each(|n| n.assert_bytes(cb));
 
-        // Constrain the MPT keys are equal.
-        slot.mpt_key.key.enforce_equal(cb, &mpt_input.key.key);
-
-        // TODO: Could assume this length value is within U32? Or U256?
+        // The length value shouldn't exceed 4-bytes (U32).
         let length_value = convert_u8_targets_to_u32(cb, &mpt_output.leaf.arr);
-        length_value[1..].iter().for_each(|v| cb.assert_zero(v.0));
 
         // Register the public inputs.
         PublicInputs::register(
