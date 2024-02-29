@@ -26,7 +26,7 @@ const NB_ITEMS_LEAF: usize = 2;
 /// Currently a constant set to denote the length of the value we are extracting from the MPT trie.
 /// This can later be also be done in a generic way to allow different sizes.
 /// Given we target MPT storage proof, the value is 32 bytes.
-const MAX_LEAF_VALUE: usize = HASH_LEN;
+pub const MAX_LEAF_VALUE_LEN: usize = HASH_LEN;
 
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
@@ -79,7 +79,7 @@ where
     /// some additional wires for each input (see keccak circuit for more info.).
     keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; DEPTH],
     /// The leaf value wires. It is provably extracted from the leaf node.
-    leaf: Array<Target, MAX_LEAF_VALUE>,
+    leaf: Array<Target, MAX_LEAF_VALUE_LEN>,
     /// The root hash value wire.
     root: OutputHash,
 }
@@ -418,15 +418,13 @@ impl MPTKeyWire {
 
     /// Proves the prefix of this key and other's key up to pointer are the same.
     /// Proves both pointers are the same.
-    pub fn is_prefix_equal<F: RichField + Extendable<D>, const D: usize>(
+    pub fn enforce_prefix_equal<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
         other: &Self,
-    ) -> BoolTarget {
-        let ptr_equal = b.is_equal(self.pointer, other.pointer);
-        let prefix_equal = self.key.slice_equals(b, &other.key, self.pointer);
-        let both = b.and(ptr_equal, prefix_equal);
-        both
+    ) {
+        b.connect(self.pointer, other.pointer);
+        self.key.enforce_slice_equals(b, &other.key, self.pointer);
     }
     /// Register the key and pointer as public inputs.
     pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
@@ -520,7 +518,7 @@ pub mod test {
     use crate::utils::{convert_u8_targets_to_u32, less_than, IntTargetWriter};
     use crate::{
         array::{Array, VectorWire},
-        circuit::{test::test_simple_circuit, UserCircuit},
+        circuit::{test::run_circuit, UserCircuit},
         keccak::OutputHash,
         mpt_sequential::MPTKeyWire,
         utils::{find_index_subvector, keccak256},
@@ -630,7 +628,7 @@ pub mod test {
             exp_root: root.try_into().unwrap(),
             exp_value: value_bytes,
         };
-        test_simple_circuit::<F, D, C, _>(circuit);
+        run_circuit::<F, D, C, _>(circuit);
 
         Ok(())
     }
@@ -683,7 +681,7 @@ pub mod test {
             exp_root: root,
             exp_value: value.try_into().unwrap(),
         };
-        test_simple_circuit::<F, D, C, _>(circuit);
+        run_circuit::<F, D, C, _>(circuit);
     }
 
     fn visit_proof(proof: &[Vec<u8>]) {

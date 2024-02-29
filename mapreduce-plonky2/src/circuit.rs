@@ -335,6 +335,7 @@ pub(crate) mod test {
         iop::witness::PartialWitness,
         plonk::{
             circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
+            proof::ProofWithPublicInputs,
         },
     };
 
@@ -350,35 +351,26 @@ pub(crate) mod test {
         pub verifying: u64,
     }
 
-    pub(crate) fn test_simple_circuit<
+    pub(crate) fn run_circuit<
         F: RichField + Extendable<D>,
         const D: usize,
         C: GenericConfig<D, F = F>,
         U: UserCircuit<F, D>,
     >(
         u: U,
-    ) -> BenchResult {
+    ) -> ProofWithPublicInputs<F, C, D> {
         let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut pw = PartialWitness::new();
-        let now = time::Instant::now();
         let wires = U::build(&mut b);
-        let gate_count = b.num_gates();
         let circuit_data = b.build::<C>();
-        let building_time = now.elapsed();
-        let now = time::Instant::now();
         u.prove(&mut pw, &wires);
         let proof = circuit_data.prove(pw).expect("invalid proof");
-        let proving_time = now.elapsed();
-        let lde = circuit_data.common.lde_size();
-        let now = time::Instant::now();
-        verify_proof_tuple(&(proof, circuit_data.verifier_only, circuit_data.common)).unwrap();
-        let verifying_time = now.elapsed();
-        BenchResult {
-            gate_count,
-            lde,
-            building: building_time.as_millis() as u64,
-            proving: proving_time.as_millis() as u64,
-            verifying: verifying_time.as_millis() as u64,
-        }
+        verify_proof_tuple(&(
+            proof.clone(),
+            circuit_data.verifier_only,
+            circuit_data.common,
+        ))
+        .unwrap();
+        proof
     }
 }
