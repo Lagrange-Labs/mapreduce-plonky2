@@ -167,11 +167,11 @@ where
         Ok(())
     }
 }
+#[cfg(test)]
 mod test {
     use std::array::from_fn as create_array;
 
     use crate::circuit::test::run_circuit;
-
     use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
     use crate::utils::keccak256;
