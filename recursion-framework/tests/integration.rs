@@ -19,7 +19,7 @@ use plonky2::{
     },
 };
 use recursion_framework::{
-    circuit_builder::{CircuitLogic, CircuitWithUniversalVerifierBuilder},
+    circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifierBuilder},
     framework::{
         prepare_recursive_circuit_for_circuit_set, RecursiveCircuitInfo, RecursiveCircuits,
         RecursiveCircuitsVerifierGagdet,
@@ -51,12 +51,12 @@ use serial_test::serial;
 /// considered so far
 const NUM_PUBLIC_INPUTS: usize = 1 + NUM_HASH_OUT_ELTS;
 
-struct MapCircuit<const INPUT_CHUNK_SIZE: usize> {
+struct MapCircuitWires<const INPUT_CHUNK_SIZE: usize> {
     input_targets: [Target; INPUT_CHUNK_SIZE],
 }
 
 impl<F: RichField + Extendable<D>, const D: usize, const INPUT_CHUNK_SIZE: usize>
-    CircuitLogic<F, D, 0> for MapCircuit<INPUT_CHUNK_SIZE>
+    CircuitLogicWires<F, D, 0> for MapCircuitWires<INPUT_CHUNK_SIZE>
 {
     type CircuitBuilderParams = ();
 
@@ -91,10 +91,10 @@ impl<F: RichField + Extendable<D>, const D: usize, const INPUT_CHUNK_SIZE: usize
     }
 }
 
-struct ReduceCircuit<const ARITY: usize>(());
+struct ReduceCircuitWires<const ARITY: usize>(());
 
-impl<F: RichField + Extendable<D>, const D: usize, const ARITY: usize> CircuitLogic<F, D, ARITY>
-    for ReduceCircuit<ARITY>
+impl<F: RichField + Extendable<D>, const D: usize, const ARITY: usize>
+    CircuitLogicWires<F, D, ARITY> for ReduceCircuitWires<ARITY>
 {
     type CircuitBuilderParams = ();
 
@@ -145,8 +145,8 @@ fn test_map_reduce_circuits() {
         config.clone(),
         CIRCUIT_SET_SIZE,
     );
-    let map_circuit = circuit_builder.build_circuit::<C, 0, MapCircuit<INPUT_CHUNK_SIZE>>(());
-    let reduce_circuit = circuit_builder.build_circuit::<C, ARITY, ReduceCircuit<ARITY>>(());
+    let map_circuit = circuit_builder.build_circuit::<C, 0, MapCircuitWires<INPUT_CHUNK_SIZE>>(());
+    let reduce_circuit = circuit_builder.build_circuit::<C, ARITY, ReduceCircuitWires<ARITY>>(());
     // Build framework for set of map reduce circuits
     let mr_circuits = vec![
         prepare_recursive_circuit_for_circuit_set(&map_circuit),
@@ -270,7 +270,7 @@ fn test_reduce_circuit_with_testing_framework() {
         CIRCUIT_SET_SIZE,
     );
 
-    let reduce_circuit = circuit_builder.build_circuit::<C, ARITY, ReduceCircuit<ARITY>>(());
+    let reduce_circuit = circuit_builder.build_circuit::<C, ARITY, ReduceCircuitWires<ARITY>>(());
 
     let circuit_set = vec![prepare_recursive_circuit_for_circuit_set(&reduce_circuit)];
 

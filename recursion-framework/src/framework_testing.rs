@@ -17,17 +17,17 @@ use plonky2::{
 
 use crate::{
     circuit_builder::{
-        CircuitLogic, CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder,
+        CircuitLogicWires, CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder,
     },
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
 };
 
 use anyhow::Result;
 
-struct DummyCircuit<const NUM_PUBLIC_INPUTS: usize>([Target; NUM_PUBLIC_INPUTS]);
+struct DummyCircuitWires<const NUM_PUBLIC_INPUTS: usize>([Target; NUM_PUBLIC_INPUTS]);
 
 impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize>
-    CircuitLogic<F, D, 0> for DummyCircuit<NUM_PUBLIC_INPUTS>
+    CircuitLogicWires<F, D, 0> for DummyCircuitWires<NUM_PUBLIC_INPUTS>
 {
     type CircuitBuilderParams = ();
 
@@ -63,7 +63,7 @@ pub struct TestingRecursiveCircuits<
     const NUM_PUBLIC_INPUTS: usize,
 > {
     recursive_circuits: RecursiveCircuits<F, C, D>,
-    dummy_circuit: CircuitWithUniversalVerifier<F, C, D, 0, DummyCircuit<NUM_PUBLIC_INPUTS>>,
+    dummy_circuit: CircuitWithUniversalVerifier<F, C, D, 0, DummyCircuitWires<NUM_PUBLIC_INPUTS>>,
 }
 
 /// This function must be employed to generate an instance of `CircuitWithUniversalVerifierBuilder`
@@ -106,7 +106,7 @@ where
         circuits: Vec<Box<dyn RecursiveCircuitInfo<F, C, D> + '_>>,
     ) -> Self {
         assert_eq!(circuits.len(), builder.get_circuit_set_size() - 1);
-        let dummy_circuit = builder.build_circuit::<C, 0, DummyCircuit<NUM_PUBLIC_INPUTS>>(());
+        let dummy_circuit = builder.build_circuit::<C, 0, DummyCircuitWires<NUM_PUBLIC_INPUTS>>(());
 
         let circuit_digests = circuits
             .into_iter()
@@ -131,12 +131,12 @@ where
     /// inputs of the `NUM_VERIFIERS` proof being verified in `circuit`
     pub fn generate_proof_from_public_inputs<
         const NUM_VERIFIERS: usize,
-        CL: CircuitLogic<F, D, NUM_VERIFIERS>,
+        CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
     >(
         &self,
-        circuit: &CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CL>,
+        circuit: &CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>,
         public_inputs: [[F; NUM_PUBLIC_INPUTS]; NUM_VERIFIERS],
-        custom_inputs: CL::Inputs,
+        custom_inputs: CLW::Inputs,
     ) -> Result<ProofWithPublicInputs<F, C, D>> {
         let input_proofs = self.generate_input_proofs(public_inputs)?;
 
@@ -176,11 +176,14 @@ where
     /// and the generation of the proof for circuit `circuit`; instead, generate_proof` method is meant
     /// to be publicly exposed mostly to benchmark the proof generation time of the input `circuit`, as it allows
     /// to isolate the proof generation for the circuit being benchmarked from the generation of the input proofs;
-    pub fn generate_proof<const NUM_VERIFIERS: usize, CL: CircuitLogic<F, D, NUM_VERIFIERS>>(
+    pub fn generate_proof<
+        const NUM_VERIFIERS: usize,
+        CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
+    >(
         &self,
-        circuit: &CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CL>,
+        circuit: &CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>,
         input_proofs: [ProofWithPublicInputs<F, C, D>; NUM_VERIFIERS],
-        custom_inputs: CL::Inputs,
+        custom_inputs: CLW::Inputs,
     ) -> Result<ProofWithPublicInputs<F, C, D>> {
         self.recursive_circuits.generate_proof(
             circuit,
@@ -199,10 +202,10 @@ mod tests {
     use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
     use crate::{
-        circuit_builder::tests::{RecursiveCircuit, NUM_PUBLIC_INPUTS_TEST_CIRCUITS},
+        circuit_builder::tests::{RecursiveCircuitWires, NUM_PUBLIC_INPUTS_TEST_CIRCUITS},
         framework::{
             prepare_recursive_circuit_for_circuit_set,
-            tests::{VerifierCircuit, VerifierCircuitFixed},
+            tests::{VerifierCircuitFixedWires, VerifierCircuitWires},
             RecursiveCircuitsVerifierGagdet,
         },
     };
@@ -226,8 +229,8 @@ mod tests {
         const NUM_PUBLIC_INPUTS: usize = NUM_PUBLIC_INPUTS_TEST_CIRCUITS;
         let circuit_builder =
             new_universal_circuit_builder_for_testing::<F, C, D, NUM_PUBLIC_INPUTS>(config, 1);
-        let recursive_circuit =
-            circuit_builder.build_circuit::<C, NUM_VERIFIERS, RecursiveCircuit<INPUT_SIZE>>(());
+        let recursive_circuit = circuit_builder
+            .build_circuit::<C, NUM_VERIFIERS, RecursiveCircuitWires<INPUT_SIZE>>(());
 
         let circuits = vec![prepare_recursive_circuit_for_circuit_set(
             &recursive_circuit,
@@ -303,14 +306,14 @@ mod tests {
             &testing_framework.get_recursive_circuit_set(),
         );
         let verifier_circuit = circuit_builder
-            .build_circuit::<C, 0, VerifierCircuit<C, D, NUM_PUBLIC_INPUTS>>(verifier_gadget);
+            .build_circuit::<C, 0, VerifierCircuitWires<C, D, NUM_PUBLIC_INPUTS>>(verifier_gadget);
 
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::new(
             config.clone(),
             &testing_framework.get_recursive_circuit_set(),
         );
         let verifier_circuit_fixed = circuit_builder
-            .build_circuit::<C, 0, VerifierCircuitFixed<C, D, NUM_PUBLIC_INPUTS>>((
+            .build_circuit::<C, 0, VerifierCircuitFixedWires<C, D, NUM_PUBLIC_INPUTS>>((
                 verifier_gadget,
                 testing_framework.verifier_data_for_input_proofs::<1>()[0].clone(),
             ));

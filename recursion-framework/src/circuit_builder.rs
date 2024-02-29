@@ -22,10 +22,13 @@ use anyhow::Result;
 /// Minimum number of gates for a circuit whose proofs needs to be verified by the universal verifier
 pub const MIN_CIRCUIT_SIZE: usize = 64;
 
-/// `CircuitLogic` trait must be implemented to specify the additional logic to be enforced in a circuit
-/// besides verifying proofs with the universal verifier
-pub trait CircuitLogic<F: RichField + Extendable<D>, const D: usize, const NUM_VERIFIERS: usize>:
-    Sized
+/// `CircuitLogicWires` trait must be implemented to specify the additional logic to be enforced in a
+/// circuit besides verifying proofs with the universal verifier
+pub trait CircuitLogicWires<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    const NUM_VERIFIERS: usize,
+>: Sized
 {
     /// Specific input parameters that might be necessary to write the logic of the circuit
     type CircuitBuilderParams: Sized;
@@ -50,13 +53,14 @@ pub trait CircuitLogic<F: RichField + Extendable<D>, const D: usize, const NUM_V
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()>;
 
     /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
-    /// a `CircuitWithUniversalVerifier` circuit implementing the additional circuit logid specified by `Self`, 
-    /// returns the set of `Self::NUM_PUBLIC_INPUTS` targets corresponding to all the public inputs of the 
+    /// a `CircuitWithUniversalVerifier` circuit implementing the additional circuit logid specified by `Self`,
+    /// returns the set of `Self::NUM_PUBLIC_INPUTS` targets corresponding to all the public inputs of the
     /// proof except for the ones representing the digest of the circuit set
     fn public_input_targets<'a>(&self, proof: &'a ProofWithPublicInputsTarget<D>) -> &'a [Target]
-    where [(); Self::NUM_PUBLIC_INPUTS]:
+    where
+        [(); Self::NUM_PUBLIC_INPUTS]:,
     {
-        public_input_targets::<F, D, {Self::NUM_PUBLIC_INPUTS}>(proof)
+        public_input_targets::<F, D, { Self::NUM_PUBLIC_INPUTS }>(proof)
     }
 }
 
@@ -94,17 +98,17 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
 
     /// `build_circuit` builds a Plonky2 circuit which:
     /// - Verify `NUM_VERIFIERS` proofs employing the universal verifier.
-    /// - Execute the custom logic specified by the `CL` implementation
+    /// - Execute the custom logic specified by the `CLW` implementation
     /// Note that the output data structure contains also the wrapping circuit necessary to
     /// generate proofs that can be verified recursively with a universal verifier.
     pub fn build_circuit<
         C: GenericConfig<D, F = F>,
         const NUM_VERIFIERS: usize,
-        CL: CircuitLogic<F, D, NUM_VERIFIERS>,
+        CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
     >(
         &self,
-        input_parameters: CL::CircuitBuilderParams,
-    ) -> CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CL>
+        input_parameters: CLW::CircuitBuilderParams,
+    ) -> CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>
     where
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
@@ -117,12 +121,12 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     pub fn build_circuit_with_custom_config<
         C: GenericConfig<D, F = F>,
         const NUM_VERIFIERS: usize,
-        CL: CircuitLogic<F, D, NUM_VERIFIERS>,
+        CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
     >(
         &self,
         custom_config: CircuitConfig,
-        input_parameters: CL::CircuitBuilderParams,
-    ) -> CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CL>
+        input_parameters: CLW::CircuitBuilderParams,
+    ) -> CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>
     where
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
@@ -133,12 +137,12 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     fn build_circuit_internal<
         C: GenericConfig<D, F = F>,
         const NUM_VERIFIERS: usize,
-        CL: CircuitLogic<F, D, NUM_VERIFIERS>,
+        CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
     >(
         &self,
         config: &CircuitConfig,
-        input_parameters: CL::CircuitBuilderParams,
-    ) -> CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CL>
+        input_parameters: CLW::CircuitBuilderParams,
+    ) -> CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>
     where
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
@@ -158,7 +162,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
             .iter()
             .map(|uv_t| uv_t.get_proof_target())
             .collect::<Vec<_>>();
-        let circuit_logic = CL::circuit_logic(
+        let circuit_logic_wires = CLW::circuit_logic(
             &mut builder,
             proof_targets.try_into().unwrap(),
             input_parameters,
@@ -176,10 +180,10 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
         let wrap_circuit =
             WrapCircuit::build_wrap_circuit(&data.verifier_only, &data.common, &self.config);
 
-        CircuitWithUniversalVerifier::<F, C, D, NUM_VERIFIERS, CL> {
+        CircuitWithUniversalVerifier::<F, C, D, NUM_VERIFIERS, CLW> {
             universal_verifier_targets,
             circuit_data: data,
-            circuit_logic,
+            circuit_logic_wires,
             circuit_set_target,
             wrap_circuit,
         }
@@ -234,17 +238,17 @@ pub fn circuit_set_targets<
 
 /// `CircuitWithUniversalVerifier` is a data structure representing a circuit containing `NUM_VERIFIERS`
 /// instances of the universal verifier altogether with the additional logic specified by the specific
-/// `CL` implementor
+/// `CLW` implementor
 pub struct CircuitWithUniversalVerifier<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,
     const NUM_VERIFIERS: usize,
-    CL: CircuitLogic<F, D, NUM_VERIFIERS>,
+    CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
 > {
     universal_verifier_targets: [UniversalVerifierTarget<D>; NUM_VERIFIERS],
     circuit_data: CircuitData<F, C, D>,
-    circuit_logic: CL,
+    circuit_logic_wires: CLW,
     circuit_set_target: CircuitSetTarget,
     wrap_circuit: WrapCircuit<F, C, D>,
 }
@@ -254,8 +258,8 @@ impl<
         C: GenericConfig<D, F = F>,
         const D: usize,
         const NUM_VERIFIERS: usize,
-        CL: CircuitLogic<F, D, NUM_VERIFIERS>,
-    > CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CL>
+        CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
+    > CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>
 where
     C::Hasher: AlgebraicHasher<F>,
     [(); C::Hasher::HASH_SIZE]:,
@@ -277,7 +281,7 @@ where
         input_proofs: [ProofWithPublicInputs<F, C, D>; NUM_VERIFIERS],
         input_verifier_data: [&VerifierOnlyCircuitData<C, D>; NUM_VERIFIERS],
         circuit_set: &CircuitSet<F, C, D>,
-        custom_inputs: CL::Inputs,
+        custom_inputs: CLW::Inputs,
     ) -> Result<ProofWithPublicInputs<F, C, D>> {
         let mut pw = PartialWitness::<F>::new();
         for i in 0..NUM_VERIFIERS {
@@ -288,7 +292,8 @@ where
                 input_verifier_data[i],
             )?;
         }
-        self.circuit_logic.assign_input(custom_inputs, &mut pw)?;
+        self.circuit_logic_wires
+            .assign_input(custom_inputs, &mut pw)?;
 
         self.circuit_set_target
             .set_target(&mut pw, &CircuitSetDigest::from(circuit_set));
@@ -336,10 +341,10 @@ pub(crate) mod tests {
 
     pub(crate) const NUM_PUBLIC_INPUTS_TEST_CIRCUITS: usize = NUM_HASH_OUT_ELTS;
 
-    pub(crate) type LeafCircuit<F, const INPUT_SIZE: usize> =
-        LeafCircuitWithCustomHasher<F, INPUT_SIZE, PoseidonHash>;
+    pub(crate) type LeafCircuitWires<F, const INPUT_SIZE: usize> =
+        LeafCircuitWithCustomHasherWires<F, INPUT_SIZE, PoseidonHash>;
 
-    pub(crate) struct LeafCircuitWithCustomHasher<
+    pub(crate) struct LeafCircuitWithCustomHasherWires<
         F: RichField,
         const INPUT_SIZE: usize,
         H: AlgebraicHasher<F>,
@@ -356,7 +361,8 @@ pub(crate) mod tests {
             const NUM_VERIFIERS: usize,
             const INPUT_SIZE: usize,
             H: AlgebraicHasher<F>,
-        > CircuitLogic<F, D, NUM_VERIFIERS> for LeafCircuitWithCustomHasher<F, INPUT_SIZE, H>
+        > CircuitLogicWires<F, D, NUM_VERIFIERS>
+        for LeafCircuitWithCustomHasherWires<F, INPUT_SIZE, H>
     {
         /*
         - First parameter specifies the number of hashes to be performed
@@ -411,7 +417,7 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) struct RecursiveCircuit<const INPUT_SIZE: usize> {
+    pub(crate) struct RecursiveCircuitWires<const INPUT_SIZE: usize> {
         to_be_hashed_payload: [Target; INPUT_SIZE],
     }
 
@@ -420,7 +426,7 @@ pub(crate) mod tests {
             const D: usize,
             const NUM_VERIFIERS: usize,
             const INPUT_SIZE: usize,
-        > CircuitLogic<F, D, NUM_VERIFIERS> for RecursiveCircuit<INPUT_SIZE>
+        > CircuitLogicWires<F, D, NUM_VERIFIERS> for RecursiveCircuitWires<INPUT_SIZE>
     {
         type CircuitBuilderParams = ();
         type Inputs = [F; INPUT_SIZE];
@@ -472,20 +478,21 @@ pub(crate) mod tests {
             C,
         >(std_config.clone(), 2);
         let leaf_circuit = if let Some(custom_config) = config {
-            circuit_builder.build_circuit_with_custom_config::<C, 0, LeafCircuitWithCustomHasher<F, INPUT_SIZE, H>>(custom_config, (1usize << 12, false))
+            circuit_builder.build_circuit_with_custom_config::<C, 0, LeafCircuitWithCustomHasherWires<F, INPUT_SIZE, H>>(custom_config, (1usize << 12, false))
         } else {
-            circuit_builder.build_circuit::<C, 0, LeafCircuitWithCustomHasher<F, INPUT_SIZE, H>>((
-                1usize << 7,
-                false,
-            ))
+            circuit_builder
+                .build_circuit::<C, 0, LeafCircuitWithCustomHasherWires<F, INPUT_SIZE, H>>((
+                    1usize << 7,
+                    false,
+                ))
         };
         println!(
             "leaf circuit built: {}",
             leaf_circuit.wrapped_circuit_size()
         );
 
-        let recursive_circuit =
-            circuit_builder.build_circuit::<C, NUM_VERIFIERS, RecursiveCircuit<INPUT_SIZE>>(());
+        let recursive_circuit = circuit_builder
+            .build_circuit::<C, NUM_VERIFIERS, RecursiveCircuitWires<INPUT_SIZE>>(());
 
         let circuit_set = CircuitSet::<F, C, D>::build_circuit_set(vec![
             leaf_circuit.circuit_data().verifier_only.circuit_digest,

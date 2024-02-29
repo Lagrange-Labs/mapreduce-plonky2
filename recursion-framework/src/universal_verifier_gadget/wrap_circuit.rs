@@ -154,7 +154,7 @@ pub(crate) mod test {
 
     use super::*;
     use crate::{
-        circuit_builder::{tests::LeafCircuit, CircuitLogic},
+        circuit_builder::{tests::LeafCircuitWires, CircuitLogicWires},
         framework::tests::check_panic,
     };
 
@@ -176,7 +176,7 @@ pub(crate) mod test {
         const D: usize,
         const INPUT_SIZE: usize,
     > {
-        targets: LeafCircuit<F, INPUT_SIZE>,
+        targets: LeafCircuitWires<F, INPUT_SIZE>,
         circuit_data: CircuitData<F, C, D>,
         wrap_circuit: WrapCircuit<F, C, D>,
     }
@@ -193,14 +193,15 @@ pub(crate) mod test {
     {
         fn build_circuit(
             config: CircuitConfig,
-            build_parameters: <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::CircuitBuilderParams,
+            build_parameters: <LeafCircuitWires::<F, INPUT_SIZE> as CircuitLogicWires<F,D,0>>::CircuitBuilderParams,
         ) -> Self {
             let mut builder = CircuitBuilder::<F, D>::new(config.clone());
-            let targets = <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::circuit_logic(
-                &mut builder,
-                [],
-                build_parameters,
-            );
+            let targets =
+                <LeafCircuitWires<F, INPUT_SIZE> as CircuitLogicWires<F, D, 0>>::circuit_logic(
+                    &mut builder,
+                    [],
+                    build_parameters,
+                );
 
             let circuit_data = builder.build::<C>();
 
@@ -219,10 +220,10 @@ pub(crate) mod test {
 
         fn generate_base_proof(
             &self,
-            inputs: <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::Inputs,
+            inputs: <LeafCircuitWires<F, INPUT_SIZE> as CircuitLogicWires<F, D, 0>>::Inputs,
         ) -> Result<ProofWithPublicInputs<F, C, D>> {
             let mut pw = PartialWitness::<F>::new();
-            <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::assign_input(
+            <LeafCircuitWires<F, INPUT_SIZE> as CircuitLogicWires<F, D, 0>>::assign_input(
                 &self.targets,
                 inputs,
                 &mut pw,
@@ -233,7 +234,7 @@ pub(crate) mod test {
 
         fn generate_proof(
             &self,
-            inputs: <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::Inputs,
+            inputs: <LeafCircuitWires<F, INPUT_SIZE> as CircuitLogicWires<F, D, 0>>::Inputs,
         ) -> Result<ProofWithPublicInputs<F, C, D>> {
             let proof = self.generate_base_proof(inputs)?;
 

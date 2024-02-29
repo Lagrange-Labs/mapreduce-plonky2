@@ -169,14 +169,14 @@ mod tests {
 
     use plonky2::field::types::Sample;
 
-    use crate::circuit_builder::tests::LeafCircuit;
+    use crate::circuit_builder::tests::LeafCircuitWires;
     use crate::framework::tests::check_panic;
     use crate::universal_verifier_gadget::wrap_circuit::test::mutable_final_proof_circuit_data;
     use crate::universal_verifier_gadget::CircuitSetDigest;
     use crate::{
         circuit_builder::{
-            tests::{RecursiveCircuit, NUM_PUBLIC_INPUTS_TEST_CIRCUITS},
-            CircuitLogic,
+            tests::{RecursiveCircuitWires, NUM_PUBLIC_INPUTS_TEST_CIRCUITS},
+            CircuitLogicWires,
         },
         universal_verifier_gadget::wrap_circuit::WrapCircuit,
     };
@@ -193,7 +193,7 @@ mod tests {
         const D: usize,
         const INPUT_SIZE: usize,
     > {
-        input_targets: LeafCircuit<F, INPUT_SIZE>,
+        input_targets: LeafCircuitWires<F, INPUT_SIZE>,
         circuit_set_target: CircuitSetTarget,
         circuit_data: CircuitData<F, C, D>,
         wrap_circuit: WrapCircuit<F, C, D>,
@@ -211,11 +211,11 @@ mod tests {
     {
         fn build_circuit(
             config: CircuitConfig,
-            build_parameters: <LeafCircuit::<F, INPUT_SIZE> as CircuitLogic<F,D,0>>::CircuitBuilderParams,
+            build_parameters: <LeafCircuitWires::<F, INPUT_SIZE> as CircuitLogicWires<F,D,0>>::CircuitBuilderParams,
         ) -> Self {
             let mut builder = CircuitBuilder::<F, D>::new(config.clone());
             let input_targets =
-                <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::circuit_logic(
+                <LeafCircuitWires<F, INPUT_SIZE> as CircuitLogicWires<F, D, 0>>::circuit_logic(
                     &mut builder,
                     [],
                     build_parameters,
@@ -243,10 +243,10 @@ mod tests {
         fn generate_base_proof(
             &self,
             circuit_set: &CircuitSet<F, C, D>,
-            inputs: <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::Inputs,
+            inputs: <LeafCircuitWires<F, INPUT_SIZE> as CircuitLogicWires<F, D, 0>>::Inputs,
         ) -> Result<ProofWithPublicInputs<F, C, D>> {
             let mut pw = PartialWitness::<F>::new();
-            <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::assign_input(
+            <LeafCircuitWires<F, INPUT_SIZE> as CircuitLogicWires<F, D, 0>>::assign_input(
                 &self.input_targets,
                 inputs,
                 &mut pw,
@@ -267,7 +267,7 @@ mod tests {
         fn generate_proof(
             &self,
             circuit_set: &CircuitSet<F, C, D>,
-            inputs: <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::Inputs,
+            inputs: <LeafCircuitWires<F, INPUT_SIZE> as CircuitLogicWires<F, D, 0>>::Inputs,
         ) -> Result<ProofWithPublicInputs<F, C, D>> {
             let proof = self.generate_base_proof(circuit_set, inputs)?;
 
@@ -286,7 +286,7 @@ mod tests {
         const INPUT_SIZE: usize,
     > {
         verifier_targets: UniversalVerifierTarget<D>,
-        input_targets: RecursiveCircuit<INPUT_SIZE>,
+        input_targets: RecursiveCircuitWires<INPUT_SIZE>,
         circuit_set_target: CircuitSetTarget,
         circuit_data: CircuitData<F, C, D>,
         wrap_circuit: WrapCircuit<F, C, D>,
@@ -313,7 +313,7 @@ mod tests {
                 builder.universal_verifier_circuit(&mut circuit_builder, &circuit_set_target);
             let proof_t = verifier_targets.get_proof_target();
             let input_targets =
-                <RecursiveCircuit<INPUT_SIZE> as CircuitLogic<F, D, 1>>::circuit_logic(
+                <RecursiveCircuitWires<INPUT_SIZE> as CircuitLogicWires<F, D, 1>>::circuit_logic(
                     &mut circuit_builder,
                     [proof_t],
                     (),
@@ -342,12 +342,12 @@ mod tests {
             circuit_set: &CircuitSet<F, C, D>,
             proof: &ProofWithPublicInputs<F, C, D>,
             verifier_data: &VerifierOnlyCircuitData<C, D>,
-            inputs: <RecursiveCircuit<INPUT_SIZE> as CircuitLogic<F, D, 1>>::Inputs,
+            inputs: <RecursiveCircuitWires<INPUT_SIZE> as CircuitLogicWires<F, D, 1>>::Inputs,
         ) -> Result<ProofWithPublicInputs<F, C, D>> {
             let mut pw = PartialWitness::<F>::new();
             self.verifier_targets
                 .set_target(&mut pw, circuit_set, proof, verifier_data)?;
-            <RecursiveCircuit<INPUT_SIZE> as CircuitLogic<F, D, 1>>::assign_input(
+            <RecursiveCircuitWires<INPUT_SIZE> as CircuitLogicWires<F, D, 1>>::assign_input(
                 &self.input_targets,
                 inputs,
                 &mut pw,
@@ -363,7 +363,7 @@ mod tests {
             circuit_set: &CircuitSet<F, C, D>,
             proof: &ProofWithPublicInputs<F, C, D>,
             verifier_data: &VerifierOnlyCircuitData<C, D>,
-            inputs: <RecursiveCircuit<INPUT_SIZE> as CircuitLogic<F, D, 1>>::Inputs,
+            inputs: <RecursiveCircuitWires<INPUT_SIZE> as CircuitLogicWires<F, D, 1>>::Inputs,
         ) -> Result<ProofWithPublicInputs<F, C, D>> {
             let base_proof = self.generate_base_proof(circuit_set, proof, verifier_data, inputs)?;
 
@@ -561,7 +561,7 @@ mod tests {
                     base_circuit.get_circuit_data().verifier_only.circuit_digest,
                 )
                 .unwrap();
-            <RecursiveCircuit<INPUT_SIZE> as CircuitLogic<F, D, 1>>::assign_input(
+            <RecursiveCircuitWires<INPUT_SIZE> as CircuitLogicWires<F, D, 1>>::assign_input(
                 &universal_verifier_circuit.input_targets,
                 array::from_fn(|_| F::rand()),
                 &mut pw,

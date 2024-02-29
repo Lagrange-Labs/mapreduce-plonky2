@@ -11,7 +11,7 @@ use plonky2::{
 };
 
 use crate::{
-    circuit_builder::{CircuitLogic, CircuitWithUniversalVerifier},
+    circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifier},
     universal_verifier_gadget::{
         verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
         CircuitSet, CircuitSetDigest, CircuitSetTarget,
@@ -32,14 +32,14 @@ where
 
 /// `RecursivecircuitInfo` trait is automatically implemented for any `CircuitWithUniversalVerifier`
 /// and for `&CircuitWithUniversalVerifier`
-impl<F, C, const D: usize, const NUM_VERIFIERS: usize, CL> RecursiveCircuitInfo<F, C, D>
-    for CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CL>
+impl<F, C, const D: usize, const NUM_VERIFIERS: usize, CLW> RecursiveCircuitInfo<F, C, D>
+    for CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>
 where
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
     C::Hasher: AlgebraicHasher<F>,
     [(); C::Hasher::HASH_SIZE]:,
-    CL: CircuitLogic<F, D, NUM_VERIFIERS>,
+    CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
 {
     fn get_verifier_data(&self) -> &VerifierOnlyCircuitData<C, D> {
         &self.circuit_data().verifier_only
@@ -98,12 +98,15 @@ where
     ///   enforced in the circuit besides verifying the `NUM_VERIFIERS` proofs with the universal verifier
     /// Note that this function will already output a proof that can be directly recursively verified with the
     /// universal verifier
-    pub fn generate_proof<const NUM_VERIFIERS: usize, CL: CircuitLogic<F, D, NUM_VERIFIERS>>(
+    pub fn generate_proof<
+        const NUM_VERIFIERS: usize,
+        CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
+    >(
         &self,
-        circuit: &CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CL>,
+        circuit: &CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>,
         input_proofs: [ProofWithPublicInputs<F, C, D>; NUM_VERIFIERS],
         input_verifier_data: [&VerifierOnlyCircuitData<C, D>; NUM_VERIFIERS],
-        custom_inputs: CL::Inputs,
+        custom_inputs: CLW::Inputs,
     ) -> Result<ProofWithPublicInputs<F, C, D>> {
         circuit.generate_proof(
             input_proofs,
@@ -263,7 +266,7 @@ pub(crate) mod tests {
     use serial_test::serial;
 
     use crate::circuit_builder::{
-        tests::{LeafCircuit, RecursiveCircuit},
+        tests::{LeafCircuitWires, RecursiveCircuitWires},
         CircuitWithUniversalVerifierBuilder,
     };
 
@@ -285,7 +288,7 @@ pub(crate) mod tests {
 
     /// Circuit employing the `RecursiveCircuitsVerifierGadget` to recursively verify a proof generated
     /// for any circuit belonging to a given set of circuits
-    pub(crate) struct VerifierCircuit<
+    pub(crate) struct VerifierCircuitWires<
         C: GenericConfig<D>,
         const D: usize,
         const NUM_PUBLIC_INPUTS: usize,
@@ -299,7 +302,7 @@ pub(crate) mod tests {
             C: GenericConfig<D, F = F> + 'static,
             const D: usize,
             const NUM_PUBLIC_INPUTS: usize,
-        > CircuitLogic<F, D, 0> for VerifierCircuit<C, D, NUM_PUBLIC_INPUTS>
+        > CircuitLogicWires<F, D, 0> for VerifierCircuitWires<C, D, NUM_PUBLIC_INPUTS>
     where
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
@@ -332,7 +335,7 @@ pub(crate) mod tests {
 
     /// Circuit employing the `RecursiveCircuitsVerifierGadget` to recursively verify a proof generated
     /// by a fixed circuit belonging to a given set of circuits
-    pub(crate) struct VerifierCircuitFixed<
+    pub(crate) struct VerifierCircuitFixedWires<
         C: GenericConfig<D>,
         const D: usize,
         const NUM_PUBLIC_INPUTS: usize,
@@ -346,7 +349,7 @@ pub(crate) mod tests {
             C: GenericConfig<D, F = F> + 'static,
             const D: usize,
             const NUM_PUBLIC_INPUTS: usize,
-        > CircuitLogic<F, D, 0> for VerifierCircuitFixed<C, D, NUM_PUBLIC_INPUTS>
+        > CircuitLogicWires<F, D, 0> for VerifierCircuitFixedWires<C, D, NUM_PUBLIC_INPUTS>
     where
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
@@ -392,25 +395,25 @@ pub(crate) mod tests {
         let config = CircuitConfig::standard_recursion_config();
 
         const NUM_PUBLIC_INPUTS: usize =
-            <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::NUM_PUBLIC_INPUTS;
+            <LeafCircuitWires<F, INPUT_SIZE> as CircuitLogicWires<F, D, 0>>::NUM_PUBLIC_INPUTS;
         let circuit_builder = CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::new::<
             C,
         >(config, CIRCUIT_SET_SIZE);
 
         let leaf_circuit = circuit_builder
-            .build_circuit::<C, 0, LeafCircuit<F, INPUT_SIZE>>((1usize << 12, false));
+            .build_circuit::<C, 0, LeafCircuitWires<F, INPUT_SIZE>>((1usize << 12, false));
 
         let recursive_circuit_one =
-            circuit_builder.build_circuit::<C, 1, RecursiveCircuit<INPUT_SIZE>>(());
+            circuit_builder.build_circuit::<C, 1, RecursiveCircuitWires<INPUT_SIZE>>(());
 
         let recursive_circuit_two =
-            circuit_builder.build_circuit::<C, 2, RecursiveCircuit<INPUT_SIZE>>(());
+            circuit_builder.build_circuit::<C, 2, RecursiveCircuitWires<INPUT_SIZE>>(());
 
         let recursive_circuit_three =
-            circuit_builder.build_circuit::<C, 3, RecursiveCircuit<INPUT_SIZE>>(());
+            circuit_builder.build_circuit::<C, 3, RecursiveCircuitWires<INPUT_SIZE>>(());
 
         let recursive_circuit_four =
-            circuit_builder.build_circuit::<C, 4, RecursiveCircuit<INPUT_SIZE>>(());
+            circuit_builder.build_circuit::<C, 4, RecursiveCircuitWires<INPUT_SIZE>>(());
 
         let circuits = vec![
             prepare_recursive_circuit_for_circuit_set(&leaf_circuit),
@@ -521,17 +524,17 @@ pub(crate) mod tests {
         let config = CircuitConfig::standard_recursion_config();
 
         const NUM_PUBLIC_INPUTS: usize =
-            <LeafCircuit<F, INPUT_SIZE> as CircuitLogic<F, D, 0>>::NUM_PUBLIC_INPUTS;
+            <LeafCircuitWires<F, INPUT_SIZE> as CircuitLogicWires<F, D, 0>>::NUM_PUBLIC_INPUTS;
         // build a set of recursive circuits employing the `RecursiveCircuits` framework
         let circuit_builder = CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::new::<
             C,
         >(config.clone(), CIRCUIT_SET_SIZE);
 
         let leaf_circuit = circuit_builder
-            .build_circuit::<C, 0, LeafCircuit<F, INPUT_SIZE>>((1usize << 12, false));
+            .build_circuit::<C, 0, LeafCircuitWires<F, INPUT_SIZE>>((1usize << 12, false));
 
         let recursive_circuit =
-            circuit_builder.build_circuit::<C, 1, RecursiveCircuit<INPUT_SIZE>>(());
+            circuit_builder.build_circuit::<C, 1, RecursiveCircuitWires<INPUT_SIZE>>(());
 
         let circuits = vec![
             prepare_recursive_circuit_for_circuit_set(&leaf_circuit),
@@ -569,12 +572,12 @@ pub(crate) mod tests {
         let verifier_gadget =
             RecursiveCircuitsVerifierGagdet::new(config.clone(), &recursive_framework);
         let verifier_circuit = circuit_builder
-            .build_circuit::<C, 0, VerifierCircuit<C, D, NUM_PUBLIC_INPUTS>>(verifier_gadget);
+            .build_circuit::<C, 0, VerifierCircuitWires<C, D, NUM_PUBLIC_INPUTS>>(verifier_gadget);
 
         let verifier_gadget =
             RecursiveCircuitsVerifierGagdet::new(config.clone(), &recursive_framework);
         let verifier_circuit_fixed = circuit_builder
-            .build_circuit::<C, 0, VerifierCircuitFixed<C, D, NUM_PUBLIC_INPUTS>>((
+            .build_circuit::<C, 0, VerifierCircuitFixedWires<C, D, NUM_PUBLIC_INPUTS>>((
                 verifier_gadget,
                 recursive_circuit_vd.clone(),
             ));
