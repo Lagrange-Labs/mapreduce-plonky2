@@ -54,8 +54,8 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
 /// `TestingRecursiveCircuits` is a variant of the `RecursiveCircuits` framework that must be employed only for
 /// testing and benchmarking purposes. It allows to employ dummy proofs with customizable public inputs to test
 /// circuits with the universal verifier, instead of the proofs generated from the actual circuits belonging to
-/// a `RecursiveCircuits` set, which might be hard to generate in a unit testing/benchmarking scenario given
-/// the mayn recursion layer we will need in our circuits
+/// a `RecursiveCircuits` set, which might be hard to generate in a unit testing/benchmarking scenario in 
+/// case there are many recursion layers
 pub struct TestingRecursiveCircuits<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F> + 'static,
