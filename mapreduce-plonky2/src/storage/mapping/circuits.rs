@@ -1,3 +1,5 @@
+use crate::circuit;
+
 use super::extension::ExtensionWires;
 use super::leaf::LeafWires;
 use super::leaf::MAX_LEAF_NODE_LEN;
