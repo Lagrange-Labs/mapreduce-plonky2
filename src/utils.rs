@@ -11,11 +11,18 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use sha3::Digest;
 use sha3::Keccak256;
 
-use crate::ProofTuple;
+use crate::{array::Array, ProofTuple};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
+
+/// Length of an address (H160 = [u8; 20])
+pub const ADDRESS_LEN: usize = 20;
+/// Length of an address in U32
+pub const PACKED_ADDRESS_LEN: usize = ADDRESS_LEN / 4;
+/// Pack representation of an address
+pub type PackedAddressTarget = Array<U32Target, PACKED_ADDRESS_LEN>;
 
 pub(crate) fn verify_proof_tuple<
     F: RichField + Extendable<D>,
