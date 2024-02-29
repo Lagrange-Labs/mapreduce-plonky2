@@ -48,6 +48,16 @@ pub trait CircuitLogic<F: RichField + Extendable<D>, const D: usize, const NUM_V
     /// `assign_input` allows to specify how to fill the witness variables related to the additional
     /// logic enforced in `circuit_logic`, employing the input data provided in `inputs`
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()>;
+
+    /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
+    /// a `CircuitWithUniversalVerifier` circuit implementing the additional circuit logid specified by `Self`, 
+    /// returns the set of `Self::NUM_PUBLIC_INPUTS` targets corresponding to all the public inputs of the 
+    /// proof except for the ones representing the digest of the circuit set
+    fn public_input_targets<'a>(&self, proof: &'a ProofWithPublicInputsTarget<D>) -> &'a [Target]
+    where [(); Self::NUM_PUBLIC_INPUTS]:
+    {
+        public_input_targets::<F, D, {Self::NUM_PUBLIC_INPUTS}>(proof)
+    }
 }
 
 /// `CircuitWithUniversalVerifierBuilder` is a data structure that can be employed to build circuits that
