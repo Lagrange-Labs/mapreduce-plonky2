@@ -159,11 +159,11 @@ where
         cb.connect(is_equal.target, tt.target);
 
         // Verify the account node includes the storage MPT root hash.
-        let is_included = account_node.arr.contains_array(
-            cb,
-            &wires.storage_root_bytes,
-            wires.storage_root_offset,
-        );
-        cb.connect(is_included.target, tt.target);
+        let expected_storage_root = account_node
+            .arr
+            .extract_array(cb, wires.storage_root_offset);
+        wires
+            .storage_root_bytes
+            .enforce_equal(cb, &expected_storage_root);
     }
 }
