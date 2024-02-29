@@ -59,6 +59,7 @@ impl SimpleSlot {
     }
 }
 
+// TODO: refactor to extract common fields with MappingSlotWires.
 /// Wires associated with the MPT key derivation logic of simple storage slot
 pub struct SimpleSlotWires {
     /// Simple storage slot which is assumed to fit in a single byte
@@ -78,6 +79,7 @@ pub struct SimpleSlotWires {
     pub mpt_key: MPTKeyWire,
 }
 
+// TODO: refactor to extract common functions with MappingSlot.
 impl SimpleSlot {
     /// Derive the MPT key in circuit according to simple storage slot.
     /// Remember the rules to get the MPT key is as follow:
