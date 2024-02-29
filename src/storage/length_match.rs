@@ -134,6 +134,7 @@ mod tests {
     };
     use plonky2::{
         field::types::Field,
+        iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder,
             config::{GenericConfig, PoseidonGoldilocksConfig},
