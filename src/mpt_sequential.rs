@@ -52,25 +52,25 @@ pub struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
     /// whose length == MAX_KEY_NIBBLE_LEN
     key: [u8; MAX_KEY_NIBBLE_LEN / 2],
 }
-struct InputWires<const DEPTH: usize, const NODE_LEN: usize>
+pub struct InputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
 {
-    key: MPTKeyWire,
+    pub(crate) key: MPTKeyWire,
     /// a vector of buffers whose size is the padded size of the maximum node length
     /// the padding may occur anywhere in the array but it can fit the maximum node size
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
     /// way to define everything according to max size of the data and
     /// "not care" about the padding size (almost!)
-    nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
+    pub(crate) nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
     /// in the case of a fixed circuit, the actual tree depth might be smaller.
     /// In this case, we set false on the part of the path we should not process.
     /// NOTE: for node at index i in the path, the boolean indicating if we should
     /// process it is at index i-1
     should_process: [BoolTarget; DEPTH - 1],
 }
-struct OutputWires<const DEPTH: usize, const NODE_LEN: usize>
+pub struct OutputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
@@ -79,9 +79,9 @@ where
     /// some additional wires for each input (see keccak circuit for more info.).
     keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; DEPTH],
     /// The leaf value wires. It is provably extracted from the leaf node.
-    leaf: Array<Target, MAX_LEAF_VALUE_LEN>,
+    pub(crate) leaf: Array<Target, MAX_LEAF_VALUE_LEN>,
     /// The root hash value wire.
-    root: OutputHash,
+    pub(crate) root: OutputHash,
 }
 
 impl<const DEPTH: usize, const NODE_LEN: usize> Circuit<DEPTH, NODE_LEN>

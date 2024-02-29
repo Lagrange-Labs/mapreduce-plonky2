@@ -11,10 +11,10 @@ use crate::{
     },
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
-    utils::{convert_u8_targets_to_u32, keccak256},
+    utils::{convert_u8_targets_to_u32, keccak256, AddressTarget, ADDRESS_LEN},
 };
 use core::array::from_fn as create_array;
-use ethers::types::spoof::Storage;
+use ethers::types::Address;
 use plonky2::{
     field::{extension::Extendable, goldilocks_field::GoldilocksField, types::Field},
     hash::{
@@ -27,9 +27,163 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
-use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
+
+/// One input element length to Keccak
+const INPUT_ELEMENT_LEN: usize = 32;
+/// The tuple (pair) lengh of elements to Keccak
+const INPUT_TUPLE_LEN: usize = 2 * INPUT_ELEMENT_LEN;
+/// The whole padded length for the inputs
+const INPUT_PADDED_LEN: usize = PAD_LEN(INPUT_TUPLE_LEN);
+
+/// Circuit gadget that proves the correct derivation of a MPT key from a simple
+/// storage slot.
+/// Deriving a MPT key from simple slot is done like:
+/// 1. location = keccak(left_pad32(contract_address), left_pad32(slot))
+/// 2. mpt_key = keccak(location)
+/// WARNING: Currently takes the assumption that the storage slot number fits
+/// inside a single byte.
+#[derive(Clone, Debug)]
+pub struct SimpleSlot {
+    /// Simple storage slot
+    slot: u8,
+    /// Contract address
+    contract_address: Address,
+}
+
+impl SimpleSlot {
+    pub fn new(slot: u8, contract_address: Address) -> Self {
+        Self {
+            slot,
+            contract_address,
+        }
+    }
+}
+
+/// Wires associated with the MPT key derivation logic of simple storage slot
+pub struct SimpleSlotWires {
+    /// Simple storage slot which is assumed to fit in a single byte
+    pub slot: Target,
+    /// Contract address used to calculate the "location"
+    pub contract_address: AddressTarget,
+    /// Actual keccak wires created for the computation of the "location" for
+    /// the storage slot
+    pub keccak_location: ByteKeccakWires<INPUT_PADDED_LEN>,
+    /// Actual keccak wires created for the computation of the final MPT key
+    /// from the location. THIS is the one to use to look up a key in the
+    /// associated MPT trie.
+    pub keccak_mpt: ByteKeccakWires<{ PAD_LEN(HASH_LEN) }>,
+    /// The MPT key derived in circuit from the storage slot, in NIBBLES
+    /// TODO: it represents the same information as "exp" but in nibbles.
+    /// It doesn't need to be assigned, but is used in the higher level circuits
+    pub mpt_key: MPTKeyWire,
+}
+
+impl SimpleSlot {
+    /// Derive the MPT key in circuit according to simple storage slot.
+    /// Remember the rules to get the MPT key is as follow:
+    /// * location = keccak256(pad32(contract_address), pad32(slot))
+    /// * mpt_key = keccak256(location)
+    /// Note the simple slot wire is NOT range checked, because it is expected
+    /// to be given by the verifier. If that assumption is not true, then the
+    /// caller should call `b.range_check(slot, 8)` to ensure its byteness.
+    pub fn build<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+    ) -> SimpleSlotWires {
+        let slot = b.add_virtual_target();
+        let contract_address = AddressTarget::new(b);
+
+        // Always ensure whatever goes into hash function, it's bytes.
+        contract_address.assert_bytes(b);
+
+        // keccak(left_pad32(contract_address), left_pad32(slot))
+        let mut arr = [b.zero(); INPUT_PADDED_LEN];
+        arr[INPUT_ELEMENT_LEN - ADDRESS_LEN..INPUT_ELEMENT_LEN]
+            .copy_from_slice(&contract_address.arr);
+        arr[INPUT_TUPLE_LEN - 1] = slot;
+        let vector = VectorWire::<Target, INPUT_PADDED_LEN> {
+            real_len: b.constant(F::from_canonical_usize(INPUT_TUPLE_LEN)),
+            arr: Array { arr },
+        };
+        let keccak_location = KeccakCircuit::<{ INPUT_PADDED_LEN }>::hash_to_bytes(b, &vector);
+        // keccak ( location ) - take the output and copy it in a slice large
+        // enough for padding.
+        let mut padded_location = [b.zero(); PAD_LEN(HASH_LEN)];
+        padded_location[0..HASH_LEN].copy_from_slice(&keccak_location.output.arr);
+        // TODO : make nice APIs for that in array.rs
+        let hash_len = b.constant(F::from_canonical_usize(HASH_LEN));
+        let keccak_mpt = KeccakCircuit::<{ PAD_LEN(HASH_LEN) }>::hash_to_bytes(
+            b,
+            &VectorWire {
+                real_len: hash_len,
+                arr: Array {
+                    arr: padded_location,
+                },
+            },
+        );
+
+        // Make sure we transform from the bytes to the nibbles.
+        // TODO: actually maybe better to give the nibbles directly and pack
+        // them into U32 in one go. For the future...
+        let mpt_key = MPTKeyWire::init_from_bytes(b, &keccak_mpt.output);
+
+        SimpleSlotWires {
+            slot,
+            contract_address,
+            keccak_location,
+            keccak_mpt,
+            mpt_key,
+        }
+    }
+
+    pub fn assign<F: RichField>(&self, pw: &mut PartialWitness<F>, wires: &SimpleSlotWires) {
+        pw.set_target(wires.slot, F::from_canonical_u8(self.slot));
+        wires
+            .contract_address
+            .assign_bytes(pw, &self.contract_address.0);
+
+        let inputs = self.inputs();
+        let exp_location = keccak256(&inputs);
+
+        // Assign the keccak necessary values for keccak_location.
+        KeccakCircuit::<{ INPUT_PADDED_LEN }>::assign_byte_keccak(
+            pw,
+            &wires.keccak_location,
+            // no need to create a new input wire array since we create it in circuit
+            &InputData::Assigned(
+                &Vector::from_vec(&inputs).expect("can't create vector input for keccak_location"),
+            ),
+        );
+        // assign the keccak necessary values for keccak_mpt = H(keccak_location)
+        KeccakCircuit::<{ PAD_LEN(HASH_LEN) }>::assign_byte_keccak(
+            pw,
+            &wires.keccak_mpt,
+            &InputData::Assigned(
+                &Vector::from_vec(&exp_location).expect("can't create vector input for keccak_mpt"),
+            ),
+        )
+    }
+
+    pub fn mpt_key(&self) -> [u8; HASH_LEN] {
+        // location = keccak(inputs)
+        let location = keccak256(&self.inputs());
+
+        // mpt_key = keccak(location)
+        keccak256(&location).try_into().unwrap()
+    }
+
+    fn inputs(&self) -> [u8; INPUT_TUPLE_LEN] {
+        // pad32(contract_address) || pad32(slot)
+        let padded_contract_address = left_pad32(&self.contract_address.0);
+        let padded_slot = left_pad32(&[self.slot]);
+
+        padded_contract_address
+            .into_iter()
+            .chain(padded_slot)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+}
 
 /// Circuit gadget that proves the correct derivation of a MPT key from a given mapping slot and storage slot.
 /// Deriving a MPT key from mapping slot is done like:
