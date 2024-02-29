@@ -13,7 +13,7 @@ use plonky2::{
 };
 
 use super::{
-    build_data_for_recursive_aggregation,
+    build_data_for_universal_verifier,
     circuit_set::{
         check_circuit_digest_target, CircuitSet, CircuitSetMembershipTargets, CircuitSetTarget,
     },
@@ -23,9 +23,9 @@ use super::{
 use anyhow::Result;
 
 #[derive(Debug)]
-// `UniversalVerifierTarget` comprises all the targets that are employed by the universal verifier
-// to recusively verify a proof and to check the membership of the digest of the verifier data employed
-// to verify the proof in the set of circuits bound to the universal verifier instance at hand
+/// `UniversalVerifierTarget` comprises all the targets that are employed by the universal verifier
+/// to recusively verify a proof and to check the membership of the digest of the verifier data employed
+/// to verify the proof in the set of circuits bound to the universal verifier instance at hand
 pub(crate) struct UniversalVerifierTarget<const D: usize> {
     circuit_set_membership: CircuitSetMembershipTargets,
     verified_proof: ProofWithPublicInputsTarget<D>,
@@ -37,13 +37,10 @@ impl<const D: usize> UniversalVerifierTarget<D> {
         &self.verified_proof
     }
 
-    /// Assigns the proofs and verifier data associated with the proof to the universal verifier targets. In particular,
-    /// it generates the Merkle proof showing the circuit that generated this proof belongs to the set of circuits
-    /// configured for this universal verifier.
-    pub(crate) fn set_universal_verifier_targets<
-        F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
-    >(
+    //// Assigns the proofs and verifier data associated with the proof to the universal verifier targets. In particular,
+    //// it generates the Merkle proof showing the circuit that generated this proof belongs to the set of circuits
+    //// configured for this universal verifier.
+    pub(crate) fn set_target<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>>(
         &self,
         pw: &mut PartialWitness<F>,
         circuit_set: &CircuitSet<F, C, D>,
@@ -63,10 +60,10 @@ impl<const D: usize> UniversalVerifierTarget<D> {
         )
     }
 }
-// `UniversalVerifierBuilder` is a data structure necessary to build instances of the universal verifier
-// in a circuit. It is mostly employed to cache the `CommonCircuitData` that are shared among all the
-// proofs being verified by the universal verifier, which are computed just once when initializing
-// `UniversalVerifierBuilder`
+/// `UniversalVerifierBuilder` is a data structure necessary to build instances of the universal verifier
+/// in a circuit. It is mostly employed to cache the `CommonCircuitData` that are shared among all the
+/// proofs being verified by the universal verifier, which are computed just once when initializing
+/// `UniversalVerifierBuilder`
 pub(crate) struct UniversalVerifierBuilder<
     F: RichField + Extendable<D>,
     const D: usize,
@@ -87,7 +84,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
     {
-        let rec_data = build_data_for_recursive_aggregation::<F, C, D>(config, NUM_PUBLIC_INPUTS);
+        let rec_data = build_data_for_universal_verifier::<F, C, D>(config, NUM_PUBLIC_INPUTS);
         Self {
             rec_data,
             circuit_set_size,
@@ -114,7 +111,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
         proof
     }
 
-    // check that `circuit_set_target` is the same as the one exposed by the `proof`
+    /// check that `circuit_set_target` is the same as the one exposed by the `proof`
     pub(crate) fn check_circuit_set_equality(
         builder: &mut CircuitBuilder<F, D>,
         circuit_set_target: &CircuitSetTarget,
@@ -127,8 +124,8 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
             .zip(proof.public_inputs.iter().skip(NUM_PUBLIC_INPUTS))
             .for_each(|(&cs_t, &pi_t)| builder.connect(cs_t, pi_t));
     }
-    // Gadget to add an instance of the universal verifier, bound to the circuit set specified in `circuit_set_target`,
-    // to a circuit that is being built with `builder`
+    /// Gadget to add an instance of the universal verifier, bound to the circuit set specified in `circuit_set_target`,
+    /// to a circuit that is being built with `builder`
     pub(crate) fn universal_verifier_circuit<C: GenericConfig<D, F = F>>(
         &self,
         builder: &mut CircuitBuilder<F, D>,
@@ -254,8 +251,8 @@ mod tests {
                 inputs,
                 &mut pw,
             )?;
-            CircuitSetDigest::from(circuit_set)
-                .set_circuit_set_target(&mut pw, &self.circuit_set_target);
+            self.circuit_set_target
+                .set_target::<F, C, D>(&mut pw, &CircuitSetDigest::from(circuit_set));
 
             self.circuit_data.prove(pw)
         }
@@ -348,19 +345,15 @@ mod tests {
             inputs: <RecursiveCircuit<INPUT_SIZE> as CircuitLogic<F, D, 1>>::Inputs,
         ) -> Result<ProofWithPublicInputs<F, C, D>> {
             let mut pw = PartialWitness::<F>::new();
-            self.verifier_targets.set_universal_verifier_targets(
-                &mut pw,
-                circuit_set,
-                proof,
-                verifier_data,
-            )?;
+            self.verifier_targets
+                .set_target(&mut pw, circuit_set, proof, verifier_data)?;
             <RecursiveCircuit<INPUT_SIZE> as CircuitLogic<F, D, 1>>::assign_input(
                 &self.input_targets,
                 inputs,
                 &mut pw,
             )?;
-            CircuitSetDigest::from(circuit_set)
-                .set_circuit_set_target(&mut pw, &self.circuit_set_target);
+            self.circuit_set_target
+                .set_target::<F, C, D>(&mut pw, &CircuitSetDigest::from(circuit_set));
 
             self.circuit_data.prove(pw)
         }
@@ -574,8 +567,9 @@ mod tests {
                 &mut pw,
             )
             .unwrap();
-            CircuitSetDigest::from(&circuit_set)
-                .set_circuit_set_target(&mut pw, &universal_verifier_circuit.circuit_set_target);
+            universal_verifier_circuit
+                .circuit_set_target
+                .set_target(&mut pw, &CircuitSetDigest::from(&circuit_set));
 
             check_panic!(
                 || universal_verifier_circuit.circuit_data.prove(pw),

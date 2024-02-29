@@ -235,8 +235,8 @@ fn test_map_reduce_circuits() {
         &framework,
     );
     let mut builder = CircuitBuilder::<F, D>::new(config.clone());
-    let proof_target = verifier_gadget
-        .verify_proof_fixed_circuit_in_recursive_circuit_set(&mut builder, reduce_circuit_vd);
+    let proof_target =
+        verifier_gadget.verify_proof_fixed_circuit_in_circuit_set(&mut builder, reduce_circuit_vd);
     builder.register_public_inputs(&proof_target.public_inputs);
 
     let verifier_circuit = builder.build::<C>();

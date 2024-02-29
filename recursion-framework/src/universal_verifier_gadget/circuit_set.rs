@@ -22,22 +22,22 @@ use plonky2::{
 use super::CIRCUIT_SET_CAP_HEIGHT;
 use anyhow::{Error, Result};
 
-// get the list of targets composing a `MerkleCapTarget`
+/// get the list of targets composing a `MerkleCapTarget`
 pub(crate) fn merkle_cap_to_targets(merkle_cap: &MerkleCapTarget) -> Vec<Target> {
     merkle_cap.0.iter().flat_map(|h| h.elements).collect()
 }
 
-// Set of targets employed to prove that the circuit employed to generate a proof being recursively
-// verified belongs to the set of circuits whose proofs can be verified with the universal verifier
-// bound to such a set
+/// Set of targets employed to prove that the circuit employed to generate a proof being recursively
+/// verified belongs to the set of circuits whose proofs can be verified with the universal verifier
+/// bound to such a set
 #[derive(Debug)]
 pub(crate) struct CircuitSetMembershipTargets {
     merkle_proof_target: MerkleProofTarget,
     leaf_index_bits: Vec<BoolTarget>,
 }
 
-// The target employed to represent the set of circuits whose proofs can be verified with the
-// universal verifier bound to such a set
+/// The target employed to represent the set of circuits whose proofs can be verified with the
+/// universal verifier bound to such a set
 pub(crate) struct CircuitSetTarget(MerkleCapTarget);
 
 impl CircuitSetTarget {
@@ -63,8 +63,22 @@ impl CircuitSetTarget {
         Self(builder.constant_merkle_cap(&digest.0))
     }
 
-    // Enforce that `circuit_digest_target` is a leaf in the merkle-tree
-    // with root `circuit_set_target`
+    pub(crate) fn set_target<
+        F: RichField + Extendable<D>,
+        C: GenericConfig<D, F = F>,
+        const D: usize,
+    >(
+        &self,
+        pw: &mut PartialWitness<F>,
+        digest: &CircuitSetDigest<F, C, D>,
+    ) where
+        C::Hasher: AlgebraicHasher<F>,
+    {
+        pw.set_cap_target(&self.0, &digest.0);
+    }
+
+    /// Enforce that `circuit_digest_target` is a leaf in the merkle-tree
+    /// with root `circuit_set_target`
     pub(crate) fn check_circuit_digest_membership<
         F: RichField + Extendable<D>,
         C: GenericConfig<D, F = F>,
@@ -100,18 +114,18 @@ impl CircuitSetTarget {
             leaf_index_bits,
         }
     }
+    /// Returns the number of targets employed for `CircuitSetTarget`
+    pub(crate) fn num_targets<F: RichField + Extendable<D>, const D: usize>(
+        config: CircuitConfig,
+    ) -> usize {
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let target = CircuitSetTarget::build_target(&mut builder);
+        target.to_targets().len()
+    }
 }
 
-pub(crate) fn num_targets_for_circuit_set<F: RichField + Extendable<D>, const D: usize>(
-    config: CircuitConfig,
-) -> usize {
-    let mut builder = CircuitBuilder::<F, D>::new(config);
-    let target = CircuitSetTarget::build_target(&mut builder);
-    target.to_targets().len()
-}
-
-// check in the circuit that the circuit digest in `verifier_data` is correctly computed from
-// `verifier_data.constants_sigmas_cap` and the degree bits of the circuit
+/// check in the circuit that the circuit digest in `verifier_data` is correctly computed from
+/// `verifier_data.constants_sigmas_cap` and the degree bits of the circuit
 pub(crate) fn check_circuit_digest_target<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
@@ -136,8 +150,8 @@ pub(crate) fn check_circuit_digest_target<
     builder.connect_hashes(verifier_data.circuit_digest, cap_hash);
 }
 #[derive(Clone, Debug)]
-// Data structure employed by the recursion framework to store and manage the set of circuits whose proofs
-// can be verified with the universal verifier bound to such a set
+/// Data structure employed by the recursion framework to store and manage the set of circuits whose proofs
+/// can be verified with the universal verifier bound to such a set
 pub(crate) struct CircuitSet<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
@@ -176,8 +190,8 @@ where
         self.circuit_digests_to_leaf_indexes.get(digest).cloned()
     }
 
-    // set a `CircuitSetMembershipTargets` to prove membership of `circuit_digest` in the set of
-    // circuits whose proofs can be verified with the universal verifier bound to such a set
+    /// set a `CircuitSetMembershipTargets` to prove membership of `circuit_digest` in the set of
+    /// circuits whose proofs can be verified with the universal verifier bound to such a set
     pub(crate) fn set_circuit_membership_target(
         &self,
         pw: &mut PartialWitness<F>,
@@ -217,8 +231,8 @@ where
     }
 }
 
-// A short representation (e.g., a digest) of the set of circuits whose proofs can be verified with the
-// universal verifier bound to such a set; this should represent values assignable to a `CircuitSetTarget`
+/// A short representation (e.g., a digest) of the set of circuits whose proofs can be verified with the
+/// universal verifier bound to such a set; this should represent values assignable to a `CircuitSetTarget`
 #[derive(Debug, Clone)]
 pub struct CircuitSetDigest<
     F: RichField + Extendable<D>,
@@ -231,14 +245,6 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
 where
     C::Hasher: AlgebraicHasher<F>,
 {
-    pub(crate) fn set_circuit_set_target(
-        &self,
-        pw: &mut PartialWitness<F>,
-        target: &CircuitSetTarget,
-    ) {
-        pw.set_cap_target(&target.0, &self.0);
-    }
-
     pub fn flatten(&self) -> Vec<F> {
         self.0.flatten()
     }
@@ -318,7 +324,7 @@ mod tests {
         let prove_circuit = |circuit_set: &CircuitSet<F, C, D>| {
             let mut pw = PartialWitness::<F>::new();
             let elements = circuit_set.circuit_digests_to_leaf_indexes.keys();
-            circuit_set_digest.set_circuit_set_target(&mut pw, &circuit_set_target);
+            circuit_set_target.set_target(&mut pw, &circuit_set_digest);
             element_targets
                 .iter()
                 .zip(circuit_membership_targets.iter().zip(elements))

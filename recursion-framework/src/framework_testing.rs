@@ -163,7 +163,7 @@ where
 
     /// Utility function to get the verifier data for the circuit being employed to generate the input proofs
     /// computed by the `generate_input_proofs` method
-    pub fn get_verifier_data_for_input_proofs<const NUM_VERIFIERS: usize>(
+    pub fn verifier_data_for_input_proofs<const NUM_VERIFIERS: usize>(
         &self,
     ) -> [&VerifierOnlyCircuitData<C, D>; NUM_VERIFIERS] {
         [self.dummy_circuit.get_verifier_data(); NUM_VERIFIERS]
@@ -185,7 +185,7 @@ where
         self.recursive_circuits.generate_proof(
             circuit,
             input_proofs.try_into().unwrap(),
-            self.get_verifier_data_for_input_proofs(),
+            self.verifier_data_for_input_proofs(),
             custom_inputs,
         )
     }
@@ -312,7 +312,7 @@ mod tests {
         let verifier_circuit_fixed = circuit_builder
             .build_circuit::<C, 0, VerifierCircuitFixed<C, D, NUM_PUBLIC_INPUTS>>((
                 verifier_gadget,
-                testing_framework.get_verifier_data_for_input_proofs::<1>()[0].clone(),
+                testing_framework.verifier_data_for_input_proofs::<1>()[0].clone(),
             ));
 
         let verifier_circuits = vec![
@@ -335,7 +335,7 @@ mod tests {
                         .generate_input_proofs::<1>(public_inputs)
                         .unwrap()[0]
                         .clone(),
-                    testing_framework.get_verifier_data_for_input_proofs::<1>()[0].clone(),
+                    testing_framework.verifier_data_for_input_proofs::<1>()[0].clone(),
                 ),
             )
             .unwrap();

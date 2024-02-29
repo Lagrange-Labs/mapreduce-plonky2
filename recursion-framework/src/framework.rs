@@ -21,11 +21,10 @@ use crate::{
 use anyhow::Result;
 /// This trait is employed to fetch the `VerifierOnlyCircuitData` of a circuit, which is needed to verify
 /// a proof with the universal verifier
-pub trait RecursiveCircuitInfo<
+pub trait RecursiveCircuitInfo<F, C, const D: usize>
+where
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
-    const D: usize,
->
 {
     /// Returns a reference to the `VerifierOnlyCircuitData` of the circuit implementing this trait
     fn get_verifier_data(&self) -> &VerifierOnlyCircuitData<C, D>;
@@ -33,28 +32,25 @@ pub trait RecursiveCircuitInfo<
 
 /// `RecursivecircuitInfo` trait is automatically implemented for any `CircuitWithUniversalVerifier`
 /// and for `&CircuitWithUniversalVerifier`
-impl<
-        F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
-        const D: usize,
-        const NUM_VERIFIERS: usize,
-        CL: CircuitLogic<F, D, NUM_VERIFIERS>,
-    > RecursiveCircuitInfo<F, C, D> for CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CL>
+impl<F, C, const D: usize, const NUM_VERIFIERS: usize, CL> RecursiveCircuitInfo<F, C, D>
+    for CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CL>
 where
+    F: RichField + Extendable<D>,
+    C: GenericConfig<D, F = F>,
     C::Hasher: AlgebraicHasher<F>,
     [(); C::Hasher::HASH_SIZE]:,
+    CL: CircuitLogic<F, D, NUM_VERIFIERS>,
 {
     fn get_verifier_data(&self) -> &VerifierOnlyCircuitData<C, D> {
         &self.circuit_data().verifier_only
     }
 }
 
-impl<
-        F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
-        const D: usize,
-        T: RecursiveCircuitInfo<F, C, D>,
-    > RecursiveCircuitInfo<F, C, D> for &T
+impl<F, C, const D: usize, T> RecursiveCircuitInfo<F, C, D> for &T
+where
+    F: RichField + Extendable<D>,
+    C: GenericConfig<D, F = F>,
+    T: RecursiveCircuitInfo<F, C, D>,
 {
     fn get_verifier_data(&self) -> &VerifierOnlyCircuitData<C, D> {
         (*self).get_verifier_data()
@@ -141,18 +137,15 @@ pub fn prepare_recursive_circuit_for_circuit_set<
 
 /// Targets instantiated by the `RecursiveCircuitsVerifierGadget` which needs to be assigned with a
 /// witness value by the prover
-pub struct RecursiveCircuitsVerifierTargets<const D: usize>(UniversalVerifierTarget<D>);
+pub struct RecursiveCircuitsVerifierTarget<const D: usize>(UniversalVerifierTarget<D>);
 
-impl<const D: usize> RecursiveCircuitsVerifierTargets<D> {
+impl<const D: usize> RecursiveCircuitsVerifierTarget<D> {
     /// Assign witness values to the targets in `self`, employing the following input data:
     /// - `recursive_circuits_set`: set of recursive circuits bounded to the `RecursiveCircuitsVerifierGadget`
     ///   that instantiated the targets in `self`
     /// - `proof`: proof to be verified
     /// - `verifier_data`: verifier data of the circuit employed to generate `proof`
-    pub fn set_universal_verifier_gadget_targets<
-        F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
-    >(
+    pub fn set_target<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>>(
         &self,
         pw: &mut PartialWitness<F>,
         recursive_circuits_set: &RecursiveCircuits<F, C, D>,
@@ -163,7 +156,7 @@ impl<const D: usize> RecursiveCircuitsVerifierTargets<D> {
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
     {
-        self.0.set_universal_verifier_targets(
+        self.0.set_target(
             pw,
             &recursive_circuits_set.circuit_set,
             proof,
@@ -210,10 +203,10 @@ impl<
 
     /// Gadget to verify a proof generated with the `RecursiveCircuits` framework for any circuit in the set
     /// of recursive circuits bounded to 'self` (i.e., the `recursive_circuits_set` employed to instantiate `self`)
-    pub fn verify_proof_in_recursive_circuit_set(
+    pub fn verify_proof_in_circuit_set(
         &self,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> RecursiveCircuitsVerifierTargets<D>
+    ) -> RecursiveCircuitsVerifierTarget<D>
     where
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
@@ -222,7 +215,7 @@ impl<
             builder,
             self.recursive_circuits.get_circuit_set_digest(),
         );
-        RecursiveCircuitsVerifierTargets(
+        RecursiveCircuitsVerifierTarget(
             self.gadget_builder
                 .universal_verifier_circuit(builder, &circuit_set_target),
         )
@@ -230,7 +223,7 @@ impl<
 
     /// Gadget to verify a proof generated with the 'RecursiveCircuits` framework for a specific circuit
     /// `fixed_circuit` belonging to the set of recursive circuits bounded to `self`
-    pub fn verify_proof_fixed_circuit_in_recursive_circuit_set(
+    pub fn verify_proof_fixed_circuit_in_circuit_set(
         &self,
         builder: &mut CircuitBuilder<F, D>,
         fixed_circuit: &VerifierOnlyCircuitData<C, D>,
@@ -297,7 +290,7 @@ pub(crate) mod tests {
         const D: usize,
         const NUM_PUBLIC_INPUTS: usize,
     > {
-        targets: RecursiveCircuitsVerifierTargets<D>,
+        targets: RecursiveCircuitsVerifierTarget<D>,
         c: PhantomData<C>,
     }
 
@@ -327,14 +320,13 @@ pub(crate) mod tests {
             builder_parameters: Self::CircuitBuilderParams,
         ) -> Self {
             Self {
-                targets: builder_parameters.verify_proof_in_recursive_circuit_set(builder),
+                targets: builder_parameters.verify_proof_in_circuit_set(builder),
                 c: PhantomData::<C>::default(),
             }
         }
 
         fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
-            self.targets
-                .set_universal_verifier_gadget_targets(pw, &inputs.0, &inputs.1, &inputs.2)
+            self.targets.set_target(pw, &inputs.0, &inputs.1, &inputs.2)
         }
     }
 
@@ -376,10 +368,7 @@ pub(crate) mod tests {
             Self {
                 targets: builder_parameters
                     .0
-                    .verify_proof_fixed_circuit_in_recursive_circuit_set(
-                        builder,
-                        &builder_parameters.1,
-                    ),
+                    .verify_proof_fixed_circuit_in_circuit_set(builder, &builder_parameters.1),
                 c: PhantomData::<C>::default(),
             }
         }

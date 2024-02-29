@@ -182,7 +182,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
     /// a circuit built by `Self`, returns the set of targets corresponding to all the public inputs of
     /// the proof except for the ones representing the digest of the circuit set
-    pub fn get_public_inputs_from_proof(proof: &ProofWithPublicInputsTarget<D>) -> &[Target] {
+    pub fn public_input_targets(proof: &ProofWithPublicInputsTarget<D>) -> &[Target] {
         &proof.public_inputs[..NUM_PUBLIC_INPUTS]
     }
 
@@ -190,7 +190,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     /// a circuit built by `Self`, returns the set of targets that represent the digest
     /// of the circuit set exposed as public input by the proof, which might be necessary when the proof
     /// is recursively verified in another circuit
-    pub fn get_circuit_set_targets_from_proof(proof: &ProofWithPublicInputsTarget<D>) -> &[Target] {
+    pub fn circuit_set_targets(proof: &ProofWithPublicInputsTarget<D>) -> &[Target] {
         &proof.public_inputs[NUM_PUBLIC_INPUTS..]
     }
 }
@@ -198,30 +198,28 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
 /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
 /// a `CircuitWithUniversalVerifier` circuit, returns the set of `NUM_PUBLIC_INPUTS` targets corresponding to
 /// all the public inputs of the proof except for the ones representing the digest of the circuit set
-pub fn get_public_inputs_from_proof<
+pub fn public_input_targets<
     F: RichField + Extendable<D>,
     const D: usize,
     const NUM_PUBLIC_INPUTS: usize,
 >(
     proof: &ProofWithPublicInputsTarget<D>,
 ) -> &[Target] {
-    CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::get_public_inputs_from_proof(
-        proof,
-    )
+    CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::public_input_targets(proof)
 }
 
 /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
 /// a `CircuitWithUniversalVerifier` circuit, returns the set of targets that represent the digest
 /// of the circuit set exposed as public input by the proof, which might be necessary when the proof
 /// is recursively verified in another circuit
-pub fn get_circuit_set_targets_from_proof<
+pub fn circuit_set_targets<
     F: RichField + Extendable<D>,
     const D: usize,
     const NUM_PUBLIC_INPUTS: usize,
 >(
     proof: &ProofWithPublicInputsTarget<D>,
 ) -> &[Target] {
-    CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::get_circuit_set_targets_from_proof(proof)
+    CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::circuit_set_targets(proof)
 }
 
 /// `CircuitWithUniversalVerifier` is a data structure representing a circuit containing `NUM_VERIFIERS`
@@ -273,7 +271,7 @@ where
     ) -> Result<ProofWithPublicInputs<F, C, D>> {
         let mut pw = PartialWitness::<F>::new();
         for i in 0..NUM_VERIFIERS {
-            self.universal_verifier_targets[i].set_universal_verifier_targets(
+            self.universal_verifier_targets[i].set_target(
                 &mut pw,
                 circuit_set,
                 &input_proofs[i],
@@ -282,8 +280,8 @@ where
         }
         self.circuit_logic.assign_input(custom_inputs, &mut pw)?;
 
-        CircuitSetDigest::from(circuit_set)
-            .set_circuit_set_target(&mut pw, &self.circuit_set_target);
+        self.circuit_set_target
+            .set_target(&mut pw, &CircuitSetDigest::from(circuit_set));
 
         let base_proof = self.circuit_data.prove(pw)?;
 
@@ -426,9 +424,7 @@ pub(crate) mod tests {
             let to_be_hashed_payload = builder.add_virtual_target_arr::<INPUT_SIZE>();
             let hash_input = verified_proofs
                 .into_iter()
-                .flat_map(|pt| {
-                    get_public_inputs_from_proof::<F, D, NUM_PUBLIC_INPUTS_TEST_CIRCUITS>(pt)
-                })
+                .flat_map(|pt| public_input_targets::<F, D, NUM_PUBLIC_INPUTS_TEST_CIRCUITS>(pt))
                 .chain(to_be_hashed_payload.iter())
                 .cloned()
                 .collect::<Vec<_>>();

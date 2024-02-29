@@ -19,9 +19,9 @@ use crate::universal_verifier_gadget::{
 
 use anyhow::Result;
 
-// Data structure with all input/output targets and the `CircuitData` for each circuit employed
-// to recursively wrap a proof up to the recursion threshold. The data structure contains a set
-// of targets and a `CircuitData` for each wrap step.
+/// Data structure with all input/output targets and the `CircuitData` for each circuit employed
+/// to recursively wrap a proof up to the recursion threshold. The data structure contains a set
+/// of targets and a `CircuitData` for each wrap step.
 pub(crate) struct WrapCircuit<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
@@ -37,8 +37,8 @@ where
     C::Hasher: AlgebraicHasher<F>,
     [(); C::Hasher::HASH_SIZE]:,
 {
-    // build the wrap circuit for a proof enforcing the circuit with verifier data `inner_vd`
-    // and `inner_cd`
+    /// build the wrap circuit for a proof enforcing the circuit with verifier data `inner_vd`
+    /// and `inner_cd`
     pub(crate) fn build_wrap_circuit(
         inner_vd: &VerifierOnlyCircuitData<C, D>,
         inner_cd: &CommonCircuitData<F, D>,
