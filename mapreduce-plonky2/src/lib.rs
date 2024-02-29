@@ -18,7 +18,7 @@ mod benches;
 pub mod eth;
 
 mod array;
-mod circuit;
+pub(crate) mod circuit;
 mod group_hashing;
 mod hash;
 mod keccak;

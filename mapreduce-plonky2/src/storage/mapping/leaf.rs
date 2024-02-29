@@ -170,6 +170,9 @@ where
 mod test {
     use std::array::from_fn as create_array;
 
+    use crate::circuit::test::run_circuit;
+
+    use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
     use crate::utils::keccak256;
     use eth_trie::{Nibbles, Trie};
@@ -188,15 +191,13 @@ mod test {
 
     use super::{LeafCircuit, LeafWires, PublicInputs};
     use crate::array::Array;
-    use crate::circuit::test::run_circuit;
+    use crate::circuit::UserCircuit;
     use crate::eth::{left_pad32, StorageSlot};
     use crate::group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing};
     use crate::keccak::PACKED_HASH_LEN;
     use crate::mpt_sequential::{bytes_to_nibbles, MPTKeyWire, MAX_LEAF_VALUE_LEN};
     use crate::storage::key::MappingSlot;
     use crate::utils::convert_u8_to_u32_slice;
-    use crate::utils::test::random_vector;
-    use crate::{circuit::UserCircuit, mpt_sequential::test::generate_random_storage_mpt};
     use plonky2::field::types::Field;
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
