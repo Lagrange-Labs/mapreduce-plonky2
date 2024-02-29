@@ -143,7 +143,7 @@ mod tests {
     };
     use crate::{
         benches::init_logging,
-        circuit::{test::test_simple_circuit, UserCircuit},
+        circuit::{test::run_circuit, UserCircuit},
         eth::{ProofQuery, RLPBlock},
         keccak::HASH_LEN,
         utils::{convert_u8_slice_to_u32_fields, keccak256},
@@ -219,7 +219,7 @@ mod tests {
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
             c: BlockLinkingCircuit::new(block, storage_proof, state_mpt.nodes),
         };
-        test_simple_circuit::<F, D, C, _>(test_circuit);
+        run_circuit::<F, D, C, _>(test_circuit);
     }
 
     /// Test the block-linking circuit with RPC `eth_getProof`.
@@ -267,7 +267,7 @@ mod tests {
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
             c: BlockLinkingCircuit::new(block, storage_proof, state_mpt.nodes),
         };
-        test_simple_circuit::<F, D, C, _>(test_circuit);
+        run_circuit::<F, D, C, _>(test_circuit);
 
         Ok(())
     }

@@ -580,7 +580,7 @@ mod test {
                 let origin_u8 = Array::<Target, S>::new(c);
 
                 // Verify `to_u32_array`.
-                let to_u32 = origin_u8.to_u32_array(c);
+                let to_u32 = origin_u8.convert_u8_to_u32(c);
                 let exp_u32 = Array::<U32Target, { S / 4 }>::new(c);
                 let is_equal = to_u32.equals(c, &exp_u32);
                 c.connect(is_equal.target, tr.target);

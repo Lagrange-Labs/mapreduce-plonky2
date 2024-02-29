@@ -697,7 +697,7 @@ pub mod test {
             // value. In the case of state trie, the value is 104 bytes so value is never gonna be equal.
             checking_value: false,
         };
-        test_simple_circuit::<F, D, C, _>(circuit);
+        run_circuit::<F, D, C, _>(circuit);
 
         Ok(())
     }
