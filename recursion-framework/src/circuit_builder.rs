@@ -316,6 +316,12 @@ where
     pub fn wrapped_circuit_size(&self) -> usize {
         self.circuit_data.common.degree()
     }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buff = Vec::new();
+        // TODO
+        buff
+    }
 }
 
 #[cfg(test)]

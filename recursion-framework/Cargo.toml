@@ -1,5 +1,5 @@
 [package]
-name = "recursion-framework"
+name = "recursion_framework"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,6 +9,7 @@ edition = "2021"
 anyhow = "1.0.79"
 log = "0.4.20"
 plonky2 = { version = "0.1.4" }
+serde = "1.0.197"
 
 [dev-dependencies]
 env_logger = "0.11.2"
