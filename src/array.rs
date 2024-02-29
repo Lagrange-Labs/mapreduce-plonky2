@@ -11,7 +11,7 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
-use crate::utils::{convert_u8_targets_to_u32, less_than, less_than_or_equal_to, IntTargetWriter};
+use crate::utils::{less_than, less_than_or_equal_to, IntTargetWriter};
 
 /// Utility trait to convert any value into its field representation equivalence
 pub(crate) trait ToField<F: RichField> {
@@ -318,24 +318,21 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         res
     }
 
-    pub fn slice_equals<F: RichField + Extendable<D>, const D: usize>(
+    pub fn enforce_slice_equals<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
         other: &Self,
         end_idx: Target,
-    ) -> BoolTarget {
-        let mut res = b._true();
+    ) {
         let tru = b._true();
         for (i, (our, other)) in self.arr.iter().zip(other.arr.iter()).enumerate() {
             let it = b.constant(F::from_canonical_usize(i));
             // TODO: fixed to 6 becaues max nibble len = 64 - TO CHANGE
             let before_end = less_than(b, it, end_idx, 6);
             let eq = b.is_equal(our.to_target(), other.to_target());
-            let should_be_true =
-                BoolTarget::new_unsafe(b.select(before_end, eq.target, tru.target));
-            res = b.and(res, should_be_true);
+            let res = b.select(before_end, eq.target, tru.target);
+            b.connect(res, tru.target);
         }
-        res
     }
 
     /// Returns self[at..at+SUB_SIZE].
@@ -403,13 +400,44 @@ impl<const SIZE: usize> Array<Target, SIZE>
 where
     [(); SIZE / 4]:,
 {
-    pub fn to_u32_array<F: RichField + Extendable<D>, const D: usize>(
+    pub fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
     ) -> Array<U32Target, { SIZE / 4 }> {
+        const TWO_POWER_8: usize = 256;
+        const TWO_POWER_16: usize = 65536;
+        const TWO_POWER_24: usize = 16777216;
+
+        // constants to convert [u8; 4] to u32
+        // u32 = u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
+        let two_power_8: Target = b.constant(F::from_canonical_usize(TWO_POWER_8));
+        let two_power_16: Target = b.constant(F::from_canonical_usize(TWO_POWER_16));
+        let two_power_24: Target = b.constant(F::from_canonical_usize(TWO_POWER_24));
+
         // convert padded node to u32
         Array::<U32Target, { SIZE / 4 }> {
-            arr: convert_u8_targets_to_u32(b, &self.arr).try_into().unwrap(),
+            arr: (0..SIZE)
+                .step_by(4)
+                .map(|i| {
+                    // u8[0]
+                    let mut x = self.arr[i];
+                    // u8[1]
+                    let mut y = self.arr[i + 1];
+                    // u8[0] + u8[1] * 2^8
+                    x = b.mul_add(y, two_power_8, x);
+                    // u8[2]
+                    y = self.arr[i + 2];
+                    // u8[0] + u8[1] * 2^8 + u8[2] * 2^16
+                    x = b.mul_add(y, two_power_16, x);
+                    // u8[3]
+                    y = self.arr[i + 3];
+                    // u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
+                    x = b.mul_add(y, two_power_24, x);
+                    U32Target(x)
+                })
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
         }
     }
 }
@@ -463,8 +491,8 @@ mod test {
 
     use crate::{
         array::{Array, ToField, Vector, VectorWire},
-        circuit::{test::test_simple_circuit, UserCircuit},
-        utils::{convert_u8_to_u32_slice, find_index_subvector},
+        circuit::{test::run_circuit, UserCircuit},
+        utils::{convert_u8_to_u32_slice, find_index_subvector, test::random_vector},
     };
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -520,12 +548,12 @@ mod test {
         rng.fill(&mut arr[..]);
         let mut arr2 = [0u8; SIZE];
         rng.fill(&mut arr2[..]);
-        test_simple_circuit::<F, D, C, _>(SelectCircuit {
+        run_circuit::<F, D, C, _>(SelectCircuit {
             arr,
             arr2,
             cond: true,
         });
-        test_simple_circuit::<F, D, C, _>(SelectCircuit {
+        run_circuit::<F, D, C, _>(SelectCircuit {
             arr,
             arr2,
             cond: false,
@@ -575,7 +603,7 @@ mod test {
         let mut rng = thread_rng();
         let mut arr = [0u8; SIZE];
         rng.fill(&mut arr[..]);
-        test_simple_circuit::<F, D, C, _>(ConvertCircuit { arr });
+        run_circuit::<F, D, C, _>(ConvertCircuit { arr });
     }
     #[test]
     fn test_value_at() {
@@ -612,7 +640,7 @@ mod test {
         rng.fill(&mut arr[..]);
         let idx: usize = rng.gen_range(0..SIZE);
         let exp = arr[idx];
-        test_simple_circuit::<F, D, C, _>(ValueAtCircuit { arr, idx, exp });
+        run_circuit::<F, D, C, _>(ValueAtCircuit { arr, idx, exp });
     }
 
     #[test]
@@ -655,7 +683,7 @@ mod test {
         rng.fill(&mut arr[..]);
         let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
         let exp = create_array(|i| arr[idx + i]);
-        test_simple_circuit::<F, D, C, _>(ExtractArrayCircuit { arr, idx, exp });
+        run_circuit::<F, D, C, _>(ExtractArrayCircuit { arr, idx, exp });
     }
 
     #[test]
@@ -699,11 +727,7 @@ mod test {
             rng.fill(&mut arr[..]);
             let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
             let exp = create_array(|i| arr[idx + i]);
-            test_simple_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
-                arr,
-                idx,
-                exp,
-            });
+            run_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> { arr, idx, exp });
         }
         {
             // trying where the subarray is at the end
@@ -717,7 +741,7 @@ mod test {
                 hex::decode("6b4a71765e17649ab73c5e176281619faf173519718e6e95a40a8768685a26c6")
                     .unwrap();
             let idx = find_index_subvector(&node, &child_hash).unwrap();
-            test_simple_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
+            run_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
                 arr: node.try_into().unwrap(),
                 idx,
                 exp: child_hash.try_into().unwrap(),
@@ -734,12 +758,13 @@ mod test {
             use std::panic;
             // a bit hardcore method to test for failure but it works for now
             let r = panic::catch_unwind(|| {
-                test_simple_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
-                    arr,
+                run_circuit::<F, D, C, _>(ContainsSubarrayCircuit::<SIZE, SUBSIZE> {
                     idx,
                     exp,
+                    arr,
                 })
             });
+
             assert!(r.is_err());
         }
     }
@@ -791,19 +816,13 @@ mod test {
         let idx: usize = rng.gen_range(0..(SIZE - random_size));
         let sub = arr[idx..idx + random_size].to_vec();
 
-        test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
-            arr,
-            idx: 0,
-            sub: arr.to_vec(),
-            exp: true,
-        });
-        test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
+        run_circuit::<F, D, C, _>(ContainsVectorCircuit {
             arr,
             idx,
             sub,
             exp: true,
         });
-        test_simple_circuit::<F, D, C, _>(ContainsVectorCircuit {
+        run_circuit::<F, D, C, _>(ContainsVectorCircuit {
             arr,
             idx,
             sub: (0..random_size).map(|_| rng.gen()).collect::<Vec<_>>(),
@@ -839,15 +858,71 @@ mod test {
         const N: usize = 47;
         let vector = (0..N).map(|_| thread_rng().gen::<u8>()).collect::<Vec<_>>();
         let circuit = TestAssertBytes::<u8, N> { vector };
-        test_simple_circuit::<F, D, C, _>(circuit);
+        run_circuit::<F, D, C, _>(circuit);
 
         // circuit should fail with non bytes entries
         let vector = (0..N)
-            .map(|_| thread_rng().gen_range(u8::MAX as u32..u32::MAX))
+            .map(|_| thread_rng().gen::<u32>() + u8::MAX as u32)
             .collect::<Vec<_>>();
         let res = panic::catch_unwind(|| {
             let circuit = TestAssertBytes::<u32, N> { vector };
-            test_simple_circuit::<F, D, C, _>(circuit);
+            run_circuit::<F, D, C, _>(circuit);
+        });
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_enforce_slice_equals() {
+        #[derive(Clone, Debug)]
+        struct TestSliceEqual<const N: usize> {
+            arr: [u8; N],
+            arr2: [u8; N],
+            ptr: usize,
+        }
+
+        impl<F, const D: usize, const N: usize> UserCircuit<F, D> for TestSliceEqual<N>
+        where
+            F: RichField + Extendable<D>,
+        {
+            type Wires = (Array<Target, N>, Target, Array<Target, N>);
+
+            fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let arr = Array::<Target, N>::new(c);
+                let ptr = c.add_virtual_target();
+                let prefix = Array::<Target, N>::new(c);
+                arr.enforce_slice_equals(c, &prefix, ptr);
+                (arr, ptr, prefix)
+            }
+
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires
+                    .0
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
+                wires
+                    .2
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr2[i])));
+                pw.set_target(wires.1, F::from_canonical_usize(self.ptr));
+            }
+        }
+        const N: usize = 45;
+        let arr: [u8; N] = random_vector(N).try_into().unwrap();
+        let mut arr2: [u8; N] = random_vector(N).try_into().unwrap();
+        let pointer = thread_rng().gen_range(0..N);
+        arr2[0..pointer].copy_from_slice(&arr[0..pointer]);
+        let circuit = TestSliceEqual {
+            arr,
+            arr2,
+            ptr: pointer,
+        };
+        run_circuit::<F, D, C, _>(circuit);
+
+        let res = panic::catch_unwind(|| {
+            let circuit = TestSliceEqual {
+                arr,
+                arr2: random_vector(N).try_into().unwrap(),
+                ptr: pointer,
+            };
+            run_circuit::<F, D, C, _>(circuit);
         });
         assert!(res.is_err());
     }

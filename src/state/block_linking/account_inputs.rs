@@ -154,7 +154,7 @@ where
         // it's equal to the packed hash value.
         let is_equal = wires
             .storage_root_bytes
-            .to_u32_array(cb)
+            .convert_u8_to_u32(cb)
             .equals(cb, storage_root_hash);
         cb.connect(is_equal.target, tt.target);
 
