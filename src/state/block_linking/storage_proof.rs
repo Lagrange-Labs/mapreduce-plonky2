@@ -28,8 +28,8 @@ pub const C1_IDX: usize = 11;
 pub const C2_IDX: usize = 19;
 pub const A_IDX: usize = 27;
 pub const M_IDX: usize = 32;
-pub const S_IDX: usize = 40;
-pub const STORAGE_INPUT_LEN: usize = 41;
+pub const S_IDX: usize = 33;
+pub const STORAGE_INPUT_LEN: usize = 34;
 
 /// The public input values of previous storage proof
 #[derive(Clone, Debug)]
