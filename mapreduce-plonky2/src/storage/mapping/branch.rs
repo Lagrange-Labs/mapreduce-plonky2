@@ -1,3 +1,5 @@
+use std::array::from_fn as create_array;
+
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     iop::{
@@ -8,6 +10,7 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use recursion_framework::circuit_builder::CircuitLogicWires;
 
 use crate::{
     array::{Array, Vector, VectorWire},
@@ -50,7 +53,7 @@ where
     /// verifier / recursion framework.
     pub fn build(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
-        inputs: &[Vec<Target>],
+        inputs: &[PublicInputs<Target>; N_CHILDREN],
     ) -> BranchWires<NODE_LEN> {
         let node = VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b);
         // always ensure the node is bytes at the beginning
@@ -76,8 +79,7 @@ where
         let headers = decode_fixed_list::<_, _, MAX_ITEMS_IN_LIST>(b, &node.arr.arr, zero);
         let ffalse = b._false();
         let mut seen_nibbles = vec![];
-        for i in 0..N_CHILDREN {
-            let proof_inputs = PublicInputs::from(&inputs[i]);
+        for proof_inputs in inputs {
             let child_accumulator = proof_inputs.accumulator();
             accumulator = b.curve_add(accumulator, child_accumulator);
             // add the number of leaves this proof has processed
@@ -140,8 +142,42 @@ where
     }
 }
 
+/// D = 2,
+/// Num of children = 0
+impl<const NODE_LEN: usize, const N_CHILDREN: usize>
+    CircuitLogicWires<GoldilocksField, 2, N_CHILDREN> for BranchWires<NODE_LEN>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+{
+    type CircuitBuilderParams = ();
+
+    type Inputs = BranchCircuit<NODE_LEN, N_CHILDREN>;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GoldilocksField>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<GoldilocksField, 2>,
+        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; N_CHILDREN],
+        _: Self::CircuitBuilderParams,
+    ) -> Self {
+        let inputs: [PublicInputs<Target>; N_CHILDREN] =
+            create_array(|i| PublicInputs::from(&verified_proofs[i].public_inputs));
+        BranchCircuit::build(builder, &inputs)
+    }
+
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut PartialWitness<GoldilocksField>,
+    ) -> anyhow::Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use std::array::from_fn as create_array;
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
@@ -188,7 +224,8 @@ mod test {
             let inputs = (0..N_CHILDREN)
                 .map(|_| c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN))
                 .collect::<Vec<_>>();
-            let wires = BranchCircuit::<NODE_LEN, N_CHILDREN>::build(c, &inputs);
+            let pinputs = create_array(|i| PublicInputs::from(&inputs[i]));
+            let wires = BranchCircuit::<NODE_LEN, N_CHILDREN>::build(c, &pinputs);
             (wires, inputs.try_into().unwrap())
         }
 
