@@ -130,13 +130,13 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
     }
 }
 impl<'a, T: Copy> PublicInputs<'a, T> {
-    const D_IDX: usize = 0; // 5F for each coordinates + 1 bool flag
-    const KEY_IDX: usize = 11; // 64 nibbles
-    const T_IDX: usize = 75; // 1 index
-    const S_IDX: usize = 76; // 1 index
-    const N_IDX: usize = 77; // 1 index
-    const C_IDX: usize = 78; // packed hash = 8 U32-F elements
-    const EXTENSION: usize = 5;
+    pub(crate) const D_IDX: usize = 0; // 5F for each coordinates + 1 bool flag
+    pub(crate) const KEY_IDX: usize = 11; // 64 nibbles
+    pub(crate) const T_IDX: usize = 75; // 1 index
+    pub(crate) const S_IDX: usize = 76; // 1 index
+    pub(crate) const N_IDX: usize = 77; // 1 index
+    pub(crate) const C_IDX: usize = 78; // packed hash = 8 U32-F elements
+    pub(crate) const EXTENSION: usize = 5;
     pub(crate) const TOTAL_LEN: usize = Self::C_IDX + 8;
     pub fn from(arr: &'a [T]) -> Self {
         Self { proof_inputs: arr }
@@ -156,14 +156,14 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         let flag = slice[2 * Self::EXTENSION];
         (x, y, flag)
     }
-    pub(super) fn mpt_key_info(&self) -> (&[T], T) {
+    pub(crate) fn mpt_key_info(&self) -> (&[T], T) {
         let key_range = Self::KEY_IDX..Self::KEY_IDX + MAX_KEY_NIBBLE_LEN;
         let key = &self.proof_inputs[key_range];
         let ptr_range = Self::T_IDX..Self::T_IDX + 1;
         let ptr = self.proof_inputs[ptr_range][0];
         (key, ptr)
     }
-    pub(super) fn root_hash_info(&self) -> &[T] {
+    pub(crate) fn root_hash_info(&self) -> &[T] {
         // poseidon merkle root hash is 4 F elements
         let hash_range = Self::C_IDX..Self::C_IDX + PACKED_HASH_LEN;
         &self.proof_inputs[hash_range]

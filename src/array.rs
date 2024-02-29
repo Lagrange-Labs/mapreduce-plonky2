@@ -318,6 +318,18 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         res
     }
 
+    /// Enforce this array is equal to another one.
+    pub fn enforce_equal<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        other: &Self,
+    ) {
+        self.arr
+            .iter()
+            .zip(other.arr.iter())
+            .for_each(|(our, other)| b.connect(our.to_target(), other.to_target()));
+    }
+
     pub fn enforce_slice_equals<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
