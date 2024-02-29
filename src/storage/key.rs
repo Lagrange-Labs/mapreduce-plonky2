@@ -30,7 +30,7 @@ use plonky2::{
 
 /// One input element length to Keccak
 const INPUT_ELEMENT_LEN: usize = 32;
-/// The tuple (pair) lengh of elements to Keccak
+/// The tuple (pair) length of elements to Keccak
 const INPUT_TUPLE_LEN: usize = 2 * INPUT_ELEMENT_LEN;
 /// The whole padded length for the inputs
 const INPUT_PADDED_LEN: usize = PAD_LEN(INPUT_TUPLE_LEN);
@@ -105,7 +105,7 @@ impl SimpleSlot {
             arr: Array { arr },
         };
         let keccak_location = KeccakCircuit::<{ INPUT_PADDED_LEN }>::hash_to_bytes(b, &vector);
-        // keccak ( location ) - take the output and copy it in a slice large
+        // keccak(location) - take the output and copy it in a slice large
         // enough for padding.
         let mut padded_location = [b.zero(); PAD_LEN(HASH_LEN)];
         padded_location[0..HASH_LEN].copy_from_slice(&keccak_location.output.arr);
@@ -171,7 +171,7 @@ impl SimpleSlot {
         keccak256(&location).try_into().unwrap()
     }
 
-    fn inputs(&self) -> [u8; INPUT_TUPLE_LEN] {
+    fn inputs(&self) -> Vec<u8> {
         // pad32(contract_address) || pad32(slot)
         let padded_contract_address = left_pad32(&self.contract_address.0);
         let padded_slot = left_pad32(&[self.slot]);
@@ -179,9 +179,7 @@ impl SimpleSlot {
         padded_contract_address
             .into_iter()
             .chain(padded_slot)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap()
+            .collect()
     }
 }
 

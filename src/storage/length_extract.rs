@@ -9,7 +9,7 @@ use crate::{
     utils::{convert_u8_targets_to_u32, PackedAddressTarget, PACKED_ADDRESS_LEN},
 };
 use anyhow::Result;
-use ethers::types::Address;
+use ethers::types::H160;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -111,7 +111,7 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
 {
-    pub fn new(slot: u8, contract_address: Address, nodes: Vec<Vec<u8>>) -> Self {
+    pub fn new(slot: u8, contract_address: H160, nodes: Vec<Vec<u8>>) -> Self {
         let slot = SimpleSlot::new(slot, contract_address);
         let mpt_circuit = MPTCircuit::new(slot.mpt_key(), nodes);
 
@@ -138,7 +138,7 @@ where
         // Constrain the MPT keys are equal.
         slot.mpt_key.key.enforce_equal(cb, &mpt_input.key.key);
 
-        // TODO: could assume the length value is in U32?
+        // TODO: Could assume this length value is within U32? Or U256?
         let length_value = convert_u8_targets_to_u32(cb, &mpt_output.leaf.arr);
         length_value[1..].iter().for_each(|v| cb.assert_zero(v.0));
 
@@ -173,5 +173,131 @@ where
         // Assign the input and output wires of MPT circuit.
         self.mpt_circuit
             .assign_wires(pw, &wires.mpt_input, &wires.mpt_output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        benches::init_logging,
+        circuit::{test::run_circuit, UserCircuit},
+        utils::keccak256,
+    };
+    use eth_trie::{EthTrie, MemoryDB, Trie};
+    use ethers::types::H160;
+    use plonky2::{
+        field::types::Field,
+        iop::witness::{PartialWitness, WitnessWrite},
+        plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
+    };
+    use rand::{thread_rng, Rng};
+    use std::sync::Arc;
+
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+
+    /// Test data
+    struct TestData {
+        /// Storage slot
+        slot: u8,
+        /// Contract address
+        contract_address: H160,
+        /// MPT nodes
+        nodes: Vec<Vec<u8>>,
+    }
+
+    /// Test circuit
+    #[derive(Clone, Debug)]
+    struct TestCircuit<const DEPTH: usize, const NODE_LEN: usize>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+        [(); DEPTH - 1]:,
+    {
+        c: LengthExtractCircuit<DEPTH, NODE_LEN>,
+    }
+
+    impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D> for TestCircuit<DEPTH, NODE_LEN>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+        [(); DEPTH - 1]:,
+    {
+        type Wires = LengthExtractWires<DEPTH, NODE_LEN>;
+
+        fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            LengthExtractCircuit::build(cb)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.c.assign::<F, D>(pw, wires).unwrap();
+        }
+    }
+
+    /// Test the length-match circuit with a generated random MPT.
+    #[test]
+    fn test_length_extract_circuit_with_random_mpt() {
+        init_logging();
+
+        const DEPTH: usize = 4;
+        const NODE_LEN: usize = 500;
+
+        let test_data = generate_test_data::<DEPTH>();
+        let test_circuit = TestCircuit::<DEPTH, NODE_LEN> {
+            c: LengthExtractCircuit::new(
+                test_data.slot,
+                test_data.contract_address,
+                test_data.nodes,
+            ),
+        };
+        run_circuit::<F, D, C, _>(test_circuit);
+    }
+
+    fn generate_test_data<const DEPTH: usize>() -> TestData {
+        let mut elements = Vec::new();
+        let memdb = Arc::new(MemoryDB::new(true));
+        let mut trie = EthTrie::new(Arc::clone(&memdb));
+
+        // Loop to insert random elements as long as a random selected proof is
+        // not of the right length.
+        let mut rng = thread_rng();
+        let (slot, contract_address, mpt_key) = loop {
+            println!(
+                "[+] Random mpt: insertion of {} elements so far...",
+                elements.len(),
+            );
+
+            // Generate a MPT key from the slot and contract address.
+            let slot = rng.gen::<u8>();
+            let contract_address = H160(rng.gen::<[u8; 20]>());
+            let key = SimpleSlot::new(slot, contract_address).mpt_key();
+
+            // Insert the key and value.
+            let value = rng.gen::<u8>();
+            trie.insert(&key, &[value]).unwrap();
+            trie.root_hash().unwrap();
+
+            // Save the slot, contract address and key temporarily.
+            elements.push((slot, contract_address, key));
+
+            // Check if any node has the DEPTH elements.
+            if let Some((slot, contract_address, key)) = elements
+                .iter()
+                .find(|(_, _, key)| trie.get_proof(key).unwrap().len() == DEPTH)
+            {
+                break (*slot, *contract_address, key);
+            }
+        };
+
+        let root_hash = trie.root_hash().unwrap();
+        let mut nodes = trie.get_proof(mpt_key).unwrap();
+        nodes.reverse();
+        assert!(keccak256(nodes.last().unwrap()) == root_hash.to_fixed_bytes());
+
+        TestData {
+            slot,
+            contract_address,
+            nodes,
+        }
     }
 }
