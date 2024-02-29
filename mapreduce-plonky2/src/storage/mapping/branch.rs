@@ -21,6 +21,9 @@ use crate::{
 };
 
 use super::public_inputs::PublicInputs;
+
+pub(super) const MAX_BRANCH_NODE_LEN: usize = 564;
+
 #[derive(Clone, Debug)]
 pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {
     node: Vec<u8>,
@@ -205,6 +208,14 @@ mod test {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
+    #[test]
+    fn test_len() {
+        let v: Vec<Vec<u8>> = (0..17)
+            .map(|_| random_vector::<u8>(32))
+            .collect::<Vec<Vec<u8>>>();
+        let encoded = rlp::encode_list::<Vec<u8>, _>(&v);
+        println!("BRANCH NODE: {:?}", encoded.len());
+    }
     #[derive(Clone, Debug)]
     struct TestBranchCircuit<'a, const NODE_LEN: usize, const N_CHILDREN: usize> {
         c: BranchCircuit<NODE_LEN, N_CHILDREN>,
