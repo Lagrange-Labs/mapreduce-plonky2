@@ -15,6 +15,7 @@ use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField, iop::witness::PartialWitness,
     plonk::circuit_builder::CircuitBuilder,
 };
+use public_inputs::PublicInputs;
 use storage_proof::{StorageInputs, StorageInputsWires};
 
 /// Main block-linking wires
@@ -107,11 +108,16 @@ where
             &account_inputs.state_mpt_output.root,
         );
 
-        BlockLinkingWires {
+        let wires = BlockLinkingWires {
             account_inputs,
             block_inputs,
             storage_proof,
-        }
+        };
+
+        // Register the public inputs.
+        PublicInputs::<F>::register(cb, &wires);
+
+        wires
     }
 
     /// Assign the wires.
