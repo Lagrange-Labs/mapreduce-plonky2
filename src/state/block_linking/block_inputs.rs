@@ -5,9 +5,10 @@ use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{ByteKeccakWires, InputData, KeccakCircuit, OutputByteHash, OutputHash, HASH_LEN},
     mpt_sequential::PAD_LEN,
-    rlp::{decode_compact_encoding, decode_fixed_list, RlpHeader},
+    rlp::{decode_fixed_list, RlpHeader},
     utils::{
-        convert_u8_slice_to_u32_fields, find_index_subvector, less_than, PackedU64Target, U64Target,
+        convert_u8_slice_to_u32_fields, find_index_subvector, less_than, PackedU64Target,
+        U64Target, U64_LEN,
     },
 };
 use anyhow::Result;
@@ -96,15 +97,30 @@ impl BlockInputs {
         let parent_hash: OutputByteHash = header_rlp.arr.extract_array(cb, parent_hash_offset);
         let parent_hash: OutputHash = parent_hash.convert_u8_to_u32(cb);
 
-        /*
-                let zero = cb.zero();
-                let rlp_headers = decode_fixed_list::<_, _, 9>(cb, &header_rlp.arr.arr, zero);
-                let hash_len = cb.constant(F::from_canonical_usize(HASH_LEN));
-                cb.connect(rlp_headers.len[0], hash_len);
-                cb.connect(rlp_headers.len[8], hash_len);
-                        // cb.connect(should_false.target, ffalse.target);
-                        cb.connect(kkk.real_len, hash_len);
-        */
+        // Only used for debugging the offset constants of parent hash, state
+        // root and block number in RLP encoded header.
+        #[cfg(debug_assertions)]
+        {
+            let [parent_hash_offset, state_root_offset, number_offset, number_len, hash_len] = [
+                HEADER_RLP_PARENT_HASH_OFFSET,
+                HEADER_RLP_STATE_ROOT_OFFSET,
+                HEADER_RLP_NUMBER_OFFSET,
+                U64_LEN,
+                HASH_LEN,
+            ]
+            .map(|v| cb.constant(F::from_canonical_usize(v)));
+
+            // The offsets of Parent hash, state root and block number in RLP
+            // encoded header are [0, 3, 8].
+            let rlp_headers = decode_fixed_list::<_, _, 9>(cb, &header_rlp.arr.arr, zero);
+
+            cb.connect(rlp_headers.offset[0], parent_hash_offset);
+            cb.connect(rlp_headers.offset[3], state_root_offset);
+            cb.connect(rlp_headers.offset[8], number_offset);
+            cb.connect(rlp_headers.len[0], hash_len);
+            cb.connect(rlp_headers.len[3], hash_len);
+            cb.connect(rlp_headers.len[8], number_len);
+        }
 
         BlockInputsWires {
             number,

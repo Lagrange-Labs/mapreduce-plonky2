@@ -10,7 +10,7 @@ use crate::{mpt_sequential::PAD_LEN, utils::keccak256};
 use account_inputs::{AccountInputs, AccountInputsWires};
 use anyhow::Result;
 use block_inputs::{BlockInputs, BlockInputsWires};
-use ethers::types::{Block, H256};
+use ethers::types::H256;
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField, iop::witness::PartialWitness,
     plonk::circuit_builder::CircuitBuilder,
@@ -147,19 +147,25 @@ mod tests {
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::{ProofQuery, RLPBlock},
-        keccak::HASH_LEN,
-        utils::{convert_u8_slice_to_u32_fields, keccak256},
+        keccak::{OutputByteHash, OutputHash, HASH_LEN},
+        utils::{
+            convert_u8_slice_to_u32_fields, convert_u8_to_u32_slice, keccak256, PackedU64Target,
+            U64_LEN,
+        },
     };
     use anyhow::Result;
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use ethers::{
         providers::{Http, Provider},
-        types::{Address, H160},
+        types::{Address, Block, H160, U64},
     };
-    use plonky2::plonk::{
-        circuit_builder::CircuitBuilder,
-        circuit_data::CircuitConfig,
-        config::{GenericConfig, PoseidonGoldilocksConfig},
+    use plonky2::{
+        field::types::Field,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
     };
     use rand::{thread_rng, Rng};
     use std::{str::FromStr, sync::Arc};
@@ -181,6 +187,9 @@ mod tests {
     /// Test circuit
     #[derive(Clone, Debug)]
     struct TestCircuit<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize> {
+        exp_block_number: U64,
+        exp_parent_hash: H256,
+        exp_hash: H256,
         c: BlockLinkingCircuit<F, DEPTH, NODE_LEN, BLOCK_LEN>,
     }
 
@@ -191,14 +200,48 @@ mod tests {
         [(); PAD_LEN(BLOCK_LEN)]:,
         [(); DEPTH - 1]:,
     {
-        type Wires = BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>;
+        type Wires = (
+            PackedU64Target,
+            OutputHash,
+            OutputByteHash,
+            BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>,
+        );
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            BlockLinkingCircuit::build(cb)
+            let block_number = PackedU64Target::new(cb);
+            let parent_hash = OutputHash::new(cb);
+            let hash = OutputByteHash::new(cb);
+            let wires = BlockLinkingCircuit::build(cb);
+
+            block_number.enforce_equal(cb, &wires.block_inputs.number);
+            parent_hash.enforce_equal(cb, &wires.block_inputs.parent_hash);
+            hash.enforce_equal(cb, &wires.block_inputs.hash.output);
+
+            (block_number, parent_hash, hash, wires)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.c.assign::<D>(pw, wires).unwrap();
+            let block_number: [u8; U64_LEN] = self.exp_block_number.into();
+            let block_number = convert_u8_to_u32_slice(&block_number)
+                .into_iter()
+                .map(F::from_canonical_u32)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
+            wires.0.assign(pw, &block_number);
+
+            let parent_hash = convert_u8_to_u32_slice(&self.exp_parent_hash.0)
+                .into_iter()
+                .map(F::from_canonical_u32)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
+            wires.1.assign(pw, &parent_hash);
+
+            let hash = self.exp_hash.0.map(F::from_canonical_u8);
+            wires.2.assign(pw, &hash);
+
+            self.c.assign::<D>(pw, &wires.3).unwrap();
         }
     }
 
@@ -216,10 +259,16 @@ mod tests {
         const VALUE_LEN: usize = 100;
 
         let state_mpt = generate_state_mpt::<DEPTH, VALUE_LEN>();
-        let header_rlp = generate_header_rlp(&state_mpt);
         let storage_proof = generate_storage_proof(&state_mpt);
 
+        let block = generate_block(&state_mpt);
+        let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
+        let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
+
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
+            exp_block_number: block.number.unwrap_or_default(),
+            exp_parent_hash: block.parent_hash,
+            exp_hash,
             c: BlockLinkingCircuit::new(storage_proof, header_rlp, state_mpt.nodes),
         };
         run_circuit::<F, D, C, _>(test_circuit);
@@ -264,11 +313,17 @@ mod tests {
             nodes,
         };
 
-        // TODO: test with a real block.
-        let header_rlp = generate_header_rlp(&state_mpt);
         let storage_proof = generate_storage_proof(&state_mpt);
 
+        // TODO: test with a real block.
+        let block = generate_block(&state_mpt);
+        let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
+        let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
+
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
+            exp_block_number: block.number.unwrap_or_default(),
+            exp_parent_hash: block.parent_hash,
+            exp_hash,
             c: BlockLinkingCircuit::new(storage_proof, header_rlp, state_mpt.nodes),
         };
         run_circuit::<F, D, C, _>(test_circuit);
@@ -328,7 +383,7 @@ mod tests {
     }
 
     /// Generate the test block header.
-    fn generate_header_rlp(mpt: &TestStateMPT) -> Vec<u8> {
+    fn generate_block(mpt: &TestStateMPT) -> Block<H256> {
         // Set to the MPT root hash.
         let state_root = mpt.root_hash;
 
@@ -338,15 +393,13 @@ mod tests {
         let hash = Some(rng.gen::<[u8; 32]>().into());
         let parent_hash = rng.gen::<[u8; 32]>().into();
 
-        let block = Block::<H256> {
+        Block::<H256> {
             state_root,
             number,
             hash,
             parent_hash,
             ..Default::default()
-        };
-
-        rlp::encode(&RLPBlock(&block)).to_vec()
+        }
     }
 
     /// Generate the test storage proof.
