@@ -3,7 +3,9 @@ use crate::mpt_sequential::Circuit;
 use crate::storage::mapping::branch::BranchWires;
 use crate::storage::mapping::branch::MAX_BRANCH_NODE_LEN;
 
+use super::extension::ExtensionNodeCircuit;
 use super::extension::ExtensionWires;
+use super::leaf::LeafCircuit;
 use super::leaf::LeafWires;
 use super::leaf::MAX_LEAF_NODE_LEN;
 use super::PublicInputs;
@@ -19,7 +21,18 @@ type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 
 const MAPPING_CIRCUIT_SET_SIZE: usize = 3;
+pub enum CircuitType {
+    Leaf(LeafCircuit<MAX_LEAF_NODE_LEN>),
+    Extension(ExtensionNodeCircuit),
+    Branch(GenericBranchCircuit),
+}
 
+/// This struct holds the basic information necessary to prove a branch node. It 
+/// selects the right specialized circuits according to its inputs. For example,
+/// if only one child proof is present, it uses the branch_1 circuit.
+struct GenericBranchCircuit {
+    node: Vec<u8>
+}
 struct MPTCircuitsParams {
     leaf_circuit: CircuitWithUniversalVerifier<F, C, D, 0, LeafWires<MAX_LEAF_NODE_LEN>>,
     ext_circuit: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionWires>,
