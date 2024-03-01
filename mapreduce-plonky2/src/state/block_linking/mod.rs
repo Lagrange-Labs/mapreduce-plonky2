@@ -6,11 +6,10 @@ mod block_inputs;
 mod public_inputs;
 mod storage_proof;
 
-use crate::{mpt_sequential::PAD_LEN, utils::keccak256};
+use crate::mpt_sequential::PAD_LEN;
 use account_inputs::{AccountInputs, AccountInputsWires};
 use anyhow::Result;
 use block_inputs::{BlockInputs, BlockInputsWires};
-use ethers::types::H256;
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField, iop::witness::PartialWitness,
     plonk::circuit_builder::CircuitBuilder,
@@ -151,8 +150,8 @@ mod tests {
     use anyhow::Result;
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use ethers::{
-        providers::{Http, Provider},
-        types::{Address, Block, H160, U64},
+        providers::{Http, Middleware, Provider},
+        types::{Address, Block, BlockNumber, H160, H256, U64},
     };
     use plonky2::{
         field::types::Field,
@@ -216,7 +215,7 @@ mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            let block_number: [u8; U64_LEN] = self.exp_block_number.into();
+            let block_number = self.exp_block_number.as_u64().to_be_bytes();
             let block_number = convert_u8_to_u32_slice(&block_number)
                 .into_iter()
                 .map(F::from_canonical_u32)
@@ -261,7 +260,7 @@ mod tests {
         let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
 
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
-            exp_block_number: block.number.unwrap_or_default(),
+            exp_block_number: block.number.unwrap(),
             exp_parent_hash: block.parent_hash,
             exp_hash,
             c: BlockLinkingCircuit::new(storage_proof, header_rlp, state_mpt.nodes),
@@ -285,11 +284,15 @@ mod tests {
         let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
         // Simple storage test
         let query = ProofQuery::new_simple_slot(contract, 0);
-        let res = query.query_mpt_proof(&provider).await?;
+        let block_number = provider.get_block_number().await?;
+        let block = provider.get_block(block_number).await?.unwrap();
+        let res = query
+            .query_mpt_proof(&provider, Some(block_number.into()))
+            .await?;
 
         // Written as constant from ^.
         const DEPTH: usize = 8;
-        const BLOCK_LEN: usize = 600;
+        const BLOCK_LEN: usize = 620;
         const NODE_LEN: usize = 532;
         const VALUE_LEN: usize = 100;
 
@@ -310,13 +313,11 @@ mod tests {
 
         let storage_proof = generate_storage_proof(&state_mpt);
 
-        // TODO: test with a real block.
-        let block = generate_block(&state_mpt);
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
         let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
 
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
-            exp_block_number: block.number.unwrap_or_default(),
+            exp_block_number: block.number.unwrap(),
             exp_parent_hash: block.parent_hash,
             exp_hash,
             c: BlockLinkingCircuit::new(storage_proof, header_rlp, state_mpt.nodes),

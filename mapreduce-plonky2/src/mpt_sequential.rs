@@ -614,7 +614,7 @@ pub mod test {
         let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
         // simple storage test
         let query = ProofQuery::new_simple_slot(contract, 0);
-        let res = query.query_mpt_proof(&provider).await?;
+        let res = query.query_mpt_proof(&provider, None).await?;
 
         // Verify both storage and state proofs by this MPT circuit.
         verify_storage_proof_from_query(&query, &res)?;

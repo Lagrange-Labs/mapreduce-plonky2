@@ -294,13 +294,10 @@ impl ProofQuery {
     pub async fn query_mpt_proof<P: Middleware + 'static>(
         &self,
         provider: &P,
+        block: Option<BlockId>,
     ) -> Result<EIP1186ProofResponse> {
         let res = provider
-            .get_proof(
-                self.contract,
-                vec![self.slot.location()],
-                Some(BlockNumber::Latest.into()),
-            )
+            .get_proof(self.contract, vec![self.slot.location()], block)
             .await?;
         Ok(res)
     }
@@ -392,7 +389,7 @@ mod test {
         // simple storage test
         {
             let query = ProofQuery::new_simple_slot(contract, 0);
-            let res = query.query_mpt_proof(&provider).await?;
+            let res = query.query_mpt_proof(&provider, None).await?;
             ProofQuery::verify_storage_proof(&res)?;
             query.verify_state_proof(&res)?;
         }
@@ -401,7 +398,7 @@ mod test {
             let mapping_key =
                 hex::decode("000000000000000000000000000000000000000000000000000000000001abcd")?;
             let query = ProofQuery::new_mapping_slot(contract, 1, mapping_key);
-            let res = query.query_mpt_proof(&provider).await?;
+            let res = query.query_mpt_proof(&provider, None).await?;
             ProofQuery::verify_storage_proof(&res)?;
             query.verify_state_proof(&res)?;
         }

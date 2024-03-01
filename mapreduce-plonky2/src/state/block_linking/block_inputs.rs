@@ -5,21 +5,14 @@ use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{ByteKeccakWires, InputData, KeccakCircuit, OutputByteHash, OutputHash, HASH_LEN},
     mpt_sequential::PAD_LEN,
-    rlp::{decode_fixed_list, RlpHeader},
-    utils::{
-        convert_u8_slice_to_u32_fields, find_index_subvector, less_than, PackedU64Target,
-        U64Target, U64_LEN,
-    },
+    rlp::decode_fixed_list,
+    utils::{less_than, PackedU64Target, U64Target, U64_LEN},
 };
 use anyhow::Result;
-use ethers::types::H256;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
-    iop::{
-        target::Target,
-        witness::{PartialWitness, WitnessWrite},
-    },
+    iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
 use std::array;
@@ -78,32 +71,18 @@ impl BlockInputs {
         };
         let hash = KeccakCircuit::hash_to_bytes(cb, bytes_to_keccak);
 
-        // Get the number from RLP encoded header.
-        let number_offset = cb.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
-        let number: U64Target = header_rlp.arr.extract_array(cb, number_offset);
-        let number: PackedU64Target = number.convert_u8_to_u32(cb);
-
-        // Get the parent hash from RLP encoded header.
-        let parent_hash_offset =
-            cb.constant(F::from_canonical_usize(HEADER_RLP_PARENT_HASH_OFFSET));
-        let parent_hash: OutputByteHash = header_rlp.arr.extract_array(cb, parent_hash_offset);
-        let parent_hash: OutputHash = parent_hash.convert_u8_to_u32(cb);
-
         // Only used for debugging the offset constants of parent hash, state
         // root and block number in RLP encoded header.
         #[cfg(debug_assertions)]
         {
-            let [parent_hash_offset, state_root_offset, number_offset, number_len, hash_len] = [
+            let [parent_hash_offset, state_root_offset, number_offset, hash_len] = [
                 HEADER_RLP_PARENT_HASH_OFFSET,
                 HEADER_RLP_STATE_ROOT_OFFSET,
                 HEADER_RLP_NUMBER_OFFSET,
-                U64_LEN,
                 HASH_LEN,
             ]
             .map(|v| cb.constant(F::from_canonical_usize(v)));
 
-            // The offsets of Parent hash, state root and block number in RLP
-            // encoded header are [0, 3, 8].
             let rlp_headers = decode_fixed_list::<_, _, 9>(cb, &header_rlp.arr.arr, zero);
 
             cb.connect(rlp_headers.offset[0], parent_hash_offset);
@@ -111,8 +90,32 @@ impl BlockInputs {
             cb.connect(rlp_headers.offset[8], number_offset);
             cb.connect(rlp_headers.len[0], hash_len);
             cb.connect(rlp_headers.len[3], hash_len);
-            cb.connect(rlp_headers.len[8], number_len);
         }
+
+        // Get the parent hash from RLP encoded header.
+        let parent_hash_offset =
+            cb.constant(F::from_canonical_usize(HEADER_RLP_PARENT_HASH_OFFSET));
+        let parent_hash: OutputByteHash = header_rlp.arr.extract_array(cb, parent_hash_offset);
+        let parent_hash: OutputHash = parent_hash.convert_u8_to_u32(cb);
+
+        // The indexes of parent-hash, state-root and block-number in RLP header
+        // are [0, 3, 8]. These RLP offsets should be constants, since the
+        // encoded Block fields are all H256 before block-number.
+        // The block-number is an U64, its RLP encoded length is mutable, the
+        // leading zeros are deleted during RLP encoding.
+        let rlp_headers = decode_fixed_list::<_, _, 9>(cb, &header_rlp.arr.arr, zero);
+        let number_len = rlp_headers.len[8];
+        let number_offset = cb.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
+        let start = cb.add(number_offset, number_len);
+        let number = U64Target::from_array(array::from_fn(|i| {
+            // offset = number_offset + number_len - 8 + i
+            let eight_sub_i = cb.constant(F::from_canonical_usize(U64_LEN - i));
+            let data_offset = cb.sub(start, eight_sub_i);
+            let data = header_rlp.arr.value_at(cb, data_offset);
+            let is_invalid = less_than(cb, data_offset, number_offset, 9);
+            cb.select(is_invalid, zero, data)
+        }));
+        let number: PackedU64Target = number.convert_u8_to_u32(cb);
 
         BlockInputsWires {
             number,
