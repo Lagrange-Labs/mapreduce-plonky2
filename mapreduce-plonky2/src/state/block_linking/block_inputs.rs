@@ -104,10 +104,11 @@ impl BlockInputs {
         let number: Array<Target, { U64_LEN / 2 }> =
             header_rlp.arr.extract_array(cb, number_offset);
         let number = U64Target::from(array::from_fn(|i| {
+            // Big endian
             if i < U64_LEN / 2 {
-                number[i]
-            } else {
                 zero
+            } else {
+                number[i - U64_LEN / 2]
             }
         }));
         let number: PackedU64Target = number.convert_u8_to_u32(cb);
