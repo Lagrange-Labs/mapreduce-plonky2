@@ -98,9 +98,18 @@ impl BlockInputs {
         let parent_hash: OutputByteHash = header_rlp.arr.extract_array(cb, parent_hash_offset);
         let parent_hash: OutputHash = parent_hash.convert_u8_to_u32(cb);
 
-        // Get the block number from RLP encoded header.
+        // Get the block number from 4 bytes of specified offset in RLP encoded
+        // header.
         let number_offset = cb.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
-        let number: U64Target = header_rlp.arr.extract_array(cb, number_offset);
+        let number: Array<Target, { U64_LEN / 2 }> =
+            header_rlp.arr.extract_array(cb, number_offset);
+        let number = U64Target::from(array::from_fn(|i| {
+            if i < U64_LEN / 2 {
+                number[i]
+            } else {
+                zero
+            }
+        }));
         let number: PackedU64Target = number.convert_u8_to_u32(cb);
 
         // This code is used for the mutable length of block number.
