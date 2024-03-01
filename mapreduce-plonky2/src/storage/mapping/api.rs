@@ -27,11 +27,11 @@ pub enum CircuitType {
     Branch(GenericBranchCircuit),
 }
 
-/// This struct holds the basic information necessary to prove a branch node. It 
+/// This struct holds the basic information necessary to prove a branch node. It
 /// selects the right specialized circuits according to its inputs. For example,
 /// if only one child proof is present, it uses the branch_1 circuit.
 struct GenericBranchCircuit {
-    node: Vec<u8>
+    node: Vec<u8>,
 }
 struct MPTCircuitsParams {
     leaf_circuit: CircuitWithUniversalVerifier<F, C, D, 0, LeafWires<MAX_LEAF_NODE_LEN>>,
@@ -67,6 +67,19 @@ impl MPTCircuitsParams {
             branch_1,
             branch_2,
             set: recursive_framework,
+        }
+    }
+
+    fn generate_proof(&self, circuit_type: CircuitType) {
+        match circuit_type {
+            CircuitType::Leaf(leaf) => {
+                self.set.generate_proof(&self.leaf_circuit, [], [], leaf);
+            }
+            CircuitType::Extension(ext) => {}
+            // CircuitType::Extension(ext, child_proof, child_vk) => {
+            //     self.set.generate_proof(&self.ext_circuit, [], [], ext);
+            // }
+            CircuitType::Branch(branch) => {}
         }
     }
 }
