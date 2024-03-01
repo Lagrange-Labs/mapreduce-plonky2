@@ -4,7 +4,7 @@
 
 use crate::{
     array::{Array, Vector, VectorWire},
-    keccak::{ByteKeccakWires, InputData, KeccakCircuit, OutputByteHash, OutputHash},
+    keccak::{InputData, KeccakCircuit, KeccakWires, OutputByteHash, OutputHash},
     mpt_sequential::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, MPTKeyWire,
         OutputWires as MPTOutputWires, PAD_LEN,
@@ -36,7 +36,7 @@ where
     contract_address: AddressTarget,
     /// The keccak wires computed from contract address, which is set to the
     /// state MPT root hash
-    keccak_contract_address: ByteKeccakWires<INPUT_PADDED_ADDRESS_LEN>,
+    keccak_contract_address: KeccakWires<INPUT_PADDED_ADDRESS_LEN>,
     /// The offset of storage MPT root hash located in RLP encoded account node
     pub(crate) storage_root_offset: Target,
     /// Input wires of state MPT circuit
@@ -103,8 +103,8 @@ where
             real_len: cb.constant(F::from_canonical_usize(ADDRESS_LEN)),
             arr: Array { arr },
         };
-        let keccak_contract_address = KeccakCircuit::hash_to_bytes(cb, bytes_to_keccak);
-        let expected_mpt_key = MPTKeyWire::init_from_bytes(cb, &keccak_contract_address.output);
+        let keccak_contract_address = KeccakCircuit::hash_vector(cb, bytes_to_keccak);
+        let expected_mpt_key = MPTKeyWire::init_from_u32_targets(cb, &keccak_contract_address.output_array);
 
         // Generate the input and output wires of state MPT circuit.
         let state_mpt_input = MPTCircuit::create_input_wires(cb, Some(expected_mpt_key));
@@ -140,7 +140,7 @@ where
             .assign(pw, &self.contract_address.0.map(F::from_canonical_u8));
 
         // Assign the keccak value of contract address.
-        KeccakCircuit::<{ PAD_LEN(ADDRESS_LEN) }>::assign_byte_keccak(
+        KeccakCircuit::<{ PAD_LEN(ADDRESS_LEN) }>::assign(
             pw,
             &wires.keccak_contract_address,
             &InputData::Assigned(
