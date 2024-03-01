@@ -42,8 +42,6 @@ where
     pub(crate) parent_hash: OutputHash,
     /// The keccak wires computed from RLP encoded header
     pub(crate) hash: ByteKeccakWires<{ PAD_LEN(MAX_LEN) }>,
-    /// The hash bytes of state root
-    state_root_bytes: OutputByteHash,
     /// RLP encoded bytes of block header
     pub(crate) header_rlp: VectorWire<Target, MAX_LEN>,
 }
@@ -51,18 +49,13 @@ where
 /// The block input gadget
 #[derive(Clone, Debug)]
 pub struct BlockInputs {
-    /// The hash bytes of state root
-    state_root_bytes: H256,
     /// RLP encoded bytes of block header
     header_rlp: Vec<u8>,
 }
 
 impl BlockInputs {
-    pub fn new(state_root_bytes: H256, header_rlp: Vec<u8>) -> Self {
-        Self {
-            state_root_bytes,
-            header_rlp,
-        }
+    pub fn new(header_rlp: Vec<u8>) -> Self {
+        Self { header_rlp }
     }
 
     /// Build for circuit.
@@ -73,7 +66,6 @@ impl BlockInputs {
         F: RichField + Extendable<D>,
         [(); PAD_LEN(MAX_LEN)]:,
     {
-        let state_root_bytes = Array::new(cb);
         let header_rlp = VectorWire::new(cb);
 
         // Calculate the keccak hash of RLP encoded header.
@@ -126,7 +118,6 @@ impl BlockInputs {
             number,
             parent_hash,
             hash,
-            state_root_bytes,
             header_rlp,
         }
     }
@@ -141,11 +132,6 @@ impl BlockInputs {
         F: RichField,
         [(); PAD_LEN(MAX_LEN)]:,
     {
-        // Assign the hash bytes of state root.
-        wires
-            .state_root_bytes
-            .assign(pw, &self.state_root_bytes.0.map(F::from_canonical_u8));
-
         // Assign the RLP encoded block header.
         wires
             .header_rlp
@@ -182,14 +168,6 @@ impl BlockInputs {
         let state_root_offset = cb.constant(F::from_canonical_usize(HEADER_RLP_STATE_ROOT_OFFSET));
         let within_range = less_than(cb, state_root_offset, wires.header_rlp.real_len, 10);
         cb.connect(within_range.target, tt.target);
-
-        // Convert the hash bytes of state root to an u32 array, and verify it's
-        // equal to the packed hash value.
-        let is_equal = wires
-            .state_root_bytes
-            .convert_u8_to_u32(cb)
-            .equals(cb, state_root_hash);
-        cb.connect(is_equal.target, tt.target);
 
         // Verify the block header includes the state MPT root hash.
         let expected_state_root: OutputByteHash =

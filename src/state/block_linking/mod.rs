@@ -61,13 +61,8 @@ where
         // Nodes of state MPT, it's ordered from leaf to root.
         state_mpt_nodes: Vec<Vec<u8>>,
     ) -> Self {
-        // Get the hash of state MPT root and create the block inputs gadget.
-        let state_mpt_root = H256(
-            keccak256(state_mpt_nodes.last().unwrap())
-                .try_into()
-                .unwrap(),
-        );
-        let block_inputs = BlockInputs::new(state_mpt_root, header_rlp);
+        // Create the block inputs gadget.
+        let block_inputs = BlockInputs::new(header_rlp);
 
         // Get the contract address and hash of storage MPT root, and create the
         // account inputs gadget.

@@ -37,8 +37,6 @@ where
     /// The keccak wires computed from contract address, which is set to the
     /// state MPT root hash
     keccak_contract_address: ByteKeccakWires<INPUT_PADDED_ADDRESS_LEN>,
-    /// The hash bytes of storage root
-    storage_root_bytes: OutputByteHash,
     /// The offset of storage MPT root hash located in RLP encoded account node
     pub(crate) storage_root_offset: Target,
     /// Input wires of state MPT circuit
@@ -52,8 +50,6 @@ where
 pub struct AccountInputs<const DEPTH: usize, const NODE_LEN: usize> {
     /// The contract address
     contract_address: H160,
-    /// The hash bytes of storage root
-    storage_root_bytes: H256,
     /// The offset of storage root hash located in RLP encoded account node
     storage_root_offset: usize,
     /// MPT circuit used to verify the nodes of state Merkle Tree
@@ -84,7 +80,6 @@ where
 
         Self {
             contract_address,
-            storage_root_bytes,
             storage_root_offset,
             state_mpt_circuit,
         }
@@ -98,7 +93,6 @@ where
         F: RichField + Extendable<D>,
     {
         let contract_address = Array::new(cb);
-        let storage_root_bytes = Array::new(cb);
         let storage_root_offset = cb.add_virtual_target();
 
         // Calculate the keccak hash of contract address, and use it as the
@@ -125,7 +119,6 @@ where
         AccountInputsWires {
             contract_address,
             keccak_contract_address,
-            storage_root_bytes,
             storage_root_offset,
             state_mpt_input,
             state_mpt_output,
@@ -156,11 +149,6 @@ where
             ),
         );
 
-        // Assign the hash bytes of storage root.
-        wires
-            .storage_root_bytes
-            .assign(pw, &self.storage_root_bytes.0.map(F::from_canonical_u8));
-
         // Assign the offset of storage MPT root hash located in RLP encoded
         // account node.
         pw.set_target(
@@ -190,14 +178,6 @@ where
         // and it has 104 bytes.
         let within_range = less_than(cb, wires.storage_root_offset, account_node.real_len, 7);
         cb.connect(within_range.target, tt.target);
-
-        // Convert the hash bytes of storage root to an u32 array, and verify
-        // it's equal to the packed hash value.
-        let is_equal = wires
-            .storage_root_bytes
-            .convert_u8_to_u32(cb)
-            .equals(cb, storage_root_hash);
-        cb.connect(is_equal.target, tt.target);
 
         // Verify the account node includes the storage MPT root hash.
         let expected_storage_root: OutputByteHash = account_node
