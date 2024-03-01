@@ -86,26 +86,6 @@ impl BlockInputs {
         let number: Array<Target, 4> = header_rlp.arr.extract_array(cb, number_offset);
         let number: U32Target = number.reverse().convert_u8_to_u32(cb)[0];
 
-        // This code is used for the mutable length of block number.
-        // // The indexes of parent-hash, state-root and block-number in RLP header
-        // // are [0, 3, 8]. These RLP offsets should be constants, since the
-        // // encoded Block fields are all H256 before block-number.
-        // // The block-number is an U64, its RLP encoded length is mutable, the
-        // // leading zeros are deleted during RLP encoding.
-        // let rlp_headers = decode_fixed_list::<_, _, 9>(cb, &header_rlp.arr.arr, zero);
-        // let number_len = rlp_headers.len[8];
-        // let number_offset = cb.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
-        // let start = cb.add(number_offset, number_len);
-        // let number = U64Target::from_array(array::from_fn(|i| {
-        //     // offset = number_offset + number_len - 8 + i
-        //     let eight_sub_i = cb.constant(F::from_canonical_usize(U64_LEN - i));
-        //     let data_offset = cb.sub(start, eight_sub_i);
-        //     let data = header_rlp.arr.value_at(cb, data_offset);
-        //     let is_invalid = less_than(cb, data_offset, number_offset, 9);
-        //     cb.select(is_invalid, zero, data)
-        // }));
-        // let number: PackedU64Target = number.convert_u8_to_u32(cb);
-
         BlockInputsWires {
             number,
             parent_hash,
@@ -154,12 +134,7 @@ impl BlockInputs {
         F: RichField + Extendable<D>,
         [(); PAD_LEN(MAX_LEN)]:,
     {
-        let tt = cb._true();
-
-        // Verify the offset of state MPT root hash is within range.
         let state_root_offset = cb.constant(F::from_canonical_usize(HEADER_RLP_STATE_ROOT_OFFSET));
-        let within_range = less_than(cb, state_root_offset, wires.header_rlp.real_len, 10);
-        cb.connect(within_range.target, tt.target);
 
         // Verify the block header includes the state MPT root hash.
         let expected_state_root: OutputByteHash =
@@ -189,11 +164,14 @@ mod test {
         array::Array,
         circuit::{test::run_circuit, UserCircuit},
         eth::{BlockData, BlockUtil},
+        keccak::{OutputByteHash, HASH_LEN},
         mpt_sequential::PAD_LEN,
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
 
-    use super::{BlockInputs, BlockInputsWires, HEADER_RLP_NUMBER_OFFSET};
+    use super::{
+        BlockInputs, BlockInputsWires, HEADER_RLP_NUMBER_OFFSET, HEADER_RLP_STATE_ROOT_OFFSET,
+    };
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -204,7 +182,7 @@ mod test {
     struct TestBlockCircuit {
         block: BlockInputs,
         exp_number: u32,
-        exp_array: [u8; 4],
+        exp_state_hash: Vec<u8>,
     }
 
     impl<F: RichField + Extendable<D>, const D: usize> UserCircuit<F, D> for TestBlockCircuit
@@ -212,23 +190,25 @@ mod test {
         [(); PAD_LEN(MAX_BLOCK_LEN)]:,
         [(); MAX_BLOCK_LEN]:,
     {
-        type Wires = (SWires, U32Target, Array<Target, 4>);
+        type Wires = (SWires, U32Target);
 
         fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>) -> Self::Wires {
             let w = BlockInputs::build(c);
             let n = c.add_virtual_u32_target();
             let number_offset = c.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
-            let number_array = w.header_rlp.arr.extract_array::<_, _, 4>(c, number_offset);
-            let exp_array = Array::<Target, 4>::new(c);
-            number_array.enforce_equal(c, &exp_array);
             c.connect(w.number.0, n.0);
-            (w, n, exp_array)
+            let exp_state_root = Array::<Target, HASH_LEN>::new(c);
+            let state_root_offset =
+                c.constant(F::from_canonical_usize(HEADER_RLP_STATE_ROOT_OFFSET));
+            let extracted_state_root: OutputByteHash =
+                w.header_rlp.arr.extract_array(c, state_root_offset);
+            exp_state_root.enforce_equal(c, &extracted_state_root);
+            (w, n)
         }
 
         fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<F>, wires: &Self::Wires) {
             self.block.assign(pw, &wires.0);
             pw.set_u32_target(wires.1, self.exp_number);
-            wires.2.assign_bytes(pw, &self.exp_array);
         }
     }
 
@@ -274,7 +254,7 @@ mod test {
                 header_rlp: encoded,
             },
             exp_number: block.block.number.unwrap().as_u32(),
-            exp_array: ext_slice.try_into().unwrap(),
+            exp_state_hash: block.block.state_root.as_bytes().to_vec(),
         };
         run_circuit::<F, D, C, _>(circuit);
         Ok(())

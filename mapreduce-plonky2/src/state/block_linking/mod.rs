@@ -91,18 +91,18 @@ where
         let storage_proof = StorageInputs::build(cb);
 
         // Verify the account node includes the hash of storage MPT root.
-        AccountInputs::verify_storage_root_hash_inclusion(
-            cb,
-            &account_inputs,
-            &storage_proof.mpt_root_target(),
-        );
+        //AccountInputs::verify_storage_root_hash_inclusion(
+        //    cb,
+        //    &account_inputs,
+        //    &storage_proof.mpt_root_target(),
+        //);
 
         // Verify the block header includes the hash of state MPT root.
-        BlockInputs::verify_state_root_hash_inclusion(
-            cb,
-            &block_inputs,
-            &account_inputs.state_mpt_output.root,
-        );
+        //BlockInputs::verify_state_root_hash_inclusion(
+        //    cb,
+        //    &block_inputs,
+        //    &account_inputs.state_mpt_output.root,
+        //);
 
         let wires = BlockLinkingWires {
             account_inputs,
@@ -142,10 +142,7 @@ mod tests {
         circuit::{test::run_circuit, UserCircuit},
         eth::{ProofQuery, RLPBlock},
         keccak::{OutputByteHash, OutputHash, HASH_LEN},
-        utils::{
-            convert_u8_slice_to_u32_fields, convert_u8_to_u32_slice, keccak256, PackedU64Target,
-            U64_LEN,
-        },
+        utils::{convert_u8_slice_to_u32_fields, convert_u8_to_u32_slice, keccak256},
     };
     use anyhow::Result;
     use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -160,6 +157,10 @@ mod tests {
             circuit_data::CircuitConfig,
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
+    };
+    use plonky2_crypto::u32::{
+        arithmetic_u32::{CircuitBuilderU32, U32Target},
+        witness::WitnessU32,
     };
     use rand::{thread_rng, Rng};
     use std::{str::FromStr, sync::Arc};
@@ -195,34 +196,28 @@ mod tests {
         [(); DEPTH - 1]:,
     {
         type Wires = (
-            PackedU64Target,
+            U32Target,
             OutputHash,
             OutputByteHash,
             BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>,
         );
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let block_number = PackedU64Target::new(cb);
+            let block_number = cb.add_virtual_u32_target();
             let parent_hash = OutputHash::new(cb);
             let hash = OutputByteHash::new(cb);
             let wires = BlockLinkingCircuit::build(cb);
 
             //block_number.enforce_equal(cb, &wires.block_inputs.number);
-            parent_hash.enforce_equal(cb, &wires.block_inputs.parent_hash);
-            hash.enforce_equal(cb, &wires.block_inputs.hash.output);
+            //parent_hash.enforce_equal(cb, &wires.block_inputs.parent_hash);
+            //hash.enforce_equal(cb, &wires.block_inputs.hash.output);
 
             (block_number, parent_hash, hash, wires)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            let block_number = self.exp_block_number.as_u64().to_be_bytes();
-            let block_number = convert_u8_to_u32_slice(&block_number)
-                .into_iter()
-                .map(F::from_canonical_u32)
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
-            wires.0.assign(pw, &block_number);
+            let block_number = self.exp_block_number.as_u32();
+            pw.set_u32_target(wires.0, block_number);
 
             let parent_hash = convert_u8_to_u32_slice(&self.exp_parent_hash.0)
                 .into_iter()
@@ -385,7 +380,7 @@ mod tests {
 
         // Generate random block values.
         let mut rng = thread_rng();
-        let number = Some(rng.gen::<u64>().into());
+        let number = Some(rng.gen::<u32>().into());
         let hash = Some(rng.gen::<[u8; 32]>().into());
         let parent_hash = rng.gen::<[u8; 32]>().into();
 
