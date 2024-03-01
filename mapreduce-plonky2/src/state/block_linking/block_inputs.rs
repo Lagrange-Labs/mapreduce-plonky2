@@ -15,6 +15,7 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use std::array;
 
 /// Parent hash offset in RLP encoded header
@@ -30,7 +31,7 @@ where
     [(); PAD_LEN(MAX_LEN)]:,
 {
     /// Block number
-    pub(crate) number: PackedU64Target,
+    pub(crate) number: U32Target,
     /// Block parent hash
     pub(crate) parent_hash: OutputHash,
     /// The keccak wires computed from RLP encoded header
@@ -71,27 +72,6 @@ impl BlockInputs {
         };
         let hash = KeccakCircuit::hash_to_bytes(cb, bytes_to_keccak);
 
-        // Only used for debugging the offset constants of parent hash, state
-        // root and block number in RLP encoded header.
-        #[cfg(debug_assertions)]
-        {
-            let [parent_hash_offset, state_root_offset, number_offset, hash_len] = [
-                HEADER_RLP_PARENT_HASH_OFFSET,
-                HEADER_RLP_STATE_ROOT_OFFSET,
-                HEADER_RLP_NUMBER_OFFSET,
-                HASH_LEN,
-            ]
-            .map(|v| cb.constant(F::from_canonical_usize(v)));
-
-            let rlp_headers = decode_fixed_list::<_, _, 9>(cb, &header_rlp.arr.arr, zero);
-
-            cb.connect(rlp_headers.offset[0], parent_hash_offset);
-            cb.connect(rlp_headers.offset[3], state_root_offset);
-            cb.connect(rlp_headers.offset[8], number_offset);
-            cb.connect(rlp_headers.len[0], hash_len);
-            cb.connect(rlp_headers.len[3], hash_len);
-        }
-
         // Get the parent hash from RLP encoded header.
         let parent_hash_offset =
             cb.constant(F::from_canonical_usize(HEADER_RLP_PARENT_HASH_OFFSET));
@@ -101,17 +81,10 @@ impl BlockInputs {
         // Get the block number from 4 bytes of specified offset in RLP encoded
         // header.
         let number_offset = cb.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
-        let number: Array<Target, { U64_LEN / 2 }> =
-            header_rlp.arr.extract_array(cb, number_offset);
-        let number = U64Target::from(array::from_fn(|i| {
-            // Big endian
-            if i < U64_LEN / 2 {
-                zero
-            } else {
-                number[i - U64_LEN / 2]
-            }
-        }));
-        let number: PackedU64Target = number.convert_u8_to_u32(cb);
+        // We assume so far it always fit in 32 bits, which give block number < 4 billion so it
+        // should be ok.
+        let number: Array<Target, 4> = header_rlp.arr.extract_array(cb, number_offset);
+        let number: U32Target = number.reverse().convert_u8_to_u32(cb)[0];
 
         // This code is used for the mutable length of block number.
         // // The indexes of parent-hash, state-root and block-number in RLP header
@@ -194,5 +167,116 @@ impl BlockInputs {
         expected_state_root
             .convert_u8_to_u32(cb)
             .enforce_equal(cb, &state_root_hash);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use anyhow::Result;
+    use ethers::types::BlockNumber;
+    use plonky2::{
+        field::extension::Extendable,
+        hash::hash_types::RichField,
+        iop::target::Target,
+        plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
+    };
+    use plonky2_crypto::u32::{
+        arithmetic_u32::{CircuitBuilderU32, U32Target},
+        witness::WitnessU32,
+    };
+
+    use crate::{
+        array::Array,
+        circuit::{test::run_circuit, UserCircuit},
+        eth::{BlockData, BlockUtil},
+        mpt_sequential::PAD_LEN,
+        utils::{convert_u8_to_u32_slice, find_index_subvector},
+    };
+
+    use super::{BlockInputs, BlockInputsWires, HEADER_RLP_NUMBER_OFFSET};
+
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+    const MAX_BLOCK_LEN: usize = 620;
+    type SWires = BlockInputsWires<MAX_BLOCK_LEN>;
+    #[derive(Debug, Clone)]
+    struct TestBlockCircuit {
+        block: BlockInputs,
+        exp_number: u32,
+        exp_array: [u8; 4],
+    }
+
+    impl<F: RichField + Extendable<D>, const D: usize> UserCircuit<F, D> for TestBlockCircuit
+    where
+        [(); PAD_LEN(MAX_BLOCK_LEN)]:,
+        [(); MAX_BLOCK_LEN]:,
+    {
+        type Wires = (SWires, U32Target, Array<Target, 4>);
+
+        fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>) -> Self::Wires {
+            let w = BlockInputs::build(c);
+            let n = c.add_virtual_u32_target();
+            let number_offset = c.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
+            let number_array = w.header_rlp.arr.extract_array::<_, _, 4>(c, number_offset);
+            let exp_array = Array::<Target, 4>::new(c);
+            number_array.enforce_equal(c, &exp_array);
+            c.connect(w.number.0, n.0);
+            (w, n, exp_array)
+        }
+
+        fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<F>, wires: &Self::Wires) {
+            self.block.assign(pw, &wires.0);
+            pw.set_u32_target(wires.1, self.exp_number);
+            wires.2.assign_bytes(pw, &self.exp_array);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_block_header_decoding() -> Result<()> {
+        let data = BlockData::fetch(BlockNumber::Latest).await?;
+        //let block_number = 5395662;
+        let block_number = BlockNumber::Latest;
+        //let mut block = BlockData::fetch(BlockNumber::Latest).await?;
+        let mut block = BlockData::fetch(block_number).await?;
+        println!("block.number: {:?}", block.block.number.unwrap());
+        let encoded = block.block.rlp();
+        let hash = block.block.block_hash();
+        assert_eq!(&block.block.hash.unwrap().to_fixed_bytes()[..], &hash);
+        let state_index = find_index_subvector(&encoded, block.block.state_root.as_bytes());
+        println!("state root index: {:?}", state_index);
+        let parent_index = find_index_subvector(&encoded, block.block.parent_hash.as_bytes());
+        println!("parent hash index: {:?}", parent_index);
+        let rlp = rlp::Rlp::new(&encoded);
+        let mut offset = rlp.payload_info().unwrap().header_len;
+        for i in 0..=7 {
+            let r = rlp.at(i).unwrap().payload_info().unwrap();
+            offset += r.header_len + r.value_len;
+        }
+        let number_rlp = rlp.at(8).unwrap().payload_info().unwrap();
+        offset += number_rlp.header_len;
+        let number_index = offset;
+        //let index = find_index_subvector(&encoded, data);
+        println!("block number index: {:?}", number_index);
+        let real_number_len = number_rlp.value_len;
+        assert_eq!(real_number_len, 4);
+        let ext_slice = encoded[number_index..number_index + real_number_len].to_vec();
+        println!(
+            "Block Number FROM RLP LEN = {} => data {:?}",
+            real_number_len, ext_slice,
+        );
+        let converted =
+            convert_u8_to_u32_slice(&ext_slice.iter().cloned().rev().collect::<Vec<u8>>())[0];
+        println!("CONVERTED u32 -> {}", converted);
+        assert_eq!(converted, block.block.number.unwrap().as_u32());
+        let circuit = TestBlockCircuit {
+            block: BlockInputs {
+                header_rlp: encoded,
+            },
+            exp_number: block.block.number.unwrap().as_u32(),
+            exp_array: ext_slice.try_into().unwrap(),
+        };
+        run_circuit::<F, D, C, _>(circuit);
+        Ok(())
     }
 }

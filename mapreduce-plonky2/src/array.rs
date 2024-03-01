@@ -152,7 +152,7 @@ impl<T: Debug, const N: usize> TryFrom<Vec<T>> for Array<T, N> {
 }
 
 /// Small wrapper trait to handle Target and U32Target in a similar way for arrays
-pub trait Targetable {
+pub trait Targetable: Copy {
     fn to_target(&self) -> Target;
     fn from_target(t: Target) -> Self;
 }
@@ -401,6 +401,11 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         T::from_target(acc)
     }
 
+    pub fn reverse(&self) -> Self {
+        Self {
+            arr: create_array(|i| self.arr[SIZE - 1 - i]),
+        }
+    }
     pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
