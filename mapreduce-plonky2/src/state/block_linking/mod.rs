@@ -276,7 +276,7 @@ mod tests {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
-        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+        let url = "https://eth.llamarpc.com";
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
