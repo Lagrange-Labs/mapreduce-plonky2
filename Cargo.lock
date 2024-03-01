@@ -1015,7 +1015,7 @@ dependencies = [
 [[package]]
 name = "ethers"
 version = "2.0.13"
-source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#9ae970644c0e29b419c666389c934dfbc9255e8d"
+source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#07ee38ea0cbdade798717805af28b6e4779071f8"
 dependencies = [
  "ethers-addressbook",
  "ethers-contract",
@@ -1030,7 +1030,7 @@ dependencies = [
 [[package]]
 name = "ethers-addressbook"
 version = "2.0.13"
-source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#9ae970644c0e29b419c666389c934dfbc9255e8d"
+source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#07ee38ea0cbdade798717805af28b6e4779071f8"
 dependencies = [
  "ethers-core",
  "once_cell",
@@ -1041,7 +1041,7 @@ dependencies = [
 [[package]]
 name = "ethers-contract"
 version = "2.0.13"
-source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#9ae970644c0e29b419c666389c934dfbc9255e8d"
+source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#07ee38ea0cbdade798717805af28b6e4779071f8"
 dependencies = [
  "const-hex",
  "ethers-contract-abigen",
@@ -1059,7 +1059,7 @@ dependencies = [
 [[package]]
 name = "ethers-contract-abigen"
 version = "2.0.13"
-source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#9ae970644c0e29b419c666389c934dfbc9255e8d"
+source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#07ee38ea0cbdade798717805af28b6e4779071f8"
 dependencies = [
  "Inflector",
  "const-hex",
@@ -1082,7 +1082,7 @@ dependencies = [
 [[package]]
 name = "ethers-contract-derive"
 version = "2.0.13"
-source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#9ae970644c0e29b419c666389c934dfbc9255e8d"
+source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#07ee38ea0cbdade798717805af28b6e4779071f8"
 dependencies = [
  "Inflector",
  "const-hex",
@@ -1097,7 +1097,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "2.0.13"
-source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#9ae970644c0e29b419c666389c934dfbc9255e8d"
+source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#07ee38ea0cbdade798717805af28b6e4779071f8"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1126,7 +1126,7 @@ dependencies = [
 [[package]]
 name = "ethers-etherscan"
 version = "2.0.13"
-source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#9ae970644c0e29b419c666389c934dfbc9255e8d"
+source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#07ee38ea0cbdade798717805af28b6e4779071f8"
 dependencies = [
  "chrono",
  "ethers-core",
@@ -1141,7 +1141,7 @@ dependencies = [
 [[package]]
 name = "ethers-middleware"
 version = "2.0.13"
-source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#9ae970644c0e29b419c666389c934dfbc9255e8d"
+source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#07ee38ea0cbdade798717805af28b6e4779071f8"
 dependencies = [
  "async-trait",
  "auto_impl",
@@ -1166,7 +1166,7 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "2.0.13"
-source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#9ae970644c0e29b419c666389c934dfbc9255e8d"
+source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#07ee38ea0cbdade798717805af28b6e4779071f8"
 dependencies = [
  "async-trait",
  "auto_impl",
@@ -1202,7 +1202,7 @@ dependencies = [
 [[package]]
 name = "ethers-signers"
 version = "2.0.13"
-source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#9ae970644c0e29b419c666389c934dfbc9255e8d"
+source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#07ee38ea0cbdade798717805af28b6e4779071f8"
 dependencies = [
  "async-trait",
  "coins-bip32",
@@ -1220,7 +1220,7 @@ dependencies = [
 [[package]]
 name = "ethers-solc"
 version = "2.0.13"
-source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#9ae970644c0e29b419c666389c934dfbc9255e8d"
+source = "git+https://github.com/Lagrange-Labs/ethers-rs?branch=get-proof-0x#07ee38ea0cbdade798717805af28b6e4779071f8"
 dependencies = [
  "cfg-if",
  "const-hex",
