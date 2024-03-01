@@ -17,16 +17,16 @@ use plonky2::{
 /// `M` Storage slot of the mapping
 /// `S` Storage slot of the variable holding the length
 /// `C` Merkle root of the storage database
-/// H = 8, N = 1, PREV_H = 8, A = 5, D = 5*2+1, M = 8, S = 1, C = 8
+/// H = 8, N = 2, PREV_H = 8, A = 5, D = 5*2+1, M = 8, S = 1, C = 8
 const H_IDX: usize = 0;
 const N_IDX: usize = 8;
-const PREV_H_IDX: usize = 9;
-const A_IDX: usize = 17;
-const D_IDX: usize = 22;
-const M_IDX: usize = 33;
-const S_IDX: usize = 41;
-const C_IDX: usize = 42;
-const TOTAL_LEN: usize = 50;
+const PREV_H_IDX: usize = 10;
+const A_IDX: usize = 18;
+const D_IDX: usize = 23;
+const M_IDX: usize = 34;
+const S_IDX: usize = 42;
+const C_IDX: usize = 43;
+const TOTAL_LEN: usize = 51;
 
 pub struct PublicInputs<T> {
     inner: [T; TOTAL_LEN],
@@ -45,10 +45,11 @@ impl<T> PublicInputs<T> {
     ) where
         F: RichField + Extendable<D>,
         [(); PAD_LEN(NODE_LEN)]:,
+        [(); PAD_LEN(BLOCK_LEN)]:,
         [(); DEPTH - 1]:,
     {
-        wires.block_inputs.hash.register_as_public_input(cb);
-        cb.register_public_input(wires.block_inputs.number);
+        wires.block_inputs.hash.output.register_as_public_input(cb);
+        wires.block_inputs.number.register_as_public_input(cb);
         wires.block_inputs.parent_hash.register_as_public_input(cb);
         cb.register_public_inputs(wires.storage_proof.a());
         cb.register_public_inputs(wires.storage_proof.d());

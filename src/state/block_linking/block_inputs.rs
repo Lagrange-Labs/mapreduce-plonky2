@@ -3,12 +3,15 @@
 
 use crate::{
     array::{Array, Vector, VectorWire},
-    eth::RLPBlock,
-    keccak::{OutputByteHash, OutputHash},
-    utils::{convert_u8_slice_to_u32_fields, find_index_subvector, less_than},
+    keccak::{ByteKeccakWires, InputData, KeccakCircuit, OutputByteHash, OutputHash, HASH_LEN},
+    mpt_sequential::PAD_LEN,
+    rlp::{decode_compact_encoding, decode_fixed_list, RlpHeader},
+    utils::{
+        convert_u8_slice_to_u32_fields, find_index_subvector, less_than, PackedU64Target, U64Target,
+    },
 };
 use anyhow::Result;
-use ethers::types::{Block, H256};
+use ethers::types::H256;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -18,54 +21,45 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+use std::array;
+
+/// Parent hash offset in RLP encoded header
+const HEADER_RLP_PARENT_HASH_OFFSET: usize = 4;
+/// State root offset in RLP encoded header
+const HEADER_RLP_STATE_ROOT_OFFSET: usize = 91;
+/// Number offset in RLP encoded header
+const HEADER_RLP_NUMBER_OFFSET: usize = 450;
 
 /// The block input wires
-pub struct BlockInputsWires<const MAX_LEN: usize> {
+pub struct BlockInputsWires<const MAX_LEN: usize>
+where
+    [(); PAD_LEN(MAX_LEN)]:,
+{
     /// Block number
-    pub number: Target,
-    /// Block hash
-    pub hash: OutputHash,
+    pub(crate) number: PackedU64Target,
     /// Block parent hash
-    pub parent_hash: OutputHash,
+    pub(crate) parent_hash: OutputHash,
+    /// The keccak wires computed from RLP encoded header
+    pub(crate) hash: ByteKeccakWires<{ PAD_LEN(MAX_LEN) }>,
     /// The hash bytes of state root
     state_root_bytes: OutputByteHash,
-    /// The offset of state MPT root hash located in RLP encoded block header
-    pub state_root_offset: Target,
     /// RLP encoded bytes of block header
-    pub header_rlp: VectorWire<Target, MAX_LEN>,
+    pub(crate) header_rlp: VectorWire<Target, MAX_LEN>,
 }
 
 /// The block input gadget
 #[derive(Clone, Debug)]
 pub struct BlockInputs {
-    /// Block number
-    number: u64,
-    /// Block hash
-    hash: H256,
-    /// Block parent hash
-    parent_hash: H256,
     /// The hash bytes of state root
     state_root_bytes: H256,
-    /// The offset of state MPT root hash located in RLP encoded block header
-    state_root_offset: usize,
     /// RLP encoded bytes of block header
     header_rlp: Vec<u8>,
 }
 
 impl BlockInputs {
-    pub fn new(block: Block<H256>, state_root_bytes: H256) -> Self {
-        let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
-
-        // Find the state root hash from block header.
-        let state_root_offset = find_index_subvector(&header_rlp, &state_root_bytes.0)
-            .expect("Failed to find the root hash of state MPT in the RLP encoded block header");
-
+    pub fn new(state_root_bytes: H256, header_rlp: Vec<u8>) -> Self {
         Self {
-            number: block.number.unwrap().as_u64(),
-            hash: block.hash.unwrap(),
-            parent_hash: block.parent_hash,
             state_root_bytes,
-            state_root_offset,
             header_rlp,
         }
     }
@@ -76,14 +70,48 @@ impl BlockInputs {
     ) -> BlockInputsWires<MAX_LEN>
     where
         F: RichField + Extendable<D>,
+        [(); PAD_LEN(MAX_LEN)]:,
     {
+        let state_root_bytes = Array::new(cb);
+        let header_rlp = VectorWire::new(cb);
+
+        // Calculate the keccak hash of RLP encoded header.
+        let zero = cb.zero();
+        let mut arr = [zero; PAD_LEN(MAX_LEN)];
+        arr[..MAX_LEN].copy_from_slice(&header_rlp.arr.arr);
+        let bytes_to_keccak = &VectorWire::<Target, { PAD_LEN(MAX_LEN) }> {
+            real_len: header_rlp.real_len,
+            arr: Array { arr },
+        };
+        let hash = KeccakCircuit::hash_to_bytes(cb, bytes_to_keccak);
+
+        // Get the number from RLP encoded header.
+        let number_offset = cb.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
+        let number: U64Target = header_rlp.arr.extract_array(cb, number_offset);
+        let number: PackedU64Target = number.convert_u8_to_u32(cb);
+
+        // Get the parent hash from RLP encoded header.
+        let parent_hash_offset =
+            cb.constant(F::from_canonical_usize(HEADER_RLP_PARENT_HASH_OFFSET));
+        let parent_hash: OutputByteHash = header_rlp.arr.extract_array(cb, parent_hash_offset);
+        let parent_hash: OutputHash = parent_hash.convert_u8_to_u32(cb);
+
+        /*
+                let zero = cb.zero();
+                let rlp_headers = decode_fixed_list::<_, _, 9>(cb, &header_rlp.arr.arr, zero);
+                let hash_len = cb.constant(F::from_canonical_usize(HASH_LEN));
+                cb.connect(rlp_headers.len[0], hash_len);
+                cb.connect(rlp_headers.len[8], hash_len);
+                        // cb.connect(should_false.target, ffalse.target);
+                        cb.connect(kkk.real_len, hash_len);
+        */
+
         BlockInputsWires {
-            number: cb.add_virtual_target(),
-            hash: Array::new(cb),
-            parent_hash: Array::new(cb),
-            state_root_bytes: Array::new(cb),
-            state_root_offset: cb.add_virtual_target(),
-            header_rlp: VectorWire::new(cb),
+            number,
+            parent_hash,
+            hash,
+            state_root_bytes,
+            header_rlp,
         }
     }
 
@@ -95,39 +123,27 @@ impl BlockInputs {
     ) -> Result<()>
     where
         F: RichField,
+        [(); PAD_LEN(MAX_LEN)]:,
     {
-        // Assign the block number.
-        pw.set_target(wires.number, F::from_canonical_u64(self.number));
-
-        // Assign the block hash and parent hash.
-        [
-            (&wires.hash, self.hash),
-            (&wires.parent_hash, self.parent_hash),
-        ]
-        .iter()
-        .for_each(|(target, value)| {
-            target.assign(
-                pw,
-                &convert_u8_slice_to_u32_fields(&value.0).try_into().unwrap(),
-            )
-        });
-
         // Assign the hash bytes of state root.
         wires
             .state_root_bytes
             .assign(pw, &self.state_root_bytes.0.map(F::from_canonical_u8));
 
-        // Assign the offset of state MPT root hash located in RLP encoded block
-        // header.
-        pw.set_target(
-            wires.state_root_offset,
-            F::from_canonical_usize(self.state_root_offset),
-        );
-
         // Assign the RLP encoded block header.
         wires
             .header_rlp
             .assign(pw, &Vector::from_vec(&self.header_rlp)?);
+
+        // Assign the keccak value of RLP encoded header.
+        KeccakCircuit::<{ PAD_LEN(MAX_LEN) }>::assign_byte_keccak(
+            pw,
+            &wires.hash,
+            &InputData::Assigned(
+                &Vector::from_vec(&self.header_rlp)
+                    .expect("Cannot create vector input for keccak RLP encoded header"),
+            ),
+        );
 
         Ok(())
     }
@@ -142,11 +158,13 @@ impl BlockInputs {
         state_root_hash: &OutputHash,
     ) where
         F: RichField + Extendable<D>,
+        [(); PAD_LEN(MAX_LEN)]:,
     {
         let tt = cb._true();
 
         // Verify the offset of state MPT root hash is within range.
-        let within_range = less_than(cb, wires.state_root_offset, wires.header_rlp.real_len, 10);
+        let state_root_offset = cb.constant(F::from_canonical_usize(HEADER_RLP_STATE_ROOT_OFFSET));
+        let within_range = less_than(cb, state_root_offset, wires.header_rlp.real_len, 10);
         cb.connect(within_range.target, tt.target);
 
         // Convert the hash bytes of state root to an u32 array, and verify it's
@@ -158,10 +176,8 @@ impl BlockInputs {
         cb.connect(is_equal.target, tt.target);
 
         // Verify the block header includes the state MPT root hash.
-        let expected_state_root: OutputByteHash = wires
-            .header_rlp
-            .arr
-            .extract_array(cb, wires.state_root_offset);
+        let expected_state_root: OutputByteHash =
+            wires.header_rlp.arr.extract_array(cb, state_root_offset);
         expected_state_root
             .convert_u8_to_u32(cb)
             .enforce_equal(cb, &state_root_hash);

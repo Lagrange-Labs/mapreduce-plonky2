@@ -22,6 +22,7 @@ use storage_proof::{StorageInputs, StorageInputsWires};
 pub struct BlockLinkingWires<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(BLOCK_LEN)]:,
     [(); DEPTH - 1]:,
 {
     /// Account input data
@@ -51,11 +52,12 @@ impl<F, const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>
 where
     F: RichField,
     [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(BLOCK_LEN)]:,
     [(); DEPTH - 1]:,
 {
     pub fn new(
-        block: Block<H256>,
         storage_proof: StorageInputs<F>,
+        header_rlp: Vec<u8>,
         // Nodes of state MPT, it's ordered from leaf to root.
         state_mpt_nodes: Vec<Vec<u8>>,
     ) -> Self {
@@ -65,7 +67,7 @@ where
                 .try_into()
                 .unwrap(),
         );
-        let block_inputs = BlockInputs::new(block, state_mpt_root);
+        let block_inputs = BlockInputs::new(state_mpt_root, header_rlp);
 
         // Get the contract address and hash of storage MPT root, and create the
         // account inputs gadget.
@@ -186,6 +188,7 @@ mod tests {
         for TestCircuit<DEPTH, NODE_LEN, BLOCK_LEN>
     where
         [(); PAD_LEN(NODE_LEN)]:,
+        [(); PAD_LEN(BLOCK_LEN)]:,
         [(); DEPTH - 1]:,
     {
         type Wires = BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>;
@@ -213,11 +216,11 @@ mod tests {
         const VALUE_LEN: usize = 100;
 
         let state_mpt = generate_state_mpt::<DEPTH, VALUE_LEN>();
-        let block = generate_block(&state_mpt);
+        let header_rlp = generate_header_rlp(&state_mpt);
         let storage_proof = generate_storage_proof(&state_mpt);
 
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
-            c: BlockLinkingCircuit::new(block, storage_proof, state_mpt.nodes),
+            c: BlockLinkingCircuit::new(storage_proof, header_rlp, state_mpt.nodes),
         };
         run_circuit::<F, D, C, _>(test_circuit);
     }
@@ -262,11 +265,11 @@ mod tests {
         };
 
         // TODO: test with a real block.
-        let block = generate_block(&state_mpt);
+        let header_rlp = generate_header_rlp(&state_mpt);
         let storage_proof = generate_storage_proof(&state_mpt);
 
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
-            c: BlockLinkingCircuit::new(block, storage_proof, state_mpt.nodes),
+            c: BlockLinkingCircuit::new(storage_proof, header_rlp, state_mpt.nodes),
         };
         run_circuit::<F, D, C, _>(test_circuit);
 
@@ -325,7 +328,7 @@ mod tests {
     }
 
     /// Generate the test block header.
-    fn generate_block(mpt: &TestStateMPT) -> Block<H256> {
+    fn generate_header_rlp(mpt: &TestStateMPT) -> Vec<u8> {
         // Set to the MPT root hash.
         let state_root = mpt.root_hash;
 
@@ -335,13 +338,15 @@ mod tests {
         let hash = Some(rng.gen::<[u8; 32]>().into());
         let parent_hash = rng.gen::<[u8; 32]>().into();
 
-        Block {
+        let block = Block::<H256> {
             state_root,
             number,
             hash,
             parent_hash,
             ..Default::default()
-        }
+        };
+
+        rlp::encode(&RLPBlock(&block)).to_vec()
     }
 
     /// Generate the test storage proof.
