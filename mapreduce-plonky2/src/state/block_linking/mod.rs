@@ -207,7 +207,7 @@ mod tests {
             let hash = OutputByteHash::new(cb);
             let wires = BlockLinkingCircuit::build(cb);
 
-            cb.connect(block_number.0, wires.block_inputs.number.0);
+            cb.connect(wires.block_inputs.number.0, block_number.0);
             parent_hash.enforce_equal(cb, &wires.block_inputs.parent_hash);
             hash.enforce_equal(cb, &wires.block_inputs.hash.output);
 
@@ -216,6 +216,7 @@ mod tests {
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             let block_number = self.exp_block_number.as_u32();
+            println!("exp block number: {:?}", block_number);
             pw.set_u32_target(wires.0, block_number);
 
             let parent_hash = convert_u8_to_u32_slice(&self.exp_parent_hash.0)
@@ -280,6 +281,7 @@ mod tests {
         // Simple storage test
         let query = ProofQuery::new_simple_slot(contract, 0);
         let block_number = provider.get_block_number().await?;
+        println!("Block number: {:?}", block_number);
         let block = provider.get_block(block_number).await?.unwrap();
         let res = query
             .query_mpt_proof(&provider, Some(block_number.into()))
