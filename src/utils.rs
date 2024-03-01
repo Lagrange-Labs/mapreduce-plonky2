@@ -21,7 +21,9 @@ const TWO_POWER_24: usize = 16777216;
 pub const ADDRESS_LEN: usize = 20;
 /// Length of an address in U32
 pub const PACKED_ADDRESS_LEN: usize = ADDRESS_LEN / 4;
-/// Pack representation of an address
+/// Byte representation of an address
+pub type AddressTarget = Array<Target, ADDRESS_LEN>;
+/// U32 representation of an address
 pub type PackedAddressTarget = Array<U32Target, PACKED_ADDRESS_LEN>;
 
 pub(crate) fn verify_proof_tuple<

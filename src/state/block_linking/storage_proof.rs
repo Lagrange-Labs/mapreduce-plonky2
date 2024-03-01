@@ -31,6 +31,7 @@ pub const M_IDX: usize = 32;
 pub const S_IDX: usize = 33;
 pub const STORAGE_INPUT_LEN: usize = 34;
 
+// TODO: fix as PublicInputs in `length_extract.rs`.
 /// The public input values of previous storage proof
 #[derive(Clone, Debug)]
 pub struct StorageInputs<T> {

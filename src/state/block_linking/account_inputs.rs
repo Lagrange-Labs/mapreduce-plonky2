@@ -3,12 +3,13 @@
 //! the account node.
 
 use crate::{
-    array::Array,
-    keccak::{OutputByteHash, OutputHash},
+    array::{Array, Vector, VectorWire},
+    keccak::{ByteKeccakWires, InputData, KeccakCircuit, OutputByteHash, OutputHash},
     mpt_sequential::{
-        Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
+        Circuit as MPTCircuit, InputWires as MPTInputWires, MPTKeyWire,
+        OutputWires as MPTOutputWires, PAD_LEN,
     },
-    utils::{find_index_subvector, keccak256, less_than},
+    utils::{find_index_subvector, keccak256, less_than, AddressTarget, ADDRESS_LEN},
 };
 use anyhow::Result;
 use ethers::types::{H160, H256};
@@ -22,12 +23,20 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
+/// Keccak input padded length for address
+const INPUT_PADDED_ADDRESS_LEN: usize = PAD_LEN(ADDRESS_LEN);
+
 /// The account input wires
 pub struct AccountInputsWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
 {
+    /// The contract address, TODO: should get from previous public inputs
+    contract_address: AddressTarget,
+    /// The keccak wires computed from contract address, which is set to the
+    /// state MPT root hash
+    keccak_contract_address: ByteKeccakWires<INPUT_PADDED_ADDRESS_LEN>,
     /// The hash bytes of storage root
     storage_root_bytes: OutputByteHash,
     /// The offset of storage MPT root hash located in RLP encoded account node
@@ -41,6 +50,8 @@ where
 /// The account input gadget
 #[derive(Clone, Debug)]
 pub struct AccountInputs<const DEPTH: usize, const NODE_LEN: usize> {
+    /// The contract address
+    contract_address: H160,
     /// The hash bytes of storage root
     storage_root_bytes: H256,
     /// The offset of storage root hash located in RLP encoded account node
@@ -72,6 +83,7 @@ where
         let state_mpt_circuit = MPTCircuit::new(state_mpt_key, state_mpt_nodes);
 
         Self {
+            contract_address,
             storage_root_bytes,
             storage_root_offset,
             state_mpt_circuit,
@@ -85,11 +97,23 @@ where
     where
         F: RichField + Extendable<D>,
     {
+        let contract_address = Array::new(cb);
         let storage_root_bytes = Array::new(cb);
         let storage_root_offset = cb.add_virtual_target();
 
+        // Calculate the keccak hash of contract address, and use it as the
+        // state MPT root hash.
+        let mut arr = [cb.zero(); INPUT_PADDED_ADDRESS_LEN];
+        arr[..ADDRESS_LEN].copy_from_slice(&contract_address.arr);
+        let bytes_to_keccak = &VectorWire::<Target, INPUT_PADDED_ADDRESS_LEN> {
+            real_len: cb.constant(F::from_canonical_usize(ADDRESS_LEN)),
+            arr: Array { arr },
+        };
+        let keccak_contract_address = KeccakCircuit::hash_to_bytes(cb, bytes_to_keccak);
+        let expected_mpt_key = MPTKeyWire::init_from_bytes(cb, &keccak_contract_address.output);
+
         // Generate the input and output wires of state MPT circuit.
-        let state_mpt_input = MPTCircuit::create_input_wires(cb);
+        let state_mpt_input = MPTCircuit::create_input_wires(cb, Some(expected_mpt_key));
         let state_mpt_output = MPTCircuit::verify_mpt_proof(cb, &state_mpt_input);
 
         // Range check to constrain only bytes for each node of state MPT input.
@@ -99,6 +123,8 @@ where
             .for_each(|n| n.assert_bytes(cb));
 
         AccountInputsWires {
+            contract_address,
+            keccak_contract_address,
             storage_root_bytes,
             storage_root_offset,
             state_mpt_input,
@@ -115,6 +141,21 @@ where
     where
         F: RichField + Extendable<D>,
     {
+        // Assign the contract address.
+        wires
+            .contract_address
+            .assign(pw, &self.contract_address.0.map(F::from_canonical_u8));
+
+        // Assign the keccak value of contract address.
+        KeccakCircuit::<{ PAD_LEN(ADDRESS_LEN) }>::assign_byte_keccak(
+            pw,
+            &wires.keccak_contract_address,
+            &InputData::Assigned(
+                &Vector::from_vec(&self.contract_address.0)
+                    .expect("Cannot create vector input for keccak contract address"),
+            ),
+        );
+
         // Assign the hash bytes of storage root.
         wires
             .storage_root_bytes
