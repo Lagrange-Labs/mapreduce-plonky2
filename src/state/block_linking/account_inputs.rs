@@ -159,11 +159,11 @@ where
         cb.connect(is_equal.target, tt.target);
 
         // Verify the account node includes the storage MPT root hash.
-        let expected_storage_root = account_node
+        let expected_storage_root: OutputByteHash = account_node
             .arr
             .extract_array(cb, wires.storage_root_offset);
-        wires
-            .storage_root_bytes
-            .enforce_equal(cb, &expected_storage_root);
+        expected_storage_root
+            .convert_u8_to_u32(cb)
+            .enforce_equal(cb, storage_root_hash);
     }
 }

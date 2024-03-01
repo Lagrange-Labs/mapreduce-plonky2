@@ -158,12 +158,12 @@ impl BlockInputs {
         cb.connect(is_equal.target, tt.target);
 
         // Verify the block header includes the state MPT root hash.
-        let expected_state_root = wires
+        let expected_state_root: OutputByteHash = wires
             .header_rlp
             .arr
             .extract_array(cb, wires.state_root_offset);
-        wires
-            .state_root_bytes
-            .enforce_equal(cb, &expected_state_root);
+        expected_state_root
+            .convert_u8_to_u32(cb)
+            .enforce_equal(cb, &state_root_hash);
     }
 }
