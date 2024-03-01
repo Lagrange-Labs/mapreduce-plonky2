@@ -6,7 +6,7 @@ mod block_inputs;
 mod public_inputs;
 mod storage_proof;
 
-use crate::mpt_sequential::PAD_LEN;
+use crate::{array::L32, mpt_sequential::PAD_LEN};
 use account_inputs::{AccountInputs, AccountInputsWires};
 use anyhow::Result;
 use block_inputs::{BlockInputs, BlockInputsWires};
@@ -36,23 +36,34 @@ where
 /// Block-linking circuit used to prove the pre-computed state root proof is
 /// linked to the specific block header.
 #[derive(Clone, Debug)]
-pub struct BlockLinkingCircuit<F, const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>
-{
+pub struct BlockLinkingCircuit<
+    F,
+    const DEPTH: usize,
+    const NODE_LEN: usize,
+    const BLOCK_LEN: usize,
+    const NUMBER_LEN: usize,
+> {
     /// Account input data
     account_inputs: AccountInputs<DEPTH, NODE_LEN>,
     /// Block input data
-    block_inputs: BlockInputs,
+    block_inputs: BlockInputs<NUMBER_LEN>,
     /// Previous storage proof
     storage_proof: StorageInputs<F>,
 }
 
-impl<F, const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>
-    BlockLinkingCircuit<F, DEPTH, NODE_LEN, BLOCK_LEN>
+impl<
+        F,
+        const DEPTH: usize,
+        const NODE_LEN: usize,
+        const BLOCK_LEN: usize,
+        const NUMBER_LEN: usize,
+    > BlockLinkingCircuit<F, DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN>
 where
     F: RichField,
     [(); PAD_LEN(NODE_LEN)]:,
     [(); PAD_LEN(BLOCK_LEN)]:,
     [(); DEPTH - 1]:,
+    [(); L32(NUMBER_LEN)]:,
 {
     pub fn new(
         storage_proof: StorageInputs<F>,
@@ -61,7 +72,7 @@ where
         state_mpt_nodes: Vec<Vec<u8>>,
     ) -> Self {
         // Create the block inputs gadget.
-        let block_inputs = BlockInputs::new(header_rlp);
+        let block_inputs = BlockInputs::<NUMBER_LEN>::new(header_rlp);
 
         // Get the contract address and hash of storage MPT root, and create the
         // account inputs gadget.
@@ -163,6 +174,7 @@ mod tests {
     };
     use rand::{thread_rng, Rng};
     use std::{str::FromStr, sync::Arc};
+    use tests::block_inputs::SEPOLIA_NUMBER_LEN;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -180,19 +192,29 @@ mod tests {
 
     /// Test circuit
     #[derive(Clone, Debug)]
-    struct TestCircuit<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize> {
+    struct TestCircuit<
+        const DEPTH: usize,
+        const NODE_LEN: usize,
+        const BLOCK_LEN: usize,
+        const NUMBER_LEN: usize,
+    > {
         exp_block_number: U64,
         exp_parent_hash: H256,
         exp_hash: H256,
-        c: BlockLinkingCircuit<F, DEPTH, NODE_LEN, BLOCK_LEN>,
+        c: BlockLinkingCircuit<F, DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN>,
     }
 
-    impl<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize> UserCircuit<F, D>
-        for TestCircuit<DEPTH, NODE_LEN, BLOCK_LEN>
+    impl<
+            const DEPTH: usize,
+            const NODE_LEN: usize,
+            const BLOCK_LEN: usize,
+            const NUMBER_LEN: usize,
+        > UserCircuit<F, D> for TestCircuit<DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN>
     where
         [(); PAD_LEN(NODE_LEN)]:,
         [(); PAD_LEN(BLOCK_LEN)]:,
         [(); DEPTH - 1]:,
+        [(); L32(NUMBER_LEN)]:,
     {
         type Wires = (
             U32Target,
@@ -254,7 +276,7 @@ mod tests {
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
         let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
 
-        let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
+        let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN, 4> {
             exp_block_number: block.number.unwrap(),
             exp_parent_hash: block.parent_hash,
             exp_hash,
@@ -281,6 +303,8 @@ mod tests {
         // Simple storage test
         let query = ProofQuery::new_simple_slot(contract, 0);
         let block_number = provider.get_block_number().await?;
+        //let block_number = U64::from(5397174);
+
         println!("Block number: {:?}", block_number);
         let block = provider.get_block(block_number).await?.unwrap();
         let res = query
@@ -313,7 +337,7 @@ mod tests {
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
         let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
 
-        let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN> {
+        let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN, SEPOLIA_NUMBER_LEN> {
             exp_block_number: block.number.unwrap(),
             exp_parent_hash: block.parent_hash,
             exp_hash,
