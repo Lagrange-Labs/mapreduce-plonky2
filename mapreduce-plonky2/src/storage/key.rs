@@ -250,9 +250,12 @@ mod test {
                 .2
                 .assign_bytes(pw, &self.exp_keccak_location.clone().try_into().unwrap());
             let exp_mpt_key_bytes = keccak256(&self.exp_keccak_location);
-            wires
-                .3
-                .assign(pw, &convert_u8_slice_to_u32_fields(&exp_mpt_key_bytes).try_into().unwrap());
+            wires.3.assign(
+                pw,
+                &convert_u8_slice_to_u32_fields(&exp_mpt_key_bytes)
+                    .try_into()
+                    .unwrap(),
+            );
             self.m.assign(pw, &wires.0);
         }
     }

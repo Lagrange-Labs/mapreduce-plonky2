@@ -435,7 +435,7 @@ impl MPTKeyWire {
         self.key.register_as_input(b);
         b.register_public_input(self.pointer);
     }
-    
+
     /// Initialize a new MPTKeyWire from the array of `U32Target`.
     /// It returns a MPTKeyWire with the pointer set to the last nibble, as in an initial
     /// case.
@@ -452,16 +452,19 @@ impl MPTKeyWire {
                         let four = b.constant(F::from_canonical_u8(4));
                         // decompose the `U32Target` in 16 limbs of 2 bits each; the output limbs are already range-checked
                         // by the `split_le_base` operation
-                        let limbs: [Target; 16] = b.split_le_base::<4>(u32_limb.0, 16).try_into().unwrap();
-                        // now we need to pack each pair of 2 bit limbs into a nibble, but for each byte we want nibbles to 
+                        let limbs: [Target; 16] =
+                            b.split_le_base::<4>(u32_limb.0, 16).try_into().unwrap();
+                        // now we need to pack each pair of 2 bit limbs into a nibble, but for each byte we want nibbles to
                         // be ordered in big-endian
-                        limbs.chunks(4).flat_map(|chunk| {
-                            vec![
-                                b.mul_const_add(F::from_canonical_u8(4), chunk[3], chunk[2]),
-                                b.mul_const_add(F::from_canonical_u8(4), chunk[1], chunk[0])
-                            ]
-                        })
-                        .collect::<Vec<_>>()
+                        limbs
+                            .chunks(4)
+                            .flat_map(|chunk| {
+                                vec![
+                                    b.mul_const_add(F::from_canonical_u8(4), chunk[3], chunk[2]),
+                                    b.mul_const_add(F::from_canonical_u8(4), chunk[1], chunk[0]),
+                                ]
+                            })
+                            .collect::<Vec<_>>()
                     })
                     .collect::<Vec<_>>()
                     .try_into()
@@ -1130,9 +1133,12 @@ pub mod test {
         let mut b = CircuitBuilder::<F, D>::new(config);
         let tt = b._true();
         let key_bytes = Array::<Target, HASH_LEN>::new(&mut b);
-        let key_u32: Array::<U32Target, PACKED_HASH_LEN> = 
-            convert_u8_targets_to_u32(&mut b, &key_bytes.arr).into_iter()
-            .collect::<Vec<_>>().try_into().unwrap();
+        let key_u32: Array<U32Target, PACKED_HASH_LEN> =
+            convert_u8_targets_to_u32(&mut b, &key_bytes.arr)
+                .into_iter()
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
         let key_nibbles = MPTKeyWire::init_from_u32_targets(&mut b, &key_u32);
         let exp_nibbles = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(&mut b);
         let eq = key_nibbles.key.equals(&mut b, &exp_nibbles);

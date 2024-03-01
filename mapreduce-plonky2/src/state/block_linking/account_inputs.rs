@@ -104,7 +104,8 @@ where
             arr: Array { arr },
         };
         let keccak_contract_address = KeccakCircuit::hash_vector(cb, bytes_to_keccak);
-        let expected_mpt_key = MPTKeyWire::init_from_u32_targets(cb, &keccak_contract_address.output_array);
+        let expected_mpt_key =
+            MPTKeyWire::init_from_u32_targets(cb, &keccak_contract_address.output_array);
 
         // Generate the input and output wires of state MPT circuit.
         let state_mpt_input = MPTCircuit::create_input_wires(cb, Some(expected_mpt_key));
