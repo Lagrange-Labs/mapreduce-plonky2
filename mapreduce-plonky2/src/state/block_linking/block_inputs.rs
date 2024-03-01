@@ -207,7 +207,7 @@ mod test {
         }
 
         fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<F>, wires: &Self::Wires) {
-            self.block.assign(pw, &wires.0);
+            self.block.assign(pw, &wires.0).unwrap();
             pw.set_u32_target(wires.1, self.exp_number);
         }
     }

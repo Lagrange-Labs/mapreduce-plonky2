@@ -189,3 +189,117 @@ where
             .enforce_equal(cb, storage_root_hash);
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::{str::FromStr, sync::Arc};
+
+    use eth_trie::{EthTrie, MemoryDB, Trie};
+    use ethers::{
+        providers::{Http, Middleware, Provider},
+        types::{Address, BlockId, BlockNumber, H160, H256, U64},
+    };
+    use plonky2::{
+        field::extension::Extendable,
+        hash::hash_types::RichField,
+        plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
+    };
+
+    use crate::{
+        benches::init_logging,
+        circuit::{test::run_circuit, UserCircuit},
+        eth::{BlockData, ProofQuery},
+        mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
+        storage,
+        utils::{find_index_subvector, keccak256},
+    };
+
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+    use super::{AccountInputs, AccountInputsWires};
+    #[derive(Clone, Debug)]
+    struct TestAccountInputs<const DEPTH: usize, const NODE_LEN: usize> {
+        a: AccountInputs<DEPTH, NODE_LEN>,
+    }
+
+    impl<
+            const DEPTH: usize,
+            const NODE_LEN: usize,
+            F: RichField + Extendable<D>,
+            const D: usize,
+        > UserCircuit<F, D> for TestAccountInputs<DEPTH, NODE_LEN>
+    where
+        [(); DEPTH - 1]:,
+        [(); PAD_LEN(NODE_LEN)]:,
+    {
+        type Wires = AccountInputsWires<DEPTH, NODE_LEN>;
+
+        fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>) -> Self::Wires {
+            AccountInputs::build(c)
+        }
+
+        fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<F>, wires: &Self::Wires) {
+            self.a.assign(pw, wires).unwrap();
+        }
+    }
+    use anyhow::Result;
+    #[tokio::test]
+    async fn test_account_inputs() -> Result<()> {
+        const DEPTH: usize = 8;
+        const BLOCK_LEN: usize = 620;
+        const NODE_LEN: usize = 532;
+        const VALUE_LEN: usize = 100;
+        init_logging();
+
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = std::env::var("RPC_SEPOLIA")
+            .unwrap_or("https://ethereum-sepolia-rpc.publicnode.com".to_string());
+
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        let block_number = U64::from(5395609);
+        // Sepolia contract
+        let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
+        // Simple storage test
+        let query = ProofQuery::new_simple_slot(contract, 0);
+        let block = provider
+            .get_block_with_txs(BlockId::Number(BlockNumber::Number(block_number)))
+            .await?
+            .expect("should have been a block");
+        let res = query
+            .query_mpt_proof(
+                &provider,
+                Some(BlockId::Number(BlockNumber::Number(block_number))),
+            )
+            .await?;
+        let account_proof = res
+            .account_proof
+            .iter()
+            .rev()
+            .map(|b| b.to_vec())
+            .collect::<Vec<Vec<u8>>>();
+        let state_root = keccak256(&account_proof.last().unwrap());
+        let key = keccak256(&contract.as_bytes());
+        let db = MemoryDB::new(true);
+        let trie = EthTrie::new(Arc::new(db));
+        let is_proof_valid = trie
+            .verify_proof(H256::from_slice(&state_root), &key, account_proof.clone())
+            .expect("proof should be valid");
+        assert!(is_proof_valid.is_some());
+        let storage_root = keccak256(&res.storage_proof[0].proof[0].clone());
+        let state_account = account_proof[0].clone();
+        let storage_root_offset =
+            find_index_subvector(&state_account, &storage_root).expect("no subvector");
+        let acc = AccountInputs::<DEPTH, NODE_LEN> {
+            contract_address: contract,
+            storage_root_offset,
+            state_mpt_circuit: MPTCircuit::new(key.try_into().unwrap(), account_proof),
+        };
+        run_circuit::<F, D, C, _>(TestAccountInputs { a: acc });
+        Ok(())
+    }
+}

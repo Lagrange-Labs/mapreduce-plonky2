@@ -81,10 +81,14 @@ impl BlockData {
         let url = env::var("CI_RPC_URL").expect("CI_RPC_URL env var not set");
         #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
-        //let provider = Provider::<Http>::try_from
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
-
+        Self::fetch_from(&provider, blockid).await
+    }
+    pub async fn fetch_from<T: Into<BlockId> + Send + Sync>(
+        provider: &Provider<Http>,
+        blockid: T,
+    ) -> Result<Self> {
         let block = provider
             .get_block_with_txs(blockid)
             .await?

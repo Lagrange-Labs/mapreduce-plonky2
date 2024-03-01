@@ -91,18 +91,18 @@ where
         let storage_proof = StorageInputs::build(cb);
 
         // Verify the account node includes the hash of storage MPT root.
-        //AccountInputs::verify_storage_root_hash_inclusion(
-        //    cb,
-        //    &account_inputs,
-        //    &storage_proof.mpt_root_target(),
-        //);
+        AccountInputs::verify_storage_root_hash_inclusion(
+            cb,
+            &account_inputs,
+            &storage_proof.mpt_root_target(),
+        );
 
-        // Verify the block header includes the hash of state MPT root.
-        //BlockInputs::verify_state_root_hash_inclusion(
-        //    cb,
-        //    &block_inputs,
-        //    &account_inputs.state_mpt_output.root,
-        //);
+        //Verify the block header includes the hash of state MPT root.
+        BlockInputs::verify_state_root_hash_inclusion(
+            cb,
+            &block_inputs,
+            &account_inputs.state_mpt_output.root,
+        );
 
         let wires = BlockLinkingWires {
             account_inputs,
@@ -148,13 +148,12 @@ mod tests {
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use ethers::{
         providers::{Http, Middleware, Provider},
-        types::{Address, Block, BlockNumber, H160, H256, U64},
+        types::{Address, Block, H160, H256, U64},
     };
     use plonky2::{
         field::types::Field,
         plonk::{
             circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
@@ -208,9 +207,9 @@ mod tests {
             let hash = OutputByteHash::new(cb);
             let wires = BlockLinkingCircuit::build(cb);
 
-            //block_number.enforce_equal(cb, &wires.block_inputs.number);
-            //parent_hash.enforce_equal(cb, &wires.block_inputs.parent_hash);
-            //hash.enforce_equal(cb, &wires.block_inputs.hash.output);
+            cb.connect(block_number.0, wires.block_inputs.number.0);
+            parent_hash.enforce_equal(cb, &wires.block_inputs.parent_hash);
+            hash.enforce_equal(cb, &wires.block_inputs.hash.output);
 
             (block_number, parent_hash, hash, wires)
         }
@@ -271,7 +270,8 @@ mod tests {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
-        let url = "https://eth.llamarpc.com";
+        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
