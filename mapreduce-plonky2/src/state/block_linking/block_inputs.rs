@@ -15,6 +15,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use std::array;
 
 /// Parent hash offset in RLP encoded header
 const HEADER_RLP_PARENT_HASH_OFFSET: usize = 4;
@@ -85,12 +86,15 @@ where
             .unwrap();
 
         // We assume so far it always fit in 32 bits, which give block number < 4 billion so it
-        // should be ok.
-        let mut number = header_rlp.arr.arr
-            [HEADER_RLP_NUMBER_OFFSET..HEADER_RLP_NUMBER_OFFSET + NUMBER_LEN]
-            .to_vec();
-        number.reverse();
-        let number: U32Target = convert_u8_targets_to_u32(cb, &number)[0];
+        // should be ok. And we get the array with reverse order.
+        let number = Array::<Target, 4>::from(array::from_fn(|i| {
+            if i < NUMBER_LEN {
+                header_rlp.arr.arr[HEADER_RLP_NUMBER_OFFSET + NUMBER_LEN - 1 - i]
+            } else {
+                zero
+            }
+        }));
+        let number = number.convert_u8_to_u32(cb)[0];
 
         BlockInputsWires {
             number,
@@ -176,7 +180,7 @@ mod test {
         keccak::{OutputByteHash, HASH_LEN},
         mpt_sequential::PAD_LEN,
         state::block_linking::block_inputs::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN},
-        utils::{convert_u8_targets_to_u32, convert_u8_to_u32_slice, find_index_subvector},
+        utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
 
     use super::{
