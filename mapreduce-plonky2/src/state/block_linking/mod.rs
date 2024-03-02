@@ -220,19 +220,19 @@ mod tests {
         type Wires = (
             U32Target,
             OutputHash,
-            OutputByteHash,
+            OutputHash,
             BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>,
         );
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let block_number = cb.add_virtual_u32_target();
             let parent_hash = OutputHash::new(cb);
-            let hash = OutputByteHash::new(cb);
+            let hash = OutputHash::new(cb);
             let wires = BlockLinkingCircuit::build(cb);
 
             cb.connect(wires.block_inputs.number.0, block_number.0);
             parent_hash.enforce_equal(cb, &wires.block_inputs.parent_hash);
-            hash.enforce_equal(cb, &wires.block_inputs.hash.output);
+            hash.enforce_equal(cb, &wires.block_inputs.hash.output_array);
 
             (block_number, parent_hash, hash, wires)
         }
@@ -242,16 +242,17 @@ mod tests {
             println!("exp block number: {:?}", block_number);
             pw.set_u32_target(wires.0, block_number);
 
-            let parent_hash = convert_u8_to_u32_slice(&self.exp_parent_hash.0)
-                .into_iter()
-                .map(F::from_canonical_u32)
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
-            wires.1.assign(pw, &parent_hash);
-
-            let hash = self.exp_hash.0.map(F::from_canonical_u8);
-            wires.2.assign(pw, &hash);
+            [(&wires.1, self.exp_parent_hash), (&wires.2, self.exp_hash)]
+                .iter()
+                .for_each(|(wires, value)| {
+                    let value = convert_u8_to_u32_slice(&value.0)
+                        .into_iter()
+                        .map(F::from_canonical_u32)
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .unwrap();
+                    wires.assign(pw, &value);
+                });
 
             self.c.assign::<D>(pw, &wires.3).unwrap();
         }
@@ -259,7 +260,6 @@ mod tests {
 
     /// Test the block-linking circuit with a generated random MPT.
     #[test]
-    #[serial]
     fn test_block_linking_circuit_with_random_mpt() {
         init_logging();
 

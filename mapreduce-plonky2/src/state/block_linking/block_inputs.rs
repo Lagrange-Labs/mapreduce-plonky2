@@ -3,7 +3,7 @@
 
 use crate::{
     array::{Array, Vector, VectorWire, L32},
-    keccak::{ByteKeccakWires, InputData, KeccakCircuit, OutputByteHash, OutputHash, HASH_LEN},
+    keccak::{InputData, KeccakCircuit, KeccakWires, OutputByteHash, OutputHash, HASH_LEN},
     mpt_sequential::PAD_LEN,
     rlp::decode_fixed_list,
     utils::{less_than, PackedU64Target, U64Target, U64_LEN},
@@ -38,7 +38,7 @@ where
     /// Block parent hash
     pub(crate) parent_hash: OutputHash,
     /// The keccak wires computed from RLP encoded header
-    pub(crate) hash: ByteKeccakWires<{ PAD_LEN(MAX_LEN) }>,
+    pub(crate) hash: KeccakWires<{ PAD_LEN(MAX_LEN) }>,
     /// RLP encoded bytes of block header
     pub(crate) header_rlp: VectorWire<Target, MAX_LEN>,
 }
@@ -76,7 +76,7 @@ where
             real_len: header_rlp.real_len,
             arr: Array { arr },
         };
-        let hash = KeccakCircuit::hash_to_bytes(cb, bytes_to_keccak);
+        let hash = KeccakCircuit::hash_vector(cb, bytes_to_keccak);
 
         // Get the parent hash from RLP encoded header.
         let parent_hash_offset =
@@ -116,7 +116,7 @@ where
             .assign(pw, &Vector::from_vec(&self.header_rlp)?);
 
         // Assign the keccak value of RLP encoded header.
-        KeccakCircuit::<{ PAD_LEN(MAX_LEN) }>::assign_byte_keccak(
+        KeccakCircuit::<{ PAD_LEN(MAX_LEN) }>::assign(
             pw,
             &wires.hash,
             &InputData::Assigned(
@@ -226,7 +226,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_block_header_decoding_on_sepolia() -> Result<()> {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
@@ -237,7 +236,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_block_header_decoding_on_mainnet() -> Result<()> {
         let url = "https://eth.llamarpc.com";
 

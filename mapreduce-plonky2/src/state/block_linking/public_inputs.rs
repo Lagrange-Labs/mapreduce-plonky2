@@ -48,8 +48,11 @@ impl<T> PublicInputs<T> {
         [(); PAD_LEN(BLOCK_LEN)]:,
         [(); DEPTH - 1]:,
     {
-        wires.block_inputs.hash.output.register_as_public_input(cb);
-        //wires.block_inputs.number.register_as_public_input(cb);
+        wires
+            .block_inputs
+            .hash
+            .output_array
+            .register_as_public_input(cb);
         cb.register_public_input(wires.block_inputs.number.0);
         wires.block_inputs.parent_hash.register_as_public_input(cb);
         cb.register_public_inputs(wires.storage_proof.a());
