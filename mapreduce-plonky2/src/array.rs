@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use plonky2::{
-    field::{extension::Extendable, goldilocks_field::GoldilocksField},
+    field::extension::Extendable,
     hash::hash_types::RichField,
     iop::{
         target::{BoolTarget, Target},
@@ -11,10 +11,7 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
-use crate::{
-    mpt_sequential::Circuit,
-    utils::{less_than, less_than_or_equal_to, IntTargetWriter},
-};
+use crate::utils::{less_than, less_than_or_equal_to};
 
 /// Utility trait to convert any value into its field representation equivalence
 pub(crate) trait ToField<F: RichField> {
@@ -417,7 +414,7 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
     }
 }
 pub(crate) const fn L32(a: usize) -> usize {
-    if a % 4 != 0{
+    if a % 4 != 0 {
         a / 4 + 1
     } else {
         a / 4
@@ -442,7 +439,7 @@ where
         let two_power_24: Target = b.constant(F::from_canonical_usize(TWO_POWER_24));
         let powers = [two_power_8, two_power_16, two_power_24];
 
-        println!("SIZE{} SIZE/4 {} L32(SIZE) {}", SIZE, SIZE/4, L32(SIZE));
+        println!("SIZE{} SIZE/4 {} L32(SIZE) {}", SIZE, SIZE / 4, L32(SIZE));
         // convert padded node to u32
         Array {
             arr: (0..SIZE)

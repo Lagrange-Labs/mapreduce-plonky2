@@ -308,7 +308,7 @@ impl ProofQuery {
     pub fn verify_storage_proof(proof: &EIP1186ProofResponse) -> Result<()> {
         let memdb = Arc::new(MemoryDB::new(true));
         let tx_trie = EthTrie::new(Arc::clone(&memdb));
-        let proof_key_bytes = proof.storage_proof[0].key.to_fixed_bytes();
+        let proof_key_bytes: [u8; 32] = proof.storage_proof[0].key.into();
         let mpt_key = keccak256(&proof_key_bytes[..]);
         let is_valid = tx_trie.verify_proof(
             proof.storage_hash,

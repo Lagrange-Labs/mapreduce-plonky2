@@ -174,7 +174,7 @@ mod tests {
     };
     use rand::{thread_rng, Rng};
     use std::{str::FromStr, sync::Arc};
-    use tests::block_inputs::SEPOLIA_NUMBER_LEN;
+    use tests::block_inputs::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN};
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -285,37 +285,75 @@ mod tests {
         run_circuit::<F, D, C, _>(test_circuit);
     }
 
-    /// Test the block-linking circuit with RPC `eth_getProof`.
+    /// Test the block-linking circuit with Sepolia RPC.
     #[tokio::test]
-    async fn test_block_linking_circuit_with_rpc() -> Result<()> {
-        init_logging();
-
+    async fn test_block_linking_circuit_with_sepolia_rpc() -> Result<()> {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
         let url = "https://ethereum-sepolia-rpc.publicnode.com";
 
+        let contract_address = "0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E";
+
+        // Written as constants from the result.
+        const DEPTH: usize = 8;
+        const NODE_LEN: usize = 532;
+        const BLOCK_LEN: usize = 620;
+
+        test_with_rpc::<DEPTH, NODE_LEN, BLOCK_LEN, SEPOLIA_NUMBER_LEN>(url, contract_address).await
+    }
+
+    /// Test the block-linking circuit with Mainnet RPC.
+    #[tokio::test]
+    async fn test_block_linking_circuit_with_mainnet_rpc() -> Result<()> {
+        let url = "https://eth.llamarpc.com";
+        // TODO: this Mainnet contract address only works with state proof
+        let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
+
+        // Written as constants from the result.
+        const DEPTH: usize = 8;
+        const NODE_LEN: usize = 532;
+        const BLOCK_LEN: usize = 620;
+
+        test_with_rpc::<DEPTH, NODE_LEN, BLOCK_LEN, MAINNET_NUMBER_LEN>(url, contract_address).await
+    }
+
+    /// Test with RPC `eth_getProof`.
+    async fn test_with_rpc<
+        const DEPTH: usize,
+        const NODE_LEN: usize,
+        const BLOCK_LEN: usize,
+        const NUMBER_LEN: usize,
+    >(
+        url: &str,
+        contract_address: &str,
+    ) -> Result<()>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+        [(); PAD_LEN(BLOCK_LEN)]:,
+        [(); DEPTH - 1]:,
+        [(); L32(NUMBER_LEN)]:,
+    {
+        init_logging();
+
+        let contract_address = Address::from_str(contract_address)?;
+
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
-        // Sepolia contract
-        let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
-        // Simple storage test
-        let query = ProofQuery::new_simple_slot(contract, 0);
+        // Get the latest block number.
         let block_number = provider.get_block_number().await?;
-        //let block_number = U64::from(5397174);
-
         println!("Block number: {:?}", block_number);
+        // Get block.
         let block = provider.get_block(block_number).await?.unwrap();
+        // Query the MPT proof.
+        let query = ProofQuery::new_simple_slot(contract_address, 0);
         let res = query
             .query_mpt_proof(&provider, Some(block_number.into()))
             .await?;
-
-        // Written as constant from ^.
-        const DEPTH: usize = 8;
-        const BLOCK_LEN: usize = 620;
-        const NODE_LEN: usize = 532;
-        const VALUE_LEN: usize = 100;
+        // TODO: this Mainnet contract address only works with state proof
+        // (not storage proof) for now.
+        query.verify_state_proof(&res)?;
 
         // Construct the state MPT via the RPC response.
         let account_address = query.contract;
@@ -337,7 +375,7 @@ mod tests {
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
         let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
 
-        let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN, SEPOLIA_NUMBER_LEN> {
+        let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN> {
             exp_block_number: block.number.unwrap(),
             exp_parent_hash: block.parent_hash,
             exp_hash,

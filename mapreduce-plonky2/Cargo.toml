@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.75"
 itertools = "0.12.0"
-ethers = { version ="2.0.11", default-features = false, features = ["rustls"]}
+ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features = false, features = ["rustls"], branch = "get-proof-0x" }
 plonky2 = { version = "0.1.4" }
 
 # supporting latest plonky2
