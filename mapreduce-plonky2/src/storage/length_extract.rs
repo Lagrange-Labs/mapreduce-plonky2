@@ -178,7 +178,7 @@ mod tests {
     use crate::{
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        utils::keccak256,
+        utils::{convert_u8_to_u32_slice, keccak256},
     };
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use ethers::types::H160;
@@ -198,6 +198,8 @@ mod tests {
     struct TestData {
         /// Storage slot
         slot: u8,
+        /// Expected length value
+        value: u8,
         /// Contract address
         contract_address: H160,
         /// MPT nodes
@@ -232,13 +234,27 @@ mod tests {
 
     /// Test the length-match circuit with a generated random MPT.
     #[test]
-    fn test_length_extract_circuit_with_random_mpt() {
+    fn test_length_extract_circuit() {
         init_logging();
 
         const DEPTH: usize = 4;
         const NODE_LEN: usize = 500;
 
         let test_data = generate_test_data::<DEPTH>();
+
+        // Get the expected public inputs.
+        let exp_slot = F::from_canonical_u8(test_data.slot);
+        let exp_value = F::from_canonical_u8(test_data.value);
+        let exp_root_hash: Vec<_> =
+            convert_u8_to_u32_slice(&keccak256(test_data.nodes.last().unwrap()))
+                .into_iter()
+                .map(F::from_canonical_u32)
+                .collect();
+        let exp_contract_address: Vec<_> = convert_u8_to_u32_slice(&test_data.contract_address.0)
+            .into_iter()
+            .map(F::from_canonical_u32)
+            .collect();
+
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN> {
             c: LengthExtractCircuit::new(
                 test_data.slot,
@@ -246,7 +262,14 @@ mod tests {
                 test_data.nodes,
             ),
         };
-        run_circuit::<F, D, C, _>(test_circuit);
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
+
+        // Verify the public inputs.
+        let pi = PublicInputs::<F>::from(&proof.public_inputs);
+        assert_eq!(pi.storage_slot(), exp_slot);
+        assert_eq!(pi.length_value(), exp_value);
+        assert_eq!(pi.root_hash_data(), exp_root_hash);
+        assert_eq!(pi.contract_address_data(), exp_contract_address);
     }
 
     fn generate_test_data<const DEPTH: usize>() -> TestData {
@@ -286,12 +309,14 @@ mod tests {
         };
 
         let root_hash = trie.root_hash().unwrap();
+        let value = trie.get(mpt_key).unwrap().unwrap()[0];
         let mut nodes = trie.get_proof(mpt_key).unwrap();
         nodes.reverse();
         assert!(keccak256(nodes.last().unwrap()) == root_hash.to_fixed_bytes());
 
         TestData {
             slot,
+            value,
             contract_address,
             nodes,
         }
