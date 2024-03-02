@@ -3,10 +3,9 @@
 
 use crate::{
     array::{Array, Vector, VectorWire, L32},
-    keccak::{InputData, KeccakCircuit, KeccakWires, OutputByteHash, OutputHash, HASH_LEN},
+    keccak::{InputData, KeccakCircuit, KeccakWires, OutputHash, HASH_LEN},
     mpt_sequential::PAD_LEN,
-    rlp::decode_fixed_list,
-    utils::{less_than, PackedU64Target, U64Target, U64_LEN},
+    utils::convert_u8_targets_to_u32,
 };
 use anyhow::Result;
 use plonky2::{
@@ -16,7 +15,6 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use std::array;
 
 /// Parent hash offset in RLP encoded header
 const HEADER_RLP_PARENT_HASH_OFFSET: usize = 4;
@@ -79,18 +77,19 @@ where
         let hash = KeccakCircuit::hash_vector(cb, bytes_to_keccak);
 
         // Get the parent hash from RLP encoded header.
-        let parent_hash_offset =
-            cb.constant(F::from_canonical_usize(HEADER_RLP_PARENT_HASH_OFFSET));
-        let parent_hash: OutputByteHash = header_rlp.arr.extract_array(cb, parent_hash_offset);
-        let parent_hash: OutputHash = parent_hash.convert_u8_to_u32(cb);
+        let parent_hash = &header_rlp.arr.arr
+            [HEADER_RLP_PARENT_HASH_OFFSET..HEADER_RLP_PARENT_HASH_OFFSET + HASH_LEN];
+        let parent_hash: OutputHash = convert_u8_targets_to_u32(cb, parent_hash)
+            .try_into()
+            .unwrap();
 
-        // Get the block number from 4 bytes of specified offset in RLP encoded
-        // header.
-        let number_offset = cb.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
         // We assume so far it always fit in 32 bits, which give block number < 4 billion so it
         // should be ok.
-        let number: Array<Target, NUMBER_LEN> = header_rlp.arr.extract_array(cb, number_offset);
-        let number: U32Target = number.reverse().convert_u8_to_u32(cb)[0];
+        let mut number = header_rlp.arr.arr
+            [HEADER_RLP_NUMBER_OFFSET..HEADER_RLP_NUMBER_OFFSET + NUMBER_LEN]
+            .to_vec();
+        number.reverse();
+        let number: U32Target = convert_u8_targets_to_u32(cb, &number)[0];
 
         BlockInputsWires {
             number,
@@ -140,14 +139,13 @@ where
         F: RichField + Extendable<D>,
         [(); PAD_LEN(MAX_LEN)]:,
     {
-        let state_root_offset = cb.constant(F::from_canonical_usize(HEADER_RLP_STATE_ROOT_OFFSET));
-
         // Verify the block header includes the state MPT root hash.
-        let expected_state_root: OutputByteHash =
-            wires.header_rlp.arr.extract_array(cb, state_root_offset);
-        expected_state_root
-            .convert_u8_to_u32(cb)
-            .enforce_equal(cb, &state_root_hash);
+        let expected_state_root = &wires.header_rlp.arr.arr
+            [HEADER_RLP_STATE_ROOT_OFFSET..HEADER_RLP_STATE_ROOT_OFFSET + HASH_LEN];
+        let expected_state_root: OutputHash = convert_u8_targets_to_u32(cb, expected_state_root)
+            .try_into()
+            .unwrap();
+        expected_state_root.enforce_equal(cb, &state_root_hash);
     }
 }
 
@@ -177,7 +175,7 @@ mod test {
         keccak::{OutputByteHash, HASH_LEN},
         mpt_sequential::PAD_LEN,
         state::block_linking::block_inputs::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN},
-        utils::{convert_u8_to_u32_slice, find_index_subvector},
+        utils::{convert_u8_targets_to_u32, convert_u8_to_u32_slice, find_index_subvector},
     };
 
     use super::{
@@ -213,8 +211,11 @@ mod test {
             let exp_state_root = Array::<Target, HASH_LEN>::new(c);
             let state_root_offset =
                 c.constant(F::from_canonical_usize(HEADER_RLP_STATE_ROOT_OFFSET));
-            let extracted_state_root: OutputByteHash =
-                w.header_rlp.arr.extract_array(c, state_root_offset);
+            let extracted_state_root = w.header_rlp.arr.arr
+                [HEADER_RLP_STATE_ROOT_OFFSET..HEADER_RLP_STATE_ROOT_OFFSET + HASH_LEN]
+                .to_vec()
+                .try_into()
+                .unwrap();
             exp_state_root.enforce_equal(c, &extracted_state_root);
             (w, n)
         }
