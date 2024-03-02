@@ -6,7 +6,7 @@ mod block_inputs;
 mod public_inputs;
 mod storage_proof;
 
-use crate::{array::L32, mpt_sequential::PAD_LEN};
+use crate::mpt_sequential::PAD_LEN;
 use account_inputs::{AccountInputs, AccountInputsWires};
 use anyhow::Result;
 use block_inputs::{BlockInputs, BlockInputsWires};
@@ -63,7 +63,6 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); PAD_LEN(BLOCK_LEN)]:,
     [(); DEPTH - 1]:,
-    [(); L32(NUMBER_LEN)]:,
 {
     pub fn new(
         storage_proof: StorageInputs<F>,
@@ -98,7 +97,7 @@ where
         [(); DEPTH - 1]:,
     {
         let account_inputs = AccountInputs::build(cb);
-        let block_inputs = BlockInputs::build(cb);
+        let block_inputs = BlockInputs::<NUMBER_LEN>::build(cb);
         let storage_proof = StorageInputs::build(cb);
 
         // Verify the account node includes the hash of storage MPT root.
@@ -109,7 +108,7 @@ where
         );
 
         //Verify the block header includes the hash of state MPT root.
-        BlockInputs::verify_state_root_hash_inclusion(
+        BlockInputs::<NUMBER_LEN>::verify_state_root_hash_inclusion(
             cb,
             &block_inputs,
             &account_inputs.state_mpt_output.root,
@@ -215,7 +214,6 @@ mod tests {
         [(); PAD_LEN(NODE_LEN)]:,
         [(); PAD_LEN(BLOCK_LEN)]:,
         [(); DEPTH - 1]:,
-        [(); L32(NUMBER_LEN)]:,
     {
         type Wires = (
             U32Target,
@@ -228,7 +226,7 @@ mod tests {
             let block_number = cb.add_virtual_u32_target();
             let parent_hash = OutputHash::new(cb);
             let hash = OutputHash::new(cb);
-            let wires = BlockLinkingCircuit::build(cb);
+            let wires = BlockLinkingCircuit::<F, DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN>::build(cb);
 
             cb.connect(wires.block_inputs.number.0, block_number.0);
             parent_hash.enforce_equal(cb, &wires.block_inputs.parent_hash);
@@ -336,7 +334,6 @@ mod tests {
         [(); PAD_LEN(NODE_LEN)]:,
         [(); PAD_LEN(BLOCK_LEN)]:,
         [(); DEPTH - 1]:,
-        [(); L32(NUMBER_LEN)]:,
     {
         init_logging();
 

@@ -2,7 +2,7 @@
 //! hash of state MPT root should be included in the block header.
 
 use crate::{
-    array::{Array, Vector, VectorWire, L32},
+    array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, OutputHash, HASH_LEN},
     mpt_sequential::PAD_LEN,
     utils::convert_u8_targets_to_u32,
@@ -51,10 +51,7 @@ pub struct BlockInputs<const NUMBER_LEN: usize> {
     header_rlp: Vec<u8>,
 }
 
-impl<const NUMBER_LEN: usize> BlockInputs<NUMBER_LEN>
-where
-    [(); L32(NUMBER_LEN)]:,
-{
+impl<const NUMBER_LEN: usize> BlockInputs<NUMBER_LEN> {
     pub fn new(header_rlp: Vec<u8>) -> Self {
         Self { header_rlp }
     }
@@ -179,7 +176,7 @@ mod test {
     use serial_test::serial;
 
     use crate::{
-        array::{Array, L32},
+        array::Array,
         circuit::{test::run_circuit, UserCircuit},
         eth::{BlockData, BlockUtil},
         keccak::{OutputByteHash, HASH_LEN},
@@ -209,7 +206,6 @@ mod test {
     where
         [(); PAD_LEN(MAX_BLOCK_LEN)]:,
         [(); MAX_BLOCK_LEN]:,
-        [(); L32(NL)]:,
     {
         type Wires = (SWires, U32Target);
 
@@ -251,10 +247,7 @@ mod test {
         test_block_header_decoding::<MAINNET_NUMBER_LEN>(url).await
     }
 
-    async fn test_block_header_decoding<const NUMBER_LEN: usize>(url: &str) -> Result<()>
-    where
-        [(); L32(NUMBER_LEN)]:,
-    {
+    async fn test_block_header_decoding<const NUMBER_LEN: usize>(url: &str) -> Result<()> {
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
         let block_number = provider.get_block_number().await?;

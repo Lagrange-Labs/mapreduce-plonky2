@@ -209,7 +209,6 @@ mod test {
     use serial_test::serial;
 
     use crate::{
-        array::L32,
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::{BlockData, ProofQuery},
@@ -298,7 +297,6 @@ mod test {
         [(); PAD_LEN(NODE_LEN)]:,
         [(); PAD_LEN(BLOCK_LEN)]:,
         [(); DEPTH - 1]:,
-        [(); L32(NUMBER_LEN)]:,
     {
         init_logging();
 
