@@ -181,7 +181,9 @@ mod test {
         eth::{BlockData, BlockUtil},
         keccak::{OutputByteHash, HASH_LEN},
         mpt_sequential::PAD_LEN,
-        state::block_linking::block_inputs::{HEADER_RLP_PARENT_HASH_OFFSET, MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN},
+        state::block_linking::block_inputs::{
+            HEADER_RLP_PARENT_HASH_OFFSET, MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN,
+        },
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
 
@@ -227,7 +229,9 @@ mod test {
         fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<F>, wires: &Self::Wires) {
             self.block.assign(pw, &wires.0).unwrap();
             pw.set_u32_target(wires.1, self.exp_number);
-            wires.2.assign_from_data(pw, &self.exp_state_hash.clone().try_into().unwrap())
+            wires
+                .2
+                .assign_from_data(pw, &self.exp_state_hash.clone().try_into().unwrap())
         }
     }
 
