@@ -24,7 +24,9 @@ const HEADER_RLP_STATE_ROOT_OFFSET: usize = 91;
 /// Number offset in RLP encoded header
 const HEADER_RLP_NUMBER_OFFSET: usize = 450;
 
+/// On sepolia, the block number is encoded on 3 bytes (u24)
 pub(super) const SEPOLIA_NUMBER_LEN: usize = 3;
+/// On mainnet, the block number is encoded on 4 bytes (u32)
 pub(super) const MAINNET_NUMBER_LEN: usize = 4;
 
 /// The block input wires
@@ -58,6 +60,8 @@ where
     }
 
     /// Build for circuit.
+    /// NOTE: It assumes the block number is encoded on maximum 4 bytes. It can be
+    /// encoded using less, for example on Sepolia.
     pub fn build<F, const D: usize, const MAX_LEN: usize>(
         cb: &mut CircuitBuilder<F, D>,
     ) -> BlockInputsWires<MAX_LEN>
@@ -87,6 +91,7 @@ where
 
         // We assume so far it always fit in 32 bits, which give block number < 4 billion so it
         // should be ok. And we get the array with reverse order.
+        // This logic handles the case where block number is encoded on 4 bytes or on 3 bytes.
         let number = Array::<Target, 4>::from(array::from_fn(|i| {
             if i < NUMBER_LEN {
                 header_rlp.arr.arr[HEADER_RLP_NUMBER_OFFSET + NUMBER_LEN - 1 - i]
