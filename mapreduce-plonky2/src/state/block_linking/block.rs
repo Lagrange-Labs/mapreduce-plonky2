@@ -46,12 +46,12 @@ where
 
 /// The block input gadget
 #[derive(Clone, Debug)]
-pub struct BlockInputs<const NUMBER_LEN: usize> {
+pub struct BlockHeader<const NUMBER_LEN: usize> {
     /// RLP encoded bytes of block header
     header_rlp: Vec<u8>,
 }
 
-impl<const NUMBER_LEN: usize> BlockInputs<NUMBER_LEN> {
+impl<const NUMBER_LEN: usize> BlockHeader<NUMBER_LEN> {
     pub fn new(header_rlp: Vec<u8>) -> Self {
         Self { header_rlp }
     }
@@ -181,14 +181,14 @@ mod test {
         eth::{BlockData, BlockUtil},
         keccak::{OutputByteHash, HASH_LEN},
         mpt_sequential::PAD_LEN,
-        state::block_linking::block_inputs::{
+        state::block_linking::block::{
             HEADER_RLP_PARENT_HASH_OFFSET, MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN,
         },
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
 
     use super::{
-        BlockInputs, BlockInputsWires, HEADER_RLP_NUMBER_OFFSET, HEADER_RLP_STATE_ROOT_OFFSET,
+        BlockHeader, BlockInputsWires, HEADER_RLP_NUMBER_OFFSET, HEADER_RLP_STATE_ROOT_OFFSET,
     };
 
     const D: usize = 2;
@@ -198,7 +198,7 @@ mod test {
     type SWires = BlockInputsWires<MAX_BLOCK_LEN>;
     #[derive(Debug, Clone)]
     struct TestBlockCircuit<const NL: usize> {
-        block: BlockInputs<NL>,
+        block: BlockHeader<NL>,
         exp_number: u32,
         exp_state_hash: Vec<u8>,
     }
@@ -212,7 +212,7 @@ mod test {
         type Wires = (SWires, U32Target, Array<Target, HASH_LEN>);
 
         fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>) -> Self::Wires {
-            let w = BlockInputs::<NL>::build(c);
+            let w = BlockHeader::<NL>::build(c);
             let n = c.add_virtual_u32_target();
             let number_offset = c.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
             c.connect(w.number.0, n.0);
@@ -307,7 +307,7 @@ mod test {
         )[0];
         assert_eq!(converted2, block.number.unwrap().as_u32());
         let circuit = TestBlockCircuit::<NUMBER_LEN> {
-            block: BlockInputs {
+            block: BlockHeader {
                 header_rlp: encoded,
             },
             exp_number: block.number.unwrap().as_u32(),
