@@ -175,7 +175,7 @@ mod test {
         eth::{BlockData, BlockUtil},
         keccak::{OutputByteHash, HASH_LEN},
         mpt_sequential::PAD_LEN,
-        state::block_linking::block_inputs::SEPOLIA_NUMBER_LEN,
+        state::block_linking::block_inputs::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN},
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
 
@@ -225,12 +225,26 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_block_header_decoding() -> Result<()> {
+    async fn test_block_header_decoding_on_sepolia() -> Result<()> {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
         let url = "https://ethereum-sepolia-rpc.publicnode.com";
 
+        test_block_header_decoding::<SEPOLIA_NUMBER_LEN>(url).await
+    }
+
+    #[tokio::test]
+    async fn test_block_header_decoding_on_mainnet() -> Result<()> {
+        let url = "https://eth.llamarpc.com";
+
+        test_block_header_decoding::<MAINNET_NUMBER_LEN>(url).await
+    }
+
+    async fn test_block_header_decoding<const NUMBER_LEN: usize>(url: &str) -> Result<()>
+    where
+        [(); L32(NUMBER_LEN)]:,
+    {
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
         let block_number = provider.get_block_number().await?;
@@ -281,7 +295,7 @@ mod test {
                 .collect::<Vec<u8>>(),
         )[0];
         assert_eq!(converted2, block.number.unwrap().as_u32());
-        let circuit = TestBlockCircuit::<SEPOLIA_NUMBER_LEN> {
+        let circuit = TestBlockCircuit::<NUMBER_LEN> {
             block: BlockInputs {
                 header_rlp: encoded,
             },

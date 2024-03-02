@@ -287,7 +287,7 @@ mod tests {
 
     /// Test the block-linking circuit with Sepolia RPC.
     #[tokio::test]
-    async fn test_block_linking_circuit_with_sepolia_rpc() -> Result<()> {
+    async fn test_block_linking_circuit_on_sepolia() -> Result<()> {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
@@ -305,7 +305,7 @@ mod tests {
 
     /// Test the block-linking circuit with Mainnet RPC.
     #[tokio::test]
-    async fn test_block_linking_circuit_with_mainnet_rpc() -> Result<()> {
+    async fn test_block_linking_circuit_on_mainnet() -> Result<()> {
         let url = "https://eth.llamarpc.com";
         // TODO: this Mainnet contract address only works with state proof
         let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";

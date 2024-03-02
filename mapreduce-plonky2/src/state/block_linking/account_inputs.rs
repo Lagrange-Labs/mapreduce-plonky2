@@ -206,10 +206,12 @@ mod test {
     };
 
     use crate::{
+        array::L32,
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::{BlockData, ProofQuery},
         mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
+        state::block_linking::block_inputs::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN},
         storage,
         utils::{find_index_subvector, keccak256},
     };
@@ -244,28 +246,65 @@ mod test {
         }
     }
     use anyhow::Result;
-    #[tokio::test]
-    async fn test_account_inputs() -> Result<()> {
-        const DEPTH: usize = 8;
-        const BLOCK_LEN: usize = 620;
-        const NODE_LEN: usize = 532;
-        const VALUE_LEN: usize = 100;
-        init_logging();
 
+    #[tokio::test]
+    async fn test_account_inputs_on_sepolia() -> Result<()> {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
-        let url = std::env::var("RPC_SEPOLIA")
-            .unwrap_or("https://ethereum-sepolia-rpc.publicnode.com".to_string());
+        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+
+        let contract_address = "0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E";
+
+        // Written as constants from the result.
+        const DEPTH: usize = 8;
+        const NODE_LEN: usize = 532;
+        const BLOCK_LEN: usize = 620;
+
+        test_account_inputs::<DEPTH, NODE_LEN, BLOCK_LEN, SEPOLIA_NUMBER_LEN>(url, contract_address)
+            .await
+    }
+
+    #[tokio::test]
+    async fn test_account_inputs_on_mainnet() -> Result<()> {
+        let url = "https://eth.llamarpc.com";
+        // TODO: this Mainnet contract address only works with state proof
+        let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
+
+        // Written as constants from the result.
+        const DEPTH: usize = 8;
+        const NODE_LEN: usize = 532;
+        const BLOCK_LEN: usize = 620;
+
+        test_account_inputs::<DEPTH, NODE_LEN, BLOCK_LEN, MAINNET_NUMBER_LEN>(url, contract_address)
+            .await
+    }
+
+    async fn test_account_inputs<
+        const DEPTH: usize,
+        const NODE_LEN: usize,
+        const BLOCK_LEN: usize,
+        const NUMBER_LEN: usize,
+    >(
+        url: &str,
+        contract_address: &str,
+    ) -> Result<()>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+        [(); PAD_LEN(BLOCK_LEN)]:,
+        [(); DEPTH - 1]:,
+        [(); L32(NUMBER_LEN)]:,
+    {
+        init_logging();
+
+        let contract_address = Address::from_str(contract_address)?;
 
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
-        let block_number = U64::from(5395609);
-        // Sepolia contract
-        let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
+        let block_number = provider.get_block_number().await?;
         // Simple storage test
-        let query = ProofQuery::new_simple_slot(contract, 0);
+        let query = ProofQuery::new_simple_slot(contract_address, 0);
         let block = provider
             .get_block_with_txs(BlockId::Number(BlockNumber::Number(block_number)))
             .await?
@@ -283,7 +322,7 @@ mod test {
             .map(|b| b.to_vec())
             .collect::<Vec<Vec<u8>>>();
         let state_root = keccak256(&account_proof.last().unwrap());
-        let key = keccak256(&contract.as_bytes());
+        let key = keccak256(&contract_address.as_bytes());
         let db = MemoryDB::new(true);
         let trie = EthTrie::new(Arc::new(db));
         let is_proof_valid = trie
@@ -295,7 +334,7 @@ mod test {
         let storage_root_offset =
             find_index_subvector(&state_account, &storage_root).expect("no subvector");
         let acc = AccountInputs::<DEPTH, NODE_LEN> {
-            contract_address: contract,
+            contract_address,
             storage_root_offset,
             state_mpt_circuit: MPTCircuit::new(key.try_into().unwrap(), account_proof),
         };
