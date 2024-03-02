@@ -181,7 +181,7 @@ mod test {
         eth::{BlockData, BlockUtil},
         keccak::{OutputByteHash, HASH_LEN},
         mpt_sequential::PAD_LEN,
-        state::block_linking::block_inputs::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN},
+        state::block_linking::block_inputs::{HEADER_RLP_PARENT_HASH_OFFSET, MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN},
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
 
@@ -207,7 +207,7 @@ mod test {
         [(); PAD_LEN(MAX_BLOCK_LEN)]:,
         [(); MAX_BLOCK_LEN]:,
     {
-        type Wires = (SWires, U32Target);
+        type Wires = (SWires, U32Target, Array<Target, HASH_LEN>);
 
         fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>) -> Self::Wires {
             let w = BlockInputs::<NL>::build(c);
@@ -221,12 +221,13 @@ mod test {
                 .try_into()
                 .unwrap();
             exp_state_root.enforce_equal(c, &extracted_state_root);
-            (w, n)
+            (w, n, exp_state_root)
         }
 
         fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<F>, wires: &Self::Wires) {
             self.block.assign(pw, &wires.0).unwrap();
             pw.set_u32_target(wires.1, self.exp_number);
+            wires.2.assign_from_data(pw, &self.exp_state_hash.clone().try_into().unwrap())
         }
     }
 
@@ -258,8 +259,10 @@ mod test {
         assert_eq!(&block.hash.unwrap().to_fixed_bytes()[..], &hash);
         let state_index = find_index_subvector(&encoded, block.state_root.as_bytes());
         println!("state root index: {:?}", state_index);
+        assert_eq!(state_index.unwrap(), HEADER_RLP_STATE_ROOT_OFFSET);
         let parent_index = find_index_subvector(&encoded, block.parent_hash.as_bytes());
         println!("parent hash index: {:?}", parent_index);
+        assert_eq!(parent_index.unwrap(), HEADER_RLP_PARENT_HASH_OFFSET);
         let rlp = rlp::Rlp::new(&encoded);
         let mut offset = rlp.payload_info().unwrap().header_len;
         for i in 0..=7 {
@@ -271,6 +274,7 @@ mod test {
         let number_index = offset;
         //let index = find_index_subvector(&encoded, data);
         println!("block number index: {:?}", number_index);
+        assert_eq!(number_index, HEADER_RLP_NUMBER_OFFSET);
         let real_number_len = number_rlp.value_len;
         assert!(real_number_len <= 4);
         let ext_slice = encoded[number_index..number_index + real_number_len].to_vec();
