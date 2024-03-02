@@ -93,6 +93,8 @@ where
         F: RichField + Extendable<D>,
     {
         let contract_address = Array::new(cb);
+        contract_address.assert_bytes(cb);
+
         let storage_root_offset = cb.add_virtual_target();
 
         // Calculate the keccak hash of contract address, and use it as the

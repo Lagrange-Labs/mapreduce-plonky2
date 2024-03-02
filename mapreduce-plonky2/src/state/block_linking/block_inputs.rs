@@ -65,6 +65,7 @@ where
         [(); PAD_LEN(MAX_LEN)]:,
     {
         let header_rlp = VectorWire::new(cb);
+        header_rlp.assert_bytes(cb);
 
         // Calculate the keccak hash of RLP encoded header.
         let zero = cb.zero();
@@ -209,8 +210,6 @@ mod test {
             let number_offset = c.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
             c.connect(w.number.0, n.0);
             let exp_state_root = Array::<Target, HASH_LEN>::new(c);
-            let state_root_offset =
-                c.constant(F::from_canonical_usize(HEADER_RLP_STATE_ROOT_OFFSET));
             let extracted_state_root = w.header_rlp.arr.arr
                 [HEADER_RLP_STATE_ROOT_OFFSET..HEADER_RLP_STATE_ROOT_OFFSET + HASH_LEN]
                 .to_vec()
