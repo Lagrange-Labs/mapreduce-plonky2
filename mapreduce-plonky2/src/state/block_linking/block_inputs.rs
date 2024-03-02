@@ -168,6 +168,7 @@ mod test {
         arithmetic_u32::{CircuitBuilderU32, U32Target},
         witness::WitnessU32,
     };
+    use serial_test::serial;
 
     use crate::{
         array::{Array, L32},
@@ -225,6 +226,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_block_header_decoding_on_sepolia() -> Result<()> {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
@@ -235,6 +237,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_block_header_decoding_on_mainnet() -> Result<()> {
         let url = "https://eth.llamarpc.com";
 

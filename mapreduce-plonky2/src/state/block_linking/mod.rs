@@ -173,6 +173,7 @@ mod tests {
         witness::WitnessU32,
     };
     use rand::{thread_rng, Rng};
+    use serial_test::serial;
     use std::{str::FromStr, sync::Arc};
     use tests::block_inputs::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN};
 
@@ -258,6 +259,7 @@ mod tests {
 
     /// Test the block-linking circuit with a generated random MPT.
     #[test]
+    #[serial]
     fn test_block_linking_circuit_with_random_mpt() {
         init_logging();
 
@@ -287,6 +289,7 @@ mod tests {
 
     /// Test the block-linking circuit with Sepolia RPC.
     #[tokio::test]
+    #[serial]
     async fn test_block_linking_circuit_on_sepolia() -> Result<()> {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
@@ -305,6 +308,7 @@ mod tests {
 
     /// Test the block-linking circuit with Mainnet RPC.
     #[tokio::test]
+    #[serial]
     async fn test_block_linking_circuit_on_mainnet() -> Result<()> {
         let url = "https://eth.llamarpc.com";
         // TODO: this Mainnet contract address only works with state proof
