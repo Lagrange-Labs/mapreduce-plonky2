@@ -17,11 +17,22 @@ const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
 
+/// Length of an U64
+pub const U64_LEN: usize = 8;
+/// Length of an U64 in U32
+pub const PACKED_U64_LEN: usize = U64_LEN / 4;
+/// Byte representation of an U64
+pub type U64Target = Array<Target, U64_LEN>;
+/// U32 representation of an U64
+pub type PackedU64Target = Array<U32Target, PACKED_U64_LEN>;
+
 /// Length of an address (H160 = [u8; 20])
 pub const ADDRESS_LEN: usize = 20;
 /// Length of an address in U32
 pub const PACKED_ADDRESS_LEN: usize = ADDRESS_LEN / 4;
-/// Pack representation of an address
+/// Byte representation of an address
+pub type AddressTarget = Array<Target, ADDRESS_LEN>;
+/// U32 representation of an address
 pub type PackedAddressTarget = Array<U32Target, PACKED_ADDRESS_LEN>;
 
 pub(crate) fn verify_proof_tuple<
@@ -62,6 +73,28 @@ pub(crate) fn keccak256(data: &[u8]) -> Vec<u8> {
     let mut hasher = Keccak256::new();
     hasher.update(data);
     hasher.finalize().to_vec()
+}
+
+/// Convert an u8 slice to an u32-field vector.
+pub(crate) fn convert_u8_slice_to_u32_fields<F: RichField>(values: &[u8]) -> Vec<F> {
+    assert!(values.len() % 4 == 0);
+
+    values
+        .chunks(4)
+        .into_iter()
+        .map(|mut chunk| {
+            let u32_num = read_le_u32(&mut chunk);
+            F::from_canonical_u32(u32_num)
+        })
+        .collect()
+}
+
+/// Convert an u32-field slice to an u8 vector.
+pub(crate) fn convert_u32_fields_to_u8_vec<F: RichField>(fields: &[F]) -> Vec<u8> {
+    fields
+        .iter()
+        .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
+        .collect()
 }
 
 pub(crate) fn convert_u8_values_to_u32<F: RichField>(values: &[F]) -> Vec<F> {

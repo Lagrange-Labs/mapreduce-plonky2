@@ -52,7 +52,7 @@ pub struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
     /// whose length == MAX_KEY_NIBBLE_LEN
     key: [u8; MAX_KEY_NIBBLE_LEN / 2],
 }
-struct InputWires<const DEPTH: usize, const NODE_LEN: usize>
+pub struct InputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
@@ -63,14 +63,14 @@ where
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
     /// way to define everything according to max size of the data and
     /// "not care" about the padding size (almost!)
-    nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
+    pub(crate) nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
     /// in the case of a fixed circuit, the actual tree depth might be smaller.
     /// In this case, we set false on the part of the path we should not process.
     /// NOTE: for node at index i in the path, the boolean indicating if we should
     /// process it is at index i-1
     should_process: [BoolTarget; DEPTH - 1],
 }
-struct OutputWires<const DEPTH: usize, const NODE_LEN: usize>
+pub struct OutputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
@@ -81,7 +81,7 @@ where
     /// The leaf value wires. It is provably extracted from the leaf node.
     leaf: Array<Target, MAX_LEAF_VALUE_LEN>,
     /// The root hash value wire.
-    root: OutputHash,
+    pub(crate) root: OutputHash,
 }
 
 impl<const DEPTH: usize, const NODE_LEN: usize> Circuit<DEPTH, NODE_LEN>
@@ -95,23 +95,24 @@ where
 
     pub fn create_input_wires<F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
+        key: Option<MPTKeyWire>, // Could set the full key from outside
     ) -> InputWires<DEPTH, NODE_LEN>
     where
         F: RichField + Extendable<D>,
     {
         // full key is expected to be given by verifier (done in UserCircuit impl)
         // initial key has the pointer that is set at the maximum length - 1 (it's an index, so 0-based)
-        let full_key = MPTKeyWire {
+        let key = key.unwrap_or_else(|| MPTKeyWire {
             key: Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b),
             pointer: b.constant(F::from_canonical_usize(MAX_KEY_NIBBLE_LEN) - F::ONE),
-        };
+        });
         let should_process: [BoolTarget; DEPTH - 1] =
             create_array(|_| b.add_virtual_bool_target_safe());
         // nodes should be ordered from leaf to root and padded at the end
         let nodes: [VectorWire<Target, _>; DEPTH] =
             create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b));
         InputWires {
-            key: full_key,
+            key,
             nodes,
             should_process,
         }
@@ -434,22 +435,36 @@ impl MPTKeyWire {
         self.key.register_as_input(b);
         b.register_public_input(self.pointer);
     }
-    /// Initialize a new MPTKeyWire from the array of bytes. It is expected the bytes
-    /// are checked to be bytes before this calling this function.
+
+    /// Initialize a new MPTKeyWire from the array of `U32Target`.
     /// It returns a MPTKeyWire with the pointer set to the last nibble, as in an initial
     /// case.
-    pub fn init_from_bytes<F: RichField + Extendable<D>, const D: usize>(
+    pub fn init_from_u32_targets<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-        arr: &Array<Target, HASH_LEN>,
+        arr: &Array<U32Target, PACKED_HASH_LEN>,
     ) -> Self {
         Self {
             key: Array {
                 arr: arr
                     .arr
                     .iter()
-                    .flat_map(|byte| {
-                        let (low, high) = b.split_low_high(*byte, 4, 8);
-                        [high, low]
+                    .flat_map(|u32_limb| {
+                        let four = b.constant(F::from_canonical_u8(4));
+                        // decompose the `U32Target` in 16 limbs of 2 bits each; the output limbs are already range-checked
+                        // by the `split_le_base` operation
+                        let limbs: [Target; 16] =
+                            b.split_le_base::<4>(u32_limb.0, 16).try_into().unwrap();
+                        // now we need to pack each pair of 2 bit limbs into a nibble, but for each byte we want nibbles to
+                        // be ordered in big-endian
+                        limbs
+                            .chunks(4)
+                            .flat_map(|chunk| {
+                                vec![
+                                    b.mul_const_add(F::from_canonical_u8(4), chunk[3], chunk[2]),
+                                    b.mul_const_add(F::from_canonical_u8(4), chunk[1], chunk[0]),
+                                ]
+                            })
+                            .collect::<Vec<_>>()
                     })
                     .collect::<Vec<_>>()
                     .try_into()
@@ -489,14 +504,17 @@ pub mod test {
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use ethers::providers::{Http, Provider};
-    use ethers::types::Address;
+    use ethers::types::{Address, EIP1186ProofResponse};
     use itertools::Itertools;
     use plonky2::field::types::Field;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
-        iop::{target::Target, witness::PartialWitness},
+        iop::{
+            target::{BoolTarget, Target},
+            witness::PartialWitness,
+        },
         plonk::{
             circuit_builder::CircuitBuilder,
             circuit_data::CircuitConfig,
@@ -534,6 +552,9 @@ pub mod test {
         c: Circuit<DEPTH, NODE_LEN>,
         exp_root: [u8; 32],
         exp_value: [u8; 32],
+        // The flag identifies if need to check the expected leaf value, it's
+        // set to true for storage proof, and false for state proof (unconcern).
+        checking_value: bool,
     }
     impl<F, const D: usize, const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D>
         for TestCircuit<DEPTH, NODE_LEN>
@@ -549,6 +570,7 @@ pub mod test {
             OutputWires<DEPTH, NODE_LEN>,
             Array<Target, HASH_LEN>, // root
             Array<Target, 32>,       // value
+            BoolTarget,              // checking_value
         );
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
@@ -557,15 +579,23 @@ pub mod test {
             let arr = Array::<U32Target, PACKED_HASH_LEN>::from_array(
                 packed_exp_root.try_into().unwrap(),
             );
-            let input_wires = Circuit::create_input_wires(c);
+            let input_wires = Circuit::create_input_wires(c, None);
             let output_wires = Circuit::verify_mpt_proof(c, &input_wires);
             let is_equal = output_wires.root.equals(c, &arr);
             let tt = c._true();
             c.connect(is_equal.target, tt.target);
             let value_wire = Array::<Target, 32>::new(c);
             let values_equal = value_wire.equals(c, &output_wires.leaf);
-            c.connect(tt.target, values_equal.target);
-            (input_wires, output_wires, expected_root, value_wire)
+            let checking_value = c.add_virtual_bool_target_safe();
+            let values_equal = c.select(checking_value, values_equal.target, tt.target);
+            c.connect(tt.target, values_equal);
+            (
+                input_wires,
+                output_wires,
+                expected_root,
+                value_wire,
+                checking_value,
+            )
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -578,6 +608,7 @@ pub mod test {
                 pw,
                 &create_array(|i| F::from_canonical_u8(self.exp_value[i])),
             );
+            pw.set_bool_target(wires.4, self.checking_value);
         }
     }
     use anyhow::Result;
@@ -588,7 +619,8 @@ pub mod test {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
-        let url = "https://sepolia.infura.io/v3/d22da7908d80409b95cee2f3fbfddb3b";
+        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
@@ -596,11 +628,23 @@ pub mod test {
         let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
         // simple storage test
         let query = ProofQuery::new_simple_slot(contract, 0);
-        let res = query.query_mpt_proof(&provider).await?;
+        let res = query.query_mpt_proof(&provider, None).await?;
+
+        // Verify both storage and state proofs by this MPT circuit.
+        verify_storage_proof_from_query(&query, &res)?;
+        verify_state_proof_from_query(&query, &res)
+    }
+
+    /// Verify the storage proof from query result.
+    fn verify_storage_proof_from_query(
+        query: &ProofQuery,
+        res: &EIP1186ProofResponse,
+    ) -> Result<()> {
+        ProofQuery::verify_storage_proof(&res)?;
+
         let value = res.storage_proof[0].value;
         let mut value_bytes = [0u8; 32];
         value.to_little_endian(&mut value_bytes);
-        ProofQuery::verify_storage_proof(&res)?;
         let mpt_proof = res.storage_proof[0]
             .proof
             .iter()
@@ -627,11 +671,52 @@ pub mod test {
             c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
             exp_root: root.try_into().unwrap(),
             exp_value: value_bytes,
+            checking_value: true,
         };
         run_circuit::<F, D, C, _>(circuit);
 
         Ok(())
     }
+
+    /// Verify the state proof from query result.
+    fn verify_state_proof_from_query(query: &ProofQuery, res: &EIP1186ProofResponse) -> Result<()> {
+        query.verify_state_proof(&res)?;
+
+        let mpt_proof = res
+            .account_proof
+            .iter()
+            .rev() // we want the leaf first and root last
+            .map(|b| b.to_vec())
+            .collect::<Vec<Vec<u8>>>();
+        let root = keccak256(mpt_proof.last().unwrap());
+        let mpt_key = keccak256(&query.contract.0);
+        println!("Account proof depth : {}", mpt_proof.len());
+        println!(
+            "Account proof max len node : {}",
+            mpt_proof.iter().map(|node| node.len()).max().unwrap()
+        );
+        // Written as constant from ^.
+        const DEPTH: usize = 8;
+        const NODE_LEN: usize = 532;
+        visit_proof(&mpt_proof);
+        for i in 1..mpt_proof.len() {
+            let child_hash = keccak256(&mpt_proof[i - 1]);
+            let u8idx = find_index_subvector(&mpt_proof[i], &child_hash);
+            assert!(u8idx.is_some());
+        }
+        let circuit = TestCircuit::<DEPTH, NODE_LEN> {
+            c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
+            exp_root: root.try_into().unwrap(),
+            exp_value: [0; 32],
+            // the reason we don't check the value is the circuit is made for storage proof and it extracts a 32bytes
+            // value. In the case of state trie, the value is 104 bytes so value is never gonna be equal.
+            checking_value: false,
+        };
+        run_circuit::<F, D, C, _>(circuit);
+
+        Ok(())
+    }
+
     #[test]
     fn test_mpt_proof_verification() {
         init_logging();
@@ -680,6 +765,7 @@ pub mod test {
             c: Circuit::<DEPTH, NODE_LEN>::new(key.try_into().unwrap(), proof),
             exp_root: root,
             exp_value: value.try_into().unwrap(),
+            checking_value: true,
         };
         run_circuit::<F, D, C, _>(circuit);
     }
@@ -1047,7 +1133,13 @@ pub mod test {
         let mut b = CircuitBuilder::<F, D>::new(config);
         let tt = b._true();
         let key_bytes = Array::<Target, HASH_LEN>::new(&mut b);
-        let key_nibbles = MPTKeyWire::init_from_bytes(&mut b, &key_bytes);
+        let key_u32: Array<U32Target, PACKED_HASH_LEN> =
+            convert_u8_targets_to_u32(&mut b, &key_bytes.arr)
+                .into_iter()
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
+        let key_nibbles = MPTKeyWire::init_from_u32_targets(&mut b, &key_u32);
         let exp_nibbles = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(&mut b);
         let eq = key_nibbles.key.equals(&mut b, &exp_nibbles);
         b.connect(tt.target, eq.target);

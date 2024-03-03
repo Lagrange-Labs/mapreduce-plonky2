@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use plonky2::{
-    field::{extension::Extendable, goldilocks_field::GoldilocksField},
+    field::extension::Extendable,
     hash::hash_types::RichField,
     iop::{
         target::{BoolTarget, Target},
@@ -11,7 +11,7 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
-use crate::utils::{less_than, less_than_or_equal_to, IntTargetWriter};
+use crate::utils::{less_than, less_than_or_equal_to};
 
 /// Utility trait to convert any value into its field representation equivalence
 pub(crate) trait ToField<F: RichField> {
@@ -152,7 +152,7 @@ impl<T: Debug, const N: usize> TryFrom<Vec<T>> for Array<T, N> {
 }
 
 /// Small wrapper trait to handle Target and U32Target in a similar way for arrays
-pub trait Targetable {
+pub trait Targetable: Copy {
     fn to_target(&self) -> Target;
     fn from_target(t: Target) -> Self;
 }
@@ -401,6 +401,11 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         T::from_target(acc)
     }
 
+    pub fn reverse(&self) -> Self {
+        Self {
+            arr: create_array(|i| self.arr[SIZE - 1 - i]),
+        }
+    }
     pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
@@ -408,14 +413,22 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         b.register_public_inputs(&self.arr.iter().map(|t| t.to_target()).collect::<Vec<_>>());
     }
 }
+/// Returns the size of the array in 32-bit units, rounded up.
+pub(crate) const fn L32(a: usize) -> usize {
+    if a % 4 != 0 {
+        a / 4 + 1
+    } else {
+        a / 4
+    }
+}
 impl<const SIZE: usize> Array<Target, SIZE>
 where
-    [(); SIZE / 4]:,
+    [(); L32(SIZE)]:,
 {
     pub fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
-    ) -> Array<U32Target, { SIZE / 4 }> {
+    ) -> Array<U32Target, { L32(SIZE) }> {
         const TWO_POWER_8: usize = 256;
         const TWO_POWER_16: usize = 65536;
         const TWO_POWER_24: usize = 16777216;
@@ -425,26 +438,17 @@ where
         let two_power_8: Target = b.constant(F::from_canonical_usize(TWO_POWER_8));
         let two_power_16: Target = b.constant(F::from_canonical_usize(TWO_POWER_16));
         let two_power_24: Target = b.constant(F::from_canonical_usize(TWO_POWER_24));
+        let powers = [two_power_8, two_power_16, two_power_24];
 
         // convert padded node to u32
-        Array::<U32Target, { SIZE / 4 }> {
+        Array {
             arr: (0..SIZE)
                 .step_by(4)
                 .map(|i| {
-                    // u8[0]
                     let mut x = self.arr[i];
-                    // u8[1]
-                    let mut y = self.arr[i + 1];
-                    // u8[0] + u8[1] * 2^8
-                    x = b.mul_add(y, two_power_8, x);
-                    // u8[2]
-                    y = self.arr[i + 2];
-                    // u8[0] + u8[1] * 2^8 + u8[2] * 2^16
-                    x = b.mul_add(y, two_power_16, x);
-                    // u8[3]
-                    y = self.arr[i + 3];
-                    // u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
-                    x = b.mul_add(y, two_power_24, x);
+                    for (i, v) in self.arr[i..].iter().skip(1).take(3).enumerate() {
+                        x = b.mul_add(*v, powers[i], x);
+                    }
                     U32Target(x)
                 })
                 .collect::<Vec<_>>()
@@ -502,7 +506,7 @@ mod test {
     use std::panic;
 
     use crate::{
-        array::{Array, ToField, Vector, VectorWire},
+        array::{Array, ToField, Vector, VectorWire, L32},
         circuit::{test::run_circuit, UserCircuit},
         utils::{convert_u8_to_u32_slice, find_index_subvector, test::random_vector},
     };
@@ -577,30 +581,33 @@ mod test {
         #[derive(Clone, Debug)]
         struct ConvertCircuit<const S: usize>
         where
-            [(); S / 4]:,
+            [(); L32(S)]:,
         {
             arr: [u8; S],
         }
         impl<F, const D: usize, const S: usize> UserCircuit<F, D> for ConvertCircuit<S>
         where
             F: RichField + Extendable<D>,
-            [(); S / 4]:,
+            [(); L32(S)]:,
         {
-            type Wires = (Array<Target, S>, Array<U32Target, { S / 4 }>);
+            type Wires = (Array<Target, S>, Array<U32Target, { L32(S) }>);
             fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-                let array = Array::<Target, S>::new(c);
-                let tou32 = array.convert_u8_to_u32(c);
-                let exp_u32 = Array::<U32Target, { S / 4 }>::new(c);
                 let tr = c._true();
-                let f = tou32.equals(c, &exp_u32);
-                c.connect(f.target, tr.target);
-                (array, exp_u32)
+                let origin_u8 = Array::<Target, S>::new(c);
+
+                // Verify `to_u32_array`.
+                let to_u32 = origin_u8.convert_u8_to_u32(c);
+                let exp_u32 = Array::<U32Target, { L32(S) }>::new(c);
+                let is_equal = to_u32.equals(c, &exp_u32);
+                c.connect(is_equal.target, tr.target);
+
+                (origin_u8, exp_u32)
             }
             fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
                 wires
                     .0
                     .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
-                let u32arr: [F; S / 4] = convert_u8_to_u32_slice(&self.arr)
+                let u32arr: [F; L32(S)] = convert_u8_to_u32_slice(&self.arr)
                     .iter()
                     .map(|x| F::from_canonical_u32(*x))
                     .collect::<Vec<_>>()
@@ -611,6 +618,12 @@ mod test {
         }
         let mut rng = thread_rng();
         let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..]);
+        run_circuit::<F, D, C, _>(ConvertCircuit { arr });
+
+        const ODD_SIZE: usize = 3;
+        let mut rng = thread_rng();
+        let mut arr = [0u8; ODD_SIZE];
         rng.fill(&mut arr[..]);
         run_circuit::<F, D, C, _>(ConvertCircuit { arr });
     }
