@@ -41,7 +41,7 @@ pub struct BlockLinkingCircuit<
     const BLOCK_LEN: usize,
     const NUMBER_LEN: usize,
 > {
-    /// Account iaaaasaqsuinput data
+    /// Account input data
     account: Account<DEPTH, NODE_LEN>,
     /// Block input data
     block: BlockHeader<NUMBER_LEN>,
