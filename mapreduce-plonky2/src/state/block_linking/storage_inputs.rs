@@ -1,7 +1,11 @@
 //! This is the public inputs of previous storage proof, it's considered as
 //! inputs of the current state proving process.
 
-use crate::{keccak::OutputHash, utils::convert_u32_fields_to_u8_vec};
+use crate::{
+    array::Array,
+    keccak::OutputHash,
+    utils::{convert_u32_fields_to_u8_vec, PACKED_ADDRESS_LEN},
+};
 use ethers::types::{H160, H256};
 use plonky2::{
     field::extension::Extendable,
@@ -13,7 +17,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use std::array;
+use std::array::{self, from_fn as create_array};
 
 /// The previous storage public inputs are composed of:
 /// - `D` Digest of all the values processed
@@ -65,13 +69,19 @@ impl<T> StorageInputs<T> {
     }
 }
 
-pub type StorageInputsWires = StorageInputs<Target>;
+pub(crate) type StorageInputsWires = StorageInputs<Target>;
 
 impl StorageInputsWires {
     /// Get the hash target of storage MPT root (C1).
     pub fn mpt_root_target(&self) -> OutputHash {
         let data = self.mpt_root();
         array::from_fn(|i| U32Target(data[i])).into()
+    }
+    pub fn contract_address_targets(&self) -> Array<U32Target, PACKED_ADDRESS_LEN> {
+        let base = self.a();
+        Array {
+            arr: create_array(|i| U32Target(base[i])),
+        }
     }
 }
 
@@ -114,5 +124,31 @@ where
         let bytes = convert_u32_fields_to_u8_vec(&self.mpt_root());
 
         H256(bytes.try_into().unwrap())
+    }
+
+    #[cfg(test)]
+    pub fn random() -> Self {
+        StorageInputs {
+            inner: F::rand_vec(STORAGE_INPUT_LEN).try_into().unwrap(),
+        }
+    }
+    #[cfg(test)]
+    pub fn set_address(&mut self, address: H160) {
+        use crate::utils::convert_u8_to_u32_slice;
+        let packed = convert_u8_to_u32_slice(address.as_bytes());
+        debug_assert_eq!(packed.len(), PACKED_ADDRESS_LEN);
+        for (i, v) in packed.into_iter().enumerate() {
+            self.inner[A_IDX + i] = F::from_canonical_u32(v);
+        }
+    }
+
+    #[cfg(test)]
+    pub fn set_c1(&mut self, storage_root: &[u8]) {
+        use crate::utils::convert_u8_to_u32_slice;
+        let packed = convert_u8_to_u32_slice(storage_root);
+        debug_assert_eq!(packed.len(), 8);
+        for (i, v) in packed.into_iter().enumerate() {
+            self.inner[C1_IDX + i] = F::from_canonical_u32(v);
+        }
     }
 }

@@ -413,6 +413,7 @@ impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
         b.register_public_inputs(&self.arr.iter().map(|t| t.to_target()).collect::<Vec<_>>());
     }
 }
+/// Returns the size of the array in 32-bit units, rounded up.
 pub(crate) const fn L32(a: usize) -> usize {
     if a % 4 != 0 {
         a / 4 + 1
@@ -439,7 +440,6 @@ where
         let two_power_24: Target = b.constant(F::from_canonical_usize(TWO_POWER_24));
         let powers = [two_power_8, two_power_16, two_power_24];
 
-        println!("SIZE{} SIZE/4 {} L32(SIZE) {}", SIZE, SIZE / 4, L32(SIZE));
         // convert padded node to u32
         Array {
             arr: (0..SIZE)

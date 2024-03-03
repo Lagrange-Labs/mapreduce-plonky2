@@ -9,7 +9,9 @@ use crate::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, MPTKeyWire,
         OutputWires as MPTOutputWires, PAD_LEN,
     },
-    utils::{find_index_subvector, keccak256, less_than, AddressTarget, ADDRESS_LEN},
+    utils::{
+        find_index_subvector, keccak256, less_than, AddressTarget, ADDRESS_LEN, PACKED_ADDRESS_LEN,
+    },
 };
 use anyhow::Result;
 use ethers::types::{H160, H256};
@@ -22,6 +24,9 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
+
+use super::storage_inputs::StorageInputs;
 
 /// Keccak input padded length for address
 const INPUT_PADDED_ADDRESS_LEN: usize = PAD_LEN(ADDRESS_LEN);
@@ -47,7 +52,7 @@ where
 
 /// The account input gadget
 #[derive(Clone, Debug)]
-pub struct AccountInputs<const DEPTH: usize, const NODE_LEN: usize> {
+pub struct Account<const DEPTH: usize, const NODE_LEN: usize> {
     /// The contract address
     contract_address: H160,
     /// The offset of storage root hash located in RLP encoded account node
@@ -56,7 +61,7 @@ pub struct AccountInputs<const DEPTH: usize, const NODE_LEN: usize> {
     state_mpt_circuit: MPTCircuit<DEPTH, NODE_LEN>,
 }
 
-impl<const DEPTH: usize, const NODE_LEN: usize> AccountInputs<DEPTH, NODE_LEN>
+impl<const DEPTH: usize, const NODE_LEN: usize> Account<DEPTH, NODE_LEN>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
@@ -88,12 +93,18 @@ where
     /// Build for circuit.
     pub fn build<F, const D: usize>(
         cb: &mut CircuitBuilder<F, D>,
+        inputs: &StorageInputs<Target>,
     ) -> AccountInputsWires<DEPTH, NODE_LEN>
     where
         F: RichField + Extendable<D>,
     {
         let contract_address = Array::new(cb);
         contract_address.assert_bytes(cb);
+        // make sure address is the same as the one in the public inputs which is
+        // in compact form
+        let packed_address: Array<U32Target, PACKED_ADDRESS_LEN> =
+            contract_address.convert_u8_to_u32(cb);
+        packed_address.enforce_equal(cb, &inputs.contract_address_targets());
 
         let storage_root_offset = cb.add_virtual_target();
 
@@ -201,10 +212,16 @@ mod test {
         providers::{Http, Middleware, Provider},
         types::{Address, BlockId, BlockNumber, H160, H256, U64},
     };
+    use plonky2::field::types::Field;
+    use plonky2::field::types::Sample;
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
-        plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
+        iop::{target::Target, witness::PartialWitness},
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
     };
     use serial_test::serial;
 
@@ -213,38 +230,44 @@ mod test {
         circuit::{test::run_circuit, UserCircuit},
         eth::{BlockData, ProofQuery},
         mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
-        state::block_linking::block_inputs::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN},
+        state::block_linking::{
+            block::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN},
+            storage_inputs::{self, StorageInputs, StorageInputsWires, STORAGE_INPUT_LEN},
+        },
         storage,
-        utils::{find_index_subvector, keccak256},
+        utils::{
+            convert_u8_to_u32_slice, convert_u8_values_to_u32, find_index_subvector, keccak256,
+        },
     };
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
-    use super::{AccountInputs, AccountInputsWires};
+    use super::{Account, AccountInputsWires};
     #[derive(Clone, Debug)]
     struct TestAccountInputs<const DEPTH: usize, const NODE_LEN: usize> {
-        a: AccountInputs<DEPTH, NODE_LEN>,
+        a: Account<DEPTH, NODE_LEN>,
+        inputs: StorageInputs<F>,
     }
 
-    impl<
-            const DEPTH: usize,
-            const NODE_LEN: usize,
-            F: RichField + Extendable<D>,
-            const D: usize,
-        > UserCircuit<F, D> for TestAccountInputs<DEPTH, NODE_LEN>
+    impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D>
+        for TestAccountInputs<DEPTH, NODE_LEN>
     where
         [(); DEPTH - 1]:,
         [(); PAD_LEN(NODE_LEN)]:,
     {
-        type Wires = AccountInputsWires<DEPTH, NODE_LEN>;
+        type Wires = (AccountInputsWires<DEPTH, NODE_LEN>, StorageInputsWires);
 
-        fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>) -> Self::Wires {
-            AccountInputs::build(c)
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            // fake inputs creation - this comes from the proof to verify during real proofs
+            let inputs = StorageInputs::build(c);
+            let wires = Account::build(c, &inputs);
+            (wires, inputs)
         }
 
-        fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<F>, wires: &Self::Wires) {
-            self.a.assign(pw, wires).unwrap();
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.a.assign::<F, D>(pw, &wires.0).unwrap();
+            self.inputs.assign(pw, &wires.1);
         }
     }
     use anyhow::Result;
@@ -336,12 +359,17 @@ mod test {
         let state_account = account_proof[0].clone();
         let storage_root_offset =
             find_index_subvector(&state_account, &storage_root).expect("no subvector");
-        let acc = AccountInputs::<DEPTH, NODE_LEN> {
+        let acc = Account::<DEPTH, NODE_LEN> {
             contract_address,
             storage_root_offset,
             state_mpt_circuit: MPTCircuit::new(key.try_into().unwrap(), account_proof),
         };
-        run_circuit::<F, D, C, _>(TestAccountInputs { a: acc });
+        // manually construct random proofs inputs with specific contract address and storage root
+        // as these are the two informations are used from the proof inside this circuit
+        let mut inputs = StorageInputs::random();
+        inputs.set_address(contract_address);
+        inputs.set_c1(&storage_root);
+        run_circuit::<F, D, C, _>(TestAccountInputs { a: acc, inputs });
         Ok(())
     }
 }
