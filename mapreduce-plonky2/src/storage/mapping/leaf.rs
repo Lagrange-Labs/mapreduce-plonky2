@@ -93,7 +93,7 @@ where
         let (new_key, value, is_valid) = MPTCircuit::<1, NODE_LEN>::advance_key_leaf_or_extension(
             b,
             &node.arr,
-            &mapping_slot_wires.mpt_key,
+            &mapping_slot_wires.keccak_mpt.mpt_key,
             &rlp_headers,
         );
         b.connect(tru.target, is_valid.target);
