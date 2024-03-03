@@ -57,7 +57,7 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
 {
-    key: MPTKeyWire,
+    pub(crate) key: MPTKeyWire,
     /// a vector of buffers whose size is the padded size of the maximum node length
     /// the padding may occur anywhere in the array but it can fit the maximum node size
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
@@ -79,7 +79,7 @@ where
     /// some additional wires for each input (see keccak circuit for more info.).
     keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; DEPTH],
     /// The leaf value wires. It is provably extracted from the leaf node.
-    leaf: Array<Target, MAX_LEAF_VALUE_LEN>,
+    pub(crate) leaf: Array<Target, MAX_LEAF_VALUE_LEN>,
     /// The root hash value wire.
     pub(crate) root: OutputHash,
 }
