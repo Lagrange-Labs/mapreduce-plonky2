@@ -81,10 +81,14 @@ impl BlockData {
         let url = env::var("CI_RPC_URL").expect("CI_RPC_URL env var not set");
         #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
-        //let provider = Provider::<Http>::try_from
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
-
+        Self::fetch_from(&provider, blockid).await
+    }
+    pub async fn fetch_from<T: Into<BlockId> + Send + Sync>(
+        provider: &Provider<Http>,
+        blockid: T,
+    ) -> Result<Self> {
         let block = provider
             .get_block_with_txs(blockid)
             .await?
@@ -163,19 +167,19 @@ impl<'a, X> rlp::Encodable for RLPBlock<'a, X> {
         s.begin_unbounded_list();
         s.append(&self.0.parent_hash);
         s.append(&self.0.uncles_hash);
-        s.append(&self.0.author.unwrap());
+        s.append(&self.0.author.unwrap_or_default());
         s.append(&self.0.state_root);
         s.append(&self.0.transactions_root);
         s.append(&self.0.receipts_root);
-        s.append(&self.0.logs_bloom.unwrap());
+        s.append(&self.0.logs_bloom.unwrap_or_default());
         s.append(&self.0.difficulty);
-        s.append(&self.0.number.unwrap());
+        s.append(&self.0.number.unwrap_or_default());
         s.append(&self.0.gas_limit);
         s.append(&self.0.gas_used);
         s.append(&self.0.timestamp);
         s.append(&self.0.extra_data.to_vec());
-        s.append(&self.0.mix_hash.unwrap());
-        s.append(&self.0.nonce.unwrap());
+        s.append(&self.0.mix_hash.unwrap_or_default());
+        s.append(&self.0.nonce.unwrap_or_default());
         rlp_opt(s, &self.0.base_fee_per_gas);
         rlp_opt(s, &self.0.withdrawals_root);
         rlp_opt(s, &self.0.blob_gas_used);
@@ -245,7 +249,7 @@ pub(crate) fn left_pad32(slice: &[u8]) -> [u8; 32] {
 }
 
 pub(crate) struct ProofQuery {
-    contract: Address,
+    pub(crate) contract: Address,
     pub(crate) slot: StorageSlot,
 }
 pub(crate) enum StorageSlot {
@@ -294,20 +298,17 @@ impl ProofQuery {
     pub async fn query_mpt_proof<P: Middleware + 'static>(
         &self,
         provider: &P,
+        block: Option<BlockId>,
     ) -> Result<EIP1186ProofResponse> {
         let res = provider
-            .get_proof(
-                self.contract,
-                vec![self.slot.location()],
-                Some(BlockNumber::Latest.into()),
-            )
+            .get_proof(self.contract, vec![self.slot.location()], block)
             .await?;
         Ok(res)
     }
     pub fn verify_storage_proof(proof: &EIP1186ProofResponse) -> Result<()> {
         let memdb = Arc::new(MemoryDB::new(true));
         let tx_trie = EthTrie::new(Arc::clone(&memdb));
-        let proof_key_bytes = proof.storage_proof[0].key.to_fixed_bytes();
+        let proof_key_bytes: [u8; 32] = proof.storage_proof[0].key.into();
         let mpt_key = keccak256(&proof_key_bytes[..]);
         let is_valid = tx_trie.verify_proof(
             proof.storage_hash,
@@ -332,6 +333,36 @@ impl ProofQuery {
         }
         Ok(())
     }
+    pub fn verify_state_proof(&self, res: &EIP1186ProofResponse) -> Result<()> {
+        let memdb = Arc::new(MemoryDB::new(true));
+        let tx_trie = EthTrie::new(Arc::clone(&memdb));
+
+        // According to EIP-1186, accountProof starts with the the state root.
+        let state_root_hash = H256(keccak256(&res.account_proof[0]).try_into().unwrap());
+
+        // The MPT key is Keccak hash of the contract (requested) address.
+        let mpt_key = keccak256(&self.contract.0);
+
+        let is_valid = tx_trie.verify_proof(
+            state_root_hash,
+            &mpt_key,
+            res.account_proof.iter().map(|b| b.to_vec()).collect(),
+        );
+
+        if is_valid.is_err() {
+            bail!("Account proof is invalid");
+        }
+        if is_valid.unwrap().is_none() {
+            bail!("Account proof says the value associated with that key does not exist");
+        }
+
+        // The length of acount node must be 104 bytes (8 + 32 + 32 + 32) as:
+        // [nonce (U64), balance (U256), storage_hash (H256), code_hash (H256)]
+        let account_node = res.account_proof.last().unwrap();
+        assert_eq!(account_node.len(), 104);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -345,7 +376,7 @@ mod test {
     use super::*;
 
     #[tokio::test]
-    async fn test_kashish_contract() -> Result<()> {
+    async fn test_kashish_contract_proof_query() -> Result<()> {
         // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
         // uint256 public n_registered; // storage slot 0
         // mapping(address => uint256) public holders; // storage slot 1
@@ -362,17 +393,18 @@ mod test {
         // simple storage test
         {
             let query = ProofQuery::new_simple_slot(contract, 0);
-            let res = query.query_mpt_proof(&provider).await?;
+            let res = query.query_mpt_proof(&provider, None).await?;
             ProofQuery::verify_storage_proof(&res)?;
+            query.verify_state_proof(&res)?;
         }
-        // mapping storage test
         {
             // mapping key
             let mapping_key =
                 hex::decode("000000000000000000000000000000000000000000000000000000000001abcd")?;
             let query = ProofQuery::new_mapping_slot(contract, 1, mapping_key);
-            let res = query.query_mpt_proof(&provider).await?;
+            let res = query.query_mpt_proof(&provider, None).await?;
             ProofQuery::verify_storage_proof(&res)?;
+            query.verify_state_proof(&res)?;
         }
         Ok(())
     }

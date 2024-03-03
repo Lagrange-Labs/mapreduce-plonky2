@@ -26,6 +26,7 @@ pub mod merkle;
 mod merkle_tree;
 mod mpt_sequential;
 mod rlp;
+mod state;
 mod storage;
 pub mod transaction;
 mod utils;

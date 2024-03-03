@@ -4,7 +4,7 @@
 use crate::{
     array::{Array, Vector, VectorWire},
     eth::left_pad32,
-    keccak::{ByteKeccakWires, InputData, KeccakCircuit, HASH_LEN},
+    keccak::{ByteKeccakWires, InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, PAD_LEN},
     utils::{keccak256, AddressTarget, ADDRESS_LEN},
 };
@@ -34,7 +34,7 @@ pub struct KeccakMPTWires {
     /// Actual keccak wires created for the computation of the final MPT key
     /// from the location. THIS is the one to use to look up a key in the
     /// associated MPT trie.
-    pub(crate) keccak_mpt_key: ByteKeccakWires<{ PAD_LEN(HASH_LEN) }>,
+    pub(crate) keccak_mpt_key: KeccakWires<{ PAD_LEN(HASH_LEN) }>,
     /// The MPT key derived in circuit from the storage slot, in NIBBLES
     /// TODO: it represents the same information as "exp" but in nibbles.
     /// It doesn't need to be assigned, but is used in the higher level circuits
@@ -54,7 +54,7 @@ impl KeccakMPT {
         let mut padded_location = [b.zero(); PAD_LEN(HASH_LEN)];
         padded_location[0..HASH_LEN].copy_from_slice(&keccak_location.output.arr);
         let hash_len = b.constant(F::from_canonical_usize(HASH_LEN));
-        let keccak_mpt_key = KeccakCircuit::<{ PAD_LEN(HASH_LEN) }>::hash_to_bytes(
+        let keccak_mpt_key = KeccakCircuit::<{ PAD_LEN(HASH_LEN) }>::hash_vector(
             b,
             &VectorWire {
                 real_len: hash_len,
@@ -67,7 +67,7 @@ impl KeccakMPT {
         // Make sure we transform from the bytes to the nibbles.
         // TODO: actually maybe better to give the nibbles directly and pack
         // them into U32 in one go. For the future...
-        let mpt_key = MPTKeyWire::init_from_bytes(b, &keccak_mpt_key.output);
+        let mpt_key = MPTKeyWire::init_from_u32_targets(b, &keccak_mpt_key.output_array);
 
         KeccakMPTWires {
             keccak_location,
@@ -93,7 +93,7 @@ impl KeccakMPT {
         );
 
         // Assign the keccak necessary values for keccak_mpt = H(keccak_location).
-        KeccakCircuit::<{ PAD_LEN(HASH_LEN) }>::assign_byte_keccak(
+        KeccakCircuit::<{ PAD_LEN(HASH_LEN) }>::assign(
             pw,
             &wires.keccak_mpt_key,
             &InputData::Assigned(
@@ -308,15 +308,16 @@ mod test {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
+    use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
     use crate::{
         array::Array,
         circuit::{test::run_circuit, UserCircuit},
         eth::StorageSlot,
-        keccak::HASH_LEN,
+        keccak::{HASH_LEN, PACKED_HASH_LEN},
         mpt_sequential::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::keccak256,
+        utils::{convert_u8_slice_to_u32_fields, keccak256},
     };
 
     use super::{MappingSlot, MappingSlotWires};
@@ -339,7 +340,7 @@ mod test {
             // exp keccak location
             Array<Target, HASH_LEN>,
             // exp mpt key bytes
-            Array<Target, HASH_LEN>,
+            Array<U32Target, PACKED_HASH_LEN>,
         );
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
@@ -359,11 +360,11 @@ mod test {
                 .output
                 .equals(b, &exp_keccak_location);
             b.connect(tru.target, good_keccak_location.target);
-            let exp_keccak_mpt = Array::<Target, HASH_LEN>::new(b);
+            let exp_keccak_mpt = Array::<U32Target, PACKED_HASH_LEN>::new(b);
             let good_keccak_mpt = mapping_slot_wires
                 .keccak_mpt
                 .keccak_mpt_key
-                .output
+                .output_array
                 .equals(b, &exp_keccak_mpt);
             b.connect(tru.target, good_keccak_mpt.target);
             (
@@ -384,9 +385,12 @@ mod test {
                 .2
                 .assign_bytes(pw, &self.exp_keccak_location.clone().try_into().unwrap());
             let exp_mpt_key_bytes = keccak256(&self.exp_keccak_location);
-            wires
-                .3
-                .assign_bytes(pw, &exp_mpt_key_bytes.try_into().unwrap());
+            wires.3.assign(
+                pw,
+                &convert_u8_slice_to_u32_fields(&exp_mpt_key_bytes)
+                    .try_into()
+                    .unwrap(),
+            );
             self.m.assign(pw, &wires.0);
         }
     }
