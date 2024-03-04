@@ -30,6 +30,7 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
+use serde::{Deserialize, Serialize};
 
 /// Circuit gadget that proves the correct derivation of a MPT key from a given mapping slot and storage slot.
 /// Deriving a MPT key from mapping slot is done like:
@@ -54,6 +55,7 @@ impl MappingSlot {
 /// Contains the wires associated with the storage slot's mpt key
 /// derivation logic.
 /// NOTE: currently specific only for mapping slots.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MappingSlotWires {
     /// "input" mapping key which is maxed out at 32 bytes
     pub(super) mapping_key: Array<Target, MAPPING_KEY_LEN>,

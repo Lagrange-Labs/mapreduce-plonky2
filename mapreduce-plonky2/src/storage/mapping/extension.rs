@@ -4,6 +4,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     array::{Vector, VectorWire},
@@ -27,6 +28,7 @@ pub struct ExtensionNodeCircuit {
 }
 
 /// Wires associated with this processing.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExtensionWires {
     pub(super) node: VectorWire<Target, PADDED_LEN>,
     keccak: KeccakWires<PADDED_LEN>,

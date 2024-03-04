@@ -19,6 +19,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use serde::{Deserialize, Serialize};
 
 use crate::keccak::{compute_size_with_padding, KeccakCircuit, OutputHash};
 /// Number of items in the RLP encoded list in a leaf node.
@@ -351,7 +352,7 @@ where
 
 /// A structure that keeps a running pointer to the portion of the key the circuit
 /// already has proven.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MPTKeyWire {
     /// Represents the full key of the value(s) we're looking at in the MPT trie.
     pub key: Array<Target, MAX_KEY_NIBBLE_LEN>,
