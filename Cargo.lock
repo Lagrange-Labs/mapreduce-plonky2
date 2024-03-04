@@ -2507,7 +2507,7 @@ dependencies = [
 [[package]]
 name = "plonky2_crypto"
 version = "0.1.0"
-source = "git+https://github.com/nikkolasg/plonky2-crypto?branch=feat/serialization#3eb812cfecdca4d16886af655feed721e58915ec"
+source = "git+https://github.com/nikkolasg/plonky2-crypto?branch=feat/serialization#83d8a542d4bb6137f9e3b2b167250ec150916245"
 dependencies = [
  "anyhow",
  "hex",

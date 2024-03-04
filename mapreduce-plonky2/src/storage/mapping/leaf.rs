@@ -38,6 +38,7 @@ use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
 use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
 
 use super::super::key::{MappingSlot, MAPPING_KEY_LEN};
 use crate::storage::mapping::public_inputs::PublicInputs;
@@ -52,6 +53,7 @@ pub(crate) struct LeafCircuit<const NODE_LEN: usize> {
     slot: MappingSlot,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
