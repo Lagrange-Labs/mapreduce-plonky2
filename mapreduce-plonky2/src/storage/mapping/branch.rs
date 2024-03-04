@@ -27,7 +27,7 @@ pub(super) const MAX_BRANCH_NODE_LEN: usize = 564;
 #[derive(Clone, Debug)]
 pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {
     node: Vec<u8>,
-    // in bytes
+    // in nibbles
     common_prefix: Vec<u8>,
     expected_pointer: usize,
     mapping_slot: usize,
@@ -130,7 +130,7 @@ where
         wires.node.assign(pw, &vec);
         wires.common_prefix.assign(
             pw,
-            &bytes_to_nibbles(&self.common_prefix).try_into().unwrap(),
+            &self.common_prefix.try_into().unwrap(),
             self.expected_pointer,
         );
         KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
@@ -295,7 +295,7 @@ mod test {
         let branch_circuit = BranchCircuit::<NODE_LEN, N_CHILDREN> {
             node: node.clone(),
             // any of the two keys will do since we only care about the common prefix
-            common_prefix: key1.clone(),
+            common_prefix: bytes_to_nibbles(&key1),
             // - 1 because we compare pointers _after_ advancing the key for each leaf
             expected_pointer: ptr1 - 1,
             mapping_slot: slot,
