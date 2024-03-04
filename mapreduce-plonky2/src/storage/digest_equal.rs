@@ -1,3 +1,6 @@
+//! This module implements the logic of verifying that a Merkle recursive proof over a tree contains the same set of
+//! leaves than a MPT recursive proof over a different tree. This is the digest translation mechanism, passing from 
+//! one tree to another.
 use super::{
     length_match::PublicInputs as MPTPublicInputs, merkle::PublicInputs as MerklePublicInputs,
 };
