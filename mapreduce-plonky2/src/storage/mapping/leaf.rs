@@ -49,8 +49,8 @@ pub(super) const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
 /// MPT proof verification logic.
 #[derive(Clone, Debug)]
 pub(crate) struct LeafCircuit<const NODE_LEN: usize> {
-    node: Vec<u8>,
-    slot: MappingSlot,
+    pub(super) node: Vec<u8>,
+    pub(super) slot: MappingSlot,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
