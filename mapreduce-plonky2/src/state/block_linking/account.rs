@@ -99,7 +99,6 @@ where
         F: RichField + Extendable<D>,
     {
         let contract_address = Array::new(cb);
-        contract_address.assert_bytes(cb);
         // make sure address is the same as the one in the public inputs which is
         // in compact form
         let packed_address: Array<U32Target, PACKED_ADDRESS_LEN> =
