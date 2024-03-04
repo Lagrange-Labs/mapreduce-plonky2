@@ -2039,6 +2039,7 @@ dependencies = [
  "hex",
  "itertools 0.12.1",
  "log",
+ "paste",
  "plonky2",
  "plonky2_crypto",
  "plonky2_ecgfp5",
