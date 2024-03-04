@@ -57,7 +57,7 @@ where
     [(); DEPTH - 1]:,
 {
     pub fn new<F: RichField>(
-        storage_inputs: &[F],
+        storage_pi: &[F],
         header_rlp: Vec<u8>,
         // Nodes of state MPT, it's ordered from leaf to root.
         state_mpt_nodes: Vec<Vec<u8>>,
@@ -67,9 +67,9 @@ where
 
         // Get the contract address and hash of storage MPT root, and create the
         // account inputs gadget.
-        let storage_inputs = StorageInputs::from(storage_inputs);
-        let contract_address = storage_inputs.contract_address_value();
-        let storage_mpt_root = storage_inputs.mpt_root_value();
+        let storage_pi = StorageInputs::from(storage_pi);
+        let contract_address = storage_pi.contract_address_value();
+        let storage_mpt_root = storage_pi.mpt_root_value();
         let account_inputs = Account::new(contract_address, storage_mpt_root, state_mpt_nodes);
 
         Self {
@@ -81,23 +81,19 @@ where
     /// Build for circuit.
     pub fn build<F, const D: usize>(
         cb: &mut CircuitBuilder<F, D>,
-        storage_inputs: &[Target],
+        storage_pi: &[Target],
     ) -> BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>
     where
         F: RichField + Extendable<D>,
         [(); PAD_LEN(NODE_LEN)]:,
         [(); DEPTH - 1]:,
     {
-        let account_inputs = Account::build(cb, storage_inputs);
+        let account_inputs = Account::build(cb, storage_pi);
         let block_inputs = BlockHeader::<NUMBER_LEN>::build(cb);
 
         // Verify the account node includes the hash of storage MPT root.
-        let storage_inputs = StorageInputs::from(storage_inputs);
-        Account::verify_storage_root_hash_inclusion(
-            cb,
-            &account_inputs,
-            &storage_inputs.mpt_root(),
-        );
+        let storage_pi = StorageInputs::from(storage_pi);
+        Account::verify_storage_root_hash_inclusion(cb, &account_inputs, &storage_pi.mpt_root());
 
         //Verify the block header includes the hash of state MPT root.
         BlockHeader::<NUMBER_LEN>::verify_state_root_hash_inclusion(
@@ -112,7 +108,7 @@ where
         };
 
         // Register the public inputs.
-        PublicInputs::<F>::register(cb, &wires, &storage_inputs);
+        PublicInputs::<F>::register(cb, &wires, &storage_pi);
 
         wires
     }
@@ -190,7 +186,7 @@ mod tests {
         exp_parent_hash: H256,
         exp_hash: H256,
         c: BlockLinkingCircuit<DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN>,
-        inputs: Vec<F>,
+        storage_pi: Vec<F>,
     }
 
     impl<
@@ -213,23 +209,25 @@ mod tests {
         );
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let inputs = cb.add_virtual_targets(StorageInputs::<Target>::TOTAL_LEN);
+            let storage_pi = cb.add_virtual_targets(StorageInputs::<Target>::TOTAL_LEN);
 
             let block_number = cb.add_virtual_u32_target();
             let parent_hash = OutputHash::new(cb);
             let hash = OutputHash::new(cb);
-            let wires =
-                BlockLinkingCircuit::<DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN>::build(cb, &inputs);
+            let wires = BlockLinkingCircuit::<DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN>::build(
+                cb,
+                &storage_pi,
+            );
 
             cb.connect(wires.block_inputs.number.0, block_number.0);
             parent_hash.enforce_equal(cb, &wires.block_inputs.parent_hash);
             hash.enforce_equal(cb, &wires.block_inputs.hash.output_array);
 
-            (inputs, block_number, parent_hash, hash, wires)
+            (storage_pi, block_number, parent_hash, hash, wires)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_target_arr(&wires.0, &self.inputs);
+            pw.set_target_arr(&wires.0, &self.storage_pi);
             let block_number = self.exp_block_number.as_u32();
             pw.set_u32_target(wires.1, block_number);
 
@@ -263,7 +261,7 @@ mod tests {
         const VALUE_LEN: usize = 50;
 
         let state_mpt = generate_state_mpt::<DEPTH, VALUE_LEN>();
-        let inputs = generate_proof_inputs(&state_mpt);
+        let storage_pi = generate_storage_inputs(&state_mpt);
 
         let block = generate_block(&state_mpt);
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
@@ -273,8 +271,8 @@ mod tests {
             exp_block_number: block.number.unwrap(),
             exp_parent_hash: block.parent_hash,
             exp_hash,
-            c: BlockLinkingCircuit::new(&inputs, header_rlp, state_mpt.nodes),
-            inputs,
+            c: BlockLinkingCircuit::new(&storage_pi, header_rlp, state_mpt.nodes),
+            storage_pi,
         };
         run_circuit::<F, D, C, _>(test_circuit);
     }
@@ -365,7 +363,7 @@ mod tests {
             nodes,
         };
 
-        let proof_inputs = generate_proof_inputs(&state_mpt);
+        let storage_pi = generate_storage_inputs(&state_mpt);
 
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
         let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
@@ -374,8 +372,8 @@ mod tests {
             exp_block_number: block.number.unwrap(),
             exp_parent_hash: block.parent_hash,
             exp_hash,
-            c: BlockLinkingCircuit::new(&proof_inputs, header_rlp, state_mpt.nodes),
-            inputs: proof_inputs,
+            c: BlockLinkingCircuit::new(&storage_pi, header_rlp, state_mpt.nodes),
+            storage_pi,
         };
         run_circuit::<F, D, C, _>(test_circuit);
 
@@ -454,14 +452,14 @@ mod tests {
     }
 
     /// Generate the test storage proof inputs as if it was given by a real proof.
-    fn generate_proof_inputs<F: RichField>(mpt: &TestStateMPT) -> Vec<F> {
-        let mut inputs: Vec<F> = (0..StorageInputs::<F>::TOTAL_LEN)
+    fn generate_storage_inputs<F: RichField>(mpt: &TestStateMPT) -> Vec<F> {
+        let mut storage_pi: Vec<_> = (0..StorageInputs::<F>::TOTAL_LEN)
             .map(|_| F::from_canonical_u64(thread_rng().gen::<u64>()))
             .collect();
 
         // Set the contract address to the public inputs of storage proof.
         let contract_address = convert_u8_slice_to_u32_fields(&mpt.account_address.0);
-        inputs[StorageInputs::<F>::A_IDX..StorageInputs::<F>::M_IDX]
+        storage_pi[StorageInputs::<F>::A_IDX..StorageInputs::<F>::M_IDX]
             .copy_from_slice(&contract_address);
 
         // Set the storage root hash to the public inputs of storage proof.
@@ -471,9 +469,9 @@ mod tests {
         let start = thread_rng().gen_range(0..100 - HASH_LEN);
         let storage_root_hash =
             convert_u8_slice_to_u32_fields(&account_node[start..start + HASH_LEN]);
-        inputs[StorageInputs::<F>::C1_IDX..StorageInputs::<F>::C2_IDX]
+        storage_pi[StorageInputs::<F>::C1_IDX..StorageInputs::<F>::C2_IDX]
             .copy_from_slice(&storage_root_hash);
 
-        inputs
+        storage_pi
     }
 }

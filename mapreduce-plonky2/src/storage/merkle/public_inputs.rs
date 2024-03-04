@@ -2,7 +2,7 @@ use crate::{
     array::Array,
     group_hashing::N,
     keccak::OutputHash,
-    utils::{convert_point_to_curve_target, transform_to_curve_point},
+    utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 use plonky2::{
     field::goldilocks_field::GoldilocksField, hash::hash_types::NUM_HASH_OUT_ELTS,
@@ -53,7 +53,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     /// Transform a list of elements to a curve point.
     pub fn digest_data(&self) -> ([T; 5], [T; 5], T) {
-        transform_to_curve_point(&self.proof_inputs[Self::D_IDX..])
+        convert_slice_to_curve_point(&self.proof_inputs[Self::D_IDX..])
     }
 
     pub fn root_hash_data(&self) -> &[T] {

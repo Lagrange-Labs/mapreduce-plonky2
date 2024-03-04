@@ -11,7 +11,7 @@ use crate::{
     group_hashing::{CircuitBuilderGroupHashing, N},
     keccak::{OutputHash, PACKED_HASH_LEN},
     utils::{
-        convert_point_to_curve_target, convert_u32_fields_to_u8_vec, transform_to_curve_point,
+        convert_point_to_curve_target, convert_slice_to_curve_point, convert_u32_fields_to_u8_vec,
         PackedAddressTarget, PACKED_ADDRESS_LEN,
     },
 };
@@ -119,7 +119,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     /// Transform a list of elements to a curve point.
     pub fn digest_data(&self) -> ([T; 5], [T; 5], T) {
-        transform_to_curve_point(&self.proof_inputs[Self::D_IDX..])
+        convert_slice_to_curve_point(&self.proof_inputs[Self::D_IDX..])
     }
 
     pub fn mpt_root_data(&self) -> &[T] {

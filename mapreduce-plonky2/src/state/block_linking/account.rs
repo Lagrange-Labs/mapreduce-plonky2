@@ -11,8 +11,7 @@ use crate::{
     },
     storage::PublicInputs as StorageInputs,
     utils::{
-        find_index_subvector, keccak256, less_than, AddressTarget, PackedAddressTarget,
-        ADDRESS_LEN, PACKED_ADDRESS_LEN,
+        find_index_subvector, keccak256, less_than, AddressTarget, PackedAddressTarget, ADDRESS_LEN,
     },
 };
 use anyhow::Result;
@@ -26,7 +25,6 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 /// Keccak input padded length for address
 const INPUT_PADDED_ADDRESS_LEN: usize = PAD_LEN(ADDRESS_LEN);
@@ -93,7 +91,7 @@ where
     /// Build for circuit.
     pub fn build<F, const D: usize>(
         cb: &mut CircuitBuilder<F, D>,
-        storage_inputs: &[Target],
+        storage_pi: &[Target],
     ) -> AccountInputsWires<DEPTH, NODE_LEN>
     where
         F: RichField + Extendable<D>,
@@ -103,8 +101,8 @@ where
         // make sure address is the same as the one in the public inputs which is
         // in compact form
         let packed_address: PackedAddressTarget = contract_address.convert_u8_to_u32(cb);
-        let storage_inputs = StorageInputs::from(storage_inputs);
-        packed_address.enforce_equal(cb, &storage_inputs.contract_address());
+        let storage_pi = StorageInputs::from(storage_pi);
+        packed_address.enforce_equal(cb, &storage_pi.contract_address());
 
         let storage_root_offset = cb.add_virtual_target();
 
@@ -248,7 +246,7 @@ mod test {
     #[derive(Clone, Debug)]
     struct TestAccountInputs<const DEPTH: usize, const NODE_LEN: usize> {
         a: Account<DEPTH, NODE_LEN>,
-        storage_inputs: Vec<F>,
+        storage_pi: Vec<F>,
     }
 
     impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D>
@@ -260,14 +258,14 @@ mod test {
         type Wires = (AccountInputsWires<DEPTH, NODE_LEN>, Vec<Target>);
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let storage_inputs = c.add_virtual_targets(StorageInputs::<Target>::TOTAL_LEN);
-            let wires = Account::build(c, &storage_inputs);
-            (wires, storage_inputs)
+            let storage_pi = c.add_virtual_targets(StorageInputs::<Target>::TOTAL_LEN);
+            let wires = Account::build(c, &storage_pi);
+            (wires, storage_pi)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.a.assign::<F, D>(pw, &wires.0).unwrap();
-            pw.set_target_arr(&wires.1, &self.storage_inputs);
+            pw.set_target_arr(&wires.1, &self.storage_pi);
         }
     }
     use anyhow::Result;
@@ -366,18 +364,15 @@ mod test {
         };
         // manually construct random proofs inputs with specific contract address and storage root
         // as these are the two informations are used from the proof inside this circuit
-        let mut storage_inputs: Vec<_> = random_vector::<u32>(StorageInputs::<F>::TOTAL_LEN)
+        let mut storage_pi: Vec<_> = random_vector::<u32>(StorageInputs::<F>::TOTAL_LEN)
             .into_iter()
             .map(F::from_canonical_u32)
             .collect();
-        storage_inputs[StorageInputs::<F>::A_IDX..StorageInputs::<F>::M_IDX]
+        storage_pi[StorageInputs::<F>::A_IDX..StorageInputs::<F>::M_IDX]
             .copy_from_slice(&convert_u8_slice_to_u32_fields(contract_address.as_bytes()));
-        storage_inputs[StorageInputs::<F>::C1_IDX..StorageInputs::<F>::C2_IDX]
+        storage_pi[StorageInputs::<F>::C1_IDX..StorageInputs::<F>::C2_IDX]
             .copy_from_slice(&convert_u8_slice_to_u32_fields(&storage_root));
-        run_circuit::<F, D, C, _>(TestAccountInputs {
-            a: acc,
-            storage_inputs,
-        });
+        run_circuit::<F, D, C, _>(TestAccountInputs { a: acc, storage_pi });
         Ok(())
     }
 }

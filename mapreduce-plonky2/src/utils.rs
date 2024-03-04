@@ -247,8 +247,8 @@ pub(crate) fn read_le_u32(input: &mut &[u8]) -> u32 {
     u32::from_le_bytes(int_bytes.try_into().unwrap())
 }
 
-/// Transform a list of elements to a curve point.
-pub fn transform_to_curve_point<T: Copy>(s: &[T]) -> ([T; 5], [T; 5], T) {
+/// Convert a list of elements to a curve point.
+pub fn convert_slice_to_curve_point<T: Copy>(s: &[T]) -> ([T; 5], [T; 5], T) {
     // 5 F for each coordinates + 1 bool flag
     assert!(s.len() >= 2 * N + 1);
 

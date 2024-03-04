@@ -7,7 +7,10 @@ use super::{
 };
 use crate::{
     keccak::{OutputHash, PACKED_HASH_LEN},
-    utils::{transform_to_curve_point, PackedAddressTarget, PACKED_ADDRESS_LEN},
+    utils::{
+        convert_point_to_curve_target, convert_slice_to_curve_point, PackedAddressTarget,
+        PACKED_ADDRESS_LEN,
+    },
 };
 use plonky2::{
     field::goldilocks_field::GoldilocksField, iop::target::BoolTarget, iop::target::Target,
@@ -50,13 +53,7 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// Return the curve point target of digest defined over the public inputs.
     pub fn digest(&self) -> CurveTarget {
-        let (x, y, is_inf) = self.digest_data();
-
-        let x = QuinticExtensionTarget(x);
-        let y = QuinticExtensionTarget(y);
-        let flag = BoolTarget::new_unsafe(is_inf);
-
-        CurveTarget(([x, y], flag))
+        convert_point_to_curve_target(self.digest_data())
     }
 
     pub fn contract_address(&self) -> PackedAddressTarget {
@@ -84,7 +81,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     /// Transform a list of elements to a curve point.
     pub fn digest_data(&self) -> ([T; 5], [T; 5], T) {
-        transform_to_curve_point(&self.proof_inputs[Self::D_IDX..])
+        convert_slice_to_curve_point(&self.proof_inputs[Self::D_IDX..])
     }
 
     pub fn contract_address_data(&self) -> &[T] {
