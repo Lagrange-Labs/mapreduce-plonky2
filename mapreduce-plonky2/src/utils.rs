@@ -8,6 +8,7 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::plonk::config::GenericConfig;
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
 use sha3::Digest;
 use sha3::Keccak256;
 
@@ -256,6 +257,17 @@ pub fn transform_to_curve_point<T: Copy>(s: &[T]) -> ([T; 5], [T; 5], T) {
     let flag = s[2 * N];
 
     (x, y, flag)
+}
+
+/// Convert a tuple of point to a curve target.
+pub fn convert_point_to_curve_target(point: ([Target; 5], [Target; 5], Target)) -> CurveTarget {
+    let (x, y, is_inf) = point;
+
+    let x = QuinticExtensionTarget(x);
+    let y = QuinticExtensionTarget(y);
+    let flag = BoolTarget::new_unsafe(is_inf);
+
+    CurveTarget(([x, y], flag))
 }
 
 #[cfg(test)]

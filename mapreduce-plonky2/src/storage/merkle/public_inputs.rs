@@ -1,4 +1,8 @@
-use crate::{group_hashing::N, keccak::OutputHash, utils::transform_to_curve_point};
+use crate::{
+    group_hashing::N,
+    keccak::OutputHash,
+    utils::{convert_point_to_curve_target, transform_to_curve_point},
+};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::NUM_HASH_OUT_ELTS,
@@ -33,13 +37,7 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// Return the curve point target of digest defined over the public inputs.
     pub fn digest(&self) -> CurveTarget {
-        let (x, y, is_inf) = self.digest_data();
-
-        let x = QuinticExtensionTarget(x);
-        let y = QuinticExtensionTarget(y);
-        let flag = BoolTarget::new_unsafe(is_inf);
-
-        CurveTarget(([x, y], flag))
+        convert_point_to_curve_target(self.digest_data())
     }
 
     pub fn root_hash(&self) -> OutputHash {

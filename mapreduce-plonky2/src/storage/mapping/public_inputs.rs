@@ -23,7 +23,7 @@ use crate::{
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::MPTKeyWire,
     rlp::MAX_KEY_NIBBLE_LEN,
-    utils::transform_to_curve_point,
+    utils::{convert_point_to_curve_target, transform_to_curve_point},
 };
 // This is a wrapper around an array of targets set as public inputs
 // of any proof generated in this module. They all share the same
@@ -67,11 +67,7 @@ impl<'a> PublicInputs<'a, Target> {
     /// Returns the accumulator digest defined over the public inputs
     // TODO: move that to ecgfp5 repo
     pub fn accumulator(&self) -> CurveTarget {
-        let (x, y, is_inf) = self.accumulator_info();
-        let x = QuinticExtensionTarget(x);
-        let y = QuinticExtensionTarget(y);
-        let flag = BoolTarget::new_unsafe(is_inf);
-        CurveTarget(([x, y], flag))
+        convert_point_to_curve_target(self.accumulator_info())
     }
 
     /// Returns the merkle hash C of the subtree this proof has processed.

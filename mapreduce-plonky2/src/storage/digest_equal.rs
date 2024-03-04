@@ -11,8 +11,8 @@ use crate::{
     group_hashing::{CircuitBuilderGroupHashing, N},
     keccak::{OutputHash, PACKED_HASH_LEN},
     utils::{
-        convert_u32_fields_to_u8_vec, transform_to_curve_point, PackedAddressTarget,
-        PACKED_ADDRESS_LEN,
+        convert_point_to_curve_target, convert_u32_fields_to_u8_vec, transform_to_curve_point,
+        PackedAddressTarget, PACKED_ADDRESS_LEN,
     },
 };
 use ethers::types::{H160, H256};
@@ -82,13 +82,7 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// Return the curve point target of digest defined over the public inputs.
     pub fn digest(&self) -> CurveTarget {
-        let (x, y, is_inf) = self.digest_data();
-
-        let x = QuinticExtensionTarget(x);
-        let y = QuinticExtensionTarget(y);
-        let flag = BoolTarget::new_unsafe(is_inf);
-
-        CurveTarget(([x, y], flag))
+        convert_point_to_curve_target(self.digest_data())
     }
 
     pub fn contract_address(&self) -> PackedAddressTarget {
