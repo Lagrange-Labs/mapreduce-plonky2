@@ -256,7 +256,7 @@ mod tests {
         const ACTUAL_DEPTH: usize = DEPTH - 1;
 
         const BLOCK_LEN: usize = 600;
-        const NODE_LEN: usize = 500;
+        const NODE_LEN: usize = 600;
         const VALUE_LEN: usize = 100;
 
         let state_mpt = generate_state_mpt::<DEPTH, VALUE_LEN>();
