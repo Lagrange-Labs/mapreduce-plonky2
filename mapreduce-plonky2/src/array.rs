@@ -9,6 +9,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
 use crate::utils::{less_than, less_than_or_equal_to};
@@ -36,8 +37,12 @@ impl<F: RichField> ToField<F> for usize {
 /// VectorWire contains the wires representing an array of dynamic length
 /// up to MAX_LEN. This is useful when you don't know the exact size in advance
 /// of your data, for example in hashing MPT nodes.
-#[derive(Debug, Clone)]
-pub struct VectorWire<T: Targetable, const MAX_LEN: usize> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VectorWire<T: Targetable + Clone + Serialize, const MAX_LEN: usize>
+where
+    for<'d> T: Deserialize<'d>,
+{
+    #[serde(bound(deserialize = "T: for <'a>Deserialize<'a>"))]
     pub arr: Array<T, MAX_LEN>,
     pub real_len: Target,
 }
@@ -91,14 +96,20 @@ impl<T: Default + Clone + Debug, const MAX_LEN: usize> Vector<T, MAX_LEN> {
 
 impl<F: RichField, const MAX_LEN: usize> Vector<F, MAX_LEN> {}
 
-impl<const SIZE: usize, T: Targetable> Index<usize> for VectorWire<T, SIZE> {
+impl<const SIZE: usize, T: Targetable + Clone + Serialize> Index<usize> for VectorWire<T, SIZE>
+where
+    for<'de> T: Deserialize<'de>,
+{
     type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
         self.arr.index(index)
     }
 }
 
-impl<const MAX_LEN: usize, T: Targetable> VectorWire<T, MAX_LEN> {
+impl<const MAX_LEN: usize, T: Targetable + Clone + Serialize> VectorWire<T, MAX_LEN>
+where
+    for<'de> T: Deserialize<'de>,
+{
     pub fn new<F, const D: usize>(b: &mut CircuitBuilder<F, D>) -> Self
     where
         F: RichField + Extendable<D>,
@@ -130,17 +141,51 @@ impl<const MAX_LEN: usize> VectorWire<Target, MAX_LEN> {
 
 /// Fixed size array in circuit of any type (Target or U32Target for example!)
 /// of N elements.
-#[derive(Clone, Debug)]
-pub struct Array<T, const N: usize> {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Array<T: Clone + Serialize, const N: usize>
+where
+    for<'d> T: Deserialize<'d>,
+{
+    // special serialization because serde doesn't implement using const generics
+    #[serde(serialize_with = "to_targets", deserialize_with = "from_targets")]
     pub(crate) arr: [T; N],
 }
 
-impl<T, const N: usize> From<[T; N]> for Array<T, N> {
+fn to_targets<T: Clone + Serialize, const N: usize, S>(
+    v: &[T; N],
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_some(&v.to_vec())
+}
+
+pub fn from_targets<'de, D, T: Clone + Serialize + Deserialize<'de>, const N: usize>(
+    deserializer: D,
+) -> Result<[T; N], D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    Vec::<T>::deserialize(deserializer).and_then(|vec| {
+        vec.try_into()
+            .map_err(|_| Error::custom("failed to deserialize array"))
+    })
+}
+
+impl<T: Clone + Serialize, const N: usize> From<[T; N]> for Array<T, N>
+where
+    for<'de> T: Deserialize<'de>,
+{
     fn from(value: [T; N]) -> Self {
         Self { arr: value }
     }
 }
-impl<T: Debug, const N: usize> TryFrom<Vec<T>> for Array<T, N> {
+impl<T: Clone + Debug + Serialize, const N: usize> TryFrom<Vec<T>> for Array<T, N>
+where
+    for<'de> T: Deserialize<'de>,
+{
     type Error = anyhow::Error;
     fn try_from(value: Vec<T>) -> Result<Self> {
         Ok(Self {
@@ -175,7 +220,10 @@ impl Targetable for U32Target {
     }
 }
 
-impl<T, const SIZE: usize> Index<usize> for Array<T, SIZE> {
+impl<T: Clone + Serialize, const SIZE: usize> Index<usize> for Array<T, SIZE>
+where
+    for<'de> T: Deserialize<'de>,
+{
     type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
         self.arr.index(index)
@@ -193,7 +241,10 @@ impl<const SIZE: usize> Array<Target, SIZE> {
     }
 }
 
-impl<T: Targetable, const SIZE: usize> Array<T, SIZE> {
+impl<T: Targetable + Clone + Serialize, const SIZE: usize> Array<T, SIZE>
+where
+    for<'de> T: Deserialize<'de>,
+{
     /// Creates new wires of the given SIZE.
     pub fn new<F: RichField + Extendable<D>, const D: usize>(b: &mut CircuitBuilder<F, D>) -> Self {
         Self {
