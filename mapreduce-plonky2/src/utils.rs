@@ -17,6 +17,9 @@ const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
 
+/// The coordinate length of a curve point
+pub const CURVE_COORDINATE_LEN: usize = 5;
+
 /// Length of an U64
 pub const U64_LEN: usize = 8;
 /// Length of an U64 in U32
@@ -244,6 +247,20 @@ pub(crate) fn read_le_u32(input: &mut &[u8]) -> u32 {
     let (int_bytes, rest) = input.split_at(std::mem::size_of::<u32>());
     *input = rest;
     u32::from_le_bytes(int_bytes.try_into().unwrap())
+}
+
+/// Transform a list of elements to a curve point.
+pub fn transform_to_curve_point<T: Copy>(s: &[T]) -> ([T; 5], [T; 5], T) {
+    // 5 F for each coordinates + 1 bool flag
+    assert!(s.len() >= 2 * CURVE_COORDINATE_LEN + 1);
+
+    let x = s[..CURVE_COORDINATE_LEN].try_into().unwrap();
+    let y = s[CURVE_COORDINATE_LEN..2 * CURVE_COORDINATE_LEN]
+        .try_into()
+        .unwrap();
+    let flag = s[2 * CURVE_COORDINATE_LEN];
+
+    (x, y, flag)
 }
 
 #[cfg(test)]
