@@ -143,17 +143,15 @@ impl SimpleSlot {
     /// Remember the rules to get the MPT key is as follow:
     /// * location = keccak256(pad32(contract_address), pad32(slot))
     /// * mpt_key = keccak256(location)
-    /// Note the simple slot wire is NOT range checked, because it is expected
-    /// to be given by the verifier. If that assumption is not true, then the
-    /// caller should call `b.range_check(slot, 8)` to ensure its byteness.
+    /// Note the simple slot wire and the contract address wires are NOT range 
+    /// checked, because they are expected to be given by the verifier. 
+    /// If that assumption is not true, then the caller should call 
+    /// `b.range_check(slot, 8)` to ensure its byteness.
     pub fn build<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
     ) -> SimpleSlotWires {
         let slot = b.add_virtual_target();
         let contract_address = AddressTarget::new(b);
-
-        // Always ensure whatever goes into hash function, it's bytes.
-        contract_address.assert_bytes(b);
 
         // keccak(left_pad32(contract_address), left_pad32(slot))
         let mut arr = [b.zero(); INPUT_PADDED_LEN];
