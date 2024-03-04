@@ -1,23 +1,33 @@
-//! This module implements the logic of verifying that a Merkle recursive proof over a tree contains the same set of
-//! leaves than a MPT recursive proof over a different tree. This is the digest translation mechanism, passing from 
-//! one tree to another.
+//! This module implements the logic of verifying that a Merkle recursive proof
+//! over a tree contains the same set of leaves than a MPT recursive proof over
+//! a different tree. This is the digest translation mechanism, passing from one
+//! tree to another.
+
 use super::{
     length_match::PublicInputs as MPTPublicInputs, merkle::PublicInputs as MerklePublicInputs,
 };
 use crate::{
+    array::Array,
     group_hashing::CircuitBuilderGroupHashing,
     keccak::{OutputHash, PACKED_HASH_LEN},
-    utils::{transform_to_curve_point, PackedAddressTarget, PACKED_ADDRESS_LEN},
+    utils::{
+        convert_u32_fields_to_u8_vec, transform_to_curve_point, PackedAddressTarget,
+        PACKED_ADDRESS_LEN,
+    },
 };
+use ethers::types::{H160, H256};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
+    hash::hash_types::RichField,
     iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::{
     base_field::QuinticExtensionTarget,
     curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
+use std::array;
 
 /// This is a wrapper around an array of targets set as public inputs of any
 /// proof generated in this module. They all share the same structure.
@@ -30,6 +40,26 @@ use plonky2_ecgfp5::gadgets::{
 #[derive(Clone, Debug)]
 pub struct PublicInputs<'a, T: Clone> {
     pub(crate) proof_inputs: &'a [T],
+}
+
+impl<'a, F: RichField> PublicInputs<'a, F> {
+    /// Get the contract address (A).
+    pub fn contract_address_value(&self) -> H160 {
+        // The contract address is packed as [u32; 5] in public inputs. This
+        // code converts it to [u8; 20] as H160.
+        let bytes = convert_u32_fields_to_u8_vec(self.contract_address_data());
+
+        H160(bytes.try_into().unwrap())
+    }
+
+    /// Get the hash value of storage MPT root (C1).
+    pub fn mpt_root_value(&self) -> H256 {
+        // The root hash is packed as [u32; 8] in public inputs. This code
+        // converts it to [u8; 32] as H256.
+        let bytes = convert_u32_fields_to_u8_vec(&self.mpt_root_data());
+
+        H256(bytes.try_into().unwrap())
+    }
 }
 
 impl<'a> PublicInputs<'a, Target> {
@@ -60,6 +90,18 @@ impl<'a> PublicInputs<'a, Target> {
 
         CurveTarget(([x, y], flag))
     }
+
+    pub fn contract_address(&self) -> PackedAddressTarget {
+        let data = self.contract_address_data();
+        Array {
+            arr: array::from_fn(|i| U32Target(data[i])),
+        }
+    }
+
+    pub fn mpt_root(&self) -> OutputHash {
+        let data = self.mpt_root_data();
+        array::from_fn(|i| U32Target(data[i])).into()
+    }
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
@@ -69,12 +111,12 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     /// `A` Address of smart contract
     /// `M` Storage slot of the mapping
     /// `S` Storage slot of the variable holding the length
-    const D_IDX: usize = 0;
-    const C1_IDX: usize = Self::D_IDX + 11; // 5*2+1 for curve target
-    const C2_IDX: usize = Self::C1_IDX + PACKED_HASH_LEN;
-    const A_IDX: usize = Self::C2_IDX + PACKED_HASH_LEN;
-    const M_IDX: usize = Self::A_IDX + PACKED_ADDRESS_LEN;
-    const S_IDX: usize = Self::M_IDX + 1;
+    pub(crate) const D_IDX: usize = 0;
+    pub(crate) const C1_IDX: usize = Self::D_IDX + 11; // 5*2+1 for curve target
+    pub(crate) const C2_IDX: usize = Self::C1_IDX + PACKED_HASH_LEN;
+    pub(crate) const A_IDX: usize = Self::C2_IDX + PACKED_HASH_LEN;
+    pub(crate) const M_IDX: usize = Self::A_IDX + PACKED_ADDRESS_LEN;
+    pub(crate) const S_IDX: usize = Self::M_IDX + 1;
     pub(crate) const TOTAL_LEN: usize = Self::S_IDX + 1;
 
     pub fn from(arr: &'a [T]) -> Self {
@@ -86,15 +128,15 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         transform_to_curve_point(&self.proof_inputs[Self::D_IDX..])
     }
 
-    pub fn mpt_root_hash(&self) -> &[T] {
+    pub fn mpt_root_data(&self) -> &[T] {
         &self.proof_inputs[Self::C1_IDX..Self::C2_IDX]
     }
 
-    pub fn merkle_root_hash(&self) -> &[T] {
+    pub fn merkle_root_data(&self) -> &[T] {
         &self.proof_inputs[Self::C2_IDX..Self::A_IDX]
     }
 
-    pub fn contract_address(&self) -> &[T] {
+    pub fn contract_address_data(&self) -> &[T] {
         &self.proof_inputs[Self::A_IDX..Self::M_IDX]
     }
 
@@ -205,8 +247,8 @@ mod tests {
 
         // Get the expected public inputs.
         let exp_digest = (digest.x.0, digest.y.0, F::from_bool(digest.is_inf));
-        let exp_mpt_root_hash = mpt_pi_wrapper.root_hash_data();
-        let exp_merkle_root_hash = merkle_pi_wrapper.root_hash_data();
+        let exp_mpt_root = mpt_pi_wrapper.root_hash_data();
+        let exp_merkle_root = merkle_pi_wrapper.root_hash_data();
         let exp_contract_address = mpt_pi_wrapper.contract_address_data();
         let exp_mapping_slot = mpt_pi_wrapper.mapping_slot();
         let exp_length_slot = mpt_pi_wrapper.length_slot();
@@ -220,9 +262,9 @@ mod tests {
         // Verify the public inputs.
         let pi = PublicInputs::<F>::from(&proof.public_inputs);
         assert_eq!(pi.digest_data(), exp_digest);
-        assert_eq!(pi.mpt_root_hash(), exp_mpt_root_hash);
-        assert_eq!(pi.merkle_root_hash(), exp_merkle_root_hash);
-        assert_eq!(pi.contract_address(), exp_contract_address);
+        assert_eq!(pi.mpt_root_data(), exp_mpt_root);
+        assert_eq!(pi.merkle_root_data(), exp_merkle_root);
+        assert_eq!(pi.contract_address_data(), exp_contract_address);
         assert_eq!(pi.mapping_slot(), exp_mapping_slot);
         assert_eq!(pi.length_slot(), exp_length_slot);
     }
