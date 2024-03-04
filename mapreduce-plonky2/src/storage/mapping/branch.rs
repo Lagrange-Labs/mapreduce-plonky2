@@ -22,15 +22,15 @@ use crate::{
 
 use super::public_inputs::PublicInputs;
 
-pub(super) const MAX_BRANCH_NODE_LEN: usize = 564;
+pub(super) const MAX_BRANCH_NODE_LEN: usize = 532;
 
 #[derive(Clone, Debug)]
 pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {
-    node: Vec<u8>,
+    pub(super) node: Vec<u8>,
     // in nibbles
-    common_prefix: Vec<u8>,
-    expected_pointer: usize,
-    mapping_slot: usize,
+    pub(super) common_prefix: Vec<u8>,
+    pub(super) expected_pointer: usize,
+    pub(super) mapping_slot: usize,
 }
 
 pub struct BranchWires<const NODE_LEN: usize>
@@ -130,7 +130,7 @@ where
         wires.node.assign(pw, &vec);
         wires.common_prefix.assign(
             pw,
-            &self.common_prefix.try_into().unwrap(),
+            &self.common_prefix.clone().try_into().unwrap(),
             self.expected_pointer,
         );
         KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
