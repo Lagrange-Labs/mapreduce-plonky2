@@ -99,12 +99,15 @@ macro_rules! impl_branch_circuits {
             fn new(builder: &CircuitWithUniversalVerifierBuilder<F, D, NUM_IO>) -> Self {
                 BranchCircuits {
                     $(
+                        // generate one circuit with full node len
                         [< b $i >]:  builder.build_circuit::<C, $i, BranchWires<MAX_BRANCH_NODE_LEN>>(()),
+                        // generate one circuit with half node len
                         [< b $i over_2>]:  builder.build_circuit::<C, $i, BranchWires<{MAX_BRANCH_NODE_LEN/2}>>(()),
 
                     )+
                 }
             }
+            /// Returns the set of circuits to be fed to the recursive framework
             fn circuit_set(&self) -> Vec<Box<dyn RecursiveCircuitInfo<F, C, D> + '_>> {
                 let mut arr = Vec::new();
                 $(
@@ -113,6 +116,8 @@ macro_rules! impl_branch_circuits {
                 )+
                 arr
             }
+            /// generates a proof from the inputs stored in `branch`. Depending on the size of the node,
+            /// and the number of children proofs, it selects the right specialized circuit to generate the proof.
             fn generate_proof(
                 &self,
                 set: &RecursiveCircuits<F, C, D>,
