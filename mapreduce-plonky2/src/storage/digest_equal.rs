@@ -67,7 +67,7 @@ impl<'a> PublicInputs<'a, Target> {
         cb: &mut CircuitBuilder<GoldilocksField, 2>,
         digest: &CurveTarget,
         mpt_root_hash: &OutputHash,
-        merkle_root_hash: &OutputHash,
+        merkle_root_hash: &Array<Target, NUM_HASH_OUT_ELTS>,
         contract_address: &PackedAddressTarget,
         mapping_slot: Target,
         length_slot: Target,

@@ -1,19 +1,15 @@
 use crate::{
+    array::Array,
     group_hashing::N,
     keccak::OutputHash,
     utils::{convert_point_to_curve_target, transform_to_curve_point},
 };
 use plonky2::{
-    field::goldilocks_field::GoldilocksField,
-    hash::hash_types::NUM_HASH_OUT_ELTS,
-    iop::target::{BoolTarget, Target},
-    plonk::circuit_builder::CircuitBuilder,
+    field::goldilocks_field::GoldilocksField, hash::hash_types::NUM_HASH_OUT_ELTS,
+    iop::target::Target, plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use plonky2_ecgfp5::gadgets::{
-    base_field::QuinticExtensionTarget,
-    curve::{CircuitBuilderEcGFp5, CurveTarget},
-};
+use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 use std::array;
 
 /// This is a wrapper around an array of targets set as public inputs of any
@@ -40,9 +36,9 @@ impl<'a> PublicInputs<'a, Target> {
         convert_point_to_curve_target(self.digest_data())
     }
 
-    pub fn root_hash(&self) -> OutputHash {
+    pub fn root_hash(&self) -> Array<Target, NUM_HASH_OUT_ELTS> {
         let data = self.root_hash_data();
-        array::from_fn(|i| U32Target(data[i])).into()
+        array::from_fn(|i| data[i]).into()
     }
 }
 
