@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     array::Array,
-    group_hashing::CircuitBuilderGroupHashing,
+    group_hashing::{CircuitBuilderGroupHashing, N},
     keccak::{OutputHash, PACKED_HASH_LEN},
     utils::{
         convert_u32_fields_to_u8_vec, transform_to_curve_point, PackedAddressTarget,
@@ -18,7 +18,7 @@ use crate::{
 use ethers::types::{H160, H256};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
-    hash::hash_types::RichField,
+    hash::hash_types::{RichField, NUM_HASH_OUT_ELTS},
     iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,
 };
@@ -112,9 +112,9 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     /// `M` Storage slot of the mapping
     /// `S` Storage slot of the variable holding the length
     pub(crate) const D_IDX: usize = 0;
-    pub(crate) const C1_IDX: usize = Self::D_IDX + 11; // 5*2+1 for curve target
+    pub(crate) const C1_IDX: usize = Self::D_IDX + 2 * N + 1; // 2*N+1 for curve target
     pub(crate) const C2_IDX: usize = Self::C1_IDX + PACKED_HASH_LEN;
-    pub(crate) const A_IDX: usize = Self::C2_IDX + PACKED_HASH_LEN;
+    pub(crate) const A_IDX: usize = Self::C2_IDX + NUM_HASH_OUT_ELTS;
     pub(crate) const M_IDX: usize = Self::A_IDX + PACKED_ADDRESS_LEN;
     pub(crate) const S_IDX: usize = Self::M_IDX + 1;
     pub(crate) const TOTAL_LEN: usize = Self::S_IDX + 1;
@@ -187,7 +187,7 @@ mod tests {
     use crate::{
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        utils::{test::random_vector, CURVE_COORDINATE_LEN},
+        utils::test::random_vector,
     };
     use plonky2::{
         field::types::{Field, Sample},
@@ -276,12 +276,11 @@ mod tests {
             .collect();
 
         // Set the digest.
-        pi[MPTPublicInputs::<F>::D_IDX..MPTPublicInputs::<F>::D_IDX + CURVE_COORDINATE_LEN]
+        pi[MPTPublicInputs::<F>::D_IDX..MPTPublicInputs::<F>::D_IDX + N]
             .copy_from_slice(&digest.x.0);
-        pi[MPTPublicInputs::<F>::D_IDX + CURVE_COORDINATE_LEN
-            ..MPTPublicInputs::<F>::D_IDX + 2 * CURVE_COORDINATE_LEN]
+        pi[MPTPublicInputs::<F>::D_IDX + N..MPTPublicInputs::<F>::D_IDX + 2 * N]
             .copy_from_slice(&digest.y.0);
-        pi[MPTPublicInputs::<F>::D_IDX + 2 * CURVE_COORDINATE_LEN] = F::from_bool(digest.is_inf);
+        pi[MPTPublicInputs::<F>::D_IDX + 2 * N] = F::from_bool(digest.is_inf);
 
         pi
     }
@@ -293,12 +292,11 @@ mod tests {
             .collect();
 
         // Set the digest.
-        pi[MerklePublicInputs::<F>::D_IDX..MerklePublicInputs::<F>::D_IDX + CURVE_COORDINATE_LEN]
+        pi[MerklePublicInputs::<F>::D_IDX..MerklePublicInputs::<F>::D_IDX + N]
             .copy_from_slice(&digest.x.0);
-        pi[MerklePublicInputs::<F>::D_IDX + CURVE_COORDINATE_LEN
-            ..MerklePublicInputs::<F>::D_IDX + 2 * CURVE_COORDINATE_LEN]
+        pi[MerklePublicInputs::<F>::D_IDX + N..MerklePublicInputs::<F>::D_IDX + 2 * N]
             .copy_from_slice(&digest.y.0);
-        pi[MerklePublicInputs::<F>::D_IDX + 2 * CURVE_COORDINATE_LEN] = F::from_bool(digest.is_inf);
+        pi[MerklePublicInputs::<F>::D_IDX + 2 * N] = F::from_bool(digest.is_inf);
 
         pi
     }

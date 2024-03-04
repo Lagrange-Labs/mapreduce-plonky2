@@ -11,14 +11,11 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use sha3::Digest;
 use sha3::Keccak256;
 
-use crate::{array::Array, ProofTuple};
+use crate::{array::Array, group_hashing::N, ProofTuple};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
-
-/// The coordinate length of a curve point
-pub const CURVE_COORDINATE_LEN: usize = 5;
 
 /// Length of an U64
 pub const U64_LEN: usize = 8;
@@ -252,13 +249,11 @@ pub(crate) fn read_le_u32(input: &mut &[u8]) -> u32 {
 /// Transform a list of elements to a curve point.
 pub fn transform_to_curve_point<T: Copy>(s: &[T]) -> ([T; 5], [T; 5], T) {
     // 5 F for each coordinates + 1 bool flag
-    assert!(s.len() >= 2 * CURVE_COORDINATE_LEN + 1);
+    assert!(s.len() >= 2 * N + 1);
 
-    let x = s[..CURVE_COORDINATE_LEN].try_into().unwrap();
-    let y = s[CURVE_COORDINATE_LEN..2 * CURVE_COORDINATE_LEN]
-        .try_into()
-        .unwrap();
-    let flag = s[2 * CURVE_COORDINATE_LEN];
+    let x = s[..N].try_into().unwrap();
+    let y = s[N..2 * N].try_into().unwrap();
+    let flag = s[2 * N];
 
     (x, y, flag)
 }

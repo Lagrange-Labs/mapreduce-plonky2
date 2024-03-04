@@ -1,9 +1,7 @@
-use crate::{
-    keccak::{OutputHash, PACKED_HASH_LEN},
-    utils::transform_to_curve_point,
-};
+use crate::{group_hashing::N, keccak::OutputHash, utils::transform_to_curve_point};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
+    hash::hash_types::NUM_HASH_OUT_ELTS,
     iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,
 };
@@ -52,9 +50,8 @@ impl<'a> PublicInputs<'a, Target> {
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
     pub(crate) const D_IDX: usize = 0;
-    pub(crate) const R_IDX: usize = Self::D_IDX + 11; // 5*2+1 for curve target
-    pub(crate) const TOTAL_LEN: usize = Self::R_IDX + PACKED_HASH_LEN;
-    const EXTENSION: usize = 5;
+    pub(crate) const R_IDX: usize = Self::D_IDX + 2 * N + 1; // 2*N+1 for curve target
+    pub(crate) const TOTAL_LEN: usize = Self::R_IDX + NUM_HASH_OUT_ELTS;
 
     pub fn from(arr: &'a [T]) -> Self {
         Self { proof_inputs: arr }
