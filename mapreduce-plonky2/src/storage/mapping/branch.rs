@@ -11,6 +11,7 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     array::{Array, Vector, VectorWire},
@@ -33,6 +34,7 @@ pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {
     pub(super) mapping_slot: usize,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BranchWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
