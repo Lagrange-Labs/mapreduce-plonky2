@@ -12,29 +12,11 @@ use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTa
 use sha3::Digest;
 use sha3::Keccak256;
 
-use crate::{array::Array, group_hashing::N, ProofTuple};
+use crate::{group_hashing::N, ProofTuple};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
-
-/// Length of an U64
-pub const U64_LEN: usize = 8;
-/// Length of an U64 in U32
-pub const PACKED_U64_LEN: usize = U64_LEN / 4;
-/// Byte representation of an U64
-pub type U64Target = Array<Target, U64_LEN>;
-/// U32 representation of an U64
-pub type PackedU64Target = Array<U32Target, PACKED_U64_LEN>;
-
-/// Length of an address (H160 = [u8; 20])
-pub const ADDRESS_LEN: usize = 20;
-/// Length of an address in U32
-pub const PACKED_ADDRESS_LEN: usize = ADDRESS_LEN / 4;
-/// Byte representation of an address
-pub type AddressTarget = Array<Target, ADDRESS_LEN>;
-/// U32 representation of an address
-pub type PackedAddressTarget = Array<U32Target, PACKED_ADDRESS_LEN>;
 
 pub(crate) fn verify_proof_tuple<
     F: RichField + Extendable<D>,
@@ -151,6 +133,44 @@ pub(crate) fn convert_u8_targets_to_u32<F: RichField + Extendable<D>, const D: u
             U32Target(x)
         })
         .collect_vec()
+}
+
+// TODO: delete if useless.
+/// Convert an u32 target slice to a vector of u8 targets.
+pub(crate) fn convert_u32_targets_to_u8<F: RichField + Extendable<D>, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    data: &[U32Target],
+) -> Vec<Target> {
+    let four = b.constant(F::from_canonical_usize(4));
+    let four_square = b.constant(F::from_canonical_usize(16));
+    let four_cube = b.constant(F::from_canonical_usize(64));
+
+    // Convert each u32 to [u8; 4].
+    data.iter()
+        .flat_map(|u32_element| {
+            // Convert an u32 to [u2; 16], each limb is an u2, it means
+            // BASE is 4 (2^2), and total 16 limbs.
+            // We cannot set base to 16 (2^4), otherwise an error of too
+            // high degree occurred.
+            let u2_elements = b.split_le_base::<4>(u32_element.0, 16);
+
+            // Convert each [u2; 4] to an u8 as:
+            // u[0] + u[1] * 4 + u[2] * 16 + u[3] * 64
+            u2_elements
+                .chunks(4)
+                .map(|u| {
+                    // acc = u[0] + u[1] * 4
+                    let acc = b.mul_add(u[1], four, u[0]);
+                    // acc += [u2] * 4^2
+                    let acc = b.mul_add(u[2], four_square, acc);
+                    // acc += [u3] * 4^3
+                    b.mul_add(u[3], four_cube, acc)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap()
 }
 
 /// Returns the bits of the given number.

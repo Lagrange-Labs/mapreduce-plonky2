@@ -10,23 +10,20 @@ use crate::{
     array::Array,
     group_hashing::{CircuitBuilderGroupHashing, N},
     keccak::{OutputHash, PACKED_HASH_LEN},
+    types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
     utils::{
         convert_point_to_curve_target, convert_slice_to_curve_point, convert_u32_fields_to_u8_vec,
-        PackedAddressTarget, PACKED_ADDRESS_LEN,
     },
 };
 use ethers::types::{H160, H256};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::{RichField, NUM_HASH_OUT_ELTS},
-    iop::target::{BoolTarget, Target},
+    iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use plonky2_ecgfp5::gadgets::{
-    base_field::QuinticExtensionTarget,
-    curve::{CircuitBuilderEcGFp5, CurveTarget},
-};
+use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 use std::array;
 
 /// This is a wrapper around an array of targets set as public inputs of any

@@ -3,3 +3,6 @@
 //!     block-linking-circuit --> ...
 
 mod block_linking;
+mod branch;
+
+pub use branch::PublicInputs;
