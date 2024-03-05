@@ -297,7 +297,8 @@ where
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
         rlp_headers: &RlpList<MAX_ITEMS_IN_LIST>,
-    ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget) {
+        // advancedkey, extracted hash, condition, nibble
+    ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget, Target) {
         let one = b.one();
         // assume it's a node and return the boolean condition that must be true if
         // it is a node - decided in advance_key function
@@ -313,7 +314,7 @@ where
         let new_key = key.advance_by(b, one);
         let nibble_header = rlp_headers.select(b, nibble);
         let branch_child_hash = node.extract_array::<F, D, HASH_LEN>(b, nibble_header.offset);
-        (new_key, branch_child_hash, branch_condition)
+        (new_key, branch_child_hash, branch_condition, nibble)
     }
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
@@ -928,7 +929,7 @@ pub mod test {
         let key_wire = MPTKeyWire::new(&mut builder);
         let rlp_headers =
             decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(&mut builder, &node.arr, zero);
-        let (advanced_key, value, should_true) = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
+        let (advanced_key, value, should_true, _) = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
             &mut builder,
             &node,
             &key_wire,

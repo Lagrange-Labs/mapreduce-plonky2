@@ -95,6 +95,8 @@ impl ByteProofTuple {
 
 #[cfg(test)]
 mod test {
+    use std::time;
+
     use ethers::utils::keccak256;
     use plonky2::{
         iop::witness::{PartialWitness, WitnessWrite},
@@ -134,12 +136,19 @@ mod test {
         let hout = keccak256(&hin[..]);
         pw.set_keccak256_input_target(&hash_input, &hin);
         pw.set_keccak256_output_target(&hash_output, &hout);
+        let now = time::Instant::now();
         let data = builder.build();
+        println!("Circuit build time: {} ms", now.elapsed().as_millis());
+        let now = time::Instant::now();
         let proof = data.prove(pw).unwrap();
+        println!("Proving time: {} ms", now.elapsed().as_millis());
         let tuple = (proof, data.verifier_only, data.common);
         verify_proof_tuple(&tuple)?;
         let expected = tuple.clone();
+        let now = time::Instant::now();
         let serialized = ByteProofTuple::from_proof_tuple::<F, C, D>(tuple).unwrap();
+        let t = now.elapsed().as_millis();
+        println!("Serialization time: {} ms", t);
         let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&serialized).unwrap();
         assert_eq!(expected, deserialized);
         Ok(())

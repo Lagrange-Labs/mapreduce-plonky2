@@ -20,13 +20,21 @@ use recursion_framework::circuit_builder::CircuitWithUniversalVerifierBuilder;
 use recursion_framework::framework::prepare_recursive_circuit_for_circuit_set as p;
 use recursion_framework::framework::RecursiveCircuitInfo;
 use recursion_framework::framework::RecursiveCircuits;
+use recursion_framework::framework_testing::new_universal_circuit_builder_for_testing;
+use recursion_framework::framework_testing::TestingRecursiveCircuits;
+use serde::Deserialize;
 use std::array::from_fn as create_array;
 
 const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 
-const MAPPING_CIRCUIT_SET_SIZE: usize = 3;
+/// number of circuits in the set
+/// 1 leaf, 1 ext, 16 branches * 2 because we split the node len in half
+#[cfg(not(test))]
+const MAPPING_CIRCUIT_SET_SIZE: usize = 34;
+#[cfg(test)]
+const MAPPING_CIRCUIT_SET_SIZE: usize = 6; // 1leaf, 1ext, 2 branches * 2
 
 /// CircuitType is a wrapper around the different specialized circuits that can be used to prove a MPT node recursively
 /// NOTE: Right now these circuits are specialized to prove inclusion of a single mapping slot.
@@ -82,7 +90,10 @@ struct MPTCircuitsParams {
     branchs: BranchCircuits,
     #[cfg(test)]
     branchs: TestBranchCircuits,
+    #[cfg(not(test))]
     set: RecursiveCircuits<F, C, D>,
+    #[cfg(test)]
+    set: TestingRecursiveCircuits<F, C, D, NUM_IO>,
 }
 
 const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
@@ -120,11 +131,15 @@ macro_rules! impl_branch_circuits {
                 )+
                 arr
             }
+
             /// generates a proof from the inputs stored in `branch`. Depending on the size of the node,
             /// and the number of children proofs, it selects the right specialized circuit to generate the proof.
             fn generate_proof(
                 &self,
+                #[cfg(not(test))]
                 set: &RecursiveCircuits<F, C, D>,
+                #[cfg(test)]
+                set: &TestingRecursiveCircuits<F, C, D,NUM_IO>,
                 branch: BranchProofInput,
             ) -> Result<MPTProof> {
                 // first, determine manually the common prefix, the ptr and the mapping slot
@@ -157,6 +172,8 @@ macro_rules! impl_branch_circuits {
                     bail!("Branch node too long");
                 }
 
+                // we just take the first one,it doesn't matter which one we take as long
+                // as all prefixes and pointers are equal.
                 let pi = PublicInputs::<F>::from(&branch.child_proofs[0].proof.public_inputs);
                 let (key, ptr) = pi.mpt_key_info();
                 let mapping_slot = pi.mapping_slot().to_canonical_u64() as usize;
@@ -164,7 +181,11 @@ macro_rules! impl_branch_circuits {
                     .iter()
                     .map(|nib| nib.to_canonical_u64() as u8)
                     .collect::<Vec<_>>();
-                let pointer = ptr.to_canonical_u64() as usize;
+                // -1 because it's the expected pointer _after_ advancing the
+                // pointer by one in the branch circuit.
+                // TODO: refactor circuit to only advance the pointer by one _after_
+                // the comparison, so we don't need to do this?
+                let pointer = ptr.to_canonical_u64() as usize - 1;
                 let proofs = branch
                     .child_proofs
                     .iter()
@@ -234,7 +255,13 @@ impl MPTCircuitsParams {
     /// Generates the circuit parameters for the MPT circuits.
     fn build() -> Self {
         let config = CircuitConfig::standard_recursion_config();
+        #[cfg(not(test))]
         let circuit_builder = CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(
+            config,
+            MAPPING_CIRCUIT_SET_SIZE,
+        );
+        #[cfg(test)]
+        let circuit_builder = new_universal_circuit_builder_for_testing::<F, C, D, NUM_IO>(
             config,
             MAPPING_CIRCUIT_SET_SIZE,
         );
@@ -247,7 +274,10 @@ impl MPTCircuitsParams {
         let branch_circuits = TestBranchCircuits::new(&circuit_builder);
         let mut circuits = vec![p(&leaf_circuit), p(&ext_circuit)];
         circuits.extend(branch_circuits.circuit_set());
+        #[cfg(not(test))]
         let recursive_framework = RecursiveCircuits::new(circuits);
+        #[cfg(test)]
+        let recursive_framework = TestingRecursiveCircuits::new(&circuit_builder, circuits);
 
         MPTCircuitsParams {
             leaf_circuit,
@@ -259,20 +289,53 @@ impl MPTCircuitsParams {
 
     fn generate_proof(&self, circuit_type: CircuitType) -> Result<MPTProof> {
         match circuit_type {
-            CircuitType::Leaf(leaf) => self
-                .set
-                .generate_proof(&self.leaf_circuit, [], [], leaf)
-                .map(|p| (p, self.leaf_circuit.get_verifier_data().clone()).into()),
-            CircuitType::Extension(ext) => self
-                .set
-                .generate_proof(
-                    &self.ext_circuit,
-                    [ext.child_proof.proof],
-                    [&ext.child_proof.vk],
-                    ExtensionNodeCircuit { node: ext.node },
-                )
-                .map(|p| (p, self.ext_circuit.get_verifier_data().clone()).into()),
-            CircuitType::Branch(branch) => self.branchs.generate_proof(&self.set, branch),
+            CircuitType::Leaf(leaf) => {
+                #[cfg(not(test))]
+                {
+                    self.set
+                        .generate_proof(&self.leaf_circuit, [], [], leaf)
+                        .map(|p| (p, self.leaf_circuit.get_verifier_data().clone()).into())
+                }
+                #[cfg(test)]
+                {
+                    self.set
+                        .generate_proof(&self.leaf_circuit, [], leaf)
+                        .map(|p| (p, self.leaf_circuit.get_verifier_data().clone()).into())
+                }
+            }
+            CircuitType::Extension(ext) => {
+                #[cfg(not(test))]
+                {
+                    self.set
+                        .generate_proof(
+                            &self.ext_circuit,
+                            [ext.child_proof.proof],
+                            [&ext.child_proof.vk],
+                            ExtensionNodeCircuit { node: ext.node },
+                        )
+                        .map(|p| (p, self.ext_circuit.get_verifier_data().clone()).into())
+                }
+                #[cfg(test)]
+                {
+                    self.set
+                        .generate_proof(
+                            &self.ext_circuit,
+                            [ext.child_proof.proof],
+                            ExtensionNodeCircuit { node: ext.node },
+                        )
+                        .map(|p| (p, self.ext_circuit.get_verifier_data().clone()).into())
+                }
+            }
+            CircuitType::Branch(branch) => {
+                #[cfg(not(test))]
+                {
+                    self.branchs.generate_proof(&self.set, branch)
+                }
+                #[cfg(test)]
+                {
+                    self.branchs.generate_proof(&self.set, branch)
+                }
+            }
         }
     }
 }
@@ -280,10 +343,13 @@ impl MPTCircuitsParams {
 #[cfg(test)]
 mod test {
     use eth_trie::Trie;
-    use rand::{random, thread_rng, Rng};
+    use plonky2::field::types::Field;
+    use rand::{thread_rng, Rng};
 
     use crate::{
-        mpt_sequential::test::generate_random_storage_mpt, storage::key::MappingSlot,
+        eth::StorageSlot,
+        mpt_sequential::{bytes_to_nibbles, nibbles_to_bytes, test::generate_random_storage_mpt},
+        storage::key::MappingSlot,
         utils::test::random_vector,
     };
 
@@ -294,39 +360,69 @@ mod test {
         let params = MPTCircuitsParams::build();
         let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
         // insert two keys that share the same prefix
-        let key1 = random_vector(32);
-        let mut key2 = key1.clone();
-        key2[key1.len() - 1] = thread_rng().gen();
+        let slot = 1;
+        let key = random_vector(20); // like address
+        let mpt1 = StorageSlot::Mapping(key.clone(), slot).mpt_key();
+        let mut mpt2 = mpt1.clone();
+        mpt2[mpt1.len() - 1] = thread_rng().gen();
         let v = random_vector(32);
-        trie.insert(&key1, &v).unwrap();
-        trie.insert(&key2, &v).unwrap();
+        trie.insert(&mpt1, &v).unwrap();
+        trie.insert(&mpt2, &v).unwrap();
         trie.root_hash().unwrap();
-        let p1 = trie.get_proof(&key1.clone()).unwrap();
-        let p2 = trie.get_proof(&key2.clone()).unwrap();
+        let p1 = trie.get_proof(&mpt1.clone()).unwrap();
+        let p2 = trie.get_proof(&mpt2.clone()).unwrap();
         // they should share the same branch node
         assert_eq!(p1.len(), p2.len());
         assert_eq!(p1[p1.len() - 2], p2[p2.len() - 2]);
-        let slot = MappingSlot::new(1, vec![1, 2, 3, 4]);
         let l1 = LeafCircuit {
             node: p1.last().unwrap().to_vec(),
-            slot: slot.clone(),
+            slot: MappingSlot::new(slot as u8, key),
         };
         // generate a leaf then a branch proof with only this leaf
         let leaf1 = params.generate_proof(CircuitType::Leaf(l1)).unwrap();
+        let pub1 = leaf1.proof.public_inputs.clone();
+        let pi1 = PublicInputs::from(&leaf1.proof.public_inputs);
+        let (comp_key, comp_ptr) = pi1.mpt_key_info();
+        assert_eq!(comp_ptr, F::from_canonical_usize(62));
+        println!("LEAF output PTR: {}", comp_ptr);
         let branch_node = p1[p1.len() - 2].to_vec();
         let branch_inputs = CircuitType::Branch(BranchProofInput {
             node: branch_node.clone(),
             child_proofs: vec![leaf1.clone()],
         });
-        let branch1 = params.generate_proof(branch_inputs).unwrap();
-        let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
-            params.branchs.b1_over_2.get_verifier_data().clone()
-        } else {
-            params.branchs.b1.get_verifier_data().clone()
+        //let branch1 = params.generate_proof(branch_inputs).unwrap();
+        //let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
+        //    params.branchs.b1_over_2.get_verifier_data().clone()
+        //} else {
+        //    params.branchs.b1.get_verifier_data().clone()
+        //};
+        //assert_eq!(branch1.vk, exp_vk);
+        let branch_inputs = CircuitType::Branch(BranchProofInput {
+            node: branch_node.clone(),
+            child_proofs: vec![leaf1.clone(), leaf1.clone()],
+        });
+        let pi2 = pub1.clone();
+        let key2 = {
+            let mut key_nibbles = bytes_to_nibbles(
+                &comp_key
+                    .iter()
+                    .map(|b| b.to_canonical_u64() as u8)
+                    .collect::<Vec<_>>(),
+            );
+            // increase the nibble
+            key_nibbles[comp_ptr.to_canonical_u64() as usize - 1] =
+                (key_nibbles[comp_ptr.to_canonical_u64() as usize - 1] + 1) % 16;
+            nibbles_to_bytes(&key_nibbles)
         };
-        assert_eq!(branch1.vk, exp_vk);
+        let pub2 = PublicInputs::create_public_inputs_arr(&key2, 62, slot, 1, c, d);
+        params
+            .set
+            .generate_proof_from_public_inputs(&params.leaf_circuit)
+        //let branch2 = params.generate_proof(branch_inputs).unwrap();
 
-        // generate  a branch proof with two leafs inputs now
+        // generate  a branch proof with two leafs inputs now but using the testing framework
+        // we simulate another leaf at the right key, so we just modify the nibble at the pointer
+
         //let l2 = LeafCircuit {
         //    node: p2.last().unwrap().to_vec(),
         //    slot: slot.clone(),

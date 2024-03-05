@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
-    mpt_sequential::{bytes_to_nibbles, Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
+    mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     utils::convert_u8_targets_to_u32,
 };
@@ -82,13 +82,14 @@ where
         // we already decode the rlp headers here since we need it to verify
         // the validity of the hash exposed by the proofs
         let headers = decode_fixed_list::<_, _, MAX_ITEMS_IN_LIST>(b, &node.arr.arr, zero);
-        for proof_inputs in inputs {
+        let mut seen_nibbles = [zero; N_CHILDREN];
+        for (i, proof_inputs) in inputs.iter().enumerate() {
             let child_accumulator = proof_inputs.accumulator();
             accumulator = b.curve_add(accumulator, child_accumulator);
             // add the number of leaves this proof has processed
             n = b.add(n, proof_inputs.n());
             let child_key = proof_inputs.mpt_key();
-            let (new_key, hash, is_valid) =
+            let (new_key, hash, is_valid, nibble) =
                 MPTCircuit::<1, NODE_LEN>::advance_key_branch(b, &node.arr, &child_key, &headers);
             // we always enforce it's a branch node, i.e. that it has 17 entries
             b.connect(is_valid.target, tru.target);
@@ -107,7 +108,18 @@ where
             common_prefix.enforce_prefix_equal(b, &new_key);
             // We also check proof is valid for the _same_ mapping slot
             b.connect(mapping_slot, proof_inputs.mapping_slot());
+            seen_nibbles[i] = nibble;
         }
+        // we check if we haven't processed duplicates
+        let mut is_equal = b._false();
+        for i in 0..N_CHILDREN {
+            for j in i + 1..N_CHILDREN {
+                let eq = b.is_equal(seen_nibbles[i], seen_nibbles[j]);
+                is_equal = b.or(eq, is_equal);
+            }
+        }
+        let fal = b._false();
+        b.connect(is_equal.target, fal.target);
 
         // we now extract the public input to register for this proofs
         let c = root.output_array.clone();
