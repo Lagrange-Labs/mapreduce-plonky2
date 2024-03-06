@@ -18,12 +18,15 @@ use crate::{
     circuit_builder::{
         CircuitLogicWires, CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder,
     },
-    framework::{RecursiveCircuitInfo, RecursiveCircuits}, serialization::targets_serialization::SerializableArray,
+    framework::{RecursiveCircuitInfo, RecursiveCircuits},
+    serialization::targets_serialization::SerializableArray,
 };
 
 use anyhow::Result;
 #[derive(Serialize, Deserialize)]
-struct DummyCircuitWires<const NUM_PUBLIC_INPUTS: usize>(SerializableArray<NUM_PUBLIC_INPUTS, Target>);
+struct DummyCircuitWires<const NUM_PUBLIC_INPUTS: usize>(
+    SerializableArray<NUM_PUBLIC_INPUTS, Target>,
+);
 
 impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize>
     CircuitLogicWires<F, D, 0> for DummyCircuitWires<NUM_PUBLIC_INPUTS>
@@ -62,8 +65,7 @@ pub struct TestingRecursiveCircuits<
     C: GenericConfig<D, F = F> + 'static,
     const D: usize,
     const NUM_PUBLIC_INPUTS: usize,
-> 
-where
+> where
     C::Hasher: AlgebraicHasher<F>,
 {
     /// Set of circuits whose proofs can be recursively verified by the universal verifier 

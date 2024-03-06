@@ -12,11 +12,17 @@ use plonky2::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{serialization::{circuit_data_serialization::SerializableCircuitData, targets_serialization::SerializableArray}, universal_verifier_gadget::{
-    verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
-    wrap_circuit::WrapCircuit,
-    CircuitSet, CircuitSetDigest, CircuitSetTarget,
-}};
+use crate::{
+    serialization::{
+        circuit_data_serialization::SerializableCircuitData,
+        targets_serialization::SerializableArray,
+    },
+    universal_verifier_gadget::{
+        verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
+        wrap_circuit::WrapCircuit,
+        CircuitSet, CircuitSetDigest, CircuitSetTarget,
+    },
+};
 
 use anyhow::Result;
 
@@ -85,7 +91,10 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     /// which is a fundamental building block of circuits built with such data structure, also checks
     /// that the verifier data employed for proof verification belongs to a set of admissible verifier data;
     /// the size of such a set corresponds to `circuit_set_size`, which must be provided as input.  
-    pub fn new<C: GenericConfig<D, F = F> + 'static>(config: CircuitConfig, circuit_set_size: usize) -> Self
+    pub fn new<C: GenericConfig<D, F = F> + 'static>(
+        config: CircuitConfig,
+        circuit_set_size: usize,
+    ) -> Self
     where
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
@@ -242,14 +251,13 @@ pub fn circuit_set_targets<
 /// `CLW` implementor
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct CircuitWithUniversalVerifier< 
+pub struct CircuitWithUniversalVerifier<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F> + 'static,
     const D: usize,
     const NUM_VERIFIERS: usize,
     CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
-> 
-where
+> where
     C::Hasher: AlgebraicHasher<F>,
 {
     universal_verifier_targets: SerializableArray<NUM_VERIFIERS, UniversalVerifierTarget<D>>,
@@ -364,7 +372,8 @@ pub(crate) mod tests {
         _h: PhantomData<H>,
     }
 
-    impl<'a,
+    impl<
+            'a,
             F: RichField + Extendable<D>,
             const D: usize,
             const NUM_VERIFIERS: usize,
@@ -430,7 +439,8 @@ pub(crate) mod tests {
         to_be_hashed_payload: SerializableArray<INPUT_SIZE, Target>,
     }
 
-    impl<'a,
+    impl<
+            'a,
             F: RichField + Extendable<D>,
             const D: usize,
             const NUM_VERIFIERS: usize,

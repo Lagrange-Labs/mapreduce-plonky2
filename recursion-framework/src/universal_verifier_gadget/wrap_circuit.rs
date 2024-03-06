@@ -14,9 +14,15 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{serialization::{circuit_data_serialization::SerializableCircuitData, targets_serialization::{SerializableProofWithPublicInputsTarget, SerializableVerifierCircuitTarget}}, universal_verifier_gadget::{
-    circuit_set::check_circuit_digest_target, RECURSION_THRESHOLD,
-}};
+use crate::{
+    serialization::{
+        circuit_data_serialization::SerializableCircuitData,
+        targets_serialization::{
+            SerializableProofWithPublicInputsTarget, SerializableVerifierCircuitTarget,
+        },
+    },
+    universal_verifier_gadget::{circuit_set::check_circuit_digest_target, RECURSION_THRESHOLD},
+};
 
 use anyhow::Result;
 
@@ -29,8 +35,7 @@ pub(crate) struct WrapCircuit<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F> + 'static,
     const D: usize,
-> 
-where
+> where
     C::Hasher: AlgebraicHasher<F>,
 {
     proof_targets: Vec<SerializableProofWithPublicInputsTarget<D>>,
@@ -94,9 +99,15 @@ where
 
             let data = builder.build::<C>();
 
-            wrap_circuit.proof_targets.push(SerializableProofWithPublicInputsTarget::from(pt));
-            wrap_circuit.circuit_data.push(SerializableCircuitData::from(data));
-            wrap_circuit.inner_data.push(SerializableVerifierCircuitTarget::from(inner_data));
+            wrap_circuit
+                .proof_targets
+                .push(SerializableProofWithPublicInputsTarget::from(pt));
+            wrap_circuit
+                .circuit_data
+                .push(SerializableCircuitData::from(data));
+            wrap_circuit
+                .inner_data
+                .push(SerializableVerifierCircuitTarget::from(inner_data));
             let circuit_data = wrap_circuit.circuit_data.last().unwrap().as_ref();
             (cd, vd) = (&circuit_data.common, &circuit_data.verifier_only);
 
@@ -133,7 +144,10 @@ where
             if let Some(vd) = circuit_data {
                 // no need to set `constants_sigmas_cap` target in the first wrapping step, as they
                 // are hardcoded as constant in the first wrapping circuit
-                pw.set_cap_target(&inner_data.as_ref().constants_sigmas_cap, &vd.constants_sigmas_cap);
+                pw.set_cap_target(
+                    &inner_data.as_ref().constants_sigmas_cap,
+                    &vd.constants_sigmas_cap,
+                );
             }
 
             proof = cd.as_ref().prove(pw)?;
@@ -170,10 +184,9 @@ pub(crate) mod test {
         F: RichField + Extendable<D>,
         C: GenericConfig<D, F = F>,
         const D: usize,
-    >
-    (
+    >(
         circuit: &mut WrapCircuit<F, C, D>,
-    ) -> &mut CircuitData<F, C, D> 
+    ) -> &mut CircuitData<F, C, D>
     where
         C::Hasher: AlgebraicHasher<F>,
     {
@@ -185,7 +198,7 @@ pub(crate) mod test {
         C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
-    > 
+    >
     where
         C::Hasher: AlgebraicHasher<F>,
     {
