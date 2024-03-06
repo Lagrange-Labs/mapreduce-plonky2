@@ -120,6 +120,9 @@ impl ToBytes for BoolTarget {
     }
 }
 
+/// Data structure to serialize a vector of elements implementing `ToBytes` and `FromBytes`
+pub type SerializableVector<T> = SerializationWrapper<Vec<T>>; 
+
 #[derive(Clone, Debug)]
 /// Data structure to serialize an array of arbitary size, which is currently unsupported by serde
 pub struct SerializableArray<const SIZE: usize, T: Clone + Debug>([T; SIZE]);
