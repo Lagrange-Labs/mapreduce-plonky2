@@ -9,27 +9,33 @@ use plonky2::{
             VerifierOnlyCircuitData,
         },
         config::{AlgebraicHasher, GenericConfig, Hasher},
-        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+        proof::ProofWithPublicInputs,
     },
 };
+use serde::{Deserialize, Serialize};
 
-use crate::universal_verifier_gadget::{
+use crate::{serialization::{circuit_data_serialization::SerializableCircuitData, targets_serialization::{SerializableProofWithPublicInputsTarget, SerializableVerifierCircuitTarget}}, universal_verifier_gadget::{
     circuit_set::check_circuit_digest_target, RECURSION_THRESHOLD,
-};
+}};
 
 use anyhow::Result;
 
 /// Data structure with all input/output targets and the `CircuitData` for each circuit employed
 /// to recursively wrap a proof up to the recursion threshold. The data structure contains a set
 /// of targets and a `CircuitData` for each wrap step.
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
 pub(crate) struct WrapCircuit<
     F: RichField + Extendable<D>,
-    C: GenericConfig<D, F = F>,
+    C: GenericConfig<D, F = F> + 'static,
     const D: usize,
-> {
-    proof_targets: Vec<ProofWithPublicInputsTarget<D>>,
-    circuit_data: Vec<CircuitData<F, C, D>>,
-    inner_data: Vec<VerifierCircuitTarget>,
+> 
+where
+    C::Hasher: AlgebraicHasher<F>,
+{
+    proof_targets: Vec<SerializableProofWithPublicInputsTarget<D>>,
+    circuit_data: Vec<SerializableCircuitData<F, C, D>>,
+    inner_data: Vec<SerializableVerifierCircuitTarget>,
 }
 
 impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> WrapCircuit<F, C, D>
@@ -88,10 +94,10 @@ where
 
             let data = builder.build::<C>();
 
-            wrap_circuit.proof_targets.push(pt);
-            wrap_circuit.circuit_data.push(data);
-            wrap_circuit.inner_data.push(inner_data);
-            let circuit_data = wrap_circuit.circuit_data.last().unwrap();
+            wrap_circuit.proof_targets.push(SerializableProofWithPublicInputsTarget::from(pt));
+            wrap_circuit.circuit_data.push(SerializableCircuitData::from(data));
+            wrap_circuit.inner_data.push(SerializableVerifierCircuitTarget::from(inner_data));
+            let circuit_data = wrap_circuit.circuit_data.last().unwrap().as_ref();
             (cd, vd) = (&circuit_data.common, &circuit_data.verifier_only);
 
             log::debug!(
@@ -123,15 +129,15 @@ where
             .zip(self.inner_data.iter())
         {
             let mut pw = PartialWitness::new();
-            pw.set_proof_with_pis_target(pt, &proof);
+            pw.set_proof_with_pis_target(pt.as_ref(), &proof);
             if let Some(vd) = circuit_data {
                 // no need to set `constants_sigmas_cap` target in the first wrapping step, as they
                 // are hardcoded as constant in the first wrapping circuit
-                pw.set_cap_target(&inner_data.constants_sigmas_cap, &vd.constants_sigmas_cap);
+                pw.set_cap_target(&inner_data.as_ref().constants_sigmas_cap, &vd.constants_sigmas_cap);
             }
 
-            proof = cd.prove(pw)?;
-            circuit_data = Some(&cd.verifier_only);
+            proof = cd.as_ref().prove(pw)?;
+            circuit_data = Some(&cd.as_ref().verifier_only);
         }
 
         Ok(proof)
@@ -140,7 +146,7 @@ where
     // Helper function that returns a pointer to the circuit data of the circuit for the last
     // wrap step
     pub(crate) fn final_proof_circuit_data(&self) -> &CircuitData<F, C, D> {
-        self.circuit_data.last().unwrap()
+        self.circuit_data.last().unwrap().as_ref()
     }
 }
 
@@ -164,18 +170,25 @@ pub(crate) mod test {
         F: RichField + Extendable<D>,
         C: GenericConfig<D, F = F>,
         const D: usize,
-    >(
+    >
+    (
         circuit: &mut WrapCircuit<F, C, D>,
-    ) -> &mut CircuitData<F, C, D> {
-        circuit.circuit_data.last_mut().unwrap()
+    ) -> &mut CircuitData<F, C, D> 
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
+        circuit.circuit_data.last_mut().unwrap().as_mut()
     }
 
     struct TestCircuit<
         F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
+        C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
-    > {
+    > 
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
         targets: LeafCircuitWires<F, INPUT_SIZE>,
         circuit_data: CircuitData<F, C, D>,
         wrap_circuit: WrapCircuit<F, C, D>,

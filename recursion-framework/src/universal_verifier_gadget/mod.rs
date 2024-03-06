@@ -64,7 +64,7 @@ fn dummy_circuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const
 /// It is only called for testing purposes or during build time.
 pub(crate) fn build_data_for_universal_verifier<
     F: RichField + Extendable<D>,
-    C: GenericConfig<D, F = F>,
+    C: GenericConfig<D, F = F> + 'static,
     const D: usize,
 >(
     config: CircuitConfig,
