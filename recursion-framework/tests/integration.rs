@@ -153,7 +153,7 @@ fn test_map_reduce_circuits() {
         prepare_recursive_circuit_for_circuit_set(&reduce_circuit),
     ];
 
-    let framework = RecursiveCircuits::<F, C, D>::new(mr_circuits);
+    let framework = RecursiveCircuits::<F, C, D>::new(&mr_circuits);
     let dataset: [F; DATASET_SIZE] = array::from_fn(|_| F::rand());
 
     let mut dataset_chunk_digests = dataset

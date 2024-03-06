@@ -140,15 +140,13 @@ where
     }
 }
 
+pub(super) type StorageLeafWire = LeafWires<MAX_LEAF_NODE_LEN>;
 /// D = 2,
 /// Num of children = 0
-impl<const N: usize> CircuitLogicWires<GoldilocksField, 2, 0> for LeafWires<N>
-where
-    [(); PAD_LEN(N)]:,
-{
+impl CircuitLogicWires<GoldilocksField, 2, 0> for StorageLeafWire {
     type CircuitBuilderParams = ();
 
-    type Inputs = LeafCircuit<N>;
+    type Inputs = LeafCircuit<MAX_LEAF_NODE_LEN>;
 
     const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GoldilocksField>::TOTAL_LEN;
 
