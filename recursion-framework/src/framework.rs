@@ -9,6 +9,7 @@ use plonky2::{
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
+use std::array::from_fn as create_array;
 
 use crate::{
     circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifier},
@@ -75,7 +76,7 @@ where
     [(); C::Hasher::HASH_SIZE]:,
 {
     /// Instantiate a `RecursiveCircuits` data structure employing the list of circuits provided as input
-    pub fn new(circuits: Vec<Box<dyn RecursiveCircuitInfo<F, C, D> + '_>>) -> Self {
+    pub fn new(circuits: &[Box<dyn RecursiveCircuitInfo<F, C, D> + '_>]) -> Self {
         let circuit_digests = circuits
             .into_iter()
             .map(|circuit| circuit.as_ref().get_verifier_data().circuit_digest)
@@ -84,7 +85,7 @@ where
     }
 
     /// Internal function used to initialize `Self` from a set of `circuit_digests`
-    pub(crate) fn new_from_circuit_digests(circuit_digests: Vec<HashOut<F>>) -> Self {
+    pub fn new_from_circuit_digests(circuit_digests: Vec<HashOut<F>>) -> Self {
         Self {
             circuit_set: CircuitSet::build_circuit_set(circuit_digests),
         }
@@ -423,7 +424,7 @@ pub(crate) mod tests {
             prepare_recursive_circuit_for_circuit_set(&recursive_circuit_four),
         ];
 
-        let recursive_framework = RecursiveCircuits::new(circuits);
+        let recursive_framework = RecursiveCircuits::new(&circuits);
 
         let base_proofs = (0..7)
             .map(|_| {
@@ -541,7 +542,7 @@ pub(crate) mod tests {
             prepare_recursive_circuit_for_circuit_set(&recursive_circuit),
         ];
 
-        let recursive_framework = RecursiveCircuits::new(circuits);
+        let recursive_framework = RecursiveCircuits::new(&circuits);
         // generate proof for the `leaf_circuit`
         let base_proof = {
             let inputs = array::from_fn(|_| F::rand());
@@ -587,7 +588,7 @@ pub(crate) mod tests {
             prepare_recursive_circuit_for_circuit_set(&verifier_circuit_fixed),
         ];
 
-        let recursive_framework_verifier_circuits = RecursiveCircuits::new(verifier_circuits);
+        let recursive_framework_verifier_circuits = RecursiveCircuits::new(&verifier_circuits);
         // check that proofs generated for any circuit in `recursive_framework` set is verified by `verifier_circuit`
         for (proof, vd) in [
             (base_proof.clone(), leaf_circuit_vd),
