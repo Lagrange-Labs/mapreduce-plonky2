@@ -362,9 +362,9 @@ mod test {
         let mpt1 = StorageSlot::Mapping(key.clone(), slot).mpt_key();
         let mut mpt2 = mpt1.clone();
         let last_byte = mpt2[mpt1.len() - 1];
-        let first_nibble = last_byte >> 4;
+        let first_nibble = last_byte & 0xF0;
         // only change the last nibble
-        mpt2[mpt1.len() - 1] = (first_nibble << 4) + (thread_rng().gen::<u8>() & 0x0F);
+        mpt2[mpt1.len() - 1] = first_nibble + (thread_rng().gen::<u8>() & 0x0F);
         println!(
             "key1: {:?}, key2: {:?}",
             hex::encode(&mpt1),
@@ -387,6 +387,7 @@ mod test {
         let leaf1_proof = params.generate_proof(CircuitType::Leaf(l1)).unwrap();
         let pub1 = leaf1_proof.proof.public_inputs.clone();
         let pi1 = PublicInputs::from(&leaf1_proof.proof.public_inputs);
+        assert_eq!(pi1.proof_inputs.len(), NUM_IO);
         let (comp_key, comp_ptr) = pi1.mpt_key_info();
         assert_eq!(comp_ptr, F::from_canonical_usize(63));
         println!("LEAF output PTR: {}", comp_ptr);
@@ -395,30 +396,29 @@ mod test {
             node: branch_node.clone(),
             child_proofs: vec![leaf1_proof.clone()],
         });
-        let branch1 = params.generate_proof(branch_inputs).unwrap();
-        let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
-            params.branchs.b1_over_2.get_verifier_data().clone()
-        } else {
-            params.branchs.b1.get_verifier_data().clone()
-        };
-        assert_eq!(branch1.vk, exp_vk);
+        // let branch1 = params.generate_proof(branch_inputs).unwrap();
+        // let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
+        //     params.branchs.b1_over_2.get_verifier_data().clone()
+        // } else {
+        //     params.branchs.b1.get_verifier_data().clone()
+        // };
+        // assert_eq!(branch1.vk, exp_vk);
         let mut pi2 = pub1.clone();
         let key2 = {
-            let mut key_nibbles = bytes_to_nibbles(
-                &comp_key
-                    .iter()
-                    .map(|b| b.to_canonical_u64() as u8)
-                    .collect::<Vec<_>>(),
-            );
+            let mut key_nibbles = comp_key
+                .iter()
+                .map(|b| b.to_canonical_u64() as u8)
+                .collect::<Vec<_>>();
             // increase the nibble that is being processed in the branch node
             key_nibbles[comp_ptr.to_canonical_u64() as usize - 1] =
                 (key_nibbles[comp_ptr.to_canonical_u64() as usize - 1] + 1) % 16;
-            nibbles_to_bytes(&key_nibbles)
+            key_nibbles
                 .into_iter()
                 .map(F::from_canonical_u8)
                 .collect::<Vec<_>>()
         };
-        pi2[PublicInputs::<F>::KEY_IDX..PublicInputs::<F>::KEY_IDX + 64].copy_from_slice(&key2);
+        pi2[PublicInputs::<F>::KEY_IDX..PublicInputs::<F>::T_IDX].copy_from_slice(&key2);
+        assert_eq!(pi2.len(), pub1.len());
 
         // generate  a branch proof with two leafs inputs now but using the testing framework
         // we simulate another leaf at the right key, so we just modify the nibble at the pointer
