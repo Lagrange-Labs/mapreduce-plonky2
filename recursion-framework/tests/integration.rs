@@ -83,7 +83,9 @@ impl<F: RichField + Extendable<D>, const D: usize, const INPUT_CHUNK_SIZE: usize
         let hash_target = builder.hash_n_to_hash_no_pad::<PoseidonHash>(input_targets.to_vec());
         builder.register_public_input(sum_target);
         builder.register_public_inputs(&hash_target.elements);
-        Self { input_targets: SerializableArray::from(input_targets) }
+        Self {
+            input_targets: SerializableArray::from(input_targets),
+        }
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {

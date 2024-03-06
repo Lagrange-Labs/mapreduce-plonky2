@@ -4,16 +4,19 @@ use plonky2::{
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{
-            CircuitConfig, VerifierCircuitTarget, VerifierOnlyCircuitData,
-        },
+        circuit_data::{CircuitConfig, VerifierCircuitTarget, VerifierOnlyCircuitData},
         config::{AlgebraicHasher, GenericConfig, Hasher},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
 use serde::{Deserialize, Serialize};
 
-use crate::serialization::{circuit_data_serialization::SerializableCommonCircuitData, targets_serialization::{SerializableProofWithPublicInputsTarget, SerializableVerifierCircuitTarget}};
+use crate::serialization::{
+    circuit_data_serialization::SerializableCommonCircuitData,
+    targets_serialization::{
+        SerializableProofWithPublicInputsTarget, SerializableVerifierCircuitTarget,
+    },
+};
 
 use super::{
     build_data_for_universal_verifier,
@@ -197,7 +200,7 @@ mod tests {
         C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
-    > 
+    >
     where
         C::Hasher: AlgebraicHasher<F>,
     {
@@ -292,7 +295,7 @@ mod tests {
         C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
-    > 
+    >
     where
         C::Hasher: AlgebraicHasher<F>,
     {
@@ -556,11 +559,17 @@ mod tests {
         {
             let mut pw = PartialWitness::<F>::new();
             pw.set_proof_with_pis_target(
-                &universal_verifier_circuit.verifier_targets.verified_proof.as_ref(),
+                &universal_verifier_circuit
+                    .verifier_targets
+                    .verified_proof
+                    .as_ref(),
                 &wrapped_proof,
             );
             pw.set_verifier_data_target(
-                &universal_verifier_circuit.verifier_targets.verifier_data.as_ref(),
+                &universal_verifier_circuit
+                    .verifier_targets
+                    .verifier_data
+                    .as_ref(),
                 &base_circuit_variant.get_circuit_data().verifier_only,
             );
             circuit_set
@@ -618,11 +627,14 @@ mod tests {
                 config.clone(),
                 CIRCUIT_SET_SIZE,
             );
-        
+
         // test `UniversalVerifierTarget` serialization
         let encoded = bincode::serialize(&universal_verifier_circuit.verifier_targets).unwrap();
         let verifier_targets: UniversalVerifierTarget<D> = bincode::deserialize(&encoded).unwrap();
 
-        assert_eq!(verifier_targets, universal_verifier_circuit.verifier_targets);
+        assert_eq!(
+            verifier_targets,
+            universal_verifier_circuit.verifier_targets
+        );
     }
 }
