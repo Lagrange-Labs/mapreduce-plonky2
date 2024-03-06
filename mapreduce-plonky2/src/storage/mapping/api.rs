@@ -292,15 +292,16 @@ impl MPTCircuitsParams {
         }
     }
 
-    #[cfg(not(test))]
     fn generate_proof(&self, circuit_type: CircuitType) -> Result<MPTProof> {
+        #[cfg(not(test))]
+        let set = &self.set;
+        #[cfg(test)]
+        let set = &self.set.recursive_circuits;
         match circuit_type {
-            CircuitType::Leaf(leaf) => self
-                .set
+            CircuitType::Leaf(leaf) => set
                 .generate_proof(&self.leaf_circuit, [], [], leaf)
                 .map(|p| (p, self.leaf_circuit.get_verifier_data().clone()).into()),
-            CircuitType::Extension(ext) => self
-                .set
+            CircuitType::Extension(ext) => set
                 .generate_proof(
                     &self.ext_circuit,
                     [ext.child_proof.proof],
@@ -308,31 +309,7 @@ impl MPTCircuitsParams {
                     ExtensionNodeCircuit { node: ext.node },
                 )
                 .map(|p| (p, self.ext_circuit.get_verifier_data().clone()).into()),
-            CircuitType::Branch(branch) => self.branchs.generate_proof(&self.set, branch),
-        }
-    }
-
-    #[cfg(test)]
-    fn generate_proof(&self, circuit_type: CircuitType) -> Result<MPTProof> {
-        match circuit_type {
-            CircuitType::Leaf(leaf) => self
-                .set
-                .recursive_circuits
-                .generate_proof(&self.leaf_circuit, [], [], leaf)
-                .map(|p| (p, self.leaf_circuit.get_verifier_data().clone()).into()),
-            CircuitType::Extension(ext) => self
-                .set
-                .recursive_circuits
-                .generate_proof(
-                    &self.ext_circuit,
-                    [ext.child_proof.proof],
-                    [&ext.child_proof.vk],
-                    ExtensionNodeCircuit { node: ext.node },
-                )
-                .map(|p| (p, self.ext_circuit.get_verifier_data().clone()).into()),
-            CircuitType::Branch(branch) => self
-                .branchs
-                .generate_proof(&self.set.recursive_circuits, branch),
+            CircuitType::Branch(branch) => self.branchs.generate_proof(&set, branch),
         }
     }
 }
@@ -345,7 +322,7 @@ mod test {
 
     use crate::{
         eth::StorageSlot,
-        mpt_sequential::{bytes_to_nibbles, nibbles_to_bytes, test::generate_random_storage_mpt},
+        mpt_sequential::{bytes_to_nibbles, test::generate_random_storage_mpt},
         storage::key::MappingSlot,
         utils::test::random_vector,
     };
@@ -385,47 +362,52 @@ mod test {
         };
         // generate a leaf then a branch proof with only this leaf
         let leaf1_proof = params.generate_proof(CircuitType::Leaf(l1)).unwrap();
-        let pub1 = leaf1_proof.proof.public_inputs.clone();
-        let pi1 = PublicInputs::from(&leaf1_proof.proof.public_inputs);
+        let pub1 = leaf1_proof.proof.public_inputs[..NUM_IO].to_vec();
+        let pi1 = PublicInputs::from(&pub1);
         assert_eq!(pi1.proof_inputs.len(), NUM_IO);
-        let (comp_key, comp_ptr) = pi1.mpt_key_info();
+        let (_, comp_ptr) = pi1.mpt_key_info();
         assert_eq!(comp_ptr, F::from_canonical_usize(63));
-        println!("LEAF output PTR: {}", comp_ptr);
         let branch_node = p1[p1.len() - 2].to_vec();
         let branch_inputs = CircuitType::Branch(BranchProofInput {
             node: branch_node.clone(),
             child_proofs: vec![leaf1_proof.clone()],
         });
-        // let branch1 = params.generate_proof(branch_inputs).unwrap();
-        // let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
-        //     params.branchs.b1_over_2.get_verifier_data().clone()
-        // } else {
-        //     params.branchs.b1.get_verifier_data().clone()
-        // };
-        // assert_eq!(branch1.vk, exp_vk);
-        let mut pi2 = pub1.clone();
-        let key2 = {
-            let mut key_nibbles = comp_key
-                .iter()
-                .map(|b| b.to_canonical_u64() as u8)
-                .collect::<Vec<_>>();
-            // increase the nibble that is being processed in the branch node
-            key_nibbles[comp_ptr.to_canonical_u64() as usize - 1] =
-                (key_nibbles[comp_ptr.to_canonical_u64() as usize - 1] + 1) % 16;
-            key_nibbles
+        let branch1 = params.generate_proof(branch_inputs).unwrap();
+        let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
+            params.branchs.b1_over_2.get_verifier_data().clone()
+        } else {
+            params.branchs.b1.get_verifier_data().clone()
+        };
+        assert_eq!(branch1.vk, exp_vk);
+        let mut pub2 = pub1.clone();
+        assert_eq!(pub2.len(), NUM_IO);
+        pub2[PublicInputs::<F>::KEY_IDX..PublicInputs::<F>::T_IDX].copy_from_slice(
+            &bytes_to_nibbles(&mpt2)
                 .into_iter()
                 .map(F::from_canonical_u8)
-                .collect::<Vec<_>>()
-        };
-        pi2[PublicInputs::<F>::KEY_IDX..PublicInputs::<F>::T_IDX].copy_from_slice(&key2);
-        assert_eq!(pi2.len(), pub1.len());
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(pub2.len(), pub1.len());
+
+        let pi2 = PublicInputs::from(&pub2);
+        {
+            let (k1, p1) = pi1.mpt_key_info();
+            let (k2, p2) = pi2.mpt_key_info();
+            let (pt1, pt2) = (
+                p1.to_canonical_u64() as usize,
+                p2.to_canonical_u64() as usize,
+            );
+            assert!(pt1 < k1.len() && pt2 < k2.len());
+            assert!(p1 == p2);
+            assert!(k1[..pt1] == k2[..pt2]);
+        }
 
         // generate  a branch proof with two leafs inputs now but using the testing framework
         // we simulate another leaf at the right key, so we just modify the nibble at the pointer
         // generate fake dummy proofs but with expected public inputs
         let leaf2_proof = params
             .set
-            .generate_input_proofs([pi2.try_into().unwrap()])
+            .generate_input_proofs([pub2.try_into().unwrap()])
             .unwrap();
         let vk = params.set.verifier_data_for_input_proofs::<1>()[0].clone();
         let leaf2_proof_vk = MPTProof {
