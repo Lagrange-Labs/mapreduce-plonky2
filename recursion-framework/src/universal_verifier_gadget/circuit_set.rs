@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::serialization::{
     circuit_data_serialization::MerkleTreeSerialize,
-    targets_serialization::SerializableMerkleCapTarget, FromBytes, SerializationError, ToBytes,
+    targets_serialization::{SerializableMerkleCapTarget, SerializableMerkleProofTarget, SerializableVector},
 };
 
 use super::CIRCUIT_SET_CAP_HEIGHT;
@@ -36,13 +36,13 @@ pub(crate) fn merkle_cap_to_targets(merkle_cap: &MerkleCapTarget) -> Vec<Target>
 /// Set of targets employed to prove that the circuit employed to generate a proof being recursively
 /// verified belongs to the set of circuits whose proofs can be verified with the universal verifier
 /// bound to such a set
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct CircuitSetMembershipTargets {
-    merkle_proof_target: MerkleProofTarget,
-    leaf_index_bits: Vec<BoolTarget>,
+    merkle_proof_target: SerializableMerkleProofTarget,
+    leaf_index_bits: SerializableVector<BoolTarget>,
 }
 
-impl Serialize for CircuitSetMembershipTargets {
+/*impl Serialize for CircuitSetMembershipTargets {
     fn serialize<S>(&self, serializer: S) -> std::prelude::v1::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -82,7 +82,7 @@ impl<'a> Deserialize<'a> for CircuitSetMembershipTargets {
                 .map_err(SerializationError::to_de_error)?,
         })
     }
-}
+}*/
 
 /// The target employed to represent the set of circuits whose proofs can be verified with the
 /// universal verifier bound to such a set
@@ -163,8 +163,8 @@ impl CircuitSetTarget {
         );
 
         CircuitSetMembershipTargets {
-            merkle_proof_target: mpt,
-            leaf_index_bits,
+            merkle_proof_target: SerializableMerkleProofTarget::from(mpt),
+            leaf_index_bits: SerializableVector::from(leaf_index_bits),
         }
     }
     /// Returns the number of targets employed for `CircuitSetTarget`
@@ -261,19 +261,19 @@ where
         let merkle_proof = self.mt.prove(leaf_index);
 
         // set leaf index bits targets with the little-endian bit decomposition of leaf_index
-        for (i, bool_target) in membership_target.leaf_index_bits.iter().enumerate() {
+        for (i, bool_target) in membership_target.leaf_index_bits.as_ref().iter().enumerate() {
             let mask = (1 << i) as usize;
             pw.set_bool_target(*bool_target, (leaf_index & mask) != 0);
         }
         // set merkle proof target
         assert_eq!(
             merkle_proof.len(),
-            membership_target.merkle_proof_target.siblings.len()
+            membership_target.merkle_proof_target.as_ref().siblings.len()
         );
         for (&mp, &mpt) in merkle_proof
             .siblings
             .iter()
-            .zip(membership_target.merkle_proof_target.siblings.iter())
+            .zip(membership_target.merkle_proof_target.as_ref().siblings.iter())
         {
             pw.set_hash_target(mpt, mp);
         }
