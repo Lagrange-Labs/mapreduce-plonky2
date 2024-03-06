@@ -10,12 +10,13 @@ use plonky2::{
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::universal_verifier_gadget::{
+use crate::{serialization::{circuit_data_serialization::SerializableCircuitData, targets_serialization::SerializableArray}, universal_verifier_gadget::{
     verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
     wrap_circuit::WrapCircuit,
     CircuitSet, CircuitSetDigest, CircuitSetTarget,
-};
+}};
 
 use anyhow::Result;
 
@@ -28,7 +29,7 @@ pub trait CircuitLogicWires<
     F: RichField + Extendable<D>,
     const D: usize,
     const NUM_VERIFIERS: usize,
->: Sized
+>: Sized + Serialize + DeserializeOwned
 {
     /// Specific input parameters that might be necessary to write the logic of the circuit
     type CircuitBuilderParams: Sized;
@@ -56,7 +57,7 @@ pub trait CircuitLogicWires<
     /// a `CircuitWithUniversalVerifier` circuit implementing the additional circuit logid specified by `Self`,
     /// returns the set of `Self::NUM_PUBLIC_INPUTS` targets corresponding to all the public inputs of the
     /// proof except for the ones representing the digest of the circuit set
-    fn public_input_targets<'a>(&self, proof: &'a ProofWithPublicInputsTarget<D>) -> &'a [Target]
+    fn public_input_targets<'b>(&self, proof: &'b ProofWithPublicInputsTarget<D>) -> &'b [Target]
     where
         [(); Self::NUM_PUBLIC_INPUTS]:,
     {
@@ -84,7 +85,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     /// which is a fundamental building block of circuits built with such data structure, also checks
     /// that the verifier data employed for proof verification belongs to a set of admissible verifier data;
     /// the size of such a set corresponds to `circuit_set_size`, which must be provided as input.  
-    pub fn new<C: GenericConfig<D, F = F>>(config: CircuitConfig, circuit_set_size: usize) -> Self
+    pub fn new<C: GenericConfig<D, F = F> + 'static>(config: CircuitConfig, circuit_set_size: usize) -> Self
     where
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
@@ -181,8 +182,8 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
             WrapCircuit::build_wrap_circuit(&data.verifier_only, &data.common, &self.config);
 
         CircuitWithUniversalVerifier::<F, C, D, NUM_VERIFIERS, CLW> {
-            universal_verifier_targets,
-            circuit_data: data,
+            universal_verifier_targets: SerializableArray::from(universal_verifier_targets),
+            circuit_data: SerializableCircuitData::from(data),
             circuit_logic_wires,
             circuit_set_target,
             wrap_circuit,
@@ -239,15 +240,20 @@ pub fn circuit_set_targets<
 /// `CircuitWithUniversalVerifier` is a data structure representing a circuit containing `NUM_VERIFIERS`
 /// instances of the universal verifier altogether with the additional logic specified by the specific
 /// `CLW` implementor
-pub struct CircuitWithUniversalVerifier<
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct CircuitWithUniversalVerifier< 
     F: RichField + Extendable<D>,
-    C: GenericConfig<D, F = F>,
+    C: GenericConfig<D, F = F> + 'static,
     const D: usize,
     const NUM_VERIFIERS: usize,
     CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
-> {
-    universal_verifier_targets: [UniversalVerifierTarget<D>; NUM_VERIFIERS],
-    circuit_data: CircuitData<F, C, D>,
+> 
+where
+    C::Hasher: AlgebraicHasher<F>,
+{
+    universal_verifier_targets: SerializableArray<NUM_VERIFIERS, UniversalVerifierTarget<D>>,
+    circuit_data: SerializableCircuitData<F, C, D>,
     circuit_logic_wires: CLW,
     circuit_set_target: CircuitSetTarget,
     wrap_circuit: WrapCircuit<F, C, D>,
@@ -285,7 +291,7 @@ where
     ) -> Result<ProofWithPublicInputs<F, C, D>> {
         let mut pw = PartialWitness::<F>::new();
         for i in 0..NUM_VERIFIERS {
-            self.universal_verifier_targets[i].set_target(
+            self.universal_verifier_targets.as_ref()[i].set_target(
                 &mut pw,
                 circuit_set,
                 &input_proofs[i],
@@ -298,7 +304,7 @@ where
         self.circuit_set_target
             .set_target(&mut pw, &CircuitSetDigest::from(circuit_set));
 
-        let base_proof = self.circuit_data.prove(pw)?;
+        let base_proof = self.circuit_data.as_ref().prove(pw)?;
 
         self.wrap_circuit.wrap_proof(base_proof)
     }
@@ -314,13 +320,7 @@ where
     /// the size of the wrapped circuit, given that the final wrapping circuit, which is the one whose
     /// `CircuitData` are accessbiel through the `circuit_data` method has a fixed size  
     pub fn wrapped_circuit_size(&self) -> usize {
-        self.circuit_data.common.degree()
-    }
-
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut buff = Vec::new();
-        // TODO
-        buff
+        self.circuit_data.as_ref().common.degree()
     }
 }
 
@@ -341,6 +341,8 @@ pub(crate) mod tests {
 
     use plonky2_monolith::{gates::monolith::MonolithGate, monolith_hash::MonolithHash};
 
+    use crate::serialization::targets_serialization::SerializableArray;
+
     use super::*;
 
     use serial_test::serial;
@@ -350,18 +352,19 @@ pub(crate) mod tests {
     pub(crate) type LeafCircuitWires<F, const INPUT_SIZE: usize> =
         LeafCircuitWithCustomHasherWires<F, INPUT_SIZE, PoseidonHash>;
 
+    #[derive(Serialize, Deserialize)]
     pub(crate) struct LeafCircuitWithCustomHasherWires<
         F: RichField,
         const INPUT_SIZE: usize,
         H: AlgebraicHasher<F>,
     > {
-        inputs: [Target; INPUT_SIZE],
+        inputs: SerializableArray<INPUT_SIZE, Target>,
         generator: Target,
         _f: PhantomData<F>,
         _h: PhantomData<H>,
     }
 
-    impl<
+    impl<'a,
             F: RichField + Extendable<D>,
             const D: usize,
             const NUM_VERIFIERS: usize,
@@ -408,7 +411,7 @@ pub(crate) mod tests {
             builder.register_public_inputs(state.as_slice());
 
             Self {
-                inputs,
+                inputs: SerializableArray::from(inputs),
                 generator,
                 _f: PhantomData::default(),
                 _h: PhantomData::default(),
@@ -416,18 +419,18 @@ pub(crate) mod tests {
         }
 
         fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
-            pw.set_target_arr(self.inputs.as_slice(), inputs.0.as_slice());
+            pw.set_target_arr(self.inputs.as_ref(), inputs.0.as_slice());
             pw.set_target(self.generator, inputs.1);
 
             Ok(())
         }
     }
-
+    #[derive(Serialize, Deserialize)]
     pub(crate) struct RecursiveCircuitWires<const INPUT_SIZE: usize> {
-        to_be_hashed_payload: [Target; INPUT_SIZE],
+        to_be_hashed_payload: SerializableArray<INPUT_SIZE, Target>,
     }
 
-    impl<
+    impl<'a,
             F: RichField + Extendable<D>,
             const D: usize,
             const NUM_VERIFIERS: usize,
@@ -454,12 +457,12 @@ pub(crate) mod tests {
             builder.register_public_inputs(state.elements.as_slice());
 
             Self {
-                to_be_hashed_payload,
+                to_be_hashed_payload: SerializableArray::from(to_be_hashed_payload),
             }
         }
 
         fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
-            pw.set_target_arr(self.to_be_hashed_payload.as_slice(), inputs.as_slice());
+            pw.set_target_arr(self.to_be_hashed_payload.as_ref(), inputs.as_slice());
 
             Ok(())
         }
@@ -467,7 +470,7 @@ pub(crate) mod tests {
 
     fn test_circuit_with_universal_verifier<
         F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
+        C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const NUM_VERIFIERS: usize,
         H: AlgebraicHasher<F>,

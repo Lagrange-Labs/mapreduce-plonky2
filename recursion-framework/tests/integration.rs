@@ -18,6 +18,7 @@ use plonky2::{
         proof::ProofWithPublicInputsTarget,
     },
 };
+use recursion_framework::serialization::targets_serialization::SerializableArray;
 use recursion_framework::{
     circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifierBuilder},
     framework::{
@@ -28,6 +29,7 @@ use recursion_framework::{
 };
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use serial_test::serial;
 
 /*
@@ -50,9 +52,9 @@ use serial_test::serial;
 /// number of public inputs are the sum of even elements and the hash of the elements being
 /// considered so far
 const NUM_PUBLIC_INPUTS: usize = 1 + NUM_HASH_OUT_ELTS;
-
+#[derive(Serialize, Deserialize)]
 struct MapCircuitWires<const INPUT_CHUNK_SIZE: usize> {
-    input_targets: [Target; INPUT_CHUNK_SIZE],
+    input_targets: SerializableArray<INPUT_CHUNK_SIZE, Target>,
 }
 
 impl<F: RichField + Extendable<D>, const D: usize, const INPUT_CHUNK_SIZE: usize>
@@ -81,16 +83,16 @@ impl<F: RichField + Extendable<D>, const D: usize, const INPUT_CHUNK_SIZE: usize
         let hash_target = builder.hash_n_to_hash_no_pad::<PoseidonHash>(input_targets.to_vec());
         builder.register_public_input(sum_target);
         builder.register_public_inputs(&hash_target.elements);
-        Self { input_targets }
+        Self { input_targets: SerializableArray::from(input_targets) }
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
-        pw.set_target_arr(&self.input_targets, &inputs);
+        pw.set_target_arr(self.input_targets.as_ref(), &inputs);
 
         Ok(())
     }
 }
-
+#[derive(Serialize, Deserialize)]
 struct ReduceCircuitWires<const ARITY: usize>(());
 
 impl<F: RichField + Extendable<D>, const D: usize, const ARITY: usize>
@@ -153,7 +155,7 @@ fn test_map_reduce_circuits() {
         prepare_recursive_circuit_for_circuit_set(&reduce_circuit),
     ];
 
-    let framework = RecursiveCircuits::<F, C, D>::new(&mr_circuits);
+    let framework = RecursiveCircuits::<F, C, D>::new(mr_circuits);
     let dataset: [F; DATASET_SIZE] = array::from_fn(|_| F::rand());
 
     let mut dataset_chunk_digests = dataset
