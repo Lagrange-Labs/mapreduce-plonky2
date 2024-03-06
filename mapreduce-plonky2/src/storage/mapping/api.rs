@@ -379,6 +379,10 @@ mod test {
             params.branchs.b1.get_verifier_data().clone()
         };
         assert_eq!(branch1.vk, exp_vk);
+
+        // generate  a branch proof with two leafs inputs now but using the testing framework
+        // we simulate another leaf at the right key, so we just modify the nibble at the pointer
+        // generate fake dummy proofs but with expected public inputs
         let mut pub2 = pub1.clone();
         assert_eq!(pub2.len(), NUM_IO);
         pub2[PublicInputs::<F>::KEY_IDX..PublicInputs::<F>::T_IDX].copy_from_slice(
@@ -402,9 +406,6 @@ mod test {
             assert!(k1[..pt1] == k2[..pt2]);
         }
 
-        // generate  a branch proof with two leafs inputs now but using the testing framework
-        // we simulate another leaf at the right key, so we just modify the nibble at the pointer
-        // generate fake dummy proofs but with expected public inputs
         let leaf2_proof = params
             .set
             .generate_input_proofs([pub2.try_into().unwrap()])
@@ -418,12 +419,12 @@ mod test {
             node: branch_node.clone(),
             child_proofs: vec![leaf1_proof.clone(), leaf2_proof_vk],
         });
-        let branch1 = params.generate_proof(branch_inputs).unwrap();
+        let branch2 = params.generate_proof(branch_inputs).unwrap();
         let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
             params.branchs.b2_over_2.get_verifier_data().clone()
         } else {
             params.branchs.b2.get_verifier_data().clone()
         };
-        assert_eq!(branch1.vk, exp_vk);
+        assert_eq!(branch2.vk, exp_vk);
     }
 }
