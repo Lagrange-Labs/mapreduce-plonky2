@@ -18,7 +18,9 @@ use plonky2::{
     },
     util::log2_ceil,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+use crate::serialization::{circuit_data_serialization::MerkleTreeSerialize, targets_serialization::SerializableMerkleCapTarget, FromBytes, SerializationError, ToBytes};
 
 use super::CIRCUIT_SET_CAP_HEIGHT;
 use anyhow::{Error, Result};
@@ -31,25 +33,68 @@ pub(crate) fn merkle_cap_to_targets(merkle_cap: &MerkleCapTarget) -> Vec<Target>
 /// Set of targets employed to prove that the circuit employed to generate a proof being recursively
 /// verified belongs to the set of circuits whose proofs can be verified with the universal verifier
 /// bound to such a set
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CircuitSetMembershipTargets {
     merkle_proof_target: MerkleProofTarget,
     leaf_index_bits: Vec<BoolTarget>,
 }
 
+impl Serialize for CircuitSetMembershipTargets {
+    fn serialize<S>(&self, serializer: S) -> std::prelude::v1::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        let merkle_proof_bytes = self.merkle_proof_target.to_bytes();
+        let leaf_index_bytes = self.leaf_index_bits.to_bytes();
+        #[derive(Serialize)]
+        struct Serialization {
+            merkle_proof: Vec<u8>,
+            leaf_index: Vec<u8>,
+        }
+
+        let serialize_struct = Serialization {
+            merkle_proof: merkle_proof_bytes,
+            leaf_index: leaf_index_bytes,
+        };
+        serialize_struct.serialize(serializer)
+    }
+}
+
+impl<'a> Deserialize<'a> for CircuitSetMembershipTargets {
+    fn deserialize<D>(deserializer: D) -> std::prelude::v1::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'a> {
+        #[derive(Deserialize)]
+        struct Serialization {
+            merkle_proof: Vec<u8>,
+            leaf_index: Vec<u8>,
+        }
+
+        let serialize_struct = Serialization::deserialize(deserializer)?;
+        Ok(
+            Self {
+                merkle_proof_target: MerkleProofTarget::from_bytes(&serialize_struct.merkle_proof)
+                    .map_err(SerializationError::to_de_error)?,
+                leaf_index_bits: Vec::<BoolTarget>::from_bytes(&serialize_struct.leaf_index)
+                    .map_err(SerializationError::to_de_error)?,
+            }
+        )
+    }
+}
+
 /// The target employed to represent the set of circuits whose proofs can be verified with the
 /// universal verifier bound to such a set
-pub(crate) struct CircuitSetTarget(MerkleCapTarget);
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub(crate) struct CircuitSetTarget(SerializableMerkleCapTarget);
 
 impl CircuitSetTarget {
     pub(crate) fn build_target<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self {
-        Self(builder.add_virtual_cap(CIRCUIT_SET_CAP_HEIGHT))
+        Self(SerializableMerkleCapTarget::from(builder.add_virtual_cap(CIRCUIT_SET_CAP_HEIGHT)))
     }
 
     pub(crate) fn to_targets(&self) -> Vec<Target> {
-        merkle_cap_to_targets(&self.0)
+        merkle_cap_to_targets(&self.0.as_ref())
     }
 
     pub(crate) fn from_circuit_set_digest<
@@ -61,7 +106,7 @@ impl CircuitSetTarget {
         builder: &mut CircuitBuilder<F, D>,
         digest: CircuitSetDigest<F, C, D>,
     ) -> Self {
-        Self(builder.constant_merkle_cap(&digest.0))
+        Self(SerializableMerkleCapTarget::from(builder.constant_merkle_cap(&digest.0)))
     }
 
     pub(crate) fn set_target<
@@ -75,7 +120,7 @@ impl CircuitSetTarget {
     ) where
         C::Hasher: AlgebraicHasher<F>,
     {
-        pw.set_cap_target(&self.0, &digest.0);
+        pw.set_cap_target(&self.0.as_ref(), &digest.0);
     }
 
     /// Enforce that `circuit_digest_target` is a leaf in the merkle-tree
@@ -106,7 +151,7 @@ impl CircuitSetTarget {
         builder.verify_merkle_proof_to_cap::<C::Hasher>(
             circuit_digest_target.elements.to_vec(),
             leaf_index_bits.as_slice(),
-            &circuit_set_target.0,
+            &circuit_set_target.0.as_ref(),
             &mpt,
         );
 
@@ -150,7 +195,8 @@ pub(crate) fn check_circuit_digest_target<
     );
     builder.connect_hashes(verifier_data.circuit_digest, cap_hash);
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(bound = "")]
 /// Data structure employed by the recursion framework to store and manage the set of circuits whose proofs
 /// can be verified with the universal verifier bound to such a set
 pub(crate) struct CircuitSet<
@@ -159,6 +205,7 @@ pub(crate) struct CircuitSet<
     const D: usize,
 > {
     circuit_digests_to_leaf_indexes: HashMap<Vec<F>, usize>,
+    #[serde(with = "MerkleTreeSerialize")]
     mt: MerkleTree<F, C::Hasher>,
 }
 
@@ -234,7 +281,8 @@ where
 
 /// A short representation (e.g., a digest) of the set of circuits whose proofs can be verified with the
 /// universal verifier bound to such a set; this should represent values assignable to a `CircuitSetTarget`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct CircuitSetDigest<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
@@ -359,5 +407,64 @@ mod tests {
             || prove_circuit(&wrong_circuit_set).unwrap(),
             "circuit set membership didn't fail when employing wrong circuit set"
         );
+    }
+
+    #[test]
+    fn test_target_serialization() {
+        const NUM_ELEMENTS: usize = 42;
+
+        let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
+        let circuit_set_target = CircuitSetTarget::build_target(&mut builder);
+        let element_targets = builder.add_virtual_hashes(NUM_ELEMENTS);
+        let circuit_membership_targets = element_targets
+            .iter()
+            .map(|t| {
+                CircuitSetTarget::check_circuit_digest_membership::<F, C, D>(
+                    &mut builder,
+                    &circuit_set_target,
+                    t,
+                    NUM_ELEMENTS,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        // test serialization of `CircuitSetTarget`
+        let encoded = bincode::serialize(&circuit_set_target).unwrap();
+        let decoded_target: CircuitSetTarget = bincode::deserialize(&encoded).unwrap();
+
+        assert_eq!(circuit_set_target, decoded_target);
+
+        // test serialization of `CircuitSetMembershipTargets`
+        let encoded = bincode::serialize(&circuit_membership_targets).unwrap();
+        let decoded_targets: Vec<CircuitSetMembershipTargets> = bincode::deserialize(&encoded).unwrap();
+
+        assert_eq!(circuit_membership_targets, decoded_targets);
+    }
+
+    #[test]
+    fn test_circuit_set_serialization() {
+        const NUM_ELEMENTS: usize = 42;
+        let elements = (0..NUM_ELEMENTS)
+            .map(|_| {
+                let hash_input = vec![F::rand(); 4];
+                <C as GenericConfig<D>>::Hasher::hash_no_pad(hash_input.as_slice())
+            })
+            .collect::<Vec<_>>();
+
+        let circuit_set = CircuitSet::<F, C, D>::build_circuit_set(elements);
+
+        let circuit_set_digest = CircuitSetDigest::<F, C, D>::from(&circuit_set);
+
+        // test serialization of `CircuitSet`
+        let encoded = bincode::serialize(&circuit_set).unwrap();
+        let decoded_set: CircuitSet<F, C, D> = bincode::deserialize(&encoded).unwrap();
+
+        assert_eq!(circuit_set, decoded_set);
+
+        // test serialization of `CircuitSetDigest`
+        let encoded = bincode::serialize(&circuit_set_digest).unwrap();
+        let decoded_digest: CircuitSetDigest<F, C, D> = bincode::deserialize(&encoded).unwrap();
+
+        assert_eq!(circuit_set_digest, decoded_digest);
     }
 }

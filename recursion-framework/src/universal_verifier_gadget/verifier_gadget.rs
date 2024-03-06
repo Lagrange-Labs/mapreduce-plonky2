@@ -5,12 +5,15 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{
-            CircuitConfig, CommonCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData,
+            CircuitConfig, VerifierCircuitTarget, VerifierOnlyCircuitData,
         },
         config::{AlgebraicHasher, GenericConfig, Hasher},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
+use serde::{Deserialize, Serialize};
+
+use crate::serialization::{circuit_data_serialization::SerializableCommonCircuitData, targets_serialization::{SerializableProofWithPublicInputsTarget, SerializableVerifierCircuitTarget}};
 
 use super::{
     build_data_for_universal_verifier,
@@ -22,19 +25,19 @@ use super::{
 
 use anyhow::Result;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 /// `UniversalVerifierTarget` comprises all the targets that are employed by the universal verifier
 /// to recusively verify a proof and to check the membership of the digest of the verifier data employed
 /// to verify the proof in the set of circuits bound to the universal verifier instance at hand
 pub(crate) struct UniversalVerifierTarget<const D: usize> {
     circuit_set_membership: CircuitSetMembershipTargets,
-    verified_proof: ProofWithPublicInputsTarget<D>,
-    verifier_data: VerifierCircuitTarget,
+    verified_proof: SerializableProofWithPublicInputsTarget<D>,
+    verifier_data: SerializableVerifierCircuitTarget,
 }
 
 impl<const D: usize> UniversalVerifierTarget<D> {
     pub(crate) fn get_proof_target(&self) -> &ProofWithPublicInputsTarget<D> {
-        &self.verified_proof
+        &self.verified_proof.as_ref()
     }
 
     //// Assigns the proofs and verifier data associated with the proof to the universal verifier targets. In particular,
@@ -51,8 +54,8 @@ impl<const D: usize> UniversalVerifierTarget<D> {
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
     {
-        pw.set_proof_with_pis_target(&self.verified_proof, proof);
-        pw.set_verifier_data_target(&self.verifier_data, verifier_data);
+        pw.set_proof_with_pis_target(&self.verified_proof.as_ref(), proof);
+        pw.set_verifier_data_target(&self.verifier_data.as_ref(), verifier_data);
         circuit_set.set_circuit_membership_target(
             pw,
             &self.circuit_set_membership,
@@ -60,6 +63,8 @@ impl<const D: usize> UniversalVerifierTarget<D> {
         )
     }
 }
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(bound = "")]
 /// `UniversalVerifierBuilder` is a data structure necessary to build instances of the universal verifier
 /// in a circuit. It is mostly employed to cache the `CommonCircuitData` that are shared among all the
 /// proofs being verified by the universal verifier, which are computed just once when initializing
@@ -69,14 +74,14 @@ pub(crate) struct UniversalVerifierBuilder<
     const D: usize,
     const NUM_PUBLIC_INPUTS: usize,
 > {
-    rec_data: CommonCircuitData<F, D>,
+    rec_data: SerializableCommonCircuitData<F, D>,
     circuit_set_size: usize,
 }
 
 impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize>
     UniversalVerifierBuilder<F, D, NUM_PUBLIC_INPUTS>
 {
-    pub(crate) fn new<C: GenericConfig<D, F = F>>(
+    pub(crate) fn new<C: GenericConfig<D, F = F> + 'static>(
         config: CircuitConfig,
         circuit_set_size: usize,
     ) -> Self
@@ -86,7 +91,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     {
         let rec_data = build_data_for_universal_verifier::<F, C, D>(config, NUM_PUBLIC_INPUTS);
         Self {
-            rec_data,
+            rec_data: SerializableCommonCircuitData::from(rec_data),
             circuit_set_size,
         }
     }
@@ -106,8 +111,8 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
         C::Hasher: AlgebraicHasher<F>,
         [(); C::Hasher::HASH_SIZE]:,
     {
-        let proof = builder.add_virtual_proof_with_pis(&self.rec_data);
-        builder.verify_proof::<C>(&proof, &verifier_data, &self.rec_data);
+        let proof = builder.add_virtual_proof_with_pis(self.rec_data.as_ref());
+        builder.verify_proof::<C>(&proof, &verifier_data, self.rec_data.as_ref());
         proof
     }
 
@@ -138,7 +143,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
         // allocate verifier data targets
         let verifier_data = VerifierCircuitTarget {
             constants_sigmas_cap: builder
-                .add_virtual_cap(self.rec_data.config.fri_config.cap_height),
+                .add_virtual_cap(self.rec_data.as_ref().config.fri_config.cap_height),
             circuit_digest: builder.add_virtual_hash(),
         };
         // verify proof
@@ -155,8 +160,8 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
 
         UniversalVerifierTarget {
             circuit_set_membership: proof_membership_target,
-            verified_proof: proof,
-            verifier_data,
+            verified_proof: SerializableProofWithPublicInputsTarget::from(proof),
+            verifier_data: SerializableVerifierCircuitTarget::from(verifier_data),
         }
     }
 }
@@ -189,10 +194,13 @@ mod tests {
     /// Test circuit whose wrapped proofs can be recursviely verified by the universal verifier circuit
     struct TestCircuitForUniversalVerifier<
         F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
+        C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
-    > {
+    > 
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
         input_targets: LeafCircuitWires<F, INPUT_SIZE>,
         circuit_set_target: CircuitSetTarget,
         circuit_data: CircuitData<F, C, D>,
@@ -281,10 +289,13 @@ mod tests {
 
     struct CircuitWithUniversalVerifier<
         F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
+        C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
-    > {
+    > 
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
         verifier_targets: UniversalVerifierTarget<D>,
         input_targets: RecursiveCircuitWires<INPUT_SIZE>,
         circuit_set_target: CircuitSetTarget,
@@ -545,11 +556,11 @@ mod tests {
         {
             let mut pw = PartialWitness::<F>::new();
             pw.set_proof_with_pis_target(
-                &universal_verifier_circuit.verifier_targets.verified_proof,
+                &universal_verifier_circuit.verifier_targets.verified_proof.as_ref(),
                 &wrapped_proof,
             );
             pw.set_verifier_data_target(
-                &universal_verifier_circuit.verifier_targets.verifier_data,
+                &universal_verifier_circuit.verifier_targets.verifier_data.as_ref(),
                 &base_circuit_variant.get_circuit_data().verifier_only,
             );
             circuit_set
@@ -595,5 +606,23 @@ mod tests {
             &base_circuit_variant.get_circuit_data().verifier_only,
             array::from_fn(|_| F::rand())
         ), "universal verifier didn't fail when verifying a proof for a circuit with the wrong circuit digest");
+    }
+
+    #[test]
+    fn test_universal_verifier_target_serialization() {
+        const INPUT_SIZE: usize = 8;
+        const CIRCUIT_SET_SIZE: usize = 2;
+        let config = CircuitConfig::standard_recursion_config();
+        let universal_verifier_circuit =
+            CircuitWithUniversalVerifier::<F, C, D, INPUT_SIZE>::build_circuit(
+                config.clone(),
+                CIRCUIT_SET_SIZE,
+            );
+        
+        // test `UniversalVerifierTarget` serialization
+        let encoded = bincode::serialize(&universal_verifier_circuit.verifier_targets).unwrap();
+        let verifier_targets: UniversalVerifierTarget<D> = bincode::deserialize(&encoded).unwrap();
+
+        assert_eq!(verifier_targets, universal_verifier_circuit.verifier_targets);
     }
 }
