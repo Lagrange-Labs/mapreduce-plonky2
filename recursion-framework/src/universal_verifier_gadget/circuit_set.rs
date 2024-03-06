@@ -20,7 +20,10 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::serialization::{circuit_data_serialization::MerkleTreeSerialize, targets_serialization::SerializableMerkleCapTarget, FromBytes, SerializationError, ToBytes};
+use crate::serialization::{
+    circuit_data_serialization::MerkleTreeSerialize,
+    targets_serialization::SerializableMerkleCapTarget, FromBytes, SerializationError, ToBytes,
+};
 
 use super::CIRCUIT_SET_CAP_HEIGHT;
 use anyhow::{Error, Result};
@@ -42,7 +45,8 @@ pub(crate) struct CircuitSetMembershipTargets {
 impl Serialize for CircuitSetMembershipTargets {
     fn serialize<S>(&self, serializer: S) -> std::prelude::v1::Result<S::Ok, S::Error>
     where
-        S: serde::Serializer {
+        S: serde::Serializer,
+    {
         let merkle_proof_bytes = self.merkle_proof_target.to_bytes();
         let leaf_index_bytes = self.leaf_index_bits.to_bytes();
         #[derive(Serialize)]
@@ -62,7 +66,8 @@ impl Serialize for CircuitSetMembershipTargets {
 impl<'a> Deserialize<'a> for CircuitSetMembershipTargets {
     fn deserialize<D>(deserializer: D) -> std::prelude::v1::Result<Self, D::Error>
     where
-        D: serde::Deserializer<'a> {
+        D: serde::Deserializer<'a>,
+    {
         #[derive(Deserialize)]
         struct Serialization {
             merkle_proof: Vec<u8>,
@@ -70,14 +75,12 @@ impl<'a> Deserialize<'a> for CircuitSetMembershipTargets {
         }
 
         let serialize_struct = Serialization::deserialize(deserializer)?;
-        Ok(
-            Self {
-                merkle_proof_target: MerkleProofTarget::from_bytes(&serialize_struct.merkle_proof)
-                    .map_err(SerializationError::to_de_error)?,
-                leaf_index_bits: Vec::<BoolTarget>::from_bytes(&serialize_struct.leaf_index)
-                    .map_err(SerializationError::to_de_error)?,
-            }
-        )
+        Ok(Self {
+            merkle_proof_target: MerkleProofTarget::from_bytes(&serialize_struct.merkle_proof)
+                .map_err(SerializationError::to_de_error)?,
+            leaf_index_bits: Vec::<BoolTarget>::from_bytes(&serialize_struct.leaf_index)
+                .map_err(SerializationError::to_de_error)?,
+        })
     }
 }
 
@@ -90,7 +93,9 @@ impl CircuitSetTarget {
     pub(crate) fn build_target<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self {
-        Self(SerializableMerkleCapTarget::from(builder.add_virtual_cap(CIRCUIT_SET_CAP_HEIGHT)))
+        Self(SerializableMerkleCapTarget::from(
+            builder.add_virtual_cap(CIRCUIT_SET_CAP_HEIGHT),
+        ))
     }
 
     pub(crate) fn to_targets(&self) -> Vec<Target> {
@@ -106,7 +111,9 @@ impl CircuitSetTarget {
         builder: &mut CircuitBuilder<F, D>,
         digest: CircuitSetDigest<F, C, D>,
     ) -> Self {
-        Self(SerializableMerkleCapTarget::from(builder.constant_merkle_cap(&digest.0)))
+        Self(SerializableMerkleCapTarget::from(
+            builder.constant_merkle_cap(&digest.0),
+        ))
     }
 
     pub(crate) fn set_target<
@@ -436,7 +443,8 @@ mod tests {
 
         // test serialization of `CircuitSetMembershipTargets`
         let encoded = bincode::serialize(&circuit_membership_targets).unwrap();
-        let decoded_targets: Vec<CircuitSetMembershipTargets> = bincode::deserialize(&encoded).unwrap();
+        let decoded_targets: Vec<CircuitSetMembershipTargets> =
+            bincode::deserialize(&encoded).unwrap();
 
         assert_eq!(circuit_membership_targets, decoded_targets);
     }
