@@ -13,10 +13,7 @@ use plonky2::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
-    serialization::{
-        circuit_data_serialization::SerializableCircuitData,
-        targets_serialization::SerializableArray,
-    },
+    serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
     universal_verifier_gadget::{
         verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
         wrap_circuit::WrapCircuit,
@@ -191,8 +188,8 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
             WrapCircuit::build_wrap_circuit(&data.verifier_only, &data.common, &self.config);
 
         CircuitWithUniversalVerifier::<F, C, D, NUM_VERIFIERS, CLW> {
-            universal_verifier_targets: SerializableArray::from(universal_verifier_targets),
-            circuit_data: SerializableCircuitData::from(data),
+            universal_verifier_targets,
+            circuit_data: data,
             circuit_logic_wires,
             circuit_set_target,
             wrap_circuit,
@@ -260,8 +257,13 @@ pub struct CircuitWithUniversalVerifier<
 > where
     C::Hasher: AlgebraicHasher<F>,
 {
-    universal_verifier_targets: SerializableArray<NUM_VERIFIERS, UniversalVerifierTarget<D>>,
-    circuit_data: SerializableCircuitData<F, C, D>,
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
+    universal_verifier_targets: [UniversalVerifierTarget<D>; NUM_VERIFIERS],
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    circuit_data: CircuitData<F, C, D>,
     circuit_logic_wires: CLW,
     circuit_set_target: CircuitSetTarget,
     wrap_circuit: WrapCircuit<F, C, D>,
@@ -312,7 +314,7 @@ where
         self.circuit_set_target
             .set_target(&mut pw, &CircuitSetDigest::from(circuit_set));
 
-        let base_proof = self.circuit_data.as_ref().prove(pw)?;
+        let base_proof = self.circuit_data.prove(pw)?;
 
         self.wrap_circuit.wrap_proof(base_proof)
     }
@@ -328,7 +330,7 @@ where
     /// the size of the wrapped circuit, given that the final wrapping circuit, which is the one whose
     /// `CircuitData` are accessbiel through the `circuit_data` method has a fixed size  
     pub fn wrapped_circuit_size(&self) -> usize {
-        self.circuit_data.as_ref().common.degree()
+        self.circuit_data.common.degree()
     }
 }
 
@@ -349,7 +351,7 @@ pub(crate) mod tests {
 
     use plonky2_monolith::{gates::monolith::MonolithGate, monolith_hash::MonolithHash};
 
-    use crate::serialization::targets_serialization::SerializableArray;
+    use crate::serialization::{deserialize_array, serialize_array};
 
     use super::*;
 
@@ -366,7 +368,11 @@ pub(crate) mod tests {
         const INPUT_SIZE: usize,
         H: AlgebraicHasher<F>,
     > {
-        inputs: SerializableArray<INPUT_SIZE, Target>,
+        #[serde(
+            serialize_with = "serialize_array",
+            deserialize_with = "deserialize_array"
+        )]
+        inputs: [Target; INPUT_SIZE],
         generator: Target,
         _f: PhantomData<F>,
         _h: PhantomData<H>,
@@ -420,7 +426,7 @@ pub(crate) mod tests {
             builder.register_public_inputs(state.as_slice());
 
             Self {
-                inputs: SerializableArray::from(inputs),
+                inputs,
                 generator,
                 _f: PhantomData::default(),
                 _h: PhantomData::default(),
@@ -436,7 +442,11 @@ pub(crate) mod tests {
     }
     #[derive(Serialize, Deserialize)]
     pub(crate) struct RecursiveCircuitWires<const INPUT_SIZE: usize> {
-        to_be_hashed_payload: SerializableArray<INPUT_SIZE, Target>,
+        #[serde(
+            serialize_with = "serialize_array",
+            deserialize_with = "deserialize_array"
+        )]
+        to_be_hashed_payload: [Target; INPUT_SIZE],
     }
 
     impl<
@@ -467,7 +477,7 @@ pub(crate) mod tests {
             builder.register_public_inputs(state.elements.as_slice());
 
             Self {
-                to_be_hashed_payload: SerializableArray::from(to_be_hashed_payload),
+                to_be_hashed_payload,
             }
         }
 
