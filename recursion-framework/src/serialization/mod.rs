@@ -1,6 +1,5 @@
 use plonky2::util::serialization::IoError;
-use serde::{de::Error, Deserialize, Serialize};
-use std::fmt::Debug;
+use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Implement serialization for Plonky2 circuits-related data structures
 pub mod circuit_data_serialization;
@@ -34,46 +33,85 @@ impl SerializationError {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-/// Data structure employed to automatically serialize/deserialize a vector of bytes with serde,
-/// in turn allowing a straightforward implementation of serde serialize/deserialize for types
-/// implementing `ToBytes` and `FromBytes` traits
-struct SerializationBytesWrapper(Vec<u8>);
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// Wrapper type employed to implement serialize and deserialize for several Plonky2 types T
-pub struct SerializationWrapper<T>(T);
-
-impl<T: ToBytes> Serialize for SerializationWrapper<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let proof_bytes = SerializationBytesWrapper(self.0.to_bytes());
-        proof_bytes.serialize(serializer)
-    }
+/// `serialize` allows to serialize an element of type `T: ToBytes` employing a serde serializer;
+/// Can be employed to derive `Serialize` if `T` does not implement `Serialize` with the `serialize_with` annotation
+pub fn serialize<T: ToBytes, S: Serializer>(input: &T, serializer: S) -> Result<S::Ok, S::Error> {
+    let input_bytes = input.to_bytes();
+    serializer.serialize_bytes(&input_bytes)
 }
 
-impl<'a, T: FromBytes> Deserialize<'a> for SerializationWrapper<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'a>,
-    {
-        let proof_bytes = SerializationBytesWrapper::deserialize(deserializer)?;
-        Ok(Self(
-            T::from_bytes(&proof_bytes.0).map_err(SerializationError::to_de_error)?,
+/// `deserialize` allows to deserialize an element of type `T: FromBytes` employing a serde deserializer;
+/// Can be employed to derive `Deserialize` if `T` does not implement `Deserialize` with the `deserialize_with` annotation
+pub fn deserialize<'a, T: FromBytes, D: Deserializer<'a>>(deserializer: D) -> Result<T, D::Error> {
+    let bytes = Vec::<u8>::deserialize(deserializer)?;
+    Ok(T::from_bytes(&bytes).map_err(SerializationError::to_de_error)?)
+}
+
+/// `serialize_array` allows to serialize an array with `N` elements of type `T: ToBytes` employing a serde serializer;
+/// Can be employed to derive `Serialize` if `T` does not implement `Serialize` with the `serialize_with` annotation
+pub fn serialize_array<T: ToBytes, S: Serializer, const N: usize>(
+    input: &[T; N],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let byte_vec = input.iter().map(|inp| inp.to_bytes()).collect::<Vec<_>>();
+    Vec::<Vec<u8>>::serialize(&byte_vec, serializer)
+}
+
+/// `deserialize_array` allows to deserialize an array with `N` elements of type `T: FromBytes` employing a serde deserializer;
+/// Can be employed to derive `Deserialize` if `T` does not implement `Deserialize` with the `deserialize_with` annotation
+pub fn deserialize_array<'a, T: FromBytes, D: Deserializer<'a>, const N: usize>(
+    deserializer: D,
+) -> Result<[T; N], D::Error> {
+    deserialize_vec(deserializer)?.try_into().map_err(|_| {
+        D::Error::custom(format!(
+            "failed to deserialize array: wrong number of items found"
         ))
-    }
+    })
 }
 
-impl<T: ToBytes + FromBytes> AsRef<T> for SerializationWrapper<T> {
-    fn as_ref(&self) -> &T {
-        &self.0
-    }
+/// `serialize_long_array` overcomes a limitation of serde that cannot derive `Serialize` for arrays
+/// of type `T: Serialize` longer than `32` elements; Can be employed to derive `Serialize` for such
+/// arrays with the `serialize_with` annotation
+pub fn serialize_long_array<T: Serialize + Clone, S: Serializer, const N: usize>(
+    input: &[T; N],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    Vec::<T>::serialize(&input.to_vec(), serializer)
 }
 
-impl<T: ToBytes + FromBytes> From<T> for SerializationWrapper<T> {
-    fn from(value: T) -> Self {
-        Self(value)
-    }
+/// `deserialize_long_array` overcomes a limitation of serde that cannot derive `Deserialize` for arrays
+/// of type `T: Deserialize` longer than `32` elements; Can be employed to derive `Deserialize` for such
+/// arrays with the `deserialize_with` annotation
+pub fn deserialize_long_array<'a, T: Deserialize<'a>, D: Deserializer<'a>, const N: usize>(
+    deserializer: D,
+) -> Result<[T; N], D::Error> {
+    Vec::<T>::deserialize(deserializer)?
+        .try_into()
+        .map_err(|_| {
+            D::Error::custom(format!(
+                "failed to deserialize array: wrong number of items found"
+            ))
+        })
+}
+
+/// `serialize_vec` allows to serialize a vector with elements of type `T: ToBytes` employing a serde serializer;
+/// Can be employed to derive `Serialize` if `T` does not implement `Serialize` with the `serialize_with` annotation
+pub fn serialize_vec<T: ToBytes, S: Serializer>(
+    input: &Vec<T>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let byte_vec = input.iter().map(|inp| inp.to_bytes()).collect::<Vec<_>>();
+    Vec::<Vec<u8>>::serialize(&byte_vec, serializer)
+}
+
+/// `deserialize_vec` allows to deserialize a vector with elements of type `T: FromBytes` employing a serde deserializer;
+/// Can be employed to derive `Deserialize` if `T` does not implement `Deserialize` with the `deserialize_with` annotation
+pub fn deserialize_vec<'a, T: FromBytes, D: Deserializer<'a>>(
+    deserializer: D,
+) -> Result<Vec<T>, D::Error> {
+    let byte_vec = Vec::<Vec<u8>>::deserialize(deserializer)?;
+    byte_vec
+        .into_iter()
+        .map(|bytes| T::from_bytes(&bytes).map_err(SerializationError::to_de_error))
+        .collect::<Result<_, _>>()
 }

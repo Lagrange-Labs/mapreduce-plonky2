@@ -14,7 +14,7 @@ use plonky2::{
 use plonky2_crypto::u32::gates::{HashGateSerializer, HashGeneratorSerializer};
 use serde::{Deserialize, Serialize};
 
-use super::{FromBytes, SerializationError, SerializationWrapper, ToBytes};
+use super::{FromBytes, SerializationError, ToBytes};
 
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "MerkleTree")]
@@ -71,17 +71,6 @@ where
     }
 }
 
-/// Serializable variant of `CircuitData`
-pub type SerializableCircuitData<F, C, const D: usize> = SerializationWrapper<CircuitData<F, C, D>>;
-
-impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
-    AsMut<CircuitData<F, C, D>> for SerializableCircuitData<F, C, D>
-{
-    fn as_mut(&mut self) -> &mut CircuitData<F, C, D> {
-        &mut self.0
-    }
-}
-
 impl<F: RichField + Extendable<D>, const D: usize> ToBytes for CommonCircuitData<F, D> {
     fn to_bytes(&self) -> Vec<u8> {
         self.to_bytes(&HashGateSerializer)
@@ -95,10 +84,6 @@ impl<F: RichField + Extendable<D>, const D: usize> FromBytes for CommonCircuitDa
     }
 }
 
-/// Serializable variant of `CommonCircuitData`
-pub type SerializableCommonCircuitData<F, const D: usize> =
-    SerializationWrapper<CommonCircuitData<F, D>>;
-
 #[cfg(test)]
 pub(super) mod tests {
     use plonky2::field::types::{Field, Sample};
@@ -110,6 +95,8 @@ pub(super) mod tests {
         },
     };
     use rstest::rstest;
+
+    use crate::serialization::{deserialize, serialize};
 
     use super::*;
 
@@ -147,8 +134,10 @@ pub(super) mod tests {
         where
             C::Hasher: AlgebraicHasher<F>,
         {
-            cd: SerializableCircuitData<F, C, D>,
-            common: SerializableCommonCircuitData<F, D>,
+            #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+            cd: CircuitData<F, C, D>,
+            #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+            common: CommonCircuitData<F, D>,
             #[serde(with = "VerifierOnlyCircuitDataSerialize")]
             vd: VerifierOnlyCircuitData<C, D>,
         }
@@ -159,23 +148,20 @@ pub(super) mod tests {
         let common = data.common.clone();
 
         let serialized_struct = TestSerialization::<F, C, D> {
-            cd: SerializableCircuitData::from(data),
-            common: SerializableCommonCircuitData::from(common),
-            vd: vd.clone(),
+            cd: data,
+            common,
+            vd,
         };
 
         let encoded = bincode::serialize(&serialized_struct).unwrap();
 
         let decoded_data: TestSerialization<F, C, D> = bincode::deserialize(&encoded).unwrap();
 
-        assert_eq!(decoded_data.cd.as_ref(), serialized_struct.cd.as_ref());
+        assert_eq!(decoded_data.cd, serialized_struct.cd);
 
-        assert_eq!(
-            decoded_data.common.as_ref(),
-            serialized_struct.common.as_ref()
-        );
+        assert_eq!(decoded_data.common, serialized_struct.common);
 
-        assert_eq!(decoded_data.vd, vd);
+        assert_eq!(decoded_data.vd, serialized_struct.vd);
     }
 
     #[rstest]

@@ -9,18 +9,13 @@ use plonky2::{
             VerifierOnlyCircuitData,
         },
         config::{AlgebraicHasher, GenericConfig, Hasher},
-        proof::ProofWithPublicInputs,
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    serialization::{
-        circuit_data_serialization::SerializableCircuitData,
-        targets_serialization::{
-            SerializableProofWithPublicInputsTarget, SerializableVerifierCircuitTarget,
-        },
-    },
+    serialization::{deserialize_vec, serialize_vec},
     universal_verifier_gadget::{circuit_set::check_circuit_digest_target, RECURSION_THRESHOLD},
 };
 
@@ -38,9 +33,12 @@ pub(crate) struct WrapCircuit<
 > where
     C::Hasher: AlgebraicHasher<F>,
 {
-    proof_targets: Vec<SerializableProofWithPublicInputsTarget<D>>,
-    circuit_data: Vec<SerializableCircuitData<F, C, D>>,
-    inner_data: Vec<SerializableVerifierCircuitTarget>,
+    #[serde(serialize_with = "serialize_vec", deserialize_with = "deserialize_vec")]
+    proof_targets: Vec<ProofWithPublicInputsTarget<D>>,
+    #[serde(serialize_with = "serialize_vec", deserialize_with = "deserialize_vec")]
+    circuit_data: Vec<CircuitData<F, C, D>>,
+    #[serde(serialize_with = "serialize_vec", deserialize_with = "deserialize_vec")]
+    inner_data: Vec<VerifierCircuitTarget>,
 }
 
 impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> WrapCircuit<F, C, D>
@@ -99,16 +97,10 @@ where
 
             let data = builder.build::<C>();
 
-            wrap_circuit
-                .proof_targets
-                .push(SerializableProofWithPublicInputsTarget::from(pt));
-            wrap_circuit
-                .circuit_data
-                .push(SerializableCircuitData::from(data));
-            wrap_circuit
-                .inner_data
-                .push(SerializableVerifierCircuitTarget::from(inner_data));
-            let circuit_data = wrap_circuit.circuit_data.last().unwrap().as_ref();
+            wrap_circuit.proof_targets.push(pt);
+            wrap_circuit.circuit_data.push(data);
+            wrap_circuit.inner_data.push(inner_data);
+            let circuit_data = wrap_circuit.circuit_data.last().unwrap();
             (cd, vd) = (&circuit_data.common, &circuit_data.verifier_only);
 
             log::debug!(
@@ -140,18 +132,15 @@ where
             .zip(self.inner_data.iter())
         {
             let mut pw = PartialWitness::new();
-            pw.set_proof_with_pis_target(pt.as_ref(), &proof);
+            pw.set_proof_with_pis_target(pt, &proof);
             if let Some(vd) = circuit_data {
                 // no need to set `constants_sigmas_cap` target in the first wrapping step, as they
                 // are hardcoded as constant in the first wrapping circuit
-                pw.set_cap_target(
-                    &inner_data.as_ref().constants_sigmas_cap,
-                    &vd.constants_sigmas_cap,
-                );
+                pw.set_cap_target(&inner_data.constants_sigmas_cap, &vd.constants_sigmas_cap);
             }
 
-            proof = cd.as_ref().prove(pw)?;
-            circuit_data = Some(&cd.as_ref().verifier_only);
+            proof = cd.prove(pw)?;
+            circuit_data = Some(&cd.verifier_only);
         }
 
         Ok(proof)
@@ -160,7 +149,7 @@ where
     // Helper function that returns a pointer to the circuit data of the circuit for the last
     // wrap step
     pub(crate) fn final_proof_circuit_data(&self) -> &CircuitData<F, C, D> {
-        self.circuit_data.last().unwrap().as_ref()
+        self.circuit_data.last().unwrap()
     }
 }
 
@@ -190,7 +179,7 @@ pub(crate) mod test {
     where
         C::Hasher: AlgebraicHasher<F>,
     {
-        circuit.circuit_data.last_mut().unwrap().as_mut()
+        circuit.circuit_data.last_mut().unwrap()
     }
 
     struct TestCircuit<
