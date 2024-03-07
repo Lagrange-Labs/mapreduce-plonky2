@@ -20,10 +20,7 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::serialization::{
-    circuit_data_serialization::MerkleTreeSerialize, deserialize, deserialize_vec, serialize,
-    serialize_vec,
-};
+use crate::serialization::{deserialize, deserialize_vec, serialize, serialize_vec};
 
 use super::CIRCUIT_SET_CAP_HEIGHT;
 use anyhow::{Error, Result};
@@ -170,7 +167,7 @@ pub(crate) struct CircuitSet<
     const D: usize,
 > {
     circuit_digests_to_leaf_indexes: HashMap<Vec<F>, usize>,
-    #[serde(with = "MerkleTreeSerialize")]
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     mt: MerkleTree<F, C::Hasher>,
 }
 
