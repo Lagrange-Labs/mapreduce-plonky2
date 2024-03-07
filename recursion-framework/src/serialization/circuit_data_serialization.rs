@@ -2,42 +2,45 @@ use std::marker::PhantomData;
 
 use plonky2::{
     field::extension::Extendable,
-    hash::{
-        hash_types::RichField,
-        merkle_tree::{MerkleCap, MerkleTree},
-    },
+    hash::{hash_types::RichField, merkle_tree::MerkleTree},
     plonk::{
         circuit_data::{CircuitData, CommonCircuitData, VerifierOnlyCircuitData},
         config::{AlgebraicHasher, GenericConfig, Hasher},
     },
+    util::serialization::{Buffer, Read, Write},
 };
 use plonky2_crypto::u32::gates::{HashGateSerializer, HashGeneratorSerializer};
-use serde::{Deserialize, Serialize};
 
 use super::{FromBytes, SerializationError, ToBytes};
 
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "MerkleTree")]
-#[serde(bound = "")]
-/// Data structure employed to serialize a `MerkleTree` in another data structure,
-/// following the serde derivation for remote crates (https://serde.rs/remote-derive.html)
-pub struct MerkleTreeSerialize<F: RichField, H: Hasher<F>> {
-    leaves: Vec<Vec<F>>,
-
-    digests: Vec<H::Hash>,
-
-    cap: MerkleCap<F, H>,
+impl<F: RichField, H: Hasher<F>> ToBytes for MerkleTree<F, H> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        buffer
+            .write_merkle_tree(&self)
+            .expect("Writing to a byte-vector cannot fail.");
+        buffer
+    }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "VerifierOnlyCircuitData")]
-#[serde(bound = "")]
-/// Data structure employed to serialize a `VerifierOnlyCircuitData` in another data structure,
-/// following the serde derivation for remote crates (https://serde.rs/remote-derive.html)
-pub struct VerifierOnlyCircuitDataSerialize<C: GenericConfig<D>, const D: usize> {
-    constants_sigmas_cap: MerkleCap<C::F, C::Hasher>,
+impl<F: RichField, H: Hasher<F>> FromBytes for MerkleTree<F, H> {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
+        let mut buffer = Buffer::new(bytes);
+        Ok(buffer.read_merkle_tree()?)
+    }
+}
 
-    circuit_digest: <<C as GenericConfig<D>>::Hasher as Hasher<C::F>>::Hash,
+impl<C: GenericConfig<D>, const D: usize> ToBytes for VerifierOnlyCircuitData<C, D> {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_bytes()
+            .expect("Writing to a byte-vector cannot fail.")
+    }
+}
+
+impl<C: GenericConfig<D>, const D: usize> FromBytes for VerifierOnlyCircuitData<C, D> {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
+        Ok(Self::from_bytes(bytes.to_vec())?)
+    }
 }
 
 impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F> + 'static, const D: usize> ToBytes
@@ -95,6 +98,7 @@ pub(super) mod tests {
         },
     };
     use rstest::rstest;
+    use serde::{Deserialize, Serialize};
 
     use crate::serialization::{deserialize, serialize};
 
@@ -138,7 +142,7 @@ pub(super) mod tests {
             cd: CircuitData<F, C, D>,
             #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
             common: CommonCircuitData<F, D>,
-            #[serde(with = "VerifierOnlyCircuitDataSerialize")]
+            #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
             vd: VerifierOnlyCircuitData<C, D>,
         }
 
@@ -172,7 +176,10 @@ pub(super) mod tests {
     fn test_merkle_tree_serialization(#[case] num_leaves: usize, #[case] cap_height: usize) {
         type H = <C as GenericConfig<D>>::Hasher;
         #[derive(Serialize, Deserialize)]
-        struct TestMerkleTreeSerialization(#[serde(with = "MerkleTreeSerialize")] MerkleTree<F, H>);
+        struct TestMerkleTreeSerialization(
+            #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+            MerkleTree<F, H>,
+        );
 
         let mut leaves = (0..num_leaves)
             .map(|_| vec![F::rand(); 2])
