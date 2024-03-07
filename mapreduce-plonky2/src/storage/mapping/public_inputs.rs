@@ -23,6 +23,7 @@ use crate::{
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::MPTKeyWire,
     rlp::MAX_KEY_NIBBLE_LEN,
+    utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 // This is a wrapper around an array of targets set as public inputs
 // of any proof generated in this module. They all share the same
@@ -66,11 +67,7 @@ impl<'a> PublicInputs<'a, Target> {
     /// Returns the accumulator digest defined over the public inputs
     // TODO: move that to ecgfp5 repo
     pub fn accumulator(&self) -> CurveTarget {
-        let (x, y, is_inf) = self.accumulator_info();
-        let x = QuinticExtensionTarget(x);
-        let y = QuinticExtensionTarget(y);
-        let flag = BoolTarget::new_unsafe(is_inf);
-        CurveTarget(([x, y], flag))
+        convert_point_to_curve_target(self.accumulator_info())
     }
 
     /// Returns the merkle hash C of the subtree this proof has processed.
@@ -144,17 +141,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     // small utility function to transform a list of target to a curvetarget.
     pub(super) fn accumulator_info(&self) -> ([T; 5], [T; 5], T) {
-        // 5 F for each coordinates + 1 bool flag
-        let slice = &self.proof_inputs[Self::D_IDX..];
-        #[allow(clippy::int_plus_one)]
-        let within_bound = slice.len() >= 5 * 2 + 1;
-        assert!(within_bound);
-        let x = slice[0..Self::EXTENSION].try_into().unwrap();
-        let y = slice[Self::EXTENSION..2 * Self::EXTENSION]
-            .try_into()
-            .unwrap();
-        let flag = slice[2 * Self::EXTENSION];
-        (x, y, flag)
+        convert_slice_to_curve_point(&self.proof_inputs[Self::D_IDX..])
     }
     pub(crate) fn mpt_key_info(&self) -> (&[T], T) {
         let key_range = Self::KEY_IDX..Self::KEY_IDX + MAX_KEY_NIBBLE_LEN;

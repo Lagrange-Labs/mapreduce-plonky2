@@ -7,13 +7,21 @@ use super::{
 };
 use crate::{
     keccak::{OutputHash, PACKED_HASH_LEN},
-    utils::{PackedAddressTarget, PACKED_ADDRESS_LEN},
+    utils::{
+        convert_point_to_curve_target, convert_slice_to_curve_point, PackedAddressTarget,
+        PACKED_ADDRESS_LEN,
+    },
 };
 use plonky2::{
-    field::goldilocks_field::GoldilocksField, iop::target::Target,
+    field::goldilocks_field::GoldilocksField, iop::target::BoolTarget, iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use plonky2_ecgfp5::gadgets::{
+    base_field::QuinticExtensionTarget,
+    curve::{CircuitBuilderEcGFp5, CurveTarget},
+};
+use std::array;
 
 /// This is a wrapper around an array of targets set as public inputs of any
 /// proof generated in this module. They all share the same structure.
@@ -42,37 +50,53 @@ impl<'a> PublicInputs<'a, Target> {
         cb.register_public_input(mapping_slot);
         cb.register_public_input(length_slot);
     }
+
+    /// Return the curve point target of digest defined over the public inputs.
+    pub fn digest(&self) -> CurveTarget {
+        convert_point_to_curve_target(self.digest_data())
+    }
+
+    pub fn contract_address(&self) -> PackedAddressTarget {
+        let data = self.contract_address_data();
+        array::from_fn(|i| U32Target(data[i])).into()
+    }
+
+    pub fn root_hash(&self) -> OutputHash {
+        let data = self.root_hash_data();
+        array::from_fn(|i| U32Target(data[i])).into()
+    }
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
-    const D_IDX: usize = 0;
-    const A_IDX: usize = Self::D_IDX + 11; // 5*2+1 for curve target
-    const C_IDX: usize = Self::A_IDX + PACKED_ADDRESS_LEN;
-    const M_IDX: usize = Self::C_IDX + PACKED_HASH_LEN;
-    const S_IDX: usize = Self::M_IDX + 1;
+    pub(crate) const D_IDX: usize = 0;
+    pub(crate) const A_IDX: usize = Self::D_IDX + 11; // 5*2+1 for curve target
+    pub(crate) const C_IDX: usize = Self::A_IDX + PACKED_ADDRESS_LEN;
+    pub(crate) const M_IDX: usize = Self::C_IDX + PACKED_HASH_LEN;
+    pub(crate) const S_IDX: usize = Self::M_IDX + 1;
     pub(crate) const TOTAL_LEN: usize = Self::S_IDX + 1;
 
     pub fn from(arr: &'a [T]) -> Self {
         Self { proof_inputs: arr }
     }
 
-    pub fn digest(&self) -> &[T] {
-        &self.proof_inputs[Self::D_IDX..Self::A_IDX]
+    /// Transform a list of elements to a curve point.
+    pub fn digest_data(&self) -> ([T; 5], [T; 5], T) {
+        convert_slice_to_curve_point(&self.proof_inputs[Self::D_IDX..])
     }
 
-    pub fn contract_address(&self) -> &[T] {
+    pub fn contract_address_data(&self) -> &[T] {
         &self.proof_inputs[Self::A_IDX..Self::C_IDX]
     }
 
-    pub fn mpt_root_hash(&self) -> &[T] {
+    pub fn root_hash_data(&self) -> &[T] {
         &self.proof_inputs[Self::C_IDX..Self::M_IDX]
     }
 
-    pub fn mapping_storage_slot(&self) -> T {
+    pub fn mapping_slot(&self) -> T {
         self.proof_inputs[Self::M_IDX]
     }
 
-    pub fn length_storage_slot(&self) -> T {
+    pub fn length_slot(&self) -> T {
         self.proof_inputs[Self::S_IDX]
     }
 }
