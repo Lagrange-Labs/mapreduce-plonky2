@@ -276,7 +276,7 @@ pub(crate) mod tests {
         tests::{LeafCircuitWires, RecursiveCircuitWires},
         CircuitWithUniversalVerifierBuilder,
     };
-    use crate::serialization::targets_serialization::SerializableProofWithPublicInputsTarget;
+    use crate::serialization::{deserialize, serialize};
 
     use super::*;
 
@@ -350,7 +350,8 @@ pub(crate) mod tests {
         const D: usize,
         const NUM_PUBLIC_INPUTS: usize,
     > {
-        targets: SerializableProofWithPublicInputsTarget<D>,
+        #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+        targets: ProofWithPublicInputsTarget<D>,
         c: PhantomData<C>,
     }
 
@@ -379,17 +380,15 @@ pub(crate) mod tests {
             builder_parameters: Self::CircuitBuilderParams,
         ) -> Self {
             Self {
-                targets: SerializableProofWithPublicInputsTarget::from(
-                    builder_parameters
-                        .0
-                        .verify_proof_fixed_circuit_in_circuit_set(builder, &builder_parameters.1),
-                ),
+                targets: builder_parameters
+                    .0
+                    .verify_proof_fixed_circuit_in_circuit_set(builder, &builder_parameters.1),
                 c: PhantomData::<C>::default(),
             }
         }
 
         fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
-            pw.set_proof_with_pis_target(&self.targets.as_ref(), &inputs);
+            pw.set_proof_with_pis_target(&self.targets, &inputs);
 
             Ok(())
         }

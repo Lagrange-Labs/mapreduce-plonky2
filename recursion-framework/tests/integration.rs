@@ -18,7 +18,7 @@ use plonky2::{
         proof::ProofWithPublicInputsTarget,
     },
 };
-use recursion_framework::serialization::targets_serialization::SerializableArray;
+use recursion_framework::serialization::{deserialize_array, serialize_array};
 use recursion_framework::{
     circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifierBuilder},
     framework::{
@@ -54,7 +54,11 @@ use serial_test::serial;
 const NUM_PUBLIC_INPUTS: usize = 1 + NUM_HASH_OUT_ELTS;
 #[derive(Serialize, Deserialize)]
 struct MapCircuitWires<const INPUT_CHUNK_SIZE: usize> {
-    input_targets: SerializableArray<INPUT_CHUNK_SIZE, Target>,
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
+    input_targets: [Target; INPUT_CHUNK_SIZE],
 }
 
 impl<F: RichField + Extendable<D>, const D: usize, const INPUT_CHUNK_SIZE: usize>
@@ -83,9 +87,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const INPUT_CHUNK_SIZE: usize
         let hash_target = builder.hash_n_to_hash_no_pad::<PoseidonHash>(input_targets.to_vec());
         builder.register_public_input(sum_target);
         builder.register_public_inputs(&hash_target.elements);
-        Self {
-            input_targets: SerializableArray::from(input_targets),
-        }
+        Self { input_targets }
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {

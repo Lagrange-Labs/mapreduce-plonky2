@@ -1,13 +1,11 @@
 use plonky2::{
     hash::{hash_types::MerkleCapTarget, merkle_proofs::MerkleProofTarget},
-    iop::target::BoolTarget,
+    iop::target::{BoolTarget, Target},
     plonk::{circuit_data::VerifierCircuitTarget, proof::ProofWithPublicInputsTarget},
     util::serialization::{Buffer, Read, Write},
 };
-use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
 
-use super::{FromBytes, SerializationError, SerializationWrapper, ToBytes};
+use super::{FromBytes, SerializationError, ToBytes};
 
 impl<const D: usize> ToBytes for ProofWithPublicInputsTarget<D> {
     fn to_bytes(&self) -> Vec<u8> {
@@ -26,10 +24,6 @@ impl<const D: usize> FromBytes for ProofWithPublicInputsTarget<D> {
     }
 }
 
-/// Serializable variant of `ProofWithPublicInputsTarget`
-pub type SerializableProofWithPublicInputsTarget<const D: usize> =
-    SerializationWrapper<ProofWithPublicInputsTarget<D>>;
-
 impl ToBytes for VerifierCircuitTarget {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
@@ -46,9 +40,6 @@ impl FromBytes for VerifierCircuitTarget {
         Ok(buffer.read_target_verifier_circuit()?)
     }
 }
-
-/// Serializable variant of `VerifierCircuitTarget`
-pub type SerializableVerifierCircuitTarget = SerializationWrapper<VerifierCircuitTarget>;
 
 impl ToBytes for MerkleProofTarget {
     fn to_bytes(&self) -> Vec<u8> {
@@ -67,9 +58,6 @@ impl FromBytes for MerkleProofTarget {
     }
 }
 
-/// Serializable variant of `MerkleProofTarget`
-pub type SerializableMerkleProofTarget = SerializationWrapper<MerkleProofTarget>;
-
 impl ToBytes for MerkleCapTarget {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
@@ -86,9 +74,6 @@ impl FromBytes for MerkleCapTarget {
         Ok(buffer.read_target_merkle_cap()?)
     }
 }
-
-/// Serializable variant of `MerkleCapTarget`
-pub type SerializableMerkleCapTarget = SerializationWrapper<MerkleCapTarget>;
 
 impl<T: ToBytes> ToBytes for Vec<T> {
     fn to_bytes(&self) -> Vec<u8> {
@@ -120,44 +105,27 @@ impl ToBytes for BoolTarget {
     }
 }
 
-/// Data structure to serialize a vector of elements implementing `ToBytes` and `FromBytes`
-pub type SerializableVector<T> = SerializationWrapper<Vec<T>>; 
-
-#[derive(Clone, Debug)]
-/// Data structure to serialize an array of arbitary size, which is currently unsupported by serde
-pub struct SerializableArray<const SIZE: usize, T: Clone + Debug>([T; SIZE]);
-
-impl<const SIZE: usize, T: Serialize + Clone + Debug> Serialize for SerializableArray<SIZE, T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let vector = self.0.to_vec();
-        vector.serialize(serializer)
+impl FromBytes for BoolTarget {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
+        let mut buffer = Buffer::new(bytes);
+        Ok(buffer.read_target_bool()?)
     }
 }
 
-impl<'a, const SIZE: usize, T: Clone + Debug + Deserialize<'a>> Deserialize<'a>
-    for SerializableArray<SIZE, T>
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'a>,
-    {
-        let vector = Vec::<T>::deserialize(deserializer)?;
-        Ok(Self(vector.try_into().unwrap()))
+impl ToBytes for Target {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        buffer
+            .write_target(*self)
+            .expect("Writing to a byte-vector cannot fail.");
+        buffer
     }
 }
 
-impl<const SIZE: usize, T: Clone + Debug> AsRef<[T; SIZE]> for SerializableArray<SIZE, T> {
-    fn as_ref(&self) -> &[T; SIZE] {
-        &self.0
-    }
-}
-
-impl<const SIZE: usize, T: Clone + Debug> From<[T; SIZE]> for SerializableArray<SIZE, T> {
-    fn from(value: [T; SIZE]) -> Self {
-        Self(value)
+impl FromBytes for Target {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
+        let mut buffer = Buffer::new(bytes);
+        Ok(buffer.read_target()?)
     }
 }
 
@@ -165,6 +133,9 @@ impl<const SIZE: usize, T: Clone + Debug> From<[T; SIZE]> for SerializableArray<
 mod tests {
     use super::*;
     use crate::serialization::circuit_data_serialization::tests::build_test_circuit;
+    use crate::serialization::{
+        deserialize, deserialize_array, deserialize_vec, serialize, serialize_array, serialize_vec,
+    };
     use plonky2::{
         iop::target::Target,
         plonk::{
@@ -174,6 +145,7 @@ mod tests {
         },
     };
     use rstest::rstest;
+    use serde::{Deserialize, Serialize};
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -185,52 +157,82 @@ mod tests {
     #[case(3, 0)]
     #[case(0, 0)]
     fn test_targets_serialization(#[case] cap_height: usize, #[case] merkle_proof_height: usize) {
+        #[derive(Serialize, Deserialize)]
+        struct TestSerialization<T: FromBytes + ToBytes>(
+            #[serde(serialize_with = "serialize", deserialize_with = "deserialize")] T,
+        );
+
         let cd = build_test_circuit::<F, C, D>().common;
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
-        let merkle_cap = SerializableMerkleCapTarget::from(builder.add_virtual_cap(cap_height));
+        let merkle_cap = TestSerialization::<MerkleCapTarget>(builder.add_virtual_cap(cap_height));
 
-        let merkle_proof = SerializableMerkleProofTarget::from(MerkleProofTarget {
+        let merkle_proof = TestSerialization::<MerkleProofTarget>(MerkleProofTarget {
             siblings: builder.add_virtual_hashes(merkle_proof_height),
         });
 
-        let proof =
-            SerializableProofWithPublicInputsTarget::from(builder.add_virtual_proof_with_pis(&cd));
-        let vd = SerializableVerifierCircuitTarget::from(
+        let proof = TestSerialization::<ProofWithPublicInputsTarget<D>>(
+            builder.add_virtual_proof_with_pis(&cd),
+        );
+        let vd = TestSerialization::<VerifierCircuitTarget>(
             builder.add_virtual_verifier_data(cd.config.fri_config.cap_height),
         );
 
-        let short_target_arr = SerializableArray::from(builder.add_virtual_target_arr::<13>());
-        let long_target_arr = SerializableArray::from(builder.add_virtual_target_arr::<42>());
+        #[derive(Serialize, Deserialize)]
+        struct TestArraySerialization<T: ToBytes + FromBytes, const N: usize>(
+            #[serde(
+                serialize_with = "serialize_array",
+                deserialize_with = "deserialize_array"
+            )]
+            [T; N],
+        );
+
+        let short_target_arr = TestArraySerialization(builder.add_virtual_target_arr::<13>());
+        let long_target_arr = TestArraySerialization(builder.add_virtual_target_arr::<42>());
+        #[derive(Serialize, Deserialize)]
+        struct TestVecSerialization<T: ToBytes + FromBytes>(
+            #[serde(serialize_with = "serialize_vec", deserialize_with = "deserialize_vec")] Vec<T>,
+        );
+        let target_vec = TestVecSerialization::<Target>(builder.add_virtual_targets(7));
 
         // test `MerkleCapTarget` serialization
         let encoded = bincode::serialize(&merkle_cap).unwrap();
-        let decoded: SerializableMerkleCapTarget = bincode::deserialize(&encoded).unwrap();
-        assert_eq!(merkle_cap.as_ref(), decoded.as_ref());
+        let decoded: TestSerialization<MerkleCapTarget> = bincode::deserialize(&encoded).unwrap();
+        assert_eq!(merkle_cap.0, decoded.0);
 
         // test `MerkleProofTarget` serialization
         let encoded = bincode::serialize(&merkle_proof).unwrap();
-        let decoded: SerializableMerkleProofTarget = bincode::deserialize(&encoded).unwrap();
-        assert_eq!(merkle_proof.as_ref(), decoded.as_ref());
+        let decoded: TestSerialization<MerkleProofTarget> = bincode::deserialize(&encoded).unwrap();
+        assert_eq!(merkle_proof.0, decoded.0);
 
         // test `ProofWithPublicInputsTarget` serialization
         let encoded = bincode::serialize(&proof).unwrap();
-        let decoded: SerializableProofWithPublicInputsTarget<D> =
+        let decoded: TestSerialization<ProofWithPublicInputsTarget<D>> =
             bincode::deserialize(&encoded).unwrap();
-        assert_eq!(proof.as_ref(), decoded.as_ref());
+        assert_eq!(proof.0, decoded.0);
 
         // test `VerifierCircuitTarget` serialization
         let encoded = bincode::serialize(&vd).unwrap();
-        let decoded: SerializableVerifierCircuitTarget = bincode::deserialize(&encoded).unwrap();
-        assert_eq!(vd.as_ref(), decoded.as_ref());
+        let decoded: TestSerialization<VerifierCircuitTarget> =
+            bincode::deserialize(&encoded).unwrap();
+        assert_eq!(vd.0, decoded.0);
 
         // test short target array serialization
         let encoded = bincode::serialize(&short_target_arr).unwrap();
-        let decoded: SerializableArray<13, Target> = bincode::deserialize(&encoded).unwrap();
-        assert_eq!(short_target_arr.as_ref(), decoded.as_ref());
+        let decoded: TestArraySerialization<Target, 13> = bincode::deserialize(&encoded).unwrap();
+        assert_eq!(short_target_arr.0, decoded.0);
 
         // test long target array serialization
         let encoded = bincode::serialize(&long_target_arr).unwrap();
-        let decoded: SerializableArray<42, Target> = bincode::deserialize(&encoded).unwrap();
-        assert_eq!(long_target_arr.as_ref(), decoded.as_ref());
+        let decoded: TestArraySerialization<Target, 42> = bincode::deserialize(&encoded).unwrap();
+        assert_eq!(long_target_arr.0, decoded.0);
+
+        // try to deserialize an array with wrong length
+        let decoded: Result<TestArraySerialization<Target, 43>, _> = bincode::deserialize(&encoded);
+        assert!(decoded.is_err());
+
+        // test vector of targets serialization
+        let encoded = bincode::serialize(&target_vec).unwrap();
+        let decoded: TestVecSerialization<Target> = bincode::deserialize(&encoded).unwrap();
+        assert_eq!(target_vec.0, decoded.0);
     }
 }

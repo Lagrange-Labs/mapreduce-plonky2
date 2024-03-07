@@ -19,13 +19,17 @@ use crate::{
         CircuitLogicWires, CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder,
     },
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
-    serialization::targets_serialization::SerializableArray,
+    serialization::{deserialize_array, serialize_array},
 };
 
 use anyhow::Result;
 #[derive(Serialize, Deserialize)]
 struct DummyCircuitWires<const NUM_PUBLIC_INPUTS: usize>(
-    SerializableArray<NUM_PUBLIC_INPUTS, Target>,
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
+    [Target; NUM_PUBLIC_INPUTS],
 );
 
 impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize>
@@ -44,7 +48,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
     ) -> Self {
         let input_targets = builder.add_virtual_public_input_arr::<NUM_PUBLIC_INPUTS>();
 
-        Self(SerializableArray::from(input_targets))
+        Self(input_targets)
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
@@ -68,7 +72,7 @@ pub struct TestingRecursiveCircuits<
 > where
     C::Hasher: AlgebraicHasher<F>,
 {
-    /// Set of circuits whose proofs can be recursively verified by the universal verifier 
+    /// Set of circuits whose proofs can be recursively verified by the universal verifier
     pub recursive_circuits: RecursiveCircuits<F, C, D>,
     dummy_circuit: CircuitWithUniversalVerifier<F, C, D, 0, DummyCircuitWires<NUM_PUBLIC_INPUTS>>,
 }
