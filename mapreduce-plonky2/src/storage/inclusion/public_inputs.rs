@@ -1,10 +1,17 @@
 use plonky2::{
-    field::goldilocks_field::GoldilocksField, iop::target::Target,
+    field::goldilocks_field::GoldilocksField,
+    hash::keccak::SPONGE_WIDTH,
+    iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::CurveTarget;
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
 
-use crate::keccak::OutputHash;
+use crate::{array::Array, keccak::OutputHash};
+
+pub const POSEIDON_HASH_LEN: usize = SPONGE_WIDTH;
+
+type EncodedPoseidonHash = Array<U32Target, { POSEIDON_HASH_LEN / 4 }>;
 
 /// Stores the public input used to prove the inclusion of a value in a *binary* merkle tree.
 ///
@@ -14,7 +21,7 @@ pub struct PublicInputs<'input, FieldElt: Clone> {
     pub inputs: &'input [FieldElt],
 }
 
-impl<'a, FieldElt: Clone + Copy> PublicInputs<'a, FieldElt> {
+impl<'a, T: Copy> PublicInputs<'a, T> {
     const EXTENSION: usize = 5;
 
     const ROOT_OFFSET: usize = 0;
@@ -30,11 +37,7 @@ impl<'a, FieldElt: Clone + Copy> PublicInputs<'a, FieldElt> {
     ) {
     }
 
-    pub fn current_root() {}
-
-    // TODO: merge with storage/mapping implementationproof_proof_ & generalize
-    pub fn digest(&self) -> ([FieldElt; 5], [FieldElt; 5], FieldElt) {
-        // 5 F for each coordinates + 1 bool flag
+    pub fn digest_raw(&self) -> ([T; 5], [T; 5], T) {
         let raw = &self.inputs[Self::DIGEST_OFFSET..Self::DIGEST_OFFSET + Self::DIGEST_LEN];
         assert!(raw.len() >= 5 * 2 + 1);
         let x = raw[0..Self::EXTENSION].try_into().unwrap();
@@ -45,7 +48,23 @@ impl<'a, FieldElt: Clone + Copy> PublicInputs<'a, FieldElt> {
         (x, y, flag)
     }
 
-    pub fn root(&self) -> &[FieldElt] {
+    fn root_raw(&self) -> &[T] {
         &self.inputs[Self::ROOT_OFFSET..Self::ROOT_OFFSET + Self::ROOT_LEN]
+    }
+}
+
+impl<'a> PublicInputs<'a, Target> {
+    pub fn digest(&self) -> CurveTarget {
+        let (x, y, is_inf) = self.digest_raw();
+        let x = QuinticExtensionTarget(x);
+        let y = QuinticExtensionTarget(y);
+        let flag = BoolTarget::new_unsafe(is_inf);
+        CurveTarget(([x, y], flag))
+    }
+
+    pub fn root(&self) -> EncodedPoseidonHash {
+        EncodedPoseidonHash::from_array(std::array::from_fn(|i| {
+            U32Target(self.inputs[Self::ROOT_OFFSET + i])
+        }))
     }
 }
