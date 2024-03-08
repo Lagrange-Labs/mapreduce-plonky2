@@ -74,6 +74,8 @@ where
         // we already decode the rlp headers here since we need it to verify
         // the validity of the hash exposed by the proofs
         let headers = decode_fixed_list::<_, _, MAX_ITEMS_IN_LIST>(b, &node.arr.arr, zero);
+        let ffalse = b._false();
+        let mut seen_nibbles = vec![];
         for i in 0..N_CHILDREN {
             let proof_inputs = PublicInputs::from(&inputs[i]);
             let child_accumulator = proof_inputs.accumulator();
@@ -81,10 +83,16 @@ where
             // add the number of leaves this proof has processed
             n = b.add(n, proof_inputs.n());
             let child_key = proof_inputs.mpt_key();
-            let (new_key, hash, is_valid) =
+            let (new_key, hash, is_valid, nibble) =
                 MPTCircuit::<1, NODE_LEN>::advance_key_branch(b, &node.arr, &child_key, &headers);
             // we always enforce it's a branch node, i.e. that it has 17 entries
             b.connect(is_valid.target, tru.target);
+            // make sure we don't process twice the same proof for same nibble
+            seen_nibbles.iter().for_each(|sn| {
+                let is_equal = b.is_equal(*sn, nibble);
+                b.connect(is_equal.target, ffalse.target);
+            });
+            seen_nibbles.push(nibble);
             // we check the hash is the one exposed by the proof
             // first convert the extracted hash to packed one to compare
             let packed_hash = Array::<U32Target, PACKED_HASH_LEN> {

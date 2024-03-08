@@ -287,17 +287,21 @@ where
         (new_key, child_hash, tuple_or_branch)
     }
 
-    /// Returns the key with the pointer moved, returns the child hash / value of the node,
-    /// and returns booleans that must be true IF the given node is a leaf or an extension.
-    /// * key where to lookup the next nibble and thus the hash stored at the
-    /// `nibble` position in the branch node
-    /// * headers of the current node
+    /// This function advances the pointer of the MPT key. The parameters are:
+    /// * The key where to lookup the next nibble and thus the hash stored at
+    ///   nibble position in the branch node.
+    /// * RLP headers of the current node.
+    /// And it returns:
+    /// * New key with the pointer moved.
+    /// * The child hash / value of the node.
+    /// * A boolean that must be true if the given node is a leaf or an extension.
+    /// * The nibble position before this advance.
     pub(crate) fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
         rlp_headers: &RlpList<MAX_ITEMS_IN_LIST>,
-    ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget) {
+    ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget, Target) {
         let one = b.one();
         // assume it's a node and return the boolean condition that must be true if
         // it is a node - decided in advance_key function
@@ -313,7 +317,7 @@ where
         let new_key = key.advance_by(b, one);
         let nibble_header = rlp_headers.select(b, nibble);
         let branch_child_hash = node.extract_array::<F, D, HASH_LEN>(b, nibble_header.offset);
-        (new_key, branch_child_hash, branch_condition)
+        (new_key, branch_child_hash, branch_condition, nibble)
     }
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
@@ -1013,7 +1017,7 @@ pub mod test {
         let key_wire = MPTKeyWire::new(&mut builder);
         let rlp_headers =
             decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(&mut builder, &node.arr, zero);
-        let (advanced_key, value, should_true) = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
+        let (advanced_key, value, should_true, _) = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
             &mut builder,
             &node,
             &key_wire,
