@@ -148,25 +148,29 @@ where
     for<'d> T: Deserialize<'d>,
 {
     // special serialization because serde doesn't implement using const generics
-    #[serde(serialize_with = "serialize_long_array", deserialize_with = "deserialize_long_array")]
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     pub(crate) arr: [T; N],
 }
 
-impl<T: Targetable + Clone + Serialize, const N: usize> PartialEq for Array<T, N> 
+impl<T: Targetable + Clone + Serialize, const N: usize> PartialEq for Array<T, N>
 where
     for<'d> T: Deserialize<'d>,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.arr.iter().zip(other.arr.iter()).all(
-            |(first, second)|
-                first.to_target() == second.to_target()
-        )
+        self.arr
+            .iter()
+            .zip(other.arr.iter())
+            .all(|(first, second)| first.to_target() == second.to_target())
     }
 }
 
-impl<T: Targetable + Clone + Serialize, const N: usize> Eq for Array<T, N> 
-where
-    for<'d> T: Deserialize<'d>, {}
+impl<T: Targetable + Clone + Serialize, const N: usize> Eq for Array<T, N> where
+    for<'d> T: Deserialize<'d>
+{
+}
 
 impl<T: Clone + Serialize, const N: usize> From<[T; N]> for Array<T, N>
 where
