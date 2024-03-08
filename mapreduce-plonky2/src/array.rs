@@ -9,6 +9,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use recursion_framework::serialization::{deserialize_long_array, serialize_long_array};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
@@ -37,7 +38,7 @@ impl<F: RichField> ToField<F> for usize {
 /// VectorWire contains the wires representing an array of dynamic length
 /// up to MAX_LEN. This is useful when you don't know the exact size in advance
 /// of your data, for example in hashing MPT nodes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct VectorWire<T: Targetable + Clone + Serialize, const MAX_LEN: usize>
 where
     for<'d> T: Deserialize<'d>,
@@ -147,32 +148,25 @@ where
     for<'d> T: Deserialize<'d>,
 {
     // special serialization because serde doesn't implement using const generics
-    #[serde(serialize_with = "to_targets", deserialize_with = "from_targets")]
+    #[serde(serialize_with = "serialize_long_array", deserialize_with = "deserialize_long_array")]
     pub(crate) arr: [T; N],
 }
 
-fn to_targets<T: Clone + Serialize, const N: usize, S>(
-    v: &[T; N],
-    serializer: S,
-) -> Result<S::Ok, S::Error>
+impl<T: Targetable + Clone + Serialize, const N: usize> PartialEq for Array<T, N> 
 where
-    S: Serializer,
+    for<'d> T: Deserialize<'d>,
 {
-    serializer.serialize_some(&v.to_vec())
+    fn eq(&self, other: &Self) -> bool {
+        self.arr.iter().zip(other.arr.iter()).all(
+            |(first, second)|
+                first.to_target() == second.to_target()
+        )
+    }
 }
 
-pub fn from_targets<'de, D, T: Clone + Serialize + Deserialize<'de>, const N: usize>(
-    deserializer: D,
-) -> Result<[T; N], D::Error>
+impl<T: Targetable + Clone + Serialize, const N: usize> Eq for Array<T, N> 
 where
-    D: Deserializer<'de>,
-{
-    use serde::de::Error;
-    Vec::<T>::deserialize(deserializer).and_then(|vec| {
-        vec.try_into()
-            .map_err(|_| Error::custom("failed to deserialize array"))
-    })
-}
+    for<'d> T: Deserialize<'d>, {}
 
 impl<T: Clone + Serialize, const N: usize> From<[T; N]> for Array<T, N>
 where

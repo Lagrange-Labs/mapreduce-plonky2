@@ -28,7 +28,7 @@ pub struct ExtensionNodeCircuit {
 }
 
 /// Wires associated with this processing.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ExtensionWires {
     pub(super) node: VectorWire<Target, PADDED_LEN>,
     keccak: KeccakWires<PADDED_LEN>,

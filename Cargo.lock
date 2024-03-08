@@ -2539,7 +2539,7 @@ dependencies = [
 [[package]]
 name = "plonky2_ecgfp5"
 version = "0.1.0"
-source = "git+https://github.com/Lagrange-Labs/plonky2-ecgfp5#d5a6a0b7dfee4ab69d8c1c315f9f4407502f07eb"
+source = "git+https://github.com/Lagrange-Labs/plonky2-ecgfp5#52cd18a81819bb138d0b40c88cb509f1fcb38b5b"
 dependencies = [
  "itertools 0.10.5",
  "num",
@@ -2788,6 +2788,7 @@ dependencies = [
  "log",
  "plonky2",
  "plonky2_crypto",
+ "plonky2_ecgfp5",
  "plonky2_monolith",
  "rstest",
  "serde",

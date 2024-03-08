@@ -357,7 +357,7 @@ where
 
 /// A structure that keeps a running pointer to the portion of the key the circuit
 /// already has proven.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct MPTKeyWire {
     /// Represents the full key of the value(s) we're looking at in the MPT trie.
     pub key: Array<Target, MAX_KEY_NIBBLE_LEN>,
