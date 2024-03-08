@@ -405,7 +405,9 @@ mod test {
         let last_byte = mpt2[mpt1.len() - 1];
         let first_nibble = last_byte & 0xF0;
         // only change the last nibble
-        mpt2[mpt1.len() - 1] = first_nibble + (thread_rng().gen::<u8>() & 0x0F);
+        while mpt2 == mpt1 {
+            mpt2[mpt1.len() - 1] = first_nibble + (thread_rng().gen::<u8>() & 0x0F);
+        }
         println!(
             "key1: {:?}, key2: {:?}",
             hex::encode(&mpt1),

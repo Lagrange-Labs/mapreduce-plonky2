@@ -12,10 +12,12 @@ use plonky2::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifier}, serialization::circuit_data_serialization::SerializableRichField, universal_verifier_gadget::{
+    circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifier},
+    serialization::circuit_data_serialization::SerializableRichField,
+    universal_verifier_gadget::{
         verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
         CircuitSet, CircuitSetDigest, CircuitSetTarget,
-    }
+    },
 };
 
 use anyhow::Result;
