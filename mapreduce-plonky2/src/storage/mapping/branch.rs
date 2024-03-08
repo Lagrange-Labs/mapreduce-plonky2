@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
-    mpt_sequential::{bytes_to_nibbles, Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
+    mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     utils::convert_u8_targets_to_u32,
 };
@@ -34,7 +34,7 @@ pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {
     pub(super) mapping_slot: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct BranchWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,

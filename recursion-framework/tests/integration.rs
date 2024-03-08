@@ -2,9 +2,9 @@ use std::{array, iter::once};
 
 use plonky2::field::types::{Field, Sample};
 use plonky2::{
-    field::{extension::Extendable, types::PrimeField64},
+    field::types::PrimeField64,
     hash::{
-        hash_types::{RichField, NUM_HASH_OUT_ELTS},
+        hash_types::NUM_HASH_OUT_ELTS,
         poseidon::PoseidonHash,
     },
     iop::{
@@ -18,6 +18,7 @@ use plonky2::{
         proof::ProofWithPublicInputsTarget,
     },
 };
+use recursion_framework::serialization::circuit_data_serialization::SerializableRichField;
 use recursion_framework::serialization::{deserialize_array, serialize_array};
 use recursion_framework::{
     circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifierBuilder},
@@ -61,7 +62,7 @@ struct MapCircuitWires<const INPUT_CHUNK_SIZE: usize> {
     input_targets: [Target; INPUT_CHUNK_SIZE],
 }
 
-impl<F: RichField + Extendable<D>, const D: usize, const INPUT_CHUNK_SIZE: usize>
+impl<F: SerializableRichField<D>, const D: usize, const INPUT_CHUNK_SIZE: usize>
     CircuitLogicWires<F, D, 0> for MapCircuitWires<INPUT_CHUNK_SIZE>
 {
     type CircuitBuilderParams = ();
@@ -99,7 +100,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const INPUT_CHUNK_SIZE: usize
 #[derive(Serialize, Deserialize)]
 struct ReduceCircuitWires<const ARITY: usize>(());
 
-impl<F: RichField + Extendable<D>, const D: usize, const ARITY: usize>
+impl<F: SerializableRichField<D>, const D: usize, const ARITY: usize>
     CircuitLogicWires<F, D, ARITY> for ReduceCircuitWires<ARITY>
 {
     type CircuitBuilderParams = ();

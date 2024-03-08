@@ -13,7 +13,7 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::serialization::{deserialize, serialize};
+use crate::serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize};
 
 use super::{
     build_data_for_universal_verifier,
@@ -81,7 +81,7 @@ pub(crate) struct UniversalVerifierBuilder<
     circuit_set_size: usize,
 }
 
-impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize>
+impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize>
     UniversalVerifierBuilder<F, D, NUM_PUBLIC_INPUTS>
 {
     pub(crate) fn new<C: GenericConfig<D, F = F> + 'static>(
@@ -196,7 +196,7 @@ mod tests {
 
     /// Test circuit whose wrapped proofs can be recursviely verified by the universal verifier circuit
     struct TestCircuitForUniversalVerifier<
-        F: RichField + Extendable<D>,
+        F: SerializableRichField<D>,
         C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
@@ -211,7 +211,7 @@ mod tests {
     }
 
     impl<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F>,
             const D: usize,
             const INPUT_SIZE: usize,
@@ -291,7 +291,7 @@ mod tests {
     }
 
     struct CircuitWithUniversalVerifier<
-        F: RichField + Extendable<D>,
+        F: SerializableRichField<D>,
         C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
@@ -307,7 +307,7 @@ mod tests {
     }
 
     impl<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F>,
             const D: usize,
             const INPUT_SIZE: usize,

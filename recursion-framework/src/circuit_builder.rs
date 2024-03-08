@@ -13,7 +13,7 @@ use plonky2::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
-    serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
+    serialization::{circuit_data_serialization::SerializableRichField, deserialize, deserialize_long_array, serialize, serialize_long_array},
     universal_verifier_gadget::{
         verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
         wrap_circuit::WrapCircuit,
@@ -29,7 +29,7 @@ pub const MIN_CIRCUIT_SIZE: usize = 64;
 /// `CircuitLogicWires` trait must be implemented to specify the additional logic to be enforced in a
 /// circuit besides verifying proofs with the universal verifier
 pub trait CircuitLogicWires<
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     const D: usize,
     const NUM_VERIFIERS: usize,
 >: Sized + Serialize + DeserializeOwned
@@ -80,7 +80,7 @@ pub struct CircuitWithUniversalVerifierBuilder<
     config: CircuitConfig,
 }
 
-impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize>
+impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize>
     CircuitWithUniversalVerifierBuilder<F, D, NUM_PUBLIC_INPUTS>
 {
     /// Instantiate a `CircuitWithUniversalVerifierBuilder` to build circuits with `num_public_inputs`
@@ -220,7 +220,7 @@ impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usiz
 /// a `CircuitWithUniversalVerifier` circuit, returns the set of `NUM_PUBLIC_INPUTS` targets corresponding to
 /// all the public inputs of the proof except for the ones representing the digest of the circuit set
 pub fn public_input_targets<
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     const D: usize,
     const NUM_PUBLIC_INPUTS: usize,
 >(
@@ -234,7 +234,7 @@ pub fn public_input_targets<
 /// of the circuit set exposed as public input by the proof, which might be necessary when the proof
 /// is recursively verified in another circuit
 pub fn circuit_set_targets<
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     const D: usize,
     const NUM_PUBLIC_INPUTS: usize,
 >(
@@ -246,10 +246,10 @@ pub fn circuit_set_targets<
 /// `CircuitWithUniversalVerifier` is a data structure representing a circuit containing `NUM_VERIFIERS`
 /// instances of the universal verifier altogether with the additional logic specified by the specific
 /// `CLW` implementor
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(bound = "")]
 pub struct CircuitWithUniversalVerifier<
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     C: GenericConfig<D, F = F> + 'static,
     const D: usize,
     const NUM_VERIFIERS: usize,
@@ -270,7 +270,7 @@ pub struct CircuitWithUniversalVerifier<
 }
 
 impl<
-        F: RichField + Extendable<D>,
+        F: SerializableRichField<D>,
         C: GenericConfig<D, F = F>,
         const D: usize,
         const NUM_VERIFIERS: usize,
@@ -351,7 +351,7 @@ pub(crate) mod tests {
 
     use plonky2_monolith::{gates::monolith::MonolithGate, monolith_hash::MonolithHash};
 
-    use crate::serialization::{deserialize_array, serialize_array};
+    use crate::serialization::{circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array};
 
     use super::*;
 
@@ -380,7 +380,7 @@ pub(crate) mod tests {
 
     impl<
             'a,
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             const D: usize,
             const NUM_VERIFIERS: usize,
             const INPUT_SIZE: usize,
@@ -451,7 +451,7 @@ pub(crate) mod tests {
 
     impl<
             'a,
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             const D: usize,
             const NUM_VERIFIERS: usize,
             const INPUT_SIZE: usize,
@@ -489,7 +489,7 @@ pub(crate) mod tests {
     }
 
     fn test_circuit_with_universal_verifier<
-        F: RichField + Extendable<D>,
+        F: SerializableRichField<D>,
         C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const NUM_VERIFIERS: usize,

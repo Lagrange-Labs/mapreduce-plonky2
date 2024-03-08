@@ -8,27 +8,26 @@ use super::PublicInputs;
 use crate::storage::mapping::branch::BranchCircuit;
 use crate::storage::mapping::branch::BranchWires;
 use crate::storage::mapping::branch::MAX_BRANCH_NODE_LEN;
+use crate::mpt_sequential::PAD_LEN;
 use anyhow::bail;
 use anyhow::Result;
 use paste::paste;
-use plonky2::field::extension::Extendable;
 use plonky2::field::types::PrimeField64;
 use plonky2::hash::hash_types::HashOut;
-use plonky2::hash::hash_types::RichField;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;
-use plonky2::plonk::config::AlgebraicHasher;
-use plonky2::plonk::config::Hasher;
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::plonk::proof::ProofWithPublicInputs;
 use recursion_framework::circuit_builder::CircuitWithUniversalVerifier;
 use recursion_framework::circuit_builder::CircuitWithUniversalVerifierBuilder;
-use recursion_framework::framework::prepare_recursive_circuit_for_circuit_set as p;
 use recursion_framework::framework::RecursiveCircuitInfo;
 use recursion_framework::framework::RecursiveCircuits;
 use recursion_framework::framework_testing::new_universal_circuit_builder_for_testing;
 use recursion_framework::framework_testing::TestingRecursiveCircuits;
+use recursion_framework::serialization::deserialize;
+use recursion_framework::serialization::serialize;
 use serde::Deserialize;
+use serde::Serialize;
 use std::array::from_fn as create_array;
 
 const D: usize = 2;
@@ -42,18 +41,66 @@ const MAPPING_CIRCUIT_SET_SIZE: usize = 34;
 #[cfg(test)]
 const MAPPING_CIRCUIT_SET_SIZE: usize = 6; // 1leaf, 1ext, 2 branches * 2
 
+#[derive(Serialize, Deserialize)]
 /// CircuitType is a wrapper around the different specialized circuits that can be used to prove a MPT node recursively
 /// NOTE: Right now these circuits are specialized to prove inclusion of a single mapping slot.
 pub enum CircuitType {
     Leaf(LeafCircuit<MAX_LEAF_NODE_LEN>),
-    Extension(ExtensionProofInput),
-    Branch(BranchProofInput),
+    Extension(ExtensionProofInputSerialized),
+    Branch(BranchProofInputSerialized),
+}
+#[derive(Serialize, Deserialize)]
+/// This data structure allows to specify the inputs for a circuit that needs to recursively verify 
+/// proofs; the generic type `T` allows to specify the specific inputs of each circuits besides the
+/// proofs that need to be recursively verified, while the proofs are serialized in byte format 
+pub struct ProofInputSerialized<T> 
+{
+    input: T,
+    serialized_child_proofs: Vec<Vec<u8>>,
+}
+
+impl<T> ProofInputSerialized<T> {
+    /// Instantiate a new `ProofInputSerialized<T>` from the set of specific inputs (of type `T`) 
+    /// for a circuit and the set of proofs (serialized in byte format) to be recursively verified
+    /// in the circuit 
+    pub fn new(input: T, child_proofs: Vec<Vec<u8>>) -> Self {
+        Self {
+            input,
+            serialized_child_proofs: child_proofs,
+        }
+    }
+}
+
+/// This data structure contains the same information as `ProofInputSerialized<T>`, but the proofs
+/// to be recursively verified are deserialized; it is the actual data structure employed to provide
+/// inputs to recursive circuits
+struct ProofInput<T> {
+    input: T,
+    child_proofs: Vec<MPTProof>,
+}
+
+impl<T> TryFrom<ProofInputSerialized<T>> for ProofInput<T> {
+    
+    type Error = bincode::Error;
+    
+    fn try_from(value: ProofInputSerialized<T>) -> std::prelude::v1::Result<Self, Self::Error> {
+        let child_proofs: Vec<MPTProof> = value.serialized_child_proofs.into_iter().map(|proof| 
+            bincode::deserialize(&proof)
+        ).collect::<Result<Vec<_>,_>>()?;
+        Ok(
+            Self{
+                input: value.input,
+                child_proofs,
+            }
+        )
+    }
 }
 
 /// MPTProof is a generic struct holding a child proof and its associated verification key.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct MPTProof {
     proof: ProofWithPublicInputs<F, C, D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     vk: VerifierOnlyCircuitData<C, D>,
 }
 
@@ -72,34 +119,42 @@ impl
         MPTProof { proof, vk }
     }
 }
-/// Struct containing the expected inputs to prove an extension node.
-pub struct ExtensionProofInput {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Struct containing the expected input MPT Extension/Branch node.
+pub struct InputNode {
     node: Vec<u8>,
-    child_proof: MPTProof,
 }
 
-/// This struct holds the basic information necessary to prove a branch node. It
-/// selects the right specialized circuits according to its inputs. For example,
-/// if only one child proof is present, it uses the b_1 or b_1_over_2 circuit.
-pub struct BranchProofInput {
-    node: Vec<u8>,
-    child_proofs: Vec<MPTProof>,
-}
+type ExtensionProofInputSerialized = ProofInputSerialized<InputNode>;
+
+type ExtensionProofInput = ProofInput<InputNode>;
+
+type BranchProofInputSerialized = ProofInputSerialized<InputNode>;
+
+type BranchProofInput = ProofInput<InputNode>;
 
 const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 /// generate a macro filling the BranchCircuit structs manually
 macro_rules! impl_branch_circuits {
     ($struct_name:ty, $($i:expr),*) => {
         paste! {
-        /// BranchCircuits holds the logic to create the different circuits for handling a branch node.
-        /// In particular, it generates specific circuits for each number of child proofs, as well as
-        /// in combination with the node input length.
-        pub struct $struct_name {
+        #[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+        pub struct [< $struct_name GenericNodeLen>]<const NODE_LEN: usize>
+        where
+            [(); PAD_LEN(NODE_LEN)]:,
+            [(); PAD_LEN(NODE_LEN/2)]:,
+        {
             $(
-                [< b $i >]: CircuitWithUniversalVerifier<F, C, D, $i, BranchWires<MAX_BRANCH_NODE_LEN>>,
-                [< b $i _over_2 >]: CircuitWithUniversalVerifier<F, C, D, $i, BranchWires<{MAX_BRANCH_NODE_LEN/2}>>,
+                [< b $i >]: CircuitWithUniversalVerifier<F, C, D, $i, BranchWires<NODE_LEN>>,
+                [< b $i _over_2 >]: CircuitWithUniversalVerifier<F, C, D, $i, BranchWires<{NODE_LEN/2}>>,
             )+
         }
+        #[doc = stringify!($struct_name)]
+        #[doc = "holds the logic to create the different circuits for handling a branch node.
+        In particular, it generates specific circuits for each number of child proofs, as well as
+        in combination with the node input length."]
+        pub type $struct_name =  [< $struct_name GenericNodeLen>]<MAX_BRANCH_NODE_LEN>;
+
         impl $struct_name {
             fn new(builder: &CircuitWithUniversalVerifierBuilder<F, D, NUM_IO>) -> Self {
                 $struct_name {
@@ -155,7 +210,7 @@ macro_rules! impl_branch_circuits {
                 if branch.child_proofs.is_empty() || branch.child_proofs.len() > 16 {
                     bail!("No child proofs or too many child proofs");
                 }
-                if branch.node.len() > MAX_BRANCH_NODE_LEN {
+                if branch.input.node.len() > MAX_BRANCH_NODE_LEN {
                     bail!("Branch node too long");
                 }
 
@@ -181,26 +236,26 @@ macro_rules! impl_branch_circuits {
                     .collect::<Vec<_>>();
                 let min_range = MAX_BRANCH_NODE_LEN / 2;
                  match branch.child_proofs.len() {
-                     $($i if branch.node.len() > min_range => {
+                     $($i if branch.input.node.len() > min_range => {
                          set.generate_proof(
                              &self.[< b $i >],
                              proofs.try_into().unwrap(),
                              create_array(|i| &branch.child_proofs[i].vk),
                              BranchCircuit {
-                                 node: branch.node,
+                                 node: branch.input.node,
                                  common_prefix,
                                  expected_pointer: pointer,
                                  mapping_slot,
                              }
                          ).map(|p| (p, self.[< b $i >].get_verifier_data().clone()).into())
                      },
-                         $i if branch.node.len() <= min_range => {
+                         $i if branch.input.node.len() <= min_range => {
                          set.generate_proof(
                              &self.[< b $i _over_2 >],
                              proofs.try_into().unwrap(),
                              create_array(|i| &branch.child_proofs[i].vk),
                              BranchCircuit {
-                                 node: branch.node,
+                                 node: branch.input.node,
                                  common_prefix,
                                  expected_pointer: pointer,
                                  mapping_slot,
@@ -238,6 +293,7 @@ impl_branch_circuits!(
 #[cfg(test)]
 impl_branch_circuits!(TestBranchCircuits, 1, 2);
 
+#[derive(Serialize, Deserialize, Eq, PartialEq)]
 /// Main struct holding the different circuit parameters for each of the MPT circuits defined here.
 /// Most notably, it holds them in a way to use the recursion framework allowing us to specialize
 /// circuits according to the situation.
@@ -296,27 +352,51 @@ impl MPTCircuitsParams {
         #[cfg(not(test))]
         let set = &self.set;
         #[cfg(test)]
-        let set = &self.set.recursive_circuits;
+        let set = &self.set.get_recursive_circuit_set();
         match circuit_type {
             CircuitType::Leaf(leaf) => set
                 .generate_proof(&self.leaf_circuit, [], [], leaf)
                 .map(|p| (p, self.leaf_circuit.get_verifier_data().clone()).into()),
-            CircuitType::Extension(ext) => set
+            CircuitType::Extension(ext) => {
+                let mut ext = ExtensionProofInput::try_from(ext)?;
+                let child_proof = ext.child_proofs.pop()
+                    .ok_or(
+                    anyhow::Error::msg("No proof found in input for extension node")
+                    )?;
+                set
                 .generate_proof(
                     &self.ext_circuit,
-                    [ext.child_proof.proof],
-                    [&ext.child_proof.vk],
-                    ExtensionNodeCircuit { node: ext.node },
+                    [child_proof.proof],
+                    [&child_proof.vk],
+                    ExtensionNodeCircuit { node: ext.input.node },
                 )
-                .map(|p| (p, self.ext_circuit.get_verifier_data().clone()).into()),
-            CircuitType::Branch(branch) => self.branchs.generate_proof(&set, branch),
+                .map(|p| (p, self.ext_circuit.get_verifier_data().clone()).into())
+            },
+            CircuitType::Branch(branch) => {
+                let branch = BranchProofInput::try_from(branch)?;
+                self.branchs.generate_proof(&set, branch)
+            },
         }
     }
 }
 
+/// Public API employed to build the MPT circuits, which are returned in serialized form
+pub fn build_circuits() -> Result<Vec<u8>> {
+    let circuits = MPTCircuitsParams::build();
+    Ok(bincode::serialize(&circuits)?)
+}
+
+/// Public API employed to generate a proof for the circuit specified by `CircuitType`, 
+/// employing the `circuits`` generated with the `build_circuits` API
+pub fn generate_proof(circuit_type: CircuitType, circuits: Vec<u8>) -> Result<Vec<u8>> {
+    let params: MPTCircuitsParams = bincode::deserialize(&circuits)?;
+    let proof = params.generate_proof(circuit_type)?;
+    Ok(bincode::serialize(&proof)?)
+}
+
 #[cfg(test)]
 mod test {
-    use eth_trie::Trie;
+    use eth_trie::{EthTrie, MemoryDB, Trie};
     use plonky2::field::types::Field;
     use rand::{thread_rng, Rng};
 
@@ -326,15 +406,18 @@ mod test {
         storage::key::MappingSlot,
         utils::test::random_vector,
     };
+    use super::*;
 
-    /// test if the selection of the circuits is correct
-    #[test]
-    fn test_branch_logic() {
-        use super::*;
-        let params = MPTCircuitsParams::build();
+    struct TestData {
+        trie: EthTrie<MemoryDB>,
+        key: Vec<u8>,
+        mpt_key1: Vec<u8>,
+        mpt_key2: Vec<u8>,
+    }
+
+    fn generate_storage_trie_and_keys(slot: usize) -> TestData {
         let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
         // insert two keys that share the same prefix
-        let slot = 1;
         let key = random_vector(20); // like address
         let mpt1 = StorageSlot::Mapping(key.clone(), slot).mpt_key();
         let mut mpt2 = mpt1.clone();
@@ -351,14 +434,84 @@ mod test {
         trie.insert(&mpt1, &v).unwrap();
         trie.insert(&mpt2, &v).unwrap();
         trie.root_hash().unwrap();
-        let p1 = trie.get_proof(&mpt1.clone()).unwrap();
-        let p2 = trie.get_proof(&mpt2.clone()).unwrap();
+
+        TestData {
+            trie,
+            key,
+            mpt_key1: mpt1,
+            mpt_key2: mpt2
+        }
+    }
+
+    #[test]
+    fn test_serialization() {
+        let params = MPTCircuitsParams::build();
+
+        let encoded = bincode::serialize(&params).unwrap();
+        let decoded_params: MPTCircuitsParams = bincode::deserialize(&encoded).unwrap();
+
+        assert!(decoded_params == params);
+
+        let slot = 3;
+        let mut test_data = generate_storage_trie_and_keys(slot);
+        let p1 = test_data.trie.get_proof(&test_data.mpt_key1).unwrap();
+        let l1 = CircuitType::Leaf(
+                LeafCircuit {
+                node: p1.last().unwrap().to_vec(),
+                slot: MappingSlot::new(slot as u8, test_data.key.clone()),
+            }
+        );
+
+        let encoded = bincode::serialize(&l1).unwrap();
+        let decoded_input: CircuitType = bincode::deserialize(&encoded).unwrap();
+
+        // we test serialization of `CircuitType::Leaf` by employing the deserialized input to 
+        // generate the proof
+        let leaf_proof = params.generate_proof(decoded_input).unwrap();
+        let encoded = bincode::serialize(&leaf_proof).unwrap();
+        let decoded_proof: MPTProof = bincode::deserialize(&encoded).unwrap();
+
+        assert_eq!(leaf_proof, decoded_proof); 
+
+        let branch_node = p1[p1.len() - 2].to_vec();
+        let branch_inputs = CircuitType::Branch(BranchProofInputSerialized {
+            input: InputNode {
+                node: branch_node.clone(),
+            },
+            serialized_child_proofs: vec![encoded],
+        });
+
+        let encoded = bincode::serialize(&branch_inputs).unwrap();
+        let decoded_input: CircuitType = bincode::deserialize(&encoded).unwrap();
+
+        // we test serialization of `CircuitType::Branch` by employing the deserialized input to 
+        // generate the proof
+        let proof = params.generate_proof(decoded_input).unwrap();
+
+        let encoded = bincode::serialize(&proof).unwrap();
+        let decoded_proof: MPTProof = bincode::deserialize(&encoded).unwrap();
+
+        assert_eq!(proof, decoded_proof); 
+    }
+
+    /// test if the selection of the circuits is correct
+    #[test]
+    fn test_branch_logic() {
+        let params = MPTCircuitsParams::build();
+        let slot = 1;
+        let mut test_data = generate_storage_trie_and_keys(slot);
+        let trie = &mut test_data.trie;
+        let key = &test_data.key;
+        let mpt1 = &test_data.mpt_key1;
+        let mpt2 = &test_data.mpt_key2;
+        let p1 = trie.get_proof(&mpt1).unwrap();
+        let p2 = trie.get_proof(&mpt2).unwrap();
         // they should share the same branch node
         assert_eq!(p1.len(), p2.len());
         assert_eq!(p1[p1.len() - 2], p2[p2.len() - 2]);
         let l1 = LeafCircuit {
             node: p1.last().unwrap().to_vec(),
-            slot: MappingSlot::new(slot as u8, key),
+            slot: MappingSlot::new(slot as u8, key.clone()),
         };
         // generate a leaf then a branch proof with only this leaf
         let leaf1_proof = params.generate_proof(CircuitType::Leaf(l1)).unwrap();
@@ -368,9 +521,11 @@ mod test {
         let (_, comp_ptr) = pi1.mpt_key_info();
         assert_eq!(comp_ptr, F::from_canonical_usize(63));
         let branch_node = p1[p1.len() - 2].to_vec();
-        let branch_inputs = CircuitType::Branch(BranchProofInput {
-            node: branch_node.clone(),
-            child_proofs: vec![leaf1_proof.clone()],
+        let branch_inputs = CircuitType::Branch(BranchProofInputSerialized {
+            input: InputNode {
+                node: branch_node.clone(),
+            },
+            serialized_child_proofs: vec![bincode::serialize(&leaf1_proof).unwrap()],
         });
         let branch1 = params.generate_proof(branch_inputs).unwrap();
         let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
@@ -415,9 +570,14 @@ mod test {
             proof: leaf2_proof[0].clone(),
             vk,
         };
-        let branch_inputs = CircuitType::Branch(BranchProofInput {
-            node: branch_node.clone(),
-            child_proofs: vec![leaf1_proof.clone(), leaf2_proof_vk],
+        let branch_inputs = CircuitType::Branch(BranchProofInputSerialized {
+            input: InputNode {
+                node: branch_node.clone(),
+            },
+            serialized_child_proofs: vec![
+                bincode::serialize(&leaf1_proof).unwrap(), 
+                bincode::serialize(&leaf2_proof_vk).unwrap(),
+            ],
         });
         let branch2 = params.generate_proof(branch_inputs).unwrap();
         let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {

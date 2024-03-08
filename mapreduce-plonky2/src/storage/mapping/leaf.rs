@@ -47,13 +47,13 @@ pub(super) const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
 /// Circuit implementing the circuit to prove the correct derivation of the
 /// MPT key from a mapping key and mapping slot. It also do the usual recursive
 /// MPT proof verification logic.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafCircuit<const NODE_LEN: usize> {
     pub(super) node: Vec<u8>,
     pub(super) slot: MappingSlot,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub(crate) struct LeafWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,

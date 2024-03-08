@@ -12,11 +12,10 @@ use plonky2::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifier},
-    universal_verifier_gadget::{
+    circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifier}, serialization::circuit_data_serialization::SerializableRichField, universal_verifier_gadget::{
         verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
         CircuitSet, CircuitSetDigest, CircuitSetTarget,
-    },
+    }
 };
 
 use anyhow::Result;
@@ -37,7 +36,7 @@ where
 impl<F, C, const D: usize, const NUM_VERIFIERS: usize, CLW> RecursiveCircuitInfo<F, C, D>
     for CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>
 where
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     C: GenericConfig<D, F = F>,
     C::Hasher: AlgebraicHasher<F>,
     [(); C::Hasher::HASH_SIZE]:,
@@ -59,19 +58,19 @@ where
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(bound = "")]
 /// `RecursiveCircuits` is a data structure employed to generate proofs for a given set of circuits,
 /// which are basically instances of `CircuitWithUniversalVerifier`
 pub struct RecursiveCircuits<
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,
 > {
     circuit_set: CircuitSet<F, C, D>,
 }
 
-impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F> + 'static, const D: usize>
+impl<F: SerializableRichField<D>, C: GenericConfig<D, F = F> + 'static, const D: usize>
     RecursiveCircuits<F, C, D>
 where
     C::Hasher: AlgebraicHasher<F>,
@@ -152,7 +151,7 @@ impl<const D: usize> RecursiveCircuitsVerifierTarget<D> {
     ///   that instantiated the targets in `self`
     /// - `proof`: proof to be verified
     /// - `verifier_data`: verifier data of the circuit employed to generate `proof`
-    pub fn set_target<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>>(
+    pub fn set_target<F: SerializableRichField<D>, C: GenericConfig<D, F = F>>(
         &self,
         pw: &mut PartialWitness<F>,
         recursive_circuits_set: &RecursiveCircuits<F, C, D>,
@@ -177,7 +176,7 @@ impl<const D: usize> RecursiveCircuitsVerifierTarget<D> {
 /// with the `RecursiveCircuits` framework. This data structure is instantiated in order to add the verifier for such
 /// proofs to an existing circuit, employing the methods provided by the data structure.
 pub struct RecursiveCircuitsVerifierGagdet<
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,
     const NUM_PUBLIC_INPUTS: usize,
@@ -187,7 +186,7 @@ pub struct RecursiveCircuitsVerifierGagdet<
 }
 
 impl<
-        F: RichField + Extendable<D>,
+        F: SerializableRichField<D>,
         C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const NUM_PUBLIC_INPUTS: usize,
@@ -276,6 +275,7 @@ pub(crate) mod tests {
         tests::{LeafCircuitWires, RecursiveCircuitWires},
         CircuitWithUniversalVerifierBuilder,
     };
+    use crate::serialization::circuit_data_serialization::SerializableRichField;
     use crate::serialization::{deserialize, serialize};
 
     use super::*;
@@ -307,7 +307,7 @@ pub(crate) mod tests {
     }
 
     impl<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F> + 'static,
             const D: usize,
             const NUM_PUBLIC_INPUTS: usize,
@@ -356,7 +356,7 @@ pub(crate) mod tests {
     }
 
     impl<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F> + 'static,
             const D: usize,
             const NUM_PUBLIC_INPUTS: usize,
@@ -402,7 +402,7 @@ pub(crate) mod tests {
     #[derive(Serialize, Deserialize)]
     #[serde(bound = "")]
     struct TestRecursiveCircuits<
-        F: RichField + Extendable<D>,
+        F: SerializableRichField<D>,
         C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
@@ -423,7 +423,7 @@ pub(crate) mod tests {
     }
 
     impl<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F> + 'static,
             const D: usize,
             const INPUT_SIZE: usize,
