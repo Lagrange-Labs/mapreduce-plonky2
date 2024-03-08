@@ -13,7 +13,10 @@ use plonky2::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
-    serialization::{circuit_data_serialization::SerializableRichField, deserialize, deserialize_long_array, serialize, serialize_long_array},
+    serialization::{
+        circuit_data_serialization::SerializableRichField, deserialize, deserialize_long_array,
+        serialize, serialize_long_array,
+    },
     universal_verifier_gadget::{
         verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
         wrap_circuit::WrapCircuit,
@@ -28,11 +31,8 @@ pub const MIN_CIRCUIT_SIZE: usize = 64;
 
 /// `CircuitLogicWires` trait must be implemented to specify the additional logic to be enforced in a
 /// circuit besides verifying proofs with the universal verifier
-pub trait CircuitLogicWires<
-    F: SerializableRichField<D>,
-    const D: usize,
-    const NUM_VERIFIERS: usize,
->: Sized + Serialize + DeserializeOwned
+pub trait CircuitLogicWires<F: SerializableRichField<D>, const D: usize, const NUM_VERIFIERS: usize>:
+    Sized + Serialize + DeserializeOwned
 {
     /// Specific input parameters that might be necessary to write the logic of the circuit
     type CircuitBuilderParams: Sized;
@@ -351,7 +351,9 @@ pub(crate) mod tests {
 
     use plonky2_monolith::{gates::monolith::MonolithGate, monolith_hash::MonolithHash};
 
-    use crate::serialization::{circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array};
+    use crate::serialization::{
+        circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array,
+    };
 
     use super::*;
 

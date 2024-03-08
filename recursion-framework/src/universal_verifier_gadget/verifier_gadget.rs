@@ -13,7 +13,9 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize};
+use crate::serialization::{
+    circuit_data_serialization::SerializableRichField, deserialize, serialize,
+};
 
 use super::{
     build_data_for_universal_verifier,

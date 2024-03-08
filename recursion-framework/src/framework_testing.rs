@@ -18,7 +18,9 @@ use crate::{
         CircuitLogicWires, CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder,
     },
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
-    serialization::{circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array},
+    serialization::{
+        circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array,
+    },
 };
 
 use anyhow::Result;

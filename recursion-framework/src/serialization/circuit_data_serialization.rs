@@ -1,18 +1,68 @@
 use std::marker::PhantomData;
 
 use plonky2::{
-    field::extension::Extendable, gadgets::{arithmetic::EqualityGenerator, arithmetic_extension::QuotientGeneratorExtension, 
-        range_check::LowHighGenerator, split_base::BaseSumGenerator, split_join::{SplitGenerator, WireSplitGenerator}}, 
-        gates::{arithmetic_base::{ArithmeticBaseGenerator, ArithmeticGate}, arithmetic_extension::{ArithmeticExtensionGate, ArithmeticExtensionGenerator}, base_sum::{BaseSplitGenerator, BaseSumGate}, constant::ConstantGate, coset_interpolation::{CosetInterpolationGate, InterpolationGenerator}, exponentiation::{ExponentiationGate, ExponentiationGenerator}, lookup::{LookupGate, LookupGenerator}, lookup_table::{LookupTableGate, LookupTableGenerator}, multiplication_extension::{MulExtensionGate, MulExtensionGenerator}, noop::NoopGate, poseidon::{PoseidonGate, PoseidonGenerator}, poseidon_mds::{PoseidonMdsGate, PoseidonMdsGenerator}, public_input::PublicInputGate, random_access::{RandomAccessGate, RandomAccessGenerator}, reducing::{ReducingGate, ReducingGenerator}, reducing_extension::{ReducingExtensionGate, ReducingGenerator as ReducingExtensionGenerator}}, 
-        get_gate_tag_impl, get_generator_tag_impl, hash::{hash_types::RichField, merkle_tree::MerkleTree}, 
-        impl_gate_serializer, impl_generator_serializer, 
-        iop::generator::{ConstantGenerator, CopyGenerator, NonzeroTestGenerator, RandomValueGenerator}, plonk::{
+    field::extension::Extendable,
+    gadgets::{
+        arithmetic::EqualityGenerator,
+        arithmetic_extension::QuotientGeneratorExtension,
+        range_check::LowHighGenerator,
+        split_base::BaseSumGenerator,
+        split_join::{SplitGenerator, WireSplitGenerator},
+    },
+    gates::{
+        arithmetic_base::{ArithmeticBaseGenerator, ArithmeticGate},
+        arithmetic_extension::{ArithmeticExtensionGate, ArithmeticExtensionGenerator},
+        base_sum::{BaseSplitGenerator, BaseSumGate},
+        constant::ConstantGate,
+        coset_interpolation::{CosetInterpolationGate, InterpolationGenerator},
+        exponentiation::{ExponentiationGate, ExponentiationGenerator},
+        lookup::{LookupGate, LookupGenerator},
+        lookup_table::{LookupTableGate, LookupTableGenerator},
+        multiplication_extension::{MulExtensionGate, MulExtensionGenerator},
+        noop::NoopGate,
+        poseidon::{PoseidonGate, PoseidonGenerator},
+        poseidon_mds::{PoseidonMdsGate, PoseidonMdsGenerator},
+        public_input::PublicInputGate,
+        random_access::{RandomAccessGate, RandomAccessGenerator},
+        reducing::{ReducingGate, ReducingGenerator},
+        reducing_extension::{
+            ReducingExtensionGate, ReducingGenerator as ReducingExtensionGenerator,
+        },
+    },
+    get_gate_tag_impl, get_generator_tag_impl,
+    hash::{hash_types::RichField, merkle_tree::MerkleTree},
+    impl_gate_serializer, impl_generator_serializer,
+    iop::generator::{
+        ConstantGenerator, CopyGenerator, NonzeroTestGenerator, RandomValueGenerator,
+    },
+    plonk::{
         circuit_data::{CircuitData, CommonCircuitData, VerifierOnlyCircuitData},
         config::{AlgebraicHasher, GenericConfig, Hasher},
-    }, read_gate_impl, read_generator_impl, recursion::dummy_circuit::DummyProofGenerator, util::serialization::{Buffer, GateSerializer, Read, WitnessGeneratorSerializer, Write}
+    },
+    read_gate_impl, read_generator_impl,
+    recursion::dummy_circuit::DummyProofGenerator,
+    util::serialization::{Buffer, GateSerializer, Read, WitnessGeneratorSerializer, Write},
 };
-use plonky2_crypto::{biguint::BigUintDivRemGenerator, u32::{arithmetic_u32::SplitToU32Generator, gates::{add_many_u32::{U32AddManyGate, U32AddManyGenerator}, arithmetic_u32::{U32ArithmeticGate, U32ArithmeticGenerator}, comparison::{ComparisonGate, ComparisonGenerator}, interleave_u32::{U32InterleaveGate, U32InterleaveGenerator}, range_check_u32::{U32RangeCheckGate, U32RangeCheckGenerator}, subtraction_u32::{U32SubtractionGate, U32SubtractionGenerator}, uninterleave_to_b32::{UninterleaveToB32Gate, UninterleaveToB32Generator}, uninterleave_to_u32::{UninterleaveToU32Gate, UninterleaveToU32Generator}}}};
-use plonky2_ecgfp5::{curve::base_field::InverseOrZero, gadgets::base_field::{QuinticQuotientGenerator, QuinticSqrtGenerator}};
+use plonky2_crypto::{
+    biguint::BigUintDivRemGenerator,
+    u32::{
+        arithmetic_u32::SplitToU32Generator,
+        gates::{
+            add_many_u32::{U32AddManyGate, U32AddManyGenerator},
+            arithmetic_u32::{U32ArithmeticGate, U32ArithmeticGenerator},
+            comparison::{ComparisonGate, ComparisonGenerator},
+            interleave_u32::{U32InterleaveGate, U32InterleaveGenerator},
+            range_check_u32::{U32RangeCheckGate, U32RangeCheckGenerator},
+            subtraction_u32::{U32SubtractionGate, U32SubtractionGenerator},
+            uninterleave_to_b32::{UninterleaveToB32Gate, UninterleaveToB32Generator},
+            uninterleave_to_u32::{UninterleaveToU32Gate, UninterleaveToU32Generator},
+        },
+    },
+};
+use plonky2_ecgfp5::{
+    curve::base_field::InverseOrZero,
+    gadgets::base_field::{QuinticQuotientGenerator, QuinticSqrtGenerator},
+};
 
 use super::{FromBytes, SerializationError, ToBytes};
 
@@ -91,10 +141,14 @@ impl<F: RichField + Extendable<D>, const D: usize> FromBytes for CommonCircuitDa
 }
 /// Trait alias for `RichField` types compatible with the serialization of `CircuitData` provided
 /// in this crate
-pub trait SerializableRichField<const D: usize>: RichField + Extendable<D> + Extendable<5> + InverseOrZero {}
+pub trait SerializableRichField<const D: usize>:
+    RichField + Extendable<D> + Extendable<5> + InverseOrZero
+{
+}
 
-impl<const D: usize, T: RichField +Extendable<D> + Extendable<5> + InverseOrZero> SerializableRichField<D> for T {
-
+impl<const D: usize, T: RichField + Extendable<D> + Extendable<5> + InverseOrZero>
+    SerializableRichField<D> for T
+{
 }
 /// Serializer for the set of generators employed in our map-reduce circuits
 pub struct CustomGeneratorSerializer<C: GenericConfig<D>, const D: usize> {
@@ -185,7 +239,6 @@ impl<F: RichField + Extendable<D>, const D: usize> GateSerializer<F, D> for Cust
         UninterleaveToU32Gate
     }
 }
-
 
 #[cfg(test)]
 pub(super) mod tests {
