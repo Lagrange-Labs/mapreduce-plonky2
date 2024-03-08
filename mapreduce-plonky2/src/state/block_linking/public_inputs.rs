@@ -7,32 +7,41 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
-/// This is a wrapper around an array of targets set as public inputs of any
-/// proof generated in this module. They all share the same structure.
-/// `H` Block header hash
-/// `N` Block number
-/// `PREV_H` Header hash of the previous block (parent hash)
-/// `A` Smart contract address
-/// `D` Digest of the values
-/// `M` Storage slot of the mapping
-/// `S` Storage slot of the variable holding the length
-/// `C` Merkle root of the storage database
-/// H = 8, N = 2, PREV_H = 8, A = 5, D = 5*2+1, M = 8, S = 1, C = 8
-const H_IDX: usize = 0;
-const N_IDX: usize = 8;
-const PREV_H_IDX: usize = 10;
-const A_IDX: usize = 18;
-const D_IDX: usize = 23;
-const M_IDX: usize = 34;
-const S_IDX: usize = 42;
-const C_IDX: usize = 43;
-const TOTAL_LEN: usize = 51;
-
 pub struct PublicInputs<T> {
-    inner: [T; TOTAL_LEN],
+    inner: [T; PublicInputs::<()>::TOTAL_LEN],
 }
 
 impl<T> PublicInputs<T> {
+    /// This is a wrapper around an array of targets set as public inputs of any
+    /// proof generated in this module. They all share the same structure.
+    /// `H` Block header hash
+    /// `N` Block number
+    /// `PREV_H` Header hash of the previous block (parent hash)
+    /// `A` Smart contract address
+    /// `D` Digest of the values
+    /// `M` Storage slot of the mapping
+    /// `S` Storage slot of the variable holding the length
+    /// `C` Merkle root of the storage database
+    /// H = 8, N = 2, PREV_H = 8, A = 5, D = 5*2+1, M = 8, S = 1, C = 8
+    pub const H_LEN: usize = 8;
+    pub const N_LEN: usize = 2;
+    pub const PREV_H_LEN: usize = 8;
+    pub const A_LEN: usize = 5;
+    pub const D_LEN: usize = 11;
+    pub const M_LEN: usize = 8;
+    pub const S_LEN: usize = 1;
+    pub const C_LEN: usize = 8;
+    pub const TOTAL_LEN: usize = 51;
+
+    pub const H_IDX: usize = 0;
+    pub const N_IDX: usize = Self::H_IDX + Self::H_LEN;
+    pub const PREV_H_IDX: usize = Self::N_IDX + Self::N_LEN;
+    pub const A_IDX: usize = Self::PREV_H_IDX + Self::PREV_H_LEN;
+    pub const D_IDX: usize = Self::A_IDX + Self::A_LEN;
+    pub const M_IDX: usize = Self::D_IDX + Self::D_LEN;
+    pub const S_IDX: usize = Self::M_IDX + Self::M_LEN;
+    pub const C_IDX: usize = Self::S_IDX + Self::S_LEN;
+
     pub fn register<
         F,
         const D: usize,
@@ -70,35 +79,39 @@ impl<T> PublicInputs<T> {
         cb.register_public_inputs(storage_inputs.merkle_root_data());
     }
 
-    pub fn block_hash(&self) -> &[T] {
-        &self.inner[H_IDX..N_IDX]
+    pub fn inner(&self) -> &[T] {
+        &self.inner
     }
 
-    pub fn block_number(&self) -> &[T] {
-        &self.inner[N_IDX..PREV_H_IDX]
+    pub fn block_hash(s: &[T]) -> &[T] {
+        &s[Self::H_IDX..Self::N_IDX]
     }
 
-    pub fn prev_block_hash(&self) -> &[T] {
-        &self.inner[PREV_H_IDX..A_IDX]
+    pub fn block_number(s: &[T]) -> &[T] {
+        &s[Self::N_IDX..Self::PREV_H_IDX]
     }
 
-    pub fn a(&self) -> &[T] {
-        &self.inner[A_IDX..D_IDX]
+    pub fn prev_block_hash(s: &[T]) -> &[T] {
+        &s[Self::PREV_H_IDX..Self::A_IDX]
     }
 
-    pub fn d(&self) -> &[T] {
-        &self.inner[D_IDX..M_IDX]
+    pub fn a(s: &[T]) -> &[T] {
+        &s[Self::A_IDX..Self::D_IDX]
     }
 
-    pub fn m(&self) -> &[T] {
-        &self.inner[M_IDX..S_IDX]
+    pub fn d(s: &[T]) -> &[T] {
+        &s[Self::D_IDX..Self::M_IDX]
     }
 
-    pub fn s(&self) -> &[T] {
-        &self.inner[S_IDX..C_IDX]
+    pub fn m(s: &[T]) -> &[T] {
+        &s[Self::M_IDX..Self::S_IDX]
     }
 
-    pub fn merkle_root(&self) -> &[T] {
-        &self.inner[C_IDX..]
+    pub fn s(s: &[T]) -> &[T] {
+        &s[Self::S_IDX..Self::C_IDX]
+    }
+
+    pub fn merkle_root(s: &[T]) -> &[T] {
+        &s[Self::C_IDX..]
     }
 }
