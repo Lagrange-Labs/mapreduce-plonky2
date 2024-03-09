@@ -1,28 +1,48 @@
 use plonky2::{
-    field::goldilocks_field::GoldilocksField, gates::poseidon::PoseidonGate, iop::target::Target,
+    field::{goldilocks_field::GoldilocksField, types::Field},
+    hash::{hash_types::HashOutTarget, poseidon::PoseidonHash},
+    iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
-use crate::array::{Array, VectorWire};
+use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
+
+use super::PublicInputs;
 
 pub struct LeafCircuit {
     value: [u8; 32],
 }
 
-struct LeafWires {
-    root: Array<Target, POSEIDON_HASH_LEN>,
-    value: VectorWire<Target, 32>,
+pub struct LeafWires {
+    // in
+    value: Array<Target, 32>,
+    // out
+    root: HashOutTarget,
+    digest: CurveTarget,
 }
 
 impl LeafCircuit {
     pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires {
-        let gate_type = PoseidonGate::<GoldilocksField, 2>::new();
-        let gate = b.add_gate(gate_type, vec![]);
+        let zero = b.zero();
+        let leaf_str = GoldilocksField::from_canonical_u32(u32::from_be_bytes(*b"LEAF"));
+        let value = Array::<Target, 32>::new(b);
+        let leaf_str = b.constant(leaf_str);
 
-        let swap_wire = PoseidonGate::<GoldilocksField, 2>::WIRE_SWAP;
-        let swap_wire = Target::wire(gate, swap_wire);
-        b.connect(b.zero(), swap_wire);
+        let to_hash = Array::<Target, 33>::try_from(
+            std::iter::once(leaf_str)
+                .chain(value.arr.iter().copied())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let digest = b.map_to_curve_point(&value.arr);
+        let root = b.hash_or_noop::<PoseidonHash>(Vec::from(to_hash.arr));
+        PublicInputs::<GoldilocksField>::register(b, &root, &digest);
 
-        let inputs = ;
+        LeafWires {
+            value,
+            root,
+            digest,
+        }
     }
 }

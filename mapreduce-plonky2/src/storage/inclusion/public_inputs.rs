@@ -1,11 +1,21 @@
 use plonky2::{
-    field::goldilocks_field::GoldilocksField,
-    hash::keccak::SPONGE_WIDTH,
+    field::{
+        extension::{quintic::QuinticExtension, FieldExtension},
+        goldilocks_field::GoldilocksField,
+        types::Field,
+    },
+    hash::{hash_types::HashOutTarget, keccak::SPONGE_WIDTH},
     iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
+use plonky2_ecgfp5::{
+    curve::curve::WeierstrassPoint,
+    gadgets::{
+        base_field::QuinticExtensionTarget,
+        curve::{CircuitBuilderEcGFp5, CurveTarget},
+    },
+};
 
 use crate::{array::Array, keccak::OutputHash};
 
@@ -31,10 +41,11 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     pub fn register(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
-        // TODO: Poseidon hash I assume?
-        root: &OutputHash,
+        root: &HashOutTarget,
         digest: &CurveTarget,
     ) {
+        b.register_curve_public_input(*digest);
+        b.register_public_inputs(&root.elements);
     }
 
     pub fn digest_raw(&self) -> ([T; 5], [T; 5], T) {
@@ -66,5 +77,28 @@ impl<'a> PublicInputs<'a, Target> {
         EncodedPoseidonHash::from_array(std::array::from_fn(|i| {
             U32Target(self.inputs[Self::ROOT_OFFSET + i])
         }))
+    }
+}
+
+impl<'a> PublicInputs<'a, GoldilocksField> {
+    pub fn digest(&self) -> WeierstrassPoint {
+        let (x, y, is_inf) = self.digest_raw();
+        WeierstrassPoint {
+            x: QuinticExtension::<GoldilocksField>::from_basefield_array(std::array::from_fn::<
+                GoldilocksField,
+                5,
+                _,
+            >(|i| x[i])),
+            y: QuinticExtension::<GoldilocksField>::from_basefield_array(std::array::from_fn::<
+                GoldilocksField,
+                5,
+                _,
+            >(|i| y[i])),
+            is_inf: is_inf.is_nonzero(),
+        }
+    }
+
+    pub fn root(&self) -> Vec<u32> {
+        self.root_raw().iter().map(|x| x.0 as u32).collect()
     }
 }
