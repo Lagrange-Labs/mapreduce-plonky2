@@ -19,7 +19,7 @@ pub mod eth;
 
 mod array;
 mod block;
-mod circuit;
+pub(crate) mod circuit;
 mod group_hashing;
 mod hash;
 mod keccak;

@@ -1,6 +1,5 @@
 use plonky2::{
-    field::extension::Extendable,
-    hash::hash_types::{MerkleCapTarget, RichField},
+    hash::hash_types::MerkleCapTarget,
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{
         circuit_builder::CircuitBuilder,
@@ -12,9 +11,13 @@ use plonky2::{
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
+use serde::{Deserialize, Serialize};
 
-use crate::universal_verifier_gadget::{
-    circuit_set::check_circuit_digest_target, RECURSION_THRESHOLD,
+use crate::{
+    serialization::{
+        circuit_data_serialization::SerializableRichField, deserialize_vec, serialize_vec,
+    },
+    universal_verifier_gadget::{circuit_set::check_circuit_digest_target, RECURSION_THRESHOLD},
 };
 
 use anyhow::Result;
@@ -22,17 +25,24 @@ use anyhow::Result;
 /// Data structure with all input/output targets and the `CircuitData` for each circuit employed
 /// to recursively wrap a proof up to the recursion threshold. The data structure contains a set
 /// of targets and a `CircuitData` for each wrap step.
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(bound = "")]
 pub(crate) struct WrapCircuit<
-    F: RichField + Extendable<D>,
-    C: GenericConfig<D, F = F>,
+    F: SerializableRichField<D>,
+    C: GenericConfig<D, F = F> + 'static,
     const D: usize,
-> {
+> where
+    C::Hasher: AlgebraicHasher<F>,
+{
+    #[serde(serialize_with = "serialize_vec", deserialize_with = "deserialize_vec")]
     proof_targets: Vec<ProofWithPublicInputsTarget<D>>,
+    #[serde(serialize_with = "serialize_vec", deserialize_with = "deserialize_vec")]
     circuit_data: Vec<CircuitData<F, C, D>>,
+    #[serde(serialize_with = "serialize_vec", deserialize_with = "deserialize_vec")]
     inner_data: Vec<VerifierCircuitTarget>,
 }
 
-impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> WrapCircuit<F, C, D>
+impl<F: SerializableRichField<D>, C: GenericConfig<D, F = F>, const D: usize> WrapCircuit<F, C, D>
 where
     C::Hasher: AlgebraicHasher<F>,
     [(); C::Hasher::HASH_SIZE]:,
@@ -156,33 +166,40 @@ pub(crate) mod test {
     use crate::{
         circuit_builder::{tests::LeafCircuitWires, CircuitLogicWires},
         framework::tests::check_panic,
+        serialization::circuit_data_serialization::SerializableRichField,
     };
 
     use serial_test::serial;
 
     pub(crate) fn mutable_final_proof_circuit_data<
-        F: RichField + Extendable<D>,
+        F: SerializableRichField<D>,
         C: GenericConfig<D, F = F>,
         const D: usize,
     >(
         circuit: &mut WrapCircuit<F, C, D>,
-    ) -> &mut CircuitData<F, C, D> {
+    ) -> &mut CircuitData<F, C, D>
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
         circuit.circuit_data.last_mut().unwrap()
     }
 
     struct TestCircuit<
-        F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
+        F: SerializableRichField<D>,
+        C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
-    > {
+    >
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
         targets: LeafCircuitWires<F, INPUT_SIZE>,
         circuit_data: CircuitData<F, C, D>,
         wrap_circuit: WrapCircuit<F, C, D>,
     }
 
     impl<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F>,
             const D: usize,
             const INPUT_SIZE: usize,

@@ -3,6 +3,8 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
+use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     array::{Vector, VectorWire},
@@ -15,17 +17,18 @@ use super::public_inputs::PublicInputs;
 
 /// rlp( rlp(max key 32b) + rlp(max value 32b) ) + 1 for compact encoding
 /// see test_len()
-const MAX_EXTENSION_NODE_LEN: usize = 69;
+pub(crate) const MAX_EXTENSION_NODE_LEN: usize = 69;
 const PADDED_LEN: usize = PAD_LEN(MAX_EXTENSION_NODE_LEN);
 
 /// Circuit proving the processing of an extension node as part of the recursive
 /// MPT proof verification circuits.
 #[derive(Clone, Debug)]
 pub struct ExtensionNodeCircuit {
-    node: Vec<u8>,
+    pub(super) node: Vec<u8>,
 }
 
 /// Wires associated with this processing.
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ExtensionWires {
     pub(super) node: VectorWire<Target, PADDED_LEN>,
     keccak: KeccakWires<PADDED_LEN>,
@@ -82,6 +85,34 @@ impl ExtensionNodeCircuit {
         let vec = Vector::<u8, PADDED_LEN>::from_vec(&self.node).unwrap();
         wires.node.assign(pw, &vec);
         KeccakCircuit::<PADDED_LEN>::assign(pw, &wires.keccak, &InputData::Assigned(&vec));
+    }
+}
+
+/// D = 2,
+/// Num of children = 1
+impl CircuitLogicWires<GoldilocksField, 2, 1> for ExtensionWires {
+    type CircuitBuilderParams = ();
+
+    type Inputs = ExtensionNodeCircuit;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GoldilocksField>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<GoldilocksField, 2>,
+        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; 1],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        let inputs = PublicInputs::from(&verified_proofs[0].public_inputs);
+        ExtensionNodeCircuit::build(builder, inputs)
+    }
+
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut PartialWitness<GoldilocksField>,
+    ) -> anyhow::Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
     }
 }
 

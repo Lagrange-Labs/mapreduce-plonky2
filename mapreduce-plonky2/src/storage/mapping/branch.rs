@@ -1,3 +1,5 @@
+use std::array::from_fn as create_array;
+
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     iop::{
@@ -8,25 +10,31 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
-    mpt_sequential::{bytes_to_nibbles, Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
+    mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     utils::convert_u8_targets_to_u32,
 };
 
 use super::public_inputs::PublicInputs;
+
+pub(super) const MAX_BRANCH_NODE_LEN: usize = 532;
+
 #[derive(Clone, Debug)]
 pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {
-    node: Vec<u8>,
-    // in bytes
-    common_prefix: Vec<u8>,
-    expected_pointer: usize,
-    mapping_slot: usize,
+    pub(super) node: Vec<u8>,
+    // in nibbles
+    pub(super) common_prefix: Vec<u8>,
+    pub(super) expected_pointer: usize,
+    pub(super) mapping_slot: usize,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct BranchWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
@@ -50,7 +58,7 @@ where
     /// verifier / recursion framework.
     pub fn build(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
-        inputs: &[Vec<Target>],
+        inputs: &[PublicInputs<Target>; N_CHILDREN],
     ) -> BranchWires<NODE_LEN> {
         let node = VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b);
         // always ensure the node is bytes at the beginning
@@ -74,17 +82,24 @@ where
         // we already decode the rlp headers here since we need it to verify
         // the validity of the hash exposed by the proofs
         let headers = decode_fixed_list::<_, _, MAX_ITEMS_IN_LIST>(b, &node.arr.arr, zero);
-        for i in 0..N_CHILDREN {
-            let proof_inputs = PublicInputs::from(&inputs[i]);
+        let ffalse = b._false();
+        let mut seen_nibbles = vec![];
+        for proof_inputs in inputs {
             let child_accumulator = proof_inputs.accumulator();
             accumulator = b.curve_add(accumulator, child_accumulator);
             // add the number of leaves this proof has processed
             n = b.add(n, proof_inputs.n());
             let child_key = proof_inputs.mpt_key();
-            let (new_key, hash, is_valid) =
+            let (new_key, hash, is_valid, nibble) =
                 MPTCircuit::<1, NODE_LEN>::advance_key_branch(b, &node.arr, &child_key, &headers);
             // we always enforce it's a branch node, i.e. that it has 17 entries
             b.connect(is_valid.target, tru.target);
+            // make sure we don't process twice the same proof for same nibble
+            seen_nibbles.iter().for_each(|sn| {
+                let is_equal = b.is_equal(*sn, nibble);
+                b.connect(is_equal.target, ffalse.target);
+            });
+            seen_nibbles.push(nibble);
             // we check the hash is the one exposed by the proof
             // first convert the extracted hash to packed one to compare
             let packed_hash = Array::<U32Target, PACKED_HASH_LEN> {
@@ -117,7 +132,7 @@ where
         wires.node.assign(pw, &vec);
         wires.common_prefix.assign(
             pw,
-            &bytes_to_nibbles(&self.common_prefix).try_into().unwrap(),
+            &self.common_prefix.clone().try_into().unwrap(),
             self.expected_pointer,
         );
         KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
@@ -132,8 +147,42 @@ where
     }
 }
 
+/// D = 2,
+/// Num of children = 0
+impl<const NODE_LEN: usize, const N_CHILDREN: usize>
+    CircuitLogicWires<GoldilocksField, 2, N_CHILDREN> for BranchWires<NODE_LEN>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+{
+    type CircuitBuilderParams = ();
+
+    type Inputs = BranchCircuit<NODE_LEN, N_CHILDREN>;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GoldilocksField>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<GoldilocksField, 2>,
+        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; N_CHILDREN],
+        _: Self::CircuitBuilderParams,
+    ) -> Self {
+        let inputs: [PublicInputs<Target>; N_CHILDREN] =
+            create_array(|i| PublicInputs::from(&verified_proofs[i].public_inputs));
+        BranchCircuit::build(builder, &inputs)
+    }
+
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut PartialWitness<GoldilocksField>,
+    ) -> anyhow::Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use std::array::from_fn as create_array;
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
@@ -161,6 +210,14 @@ mod test {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
+    #[test]
+    fn test_len() {
+        let v: Vec<Vec<u8>> = (0..17)
+            .map(|_| random_vector::<u8>(32))
+            .collect::<Vec<Vec<u8>>>();
+        let encoded = rlp::encode_list::<Vec<u8>, _>(&v);
+        println!("BRANCH NODE: {:?}", encoded.len());
+    }
     #[derive(Clone, Debug)]
     struct TestBranchCircuit<'a, const NODE_LEN: usize, const N_CHILDREN: usize> {
         c: BranchCircuit<NODE_LEN, N_CHILDREN>,
@@ -180,7 +237,8 @@ mod test {
             let inputs = (0..N_CHILDREN)
                 .map(|_| c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN))
                 .collect::<Vec<_>>();
-            let wires = BranchCircuit::<NODE_LEN, N_CHILDREN>::build(c, &inputs);
+            let pinputs = create_array(|i| PublicInputs::from(&inputs[i]));
+            let wires = BranchCircuit::<NODE_LEN, N_CHILDREN>::build(c, &pinputs);
             (wires, inputs.try_into().unwrap())
         }
 
@@ -239,7 +297,7 @@ mod test {
         let branch_circuit = BranchCircuit::<NODE_LEN, N_CHILDREN> {
             node: node.clone(),
             // any of the two keys will do since we only care about the common prefix
-            common_prefix: key1.clone(),
+            common_prefix: bytes_to_nibbles(&key1),
             // - 1 because we compare pointers _after_ advancing the key for each leaf
             expected_pointer: ptr1 - 1,
             mapping_slot: slot,

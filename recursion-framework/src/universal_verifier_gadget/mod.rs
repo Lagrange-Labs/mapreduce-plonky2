@@ -9,6 +9,8 @@ use plonky2::{
     },
 };
 
+use crate::serialization::circuit_data_serialization::SerializableRichField;
+
 use self::wrap_circuit::WrapCircuit;
 
 mod circuit_set;
@@ -63,8 +65,8 @@ fn dummy_circuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const
 /// verified by a universal verifier for a set of circuits with `num_public_inputs`.
 /// It is only called for testing purposes or during build time.
 pub(crate) fn build_data_for_universal_verifier<
-    F: RichField + Extendable<D>,
-    C: GenericConfig<D, F = F>,
+    F: SerializableRichField<D>,
+    C: GenericConfig<D, F = F> + 'static,
     const D: usize,
 >(
     config: CircuitConfig,

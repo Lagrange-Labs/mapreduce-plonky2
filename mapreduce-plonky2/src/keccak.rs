@@ -17,6 +17,7 @@ use plonky2_crypto::{
     },
     u32::arithmetic_u32::U32Target,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     array::{Array, Vector, VectorWire},
@@ -63,13 +64,14 @@ pub struct KeccakCircuit<const N: usize> {
 /// Wires containing the output of the hash function as well as the intermediate
 /// wires created. It requires assigning during proving time because of a small
 /// computation done outside the circuit that requires the original input data.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct KeccakWires<const N: usize> {
     input_array: VectorWire<Target, N>,
     diff: Target,
     // 256/u32 = 8
     pub output_array: OutputHash,
 }
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ByteKeccakWires<const N: usize> {
     keccak: KeccakWires<N>,
     pub output: OutputByteHash,
