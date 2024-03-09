@@ -1,6 +1,7 @@
 mod public_inputs;
 mod wire;
 
+/*
 use plonky2::{
     field::extension::Extendable,
     hash::{hash_types::RichField, poseidon::PoseidonHash},
@@ -38,3 +39,4 @@ impl LeafCircuit {
         wires
     }
 }
+*/

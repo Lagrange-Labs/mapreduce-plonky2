@@ -4,6 +4,6 @@
 //!     leaf-circuit --> ...
 
 mod block_linking;
-mod leaf;
+mod lpn;
 
 pub use block_linking::PublicInputs as BlockLinkingPublicInputs;

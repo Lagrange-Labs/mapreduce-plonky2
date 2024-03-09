@@ -7,11 +7,35 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
-pub struct PublicInputs<T> {
-    inner: [T; PublicInputs::<()>::TOTAL_LEN],
+pub struct PublicInputs<'a, T: Clone> {
+    inner: &'a [T],
 }
 
-impl<T> PublicInputs<T> {
+impl<'a, T: Copy + Default> PublicInputs<'a, T> {
+    /// Writes the parts of the block liking public inputs into the provided target array.
+    pub fn parts_into_target(
+        target: &mut [T; PublicInputs::<()>::TOTAL_LEN],
+        h: &[T; PublicInputs::<()>::H_LEN],
+        n: &[T; PublicInputs::<()>::N_LEN],
+        prev_h: &[T; PublicInputs::<()>::PREV_H_LEN],
+        a: &[T; PublicInputs::<()>::A_LEN],
+        d: &[T; PublicInputs::<()>::D_LEN],
+        m: &[T; PublicInputs::<()>::M_LEN],
+        s: &[T; PublicInputs::<()>::S_LEN],
+        c: &[T; PublicInputs::<()>::C_LEN],
+    ) {
+        target[Self::H_IDX..Self::H_IDX + Self::H_LEN].copy_from_slice(h);
+        target[Self::N_IDX..Self::N_IDX + Self::N_LEN].copy_from_slice(n);
+        target[Self::PREV_H_IDX..Self::PREV_H_IDX + Self::PREV_H_LEN].copy_from_slice(prev_h);
+        target[Self::A_IDX..Self::A_IDX + Self::A_LEN].copy_from_slice(a);
+        target[Self::D_IDX..Self::D_IDX + Self::D_LEN].copy_from_slice(d);
+        target[Self::M_IDX..Self::M_IDX + Self::M_LEN].copy_from_slice(m);
+        target[Self::S_IDX..Self::S_IDX + Self::S_LEN].copy_from_slice(s);
+        target[Self::C_IDX..Self::C_IDX + Self::C_LEN].copy_from_slice(c);
+    }
+}
+
+impl<'a, T: Clone> PublicInputs<'a, T> {
     /// This is a wrapper around an array of targets set as public inputs of any
     /// proof generated in this module. They all share the same structure.
     /// `H` Block header hash
@@ -23,24 +47,24 @@ impl<T> PublicInputs<T> {
     /// `S` Storage slot of the variable holding the length
     /// `C` Merkle root of the storage database
     /// H = 8, N = 2, PREV_H = 8, A = 5, D = 5*2+1, M = 8, S = 1, C = 8
-    pub const H_LEN: usize = 8;
-    pub const N_LEN: usize = 2;
-    pub const PREV_H_LEN: usize = 8;
-    pub const A_LEN: usize = 5;
-    pub const D_LEN: usize = 11;
-    pub const M_LEN: usize = 8;
-    pub const S_LEN: usize = 1;
-    pub const C_LEN: usize = 8;
-    pub const TOTAL_LEN: usize = 51;
+    pub(crate) const H_LEN: usize = 8;
+    pub(crate) const N_LEN: usize = 2;
+    pub(crate) const PREV_H_LEN: usize = 8;
+    pub(crate) const A_LEN: usize = 5;
+    pub(crate) const D_LEN: usize = 11;
+    pub(crate) const M_LEN: usize = 8;
+    pub(crate) const S_LEN: usize = 1;
+    pub(crate) const C_LEN: usize = 8;
+    pub(crate) const TOTAL_LEN: usize = 51;
 
-    pub const H_IDX: usize = 0;
-    pub const N_IDX: usize = Self::H_IDX + Self::H_LEN;
-    pub const PREV_H_IDX: usize = Self::N_IDX + Self::N_LEN;
-    pub const A_IDX: usize = Self::PREV_H_IDX + Self::PREV_H_LEN;
-    pub const D_IDX: usize = Self::A_IDX + Self::A_LEN;
-    pub const M_IDX: usize = Self::D_IDX + Self::D_LEN;
-    pub const S_IDX: usize = Self::M_IDX + Self::M_LEN;
-    pub const C_IDX: usize = Self::S_IDX + Self::S_LEN;
+    pub(crate) const H_IDX: usize = 0;
+    pub(crate) const N_IDX: usize = Self::H_IDX + Self::H_LEN;
+    pub(crate) const PREV_H_IDX: usize = Self::N_IDX + Self::N_LEN;
+    pub(crate) const A_IDX: usize = Self::PREV_H_IDX + Self::PREV_H_LEN;
+    pub(crate) const D_IDX: usize = Self::A_IDX + Self::A_LEN;
+    pub(crate) const M_IDX: usize = Self::D_IDX + Self::D_LEN;
+    pub(crate) const S_IDX: usize = Self::M_IDX + Self::M_LEN;
+    pub(crate) const C_IDX: usize = Self::S_IDX + Self::S_LEN;
 
     pub fn register<
         F,
@@ -79,39 +103,55 @@ impl<T> PublicInputs<T> {
         cb.register_public_inputs(storage_inputs.merkle_root_data());
     }
 
-    pub fn inner(&self) -> &[T] {
+    /// Creates a representation of the public inputs from the provided slice.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the length of the provided slice is smaller than
+    /// [Self::TOTAL_LEN].
+    pub fn from_slice(arr: &'a [T]) -> Self {
+        assert_eq!(
+            arr.len(),
+            Self::TOTAL_LEN,
+            "The public inputs slice of the block linking circuit must match the expected length."
+        );
+
+        Self { inner: arr }
+    }
+
+    pub(crate) fn inner(&self) -> &[T] {
         &self.inner
     }
 
-    pub fn block_hash(s: &[T]) -> &[T] {
-        &s[Self::H_IDX..Self::N_IDX]
+    pub fn block_hash(&self) -> &[T] {
+        &self.inner[Self::H_IDX..Self::N_IDX]
     }
 
-    pub fn block_number(s: &[T]) -> &[T] {
-        &s[Self::N_IDX..Self::PREV_H_IDX]
+    pub fn block_number(&self) -> &[T] {
+        &self.inner[Self::N_IDX..Self::PREV_H_IDX]
     }
 
-    pub fn prev_block_hash(s: &[T]) -> &[T] {
-        &s[Self::PREV_H_IDX..Self::A_IDX]
+    pub fn prev_block_hash(&self) -> &[T] {
+        &self.inner[Self::PREV_H_IDX..Self::A_IDX]
     }
 
-    pub fn a(s: &[T]) -> &[T] {
-        &s[Self::A_IDX..Self::D_IDX]
+    pub fn a(&self) -> &[T] {
+        &self.inner[Self::A_IDX..Self::D_IDX]
     }
 
-    pub fn d(s: &[T]) -> &[T] {
-        &s[Self::D_IDX..Self::M_IDX]
+    pub fn d(&self) -> &[T] {
+        &self.inner[Self::D_IDX..Self::M_IDX]
     }
 
-    pub fn m(s: &[T]) -> &[T] {
-        &s[Self::M_IDX..Self::S_IDX]
+    pub fn m(&self) -> &[T] {
+        &self.inner[Self::M_IDX..Self::S_IDX]
     }
 
-    pub fn s(s: &[T]) -> &[T] {
-        &s[Self::S_IDX..Self::C_IDX]
+    pub fn s(&self) -> &[T] {
+        &self.inner[Self::S_IDX..Self::C_IDX]
     }
 
-    pub fn merkle_root(s: &[T]) -> &[T] {
-        &s[Self::C_IDX..]
+    pub fn merkle_root(&self) -> &[T] {
+        &self.inner[Self::C_IDX..]
     }
 }
