@@ -30,6 +30,7 @@ use recursion_framework::serialization::serialize;
 use serde::Deserialize;
 use serde::Serialize;
 use std::array::from_fn as create_array;
+use log::debug;
 
 const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
@@ -332,8 +333,13 @@ impl PublicParameters {
             MAPPING_CIRCUIT_SET_SIZE,
         );
 
+        debug!("Building leaf circuit");
         let leaf_circuit = circuit_builder.build_circuit::<C, 0, LeafWires<MAX_LEAF_NODE_LEN>>(());
+
+        debug!("Building extension circuit");
         let ext_circuit = circuit_builder.build_circuit::<C, 1, ExtensionWires>(());
+
+        debug!("Building branch circuits");
         #[cfg(not(test))]
         let branch_circuits = BranchCircuits::new(&circuit_builder);
         #[cfg(test)]

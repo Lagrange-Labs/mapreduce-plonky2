@@ -28,7 +28,7 @@ mod merkle_tree;
 mod mpt_sequential;
 mod rlp;
 mod state;
-mod storage;
+pub mod storage;
 pub mod transaction;
 mod utils;
 /// Bundle containing the raw proof, the verification key, and some common data
