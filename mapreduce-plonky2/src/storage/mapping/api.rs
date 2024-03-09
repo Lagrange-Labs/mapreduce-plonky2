@@ -3,13 +3,13 @@ use super::extension::ExtensionWires;
 use super::leaf::LeafCircuit;
 use super::leaf::LeafWires;
 use super::leaf::StorageLeafWire;
-use super::leaf::MAX_LEAF_NODE_LEN;
 use super::PublicInputs;
 use crate::mpt_sequential::PAD_LEN;
 use crate::storage::key::MappingSlot;
 use crate::storage::mapping::branch::BranchCircuit;
 use crate::storage::mapping::branch::BranchWires;
-use crate::storage::mapping::branch::MAX_BRANCH_NODE_LEN;
+use crate::storage::MAX_BRANCH_NODE_LEN;
+use crate::storage::MAX_LEAF_NODE_LEN;
 use anyhow::bail;
 use anyhow::Result;
 use paste::paste;
@@ -79,7 +79,7 @@ impl CircuitInput {
 /// Main struct holding the different circuit parameters for each of the MPT circuits defined here.
 /// Most notably, it holds them in a way to use the recursion framework allowing us to specialize
 /// circuits according to the situation.
-pub struct MPTCircuitsParams {
+pub struct PublicParameters {
     leaf_circuit: CircuitWithUniversalVerifier<F, C, D, 0, StorageLeafWire>,
     ext_circuit: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionWires>,
     #[cfg(not(test))]
@@ -92,14 +92,14 @@ pub struct MPTCircuitsParams {
     set: TestingRecursiveCircuits<F, C, D, NUM_IO>,
 }
 /// Public API employed to build the MPT circuits, which are returned in serialized form
-pub fn build_circuits_params() -> MPTCircuitsParams {
-    MPTCircuitsParams::build()
+pub fn build_circuits_params() -> PublicParameters {
+    PublicParameters::build()
 }
 
 /// Public API employed to generate a proof for the circuit specified by `CircuitType`,
 /// employing the `circuit_params` generated with the `build_circuits_params` API
 pub fn generate_proof(
-    circuit_params: &MPTCircuitsParams,
+    circuit_params: &PublicParameters,
     circuit_type: CircuitInput,
 ) -> Result<Vec<u8>> {
     let proof = circuit_params.generate_proof(circuit_type)?;
@@ -317,7 +317,7 @@ impl_branch_circuits!(
 #[cfg(test)]
 impl_branch_circuits!(TestBranchCircuits, 1, 2);
 
-impl MPTCircuitsParams {
+impl PublicParameters {
     /// Generates the circuit parameters for the MPT circuits.
     fn build() -> Self {
         let config = CircuitConfig::standard_recursion_config();
@@ -344,7 +344,7 @@ impl MPTCircuitsParams {
         ];
         circuits_set.extend(branch_circuits.circuit_set());
 
-        MPTCircuitsParams {
+        PublicParameters {
             leaf_circuit,
             ext_circuit,
             branchs: branch_circuits,
@@ -443,10 +443,10 @@ mod test {
     #[test]
     #[serial]
     fn test_serialization() {
-        let params = MPTCircuitsParams::build();
+        let params = PublicParameters::build();
 
         let encoded = bincode::serialize(&params).unwrap();
-        let decoded_params: MPTCircuitsParams = bincode::deserialize(&encoded).unwrap();
+        let decoded_params: PublicParameters = bincode::deserialize(&encoded).unwrap();
 
         assert!(decoded_params == params);
 
@@ -494,7 +494,7 @@ mod test {
     #[test]
     #[serial]
     fn test_branch_logic() {
-        let params = MPTCircuitsParams::build();
+        let params = PublicParameters::build();
         let slot = 1;
         let mut test_data = generate_storage_trie_and_keys(slot);
         let trie = &mut test_data.trie;

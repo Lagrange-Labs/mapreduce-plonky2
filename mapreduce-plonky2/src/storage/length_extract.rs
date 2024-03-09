@@ -1,7 +1,11 @@
 //! This circuit is used to verify the length value extracted from storage trie.
 
-use super::key::{SimpleSlot, SimpleSlotWires};
+use super::{
+    key::{SimpleSlot, SimpleSlotWires},
+    MAX_BRANCH_NODE_LEN,
+};
 use crate::{
+    circuit::UserCircuit,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
@@ -14,9 +18,16 @@ use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
     iop::{target::Target, witness::PartialWitness},
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, CircuitData},
+        config::{AlgebraicHasher, GenericConfig},
+    },
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use recursion_framework::serialization::circuit_data_serialization::SerializableRichField;
+use recursion_framework::serialization::{deserialize, serialize};
+use serde::{Deserialize, Serialize};
 use std::array;
 
 /// This is a wrapper around an array of targets set as public inputs of any
@@ -26,7 +37,7 @@ use std::array;
 /// `S` storage slot of the variable holding the length
 /// `V` Integer value stored at key `S` (can be given by prover)
 #[derive(Clone, Debug)]
-pub struct PublicInputs<'a, T: Clone> {
+pub(crate) struct PublicInputs<'a, T: Clone> {
     pub(crate) proof_inputs: &'a [T],
 }
 
@@ -85,7 +96,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 }
 
-pub struct LengthExtractWires<const DEPTH: usize, const NODE_LEN: usize>
+#[derive(Serialize, Deserialize)]
+pub(crate) struct LengthExtractWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
@@ -99,7 +111,7 @@ where
 }
 
 #[derive(Clone, Debug)]
-struct LengthExtractCircuit<const DEPTH: usize, const NODE_LEN: usize> {
+pub struct LengthExtractCircuit<const DEPTH: usize, const NODE_LEN: usize> {
     /// Storage slot saved the length value
     slot: SimpleSlot,
     /// MPT circuit used to verify the nodes of storage Merkle Tree
@@ -171,6 +183,59 @@ where
             .assign_wires(pw, &wires.mpt_input, &wires.mpt_output)
     }
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct Parameters<
+    const DEPTH: usize,
+    const NODE_LEN: usize,
+    F: SerializableRichField<D>,
+    const D: usize,
+    C,
+> where
+    C: GenericConfig<D, F = F> + 'static,
+    C::Hasher: AlgebraicHasher<F>,
+    [(); DEPTH - 1]:,
+    [(); PAD_LEN(NODE_LEN)]:,
+{
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    data: CircuitData<F, C, D>,
+    wires: LengthExtractWires<DEPTH, NODE_LEN>,
+}
+
+impl<const DEPTH: usize, const NODE_LEN: usize, F, const D: usize, C>
+    Parameters<DEPTH, NODE_LEN, F, D, C>
+where
+    C: GenericConfig<D, F = F> + 'static,
+    F: SerializableRichField<D>,
+    C::Hasher: AlgebraicHasher<F>,
+    [(); DEPTH - 1]:,
+    [(); PAD_LEN(NODE_LEN)]:,
+{
+    pub fn build() -> Self {
+        let mut cb = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
+        let wires = LengthExtractCircuit::<DEPTH, NODE_LEN>::build(&mut cb);
+        let data = cb.build();
+        Self { data, wires }
+    }
+    pub fn generate(&self, inputs: LengthExtractCircuit<DEPTH, NODE_LEN>) -> Result<Vec<u8>> {
+        let mut pw = PartialWitness::new();
+        inputs.assign::<F, D>(&mut pw, &self.wires)?;
+        let proof = self.data.prove(pw)?;
+        // TODO: move serialization to common place
+        let b = bincode::serialize(&proof)?;
+        Ok(b)
+    }
+}
+
+pub const MAX_DEPTH_TRIE: usize = 4;
+pub type CircuitInput = LengthExtractCircuit<MAX_DEPTH_TRIE, MAX_BRANCH_NODE_LEN>;
+pub type PublicParameters = Parameters<
+    MAX_DEPTH_TRIE,
+    MAX_BRANCH_NODE_LEN,
+    crate::api::F,
+    { crate::api::D },
+    crate::api::C,
+>;
 
 #[cfg(test)]
 mod tests {

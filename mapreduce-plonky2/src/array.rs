@@ -9,7 +9,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use recursion_framework::serialization::{deserialize_long_array, serialize_long_array};
+use recursion_framework::serialization::{deserialize_long_array, serialize_long_array, ToBytes};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 

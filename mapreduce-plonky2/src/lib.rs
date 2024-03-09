@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 mod benches;
 pub mod eth;
 
+pub mod api;
 mod array;
 pub(crate) mod circuit;
 mod group_hashing;
