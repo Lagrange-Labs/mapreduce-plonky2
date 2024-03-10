@@ -17,7 +17,7 @@ use plonky2_ecgfp5::{
     },
 };
 
-use crate::{array::Array, keccak::OutputHash};
+use crate::array::Array;
 
 pub const POSEIDON_HASH_LEN: usize = SPONGE_WIDTH;
 
@@ -29,6 +29,12 @@ type EncodedPoseidonHash = Array<U32Target, { POSEIDON_HASH_LEN / 4 }>;
 ///  * D – the digest of the values encoutered up until R
 pub struct PublicInputs<'input, FieldElt: Clone> {
     pub inputs: &'input [FieldElt],
+}
+
+impl<'a, T: Clone> From<&'a [T]> for PublicInputs<'a, T> {
+    fn from(inputs: &'a [T]) -> Self {
+        Self { inputs }
+    }
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {

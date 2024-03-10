@@ -31,7 +31,6 @@ pub struct LeafWires {
 
 impl LeafCircuit {
     pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires {
-        let zero = b.zero();
         let leaf_str = b.constant(
             *LEAF_STR
                 .get_or_init(|| GoldilocksField::from_canonical_u32(u32::from_be_bytes(*b"LEAF"))),
