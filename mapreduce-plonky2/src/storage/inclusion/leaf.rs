@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{hash_types::HashOutTarget, poseidon::PoseidonHash},
@@ -9,6 +11,9 @@ use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 
 use super::PublicInputs;
+
+// One u32 encoding the bytes for b"LEAF"
+static LEAF_STR: OnceLock<GoldilocksField> = OnceLock::new();
 
 pub struct LeafCircuit {
     key: [u8; 32],
@@ -27,10 +32,10 @@ pub struct LeafWires {
 impl LeafCircuit {
     pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires {
         let zero = b.zero();
-        // TODO: put in a OnceCell
-        let leaf_str = b.constant(GoldilocksField::from_canonical_u32(u32::from_be_bytes(
-            *b"LEAF",
-        )));
+        let leaf_str = b.constant(
+            *LEAF_STR
+                .get_or_init(|| GoldilocksField::from_canonical_u32(u32::from_be_bytes(*b"LEAF"))),
+        );
         let key = Array::<Target, 32>::new(b);
         let value = Array::<Target, 32>::new(b);
         let kv = Array::<Target, 32>::try_from(
