@@ -11,11 +11,13 @@ use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 use super::PublicInputs;
 
 pub struct LeafCircuit {
+    key: [u8; 32],
     value: [u8; 32],
 }
 
 pub struct LeafWires {
     // in
+    key: Array<Target, 32>,
     value: Array<Target, 32>,
     // out
     root: HashOutTarget,
@@ -25,22 +27,34 @@ pub struct LeafWires {
 impl LeafCircuit {
     pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires {
         let zero = b.zero();
-        let leaf_str = GoldilocksField::from_canonical_u32(u32::from_be_bytes(*b"LEAF"));
+        // TODO: put in a OnceCell
+        let leaf_str = b.constant(GoldilocksField::from_canonical_u32(u32::from_be_bytes(
+            *b"LEAF",
+        )));
+        let key = Array::<Target, 32>::new(b);
         let value = Array::<Target, 32>::new(b);
-        let leaf_str = b.constant(leaf_str);
-
-        let to_hash = Array::<Target, 33>::try_from(
-            std::iter::once(leaf_str)
-                .chain(value.arr.iter().copied())
+        let kv = Array::<Target, 32>::try_from(
+            key.arr
+                .iter()
+                .chain(value.arr.iter())
+                .copied()
                 .collect::<Vec<_>>(),
         )
         .unwrap();
-        let digest = b.map_to_curve_point(&value.arr);
+
+        let to_hash = Array::<Target, 65>::try_from(
+            std::iter::once(leaf_str)
+                .chain(kv.arr.iter().copied())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let digest = b.map_to_curve_point(&kv.arr);
         let root = b.hash_or_noop::<PoseidonHash>(Vec::from(to_hash.arr));
 
         PublicInputs::<GoldilocksField>::register(b, &root, &digest);
 
         LeafWires {
+            key,
             value,
             root,
             digest,
