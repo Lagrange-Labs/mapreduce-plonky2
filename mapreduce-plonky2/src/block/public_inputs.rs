@@ -24,17 +24,17 @@ impl<'a> PublicInputs<'a, Target> {
     pub fn register<F, const D: usize>(
         cb: &mut CircuitBuilder<F, D>,
         init_root: &HashOutTarget,
-        new_root: &HashOutTarget,
+        root: &HashOutTarget,
         first_block_number: U32Target,
-        new_block_number: U32Target,
+        block_number: U32Target,
         block_header: &OutputHash,
     ) where
         F: RichField + Extendable<D>,
     {
         cb.register_public_inputs(&init_root.elements);
-        cb.register_public_inputs(&new_root.elements);
+        cb.register_public_inputs(&root.elements);
         cb.register_public_input(first_block_number.0);
-        cb.register_public_input(new_block_number.0);
+        cb.register_public_input(block_number.0);
         block_header.register_as_input(cb);
     }
 
@@ -45,8 +45,8 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     /// Return the new root hash.
-    pub fn new_root(&self) -> HashOutTarget {
-        let data = self.new_root_data();
+    pub fn root(&self) -> HashOutTarget {
+        let data = self.root_data();
         array::from_fn(|i| data[i]).into()
     }
 
@@ -55,9 +55,9 @@ impl<'a> PublicInputs<'a, Target> {
         U32Target(self.first_block_number_data())
     }
 
-    /// Return the new block number.
-    pub fn new_block_number(&self) -> U32Target {
-        U32Target(self.new_block_number_data())
+    /// Return the current block number.
+    pub fn block_number(&self) -> U32Target {
+        U32Target(self.block_number_data())
     }
 
     /// Return the block header hash.
@@ -83,7 +83,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         &self.proof_inputs[Self::U0_IDX..Self::UI_IDX]
     }
 
-    pub fn new_root_data(&self) -> &[T] {
+    pub fn root_data(&self) -> &[T] {
         &self.proof_inputs[Self::UI_IDX..Self::Z1_IDX]
     }
 
@@ -91,7 +91,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         self.proof_inputs[Self::Z1_IDX]
     }
 
-    pub fn new_block_number_data(&self) -> T {
+    pub fn block_number_data(&self) -> T {
         self.proof_inputs[Self::ZI_IDX]
     }
 
