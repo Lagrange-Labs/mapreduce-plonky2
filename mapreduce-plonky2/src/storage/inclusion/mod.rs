@@ -1,3 +1,4 @@
+mod inner_node;
 mod leaf;
 mod public_inputs;
 

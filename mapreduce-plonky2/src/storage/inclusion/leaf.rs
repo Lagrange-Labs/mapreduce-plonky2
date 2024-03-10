@@ -37,6 +37,7 @@ impl LeafCircuit {
         .unwrap();
         let digest = b.map_to_curve_point(&value.arr);
         let root = b.hash_or_noop::<PoseidonHash>(Vec::from(to_hash.arr));
+
         PublicInputs::<GoldilocksField>::register(b, &root, &digest);
 
         LeafWires {
