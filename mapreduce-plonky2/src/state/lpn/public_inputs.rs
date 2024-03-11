@@ -4,11 +4,7 @@ use core::array;
 
 use plonky2::{
     field::extension::Extendable,
-    hash::{
-        hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
-        hashing::hash_n_to_hash_no_pad,
-        poseidon::PoseidonPermutation,
-    },
+    hash::hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
     iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
@@ -16,7 +12,7 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 use crate::{
     keccak::{OutputHash, PACKED_HASH_LEN},
-    state::BlockLinkingPublicInputs,
+    state::lpn::LeafWires,
 };
 
 /// The public inputs for the leaf circuit.
@@ -43,19 +39,14 @@ pub struct PublicInputs<'a, T: Clone> {
 
 impl<'a> PublicInputs<'a, Target> {
     /// Registers the public inputs into the circuit builder.
-    pub fn register<F, const D: usize>(
-        cb: &mut CircuitBuilder<F, D>,
-        root: &HashOutTarget,
-        block_header: &OutputHash,
-        block_number: U32Target,
-        prev_block_header: &OutputHash,
-    ) where
+    pub fn register<F, const D: usize>(b: &mut CircuitBuilder<F, D>, wires: &LeafWires)
+    where
         F: RichField + Extendable<D>,
     {
-        cb.register_public_inputs(&root.elements);
-        block_header.register_as_input(cb);
-        cb.register_public_input(block_number.0);
-        prev_block_header.register_as_input(cb);
+        b.register_public_inputs(&wires.root.elements);
+        wires.block_header.register_as_input(b);
+        b.register_public_input(wires.block_number.0);
+        wires.prev_block_header.register_as_input(b);
     }
 
     /// Returns the root hash.
@@ -131,35 +122,38 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 }
 
-impl<'a, F: RichField> PublicInputs<'a, F> {
-    /// Writes the parts of the block liking public inputs into the provided target array.
-    pub fn block_linking_into_target<'b>(
-        target: &mut [F; PublicInputs::<()>::TOTAL_LEN],
-        pi: &'b BlockLinkingPublicInputs<'b, F>,
-    ) {
-        let len = 1 + pi.a().len() + pi.merkle_root().len() + pi.s().len() + pi.m().len();
-        let mut node = Vec::with_capacity(len);
-        node.push(F::ONE); // "LEAF"
-        node.extend_from_slice(pi.a());
-        node.extend_from_slice(pi.merkle_root());
-        node.extend_from_slice(pi.s());
-        node.extend_from_slice(pi.m());
-        let root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&node);
-
-        target[Self::C_IDX..Self::C_IDX + Self::C_LEN].copy_from_slice(&root.elements);
-        target[Self::H_IDX..Self::H_IDX + Self::H_LEN].copy_from_slice(pi.block_hash());
-        target[Self::N_IDX..Self::N_IDX + Self::N_LEN].copy_from_slice(pi.s());
-        target[Self::PREV_H_IDX..Self::PREV_H_IDX + Self::PREV_H_LEN]
-            .copy_from_slice(pi.prev_block_hash());
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
+    use plonky2::{
+        field::{goldilocks_field::GoldilocksField, types::Field},
+        hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
+    };
 
     use super::*;
     use crate::state::BlockLinkingPublicInputs;
+
+    impl<'a, F: RichField> PublicInputs<'a, F> {
+        /// Writes the parts of the block liking public inputs into the provided target array.
+        pub fn block_linking_into_target<'b>(
+            target: &mut [F; PublicInputs::<()>::TOTAL_LEN],
+            pi: &'b BlockLinkingPublicInputs<'b, F>,
+        ) {
+            let len = 1 + pi.a().len() + pi.merkle_root().len() + pi.s().len() + pi.m().len();
+            let mut node = Vec::with_capacity(len);
+            node.push(F::ONE); // "LEAF"
+            node.extend_from_slice(pi.a());
+            node.extend_from_slice(pi.merkle_root());
+            node.extend_from_slice(pi.s());
+            node.extend_from_slice(pi.m());
+            let root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&node);
+
+            target[Self::C_IDX..Self::C_IDX + Self::C_LEN].copy_from_slice(&root.elements);
+            target[Self::H_IDX..Self::H_IDX + Self::H_LEN].copy_from_slice(pi.block_hash());
+            target[Self::N_IDX..Self::N_IDX + Self::N_LEN].copy_from_slice(pi.s());
+            target[Self::PREV_H_IDX..Self::PREV_H_IDX + Self::PREV_H_LEN]
+                .copy_from_slice(pi.prev_block_hash());
+        }
+    }
 
     #[test]
     fn public_inputs_data_correspond_to_block_linking_pi_structure() {
