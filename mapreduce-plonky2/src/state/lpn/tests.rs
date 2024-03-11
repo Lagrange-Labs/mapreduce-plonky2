@@ -1,17 +1,14 @@
 //! Tests module for the leaf circuit
 
-use std::array;
-
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
-    hash::hash_types::{HashOutTarget, RichField},
+    hash::hash_types::HashOutTarget,
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{circuit_builder::CircuitBuilder, config::PoseidonGoldilocksConfig},
 };
-use rand::{rngs::StdRng, RngCore, SeedableRng};
 
 use crate::{
     circuit::{test::run_circuit, UserCircuit},
@@ -25,7 +22,8 @@ use super::LeafCircuit;
 
 #[test]
 fn prove_and_verify_leaf_circuit() {
-    let block_linking = block_linking_pi_from_seed(TestLeafCircuit::PI_SEED).to_vec();
+    let block_linking =
+        BlockLinkingPublicInputs::target_from_seed(TestLeafCircuit::PI_SEED).to_vec();
     let block_linking = BlockLinkingPublicInputs::from_slice(&block_linking);
 
     let circuit = TestLeafCircuit { c: LeafCircuit };
@@ -65,7 +63,8 @@ impl UserCircuit<GoldilocksField, 2> for TestLeafCircuit {
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
         let targets = b.add_virtual_targets(BlockLinkingPublicInputs::<()>::TOTAL_LEN);
 
-        let block_linking_values = block_linking_pi_from_seed(TestLeafCircuit::PI_SEED).to_vec();
+        let block_linking_values =
+            BlockLinkingPublicInputs::target_from_seed(TestLeafCircuit::PI_SEED).to_vec();
         let block_linking = BlockLinkingPublicInputs::from_slice(&targets);
         let wires = LeafCircuit::build(b, block_linking);
 
@@ -91,24 +90,4 @@ impl UserCircuit<GoldilocksField, 2> for TestLeafCircuit {
 
         self.c.assign(pw, &wires).unwrap();
     }
-}
-
-fn block_linking_pi_from_seed<F: RichField>(
-    seed: u64,
-) -> [F; BlockLinkingPublicInputs::<()>::TOTAL_LEN] {
-    let rng = &mut StdRng::seed_from_u64(seed);
-
-    let h = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-    let n = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-    let prev_h = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-    let a = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-    let d = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-    let m = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-    let s = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-    let c = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-
-    let mut target = array::from_fn(|_| F::ZERO);
-    BlockLinkingPublicInputs::parts_into_target(&mut target, &h, &n, &prev_h, &a, &d, &m, &s, &c);
-
-    target
 }

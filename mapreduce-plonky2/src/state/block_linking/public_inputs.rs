@@ -7,42 +7,33 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
+/// This is a wrapper around an array of targets set as public inputs of any
+/// proof generated in this module. They all share the same structure.
+/// `H` Block header hash
+/// `N` Block number
+/// `PREV_H` Header hash of the previous block (parent hash)
+/// `A` Smart contract address
+/// `D` Digest of the values
+/// `M` Storage slot of the mapping
+/// `S` Storage slot of the variable holding the length
+/// `C` Merkle root of the storage database
+/// H = 8, N = 2, PREV_H = 8, A = 5, D = 5*2+1, M = 8, S = 1, C = 8
+const H_IDX: usize = 0;
+const N_IDX: usize = 8;
+const PREV_H_IDX: usize = 10;
+const A_IDX: usize = 18;
+const D_IDX: usize = 23;
+const M_IDX: usize = 34;
+const S_IDX: usize = 42;
+const C_IDX: usize = 43;
+const TOTAL_LEN: usize = 51;
+
 #[derive(Clone)]
 pub struct PublicInputs<'a, T: Clone> {
     inner: &'a [T],
 }
 
 impl<'a, T: Clone> PublicInputs<'a, T> {
-    /// This is a wrapper around an array of targets set as public inputs of any
-    /// proof generated in this module. They all share the same structure.
-    /// `H` Block header hash
-    /// `N` Block number
-    /// `PREV_H` Header hash of the previous block (parent hash)
-    /// `A` Smart contract address
-    /// `D` Digest of the values
-    /// `M` Storage slot of the mapping
-    /// `S` Storage slot of the variable holding the length
-    /// `C` Merkle root of the storage database
-    /// H = 8, N = 2, PREV_H = 8, A = 5, D = 5*2+1, M = 8, S = 1, C = 8
-    pub(crate) const H_LEN: usize = 8;
-    pub(crate) const N_LEN: usize = 2;
-    pub(crate) const PREV_H_LEN: usize = 8;
-    pub(crate) const A_LEN: usize = 5;
-    pub(crate) const D_LEN: usize = 11;
-    pub(crate) const M_LEN: usize = 8;
-    pub(crate) const S_LEN: usize = 1;
-    pub(crate) const C_LEN: usize = 8;
-    pub(crate) const TOTAL_LEN: usize = 51;
-
-    pub(crate) const H_IDX: usize = 0;
-    pub(crate) const N_IDX: usize = Self::H_IDX + Self::H_LEN;
-    pub(crate) const PREV_H_IDX: usize = Self::N_IDX + Self::N_LEN;
-    pub(crate) const A_IDX: usize = Self::PREV_H_IDX + Self::PREV_H_LEN;
-    pub(crate) const D_IDX: usize = Self::A_IDX + Self::A_LEN;
-    pub(crate) const M_IDX: usize = Self::D_IDX + Self::D_LEN;
-    pub(crate) const S_IDX: usize = Self::M_IDX + Self::M_LEN;
-    pub(crate) const C_IDX: usize = Self::S_IDX + Self::S_LEN;
-
     pub fn register<
         F,
         const D: usize,
@@ -87,48 +78,100 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
     /// This function will panic if the length of the provided slice is smaller than
     /// [Self::TOTAL_LEN].
     pub fn from_slice(arr: &'a [T]) -> Self {
-        assert_eq!(
-            arr.len(),
-            Self::TOTAL_LEN,
-            "The public inputs slice of the block linking circuit must match the expected length."
+        assert!(
+            TOTAL_LEN <= arr.len(),
+            "The public inputs slice length must be equal or greater than the expected length."
         );
 
         Self { inner: arr }
     }
 
-    pub(crate) fn inner(&self) -> &[T] {
-        &self.inner
-    }
-
     pub fn block_hash(&self) -> &[T] {
-        &self.inner[Self::H_IDX..Self::N_IDX]
+        &self.inner[H_IDX..N_IDX]
     }
 
     pub fn block_number(&self) -> &[T] {
-        &self.inner[Self::N_IDX..Self::PREV_H_IDX]
+        &self.inner[N_IDX..PREV_H_IDX]
     }
 
     pub fn prev_block_hash(&self) -> &[T] {
-        &self.inner[Self::PREV_H_IDX..Self::A_IDX]
+        &self.inner[PREV_H_IDX..A_IDX]
     }
 
     pub fn a(&self) -> &[T] {
-        &self.inner[Self::A_IDX..Self::D_IDX]
+        &self.inner[A_IDX..D_IDX]
     }
 
     pub fn d(&self) -> &[T] {
-        &self.inner[Self::D_IDX..Self::M_IDX]
+        &self.inner[D_IDX..M_IDX]
     }
 
     pub fn m(&self) -> &[T] {
-        &self.inner[Self::M_IDX..Self::S_IDX]
+        &self.inner[M_IDX..S_IDX]
     }
 
     pub fn s(&self) -> &[T] {
-        &self.inner[Self::S_IDX..Self::C_IDX]
+        &self.inner[S_IDX..C_IDX]
     }
 
     pub fn merkle_root(&self) -> &[T] {
-        &self.inner[Self::C_IDX..]
+        &self.inner[C_IDX..]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::array;
+
+    use rand::{rngs::StdRng, RngCore, SeedableRng};
+
+    use super::*;
+
+    impl<'a, T: Clone> PublicInputs<'a, T> {
+        pub const TOTAL_LEN: usize = TOTAL_LEN;
+    }
+
+    impl<'a, T: Copy + Default> PublicInputs<'a, T> {
+        /// Writes the parts of the block liking public inputs into the provided target array.
+        pub fn parts_into_target(
+            target: &mut [T; TOTAL_LEN],
+            h: &[T; N_IDX - H_IDX],
+            n: &[T; PREV_H_IDX - N_IDX],
+            prev_h: &[T; A_IDX - PREV_H_IDX],
+            a: &[T; D_IDX - A_IDX],
+            d: &[T; M_IDX - D_IDX],
+            m: &[T; S_IDX - M_IDX],
+            s: &[T; C_IDX - S_IDX],
+            c: &[T; TOTAL_LEN - C_IDX],
+        ) {
+            target[H_IDX..N_IDX].copy_from_slice(h);
+            target[N_IDX..PREV_H_IDX].copy_from_slice(n);
+            target[PREV_H_IDX..A_IDX].copy_from_slice(prev_h);
+            target[A_IDX..D_IDX].copy_from_slice(a);
+            target[D_IDX..M_IDX].copy_from_slice(d);
+            target[M_IDX..S_IDX].copy_from_slice(m);
+            target[S_IDX..C_IDX].copy_from_slice(s);
+            target[C_IDX..TOTAL_LEN].copy_from_slice(c);
+        }
+    }
+
+    impl<'a, F: RichField> PublicInputs<'a, F> {
+        pub fn target_from_seed(seed: u64) -> [F; TOTAL_LEN] {
+            let rng = &mut StdRng::seed_from_u64(seed);
+
+            let h = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let n = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let prev_h = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let a = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let d = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let m = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let s = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let c = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+
+            let mut target = array::from_fn(|_| F::ZERO);
+            Self::parts_into_target(&mut target, &h, &n, &prev_h, &a, &d, &m, &s, &c);
+
+            target
+        }
     }
 }

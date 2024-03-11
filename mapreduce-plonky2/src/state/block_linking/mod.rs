@@ -248,30 +248,6 @@ mod tests {
         }
     }
 
-    impl<'a, T: Copy + Default> PublicInputs<'a, T> {
-        /// Writes the parts of the block liking public inputs into the provided target array.
-        pub fn parts_into_target(
-            target: &mut [T; PublicInputs::<()>::TOTAL_LEN],
-            h: &[T; PublicInputs::<()>::H_LEN],
-            n: &[T; PublicInputs::<()>::N_LEN],
-            prev_h: &[T; PublicInputs::<()>::PREV_H_LEN],
-            a: &[T; PublicInputs::<()>::A_LEN],
-            d: &[T; PublicInputs::<()>::D_LEN],
-            m: &[T; PublicInputs::<()>::M_LEN],
-            s: &[T; PublicInputs::<()>::S_LEN],
-            c: &[T; PublicInputs::<()>::C_LEN],
-        ) {
-            target[Self::H_IDX..Self::H_IDX + Self::H_LEN].copy_from_slice(h);
-            target[Self::N_IDX..Self::N_IDX + Self::N_LEN].copy_from_slice(n);
-            target[Self::PREV_H_IDX..Self::PREV_H_IDX + Self::PREV_H_LEN].copy_from_slice(prev_h);
-            target[Self::A_IDX..Self::A_IDX + Self::A_LEN].copy_from_slice(a);
-            target[Self::D_IDX..Self::D_IDX + Self::D_LEN].copy_from_slice(d);
-            target[Self::M_IDX..Self::M_IDX + Self::M_LEN].copy_from_slice(m);
-            target[Self::S_IDX..Self::S_IDX + Self::S_LEN].copy_from_slice(s);
-            target[Self::C_IDX..Self::C_IDX + Self::C_LEN].copy_from_slice(c);
-        }
-    }
-
     /// Test the block-linking circuit with a generated random MPT.
     #[test]
     fn test_block_linking_circuit_with_random_mpt() {
