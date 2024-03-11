@@ -12,6 +12,7 @@ use crate::storage::MAX_BRANCH_NODE_LEN;
 use crate::storage::MAX_LEAF_NODE_LEN;
 use anyhow::bail;
 use anyhow::Result;
+use log::debug;
 use paste::paste;
 use plonky2::field::types::PrimeField64;
 use plonky2::hash::hash_types::HashOut;
@@ -332,8 +333,13 @@ impl PublicParameters {
             MAPPING_CIRCUIT_SET_SIZE,
         );
 
+        debug!("Building leaf circuit");
         let leaf_circuit = circuit_builder.build_circuit::<C, 0, LeafWires<MAX_LEAF_NODE_LEN>>(());
+
+        debug!("Building extension circuit");
         let ext_circuit = circuit_builder.build_circuit::<C, 1, ExtensionWires>(());
+
+        debug!("Building branch circuits");
         #[cfg(not(test))]
         let branch_circuits = BranchCircuits::new(&circuit_builder);
         #[cfg(test)]

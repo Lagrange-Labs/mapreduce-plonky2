@@ -2,13 +2,10 @@ use anyhow::Result;
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    mpt_sequential::PAD_LEN,
-    storage::{
-        self,
-        length_extract::{self, MAX_DEPTH_TRIE},
-        mapping, MAX_BRANCH_NODE_LEN,
-    },
+pub use crate::storage::{
+    self,
+    length_extract::{self},
+    mapping,
 };
 
 // TODO: put every references here. remove one from mapping

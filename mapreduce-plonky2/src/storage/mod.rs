@@ -2,7 +2,7 @@ mod digest_equal;
 mod key;
 pub mod length_extract;
 mod length_match;
-pub(crate) mod mapping;
+pub mod mapping;
 mod merkle;
 
 pub use digest_equal::PublicInputs;
