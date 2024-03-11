@@ -18,7 +18,7 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-
+use serde::{Deserialize, Serialize};
 /// One input element length to Keccak
 const INPUT_ELEMENT_LEN: usize = 32;
 /// The tuple (pair) length of elements to Keccak
@@ -26,6 +26,7 @@ const INPUT_TUPLE_LEN: usize = 2 * INPUT_ELEMENT_LEN;
 /// The whole padded length for the inputs
 const INPUT_PADDED_LEN: usize = PAD_LEN(INPUT_TUPLE_LEN);
 
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 /// Wires associated with the MPT key from the keccak computation of location
 pub struct KeccakMPTWires {
     /// Actual keccak wires created for the computation of the "location" for
@@ -208,7 +209,7 @@ impl SimpleSlot {
 /// 1. location = keccak(left_pad32(key), left_pad32(slot))
 /// 2. mpt_key = keccak(location)
 /// WARNING: Currently takes the assumption that the storage slot number fits inside a single byte.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MappingSlot {
     mapping_slot: u8,
     mapping_key: Vec<u8>,
@@ -226,6 +227,7 @@ impl MappingSlot {
 /// Contains the wires associated with the storage slot's mpt key
 /// derivation logic.
 /// NOTE: currently specific only for mapping slots.
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct MappingSlotWires {
     /// "input" mapping key which is maxed out at 32 bytes
     pub(crate) mapping_key: Array<Target, MAPPING_KEY_LEN>,

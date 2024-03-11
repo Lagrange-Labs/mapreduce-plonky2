@@ -1,8 +1,10 @@
 //! Module handling the recursive proving of mapping entries specically
 //! inside a storage trie.
 
+use crate::circuit::UserCircuit;
 use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
 use crate::storage::key::MappingSlotWires;
+use crate::storage::mapping::extension::MAX_EXTENSION_NODE_LEN;
 use crate::{
     array::{Array, Vector, VectorWire},
     eth::left_pad32,
@@ -35,20 +37,24 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
+use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
 
 use super::super::key::{MappingSlot, MAPPING_KEY_LEN};
 use crate::storage::mapping::public_inputs::PublicInputs;
 
+pub(super) const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
 /// Circuit implementing the circuit to prove the correct derivation of the
 /// MPT key from a mapping key and mapping slot. It also do the usual recursive
 /// MPT proof verification logic.
-#[derive(Clone, Debug)]
-struct LeafCircuit<const NODE_LEN: usize> {
-    node: Vec<u8>,
-    slot: MappingSlot,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct LeafCircuit<const NODE_LEN: usize> {
+    pub(super) node: Vec<u8>,
+    pub(super) slot: MappingSlot,
 }
 
-struct LeafWires<const NODE_LEN: usize>
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub(crate) struct LeafWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
@@ -134,10 +140,39 @@ where
     }
 }
 
+pub(super) type StorageLeafWire = LeafWires<MAX_LEAF_NODE_LEN>;
+/// D = 2,
+/// Num of children = 0
+impl CircuitLogicWires<GoldilocksField, 2, 0> for StorageLeafWire {
+    type CircuitBuilderParams = ();
+
+    type Inputs = LeafCircuit<MAX_LEAF_NODE_LEN>;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GoldilocksField>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<GoldilocksField, 2>,
+        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; 0],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        LeafCircuit::build(builder)
+    }
+
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut PartialWitness<GoldilocksField>,
+    ) -> anyhow::Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
+    }
+}
 #[cfg(test)]
 mod test {
     use std::array::from_fn as create_array;
 
+    use crate::circuit::test::run_circuit;
+    use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
     use crate::utils::keccak256;
     use eth_trie::{Nibbles, Trie};
@@ -156,15 +191,13 @@ mod test {
 
     use super::{LeafCircuit, LeafWires, PublicInputs};
     use crate::array::Array;
-    use crate::circuit::test::run_circuit;
+    use crate::circuit::UserCircuit;
     use crate::eth::{left_pad32, StorageSlot};
     use crate::group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing};
     use crate::keccak::PACKED_HASH_LEN;
     use crate::mpt_sequential::{bytes_to_nibbles, MPTKeyWire, MAX_LEAF_VALUE_LEN};
     use crate::storage::key::MappingSlot;
     use crate::utils::convert_u8_to_u32_slice;
-    use crate::utils::test::random_vector;
-    use crate::{circuit::UserCircuit, mpt_sequential::test::generate_random_storage_mpt};
     use plonky2::field::types::Field;
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;

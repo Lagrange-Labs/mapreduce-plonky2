@@ -19,6 +19,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use serde::{Deserialize, Serialize};
 
 use crate::keccak::{compute_size_with_padding, KeccakCircuit, OutputHash};
 /// Number of items in the RLP encoded list in a leaf node.
@@ -287,17 +288,21 @@ where
         (new_key, child_hash, tuple_or_branch)
     }
 
-    /// Returns the key with the pointer moved, returns the child hash / value of the node,
-    /// and returns booleans that must be true IF the given node is a leaf or an extension.
-    /// * key where to lookup the next nibble and thus the hash stored at the
-    /// `nibble` position in the branch node
-    /// * headers of the current node
+    /// This function advances the pointer of the MPT key. The parameters are:
+    /// * The key where to lookup the next nibble and thus the hash stored at
+    ///   nibble position in the branch node.
+    /// * RLP headers of the current node.
+    /// And it returns:
+    /// * New key with the pointer moved.
+    /// * The child hash / value of the node.
+    /// * A boolean that must be true if the given node is a leaf or an extension.
+    /// * The nibble position before this advance.
     pub(crate) fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
         rlp_headers: &RlpList<MAX_ITEMS_IN_LIST>,
-    ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget) {
+    ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget, Target) {
         let one = b.one();
         // assume it's a node and return the boolean condition that must be true if
         // it is a node - decided in advance_key function
@@ -313,7 +318,7 @@ where
         let new_key = key.advance_by(b, one);
         let nibble_header = rlp_headers.select(b, nibble);
         let branch_child_hash = node.extract_array::<F, D, HASH_LEN>(b, nibble_header.offset);
-        (new_key, branch_child_hash, branch_condition)
+        (new_key, branch_child_hash, branch_condition, nibble)
     }
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
@@ -352,7 +357,7 @@ where
 
 /// A structure that keeps a running pointer to the portion of the key the circuit
 /// already has proven.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct MPTKeyWire {
     /// Represents the full key of the value(s) we're looking at in the MPT trie.
     pub key: Array<Target, MAX_KEY_NIBBLE_LEN>,
@@ -1013,7 +1018,7 @@ pub mod test {
         let key_wire = MPTKeyWire::new(&mut builder);
         let rlp_headers =
             decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(&mut builder, &node.arr, zero);
-        let (advanced_key, value, should_true) = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
+        let (advanced_key, value, should_true, _) = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
             &mut builder,
             &node,
             &key_wire,

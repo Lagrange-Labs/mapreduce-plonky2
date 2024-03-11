@@ -9,9 +9,11 @@ use plonky2::{
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifier},
+    serialization::circuit_data_serialization::SerializableRichField,
     universal_verifier_gadget::{
         verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
         CircuitSet, CircuitSetDigest, CircuitSetTarget,
@@ -19,6 +21,7 @@ use crate::{
 };
 
 use anyhow::Result;
+
 /// This trait is employed to fetch the `VerifierOnlyCircuitData` of a circuit, which is needed to verify
 /// a proof with the universal verifier
 pub trait RecursiveCircuitInfo<F, C, const D: usize>
@@ -35,7 +38,7 @@ where
 impl<F, C, const D: usize, const NUM_VERIFIERS: usize, CLW> RecursiveCircuitInfo<F, C, D>
     for CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>
 where
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     C: GenericConfig<D, F = F>,
     C::Hasher: AlgebraicHasher<F>,
     [(); C::Hasher::HASH_SIZE]:,
@@ -57,18 +60,19 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(bound = "")]
 /// `RecursiveCircuits` is a data structure employed to generate proofs for a given set of circuits,
 /// which are basically instances of `CircuitWithUniversalVerifier`
 pub struct RecursiveCircuits<
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,
 > {
     circuit_set: CircuitSet<F, C, D>,
 }
 
-impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F> + 'static, const D: usize>
+impl<F: SerializableRichField<D>, C: GenericConfig<D, F = F> + 'static, const D: usize>
     RecursiveCircuits<F, C, D>
 where
     C::Hasher: AlgebraicHasher<F>,
@@ -84,7 +88,7 @@ where
     }
 
     /// Internal function used to initialize `Self` from a set of `circuit_digests`
-    pub(crate) fn new_from_circuit_digests(circuit_digests: Vec<HashOut<F>>) -> Self {
+    pub fn new_from_circuit_digests(circuit_digests: Vec<HashOut<F>>) -> Self {
         Self {
             circuit_set: CircuitSet::build_circuit_set(circuit_digests),
         }
@@ -140,6 +144,7 @@ pub fn prepare_recursive_circuit_for_circuit_set<
 
 /// Targets instantiated by the `RecursiveCircuitsVerifierGadget` which needs to be assigned with a
 /// witness value by the prover
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct RecursiveCircuitsVerifierTarget<const D: usize>(UniversalVerifierTarget<D>);
 
 impl<const D: usize> RecursiveCircuitsVerifierTarget<D> {
@@ -148,7 +153,7 @@ impl<const D: usize> RecursiveCircuitsVerifierTarget<D> {
     ///   that instantiated the targets in `self`
     /// - `proof`: proof to be verified
     /// - `verifier_data`: verifier data of the circuit employed to generate `proof`
-    pub fn set_target<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>>(
+    pub fn set_target<F: SerializableRichField<D>, C: GenericConfig<D, F = F>>(
         &self,
         pw: &mut PartialWitness<F>,
         recursive_circuits_set: &RecursiveCircuits<F, C, D>,
@@ -167,12 +172,13 @@ impl<const D: usize> RecursiveCircuitsVerifierTarget<D> {
         )
     }
 }
-
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(bound = "")]
 /// `RecursiveCircuitsVerifierGadget` is a gadget that can be employed in circuits that need to verify proofs generated
 /// with the `RecursiveCircuits` framework. This data structure is instantiated in order to add the verifier for such
 /// proofs to an existing circuit, employing the methods provided by the data structure.
 pub struct RecursiveCircuitsVerifierGagdet<
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,
     const NUM_PUBLIC_INPUTS: usize,
@@ -182,7 +188,7 @@ pub struct RecursiveCircuitsVerifierGagdet<
 }
 
 impl<
-        F: RichField + Extendable<D>,
+        F: SerializableRichField<D>,
         C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const NUM_PUBLIC_INPUTS: usize,
@@ -263,12 +269,16 @@ pub(crate) mod tests {
     use plonky2::field::types::Sample;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::plonk::{circuit_data::CircuitConfig, config::PoseidonGoldilocksConfig};
+    use rstest::{fixture, rstest};
     use serial_test::serial;
 
+    use crate::circuit_builder::tests::NUM_PUBLIC_INPUTS_TEST_CIRCUITS;
     use crate::circuit_builder::{
         tests::{LeafCircuitWires, RecursiveCircuitWires},
         CircuitWithUniversalVerifierBuilder,
     };
+    use crate::serialization::circuit_data_serialization::SerializableRichField;
+    use crate::serialization::{deserialize, serialize};
 
     use super::*;
 
@@ -288,6 +298,7 @@ pub(crate) mod tests {
 
     /// Circuit employing the `RecursiveCircuitsVerifierGadget` to recursively verify a proof generated
     /// for any circuit belonging to a given set of circuits
+    #[derive(Serialize, Deserialize)]
     pub(crate) struct VerifierCircuitWires<
         C: GenericConfig<D>,
         const D: usize,
@@ -298,7 +309,7 @@ pub(crate) mod tests {
     }
 
     impl<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F> + 'static,
             const D: usize,
             const NUM_PUBLIC_INPUTS: usize,
@@ -335,17 +346,19 @@ pub(crate) mod tests {
 
     /// Circuit employing the `RecursiveCircuitsVerifierGadget` to recursively verify a proof generated
     /// by a fixed circuit belonging to a given set of circuits
+    #[derive(Serialize, Deserialize)]
     pub(crate) struct VerifierCircuitFixedWires<
         C: GenericConfig<D>,
         const D: usize,
         const NUM_PUBLIC_INPUTS: usize,
     > {
+        #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
         targets: ProofWithPublicInputsTarget<D>,
         c: PhantomData<C>,
     }
 
     impl<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F> + 'static,
             const D: usize,
             const NUM_PUBLIC_INPUTS: usize,
@@ -387,133 +400,198 @@ pub(crate) mod tests {
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
 
-    #[test]
+    // data structure to test the `RecursiveCircuits` framework and its serialization/deserialization
+    #[derive(Serialize, Deserialize)]
+    #[serde(bound = "")]
+    struct TestRecursiveCircuits<
+        F: SerializableRichField<D>,
+        C: GenericConfig<D, F = F> + 'static,
+        const D: usize,
+        const INPUT_SIZE: usize,
+    >
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
+        leaf_circuit: CircuitWithUniversalVerifier<F, C, D, 0, LeafCircuitWires<F, INPUT_SIZE>>,
+        recursive_circuit_one:
+            CircuitWithUniversalVerifier<F, C, D, 1, RecursiveCircuitWires<INPUT_SIZE>>,
+        recursive_circuit_two:
+            CircuitWithUniversalVerifier<F, C, D, 2, RecursiveCircuitWires<INPUT_SIZE>>,
+        recursive_circuit_three:
+            CircuitWithUniversalVerifier<F, C, D, 3, RecursiveCircuitWires<INPUT_SIZE>>,
+        recursive_circuit_four:
+            CircuitWithUniversalVerifier<F, C, D, 4, RecursiveCircuitWires<INPUT_SIZE>>,
+        framework: RecursiveCircuits<F, C, D>,
+    }
+
+    impl<
+            F: SerializableRichField<D>,
+            C: GenericConfig<D, F = F> + 'static,
+            const D: usize,
+            const INPUT_SIZE: usize,
+        > TestRecursiveCircuits<F, C, D, INPUT_SIZE>
+    where
+        C::Hasher: AlgebraicHasher<F>,
+        [(); C::Hasher::HASH_SIZE]:,
+    {
+        fn new() -> Self {
+            const CIRCUIT_SET_SIZE: usize = 5;
+            let config = CircuitConfig::standard_recursion_config();
+
+            const NUM_PUBLIC_INPUTS: usize = NUM_PUBLIC_INPUTS_TEST_CIRCUITS;
+            let circuit_builder =
+                CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::new::<C>(
+                    config,
+                    CIRCUIT_SET_SIZE,
+                );
+
+            let leaf_circuit = circuit_builder
+                .build_circuit::<C, 0, LeafCircuitWires<F, INPUT_SIZE>>((1usize << 12, false));
+
+            let recursive_circuit_one =
+                circuit_builder.build_circuit::<C, 1, RecursiveCircuitWires<INPUT_SIZE>>(());
+
+            let recursive_circuit_two =
+                circuit_builder.build_circuit::<C, 2, RecursiveCircuitWires<INPUT_SIZE>>(());
+
+            let recursive_circuit_three =
+                circuit_builder.build_circuit::<C, 3, RecursiveCircuitWires<INPUT_SIZE>>(());
+
+            let recursive_circuit_four =
+                circuit_builder.build_circuit::<C, 4, RecursiveCircuitWires<INPUT_SIZE>>(());
+
+            let circuits = vec![
+                prepare_recursive_circuit_for_circuit_set(&leaf_circuit),
+                prepare_recursive_circuit_for_circuit_set(&recursive_circuit_one),
+                prepare_recursive_circuit_for_circuit_set(&recursive_circuit_two),
+                prepare_recursive_circuit_for_circuit_set(&recursive_circuit_three),
+                prepare_recursive_circuit_for_circuit_set(&recursive_circuit_four),
+            ];
+
+            let recursive_framework = RecursiveCircuits::new(circuits);
+
+            Self {
+                leaf_circuit,
+                recursive_circuit_one,
+                recursive_circuit_two,
+                recursive_circuit_three,
+                recursive_circuit_four,
+                framework: recursive_framework,
+            }
+        }
+
+        fn run_test(&self) {
+            const NUM_PUBLIC_INPUTS: usize = NUM_PUBLIC_INPUTS_TEST_CIRCUITS;
+            let base_proofs = (0..7)
+                .map(|_| {
+                    let inputs = array::from_fn(|_| F::rand());
+                    self.framework
+                        .generate_proof(&self.leaf_circuit, [], [], (inputs, F::rand()))
+                })
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+
+            let leaf_circuit_vd = self.leaf_circuit.get_verifier_data();
+
+            let recursive_circuits_input = array::from_fn(|_| F::rand());
+            let rec_proof_1 = self
+                .framework
+                .generate_proof(
+                    &self.recursive_circuit_four,
+                    base_proofs[..4].to_vec().try_into().unwrap(),
+                    [leaf_circuit_vd; 4],
+                    recursive_circuits_input,
+                )
+                .unwrap();
+
+            assert_eq!(
+                &rec_proof_1.public_inputs[NUM_PUBLIC_INPUTS..],
+                self.framework.get_circuit_set_digest().flatten().as_slice()
+            );
+
+            let recursive_circuits_input = array::from_fn(|_| F::rand());
+            let rec_proof_2 = self
+                .framework
+                .generate_proof(
+                    &self.recursive_circuit_three,
+                    base_proofs[4..].to_vec().try_into().unwrap(),
+                    [leaf_circuit_vd; 3],
+                    recursive_circuits_input,
+                )
+                .unwrap();
+
+            assert_eq!(
+                &rec_proof_2.public_inputs[NUM_PUBLIC_INPUTS..],
+                self.framework.get_circuit_set_digest().flatten().as_slice()
+            );
+
+            let recursive_circuits_input = array::from_fn(|_| F::rand());
+            let rec_proof = self
+                .framework
+                .generate_proof(
+                    &self.recursive_circuit_two,
+                    [rec_proof_1, rec_proof_2],
+                    [
+                        self.recursive_circuit_four.get_verifier_data(),
+                        self.recursive_circuit_three.get_verifier_data(),
+                    ],
+                    recursive_circuits_input,
+                )
+                .unwrap();
+
+            assert_eq!(
+                &rec_proof.public_inputs[NUM_PUBLIC_INPUTS..],
+                self.framework.get_circuit_set_digest().flatten().as_slice()
+            );
+
+            let recursive_circuits_input = array::from_fn(|_| F::rand());
+            let rec_proof = self
+                .framework
+                .generate_proof(
+                    &self.recursive_circuit_one,
+                    [rec_proof],
+                    [self.recursive_circuit_two.get_verifier_data()],
+                    recursive_circuits_input,
+                )
+                .unwrap();
+
+            assert_eq!(
+                &rec_proof.public_inputs[NUM_PUBLIC_INPUTS..],
+                self.framework.get_circuit_set_digest().flatten().as_slice()
+            );
+
+            self.recursive_circuit_one
+                .circuit_data()
+                .verify(rec_proof)
+                .unwrap();
+        }
+    }
+
+    const INPUT_SIZE: usize = 8;
+
+    #[fixture]
+    #[once]
+    fn test_circuits() -> TestRecursiveCircuits<F, C, D, INPUT_SIZE> {
+        TestRecursiveCircuits::<F, C, D, INPUT_SIZE>::new()
+    }
+
+    #[rstest]
     #[serial]
-    fn test_recursive_circuit_framework() {
-        const INPUT_SIZE: usize = 8;
-        const CIRCUIT_SET_SIZE: usize = 5;
-        let config = CircuitConfig::standard_recursion_config();
+    fn test_recursive_circuit_framework(
+        test_circuits: &TestRecursiveCircuits<F, C, D, INPUT_SIZE>,
+    ) {
+        test_circuits.run_test()
+    }
 
-        const NUM_PUBLIC_INPUTS: usize =
-            <LeafCircuitWires<F, INPUT_SIZE> as CircuitLogicWires<F, D, 0>>::NUM_PUBLIC_INPUTS;
-        let circuit_builder = CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::new::<
-            C,
-        >(config, CIRCUIT_SET_SIZE);
-
-        let leaf_circuit = circuit_builder
-            .build_circuit::<C, 0, LeafCircuitWires<F, INPUT_SIZE>>((1usize << 12, false));
-
-        let recursive_circuit_one =
-            circuit_builder.build_circuit::<C, 1, RecursiveCircuitWires<INPUT_SIZE>>(());
-
-        let recursive_circuit_two =
-            circuit_builder.build_circuit::<C, 2, RecursiveCircuitWires<INPUT_SIZE>>(());
-
-        let recursive_circuit_three =
-            circuit_builder.build_circuit::<C, 3, RecursiveCircuitWires<INPUT_SIZE>>(());
-
-        let recursive_circuit_four =
-            circuit_builder.build_circuit::<C, 4, RecursiveCircuitWires<INPUT_SIZE>>(());
-
-        let circuits = vec![
-            prepare_recursive_circuit_for_circuit_set(&leaf_circuit),
-            prepare_recursive_circuit_for_circuit_set(&recursive_circuit_one),
-            prepare_recursive_circuit_for_circuit_set(&recursive_circuit_two),
-            prepare_recursive_circuit_for_circuit_set(&recursive_circuit_three),
-            prepare_recursive_circuit_for_circuit_set(&recursive_circuit_four),
-        ];
-
-        let recursive_framework = RecursiveCircuits::new(circuits);
-
-        let base_proofs = (0..7)
-            .map(|_| {
-                let inputs = array::from_fn(|_| F::rand());
-                recursive_framework.generate_proof(&leaf_circuit, [], [], (inputs, F::rand()))
-            })
-            .collect::<Result<Vec<_>>>()
-            .unwrap();
-
-        let leaf_circuit_vd = leaf_circuit.get_verifier_data();
-
-        let recursive_circuits_input = array::from_fn(|_| F::rand());
-        let rec_proof_1 = recursive_framework
-            .generate_proof(
-                &recursive_circuit_four,
-                base_proofs[..4].to_vec().try_into().unwrap(),
-                [leaf_circuit_vd; 4],
-                recursive_circuits_input,
-            )
-            .unwrap();
-
-        assert_eq!(
-            &rec_proof_1.public_inputs[NUM_PUBLIC_INPUTS..],
-            recursive_framework
-                .get_circuit_set_digest()
-                .flatten()
-                .as_slice()
-        );
-
-        let recursive_circuits_input = array::from_fn(|_| F::rand());
-        let rec_proof_2 = recursive_framework
-            .generate_proof(
-                &recursive_circuit_three,
-                base_proofs[4..].to_vec().try_into().unwrap(),
-                [leaf_circuit_vd; 3],
-                recursive_circuits_input,
-            )
-            .unwrap();
-
-        assert_eq!(
-            &rec_proof_2.public_inputs[NUM_PUBLIC_INPUTS..],
-            recursive_framework
-                .get_circuit_set_digest()
-                .flatten()
-                .as_slice()
-        );
-
-        let recursive_circuits_input = array::from_fn(|_| F::rand());
-        let rec_proof = recursive_framework
-            .generate_proof(
-                &recursive_circuit_two,
-                [rec_proof_1, rec_proof_2],
-                [
-                    recursive_circuit_four.get_verifier_data(),
-                    recursive_circuit_three.get_verifier_data(),
-                ],
-                recursive_circuits_input,
-            )
-            .unwrap();
-
-        assert_eq!(
-            &rec_proof.public_inputs[NUM_PUBLIC_INPUTS..],
-            recursive_framework
-                .get_circuit_set_digest()
-                .flatten()
-                .as_slice()
-        );
-
-        let recursive_circuits_input = array::from_fn(|_| F::rand());
-        let rec_proof = recursive_framework
-            .generate_proof(
-                &recursive_circuit_one,
-                [rec_proof],
-                [recursive_circuit_two.get_verifier_data()],
-                recursive_circuits_input,
-            )
-            .unwrap();
-
-        assert_eq!(
-            &rec_proof.public_inputs[NUM_PUBLIC_INPUTS..],
-            recursive_framework
-                .get_circuit_set_digest()
-                .flatten()
-                .as_slice()
-        );
-
-        recursive_circuit_one
-            .circuit_data()
-            .verify(rec_proof)
-            .unwrap();
+    #[rstest]
+    #[serial]
+    fn test_recursive_circuit_framework_serialization(
+        test_circuits: &TestRecursiveCircuits<F, C, D, INPUT_SIZE>,
+    ) {
+        let serialized = bincode::serialize(test_circuits).unwrap();
+        let test_circuits: TestRecursiveCircuits<F, C, D, INPUT_SIZE> =
+            bincode::deserialize(&serialized).unwrap();
+        test_circuits.run_test()
     }
 
     #[test]

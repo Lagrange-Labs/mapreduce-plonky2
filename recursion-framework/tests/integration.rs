@@ -2,11 +2,8 @@ use std::{array, iter::once};
 
 use plonky2::field::types::{Field, Sample};
 use plonky2::{
-    field::{extension::Extendable, types::PrimeField64},
-    hash::{
-        hash_types::{RichField, NUM_HASH_OUT_ELTS},
-        poseidon::PoseidonHash,
-    },
+    field::types::PrimeField64,
+    hash::{hash_types::NUM_HASH_OUT_ELTS, poseidon::PoseidonHash},
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
@@ -18,6 +15,8 @@ use plonky2::{
         proof::ProofWithPublicInputsTarget,
     },
 };
+use recursion_framework::serialization::circuit_data_serialization::SerializableRichField;
+use recursion_framework::serialization::{deserialize_array, serialize_array};
 use recursion_framework::{
     circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifierBuilder},
     framework::{
@@ -28,6 +27,7 @@ use recursion_framework::{
 };
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use serial_test::serial;
 
 /*
@@ -50,12 +50,16 @@ use serial_test::serial;
 /// number of public inputs are the sum of even elements and the hash of the elements being
 /// considered so far
 const NUM_PUBLIC_INPUTS: usize = 1 + NUM_HASH_OUT_ELTS;
-
+#[derive(Serialize, Deserialize)]
 struct MapCircuitWires<const INPUT_CHUNK_SIZE: usize> {
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
     input_targets: [Target; INPUT_CHUNK_SIZE],
 }
 
-impl<F: RichField + Extendable<D>, const D: usize, const INPUT_CHUNK_SIZE: usize>
+impl<F: SerializableRichField<D>, const D: usize, const INPUT_CHUNK_SIZE: usize>
     CircuitLogicWires<F, D, 0> for MapCircuitWires<INPUT_CHUNK_SIZE>
 {
     type CircuitBuilderParams = ();
@@ -85,16 +89,16 @@ impl<F: RichField + Extendable<D>, const D: usize, const INPUT_CHUNK_SIZE: usize
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
-        pw.set_target_arr(&self.input_targets, &inputs);
+        pw.set_target_arr(self.input_targets.as_ref(), &inputs);
 
         Ok(())
     }
 }
-
+#[derive(Serialize, Deserialize)]
 struct ReduceCircuitWires<const ARITY: usize>(());
 
-impl<F: RichField + Extendable<D>, const D: usize, const ARITY: usize>
-    CircuitLogicWires<F, D, ARITY> for ReduceCircuitWires<ARITY>
+impl<F: SerializableRichField<D>, const D: usize, const ARITY: usize> CircuitLogicWires<F, D, ARITY>
+    for ReduceCircuitWires<ARITY>
 {
     type CircuitBuilderParams = ();
 

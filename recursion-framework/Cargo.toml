@@ -1,5 +1,5 @@
 [package]
-name = "recursion-framework"
+name = "recursion_framework"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,8 +9,12 @@ edition = "2021"
 anyhow = "1.0.79"
 log = "0.4.20"
 plonky2 = { version = "0.1.4" }
+plonky2_crypto = { git = "https://github.com/nikkolasg/plonky2-crypto", branch = "feat/serialization" }
+plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
+serde = "1.0.197"
 
 [dev-dependencies]
+bincode = "1.3.3"
 env_logger = "0.11.2"
 plonky2_monolith = "0.1.0"
 rstest = "0.18.2"

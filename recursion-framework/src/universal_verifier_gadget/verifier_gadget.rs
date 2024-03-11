@@ -11,6 +11,11 @@ use plonky2::{
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
+use serde::{Deserialize, Serialize};
+
+use crate::serialization::{
+    circuit_data_serialization::SerializableRichField, deserialize, serialize,
+};
 
 use super::{
     build_data_for_universal_verifier,
@@ -22,13 +27,15 @@ use super::{
 
 use anyhow::Result;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 /// `UniversalVerifierTarget` comprises all the targets that are employed by the universal verifier
 /// to recusively verify a proof and to check the membership of the digest of the verifier data employed
 /// to verify the proof in the set of circuits bound to the universal verifier instance at hand
 pub(crate) struct UniversalVerifierTarget<const D: usize> {
     circuit_set_membership: CircuitSetMembershipTargets,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     verified_proof: ProofWithPublicInputsTarget<D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     verifier_data: VerifierCircuitTarget,
 }
 
@@ -60,6 +67,8 @@ impl<const D: usize> UniversalVerifierTarget<D> {
         )
     }
 }
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(bound = "")]
 /// `UniversalVerifierBuilder` is a data structure necessary to build instances of the universal verifier
 /// in a circuit. It is mostly employed to cache the `CommonCircuitData` that are shared among all the
 /// proofs being verified by the universal verifier, which are computed just once when initializing
@@ -69,14 +78,15 @@ pub(crate) struct UniversalVerifierBuilder<
     const D: usize,
     const NUM_PUBLIC_INPUTS: usize,
 > {
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     rec_data: CommonCircuitData<F, D>,
     circuit_set_size: usize,
 }
 
-impl<F: RichField + Extendable<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize>
+impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize>
     UniversalVerifierBuilder<F, D, NUM_PUBLIC_INPUTS>
 {
-    pub(crate) fn new<C: GenericConfig<D, F = F>>(
+    pub(crate) fn new<C: GenericConfig<D, F = F> + 'static>(
         config: CircuitConfig,
         circuit_set_size: usize,
     ) -> Self
@@ -188,11 +198,14 @@ mod tests {
 
     /// Test circuit whose wrapped proofs can be recursviely verified by the universal verifier circuit
     struct TestCircuitForUniversalVerifier<
-        F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
+        F: SerializableRichField<D>,
+        C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
-    > {
+    >
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
         input_targets: LeafCircuitWires<F, INPUT_SIZE>,
         circuit_set_target: CircuitSetTarget,
         circuit_data: CircuitData<F, C, D>,
@@ -200,7 +213,7 @@ mod tests {
     }
 
     impl<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F>,
             const D: usize,
             const INPUT_SIZE: usize,
@@ -280,11 +293,14 @@ mod tests {
     }
 
     struct CircuitWithUniversalVerifier<
-        F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
+        F: SerializableRichField<D>,
+        C: GenericConfig<D, F = F> + 'static,
         const D: usize,
         const INPUT_SIZE: usize,
-    > {
+    >
+    where
+        C::Hasher: AlgebraicHasher<F>,
+    {
         verifier_targets: UniversalVerifierTarget<D>,
         input_targets: RecursiveCircuitWires<INPUT_SIZE>,
         circuit_set_target: CircuitSetTarget,
@@ -293,7 +309,7 @@ mod tests {
     }
 
     impl<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F>,
             const D: usize,
             const INPUT_SIZE: usize,
@@ -595,5 +611,26 @@ mod tests {
             &base_circuit_variant.get_circuit_data().verifier_only,
             array::from_fn(|_| F::rand())
         ), "universal verifier didn't fail when verifying a proof for a circuit with the wrong circuit digest");
+    }
+
+    #[test]
+    fn test_universal_verifier_target_serialization() {
+        const INPUT_SIZE: usize = 8;
+        const CIRCUIT_SET_SIZE: usize = 2;
+        let config = CircuitConfig::standard_recursion_config();
+        let universal_verifier_circuit =
+            CircuitWithUniversalVerifier::<F, C, D, INPUT_SIZE>::build_circuit(
+                config.clone(),
+                CIRCUIT_SET_SIZE,
+            );
+
+        // test `UniversalVerifierTarget` serialization
+        let encoded = bincode::serialize(&universal_verifier_circuit.verifier_targets).unwrap();
+        let verifier_targets: UniversalVerifierTarget<D> = bincode::deserialize(&encoded).unwrap();
+
+        assert_eq!(
+            verifier_targets,
+            universal_verifier_circuit.verifier_targets
+        );
     }
 }
