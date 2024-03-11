@@ -12,6 +12,7 @@ use crate::storage::MAX_BRANCH_NODE_LEN;
 use crate::storage::MAX_LEAF_NODE_LEN;
 use anyhow::bail;
 use anyhow::Result;
+use log::debug;
 use paste::paste;
 use plonky2::field::types::PrimeField64;
 use plonky2::hash::hash_types::HashOut;
@@ -30,7 +31,6 @@ use recursion_framework::serialization::serialize;
 use serde::Deserialize;
 use serde::Serialize;
 use std::array::from_fn as create_array;
-use log::debug;
 
 const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
