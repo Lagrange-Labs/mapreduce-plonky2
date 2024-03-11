@@ -4,11 +4,11 @@ use plonky2::{
         goldilocks_field::GoldilocksField,
         types::Field,
     },
-    hash::{hash_types::HashOutTarget, keccak::SPONGE_WIDTH},
+    hash::hash_types::HashOutTarget,
     iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
+
 use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
     gadgets::{
@@ -16,12 +16,6 @@ use plonky2_ecgfp5::{
         curve::{CircuitBuilderEcGFp5, CurveTarget},
     },
 };
-
-use crate::array::Array;
-
-pub const POSEIDON_HASH_LEN: usize = SPONGE_WIDTH;
-
-type EncodedPoseidonHash = Array<U32Target, { POSEIDON_HASH_LEN / 4 }>;
 
 /// Stores the public input used to prove the inclusion of a value in a *binary* merkle tree.
 ///
@@ -54,6 +48,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         b.register_public_inputs(&root.elements);
     }
 
+    /// Extracts curve coordinates from the raw input
     pub fn digest_raw(&self) -> ([T; 5], [T; 5], T) {
         let raw = &self.inputs[Self::DIGEST_OFFSET..Self::DIGEST_OFFSET + Self::DIGEST_LEN];
         assert!(raw.len() >= 5 * 2 + 1);
@@ -65,12 +60,14 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         (x, y, flag)
     }
 
+    /// Extracts the root hash components from the raw input
     fn root_raw(&self) -> &[T] {
         &self.inputs[Self::ROOT_OFFSET..Self::ROOT_OFFSET + Self::ROOT_LEN]
     }
 }
 
 impl<'a> PublicInputs<'a, Target> {
+    /// The digest of the current subtree
     pub fn digest(&self) -> CurveTarget {
         let (x, y, is_inf) = self.digest_raw();
         let x = QuinticExtensionTarget(x);
@@ -79,14 +76,15 @@ impl<'a> PublicInputs<'a, Target> {
         CurveTarget(([x, y], flag))
     }
 
-    pub fn root(&self) -> EncodedPoseidonHash {
-        EncodedPoseidonHash::from_array(std::array::from_fn(|i| {
-            U32Target(self.inputs[Self::ROOT_OFFSET + i])
-        }))
+    /// The root hash of the current subtree
+    pub fn root(&self) -> HashOutTarget {
+        HashOutTarget::try_from(std::array::from_fn(|i| self.inputs[Self::ROOT_OFFSET + i]))
+            .unwrap()
     }
 }
 
 impl<'a> PublicInputs<'a, GoldilocksField> {
+    /// The digest point of the current subtree
     pub fn digest(&self) -> WeierstrassPoint {
         let (x, y, is_inf) = self.digest_raw();
         WeierstrassPoint {
@@ -104,7 +102,8 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
         }
     }
 
-    pub fn root(&self) -> Vec<u32> {
-        self.root_raw().iter().map(|x| x.0 as u32).collect()
+    /// The GLs forming the hash of the current subtree
+    pub fn root(&self) -> Vec<GoldilocksField> {
+        self.root_raw().to_owned()
     }
 }
