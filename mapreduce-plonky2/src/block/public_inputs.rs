@@ -96,6 +96,6 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     pub fn block_header_data(&self) -> &[T] {
-        &self.proof_inputs[Self::ZI_IDX..]
+        &self.proof_inputs[Self::H_IDX..]
     }
 }
