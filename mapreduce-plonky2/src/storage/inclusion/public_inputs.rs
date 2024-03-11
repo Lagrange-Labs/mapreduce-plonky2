@@ -35,34 +35,34 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     const EXTENSION: usize = 5;
 
     const ROOT_OFFSET: usize = 0;
-    const ROOT_LEN: usize = 64; // 4×GL(8B) = 64B
+    const ROOT_LEN: usize = 4;
     const DIGEST_OFFSET: usize = 4;
-    const DIGEST_LEN: usize = 1;
+    const DIGEST_LEN: usize = 11;
 
     pub fn register(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
         root: &HashOutTarget,
         digest: &CurveTarget,
     ) {
-        b.register_curve_public_input(*digest);
         b.register_public_inputs(&root.elements);
+        b.register_curve_public_input(*digest);
+    }
+
+    /// Extracts the root hash components from the raw input
+    fn root_raw(&self) -> &[T] {
+        &self.inputs[Self::ROOT_OFFSET..Self::ROOT_OFFSET + Self::ROOT_LEN]
     }
 
     /// Extracts curve coordinates from the raw input
     pub fn digest_raw(&self) -> ([T; 5], [T; 5], T) {
         let raw = &self.inputs[Self::DIGEST_OFFSET..Self::DIGEST_OFFSET + Self::DIGEST_LEN];
-        assert!(raw.len() >= 5 * 2 + 1);
+        assert!(raw.len() == 5 * 2 + 1, "{} != 5 + 5 + 1", raw.len());
         let x = raw[0..Self::EXTENSION].try_into().unwrap();
         let y = raw[Self::EXTENSION..2 * Self::EXTENSION]
             .try_into()
             .unwrap();
         let flag = raw[2 * Self::EXTENSION];
         (x, y, flag)
-    }
-
-    /// Extracts the root hash components from the raw input
-    fn root_raw(&self) -> &[T] {
-        &self.inputs[Self::ROOT_OFFSET..Self::ROOT_OFFSET + Self::ROOT_LEN]
     }
 }
 

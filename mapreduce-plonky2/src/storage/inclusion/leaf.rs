@@ -3,29 +3,38 @@ use std::sync::OnceLock;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{hash_types::HashOutTarget, poseidon::PoseidonHash},
-    iop::target::Target,
+    iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
-use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
+use crate::{array::Array, circuit::UserCircuit, group_hashing::CircuitBuilderGroupHashing};
 
 use super::PublicInputs;
 
 // A key is 32B-long
-// TODO: upgrade from 1B/GL to 4B/GL
 const KEY_GL_SIZE: usize = 32;
 // A value in a leaf node is 32B wide
-// TODO: upgrade from 1B/GL to 4B/GL
 const LEAF_GL_SIZE: usize = 32;
 // One u32 encoding the bytes for b"LEAF"
-static LEAF_STR: OnceLock<GoldilocksField> = OnceLock::new();
+pub static LEAF_STR: OnceLock<GoldilocksField> = OnceLock::new();
 // ['L', 'E', 'A', 'F'] -> 4B -> 1GL
 const LEAF_MARKER_GL_SIZE: usize = 1;
 
+#[derive(Clone, Debug)]
 pub struct LeafCircuit {
-    key: [u8; KEY_GL_SIZE],
-    value: [u8; LEAF_GL_SIZE],
+    pub key: [u8; KEY_GL_SIZE],
+    pub value: [u8; LEAF_GL_SIZE],
+}
+
+pub fn str_to_gl(s: &str) -> GoldilocksField {
+    assert!(s.as_bytes().len() <= 4);
+    let mut x = 0u32;
+    for b in s.bytes() {
+        x <<= 8;
+        x |= b as u32;
+    }
+    GoldilocksField::from_canonical_u32(x)
 }
 
 pub struct LeafWires {
@@ -33,21 +42,30 @@ pub struct LeafWires {
     // IN
     //
     // The key leading to this leaf
-    key: Array<Target, KEY_GL_SIZE>,
+    pub key: Array<Target, KEY_GL_SIZE>,
     // The value encoded in this leaf
-    value: Array<Target, LEAF_GL_SIZE>,
+    pub value: Array<Target, LEAF_GL_SIZE>,
 
     //
     // OUT
     //
     // the root of the degenerated sub-tree only containing this leaf, i.e. Poseidon("LEAF" ++ value)
-    root: HashOutTarget,
+    pub root: HashOutTarget,
     // the digest of " " " " " " " ", i.e. ProjectionOnCurve(value)
-    digest: CurveTarget,
+    pub digest: CurveTarget,
 }
 
 impl LeafCircuit {
-    pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires {
+    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &LeafWires) {
+        wires.key.assign_from_data(pw, &self.key);
+        wires.value.assign_from_data(pw, &self.value);
+    }
+}
+
+impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
+    type Wires = LeafWires;
+
+    fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires {
         let leaf_str = b.constant(
             *LEAF_STR
                 .get_or_init(|| GoldilocksField::from_canonical_u32(u32::from_be_bytes(*b"LEAF"))),
@@ -70,7 +88,7 @@ impl LeafCircuit {
                     .collect::<Vec<_>>(),
             )
             .unwrap();
-        let digest = b.map_to_curve_point(&kv.arr);
+        let digest = b.map_to_curve_point(&value.arr);
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(to_hash.arr));
 
         PublicInputs::<GoldilocksField>::register(b, &root, &digest);
@@ -81,5 +99,9 @@ impl LeafCircuit {
             root,
             digest,
         }
+    }
+
+    fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
+        self.assign(pw, wires);
     }
 }
