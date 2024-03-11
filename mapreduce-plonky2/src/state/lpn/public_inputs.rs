@@ -44,9 +44,9 @@ impl<'a> PublicInputs<'a, Target> {
         F: RichField + Extendable<D>,
     {
         b.register_public_inputs(&wires.root.elements);
-        wires.block_header.register_as_input(b);
-        b.register_public_input(wires.block_number.0);
-        wires.prev_block_header.register_as_input(b);
+        b.register_public_inputs(wires.block_linking.block_hash());
+        b.register_public_input(wires.block_linking.block_number()[0]);
+        b.register_public_inputs(wires.block_linking.prev_block_hash());
     }
 
     /// Returns the root hash.
