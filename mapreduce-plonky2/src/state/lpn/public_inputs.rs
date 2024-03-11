@@ -92,10 +92,9 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     /// This function will panic if the length of the provided slice is smaller than
     /// [Self::TOTAL_LEN].
     pub fn from_slice(arr: &'a [T]) -> Self {
-        assert_eq!(
-            arr.len(),
-            Self::TOTAL_LEN,
-            "The public inputs slice of the leaf circuit must match the expected length."
+        assert!(
+            Self::TOTAL_LEN <= arr.len(),
+            "The public inputs slice length must be equal or greater than the expected length."
         );
 
         Self { proof_inputs: arr }
