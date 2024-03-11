@@ -37,6 +37,7 @@ where
     /// The path starts from the sibling of new leaf (block), and the parent's
     /// siblings at each level, till to the root. It corresponds to the plonky2
     /// [MerkleProofTarget](https://github.com/0xPolygonZero/plonky2/blob/62ffe11a984dbc0e6fe92d812fa8da78b7ba73c7/plonky2/src/hash/merkle_proofs.rs#L37).
+    // The +1 is because it includes the root as well in the path. 
     path: [HashOutTarget; MAX_DEPTH + 1],
 }
 
