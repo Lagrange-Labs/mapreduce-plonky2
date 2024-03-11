@@ -6,27 +6,16 @@ use plonky2::{
         hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
         poseidon::PoseidonHash,
     },
-    iop::target::Target,
+    iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
 use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 
-use super::PublicInputs;
-
-// One u32 encoding the bytes for b"NODE"
-static NODE_STR: OnceLock<GoldilocksField> = OnceLock::new();
-// ['N', 'O', 'D', 'E'] -> 4B -> 1GL
-const LEAF_MARKER_GL_SIZE: usize = 1;
+use super::{PublicInputs, NODE_MARKER};
 
 pub struct NodeWires {
-    //
-    // IN
-    //
-    // the children proof of this inner node
-    // children: [&[Target]; 2],
-
     //
     // OUT
     //
@@ -36,19 +25,19 @@ pub struct NodeWires {
     digest: CurveTarget,
 }
 
+#[derive(Clone)]
 pub struct NodeCircuit {}
 
 impl NodeCircuit {
-    pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>, inputs: [&[Target]; 2]) -> NodeWires {
-        let (left_child, right_child) =
-            (PublicInputs::from(inputs[0]), PublicInputs::from(inputs[1]));
-        let node_str = b.constant(
-            *NODE_STR
-                .get_or_init(|| GoldilocksField::from_canonical_u32(u32::from_be_bytes(*b"NODE"))),
-        );
+    pub fn build(
+        b: &mut CircuitBuilder<GoldilocksField, 2>,
+        inputs: [PublicInputs<Target>; 2],
+    ) -> NodeWires {
+        let (left_child, right_child) = (&inputs[0], &inputs[1]);
+        let node_str = b.constant(NODE_MARKER());
 
         let digest = b.add_curve_point(&[left_child.digest(), right_child.digest()]);
-        let to_hash = Array::<Target, { LEAF_MARKER_GL_SIZE + 2 * NUM_HASH_OUT_ELTS }>::try_from(
+        let to_hash = Array::<Target, { 1 + 2 * NUM_HASH_OUT_ELTS }>::try_from(
             std::iter::once(node_str)
                 .chain(left_child.root().elements.iter().copied())
                 .chain(right_child.root().elements.iter().copied())
@@ -61,4 +50,6 @@ impl NodeCircuit {
 
         NodeWires { root, digest }
     }
+
+    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &NodeWires) {}
 }

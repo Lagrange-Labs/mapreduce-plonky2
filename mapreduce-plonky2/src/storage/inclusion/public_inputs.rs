@@ -21,6 +21,7 @@ use plonky2_ecgfp5::{
 ///
 ///  * R - the hash born by the current node
 ///  * D – the digest of the values encoutered up until R
+#[derive(Debug)]
 pub struct PublicInputs<'input, FieldElt: Clone> {
     pub inputs: &'input [FieldElt],
 }
@@ -38,6 +39,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     const ROOT_LEN: usize = 4;
     const DIGEST_OFFSET: usize = 4;
     const DIGEST_LEN: usize = 11;
+
+    pub const TOTAL_LEN: usize = 15;
 
     pub fn register(
         b: &mut CircuitBuilder<GoldilocksField, 2>,

@@ -10,14 +10,12 @@ use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
 use crate::{array::Array, circuit::UserCircuit, group_hashing::CircuitBuilderGroupHashing};
 
-use super::PublicInputs;
+use super::{PublicInputs, LEAF_MARKER};
 
 // A key is 32B-long
 const KEY_GL_SIZE: usize = 32;
 // A value in a leaf node is 32B wide
 const LEAF_GL_SIZE: usize = 32;
-// One u32 encoding the bytes for b"LEAF"
-pub static LEAF_STR: OnceLock<GoldilocksField> = OnceLock::new();
 // ['L', 'E', 'A', 'F'] -> 4B -> 1GL
 const LEAF_MARKER_GL_SIZE: usize = 1;
 
@@ -66,10 +64,7 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
     type Wires = LeafWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires {
-        let leaf_str = b.constant(
-            *LEAF_STR
-                .get_or_init(|| GoldilocksField::from_canonical_u32(u32::from_be_bytes(*b"LEAF"))),
-        );
+        let leaf_str = b.constant(LEAF_MARKER());
         let key = Array::<Target, KEY_GL_SIZE>::new(b);
         let value = Array::<Target, LEAF_GL_SIZE>::new(b);
         let kv = Array::<Target, { KEY_GL_SIZE + LEAF_GL_SIZE }>::try_from(
