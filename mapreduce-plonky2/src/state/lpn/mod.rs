@@ -4,20 +4,19 @@
 use plonky2::{
     field::extension::Extendable,
     hash::{
-        hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOutTarget, RichField},
         hashing::hash_n_to_hash_no_pad,
         poseidon::{PoseidonHash, PoseidonPermutation, SPONGE_RATE},
     },
     iop::witness::{PartialWitness, WitnessWrite},
-    plonk::{circuit_builder::CircuitBuilder, config::Hasher},
+    plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::{CircuitBuilderU32, U32Target};
 
 use crate::{
-    array::Array,
-    keccak::OutputHash,
+    keccak::{OutputHash, PACKED_HASH_LEN},
     state::BlockLinkingPublicInputs,
-    utils::{AddressTarget, ADDRESS_LEN},
+    utils::{PackedAddressTarget, PACKED_ADDRESS_LEN},
 };
 
 mod public_inputs;
@@ -27,25 +26,20 @@ mod tests;
 
 pub(crate) use public_inputs::PublicInputs;
 
-use super::block_linking;
-
 const NODE_PREIMAGE_LENGTH_NO_PAD: usize = 1 // constant flag for leaf hash
-    + ADDRESS_LEN // smart contract address
-    + NUM_HASH_OUT_ELTS // merkle root of the storage database
+    + PACKED_ADDRESS_LEN // smart contract address
+    + PACKED_HASH_LEN // merkle root of the storage database
     + 1 // storage slot of the length
     + 1; // storage slot of the mapping
 
-const NODE_PREIMAGE_LENGTH: usize = 4;
-// FIXME CircuitBuilder::hash_n_to_hash_no_pad is failing for length equal or greater than sponge
-// rate
-// const NODE_PREIMAGE_LENGTH: usize =
-//     (NODE_PREIMAGE_LENGTH_NO_PAD + SPONGE_RATE - 1) / SPONGE_RATE * SPONGE_RATE;
+const NODE_PREIMAGE_LENGTH: usize =
+    (NODE_PREIMAGE_LENGTH_NO_PAD + SPONGE_RATE - 1) / SPONGE_RATE * SPONGE_RATE;
 
 /// The wires structure of [LeafCircuit].
 #[derive(Clone, Debug)]
 pub struct LeafWires {
-    preimage_a: AddressTarget,
-    preimage_c: HashOutTarget,
+    preimage_a: PackedAddressTarget,
+    preimage_c: OutputHash,
     preimage_s: U32Target,
     preimage_m: U32Target,
     root: HashOutTarget,
@@ -112,8 +106,8 @@ where
     where
         F: RichField + Extendable<D>,
     {
-        let preimage_a = Array::new(b);
-        let preimage_c = b.add_virtual_hash();
+        let preimage_a = PackedAddressTarget::new(b);
+        let preimage_c = OutputHash::new(b);
         let preimage_s = b.add_virtual_u32_target();
         let preimage_m = b.add_virtual_u32_target();
         let root = b.add_virtual_hash();
@@ -136,13 +130,11 @@ where
 
         // constrain the merkle root preimage
 
-        // "LEAF", a(address len), c(elements), s(1), m(1)
-        let preimage_len = 3 + wires.preimage_c.elements.len() + ADDRESS_LEN;
         let mut preimage = Vec::with_capacity(NODE_PREIMAGE_LENGTH);
 
         preimage.push(b.one());
-        preimage.extend_from_slice(&wires.preimage_a.arr);
-        preimage.extend_from_slice(&wires.preimage_c.elements);
+        preimage.extend(wires.preimage_a.arr.iter().map(|a| a.0));
+        preimage.extend(wires.preimage_c.arr.iter().map(|c| c.0));
         preimage.push(wires.preimage_s.0);
         preimage.push(wires.preimage_m.0);
 
@@ -168,14 +160,14 @@ where
             .arr
             .iter()
             .zip(self.block_linking.a().iter())
-            .for_each(|(&t, &v)| pw.set_target(t, v));
+            .for_each(|(&t, &v)| pw.set_target(t.0, v));
 
         wires
             .preimage_c
-            .elements
+            .arr
             .iter()
             .zip(self.block_linking.merkle_root().iter())
-            .for_each(|(&t, &v)| pw.set_target(t, v));
+            .for_each(|(&t, &v)| pw.set_target(t.0, v));
 
         let mut node = Vec::with_capacity(NODE_PREIMAGE_LENGTH);
 
@@ -189,6 +181,7 @@ where
         pw.set_target(wires.preimage_s.0, self.block_linking.s()[0]);
         pw.set_target(wires.preimage_m.0, self.block_linking.m()[0]);
 
+        debug_assert_eq!(node.len(), NODE_PREIMAGE_LENGTH_NO_PAD);
         node.resize(NODE_PREIMAGE_LENGTH, F::ZERO);
 
         let root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&node);
