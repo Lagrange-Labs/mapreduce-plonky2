@@ -1,7 +1,5 @@
-use std::sync::OnceLock;
-
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
+    field::goldilocks_field::GoldilocksField,
     hash::{hash_types::HashOutTarget, poseidon::PoseidonHash},
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
@@ -23,16 +21,6 @@ const LEAF_MARKER_GL_SIZE: usize = 1;
 pub struct LeafCircuit {
     pub key: [u8; KEY_GL_SIZE],
     pub value: [u8; LEAF_GL_SIZE],
-}
-
-pub fn str_to_gl(s: &str) -> GoldilocksField {
-    assert!(s.as_bytes().len() <= 4);
-    let mut x = 0u32;
-    for b in s.bytes() {
-        x <<= 8;
-        x |= b as u32;
-    }
-    GoldilocksField::from_canonical_u32(x)
 }
 
 pub struct LeafWires {

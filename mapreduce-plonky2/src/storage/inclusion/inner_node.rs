@@ -1,7 +1,5 @@
-use std::sync::OnceLock;
-
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
+    field::goldilocks_field::GoldilocksField,
     hash::{
         hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
         poseidon::PoseidonHash,
