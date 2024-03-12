@@ -8,7 +8,9 @@ use crate::{
     utils::{CURVE_TARGET_LEN, PACKED_ADDRESS_LEN},
 };
 use plonky2::{
-    field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
+    field::extension::Extendable,
+    hash::hash_types::{RichField, NUM_HASH_OUT_ELTS},
+    iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
 
@@ -30,7 +32,7 @@ const A_LEN: usize = PACKED_ADDRESS_LEN;
 const D_LEN: usize = CURVE_TARGET_LEN;
 const M_LEN: usize = 1;
 const S_LEN: usize = 1;
-const C_LEN: usize = PACKED_HASH_LEN;
+const C_LEN: usize = NUM_HASH_OUT_ELTS;
 const TOTAL_LEN: usize = H_LEN + N_LEN + PREV_H_LEN + A_LEN + D_LEN + M_LEN + S_LEN + C_LEN;
 
 const H_IDX: usize = 0;
