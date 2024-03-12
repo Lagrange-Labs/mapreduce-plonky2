@@ -27,7 +27,7 @@ pub struct LeafWires {
     //
     // IN
     //
-    // The key leading to this leaf
+    // The mapping key associated to this leaf
     pub key: Array<Target, KEY_GL_SIZE>,
     // The value encoded in this leaf
     pub value: Array<Target, LEAF_GL_SIZE>,

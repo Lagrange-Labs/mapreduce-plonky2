@@ -42,8 +42,8 @@ impl UserCircuit<GoldilocksField, 2> for NodeCircuitValidator<'_> {
             c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN),
             c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN),
         ];
-        let child_traces = std::array::from_fn(|i| PublicInputs::from(child_inputs[i].as_slice()));
-        let wires = NodeCircuit::build(c, child_traces);
+        let children_io = std::array::from_fn(|i| PublicInputs::from(child_inputs[i].as_slice()));
+        let wires = NodeCircuit::build(c, children_io);
         (wires, child_inputs.try_into().unwrap())
     }
 
@@ -84,7 +84,7 @@ struct LeafProofResult {
     value_gl: Vec<F>,
 }
 impl LeafProofResult {
-    fn trace(&self) -> PublicInputs<F> {
+    fn io(&self) -> PublicInputs<F> {
         PublicInputs::from(self.proof.public_inputs.as_slice())
     }
 }
@@ -120,7 +120,7 @@ fn test_leaf(k: &str, v: &str) {
 
     // Check the digest
     let exp_digest = map_to_curve_point(&r.value_gl).to_weierstrass();
-    let found_digest = r.trace().digest();
+    let found_digest = r.io().digest();
     assert_eq!(exp_digest, found_digest);
 
     // Check the root hash
@@ -129,7 +129,7 @@ fn test_leaf(k: &str, v: &str) {
         .chain(r.value_gl.iter().copied())
         .collect::<Vec<_>>();
     let exp_root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
-    let found_root = r.trace().root();
+    let found_root = r.io().root();
     assert!(exp_root.elements.len() == found_root.len());
     assert!(exp_root
         .elements
@@ -156,7 +156,7 @@ fn test_mini_tree(k1: &str, v1: &str, k2: &str, v2: &str) {
         ],
     };
     let proof = run_circuit::<F, D, C, _>(circuit);
-    let trace = PublicInputs::<F>::from(proof.public_inputs.as_slice());
+    let ios = PublicInputs::<F>::from(proof.public_inputs.as_slice());
 
     // Check the digest
     let expected_digest = map_to_curve_point(&left.value_gl)
@@ -165,7 +165,7 @@ fn test_mini_tree(k1: &str, v1: &str, k2: &str, v2: &str) {
     let expected_other_digest = map_to_curve_point(&right.value_gl)
         .add(map_to_curve_point(&left.value_gl))
         .to_weierstrass();
-    let found_digest = trace.digest();
+    let found_digest = ios.digest();
     assert_eq!(expected_digest, found_digest);
     // The digest commutes
     assert_eq!(expected_other_digest, found_digest);
@@ -192,7 +192,7 @@ fn test_mini_tree(k1: &str, v1: &str, k2: &str, v2: &str) {
         .collect::<Vec<_>>();
     let expected_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
 
-    let found_hash = trace.root();
+    let found_hash = ios.root();
     assert!(expected_hash.elements.len() == found_hash.len());
     assert!(expected_hash
         .elements
