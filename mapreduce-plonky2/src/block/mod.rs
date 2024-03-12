@@ -21,8 +21,6 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_crypto::u32::arithmetic_u32::CircuitBuilderU32;
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use public_inputs::PublicInputs;
 use std::array;
 
@@ -70,8 +68,11 @@ where
     }
 
     /// Build for the circuit. The arguments are:
-    /// - prev_pi: Previous outputs of Merkle tree (the current circuit)
-    /// - new_leaf_pi: Public inputs of the new leaf (state root)
+    /// - prev_pi: Previous outputs of Merkle tree (the current circuit). It's a
+    ///   dummy proof if the new leaf is the first inserted block, the dummy
+    ///   proof must be set as `first_block_number = new_block_number` and
+    ///   `block_number = new_block_number - 1`.
+    /// - new_leaf_pi: Public inputs of the new leaf (state root).
     pub fn build<const D: usize>(
         cb: &mut CircuitBuilder<F, D>,
         prev_pi: &[Target],
@@ -157,15 +158,12 @@ fn verify_proofs<F: RichField + Extendable<D>, const D: usize>(
 
     // Check the sequentiality as
     // `first_block_number + leaf_index = new_block_number`.
-    let (exp_block_num, overflow) = cb.add_u32(first_block_num, U32Target(leaf_index));
-    cb.assert_zero_u32(overflow);
-    cb.connect_u32(exp_block_num, new_block_num);
+    let exp_block_num = cb.add(first_block_num.0, leaf_index);
+    cb.connect(exp_block_num, new_block_num.0);
 
-    // Check `prev_block_number + 1 == new_block_number` if not the first.
-    let one = cb.one_u32();
-    let (exp_block_num, overflow) = cb.add_u32(prev_block_num, one);
-    cb.assert_zero_u32(overflow);
-    let exp_block_num = cb.select(is_first, new_block_num.0, exp_block_num.0);
+    // Check `prev_block_number + 1 == new_block_number`.
+    let one = cb.one();
+    let exp_block_num = cb.add(prev_block_num.0, one);
     cb.connect(exp_block_num, new_block_num.0);
 
     // Check that the first block number of previous proof is set accordingly to
@@ -339,7 +337,8 @@ mod tests {
         .unwrap();
 
         // Generate the previous public inputs of Merkle tree.
-        let prev_pi = tree_inputs::<MAX_DEPTH>(first_block_num, &prev_leaf_data, old_root);
+        let prev_pi =
+            tree_inputs::<MAX_DEPTH>(leaf_index == 0, first_block_num, &prev_leaf_data, old_root);
 
         // Generate the public inputs of the new leaf.
         let new_leaf_pi = new_leaf_inputs(&leaf_data, &prev_pi);
@@ -409,24 +408,32 @@ mod tests {
 
     /// Generate the public inputs of Merkle tree (the current circuit).
     fn tree_inputs<const MAX_DEPTH: usize>(
+        is_dummy: bool,
         first_block_num: usize,
         leaf_data: &[F],
         root: HashOut<F>,
     ) -> Vec<F> {
-        // [state_root, block_number, block_header]
-        assert_eq!(leaf_data.len(), NUM_HASH_OUT_ELTS + 1 + PACKED_HASH_LEN);
-        let block_num = leaf_data[NUM_HASH_OUT_ELTS];
-        let block_header = leaf_data[NUM_HASH_OUT_ELTS + 1..].to_vec();
-
         // All leaves are empty for the init root.
         let init_root = merkle_root(generate_all_leaves::<MAX_DEPTH>(first_block_num, 0));
+
+        // [state_root, block_number, block_header]
+        assert_eq!(leaf_data.len(), NUM_HASH_OUT_ELTS + 1 + PACKED_HASH_LEN);
+        let block_header = leaf_data[NUM_HASH_OUT_ELTS + 1..].to_vec();
+
+        // The block number is set to `first_block_number - 1` for dummy proofs.
+        let first_block_num = F::from_canonical_usize(first_block_num);
+        let block_num = if is_dummy {
+            leaf_data[NUM_HASH_OUT_ELTS]
+        } else {
+            first_block_num - F::ONE
+        };
 
         // [init_root, root, first_block_number, block_number, block_header]
         init_root
             .elements
             .into_iter()
             .chain(root.elements)
-            .chain([F::from_canonical_usize(first_block_num), block_num])
+            .chain([first_block_num, block_num])
             .chain(block_header)
             .collect()
     }
