@@ -104,8 +104,8 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         &self.inner[H_IDX..N_IDX]
     }
 
-    pub fn block_number(&self) -> &[T] {
-        &self.inner[N_IDX..PREV_H_IDX]
+    pub fn block_number(&self) -> &T {
+        &self.inner[N_IDX]
     }
 
     pub fn prev_block_hash(&self) -> &[T] {
@@ -120,12 +120,12 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         &self.inner[D_IDX..M_IDX]
     }
 
-    pub fn m(&self) -> &[T] {
-        &self.inner[M_IDX..S_IDX]
+    pub fn m(&self) -> &T {
+        &self.inner[M_IDX]
     }
 
-    pub fn s(&self) -> &[T] {
-        &self.inner[S_IDX..C_IDX]
+    pub fn s(&self) -> &T {
+        &self.inner[S_IDX]
     }
 
     pub fn merkle_root(&self) -> &[T] {
