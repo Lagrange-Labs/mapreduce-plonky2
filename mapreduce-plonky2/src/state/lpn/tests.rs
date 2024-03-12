@@ -24,15 +24,17 @@ use super::LeafCircuit;
 
 #[test]
 fn prove_and_verify_leaf_circuit() {
-    let block_linking =
-        BlockLinkingPublicInputs::values_from_seed(TestLeafCircuit::PI_SEED).to_vec();
-    let block_linking = BlockLinkingPublicInputs::from_slice(&block_linking);
+    let block_linking_values = BlockLinkingPublicInputs::values_from_seed(TestLeafCircuit::PI_SEED);
+    let block_linking = BlockLinkingPublicInputs::from_slice(&block_linking_values);
 
     let preimage =
         LeafWires::node_preimage(GoldilocksField::ONE, &block_linking).collect::<Vec<_>>();
     let root = hash_n_to_hash_no_pad::<_, PoseidonPermutation<_>>(&preimage);
 
-    let circuit = TestLeafCircuit { c: LeafCircuit };
+    let circuit = TestLeafCircuit {
+        block_linking_values: block_linking_values.to_vec(),
+        c: LeafCircuit,
+    };
     let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit);
     let pi = PublicInputs::from(proof.public_inputs.as_slice());
 
@@ -56,6 +58,7 @@ struct TestLeafWires {
 
 #[derive(Clone)]
 struct TestLeafCircuit {
+    block_linking_values: Vec<GoldilocksField>,
     c: LeafCircuit,
 }
 
@@ -80,7 +83,7 @@ impl UserCircuit<GoldilocksField, 2> for TestLeafCircuit {
     fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
         let block_linking = BlockLinkingPublicInputs::from_slice(&wires.block_linking);
 
-        BlockLinkingPublicInputs::values_from_seed(TestLeafCircuit::PI_SEED)
+        self.block_linking_values
             .iter()
             .zip(block_linking.inner.iter())
             .for_each(|(&v, &t)| pw.set_target(t, v));
