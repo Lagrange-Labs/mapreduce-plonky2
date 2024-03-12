@@ -30,7 +30,7 @@ const TOTAL_LEN: usize = 51;
 
 #[derive(Clone)]
 pub struct PublicInputs<'a, T: Clone> {
-    inner: &'a [T],
+    pub(crate) inner: &'a [T],
 }
 
 impl<'a, T: Clone> PublicInputs<'a, T> {

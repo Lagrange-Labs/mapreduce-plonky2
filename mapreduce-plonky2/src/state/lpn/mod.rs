@@ -3,18 +3,13 @@
 
 use std::iter;
 
-use anyhow::Context;
 use plonky2::{
     field::extension::Extendable,
     hash::{
         hash_types::{HashOutTarget, RichField},
-        hashing::hash_n_to_hash_no_pad,
-        poseidon::{PoseidonHash, PoseidonPermutation},
+        poseidon::PoseidonHash,
     },
-    iop::{
-        target::Target,
-        witness::{PartialWitness, Witness, WitnessWrite},
-    },
+    iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
 
@@ -43,13 +38,16 @@ impl<'i> LeafWires<'i> {
     /// - `M` Storage slot of the mapping
     ///
     /// Such iterator will be used to compute the root node of the leaf.
-    pub fn node_preimage(&self) -> impl Iterator<Item = Target> + '_ {
-        let a = self.block_linking.a().iter().copied();
-        let c = self.block_linking.merkle_root().iter().copied();
-        let s = iter::once(self.block_linking.s()[0]);
-        let m = iter::once(self.block_linking.m()[0]);
+    pub fn node_preimage<T: Clone>(
+        prefix: T,
+        block_linking: &'i BlockLinkingPublicInputs<'i, T>,
+    ) -> impl Iterator<Item = T> + 'i {
+        let a = block_linking.a().iter().cloned();
+        let c = block_linking.merkle_root().iter().cloned();
+        let s = iter::once(block_linking.s()[0].clone());
+        let m = iter::once(block_linking.m()[0].clone());
 
-        a.chain(c).chain(s).chain(m)
+        iter::once(prefix).chain(a).chain(c).chain(s).chain(m)
     }
 }
 
@@ -106,47 +104,22 @@ impl LeafCircuit {
     where
         F: RichField + Extendable<D>,
     {
+        let preimage = LeafWires::node_preimage(b.one(), &block_linking).collect::<Vec<_>>();
+        let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(preimage);
         let wires = LeafWires {
             block_linking,
-            root: b.add_virtual_hash(),
+            root,
         };
 
         PublicInputs::register(b, &wires);
 
-        // constrain the merkle root preimage
-
-        let preimage = wires.node_preimage();
-        let preimage = iter::once(b.one()).chain(preimage).collect::<Vec<_>>();
-        let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(preimage);
-
-        root.elements
-            .iter()
-            .zip(wires.root.elements.iter())
-            .for_each(|(r, w)| b.connect(*r, *w));
-
         wires
     }
 
-    /// Assigns the data of [BlockLinkingPublicInputs] into the circuit wires.
-    pub fn assign<F>(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) -> anyhow::Result<()>
+    /// Assigns the wire values into the partial witness.
+    pub fn assign<F>(&self, _pw: &mut PartialWitness<F>, _wires: &LeafWires)
     where
         F: RichField,
     {
-        let preimage = wires.node_preimage().map(|p| pw.try_get_target(p));
-        let preimage = iter::once(Some(F::ONE))
-            .chain(preimage)
-            .map(|p| p.context("Block linking witness value unavailable on partial witness"))
-            .collect::<anyhow::Result<Vec<_>>>()?;
-
-        let root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&preimage);
-
-        wires
-            .root
-            .elements
-            .iter()
-            .zip(root.elements.iter())
-            .for_each(|(&t, &v)| pw.set_target(t, v));
-
-        Ok(())
     }
 }
