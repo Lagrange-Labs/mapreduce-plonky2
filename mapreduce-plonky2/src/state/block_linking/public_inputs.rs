@@ -133,8 +133,8 @@ mod tests {
 
     impl<'a, T: Copy + Default> PublicInputs<'a, T> {
         /// Writes the parts of the block liking public inputs into the provided target array.
-        pub fn parts_into_target(
-            target: &mut [T; TOTAL_LEN],
+        pub fn parts_into_values(
+            values: &mut [T; TOTAL_LEN],
             h: &[T; N_IDX - H_IDX],
             n: &[T; PREV_H_IDX - N_IDX],
             prev_h: &[T; A_IDX - PREV_H_IDX],
@@ -144,19 +144,19 @@ mod tests {
             s: &[T; C_IDX - S_IDX],
             c: &[T; TOTAL_LEN - C_IDX],
         ) {
-            target[H_IDX..N_IDX].copy_from_slice(h);
-            target[N_IDX..PREV_H_IDX].copy_from_slice(n);
-            target[PREV_H_IDX..A_IDX].copy_from_slice(prev_h);
-            target[A_IDX..D_IDX].copy_from_slice(a);
-            target[D_IDX..M_IDX].copy_from_slice(d);
-            target[M_IDX..S_IDX].copy_from_slice(m);
-            target[S_IDX..C_IDX].copy_from_slice(s);
-            target[C_IDX..TOTAL_LEN].copy_from_slice(c);
+            values[H_IDX..N_IDX].copy_from_slice(h);
+            values[N_IDX..PREV_H_IDX].copy_from_slice(n);
+            values[PREV_H_IDX..A_IDX].copy_from_slice(prev_h);
+            values[A_IDX..D_IDX].copy_from_slice(a);
+            values[D_IDX..M_IDX].copy_from_slice(d);
+            values[M_IDX..S_IDX].copy_from_slice(m);
+            values[S_IDX..C_IDX].copy_from_slice(s);
+            values[C_IDX..TOTAL_LEN].copy_from_slice(c);
         }
     }
 
     impl<'a, F: RichField> PublicInputs<'a, F> {
-        pub fn target_from_seed(seed: u64) -> [F; TOTAL_LEN] {
+        pub fn values_from_seed(seed: u64) -> [F; TOTAL_LEN] {
             let rng = &mut StdRng::seed_from_u64(seed);
 
             let h = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
@@ -168,10 +168,10 @@ mod tests {
             let s = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
             let c = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
 
-            let mut target = array::from_fn(|_| F::ZERO);
-            Self::parts_into_target(&mut target, &h, &n, &prev_h, &a, &d, &m, &s, &c);
+            let mut values = array::from_fn(|_| F::ZERO);
+            Self::parts_into_values(&mut values, &h, &n, &prev_h, &a, &d, &m, &s, &c);
 
-            target
+            values
         }
     }
 }

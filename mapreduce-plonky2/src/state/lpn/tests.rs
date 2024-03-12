@@ -25,7 +25,7 @@ use super::LeafCircuit;
 #[test]
 fn prove_and_verify_leaf_circuit() {
     let block_linking =
-        BlockLinkingPublicInputs::target_from_seed(TestLeafCircuit::PI_SEED).to_vec();
+        BlockLinkingPublicInputs::values_from_seed(TestLeafCircuit::PI_SEED).to_vec();
     let block_linking = BlockLinkingPublicInputs::from_slice(&block_linking);
 
     let preimage =
@@ -80,7 +80,7 @@ impl UserCircuit<GoldilocksField, 2> for TestLeafCircuit {
     fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
         let block_linking = BlockLinkingPublicInputs::from_slice(&wires.block_linking);
 
-        BlockLinkingPublicInputs::target_from_seed(TestLeafCircuit::PI_SEED)
+        BlockLinkingPublicInputs::values_from_seed(TestLeafCircuit::PI_SEED)
             .iter()
             .zip(block_linking.inner.iter())
             .for_each(|(&v, &t)| pw.set_target(t, v));
