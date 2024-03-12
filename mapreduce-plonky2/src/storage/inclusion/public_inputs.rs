@@ -4,18 +4,17 @@ use plonky2::{
         goldilocks_field::GoldilocksField,
         types::Field,
     },
-    hash::hash_types::HashOutTarget,
-    iop::target::{BoolTarget, Target},
+    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
+    iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
 
 use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
-    gadgets::{
-        base_field::QuinticExtensionTarget,
-        curve::{CircuitBuilderEcGFp5, CurveTarget},
-    },
+    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
+
+use crate::utils::{convert_point_to_curve_target, convert_slice_to_curve_point};
 
 /// Stores the public input used to prove the inclusion of a value in a *binary* merkle tree.
 ///
@@ -33,14 +32,12 @@ impl<'a, T: Clone> From<&'a [T]> for PublicInputs<'a, T> {
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
-    const EXTENSION: usize = 5;
-
     const ROOT_OFFSET: usize = 0;
-    const ROOT_LEN: usize = 4;
+    const ROOT_LEN: usize = NUM_HASH_OUT_ELTS;
     const DIGEST_OFFSET: usize = 4;
     const DIGEST_LEN: usize = 11;
 
-    pub const TOTAL_LEN: usize = 15;
+    pub const TOTAL_LEN: usize = Self::ROOT_LEN + Self::DIGEST_LEN;
 
     pub fn register(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
@@ -57,26 +54,22 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     /// Extracts curve coordinates from the raw input
-    pub fn digest_raw(&self) -> ([T; 5], [T; 5], T) {
+    pub fn digest_raw(
+        &self,
+    ) -> (
+        [T; crate::group_hashing::N],
+        [T; crate::group_hashing::N],
+        T,
+    ) {
         let raw = &self.inputs[Self::DIGEST_OFFSET..Self::DIGEST_OFFSET + Self::DIGEST_LEN];
-        assert!(raw.len() == 5 * 2 + 1, "{} != 5 + 5 + 1", raw.len());
-        let x = raw[0..Self::EXTENSION].try_into().unwrap();
-        let y = raw[Self::EXTENSION..2 * Self::EXTENSION]
-            .try_into()
-            .unwrap();
-        let flag = raw[2 * Self::EXTENSION];
-        (x, y, flag)
+        convert_slice_to_curve_point(raw)
     }
 }
 
 impl<'a> PublicInputs<'a, Target> {
     /// The digest of the current subtree
     pub fn digest(&self) -> CurveTarget {
-        let (x, y, is_inf) = self.digest_raw();
-        let x = QuinticExtensionTarget(x);
-        let y = QuinticExtensionTarget(y);
-        let flag = BoolTarget::new_unsafe(is_inf);
-        CurveTarget(([x, y], flag))
+        convert_point_to_curve_target(self.digest_raw())
     }
 
     /// The root hash of the current subtree
@@ -106,7 +99,7 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
     }
 
     /// The GLs forming the hash of the current subtree
-    pub fn root(&self) -> Vec<GoldilocksField> {
-        self.root_raw().to_owned()
+    pub fn root(&self) -> HashOut<GoldilocksField> {
+        HashOut::from_vec(self.root_raw().to_owned())
     }
 }

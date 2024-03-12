@@ -80,8 +80,7 @@ fn test_leaf_nonzero_zero() {
 
 struct LeafProofResult {
     proof: ProofWithPublicInputs<F, C, D>,
-    key_gl: Vec<F>,
-    value_gl: Vec<F>,
+    kv_gl: Vec<F>,
 }
 impl LeafProofResult {
     fn io(&self) -> PublicInputs<F> {
@@ -102,40 +101,36 @@ fn run_leaf_proof<'data>(k: &'_ str, v: &'_ str) -> LeafProofResult {
         .map(|x| F::from_canonical_u8(*x))
         .collect::<Vec<_>>();
 
+    let kv_gl = key_gl
+        .iter()
+        .copied()
+        .chain(value_gl.iter().copied())
+        .collect::<Vec<_>>();
+
     let circuit = LeafCircuit {
         key: key.try_into().unwrap(),
         value: value.try_into().unwrap(),
     };
 
     let proof = run_circuit::<F, D, C, _>(circuit);
-    LeafProofResult {
-        proof,
-        key_gl,
-        value_gl,
-    }
+    LeafProofResult { proof, kv_gl }
 }
 
 fn test_leaf(k: &str, v: &str) {
     let r = run_leaf_proof(k, v);
 
     // Check the digest
-    let exp_digest = map_to_curve_point(&r.value_gl).to_weierstrass();
+    let exp_digest = map_to_curve_point(&r.kv_gl).to_weierstrass();
     let found_digest = r.io().digest();
     assert_eq!(exp_digest, found_digest);
 
     // Check the root hash
     let to_hash = std::iter::once(LEAF_MARKER())
-        .chain(r.key_gl.iter().copied())
-        .chain(r.value_gl.iter().copied())
+        .chain(r.kv_gl.iter().copied())
         .collect::<Vec<_>>();
     let exp_root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
     let found_root = r.io().root();
-    assert!(exp_root.elements.len() == found_root.len());
-    assert!(exp_root
-        .elements
-        .iter()
-        .zip(found_root.iter())
-        .all(|xs| xs.0 == xs.1));
+    assert_eq!(exp_root, found_root);
 }
 
 #[test]
@@ -159,11 +154,11 @@ fn test_mini_tree(k1: &str, v1: &str, k2: &str, v2: &str) {
     let ios = PublicInputs::<F>::from(proof.public_inputs.as_slice());
 
     // Check the digest
-    let expected_digest = map_to_curve_point(&left.value_gl)
-        .add(map_to_curve_point(&right.value_gl))
+    let expected_digest = map_to_curve_point(&left.kv_gl)
+        .add(map_to_curve_point(&right.kv_gl))
         .to_weierstrass();
-    let expected_other_digest = map_to_curve_point(&right.value_gl)
-        .add(map_to_curve_point(&left.value_gl))
+    let expected_other_digest = map_to_curve_point(&right.kv_gl)
+        .add(map_to_curve_point(&left.kv_gl))
         .to_weierstrass();
     let found_digest = ios.digest();
     assert_eq!(expected_digest, found_digest);
@@ -173,15 +168,13 @@ fn test_mini_tree(k1: &str, v1: &str, k2: &str, v2: &str) {
     // Check the nested root hash
     // Left child
     let to_hash_left = std::iter::once(LEAF_MARKER())
-        .chain(left.key_gl.iter().copied())
-        .chain(left.value_gl.iter().copied())
+        .chain(left.kv_gl.iter().copied())
         .collect::<Vec<_>>();
     let hash_left = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash_left.as_slice());
 
     // Right child
     let to_hash_right = std::iter::once(LEAF_MARKER())
-        .chain(right.key_gl.iter().copied())
-        .chain(right.value_gl.iter().copied())
+        .chain(right.kv_gl.iter().copied())
         .collect::<Vec<_>>();
     let hash_right = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash_right.as_slice());
 
@@ -193,12 +186,7 @@ fn test_mini_tree(k1: &str, v1: &str, k2: &str, v2: &str) {
     let expected_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
 
     let found_hash = ios.root();
-    assert!(expected_hash.elements.len() == found_hash.len());
-    assert!(expected_hash
-        .elements
-        .iter()
-        .zip(found_hash.iter())
-        .all(|xs| xs.0 == xs.1));
+    assert_eq!(expected_hash, found_hash);
 
     // Hash is not commutative
     let to_wrongly_hash = std::iter::once(NODE_MARKER())
@@ -206,9 +194,5 @@ fn test_mini_tree(k1: &str, v1: &str, k2: &str, v2: &str) {
         .chain(hash_left.elements.iter().copied())
         .collect::<Vec<_>>();
     let wrong_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_wrongly_hash.as_slice());
-    assert!(!wrong_hash
-        .elements
-        .iter()
-        .zip(found_hash.iter())
-        .all(|xs| xs.0 == xs.1));
+    assert_ne!(wrong_hash, found_hash);
 }

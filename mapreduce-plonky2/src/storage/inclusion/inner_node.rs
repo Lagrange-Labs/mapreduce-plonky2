@@ -1,27 +1,15 @@
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
-    hash::{
-        hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
-        poseidon::PoseidonHash,
-    },
+    hash::{hash_types::NUM_HASH_OUT_ELTS, poseidon::PoseidonHash},
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
 use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 
 use super::{PublicInputs, NODE_MARKER};
 
-pub struct NodeWires {
-    //
-    // OUT
-    //
-    // the root of the subtree up to this level, i.e. Poseidon("NODE" ++ child[0].root ++ child[1].root)
-    root: HashOutTarget,
-    // the digest " " " " " " ", i.e. child[0].digest + child[1].digest
-    digest: CurveTarget,
-}
+pub struct NodeWires {}
 
 #[derive(Clone)]
 pub struct NodeCircuit {}
@@ -46,7 +34,7 @@ impl NodeCircuit {
 
         PublicInputs::<GoldilocksField>::register(b, &root, &digest);
 
-        NodeWires { root, digest }
+        NodeWires {}
     }
 
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &NodeWires) {}

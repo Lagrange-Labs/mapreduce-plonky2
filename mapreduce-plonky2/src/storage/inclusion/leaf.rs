@@ -1,10 +1,9 @@
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
-    hash::{hash_types::HashOutTarget, poseidon::PoseidonHash},
+    hash::poseidon::PoseidonHash,
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
 use crate::{array::Array, circuit::UserCircuit, group_hashing::CircuitBuilderGroupHashing};
 
@@ -31,14 +30,6 @@ pub struct LeafWires {
     pub key: Array<Target, KEY_GL_SIZE>,
     // The value encoded in this leaf
     pub value: Array<Target, LEAF_GL_SIZE>,
-
-    //
-    // OUT
-    //
-    // the root of the degenerated sub-tree only containing this leaf, i.e. Poseidon("LEAF" ++ value)
-    pub root: HashOutTarget,
-    // the digest of " " " " " " " ", i.e. ProjectionOnCurve(value)
-    pub digest: CurveTarget,
 }
 
 impl LeafCircuit {
@@ -71,17 +62,12 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
                     .collect::<Vec<_>>(),
             )
             .unwrap();
-        let digest = b.map_to_curve_point(&value.arr);
+        let digest = b.map_to_curve_point(&kv.arr);
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(to_hash.arr));
 
         PublicInputs::<GoldilocksField>::register(b, &root, &digest);
 
-        LeafWires {
-            key,
-            value,
-            root,
-            digest,
-        }
+        LeafWires { key, value }
     }
 
     fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
