@@ -45,8 +45,6 @@ pub struct BlockTreeCircuit<F, const MAX_DEPTH: usize>
 where
     F: RichField,
 {
-    /// The flag identifies if this is the first block inserted to the tree.
-    is_first: bool,
     /// The new leaf index is equal to `new_block_number - first_block_number`,
     /// it's zero for the first inserted block. It's decomposed to bits which
     /// represents if new leaf is the left or right child at each level, and we
@@ -65,14 +63,8 @@ impl<F, const MAX_DEPTH: usize> BlockTreeCircuit<F, MAX_DEPTH>
 where
     F: RichField,
 {
-    pub fn new(
-        is_first: bool,
-        leaf_index: usize,
-        root: HashOut<F>,
-        path: MerkleProof<F, PoseidonHash>,
-    ) -> Self {
+    pub fn new(leaf_index: usize, root: HashOut<F>, path: MerkleProof<F, PoseidonHash>) -> Self {
         Self {
-            is_first,
             leaf_index,
             root,
             path,
@@ -138,8 +130,6 @@ where
 
     /// Assign the wires.
     pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &BlockTreeWires<MAX_DEPTH>) {
-        pw.set_bool_target(wires.is_first, self.is_first);
-
         // Split the leaf index into a list of bits, which represents if the new
         // leaf is the left or right child at each level. It corresponds the
         // circuit function `split_le`. Reference the plonky2
@@ -266,28 +256,39 @@ mod tests {
     /// Test circuit
     #[derive(Clone, Debug)]
     struct TestCircuit<const MAX_DEPTH: usize> {
+        is_first: bool,
         prev_pi: Vec<F>,
         new_leaf_pi: Vec<F>,
         c: BlockTreeCircuit<F, MAX_DEPTH>,
     }
 
     impl<const MAX_DEPTH: usize> UserCircuit<F, D> for TestCircuit<MAX_DEPTH> {
-        type Wires = (Vec<Target>, Vec<Target>, BlockTreeWires<MAX_DEPTH>);
+        type Wires = (
+            BoolTarget,
+            Vec<Target>,
+            Vec<Target>,
+            BlockTreeWires<MAX_DEPTH>,
+        );
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let is_first = cb.add_virtual_bool_target_safe();
             let prev_pi = cb.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
             let new_leaf_pi = cb.add_virtual_targets(LeafInputs::<Target>::TOTAL_LEN);
 
             let wires = BlockTreeCircuit::build(cb, &prev_pi, &new_leaf_pi);
 
-            (prev_pi, new_leaf_pi, wires)
+            // Check is_first flag.
+            cb.connect(is_first.target, wires.is_first.target);
+
+            (is_first, prev_pi, new_leaf_pi, wires)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_target_arr(&wires.0, &self.prev_pi);
-            pw.set_target_arr(&wires.1, &self.new_leaf_pi);
+            pw.set_bool_target(wires.0, self.is_first);
+            pw.set_target_arr(&wires.1, &self.prev_pi);
+            pw.set_target_arr(&wires.2, &self.new_leaf_pi);
 
-            self.c.assign(pw, &wires.2);
+            self.c.assign(pw, &wires.3);
         }
     }
 
@@ -357,9 +358,10 @@ mod tests {
 
         // Run the circuit.
         let test_circuit = TestCircuit::<MAX_DEPTH> {
-            c: BlockTreeCircuit::new(is_first, leaf_index, new_root, path),
+            is_first,
             prev_pi,
             new_leaf_pi,
+            c: BlockTreeCircuit::new(leaf_index, new_root, path),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
 
