@@ -12,7 +12,7 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 use crate::{
     keccak::{OutputHash, PACKED_HASH_LEN},
-    state::lpn::LeafWires,
+    state::lpn::leaf::LeafWires,
 };
 
 /// The public inputs for the leaf circuit.

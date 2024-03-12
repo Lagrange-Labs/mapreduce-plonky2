@@ -15,7 +15,7 @@ use plonky2::{
 use crate::{
     circuit::{test::run_circuit, UserCircuit},
     state::{
-        lpn::{LeafWires, PublicInputs},
+        lpn::leaf::{LeafWires, PublicInputs},
         BlockLinkingPublicInputs,
     },
 };
