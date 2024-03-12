@@ -29,6 +29,8 @@ pub struct BlockTreeWires<const MAX_DEPTH: usize>
 where
     [(); MAX_DEPTH + 1]:,
 {
+    /// The flag identifies if this is the first block inserted to the tree.
+    is_first: BoolTarget,
     /// The index of new leaf is given by its little-endian bits. It corresponds
     /// to the plonky2 [verify_merkle_proof argument](https://github.com/0xPolygonZero/plonky2/blob/62ffe11a984dbc0e6fe92d812fa8da78b7ba73c7/plonky2/src/hash/merkle_proofs.rs#L98).
     leaf_index_bits: [BoolTarget; MAX_DEPTH],
@@ -46,6 +48,8 @@ where
     F: RichField,
     [(); MAX_DEPTH + 1]:,
 {
+    /// The flag identifies if this is the first block inserted to the tree.
+    is_first: bool,
     /// The new leaf index is equal to `new_block_number - first_block_number`,
     /// it's zero for the first inserted block. It's decomposed to bits which
     /// represents if new leaf is the left or right child at each level, and we
@@ -63,8 +67,12 @@ where
     F: RichField,
     [(); MAX_DEPTH + 1]:,
 {
-    pub fn new(leaf_index: usize, path: [HashOut<F>; MAX_DEPTH + 1]) -> Self {
-        Self { leaf_index, path }
+    pub fn new(is_first: bool, leaf_index: usize, path: [HashOut<F>; MAX_DEPTH + 1]) -> Self {
+        Self {
+            is_first,
+            leaf_index,
+            path,
+        }
     }
 
     /// Build for the circuit. The arguments are:
@@ -89,14 +97,20 @@ where
         let leaf_index_bits = array::from_fn(|_| cb.add_virtual_bool_target_safe());
         let path = array::from_fn(|_| cb.add_virtual_hash());
 
+        // The new leaf is the first inserted block if leaf index is zero.
+        let zero = cb.zero();
+        let leaf_index = cb.le_sum(leaf_index_bits.iter());
+        let is_first = cb.is_equal(leaf_index, zero);
+
         // Verify the previous outputs and the new leaf (block) public inputs.
-        verify_proofs(cb, &prev_pi, &new_leaf_pi, &leaf_index_bits);
+        verify_proofs(cb, &prev_pi, &new_leaf_pi, leaf_index);
 
         // Verify both the old and new roots of the block tree which are
         // calculated from the leaves sequentially.
         verify_append_only(cb, &prev_pi, &new_leaf_pi, &leaf_index_bits, &path);
 
         let wires = BlockTreeWires {
+            is_first,
             leaf_index_bits,
             path,
         };
@@ -116,6 +130,8 @@ where
 
     /// Assign the wires.
     pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &BlockTreeWires<MAX_DEPTH>) {
+        pw.set_bool_target(wires.is_first, self.is_first);
+
         // Split the leaf index into a list of bits, which represents if the new
         // leaf is the left or right child at each level. It corresponds the
         // circuit function `split_le`. Reference the plonky2
@@ -140,7 +156,7 @@ fn verify_proofs<F: RichField + Extendable<D>, const D: usize>(
     cb: &mut CircuitBuilder<F, D>,
     prev_pi: &PublicInputs<Target>,
     new_leaf_pi: &LeafInputs<Target>,
-    leaf_index_bits: &[BoolTarget],
+    leaf_index: Target,
 ) {
     // Check the previous block header.
     prev_pi
@@ -151,11 +167,6 @@ fn verify_proofs<F: RichField + Extendable<D>, const D: usize>(
     let prev_block_num = prev_pi.block_number();
     let new_block_num = new_leaf_pi.block_number();
 
-    // The new leaf is the first inserted block if leaf index is zero.
-    let zero = cb.zero();
-    let leaf_index = cb.le_sum(leaf_index_bits.iter());
-    let is_first = cb.is_equal(leaf_index, zero);
-
     // Check the sequentiality as
     // `first_block_number + leaf_index = new_block_number`.
     let exp_block_num = cb.add(first_block_num.0, leaf_index);
@@ -165,11 +176,6 @@ fn verify_proofs<F: RichField + Extendable<D>, const D: usize>(
     let one = cb.one();
     let exp_block_num = cb.add(prev_block_num.0, one);
     cb.connect(exp_block_num, new_block_num.0);
-
-    // Check that the first block number of previous proof is set accordingly to
-    // the new one if this is the first block inserted to the block tree.
-    let exp_first_block_num = cb.select(is_first, new_block_num.0, first_block_num.0);
-    cb.connect(exp_first_block_num, first_block_num.0);
 }
 
 /// Verify both the old and new roots of the block tree which are calculated
@@ -305,6 +311,9 @@ mod tests {
     {
         init_logging();
 
+        // The new leaf is the first inserted block if leaf index is zero.
+        let is_first = leaf_index == 0;
+
         // Generate the all leaves, the new leaf is specified at given index.
         let first_block_num = thread_rng().gen_range(1..10_000);
         let leaves = generate_all_leaves::<MAX_DEPTH>(first_block_num, leaf_index);
@@ -338,7 +347,7 @@ mod tests {
 
         // Generate the previous public inputs of Merkle tree.
         let prev_pi =
-            tree_inputs::<MAX_DEPTH>(leaf_index == 0, first_block_num, &prev_leaf_data, old_root);
+            tree_inputs::<MAX_DEPTH>(is_first, first_block_num, &prev_leaf_data, old_root);
 
         // Generate the public inputs of the new leaf.
         let new_leaf_pi = new_leaf_inputs(&leaf_data, &prev_pi);
@@ -348,7 +357,7 @@ mod tests {
 
         // Run the circuit.
         let test_circuit = TestCircuit::<MAX_DEPTH> {
-            c: BlockTreeCircuit::new(leaf_index, path),
+            c: BlockTreeCircuit::new(is_first, leaf_index, path),
             prev_pi,
             new_leaf_pi,
         };
@@ -423,9 +432,9 @@ mod tests {
         // The block number is set to `first_block_number - 1` for dummy proofs.
         let first_block_num = F::from_canonical_usize(first_block_num);
         let block_num = if is_dummy {
-            leaf_data[NUM_HASH_OUT_ELTS]
-        } else {
             first_block_num - F::ONE
+        } else {
+            leaf_data[NUM_HASH_OUT_ELTS]
         };
 
         // [init_root, root, first_block_number, block_number, block_header]
