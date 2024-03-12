@@ -14,10 +14,7 @@ use plonky2::{
 
 use crate::{
     circuit::{test::run_circuit, UserCircuit},
-    state::{
-        lpn::leaf::{LeafWires, PublicInputs},
-        BlockLinkingPublicInputs,
-    },
+    state::{lpn::leaf::PublicInputs, BlockLinkingPublicInputs},
 };
 
 use super::LeafCircuit;
@@ -28,7 +25,7 @@ fn prove_and_verify_leaf_circuit() {
     let block_linking = BlockLinkingPublicInputs::from_slice(&block_linking_values);
 
     let preimage =
-        LeafWires::node_preimage(GoldilocksField::ONE, &block_linking).collect::<Vec<_>>();
+        LeafCircuit::node_preimage(GoldilocksField::ONE, &block_linking).collect::<Vec<_>>();
     let root = hash_n_to_hash_no_pad::<_, PoseidonPermutation<_>>(&preimage);
 
     let circuit = TestLeafCircuit {
@@ -72,11 +69,11 @@ impl UserCircuit<GoldilocksField, 2> for TestLeafCircuit {
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
         let targets = b.add_virtual_targets(BlockLinkingPublicInputs::<()>::TOTAL_LEN);
         let block_linking = BlockLinkingPublicInputs::from_slice(&targets);
-        let wires = LeafCircuit::build(b, block_linking);
+        let root = LeafCircuit::build(b, &block_linking);
 
         TestLeafWires {
             block_linking: targets.clone(),
-            root: wires.root,
+            root,
         }
     }
 
@@ -87,12 +84,5 @@ impl UserCircuit<GoldilocksField, 2> for TestLeafCircuit {
             .iter()
             .zip(block_linking.inner.iter())
             .for_each(|(&v, &t)| pw.set_target(t, v));
-
-        let wires = LeafWires {
-            block_linking: BlockLinkingPublicInputs::from_slice(&wires.block_linking),
-            root: wires.root,
-        };
-
-        self.c.assign(pw, &wires);
     }
 }

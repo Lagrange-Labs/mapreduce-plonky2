@@ -12,7 +12,7 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 use crate::{
     keccak::{OutputHash, PACKED_HASH_LEN},
-    state::lpn::leaf::LeafWires,
+    state::BlockLinkingPublicInputs,
 };
 
 /// The public inputs for the leaf circuit.
@@ -39,14 +39,17 @@ pub struct PublicInputs<'a, T: Clone> {
 
 impl<'a> PublicInputs<'a, Target> {
     /// Registers the public inputs into the circuit builder.
-    pub fn register<F, const D: usize>(b: &mut CircuitBuilder<F, D>, wires: &LeafWires)
-    where
+    pub fn register<F, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        root: &HashOutTarget,
+        block_linking: &BlockLinkingPublicInputs<'a, Target>,
+    ) where
         F: RichField + Extendable<D>,
     {
-        b.register_public_inputs(&wires.root.elements);
-        b.register_public_inputs(wires.block_linking.block_hash());
-        b.register_public_input(wires.block_linking.block_number()[0]);
-        b.register_public_inputs(wires.block_linking.prev_block_hash());
+        b.register_public_inputs(&root.elements);
+        b.register_public_inputs(block_linking.block_hash());
+        b.register_public_input(block_linking.block_number()[0]);
+        b.register_public_inputs(block_linking.prev_block_hash());
     }
 
     /// Returns the root hash.

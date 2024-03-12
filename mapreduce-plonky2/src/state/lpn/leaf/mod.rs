@@ -9,7 +9,7 @@ use plonky2::{
         hash_types::{HashOutTarget, RichField},
         poseidon::PoseidonHash,
     },
-    iop::{target::Target, witness::PartialWitness},
+    iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
 
@@ -21,35 +21,6 @@ mod public_inputs;
 mod tests;
 
 pub(crate) use public_inputs::PublicInputs;
-
-/// The wires structure of [LeafCircuit].
-#[derive(Clone)]
-pub struct LeafWires<'i> {
-    block_linking: BlockLinkingPublicInputs<'i, Target>,
-    root: HashOutTarget,
-}
-
-impl<'i> LeafWires<'i> {
-    /// Returns an iterator with the following items, in sequence:
-    ///
-    /// - `A` Smart contract address
-    /// - `C` Merkle root of the storage database
-    /// - `S` Storage slot of the variable holding the length
-    /// - `M` Storage slot of the mapping
-    ///
-    /// Such iterator will be used to compute the root node of the leaf.
-    pub fn node_preimage<T: Clone>(
-        prefix: T,
-        block_linking: &'i BlockLinkingPublicInputs<'i, T>,
-    ) -> impl Iterator<Item = T> + 'i {
-        let a = block_linking.a().iter().cloned();
-        let c = block_linking.merkle_root().iter().cloned();
-        let s = iter::once(block_linking.s()[0].clone());
-        let m = iter::once(block_linking.m()[0].clone());
-
-        iter::once(prefix).chain(a).chain(c).chain(s).chain(m)
-    }
-}
 
 /// Circuit to prove the correct formation of the leaf node.
 ///
@@ -95,31 +66,42 @@ impl<'i> LeafWires<'i> {
 pub struct LeafCircuit;
 
 impl LeafCircuit {
+    /// Returns an iterator with the following items, in sequence:
+    ///
+    /// - `A` Smart contract address
+    /// - `C` Merkle root of the storage database
+    /// - `S` Storage slot of the variable holding the length
+    /// - `M` Storage slot of the mapping
+    ///
+    /// Such iterator will be used to compute the root node of the leaf.
+    pub fn node_preimage<'i, T: Clone>(
+        prefix: T,
+        block_linking: &'i BlockLinkingPublicInputs<'i, T>,
+    ) -> impl Iterator<Item = T> + 'i {
+        let a = block_linking.a().iter().cloned();
+        let c = block_linking.merkle_root().iter().cloned();
+        let s = iter::once(block_linking.s()[0].clone());
+        let m = iter::once(block_linking.m()[0].clone());
+
+        iter::once(prefix).chain(a).chain(c).chain(s).chain(m)
+    }
+
     /// Composes the circuit structure by assigning the virtual targets and performing the
     /// constraints.
+    ///
+    /// The returned [HashOutTarget] will correspond to the Merkle root of the leaf.
     pub fn build<'i, F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-        block_linking: BlockLinkingPublicInputs<'i, Target>,
-    ) -> LeafWires<'i>
+        block_linking: &BlockLinkingPublicInputs<'i, Target>,
+    ) -> HashOutTarget
     where
         F: RichField + Extendable<D>,
     {
-        let preimage = LeafWires::node_preimage(b.one(), &block_linking).collect::<Vec<_>>();
+        let preimage = Self::node_preimage(b.one(), &block_linking).collect::<Vec<_>>();
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(preimage);
-        let wires = LeafWires {
-            block_linking,
-            root,
-        };
 
-        PublicInputs::register(b, &wires);
+        PublicInputs::register(b, &root, block_linking);
 
-        wires
-    }
-
-    /// Assigns the wire values into the partial witness.
-    pub fn assign<F>(&self, _pw: &mut PartialWitness<F>, _wires: &LeafWires)
-    where
-        F: RichField,
-    {
+        root
     }
 }
