@@ -12,7 +12,7 @@ use plonky2::{
     field::extension::Extendable,
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField},
-        merkle_proofs::MerkleProofTarget,
+        merkle_proofs::{MerkleProof, MerkleProofTarget},
         poseidon::PoseidonHash,
     },
     iop::{
@@ -25,20 +25,18 @@ use public_inputs::PublicInputs;
 use std::array;
 
 /// Block tree wires
-pub struct BlockTreeWires<const MAX_DEPTH: usize>
-where
-    [(); MAX_DEPTH + 1]:,
-{
+pub struct BlockTreeWires<const MAX_DEPTH: usize> {
     /// The flag identifies if this is the first block inserted to the tree.
     is_first: BoolTarget,
     /// The index of new leaf is given by its little-endian bits. It corresponds
     /// to the plonky2 [verify_merkle_proof argument](https://github.com/0xPolygonZero/plonky2/blob/62ffe11a984dbc0e6fe92d812fa8da78b7ba73c7/plonky2/src/hash/merkle_proofs.rs#L98).
     leaf_index_bits: [BoolTarget; MAX_DEPTH],
-    /// The path starts from the sibling of new leaf (block), and the parent's
-    /// siblings at each level, till to the root. It corresponds to the plonky2
+    /// The new root of this Merkle tree
+    root: HashOutTarget,
+    /// The path starts from the sibling of new leaf, and the parent's siblings
+    /// at each level. The root is not included. It corresponds to the plonky2
     /// [MerkleProofTarget](https://github.com/0xPolygonZero/plonky2/blob/62ffe11a984dbc0e6fe92d812fa8da78b7ba73c7/plonky2/src/hash/merkle_proofs.rs#L37).
-    // The +1 is because it includes the root as well in the path.
-    path: [HashOutTarget; MAX_DEPTH + 1],
+    path: MerkleProofTarget,
 }
 
 /// Block tree circuit used to prove the correct updating of the block tree
@@ -46,7 +44,6 @@ where
 pub struct BlockTreeCircuit<F, const MAX_DEPTH: usize>
 where
     F: RichField,
-    [(); MAX_DEPTH + 1]:,
 {
     /// The flag identifies if this is the first block inserted to the tree.
     is_first: bool,
@@ -56,21 +53,28 @@ where
     /// could know the corresponding siblings (if left or right) in path. It
     /// corresponds to the plonky2 [verify_merkle_proof argument](https://github.com/0xPolygonZero/plonky2/blob/62ffe11a984dbc0e6fe92d812fa8da78b7ba73c7/plonky2/src/hash/merkle_proofs.rs#L44).
     leaf_index: usize,
-    /// The path starts from the sibling of new leaf (block), and the parent's
-    /// siblings at each level, till to the root. It corresonds to the plonky2
+    /// The new root of this Merkle tree
+    root: HashOut<F>,
+    /// The path starts from the sibling of new leaf, and the parent's siblings
+    /// at each level. The root is not included. It corresonds to the plonky2
     /// [MerkleProof](https://github.com/0xPolygonZero/plonky2/blob/62ffe11a984dbc0e6fe92d812fa8da78b7ba73c7/plonky2/src/hash/merkle_proofs.rs#L21).
-    path: [HashOut<F>; MAX_DEPTH + 1],
+    path: MerkleProof<F, PoseidonHash>,
 }
 
 impl<F, const MAX_DEPTH: usize> BlockTreeCircuit<F, MAX_DEPTH>
 where
     F: RichField,
-    [(); MAX_DEPTH + 1]:,
 {
-    pub fn new(is_first: bool, leaf_index: usize, path: [HashOut<F>; MAX_DEPTH + 1]) -> Self {
+    pub fn new(
+        is_first: bool,
+        leaf_index: usize,
+        root: HashOut<F>,
+        path: MerkleProof<F, PoseidonHash>,
+    ) -> Self {
         Self {
             is_first,
             leaf_index,
+            root,
             path,
         }
     }
@@ -95,7 +99,10 @@ where
 
         // Initialize the targets in wires.
         let leaf_index_bits = array::from_fn(|_| cb.add_virtual_bool_target_safe());
-        let path = array::from_fn(|_| cb.add_virtual_hash());
+        let root = cb.add_virtual_hash();
+        let path = MerkleProofTarget {
+            siblings: cb.add_virtual_hashes(MAX_DEPTH),
+        };
 
         // The new leaf is the first inserted block if leaf index is zero.
         let zero = cb.zero();
@@ -107,11 +114,12 @@ where
 
         // Verify both the old and new roots of the block tree which are
         // calculated from the leaves sequentially.
-        verify_append_only(cb, &prev_pi, &new_leaf_pi, &leaf_index_bits, &path);
+        verify_append_only(cb, &prev_pi, &new_leaf_pi, &leaf_index_bits, &root, &path);
 
         let wires = BlockTreeWires {
             is_first,
             leaf_index_bits,
+            root,
             path,
         };
 
@@ -119,7 +127,7 @@ where
         PublicInputs::register(
             cb,
             &prev_pi.init_root(),
-            path.last().unwrap(),
+            &root,
             prev_pi.first_block_number(),
             new_leaf_pi.block_number(),
             &new_leaf_pi.block_header(),
@@ -145,9 +153,10 @@ where
 
         wires
             .path
-            .into_iter()
-            .zip(self.path)
-            .for_each(|(t, v)| pw.set_hash_target(t, v));
+            .siblings
+            .iter()
+            .zip(&self.path.siblings)
+            .for_each(|(t, v)| pw.set_hash_target(*t, *v));
     }
 }
 
@@ -198,24 +207,19 @@ fn verify_append_only<F: RichField + Extendable<D>, const D: usize>(
     prev_pi: &PublicInputs<Target>,
     new_leaf_pi: &LeafInputs<Target>,
     leaf_index_bits: &[BoolTarget],
-    path: &[HashOutTarget],
+    new_root: &HashOutTarget,
+    path: &MerkleProofTarget,
 ) {
-    // Get the old and new roots.
     let old_root = prev_pi.root();
-    let (new_root, siblings) = path.split_last().unwrap();
-
-    // Construct the Merkle proof.
-    let siblings = siblings.to_vec();
-    let merkle_proof = MerkleProofTarget { siblings };
 
     // Get the new leaf data.
     let leaf_data = leaf_data(cb, new_leaf_pi);
 
     // Verify the new leaf is present at the given index in Merkle tree with the new root.
-    cb.verify_merkle_proof::<PoseidonHash>(leaf_data, leaf_index_bits, *new_root, &merkle_proof);
+    cb.verify_merkle_proof::<PoseidonHash>(leaf_data, leaf_index_bits, *new_root, path);
 
     // Verify the leaf is empty at the given index in Merkle tree with the old root.
-    cb.verify_merkle_proof::<PoseidonHash>(vec![], leaf_index_bits, old_root, &merkle_proof);
+    cb.verify_merkle_proof::<PoseidonHash>(vec![], leaf_index_bits, old_root, path);
 }
 
 /// Get the leaf data from public inputs.
@@ -249,7 +253,7 @@ mod tests {
         field::types::Field,
         hash::{
             hash_types::NUM_HASH_OUT_ELTS, merkle_proofs::verify_merkle_proof,
-            merkle_proofs::MerkleProof, merkle_tree::MerkleTree,
+            merkle_tree::MerkleTree,
         },
         plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
@@ -261,19 +265,13 @@ mod tests {
 
     /// Test circuit
     #[derive(Clone, Debug)]
-    struct TestCircuit<const MAX_DEPTH: usize>
-    where
-        [(); MAX_DEPTH + 1]:,
-    {
+    struct TestCircuit<const MAX_DEPTH: usize> {
         prev_pi: Vec<F>,
         new_leaf_pi: Vec<F>,
         c: BlockTreeCircuit<F, MAX_DEPTH>,
     }
 
-    impl<const MAX_DEPTH: usize> UserCircuit<F, D> for TestCircuit<MAX_DEPTH>
-    where
-        [(); MAX_DEPTH + 1]:,
-    {
+    impl<const MAX_DEPTH: usize> UserCircuit<F, D> for TestCircuit<MAX_DEPTH> {
         type Wires = (Vec<Target>, Vec<Target>, BlockTreeWires<MAX_DEPTH>);
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
@@ -318,10 +316,7 @@ mod tests {
     }
 
     /// Run the test circuit with a specified new leaf index.
-    fn test_circuit<const MAX_DEPTH: usize>(leaf_index: usize)
-    where
-        [(); MAX_DEPTH + 1]:,
-    {
+    fn test_circuit<const MAX_DEPTH: usize>(leaf_index: usize) {
         init_logging();
 
         // The new leaf is the first inserted block if leaf index is zero.
@@ -341,22 +336,14 @@ mod tests {
         old_leaves[leaf_index] = vec![];
         let old_root = merkle_root(old_leaves);
 
-        // Generate the new path (till to the new root).
-        let path = merkle_path(leaf_index, leaves);
+        // Generate the new root and path (siblings without root).
+        let (new_root, path) = merkle_root_path(leaf_index, leaves);
 
         // Verify the path, old and new roots (out of circuit).
-        let (new_root, siblings) = path.split_last().unwrap();
-        let siblings = siblings.to_vec();
-        let merkle_proof = MerkleProof { siblings };
-        verify_merkle_proof::<_, PoseidonHash>(vec![], leaf_index, old_root.clone(), &merkle_proof)
+        verify_merkle_proof::<_, PoseidonHash>(vec![], leaf_index, old_root.clone(), &path)
             .unwrap();
-        verify_merkle_proof::<_, PoseidonHash>(
-            leaf_data.clone(),
-            leaf_index,
-            *new_root,
-            &merkle_proof,
-        )
-        .unwrap();
+        verify_merkle_proof::<_, PoseidonHash>(leaf_data.clone(), leaf_index, new_root, &path)
+            .unwrap();
 
         // Generate the previous public inputs of Merkle tree.
         let prev_pi =
@@ -366,11 +353,11 @@ mod tests {
         let new_leaf_pi = new_leaf_inputs(&leaf_data, &prev_pi);
 
         // Get the expected outputs.
-        let exp_outputs = expected_outputs(&prev_pi, &new_leaf_pi, path.last().unwrap());
+        let exp_outputs = expected_outputs(&prev_pi, &new_leaf_pi, &new_root);
 
         // Run the circuit.
         let test_circuit = TestCircuit::<MAX_DEPTH> {
-            c: BlockTreeCircuit::new(is_first, leaf_index, path),
+            c: BlockTreeCircuit::new(is_first, leaf_index, new_root, path),
             prev_pi,
             new_leaf_pi,
         };
@@ -409,23 +396,21 @@ mod tests {
         tree.cap.0[0]
     }
 
-    /// Generate the Merkle path from leaves.
-    fn merkle_path<const MAX_DEPTH: usize>(
+    /// Generate the Merkle root and path (siblings without root) from leaves.
+    fn merkle_root_path(
         leaf_index: usize,
         leaves: Vec<Vec<F>>,
-    ) -> [HashOut<F>; MAX_DEPTH + 1] {
+    ) -> (HashOut<F>, MerkleProof<F, PoseidonHash>) {
         // Construct the Merkle tree.
         let tree = MerkleTree::<F, PoseidonHash>::new(leaves, 0);
         assert_eq!(tree.cap.0.len(), 1, "Merkle tree must have one root");
 
+        let root = tree.cap.0[0];
+
         // Generate the siblings at the each level (without root).
-        let merkle_proof = tree.prove(leaf_index);
-        let mut path = merkle_proof.siblings;
+        let path = tree.prove(leaf_index);
 
-        // Append the root to the path.
-        path.push(tree.cap.0[0]);
-
-        path.try_into().unwrap()
+        (root, path)
     }
 
     /// Generate the public inputs of Merkle tree (the current circuit).
