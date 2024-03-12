@@ -7,30 +7,14 @@ use crate::storage::key::MappingSlotWires;
 use crate::storage::{MAX_EXTENSION_NODE_LEN, MAX_LEAF_NODE_LEN};
 use crate::{
     array::{Array, Vector, VectorWire},
-    eth::left_pad32,
-    group_hashing::{self, CircuitBuilderGroupHashing},
-    keccak::{
-        ByteKeccakWires, InputData, KeccakCircuit, KeccakWires, OutputHash, HASH_LEN,
-        PACKED_HASH_LEN,
-    },
-    mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
-    rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
-    utils::{convert_u8_targets_to_u32, keccak256},
+    group_hashing::CircuitBuilderGroupHashing,
+    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
+    mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
+    rlp::decode_fixed_list,
 };
-use core::array::from_fn as create_array;
-use ethers::types::spoof::Storage;
-use plonky2::field::extension::quintic::QuinticExtension;
-use plonky2::field::extension::FieldExtension;
 use plonky2::{
-    field::{extension::Extendable, goldilocks_field::GoldilocksField, types::Field},
-    hash::{
-        hash_types::{RichField, NUM_HASH_OUT_ELTS},
-        keccak,
-    },
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+    field::goldilocks_field::GoldilocksField,
+    iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
@@ -176,25 +160,17 @@ mod test {
     use crate::utils::keccak256;
     use eth_trie::{Nibbles, Trie};
     use plonky2::iop::target::Target;
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+    use plonky2::iop::witness::PartialWitness;
+    use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use plonky2::{
-        field::extension::Extendable, hash::hash_types::RichField,
-        plonk::circuit_builder::CircuitBuilder,
-    };
-    use plonky2_crypto::u32::arithmetic_u32::U32Target;
-    use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
-    use plonky2_ecgfp5::gadgets::curve::CurveTarget;
     use rand::{thread_rng, Rng};
-    use rlp::Rlp;
 
     use super::{LeafCircuit, LeafWires, PublicInputs};
     use crate::array::Array;
     use crate::circuit::UserCircuit;
     use crate::eth::{left_pad32, StorageSlot};
-    use crate::group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing};
-    use crate::keccak::PACKED_HASH_LEN;
-    use crate::mpt_sequential::{bytes_to_nibbles, MPTKeyWire, MAX_LEAF_VALUE_LEN};
+    use crate::group_hashing::map_to_curve_point;
+    use crate::mpt_sequential::{bytes_to_nibbles, MAX_LEAF_VALUE_LEN};
     use crate::storage::key::MappingSlot;
     use crate::utils::convert_u8_to_u32_slice;
     use plonky2::field::types::Field;
