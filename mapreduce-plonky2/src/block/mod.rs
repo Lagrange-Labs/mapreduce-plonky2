@@ -103,7 +103,7 @@ where
         let is_first = cb.is_equal(leaf_index, zero);
 
         // Verify the previous outputs and the new leaf (block) public inputs.
-        verify_proofs(cb, &prev_pi, &new_leaf_pi, leaf_index);
+        verify_proofs(cb, &prev_pi, &new_leaf_pi, leaf_index, is_first);
 
         // Verify both the old and new roots of the block tree which are
         // calculated from the leaves sequentially.
@@ -157,6 +157,7 @@ fn verify_proofs<F: RichField + Extendable<D>, const D: usize>(
     prev_pi: &PublicInputs<Target>,
     new_leaf_pi: &LeafInputs<Target>,
     leaf_index: Target,
+    is_first: BoolTarget,
 ) {
     // Check the previous block header.
     prev_pi
@@ -167,8 +168,7 @@ fn verify_proofs<F: RichField + Extendable<D>, const D: usize>(
     let prev_block_num = prev_pi.block_number();
     let new_block_num = new_leaf_pi.block_number();
 
-    // Check the sequentiality as
-    // `first_block_number + leaf_index = new_block_number`.
+    // Check `first_block_number + leaf_index = new_block_number`.
     let exp_block_num = cb.add(first_block_num.0, leaf_index);
     cb.connect(exp_block_num, new_block_num.0);
 
@@ -176,6 +176,19 @@ fn verify_proofs<F: RichField + Extendable<D>, const D: usize>(
     let one = cb.one();
     let exp_block_num = cb.add(prev_block_num.0, one);
     cb.connect(exp_block_num, new_block_num.0);
+
+    // Check the previous root is equal to the init root if the new leaf is the
+    // first inserted block.
+    let init_root = prev_pi.init_root();
+    let prev_root = prev_pi.root();
+    init_root
+        .elements
+        .into_iter()
+        .zip(prev_root.elements)
+        .for_each(|(init_element, prev_element)| {
+            let exp_element = cb.select(is_first, init_element, prev_element);
+            cb.connect(exp_element, prev_element);
+        });
 }
 
 /// Verify both the old and new roots of the block tree which are calculated
@@ -423,7 +436,7 @@ mod tests {
         root: HashOut<F>,
     ) -> Vec<F> {
         // All leaves are empty for the init root.
-        let init_root = merkle_root(generate_all_leaves::<MAX_DEPTH>(first_block_num, 0));
+        let init_root = merkle_root(vec![vec![]; 1 << MAX_DEPTH]);
 
         // [state_root, block_number, block_header]
         assert_eq!(leaf_data.len(), NUM_HASH_OUT_ELTS + 1 + PACKED_HASH_LEN);
