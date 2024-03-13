@@ -19,20 +19,21 @@ use super::{public_inputs::PublicInputs, AddressTarget};
 pub struct InclusionWires {
     pub key: Array<Target, KEY_GL_SIZE>,
     pub value: Array<Target, LEAF_GL_SIZE>,
-    pub owner: Array<Target, 32>,
+    pub owner: AddressTarget,
 }
 
 #[derive(Clone)]
 pub struct InclusionCircuit {
     pub key: [u8; KEY_GL_SIZE],
     pub value: [u8; LEAF_GL_SIZE],
-    pub owner: [u8; AddressTarget::LEN]
+    pub owner: [u8; AddressTarget::LEN],
 }
 
 impl InclusionCircuit {
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &InclusionWires) {
         wires.key.assign_from_data(pw, &self.key);
         wires.value.assign_from_data(pw, &self.value);
+        wires.owner.assign_from_data(pw, &self.owner);
     }
 }
 

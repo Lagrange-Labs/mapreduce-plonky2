@@ -4,7 +4,9 @@
 use plonky2::iop::target::Target;
 
 use crate::array::Array;
+mod full_inner;
 mod leaf;
+mod partial_inner;
 mod public_inputs;
 
 // TODO: use 32B for address for now, see later if we prefer 20B

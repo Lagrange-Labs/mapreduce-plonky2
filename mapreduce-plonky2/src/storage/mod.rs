@@ -3,9 +3,11 @@ mod key;
 pub mod length_extract;
 mod length_match;
 mod lpn;
-pub mod mapping;
-mod merkle;
+mod mapping;
 mod query2;
+
+use plonky2::iop::target::Target;
+use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
 pub use digest_equal::PublicInputs;
 
@@ -34,4 +36,11 @@ fn LEAF_MARKER() -> GoldilocksField {
 #[allow(non_snake_case)]
 fn NODE_MARKER() -> GoldilocksField {
     GoldilocksField::from_canonical_u32(u32::from_be_bytes(*b"NODE"))
+}
+
+fn iter_curve_target<'a>(t: &'a CurveTarget) -> impl Iterator<Item = &'a Target> {
+    t.0 .0
+        .iter()
+        .flat_map(|x| x.0.iter())
+        .chain(std::iter::once(&t.0 .1.target))
 }

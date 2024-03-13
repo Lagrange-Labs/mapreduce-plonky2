@@ -146,7 +146,7 @@ fn test_mini_tree(k1s: &'_ str, v1s: &'_ str, k2s: &'_ str, v2s: &'_ str) {
         .to_weierstrass();
     let found_digest = ios.digest();
     assert_eq!(expected_digest, found_digest);
-    // The digest commutes
+    // The digest must commute
     assert_eq!(expected_other_digest, found_digest);
 
     // Check the nested root hash
