@@ -10,7 +10,7 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use recursion_framework::serialization::{deserialize_long_array, serialize_long_array};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
 use crate::utils::{less_than, less_than_or_equal_to};
@@ -59,7 +59,7 @@ pub struct Vector<F, const MAX_LEN: usize> {
 
 impl<T: Default + Clone + Debug, const MAX_LEN: usize> Vector<T, MAX_LEN> {
     /// Utility wrapper around vector of bytes
-    pub fn to_fields<F: RichField>(&self) -> Vector<F, MAX_LEN>
+    pub(crate) fn to_fields<F: RichField>(&self) -> Vector<F, MAX_LEN>
     where
         T: ToField<F>,
     {

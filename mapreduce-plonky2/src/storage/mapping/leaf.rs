@@ -4,7 +4,7 @@
 use crate::circuit::UserCircuit;
 use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
 use crate::storage::key::MappingSlotWires;
-use crate::storage::mapping::extension::MAX_EXTENSION_NODE_LEN;
+use crate::storage::{MAX_EXTENSION_NODE_LEN, MAX_LEAF_NODE_LEN};
 use crate::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
@@ -27,7 +27,6 @@ use serde::{Deserialize, Serialize};
 use super::super::key::{MappingSlot, MAPPING_KEY_LEN};
 use crate::storage::mapping::public_inputs::PublicInputs;
 
-pub(super) const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
 /// Circuit implementing the circuit to prove the correct derivation of the
 /// MPT key from a mapping key and mapping slot. It also do the usual recursive
 /// MPT proof verification logic.

@@ -11,13 +11,11 @@ use crate::{
     keccak::{InputData, KeccakCircuit, KeccakWires},
     mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
     rlp::decode_fixed_list,
+    storage::MAX_EXTENSION_NODE_LEN,
 };
 
 use super::public_inputs::PublicInputs;
 
-/// rlp( rlp(max key 32b) + rlp(max value 32b) ) + 1 for compact encoding
-/// see test_len()
-pub(crate) const MAX_EXTENSION_NODE_LEN: usize = 69;
 const PADDED_LEN: usize = PAD_LEN(MAX_EXTENSION_NODE_LEN);
 
 /// Circuit proving the processing of an extension node as part of the recursive
