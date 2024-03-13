@@ -21,20 +21,21 @@ pub struct InclusionWires {
     pub value: Array<Target, LEAF_GL_SIZE>,
 }
 
+/// This circuit prove the new root hash of a leaf containing the requested data
 #[derive(Clone)]
-pub struct InclusionCircuit {
+pub struct LeafCircuit {
     pub key: [u8; KEY_GL_SIZE],
     pub value: [u8; AddressTarget::LEN],
 }
 
-impl InclusionCircuit {
+impl LeafCircuit {
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &InclusionWires) {
         wires.key.assign_from_data(pw, &self.key);
         wires.value.assign_from_data(pw, &self.value);
     }
 }
 
-impl UserCircuit<GoldilocksField, 2> for InclusionCircuit {
+impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
     type Wires = InclusionWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {

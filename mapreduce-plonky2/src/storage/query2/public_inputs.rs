@@ -16,11 +16,15 @@ use plonky2_ecgfp5::{
 use crate::{
     array::Array,
     storage::CURVE_TARGET_GL_SIZE,
-    utils::{convert_point_to_curve_target, convert_slice_to_curve_point, ADDRESS_LEN},
+    utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 
 use super::AddressTarget;
 
+/// The public inputs required for the storage proof of query #2
+///   - hash of this subtree (NUM_HASH_OUT_ELTS);
+///   - digest of this subtree (CURVE_TARGET_GL_SIZE);
+///   - value (owner) forwarded bottom-up (AddressTarget::LEN)
 #[derive(Debug)]
 pub struct PublicInputs<'input, T: Clone> {
     pub inputs: &'input [T],
@@ -67,6 +71,7 @@ impl<'a, T: Clone + Copy> PublicInputs<'a, T> {
         convert_slice_to_curve_point(raw)
     }
 
+    /// Extracts the owner address
     fn owner_raw(&self) -> &[T] {
         let start = Self::ROOT_LEN + CURVE_TARGET_GL_SIZE;
         &self.inputs[start..start + AddressTarget::LEN]
@@ -85,6 +90,7 @@ impl<'a> PublicInputs<'a, Target> {
             .unwrap()
     }
 
+    /// The owner address
     pub fn owner(&self) -> AddressTarget {
         Array::try_from(self.owner_raw().to_vec()).unwrap()
     }
@@ -114,6 +120,7 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
         HashOut::from_vec(self.root_raw().to_owned())
     }
 
+    /// The owner address as an array of GL
     pub fn owner(&self) -> &[GoldilocksField] {
         self.owner_raw()
     }

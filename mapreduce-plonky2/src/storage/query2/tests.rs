@@ -28,7 +28,7 @@ use crate::{
 
 use super::{
     full_inner::{FullInnerNodeCircuit, FullInnerNodeWires},
-    leaf::InclusionCircuit,
+    leaf::LeafCircuit,
     partial_inner::{PartialInnerNodeCircuit, PartialInnerNodeWires},
     public_inputs::PublicInputs,
 };
@@ -137,7 +137,7 @@ fn run_leaf_proof<'data>(k: &'_ str, v: &'_ str) -> LeafProofResult {
         .map(F::from_canonical_u8)
         .collect_vec();
 
-    let circuit = InclusionCircuit {
+    let circuit = LeafCircuit {
         key: key.try_into().unwrap(),
         value: value.try_into().unwrap(),
     };
@@ -183,6 +183,13 @@ fn test_leaf_nonzero_zero() {
     test_leaf("1235", "00");
 }
 
+/// Builds & proves the following tree
+///
+/// Top-level - PartialInnerCircuit
+/// ├── Middle sub-tree – FullInnerNodeCircuit
+/// │   ├── LeafCircuit - K, V
+/// │   └── LeafCircuit - K, V
+/// └── Untouched sub-tree – hash == Poseidon("jean-michel")
 fn test_mini_tree(k: &str, v: &str) {
     let left = run_leaf_proof(k, v);
     let middle = run_leaf_proof(k, v);
@@ -231,7 +238,7 @@ fn test_mini_tree(k: &str, v: &str) {
     let expected_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
     assert_eq!(expected_hash, middle_ios.root());
 
-    // Check that the owner is correctly forwared
+    // Check that the owner is correctly forwarded
     assert_eq!(left.owner_gl, middle_ios.owner());
     assert_eq!(middle.owner_gl, middle_ios.owner());
 
