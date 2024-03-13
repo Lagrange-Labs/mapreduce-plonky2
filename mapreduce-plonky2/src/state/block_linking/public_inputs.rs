@@ -5,7 +5,7 @@ use crate::{
     keccak::PACKED_HASH_LEN,
     mpt_sequential::PAD_LEN,
     storage::PublicInputs as StorageInputs,
-    utils::{CURVE_TARGET_LEN, PACKED_ADDRESS_LEN},
+    types::{CURVE_TARGET_LEN, PACKED_ADDRESS_LEN},
 };
 use plonky2::{
     field::extension::Extendable,

@@ -1,3 +1,4 @@
 //! Lagrange Proving Network circuits
 
-mod leaf;
+// TODO: remove public after moving the public inputs outside of leaf.
+pub(crate) mod leaf;
