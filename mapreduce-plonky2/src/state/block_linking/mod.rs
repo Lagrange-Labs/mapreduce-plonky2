@@ -255,8 +255,6 @@ mod tests {
 
         // Set maximum depth of the trie and Leave one for padding.
         const DEPTH: usize = 4;
-        const ACTUAL_DEPTH: usize = DEPTH - 1;
-
         const BLOCK_LEN: usize = 600;
         const NODE_LEN: usize = 600;
         const VALUE_LEN: usize = 50;
@@ -376,7 +374,13 @@ mod tests {
             c: BlockLinkingCircuit::new(&storage_pi, header_rlp, state_mpt.nodes),
             storage_pi,
         };
-        run_circuit::<F, D, C, _>(test_circuit);
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
+        let pi = PublicInputs::<F>::from_slice(&proof.public_inputs);
+        let computed_bn = pi.block_number();
+        assert_eq!(
+            F::from_canonical_u32(block.number.unwrap().as_u32()),
+            computed_bn
+        );
 
         Ok(())
     }

@@ -7,9 +7,9 @@
 
 mod public_inputs;
 
-use crate::state::lpn::leaf::PublicInputs as LeafInputs;
+use crate::{state::lpn::leaf::PublicInputs as LeafInputs, types::HashOutput};
 use plonky2::{
-    field::extension::Extendable,
+    field::{extension::Extendable, goldilocks_field::GoldilocksField, types::Field},
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField},
         merkle_proofs::{MerkleProof, MerkleProofTarget},
@@ -19,10 +19,26 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        config::{GenericHashOut, Hasher},
+    },
 };
 use public_inputs::PublicInputs;
 use std::array;
+
+pub const BLOCK_LEAF_DST: u8 = 0x31;
+
+pub fn block_leaf_hash(block_number: u32, block_header: &[u32], state_root: &[u32]) -> HashOutput {
+    let f_slice = std::iter::once(BLOCK_LEAF_DST as u32)
+        .chain(std::iter::once(block_number))
+        .chain(block_header.iter().copied())
+        .chain(state_root.iter().copied())
+        .map(GoldilocksField::from_canonical_u32)
+        .collect::<Vec<_>>();
+    let hash_f = PoseidonHash::hash_no_pad(&f_slice);
+    hash_f.to_bytes().try_into().unwrap()
+}
 
 /// Block tree wires
 pub struct BlockTreeWires<const MAX_DEPTH: usize> {
@@ -221,11 +237,12 @@ fn leaf_data<F: RichField + Extendable<D>, const D: usize>(
     let block_number = leaf_pi.block_number().0;
     let block_header = leaf_pi.block_header().arr.map(|u32_target| u32_target.0);
 
-    // Join as [state_root, block_number, block_header].
-    state_root
-        .into_iter()
+    // Join as [dst, block_number, block_header, state_root ].
+    let dst = cb.constant(F::from_canonical_u8(BLOCK_LEAF_DST));
+    std::iter::once(dst)
         .chain([block_number])
         .chain(block_header)
+        .chain(state_root)
         .collect()
 }
 
@@ -489,7 +506,7 @@ mod tests {
 
     /// Generate the random leaf data.
     fn rand_leaf_data(block_num: usize) -> Vec<F> {
-        // Generate as [state_root, block_number, block_header].
+        // Generate as [block_number, block_header, state_root ].
         let mut data: Vec<_> = random_vector(NUM_HASH_OUT_ELTS + 1 + PACKED_HASH_LEN)
             .into_iter()
             .map(F::from_canonical_usize)

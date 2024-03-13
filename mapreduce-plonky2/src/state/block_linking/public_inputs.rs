@@ -14,23 +14,23 @@ use plonky2::{
 /// This is a wrapper around an array of targets set as public inputs of any
 /// proof generated in this module. They all share the same structure.
 /// `H` Block header hash
-/// `N` Block number
+/// `N` Block number in u32 format
 /// `PREV_H` Header hash of the previous block (parent hash)
 /// `A` Smart contract address
 /// `D` Digest of the values
 /// `M` Storage slot of the mapping
 /// `S` Storage slot of the variable holding the length
 /// `C` Merkle root of the storage database, using poseidon
-/// H = 8, N = 2, PREV_H = 8, A = 5, D = 5*2+1, M = 8, S = 1, C = 4
+/// H = 8, N = 1, PREV_H = 8, A = 5, D = 5*2+1, M = 1, S = 1, C = 4
 const H_IDX: usize = 0;
 const N_IDX: usize = 8;
-const PREV_H_IDX: usize = 10;
-const A_IDX: usize = 18;
-const D_IDX: usize = 23;
-const M_IDX: usize = 34;
-const S_IDX: usize = 42;
-const C_IDX: usize = 43;
-const TOTAL_LEN: usize = 47;
+const PREV_H_IDX: usize = 9;
+const A_IDX: usize = 17;
+const D_IDX: usize = 22;
+const M_IDX: usize = 33;
+const S_IDX: usize = 34;
+const C_IDX: usize = 35;
+const TOTAL_LEN: usize = 39;
 
 #[derive(Clone)]
 pub struct PublicInputs<'a, T: Clone> {
@@ -81,6 +81,7 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
     ///
     /// This function will panic if the length of the provided slice is smaller than
     /// [Self::TOTAL_LEN].
+    #[cfg(test)]
     pub fn from_slice(arr: &'a [T]) -> Self {
         assert!(
             TOTAL_LEN <= arr.len(),
@@ -94,8 +95,8 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         &self.inner[H_IDX..N_IDX]
     }
 
-    pub fn block_number(&self) -> &[T] {
-        &self.inner[N_IDX..PREV_H_IDX]
+    pub fn block_number(&self) -> T {
+        self.inner[N_IDX].clone()
     }
 
     pub fn prev_block_hash(&self) -> &[T] {
@@ -137,6 +138,8 @@ mod tests {
 
     impl<'a, T: Copy + Default> PublicInputs<'a, T> {
         /// Writes the parts of the block liking public inputs into the provided target array.
+        #[cfg(test)]
+        #[allow(clippy::too_many_arguments)]
         pub fn parts_into_values(
             values: &mut [T; TOTAL_LEN],
             h: &[T; N_IDX - H_IDX],

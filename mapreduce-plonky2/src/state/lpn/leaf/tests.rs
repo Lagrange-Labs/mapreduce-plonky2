@@ -81,7 +81,7 @@ fn prove_and_verify_leaf_circuit() {
 
     assert_eq!(pi.root_data(), root.elements);
     assert_eq!(pi.block_header_data(), block_linking.block_hash());
-    assert_eq!(pi.block_number_data(), block_linking.block_number()[0]);
+    assert_eq!(pi.block_number_data(), block_linking.block_number());
     assert_eq!(pi.prev_block_header_data(), block_linking.prev_block_hash());
 }
 
