@@ -1,9 +1,12 @@
 use std::ops::Add;
 
 use plonky2::{
-    field::goldilocks_field::GoldilocksField,
-    hash::hash_types::HashOut,
-    iop::{target::Target, witness::WitnessWrite},
+    field::{goldilocks_field::GoldilocksField, types::Field},
+    hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{
         circuit_builder::CircuitBuilder,
         config::{GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
@@ -46,11 +49,7 @@ impl UserCircuit<GoldilocksField, 2> for NodeCircuitValidator<'_> {
         (wires, child_inputs)
     }
 
-    fn prove(
-        &self,
-        pw: &mut plonky2::iop::witness::PartialWitness<GoldilocksField>,
-        wires: &Self::Wires,
-    ) {
+    fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
         pw.set_target_arr(&wires.1[0], self.children[0].inputs);
         pw.set_target_arr(&wires.1[1], self.children[1].inputs);
         self.validated.assign(pw, &wires.0);

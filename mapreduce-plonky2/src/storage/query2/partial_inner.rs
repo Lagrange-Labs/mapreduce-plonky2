@@ -22,7 +22,7 @@ impl PartialInnerNodeCircuit {
     pub fn build(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
         leaf_child: &PublicInputs<Target>,
-        inner_child_hash: &HashOutTarget,
+        inner_child_hash: HashOutTarget,
         inner_child_position: BoolTarget,
     ) -> PartialInnerNodeWires {
         let leaf_str = b.constant(LEAF_MARKER());

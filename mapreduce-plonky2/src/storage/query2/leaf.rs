@@ -54,13 +54,16 @@ impl UserCircuit<GoldilocksField, 2> for InclusionCircuit {
         )
         .unwrap();
 
-        let to_hash =
-            Array::<Target, { LEAF_MARKER_GL_SIZE + KEY_GL_SIZE + LEAF_GL_SIZE }>::try_from(
-                std::iter::once(leaf_str)
-                    .chain(kv.arr.iter().copied())
-                    .collect::<Vec<_>>(),
-            )
-            .unwrap();
+        let to_hash = Array::<
+            Target,
+            { LEAF_MARKER_GL_SIZE + KEY_GL_SIZE + LEAF_GL_SIZE + AddressTarget::LEN },
+        >::try_from(
+            std::iter::once(leaf_str)
+                .chain(kv.arr.iter().copied())
+                .chain(owner.arr.iter().copied())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
         let digest = b.map_to_curve_point(&kv.arr);
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(to_hash.arr));
 

@@ -8,6 +8,8 @@ mod full_inner;
 mod leaf;
 mod partial_inner;
 mod public_inputs;
+#[cfg(test)]
+mod tests;
 
 // TODO: use 32B for address for now, see later if we prefer 20B
 type AddressTarget = Array<Target, 32>;

@@ -12,7 +12,7 @@ use super::public_inputs::PublicInputs;
 pub struct FullInnerNodeWires {}
 
 #[derive(Clone)]
-struct FullInnerNodeCircuit {}
+pub(crate) struct FullInnerNodeCircuit {}
 
 impl FullInnerNodeCircuit {
     pub fn build(
