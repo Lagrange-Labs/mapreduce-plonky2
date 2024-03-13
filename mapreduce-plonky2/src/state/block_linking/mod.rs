@@ -15,7 +15,8 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
-use public_inputs::PublicInputs;
+
+pub use public_inputs::PublicInputs;
 
 /// Main block-linking wires
 pub struct BlockLinkingWires<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>

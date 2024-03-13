@@ -351,6 +351,7 @@ pub(crate) mod test {
         pub verifying: u64,
     }
 
+    /// Proves and verifies the provided circuit instance.
     pub(crate) fn run_circuit<
         F: RichField + Extendable<D>,
         const D: usize,

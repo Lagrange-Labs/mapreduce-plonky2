@@ -1,3 +1,5 @@
 *.csv
 .DS_Store
 /target
+/.direnv/
+/.idea/

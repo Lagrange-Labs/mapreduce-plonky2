@@ -28,11 +28,12 @@ const S_IDX: usize = 42;
 const C_IDX: usize = 43;
 const TOTAL_LEN: usize = 51;
 
-pub struct PublicInputs<T> {
-    inner: [T; TOTAL_LEN],
+#[derive(Clone)]
+pub struct PublicInputs<'a, T: Clone> {
+    pub(crate) inner: &'a [T],
 }
 
-impl<T> PublicInputs<T> {
+impl<'a, T: Clone> PublicInputs<'a, T> {
     pub fn register<
         F,
         const D: usize,
@@ -70,6 +71,21 @@ impl<T> PublicInputs<T> {
         cb.register_public_inputs(storage_inputs.merkle_root_data());
     }
 
+    /// Creates a representation of the public inputs from the provided slice.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the length of the provided slice is smaller than
+    /// [Self::TOTAL_LEN].
+    pub fn from_slice(arr: &'a [T]) -> Self {
+        assert!(
+            TOTAL_LEN <= arr.len(),
+            "The public inputs slice length must be equal or greater than the expected length."
+        );
+
+        Self { inner: arr }
+    }
+
     pub fn block_hash(&self) -> &[T] {
         &self.inner[H_IDX..N_IDX]
     }
@@ -100,5 +116,62 @@ impl<T> PublicInputs<T> {
 
     pub fn merkle_root(&self) -> &[T] {
         &self.inner[C_IDX..]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::array;
+
+    use rand::{rngs::StdRng, RngCore, SeedableRng};
+
+    use super::*;
+
+    impl<'a, T: Clone> PublicInputs<'a, T> {
+        pub const TOTAL_LEN: usize = TOTAL_LEN;
+    }
+
+    impl<'a, T: Copy + Default> PublicInputs<'a, T> {
+        /// Writes the parts of the block liking public inputs into the provided target array.
+        pub fn parts_into_values(
+            values: &mut [T; TOTAL_LEN],
+            h: &[T; N_IDX - H_IDX],
+            n: &[T; PREV_H_IDX - N_IDX],
+            prev_h: &[T; A_IDX - PREV_H_IDX],
+            a: &[T; D_IDX - A_IDX],
+            d: &[T; M_IDX - D_IDX],
+            m: &[T; S_IDX - M_IDX],
+            s: &[T; C_IDX - S_IDX],
+            c: &[T; TOTAL_LEN - C_IDX],
+        ) {
+            values[H_IDX..N_IDX].copy_from_slice(h);
+            values[N_IDX..PREV_H_IDX].copy_from_slice(n);
+            values[PREV_H_IDX..A_IDX].copy_from_slice(prev_h);
+            values[A_IDX..D_IDX].copy_from_slice(a);
+            values[D_IDX..M_IDX].copy_from_slice(d);
+            values[M_IDX..S_IDX].copy_from_slice(m);
+            values[S_IDX..C_IDX].copy_from_slice(s);
+            values[C_IDX..TOTAL_LEN].copy_from_slice(c);
+        }
+    }
+
+    impl<'a, F: RichField> PublicInputs<'a, F> {
+        pub fn values_from_seed(seed: u64) -> [F; TOTAL_LEN] {
+            let rng = &mut StdRng::seed_from_u64(seed);
+
+            let h = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let n = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let prev_h = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let a = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let d = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let m = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let s = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            let c = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+
+            let mut values = array::from_fn(|_| F::ZERO);
+            Self::parts_into_values(&mut values, &h, &n, &prev_h, &a, &d, &m, &s, &c);
+
+            values
+        }
     }
 }

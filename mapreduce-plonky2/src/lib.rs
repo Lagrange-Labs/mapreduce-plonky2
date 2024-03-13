@@ -29,7 +29,6 @@ mod mpt_sequential;
 mod rlp;
 mod state;
 mod storage;
-pub mod transaction;
 mod types;
 mod utils;
 /// Bundle containing the raw proof, the verification key, and some common data
