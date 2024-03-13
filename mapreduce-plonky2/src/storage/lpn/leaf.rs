@@ -7,7 +7,7 @@ use plonky2::{
 
 use crate::{array::Array, circuit::UserCircuit, group_hashing::CircuitBuilderGroupHashing};
 
-use super::{PublicInputs, KEY_SIZE, LEAF_SIZE, STORAGE_LEAF_DST};
+use super::{PublicInputs, KEY_SIZE, LEAF_SIZE};
 
 #[derive(Clone, Debug)]
 pub struct LeafCircuit {
@@ -36,16 +36,13 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
     type Wires = LeafWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires {
-        let leaf_dst =
-            Array::from_array([b.constant(GoldilocksField::from_canonical_u8(STORAGE_LEAF_DST))]);
         let key = Array::<Target, KEY_SIZE>::new(b);
         let key_u32 = key.convert_u8_to_u32(b);
         let value = Array::<Target, LEAF_SIZE>::new(b);
         let value_u32 = value.convert_u8_to_u32(b);
         let kv = key_u32.concat(&value_u32).to_targets();
-        let to_hash = leaf_dst.concat(&kv);
         let digest = b.map_to_curve_point(&kv.arr);
-        let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(to_hash.arr));
+        let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(kv.arr));
 
         PublicInputs::<GoldilocksField>::register(b, &root, &digest);
 

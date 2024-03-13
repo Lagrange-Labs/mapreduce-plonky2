@@ -2,7 +2,7 @@ mod inner_node;
 mod leaf;
 mod public_inputs;
 
-use plonky2_ecgfp5::curve::curve::{Point as Digest, WeierstrassPoint};
+use plonky2_ecgfp5::curve::curve::Point as Digest;
 pub use public_inputs::PublicInputs;
 #[cfg(test)]
 mod tests;
@@ -18,12 +18,6 @@ use crate::{
     utils::convert_u8_to_u32_slice,
 };
 
-/// Domain separation tag for the leaf value hashing scheme
-const STORAGE_LEAF_DST: u8 = 0x11;
-/// Domain separation tag for the intermediate node value hashing scheme
-const STORAGE_NODE_DST: u8 = 0x12;
-/// Domain separation tag for the intermediate node value hashing scheme
-const DST_SIZE: usize = 1;
 /// Size of the input value we insert in a leaf node. Note the value is compacted in a u32 slice before hashing.
 const LEAF_SIZE: usize = 32;
 /// Size of the input value we insert in a leaf node. Note the key is compacted in u32 slice before hashing.
@@ -50,14 +44,10 @@ pub fn leaf_hash_for_mapping(key: &[u8], value: &[u8]) -> HashOutput {
 /// Computes the hash of a leaf node of the lpn storage database
 pub fn leaf_hash(value: &[u8]) -> HashOutput {
     assert!(value.len() % 4 == 0, "value must be a multiple of 4 bytes");
-    let dst = GoldilocksField::from_canonical_u8(STORAGE_LEAF_DST);
     let u32_slice = convert_u8_to_u32_slice(value);
-    let f_slice = std::iter::once(dst)
-        .chain(
-            u32_slice
-                .iter()
-                .map(|x| GoldilocksField::from_canonical_u32(*x)),
-        )
+    let f_slice = u32_slice
+        .into_iter()
+        .map(GoldilocksField::from_canonical_u32)
         .collect::<Vec<_>>();
     let hash_f = PoseidonHash::hash_no_pad(&f_slice);
     hash_f.to_bytes().try_into().unwrap()
@@ -66,10 +56,10 @@ pub fn leaf_hash(value: &[u8]) -> HashOutput {
 /// Computes the intermediate node hash from two hash output from other intermediate
 /// nodes or leaf nodes.
 pub fn intermediate_node_hash(left: &HashOutput, right: &HashOutput) -> HashOutput {
-    let dst = GoldilocksField::from_canonical_u8(STORAGE_NODE_DST);
-    let f_slice = std::iter::once(dst)
-        .chain(HashOut::<GoldilocksField>::from_bytes(left).elements)
-        .chain(HashOut::<GoldilocksField>::from_bytes(right).elements)
+    let f_slice = HashOut::<GoldilocksField>::from_bytes(left)
+        .elements
+        .into_iter()
+        .chain(HashOut::from_bytes(right).elements)
         .collect::<Vec<_>>();
     let hash_f = PoseidonHash::hash_no_pad(&f_slice);
     hash_f.to_bytes().try_into().unwrap()

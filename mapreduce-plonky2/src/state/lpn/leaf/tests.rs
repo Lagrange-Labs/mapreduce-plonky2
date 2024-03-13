@@ -24,7 +24,7 @@ use plonky2::{
 use crate::{
     circuit::{test::run_circuit, UserCircuit},
     state::{
-        lpn::leaf::{state_leaf_hash, PublicInputs, STATE_LEAF_DST},
+        lpn::{leaf::PublicInputs, state_leaf_hash},
         BlockLinkingPublicInputs,
     },
 };
@@ -33,14 +33,11 @@ use super::LeafCircuit;
 
 #[test]
 fn prove_and_verify_leaf_circuit() {
-    let block_linking_values = BlockLinkingPublicInputs::values_from_seed(TestLeafCircuit::PI_SEED);
+    let block_linking_values =
+        BlockLinkingPublicInputs::<GoldilocksField>::values_from_seed(TestLeafCircuit::PI_SEED);
     let block_linking = BlockLinkingPublicInputs::from_slice(&block_linking_values);
 
-    let preimage = LeafCircuit::node_preimage(
-        GoldilocksField::from_canonical_u8(STATE_LEAF_DST),
-        &block_linking,
-    )
-    .collect::<Vec<_>>();
+    let preimage = LeafCircuit::node_preimage(&block_linking).collect::<Vec<_>>();
     println!("test preimage: {:?}", preimage);
     let root = hash_n_to_hash_no_pad::<_, PoseidonPermutation<_>>(&preimage);
     // ensuring the public method using bytes is returning the same output

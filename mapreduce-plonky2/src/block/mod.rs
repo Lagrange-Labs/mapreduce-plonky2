@@ -29,7 +29,6 @@ use plonky2::{
 };
 use public_inputs::PublicInputs;
 use std::array;
-pub const BLOCK_LEAF_DST: u8 = 0x31;
 
 /// Returns the hash in bytes of the leaf of the block tree. It takes as parameters
 /// the block number, the block header in bytes and the state root in bytes.
@@ -42,8 +41,7 @@ pub fn block_leaf_hash(
 ) -> HashOutput {
     let bh = convert_u8_to_u32_slice(block_header);
     let sr = HashOut::from_bytes(state_root);
-    let f_slice = std::iter::once(BLOCK_LEAF_DST as u32)
-        .chain(std::iter::once(block_number))
+    let f_slice = std::iter::once(block_number)
         .chain(bh)
         .map(GoldilocksField::from_canonical_u32)
         .chain(sr.elements)
@@ -264,9 +262,7 @@ fn leaf_data<F: RichField + Extendable<D>, const D: usize>(
     let block_header = leaf_pi.block_header().arr.map(|u32_target| u32_target.0);
 
     // mimick block_leaf_hash
-    let dst = cb.constant(F::from_canonical_u8(BLOCK_LEAF_DST));
-    std::iter::once(dst)
-        .chain([block_number])
+    std::iter::once(block_number)
         .chain(block_header)
         .chain(state_root)
         .collect()

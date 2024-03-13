@@ -12,10 +12,6 @@ use crate::{types::HashOutput, utils::convert_u8_to_u32_slice};
 // TODO: remove public after moving the public inputs outside of leaf.
 pub(crate) mod leaf;
 
-/// Domain separation tag for the leaf value hashing scheme for the state database
-const STATE_LEAF_DST: u8 = 0x22;
-/// Domain separation tag for the node value hashing scheme for the state database
-const STATE_NODE_DST: u8 = 0x23;
 /// Returns the hash in bytes of the leaf of the state database. It takes as parameters
 /// * the address of the contract,
 /// * the mapping slot for which we're building the database over (v0 only functionality)
@@ -28,8 +24,8 @@ pub fn state_leaf_hash(
     storage_root: HashOutput,
 ) -> HashOutput {
     let packed = convert_u8_to_u32_slice(add.as_bytes());
-    let f_slice = std::iter::once(STATE_LEAF_DST as u32)
-        .chain(packed)
+    let f_slice = packed
+        .into_iter()
         .chain(std::iter::once(mapping_slot as u32))
         .chain(std::iter::once(length_slot as u32))
         .map(GoldilocksField::from_canonical_u32)
@@ -42,8 +38,9 @@ pub fn state_leaf_hash(
 /// Returns the hash in bytes of the node of the state database.
 /// TODO: test when the circuit is ready
 pub fn state_node_hash(left: HashOutput, right: HashOutput) -> HashOutput {
-    let f_slice = std::iter::once(GoldilocksField::from_canonical_u8(STATE_NODE_DST))
-        .chain(HashOut::from_bytes(&left).elements)
+    let f_slice = HashOut::<GoldilocksField>::from_bytes(&left)
+        .elements
+        .into_iter()
         .chain(HashOut::from_bytes(&right).elements)
         .collect::<Vec<_>>();
     let hash_f = PoseidonHash::hash_no_pad(&f_slice);
