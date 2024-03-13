@@ -23,8 +23,6 @@ use crate::{
 
 use super::public_inputs::PublicInputs;
 
-pub(super) const MAX_BRANCH_NODE_LEN: usize = 532;
-
 #[derive(Clone, Debug)]
 pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {
     pub(super) node: Vec<u8>,
