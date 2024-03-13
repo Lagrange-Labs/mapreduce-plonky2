@@ -379,7 +379,7 @@ mod tests {
         let computed_bn = pi.block_number();
         assert_eq!(
             F::from_canonical_u32(block.number.unwrap().as_u32()),
-            computed_bn
+            *computed_bn
         );
 
         Ok(())

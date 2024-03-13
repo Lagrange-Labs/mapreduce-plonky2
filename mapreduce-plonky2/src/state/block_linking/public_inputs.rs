@@ -4,10 +4,15 @@ use std::array::from_fn as create_array;
 
 use super::BlockLinkingWires;
 use crate::{
-    mpt_sequential::PAD_LEN, storage::PublicInputs as StorageInputs, types::PACKED_ADDRESS_LEN,
+    keccak::PACKED_HASH_LEN,
+    mpt_sequential::PAD_LEN,
+    storage::PublicInputs as StorageInputs,
+    types::{CURVE_TARGET_LEN, PACKED_ADDRESS_LEN},
 };
 use plonky2::{
-    field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
+    field::extension::Extendable,
+    hash::hash_types::{RichField, NUM_HASH_OUT_ELTS},
+    iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
 
@@ -20,17 +25,26 @@ use plonky2::{
 /// `D` Digest of the values
 /// `M` Storage slot of the mapping
 /// `S` Storage slot of the variable holding the length
-/// `C` Merkle root of the storage database, using poseidon
-/// H = 8, N = 1, PREV_H = 8, A = 5, D = 5*2+1, M = 1, S = 1, C = 4
+/// `C` Merkle root of the storage database
+
+const H_LEN: usize = PACKED_HASH_LEN;
+const N_LEN: usize = 1;
+const PREV_H_LEN: usize = PACKED_HASH_LEN;
+const A_LEN: usize = PACKED_ADDRESS_LEN;
+const D_LEN: usize = CURVE_TARGET_LEN;
+const M_LEN: usize = 1;
+const S_LEN: usize = 1;
+const C_LEN: usize = NUM_HASH_OUT_ELTS;
+const TOTAL_LEN: usize = H_LEN + N_LEN + PREV_H_LEN + A_LEN + D_LEN + M_LEN + S_LEN + C_LEN;
+
 const H_IDX: usize = 0;
-const N_IDX: usize = 8;
-const PREV_H_IDX: usize = 9;
-const A_IDX: usize = 17;
-const D_IDX: usize = 22;
-const M_IDX: usize = 33;
-const S_IDX: usize = 34;
-const C_IDX: usize = 35;
-const TOTAL_LEN: usize = 39;
+const N_IDX: usize = H_IDX + H_LEN;
+const PREV_H_IDX: usize = N_IDX + N_LEN;
+const A_IDX: usize = PREV_H_IDX + PREV_H_LEN;
+const D_IDX: usize = A_IDX + A_LEN;
+const M_IDX: usize = D_IDX + D_LEN;
+const S_IDX: usize = M_IDX + M_LEN;
+const C_IDX: usize = S_IDX + S_LEN;
 
 #[derive(Clone)]
 pub struct PublicInputs<'a, T: Clone> {
@@ -95,8 +109,8 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         &self.inner[H_IDX..N_IDX]
     }
 
-    pub fn block_number(&self) -> T {
-        self.inner[N_IDX].clone()
+    pub fn block_number(&self) -> &T {
+        &self.inner[N_IDX]
     }
 
     pub fn prev_block_hash(&self) -> &[T] {
@@ -111,12 +125,12 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         &self.inner[D_IDX..M_IDX]
     }
 
-    pub fn mapping_slot(&self) -> &[T] {
-        &self.inner[M_IDX..S_IDX]
+    pub fn mapping_slot(&self) -> &T {
+        &self.inner[M_IDX]
     }
 
-    pub fn length_slot(&self) -> &[T] {
-        &self.inner[S_IDX..C_IDX]
+    pub fn length_slot(&self) -> &T {
+        &self.inner[S_IDX]
     }
 
     pub fn merkle_root(&self) -> &[T] {

@@ -54,8 +54,8 @@ fn prove_and_verify_leaf_circuit() {
                 .flat_map(|x| x.to_le_bytes())
                 .collect::<Vec<_>>(),
         );
-        let mapping_slot = block_linking.mapping_slot()[0].to_canonical_u64() as u8;
-        let length_slot = block_linking.length_slot()[0].to_canonical_u64() as u8;
+        let mapping_slot = block_linking.mapping_slot().to_canonical_u64() as u8;
+        let length_slot = block_linking.length_slot().to_canonical_u64() as u8;
         // we want bytes
         let storage_root = HashOut {
             elements: block_linking.merkle_root().to_vec().try_into().unwrap(),
@@ -77,18 +77,12 @@ fn prove_and_verify_leaf_circuit() {
         c: LeafCircuit,
     };
     let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit);
-    let pi = PublicInputs::from(proof.public_inputs.as_slice());
+    let pi = PublicInputs::from_slice(proof.public_inputs.as_slice());
 
     assert_eq!(pi.root_data(), root.elements);
     assert_eq!(pi.block_header_data(), block_linking.block_hash());
-    assert_eq!(pi.block_number_data(), block_linking.block_number());
+    assert_eq!(&pi.block_number_data(), block_linking.block_number());
     assert_eq!(pi.prev_block_header_data(), block_linking.prev_block_hash());
-}
-
-impl<'a, T: Clone> From<&'a [T]> for PublicInputs<'a, T> {
-    fn from(proof_inputs: &'a [T]) -> Self {
-        Self { proof_inputs }
-    }
 }
 
 #[derive(Clone)]

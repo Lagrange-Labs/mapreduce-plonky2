@@ -488,7 +488,7 @@ mod tests {
     /// Get the expected outputs.
     fn expected_outputs(prev_pi: &[F], new_leaf_pi: &[F], new_root: &HashOut<F>) -> Vec<F> {
         let prev_pi = PublicInputs::from(prev_pi);
-        let new_leaf_pi = LeafInputs::from(new_leaf_pi);
+        let new_leaf_pi = LeafInputs::from_slice(new_leaf_pi);
 
         // [init_root, root, first_block_number, block_number, block_header]
         prev_pi

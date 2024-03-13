@@ -72,8 +72,8 @@ impl LeafCircuit {
     ) -> impl Iterator<Item = T> + 'i {
         let address = block_linking.packed_address().iter().cloned();
         let storage_root = block_linking.merkle_root().iter().cloned();
-        let length_slot = iter::once(block_linking.length_slot()[0].clone());
-        let mapping_slot = iter::once(block_linking.mapping_slot()[0].clone());
+        let length_slot = iter::once(block_linking.length_slot().clone());
+        let mapping_slot = iter::once(block_linking.mapping_slot().clone());
 
         iter::once(prefix)
             .chain(address)
