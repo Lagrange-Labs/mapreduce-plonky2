@@ -68,17 +68,3 @@ impl PartialInnerNodeCircuit {
 
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &PartialInnerNodeWires) {}
 }
-
-impl UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuit {
-    type Wires = PartialInnerNodeWires;
-
-    fn build(
-        c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<GoldilocksField, 2>,
-    ) -> Self::Wires {
-        todo!()
-    }
-
-    fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
-        self.assign(pw, wires);
-    }
-}
