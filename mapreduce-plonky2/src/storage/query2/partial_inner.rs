@@ -28,7 +28,6 @@ impl PartialInnerNodeCircuit {
         unproved_hash: HashOutTarget,
         unproved_is_left: BoolTarget,
     ) -> PartialInnerNodeWires {
-        let leaf_str = b.constant(NODE_MARKER());
         let one = b.one();
 
         let unproved_is_left = unproved_is_left.target;
@@ -36,16 +35,22 @@ impl PartialInnerNodeCircuit {
 
         // Left-hand case
         let unproved_is_left_hash = b.hash_n_to_hash_no_pad::<PoseidonHash>(
-            std::iter::once(leaf_str)
-                .chain(unproved_hash.elements.iter().copied())
+            unproved_hash
+                .elements
+                .iter()
+                .copied()
                 .chain(proved.root().elements.iter().copied())
                 .collect::<Vec<_>>(),
         );
 
         // Right-hand case
+        // b.verify_merkle_proof(leaf_data, leaf_index_bits, merkle_root, proof)
         let unproved_is_right_hash = b.hash_n_to_hash_no_pad::<PoseidonHash>(
-            std::iter::once(leaf_str)
-                .chain(proved.root().elements.iter().copied())
+            proved
+                .root()
+                .elements
+                .iter()
+                .copied()
                 .chain(unproved_hash.elements.iter().copied())
                 .collect::<Vec<_>>(),
         );

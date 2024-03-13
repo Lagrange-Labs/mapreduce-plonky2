@@ -20,9 +20,12 @@ impl FullInnerNodeCircuit {
         inputs: [PublicInputs<Target>; 2],
     ) -> FullInnerNodeWires {
         // Compute the new root hash
-        let to_hash = Array::<Target, { 1 + 2 * NUM_HASH_OUT_ELTS }>::try_from(
-            std::iter::once(b.constant(NODE_MARKER()))
-                .chain(inputs[0].root().elements.iter().copied())
+        let to_hash = Array::<Target, { 2 * NUM_HASH_OUT_ELTS }>::try_from(
+            inputs[0]
+                .root()
+                .elements
+                .iter()
+                .copied()
                 .chain(inputs[1].root().elements.iter().copied())
                 .collect::<Vec<_>>(),
         )
@@ -36,8 +39,7 @@ impl FullInnerNodeCircuit {
             .iter()
             .zip(inputs[1].owner().arr.iter())
             .for_each(|(l, r)| {
-                let sub = b.sub(*l, *r);
-                b.assert_zero(sub);
+                b.connect(*l, *r);
             });
 
         // Compute the new digest

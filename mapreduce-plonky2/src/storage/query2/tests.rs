@@ -23,7 +23,6 @@ use crate::{
     circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
     group_hashing::map_to_curve_point,
-    storage::{LEAF_MARKER, NODE_MARKER},
 };
 
 use super::{
@@ -153,10 +152,7 @@ fn test_leaf(k: &str, v: &str) {
     let r = run_leaf_proof(k, v);
 
     // Check the generated root hash
-    let to_hash = std::iter::once(LEAF_MARKER())
-        .chain(r.kv_gl.iter().copied())
-        .collect_vec();
-    let exp_root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
+    let exp_root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(r.kv_gl.as_slice());
     assert_eq!(exp_root, r.io().root());
 
     // Check that the owner is correctly forwared
@@ -219,20 +215,16 @@ fn test_mini_tree(k: &str, v: &str) {
 
     // Check the nested root hash
     // Left child
-    let to_hash_left = std::iter::once(LEAF_MARKER())
-        .chain(left.kv_gl.iter().copied())
-        .collect::<Vec<_>>();
-    let hash_left = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash_left.as_slice());
+    let hash_left = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(left.kv_gl.as_slice());
 
     // Right child
-    let to_hash_right = std::iter::once(LEAF_MARKER())
-        .chain(middle.kv_gl.iter().copied())
-        .collect::<Vec<_>>();
-    let hash_right = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash_right.as_slice());
+    let hash_right = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(middle.kv_gl.as_slice());
 
     // Mini tree root
-    let to_hash = std::iter::once(NODE_MARKER())
-        .chain(hash_left.elements.iter().copied())
+    let to_hash = hash_left
+        .elements
+        .iter()
+        .copied()
         .chain(hash_right.elements.iter().copied())
         .collect::<Vec<_>>();
     let expected_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
@@ -262,8 +254,10 @@ fn test_mini_tree(k: &str, v: &str) {
 
     // Mini tree root
     let expected_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
-        std::iter::once(NODE_MARKER())
-            .chain(some_hash.elements.iter().copied())
+        some_hash
+            .elements
+            .iter()
+            .copied()
             .chain(middle_ios.root().elements.iter().copied())
             .collect::<Vec<_>>()
             .as_slice(),
@@ -271,8 +265,11 @@ fn test_mini_tree(k: &str, v: &str) {
     assert_eq!(expected_hash, top_ios.root());
 
     let wrong_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
-        std::iter::once(NODE_MARKER())
-            .chain(middle_ios.root().elements.iter().copied())
+        middle_ios
+            .root()
+            .elements
+            .iter()
+            .copied()
             .chain(some_hash.elements.iter().copied())
             .collect::<Vec<_>>()
             .as_slice(),

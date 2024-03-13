@@ -11,7 +11,7 @@ use crate::{
     array::Array,
     circuit::UserCircuit,
     group_hashing::CircuitBuilderGroupHashing,
-    storage::{KEY_GL_SIZE, LEAF_GL_SIZE, LEAF_MARKER, LEAF_MARKER_GL_SIZE},
+    storage::{KEY_GL_SIZE, LEAF_GL_SIZE},
 };
 
 use super::{public_inputs::PublicInputs, AddressTarget};
@@ -39,7 +39,6 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
     type Wires = InclusionWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
-        let leaf_str = b.constant(LEAF_MARKER());
         let key = Array::<Target, KEY_GL_SIZE>::new(b);
         let value = Array::<Target, { AddressTarget::LEN }>::new(b);
         let kv = Array::<Target, { KEY_GL_SIZE + LEAF_GL_SIZE }>::try_from(
@@ -51,15 +50,8 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
         )
         .unwrap();
 
-        let to_hash =
-            Array::<Target, { LEAF_MARKER_GL_SIZE + KEY_GL_SIZE + AddressTarget::LEN }>::try_from(
-                std::iter::once(leaf_str)
-                    .chain(kv.arr.iter().copied())
-                    .collect::<Vec<_>>(),
-            )
-            .unwrap();
         let digest = b.map_to_curve_point(&kv.arr);
-        let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(to_hash.arr));
+        let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(kv.arr));
 
         PublicInputs::<GoldilocksField>::register(b, &root, &digest, &value);
         InclusionWires { key, value }
