@@ -26,9 +26,10 @@ impl PartialInnerNodeCircuit {
         inner_child_position: BoolTarget,
     ) -> PartialInnerNodeWires {
         let leaf_str = b.constant(LEAF_MARKER());
+        let one = b.one();
 
         let do_left = inner_child_position.target;
-        let do_right = b.sub(b.one(), do_left);
+        let do_right = b.sub(one, do_left);
 
         // Left-hand case
         let to_hash_left = std::iter::once(leaf_str)
@@ -48,7 +49,10 @@ impl PartialInnerNodeCircuit {
                 .elements
                 .iter()
                 .zip(right_hash.elements.iter())
-                .map(|(l, r)| b.mul_add(do_left, *l, b.mul(do_right, *r)))
+                .map(|(l, r)| {
+                    let right = b.mul(do_right, *r);
+                    b.mul_add(do_left, *l, right)
+                })
                 .collect::<Vec<_>>(),
         );
 
