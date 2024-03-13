@@ -4,8 +4,6 @@
 //!     leaf-circuit --> ...
 
 mod block_linking;
-mod branch;
-mod lpn;
+pub(crate) mod lpn;
 
 pub use block_linking::PublicInputs as BlockLinkingPublicInputs;
-pub use branch::PublicInputs;

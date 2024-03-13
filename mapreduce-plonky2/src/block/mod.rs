@@ -7,7 +7,7 @@
 
 mod public_inputs;
 
-use crate::state::PublicInputs as LeafInputs;
+use crate::state::lpn::leaf::PublicInputs as LeafInputs;
 use plonky2::{
     field::extension::Extendable,
     hash::{
@@ -87,7 +87,7 @@ where
     {
         // Wrap the public inputs.
         let prev_pi = PublicInputs::from(prev_pi);
-        let new_leaf_pi = LeafInputs::from(new_leaf_pi);
+        let new_leaf_pi = LeafInputs::from_slice(new_leaf_pi);
 
         // Initialize the targets in wires.
         let leaf_index_bits = array::from_fn(|_| cb.add_virtual_bool_target_safe());
