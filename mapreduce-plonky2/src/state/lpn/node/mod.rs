@@ -12,25 +12,52 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
-use crate::state::BlockLinkingPublicInputs;
+use crate::state::BlockLinkingInputs;
 
-mod public_inputs;
+use super::LeafInputs;
 
 #[cfg(test)]
 mod tests;
 
-pub(crate) use public_inputs::PublicInputs;
-
-/// The wires structure of [NodeCircuit].
+/// Circuit to prove the correct formation of the intermediate node.
+///
+/// Will take the [BlockLinkingInputs] as argument.
+///
+/// # Circuit description
+///
+/// +---------------------+
+/// | left leaf.node root +------------------+
+/// +---------------------+                  |
+/// +----------------------+                 |
+/// | left leaf.block hash +---------------+ |
+/// +----------------------+               | |
+/// +------------------------+             | |
+/// | left leaf.block number +-----------+ | |
+/// +------------------------+           | | |
+/// +-------------------------------+    | | |
+/// | left leaf.previous block hash +--+ | | |
+/// +-------------------------------+  | | | |
+///                                    | | | |
+/// +----------------------+           | | | |
+/// | right leaf.node root +-------------------+
+/// +----------------------+           | | | | |
+/// +-----------------------+          | | | | |
+/// | right leaf.block hash +--------------+ | |
+/// +-----------------------+          | |   | |
+/// +-------------------------+        | |   | |
+/// | right leaf.block number +----------+   | |
+/// +-------------------------+        |     | |
+/// +--------------------------------+ |     | |
+/// | right leaf.previous block hash +-+     | |
+/// +--------------------------------+       | |
+///                                          | |
+/// +------------------+                     | |
+/// | node.merkle root +----------------+H(0,+,+)
+/// +------------------+
 #[derive(Clone)]
-pub struct NodeWires<'i> {
-    block_linking: BlockLinkingPublicInputs<'i, Target>,
-    left: HashOutTarget,
-    right: HashOutTarget,
-    root: HashOutTarget,
-}
+pub struct NodeCircuit;
 
-impl<'i> NodeWires<'i> {
+impl NodeCircuit {
     /// Returns an iterator with the following items, in sequence:
     ///
     /// - `p` The node constant prefix
@@ -40,8 +67,8 @@ impl<'i> NodeWires<'i> {
     /// - `M` Storage slot of the mapping
     ///
     /// Such iterator will be used to compute the root of the intermediate node.
-    pub fn node_preimage<T, L, R>(
-        prefix: T,
+    pub fn node_preimage<'i, T, L, R>(
+        zero: T,
         left_sibling: L,
         right_sibling: R,
     ) -> impl Iterator<Item = T> + 'i
@@ -52,76 +79,50 @@ impl<'i> NodeWires<'i> {
         R: IntoIterator<Item = &'i T>,
         <R as IntoIterator>::IntoIter: 'i,
     {
-        iter::once(prefix)
+        iter::once(zero)
             .chain(left_sibling.into_iter().cloned())
             .chain(right_sibling.into_iter().cloned())
     }
-}
 
-/// Circuit to prove the correct formation of the intermediate node.
-///
-/// Will take the [BlockLinkingPublicInputs] as argument.
-///
-/// # Circuit description
-///
-/// +----------------------------------------+
-/// | previous node left sibling.merkle root +-------+
-/// +----------------------------------------+       |
-/// +-----------------------------------------+      |
-/// | previous node right sibling.merkle root +--------+
-/// +-----------------------------------------+      | |
-/// +--------------------------+                     | |
-/// | block linking.block hash +----------+          | |
-/// +--------------------------+          |          | |
-/// +----------------------------+        |          | |
-/// | block linking.block number +--------|-+        | |
-/// +----------------------------+        | |        | |
-/// +-----------------------------------+ | |        | |
-/// | block linking.previous block hash +-|-|-+      | |
-/// +-----------------------------------+ | | |      | |
-///                                       | | |      | |
-/// +------------------+                  | | |      | |
-/// | node.merkle root +------------------------+H(0,+,+)
-/// +------------------+                  | | |
-/// +-----------------+                   | | |
-/// | node.block hash +-------------------+ | |
-/// +-----------------+                     | |
-/// +-------------------+                   | |
-/// | node.block number +-------------------+ |
-/// +-------------------+                     |
-/// +--------------------------+              |
-/// | node.previous block hash +--------------+
-/// +--------------------------+
-#[derive(Clone)]
-pub struct NodeCircuit;
-
-impl NodeCircuit {
     /// Composes the circuit structure by assigning the virtual targets and performing the
     /// constraints.
     pub fn build<'i, F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-        block_linking: BlockLinkingPublicInputs<'i, Target>,
-        left_sibling: PublicInputs<'i, Target>,
-        right_sibling: PublicInputs<'i, Target>,
-    ) -> NodeWires<'i>
+        left_sibling: LeafInputs<'i, Target>,
+        right_sibling: LeafInputs<'i, Target>,
+    ) -> HashOutTarget
     where
         F: RichField + Extendable<D>,
     {
+        left_sibling
+            .block_header()
+            .arr
+            .iter()
+            .zip(right_sibling.block_header().arr.iter())
+            .for_each(|(l, r)| b.connect(l.0, r.0));
+
+        left_sibling
+            .prev_block_header()
+            .arr
+            .iter()
+            .zip(right_sibling.prev_block_header().arr.iter())
+            .for_each(|(l, r)| b.connect(l.0, r.0));
+
+        b.connect(
+            left_sibling.block_number().0,
+            right_sibling.block_number().0,
+        );
+
         let left = left_sibling.root();
         let right = right_sibling.root();
         let preimage =
-            NodeWires::node_preimage(b.zero(), &left.elements, &right.elements).collect::<Vec<_>>();
+            Self::node_preimage(b.zero(), &left.elements, &right.elements).collect::<Vec<_>>();
+
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(preimage);
 
-        let wires = NodeWires {
-            block_linking,
-            left,
-            right,
-            root,
-        };
+        b.register_public_inputs(&root.elements);
+        left_sibling.register_block_linking_data(b);
 
-        PublicInputs::register(b, &wires);
-
-        wires
+        root
     }
 }

@@ -29,11 +29,11 @@ const C_IDX: usize = 43;
 const TOTAL_LEN: usize = 51;
 
 #[derive(Clone)]
-pub struct PublicInputs<'a, T: Clone> {
+pub struct BlockLinkingInputs<'a, T: Clone> {
     pub(crate) inner: &'a [T],
 }
 
-impl<'a, T: Clone> PublicInputs<'a, T> {
+impl<'a, T: Clone> BlockLinkingInputs<'a, T> {
     pub fn register<
         F,
         const D: usize,
@@ -127,11 +127,11 @@ mod tests {
 
     use super::*;
 
-    impl<'a, T: Clone> PublicInputs<'a, T> {
+    impl<'a, T: Clone> BlockLinkingInputs<'a, T> {
         pub const TOTAL_LEN: usize = TOTAL_LEN;
     }
 
-    impl<'a, T: Copy + Default> PublicInputs<'a, T> {
+    impl<'a, T: Copy + Default> BlockLinkingInputs<'a, T> {
         /// Writes the parts of the block liking public inputs into the provided target array.
         pub fn parts_into_values(
             values: &mut [T; TOTAL_LEN],
@@ -155,7 +155,7 @@ mod tests {
         }
     }
 
-    impl<'a, F: RichField> PublicInputs<'a, F> {
+    impl<'a, F: RichField> BlockLinkingInputs<'a, F> {
         pub fn values_from_seed(seed: u64) -> [F; TOTAL_LEN] {
             let rng = &mut StdRng::seed_from_u64(seed);
 

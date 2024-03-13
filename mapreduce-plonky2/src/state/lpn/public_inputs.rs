@@ -1,4 +1,6 @@
-use std::array;
+//! Intermediate node circuit of Merkle tree
+
+use core::array;
 
 use plonky2::{
     field::extension::Extendable,
@@ -8,35 +10,56 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
-use crate::keccak::{OutputHash, PACKED_HASH_LEN};
+use crate::{
+    keccak::{OutputHash, PACKED_HASH_LEN},
+    state::BlockLinkingInputs,
+};
 
-use super::NodeWires;
-
-/// The public inputs for the node circuit.
+/// The public inputs for the leaf circuit.
 ///
 /// # Attributes
 ///
 /// The inner attributes are, in order:
 ///
-/// - C: Merkle root of this node represented by `H("NODE" || left_c || right_c)`
+/// - C: Merkle root of this node represented by `H("LEAF" || node)`
 /// - H: Blockchain header hash
 /// - N: Block index
 /// - PREV_H: Blockchain header hash of the parent block
+///
+/// The elements of `node` are, in order:
+///
+/// - A: Smart contract address
+/// - C: Merkle root of the storage database
+/// - S: Storage slot of the variable holding the length
+/// - M: Storage slot of the mapping
 #[derive(Clone, Debug)]
-pub struct PublicInputs<'a, T: Clone> {
+pub struct LeafInputs<'a, T: Clone> {
     pub(crate) proof_inputs: &'a [T],
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl<'a> LeafInputs<'a, Target> {
     /// Registers the public inputs into the circuit builder.
-    pub fn register<F, const D: usize>(b: &mut CircuitBuilder<F, D>, wires: &NodeWires)
+    pub fn register<F, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        root: &HashOutTarget,
+        block_linking: &BlockLinkingInputs<'a, Target>,
+    ) where
+        F: RichField + Extendable<D>,
+    {
+        b.register_public_inputs(&root.elements);
+        b.register_public_inputs(block_linking.block_hash());
+        b.register_public_input(block_linking.block_number()[0]);
+        b.register_public_inputs(block_linking.prev_block_hash());
+    }
+
+    /// Registers the public inputs of the instance into the circuit builder.
+    pub fn register_block_linking_data<F, const D: usize>(&self, b: &mut CircuitBuilder<F, D>)
     where
         F: RichField + Extendable<D>,
     {
-        b.register_public_inputs(&wires.root.elements);
-        b.register_public_inputs(wires.block_linking.block_hash());
-        b.register_public_input(wires.block_linking.block_number()[0]);
-        b.register_public_inputs(wires.block_linking.prev_block_hash());
+        self.block_header().register_as_public_input(b);
+        b.register_public_input(self.block_number().0);
+        self.prev_block_header().register_as_public_input(b);
     }
 
     /// Returns the root hash.
@@ -63,7 +86,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 }
 
-impl<'a, T: Copy> PublicInputs<'a, T> {
+impl<'a, T: Copy> LeafInputs<'a, T> {
     pub(crate) const C_LEN: usize = NUM_HASH_OUT_ELTS;
     pub(crate) const H_LEN: usize = PACKED_HASH_LEN;
     pub(crate) const N_LEN: usize = 1;

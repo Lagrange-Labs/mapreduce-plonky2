@@ -7,7 +7,7 @@
 
 mod public_inputs;
 
-use crate::state::lpn::LeafInputs;
+use crate::state::LeafInputs;
 use plonky2::{
     field::extension::Extendable,
     hash::{

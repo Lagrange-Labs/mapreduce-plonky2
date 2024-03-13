@@ -13,18 +13,14 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
-use crate::state::BlockLinkingPublicInputs;
-
-mod public_inputs;
+use crate::state::{BlockLinkingInputs, LeafInputs};
 
 #[cfg(test)]
 mod tests;
 
-pub use public_inputs::PublicInputs;
-
 /// Circuit to prove the correct formation of the leaf node.
 ///
-/// Will take the [BlockLinkingPublicInputs] as argument.
+/// Will take the [BlockLinkingInputs] as argument.
 ///
 /// # Circuit description
 ///
@@ -75,15 +71,15 @@ impl LeafCircuit {
     ///
     /// Such iterator will be used to compute the root node of the leaf.
     pub fn node_preimage<'i, T: Clone>(
-        prefix: T,
-        block_linking: &'i BlockLinkingPublicInputs<'i, T>,
+        one: T,
+        block_linking: &'i BlockLinkingInputs<'i, T>,
     ) -> impl Iterator<Item = T> + 'i {
         let a = block_linking.a().iter().cloned();
         let c = block_linking.merkle_root().iter().cloned();
         let s = iter::once(block_linking.s()[0].clone());
         let m = iter::once(block_linking.m()[0].clone());
 
-        iter::once(prefix).chain(a).chain(c).chain(s).chain(m)
+        iter::once(one).chain(a).chain(c).chain(s).chain(m)
     }
 
     /// Composes the circuit structure by assigning the virtual targets and performing the
@@ -92,7 +88,7 @@ impl LeafCircuit {
     /// The returned [HashOutTarget] will correspond to the Merkle root of the leaf.
     pub fn build<'i, F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-        block_linking: &BlockLinkingPublicInputs<'i, Target>,
+        block_linking: &BlockLinkingInputs<'i, Target>,
     ) -> HashOutTarget
     where
         F: RichField + Extendable<D>,
@@ -100,7 +96,7 @@ impl LeafCircuit {
         let preimage = Self::node_preimage(b.one(), &block_linking).collect::<Vec<_>>();
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(preimage);
 
-        PublicInputs::register(b, &root, block_linking);
+        LeafInputs::register(b, &root, block_linking);
 
         root
     }
