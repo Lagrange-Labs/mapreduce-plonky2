@@ -104,7 +104,8 @@ impl<'a> UserCircuit<GoldilocksField, 2> for FullInnerNodeCircuitValidator<'a> {
 
 struct LeafProofResult {
     proof: ProofWithPublicInputs<F, C, D>,
-    kvu_gl: Vec<F>,
+    kv_gl: Vec<F>,
+    owner_gl: Vec<F>,
 }
 impl LeafProofResult {
     fn io(&self) -> PublicInputs<F> {
@@ -112,65 +113,67 @@ impl LeafProofResult {
     }
 }
 
-fn run_leaf_proof<'data>(k: &'_ str, v: &'_ str, owner: &'_ str) -> LeafProofResult {
+fn run_leaf_proof<'data>(k: &'_ str, v: &'_ str) -> LeafProofResult {
     let key = left_pad32(hex::decode(k).unwrap().as_slice())
         .into_iter()
         .collect_vec();
     let value = left_pad32(hex::decode(v).unwrap().as_slice())
         .into_iter()
         .collect_vec();
-    let owner = left_pad32(hex::decode(owner).unwrap().as_slice())
-        .into_iter()
-        .collect_vec();
 
-    let kvu_gl = key
+    let kv_gl = key
         .iter()
         .copied()
         .chain(value.iter().copied())
-        .chain(owner.iter().copied())
+        .map(F::from_canonical_u8)
+        .collect_vec();
+
+    let owner_gl = value
+        .iter()
+        .copied()
         .map(F::from_canonical_u8)
         .collect_vec();
 
     let circuit = InclusionCircuit {
         key: key.try_into().unwrap(),
         value: value.try_into().unwrap(),
-        owner: owner.try_into().unwrap(),
     };
 
     LeafProofResult {
         proof: run_circuit(circuit),
-        kvu_gl,
+        kv_gl,
+        owner_gl,
     }
 }
 
-fn test_leaf(k: &str, v: &str, u: &str) {
-    let r = run_leaf_proof(k, v, u);
+fn test_leaf(k: &str, v: &str) {
+    let r = run_leaf_proof(k, v);
 
     // Check the generated root hash
     let to_hash = std::iter::once(LEAF_MARKER())
-        .chain(r.kvu_gl.iter().copied())
+        .chain(r.kv_gl.iter().copied())
         .collect_vec();
     let exp_root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
-    let found_root = r.io().root();
-    assert_eq!(exp_root, found_root);
+    assert_eq!(exp_root, r.io().root());
+    assert_eq!(r.owner_gl, r.io().owner());
 }
 
 #[test]
 fn test_leaf_whatever() {
-    test_leaf("deadbeef", "0badf00d", "283091");
+    test_leaf("deadbeef", "0badf00d");
 }
 
 #[test]
 fn test_leaf_all0() {
-    test_leaf("", "", "");
+    test_leaf("", "");
 }
 
 #[test]
 fn test_leaf_0_nonzero() {
-    test_leaf("", "a278bf", "");
+    test_leaf("", "a278bf");
 }
 
 #[test]
 fn test_leaf_nonzero_zero() {
-    test_leaf("1235", "00", "88a9f2de");
+    test_leaf("1235", "00");
 }

@@ -68,7 +68,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     fn owner_raw(&self) -> &[T] {
         let start = Self::ROOT_LEN + CURVE_TARGET_GL_SIZE;
-        &self.inputs[start..start + ADDRESS_LEN]
+        &self.inputs[start..start + AddressTarget::LEN]
     }
 }
 
