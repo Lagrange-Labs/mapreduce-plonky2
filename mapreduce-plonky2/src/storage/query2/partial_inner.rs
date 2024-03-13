@@ -10,7 +10,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
-use crate::{circuit::UserCircuit, storage::LEAF_MARKER};
+use crate::{circuit::UserCircuit, storage::NODE_MARKER};
 
 use super::public_inputs::PublicInputs;
 pub struct PartialInnerNodeWires {}
@@ -21,37 +21,40 @@ pub struct PartialInnerNodeCircuit {}
 impl PartialInnerNodeCircuit {
     pub fn build(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
-        leaf_child: &PublicInputs<Target>,
-        inner_child_hash: HashOutTarget,
-        inner_child_position: BoolTarget,
+        proved_child: &PublicInputs<Target>,
+        unproved_child_hash: HashOutTarget,
+        unproved_child_position: BoolTarget,
     ) -> PartialInnerNodeWires {
-        let leaf_str = b.constant(LEAF_MARKER());
+        let leaf_str = b.constant(NODE_MARKER());
         let one = b.one();
 
-        let do_left = inner_child_position.target;
-        let do_right = b.sub(one, do_left);
+        let unproved_is_left = unproved_child_position.target;
+        let unproved_is_right = b.sub(one, unproved_is_left);
 
         // Left-hand case
-        let to_hash_left = std::iter::once(leaf_str)
-            .chain(inner_child_hash.elements.iter().copied())
-            .chain(leaf_child.root().elements.iter().copied())
-            .collect::<Vec<_>>();
-        let left_hash = b.hash_n_to_hash_no_pad::<PoseidonHash>(to_hash_left);
+        let unproved_is_left_hash = b.hash_n_to_hash_no_pad::<PoseidonHash>(
+            std::iter::once(leaf_str)
+                .chain(unproved_child_hash.elements.iter().copied())
+                .chain(proved_child.root().elements.iter().copied())
+                .collect::<Vec<_>>(),
+        );
+
         // Right-hand case
-        let to_hash_right = std::iter::once(leaf_str)
-            .chain(leaf_child.root().elements.iter().copied())
-            .chain(inner_child_hash.elements.iter().copied())
-            .collect::<Vec<_>>();
-        let right_hash = b.hash_n_to_hash_no_pad::<PoseidonHash>(to_hash_right);
+        let unproved_is_right_hash = b.hash_n_to_hash_no_pad::<PoseidonHash>(
+            std::iter::once(leaf_str)
+                .chain(proved_child.root().elements.iter().copied())
+                .chain(unproved_child_hash.elements.iter().copied())
+                .collect::<Vec<_>>(),
+        );
 
         let root = HashOutTarget::from_vec(
-            left_hash
+            unproved_is_left_hash
                 .elements
                 .iter()
-                .zip(right_hash.elements.iter())
+                .zip(unproved_is_right_hash.elements.iter())
                 .map(|(l, r)| {
-                    let right = b.mul(do_right, *r);
-                    b.mul_add(do_left, *l, right)
+                    let right = b.mul(unproved_is_right, *r);
+                    b.mul_add(unproved_is_left, *l, right)
                 })
                 .collect::<Vec<_>>(),
         );
@@ -59,8 +62,8 @@ impl PartialInnerNodeCircuit {
         PublicInputs::<GoldilocksField>::register(
             b,
             &root,
-            &leaf_child.digest(),
-            &leaf_child.owner(),
+            &proved_child.digest(),
+            &proved_child.owner(),
         );
         PartialInnerNodeWires {}
     }

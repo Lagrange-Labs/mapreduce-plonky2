@@ -1,3 +1,5 @@
+use std::ops::Add;
+
 use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
@@ -12,7 +14,7 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        config::{GenericConfig, PoseidonGoldilocksConfig},
+        config::{GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
         proof::ProofWithPublicInputs,
     },
 };
@@ -20,7 +22,8 @@ use plonky2::{
 use crate::{
     circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
-    storage::LEAF_MARKER,
+    group_hashing::map_to_curve_point,
+    storage::{LEAF_MARKER, NODE_MARKER},
 };
 
 use super::{
@@ -38,9 +41,9 @@ type F = <C as GenericConfig<D>>::F;
 struct PartialInnerNodeCircuitValidator<'a> {
     validated: PartialInnerNodeCircuit,
 
-    leaf_child: &'a PublicInputs<'a, F>,
-    inner_child_hash: Vec<F>,
-    inner_child_position: F,
+    proved_child: &'a PublicInputs<'a, F>,
+    unproved_hash: Vec<F>,
+    unproved_is_left: F,
 }
 impl<'a> UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuitValidator<'a> {
     type Wires = (PartialInnerNodeWires, Vec<Target>, Vec<Target>, Target);
@@ -66,9 +69,9 @@ impl<'a> UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuitValidator<'a
     }
 
     fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
-        pw.set_target_arr(&wires.1, self.leaf_child.inputs);
-        pw.set_target_arr(&wires.2, &self.inner_child_hash);
-        pw.set_target(wires.3, self.inner_child_position);
+        pw.set_target_arr(&wires.1, self.proved_child.inputs);
+        pw.set_target_arr(&wires.2, &self.unproved_hash);
+        pw.set_target(wires.3, self.unproved_is_left);
         self.validated.assign(pw, &wires.0);
     }
 }
@@ -155,6 +158,8 @@ fn test_leaf(k: &str, v: &str) {
         .collect_vec();
     let exp_root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
     assert_eq!(exp_root, r.io().root());
+
+    // Check that the owner is correctly forwared
     assert_eq!(r.owner_gl, r.io().owner());
 }
 
@@ -176,4 +181,102 @@ fn test_leaf_0_nonzero() {
 #[test]
 fn test_leaf_nonzero_zero() {
     test_leaf("1235", "00");
+}
+
+fn test_mini_tree(k: &str, v: &str) {
+    let left = run_leaf_proof(k, v);
+    let middle = run_leaf_proof(k, v);
+
+    // Build the inner node circuit wrapper
+    let inner = FullInnerNodeCircuitValidator {
+        validated: FullInnerNodeCircuit {},
+        children: &[
+            PublicInputs::from(left.proof.public_inputs.as_slice()),
+            PublicInputs::from(middle.proof.public_inputs.as_slice()),
+        ],
+    };
+    let middle_proof = run_circuit::<F, D, C, _>(inner);
+    let middle_ios = PublicInputs::<F>::from(middle_proof.public_inputs.as_slice());
+
+    // Check the digest
+    let expected_digest = map_to_curve_point(&left.kv_gl)
+        .add(map_to_curve_point(&middle.kv_gl))
+        .to_weierstrass();
+    let expected_other_digest = map_to_curve_point(&middle.kv_gl)
+        .add(map_to_curve_point(&left.kv_gl))
+        .to_weierstrass();
+    let found_digest = middle_ios.digest();
+    assert_eq!(expected_digest, found_digest);
+    // The digest must commute
+    assert_eq!(expected_other_digest, found_digest);
+
+    // Check the nested root hash
+    // Left child
+    let to_hash_left = std::iter::once(LEAF_MARKER())
+        .chain(left.kv_gl.iter().copied())
+        .collect::<Vec<_>>();
+    let hash_left = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash_left.as_slice());
+
+    // Right child
+    let to_hash_right = std::iter::once(LEAF_MARKER())
+        .chain(middle.kv_gl.iter().copied())
+        .collect::<Vec<_>>();
+    let hash_right = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash_right.as_slice());
+
+    // Mini tree root
+    let to_hash = std::iter::once(NODE_MARKER())
+        .chain(hash_left.elements.iter().copied())
+        .chain(hash_right.elements.iter().copied())
+        .collect::<Vec<_>>();
+    let expected_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
+    assert_eq!(expected_hash, middle_ios.root());
+
+    // Check that the owner is correctly forwared
+    assert_eq!(left.owner_gl, middle_ios.owner());
+    assert_eq!(middle.owner_gl, middle_ios.owner());
+
+    let some_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
+        &"jean-michel"
+            .as_bytes()
+            .iter()
+            .copied()
+            .map(F::from_canonical_u8)
+            .collect_vec(),
+    );
+
+    let top = PartialInnerNodeCircuitValidator {
+        validated: PartialInnerNodeCircuit {},
+        proved_child: &middle_ios,
+        unproved_hash: some_hash.to_vec(),
+        unproved_is_left: F::from_bool(true),
+    };
+    let top_proof = run_circuit::<F, D, C, _>(top);
+    let top_ios = PublicInputs::<F>::from(top_proof.public_inputs.as_slice());
+
+    // Mini tree root
+    let expected_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
+        std::iter::once(NODE_MARKER())
+            .chain(some_hash.elements.iter().copied())
+            .chain(middle_ios.root().elements.iter().copied())
+            .collect::<Vec<_>>()
+            .as_slice(),
+    );
+    assert_eq!(expected_hash, top_ios.root());
+
+    let wrong_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
+        std::iter::once(NODE_MARKER())
+            .chain(middle_ios.root().elements.iter().copied())
+            .chain(some_hash.elements.iter().copied())
+            .collect::<Vec<_>>()
+            .as_slice(),
+    );
+    assert_ne!(wrong_hash, top_ios.root());
+
+    // Check that the owner is correctly forwarded
+    assert_eq!(left.owner_gl, top_ios.owner());
+}
+
+#[test]
+fn test_inner_node() {
+    test_mini_tree("012345", "900600");
 }

@@ -25,18 +25,19 @@ use super::AddressTarget;
 pub struct PublicInputs<'input, T: Clone> {
     pub inputs: &'input [T],
 }
-impl<'a, T: Clone> From<&'a [T]> for PublicInputs<'a, T> {
+impl<'a, T: Clone + Copy> From<&'a [T]> for PublicInputs<'a, T> {
     fn from(inputs: &'a [T]) -> Self {
+        assert_eq!(inputs.len(), Self::TOTAL_LEN);
         Self { inputs }
     }
 }
 
-impl<'a, T: Copy> PublicInputs<'a, T> {
+impl<'a, T: Clone + Copy> PublicInputs<'a, T> {
     const ROOT_OFFSET: usize = 0;
     const ROOT_LEN: usize = NUM_HASH_OUT_ELTS;
     const DIGEST_OFFSET: usize = 4;
 
-    pub const TOTAL_LEN: usize = Self::ROOT_LEN + CURVE_TARGET_GL_SIZE + ADDRESS_LEN;
+    pub const TOTAL_LEN: usize = Self::ROOT_LEN + CURVE_TARGET_GL_SIZE + AddressTarget::LEN;
 
     pub fn register(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
