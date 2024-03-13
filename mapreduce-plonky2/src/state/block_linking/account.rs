@@ -10,9 +10,8 @@ use crate::{
         OutputWires as MPTOutputWires, PAD_LEN,
     },
     storage::PublicInputs as StorageInputs,
-    utils::{
-        find_index_subvector, keccak256, less_than, AddressTarget, PackedAddressTarget, ADDRESS_LEN,
-    },
+    types::{AddressTarget, PackedAddressTarget, ADDRESS_LEN},
+    utils::{find_index_subvector, keccak256, less_than},
 };
 use anyhow::Result;
 use ethers::types::{H160, H256};

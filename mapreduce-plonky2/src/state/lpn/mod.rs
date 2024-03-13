@@ -2,3 +2,5 @@
 
 mod leaf;
 mod node;
+
+pub use leaf::PublicInputs as LeafInputs;

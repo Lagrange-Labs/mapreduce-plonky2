@@ -6,7 +6,8 @@ use crate::{
     eth::left_pad32,
     keccak::{ByteKeccakWires, InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, PAD_LEN},
-    utils::{keccak256, AddressTarget, ADDRESS_LEN},
+    types::{AddressTarget, ADDRESS_LEN},
+    utils::keccak256,
 };
 use ethers::types::Address;
 use plonky2::{

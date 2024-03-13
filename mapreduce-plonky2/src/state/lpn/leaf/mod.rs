@@ -20,7 +20,7 @@ mod public_inputs;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use public_inputs::PublicInputs;
+pub use public_inputs::PublicInputs;
 
 /// Circuit to prove the correct formation of the leaf node.
 ///
