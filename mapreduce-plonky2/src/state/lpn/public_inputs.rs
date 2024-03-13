@@ -48,7 +48,7 @@ impl<'a> LeafInputs<'a, Target> {
     {
         b.register_public_inputs(&root.elements);
         b.register_public_inputs(block_linking.block_hash());
-        b.register_public_input(block_linking.block_number()[0]);
+        b.register_public_input(*block_linking.block_number());
         b.register_public_inputs(block_linking.prev_block_hash());
     }
 

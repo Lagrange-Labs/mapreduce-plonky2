@@ -76,8 +76,8 @@ impl LeafCircuit {
     ) -> impl Iterator<Item = T> + 'i {
         let a = block_linking.a().iter().cloned();
         let c = block_linking.merkle_root().iter().cloned();
-        let s = iter::once(block_linking.s()[0].clone());
-        let m = iter::once(block_linking.m()[0].clone());
+        let s = iter::once(block_linking.s().clone());
+        let m = iter::once(block_linking.m().clone());
 
         iter::once(one).chain(a).chain(c).chain(s).chain(m)
     }
