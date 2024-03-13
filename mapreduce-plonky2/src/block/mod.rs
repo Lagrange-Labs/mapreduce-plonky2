@@ -66,7 +66,7 @@ pub fn block_node_hash(left: HashOutput, right: HashOutput) -> HashOutput {
     hash_f.to_bytes().try_into().unwrap()
 }
 
-/// Block tree wires
+/// Block tree wires to assign
 pub struct BlockTreeWires<const MAX_DEPTH: usize> {
     /// The flag identifies if this is the first block inserted to the tree.
     is_first: BoolTarget,
