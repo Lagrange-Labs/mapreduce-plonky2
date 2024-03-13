@@ -454,7 +454,6 @@ impl MPTKeyWire {
                     .arr
                     .iter()
                     .flat_map(|u32_limb| {
-                        let four = b.constant(F::from_canonical_u8(4));
                         // decompose the `U32Target` in 16 limbs of 2 bits each; the output limbs are already range-checked
                         // by the `split_le_base` operation
                         let limbs: [Target; 16] =
