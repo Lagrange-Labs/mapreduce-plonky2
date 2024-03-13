@@ -10,7 +10,8 @@ use crate::{
     mpt_sequential::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
     },
-    utils::{convert_u8_targets_to_u32, PackedAddressTarget, PACKED_ADDRESS_LEN},
+    types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
+    utils::convert_u8_targets_to_u32,
 };
 use anyhow::Result;
 use ethers::types::H160;
