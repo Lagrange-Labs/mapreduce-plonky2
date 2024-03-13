@@ -49,6 +49,7 @@ pub fn leaf_hash(value: &[u8]) -> HashOutput {
         .into_iter()
         .map(GoldilocksField::from_canonical_u32)
         .collect::<Vec<_>>();
+    assert!(f_slice.len() != 8, "leaf hash input must NOT be of size 8");
     let hash_f = PoseidonHash::hash_no_pad(&f_slice);
     hash_f.to_bytes().try_into().unwrap()
 }

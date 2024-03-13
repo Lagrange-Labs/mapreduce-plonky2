@@ -46,6 +46,7 @@ pub fn block_leaf_hash(
         .map(GoldilocksField::from_canonical_u32)
         .chain(sr.elements)
         .collect::<Vec<_>>();
+    assert!(f_slice.len() != 8, "f_slice must NOT be of length 8");
     let hash_f = PoseidonHash::hash_no_pad(&f_slice);
     hash_f.to_bytes().try_into().unwrap()
 }

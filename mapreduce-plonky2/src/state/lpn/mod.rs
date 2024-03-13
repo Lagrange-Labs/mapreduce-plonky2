@@ -31,6 +31,10 @@ pub fn state_leaf_hash(
         .map(GoldilocksField::from_canonical_u32)
         .chain(HashOut::from_bytes(&storage_root).elements)
         .collect::<Vec<_>>();
+    assert!(
+        f_slice.len() != 8,
+        "state leaf hash input must NOT be of size 8"
+    );
     let hash_f = PoseidonHash::hash_no_pad(&f_slice);
     hash_f.to_bytes().try_into().unwrap()
 }
