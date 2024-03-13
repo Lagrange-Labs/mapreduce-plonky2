@@ -253,14 +253,13 @@ mod tests {
     fn test_block_linking_circuit_with_random_mpt() {
         init_logging();
 
-        // Set maximum depth of the trie and Leave one for padding.
-        const DEPTH: usize = 4;
+        const DEPTH: usize = 3;
         const BLOCK_LEN: usize = 600;
-        const NODE_LEN: usize = 600;
+        const NODE_LEN: usize = 500;
         const VALUE_LEN: usize = 50;
 
         let state_mpt = generate_state_mpt::<DEPTH, VALUE_LEN>();
-        let storage_pi = generate_storage_inputs(&state_mpt);
+        let storage_pi = generate_storage_inputs::<_, VALUE_LEN>(&state_mpt);
 
         let block = generate_block(&state_mpt);
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
@@ -291,8 +290,13 @@ mod tests {
         const DEPTH: usize = 8;
         const NODE_LEN: usize = 532;
         const BLOCK_LEN: usize = 620;
+        const VALUE_LEN: usize = 50;
 
-        test_with_rpc::<DEPTH, NODE_LEN, BLOCK_LEN, SEPOLIA_NUMBER_LEN>(url, contract_address).await
+        test_with_rpc::<DEPTH, NODE_LEN, BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
+            url,
+            contract_address,
+        )
+        .await
     }
 
     /// Test the block-linking circuit with Mainnet RPC.
@@ -307,8 +311,13 @@ mod tests {
         const DEPTH: usize = 8;
         const NODE_LEN: usize = 532;
         const BLOCK_LEN: usize = 620;
+        const VALUE_LEN: usize = 50;
 
-        test_with_rpc::<DEPTH, NODE_LEN, BLOCK_LEN, MAINNET_NUMBER_LEN>(url, contract_address).await
+        test_with_rpc::<DEPTH, NODE_LEN, BLOCK_LEN, VALUE_LEN, MAINNET_NUMBER_LEN>(
+            url,
+            contract_address,
+        )
+        .await
     }
 
     /// Test with RPC `eth_getProof`.
@@ -316,6 +325,7 @@ mod tests {
         const DEPTH: usize,
         const NODE_LEN: usize,
         const BLOCK_LEN: usize,
+        const VALUE_LEN: usize,
         const NUMBER_LEN: usize,
     >(
         url: &str,
@@ -362,7 +372,7 @@ mod tests {
             nodes,
         };
 
-        let storage_pi = generate_storage_inputs(&state_mpt);
+        let storage_pi = generate_storage_inputs::<_, VALUE_LEN>(&state_mpt);
 
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
         let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
@@ -457,7 +467,7 @@ mod tests {
     }
 
     /// Generate the test storage proof inputs as if it was given by a real proof.
-    fn generate_storage_inputs<F: RichField>(mpt: &TestStateMPT) -> Vec<F> {
+    fn generate_storage_inputs<F: RichField, const VALUE_LEN: usize>(mpt: &TestStateMPT) -> Vec<F> {
         let mut storage_pi: Vec<_> = (0..StorageInputs::<F>::TOTAL_LEN)
             .map(|_| F::from_canonical_u64(thread_rng().gen::<u64>()))
             .collect();
@@ -469,9 +479,12 @@ mod tests {
 
         // Set the storage root hash to the public inputs of storage proof.
         let account_node = &mpt.nodes[0];
+        // The account node length is restricted in 7-bits.
+        // <https://github.com/Lagrange-Labs/mapreduce-plonky2/blob/42aa493c80c51fd533d389d7db6ce557d0e696a4/mapreduce-plonky2/src/state/block_linking/account.rs#L190>
+        assert!(account_node.len() < 128);
         // The real account node has 104 bytes and it's composed by
         // [nonce (U64), balance (U256), storage_hash (H256), code_hash (H256)]
-        let start = thread_rng().gen_range(0..100 - HASH_LEN);
+        let start = thread_rng().gen_range(0..VALUE_LEN - HASH_LEN);
         let storage_root_hash =
             convert_u8_slice_to_u32_fields(&account_node[start..start + HASH_LEN]);
         storage_pi[StorageInputs::<F>::C1_IDX..StorageInputs::<F>::C2_IDX]
