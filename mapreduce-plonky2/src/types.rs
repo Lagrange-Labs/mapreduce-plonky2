@@ -21,3 +21,7 @@ pub const PACKED_ADDRESS_LEN: usize = ADDRESS_LEN / 4;
 pub type AddressTarget = Array<Target, ADDRESS_LEN>;
 /// U32 representation of an address
 pub type PackedAddressTarget = Array<U32Target, PACKED_ADDRESS_LEN>;
+
+/// Regular hash output function - it can be generated from field elements using
+/// poseidon with the output serialized or via regular hash functions.
+pub type HashOutput = [u8; 32];

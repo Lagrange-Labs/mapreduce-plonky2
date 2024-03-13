@@ -4,7 +4,7 @@
 //! tree to another.
 
 use super::{
-    length_match::PublicInputs as MPTPublicInputs, merkle::PublicInputs as MerklePublicInputs,
+    length_match::PublicInputs as MPTPublicInputs, lpn::PublicInputs as MerklePublicInputs,
 };
 use crate::{
     array::Array,
@@ -18,7 +18,7 @@ use crate::{
 use ethers::types::{H160, H256};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
-    hash::hash_types::{RichField, NUM_HASH_OUT_ELTS},
+    hash::hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
     iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
@@ -64,14 +64,14 @@ impl<'a> PublicInputs<'a, Target> {
         cb: &mut CircuitBuilder<GoldilocksField, 2>,
         digest: &CurveTarget,
         mpt_root_hash: &OutputHash,
-        merkle_root_hash: &Array<Target, NUM_HASH_OUT_ELTS>,
+        merkle_root_hash: &HashOutTarget,
         contract_address: &PackedAddressTarget,
         mapping_slot: Target,
         length_slot: Target,
     ) {
         cb.register_curve_public_input(*digest);
         mpt_root_hash.register_as_input(cb);
-        merkle_root_hash.register_as_input(cb);
+        cb.register_public_inputs(&merkle_root_hash.elements);
         contract_address.register_as_input(cb);
         cb.register_public_input(mapping_slot);
         cb.register_public_input(length_slot);
@@ -234,12 +234,12 @@ mod tests {
         let merkle_pi = generate_merkle_public_inputs(&digest);
 
         let mpt_pi_wrapper = MPTPublicInputs::<F>::from(&mpt_pi);
-        let merkle_pi_wrapper = MerklePublicInputs::<F>::from(&merkle_pi);
+        let merkle_pi_wrapper = MerklePublicInputs::<F>::from(merkle_pi.as_slice());
 
         // Get the expected public inputs.
         let exp_digest = (digest.x.0, digest.y.0, F::from_bool(digest.is_inf));
         let exp_mpt_root = mpt_pi_wrapper.root_hash_data();
-        let exp_merkle_root = merkle_pi_wrapper.root_hash_data();
+        let exp_merkle_root = merkle_pi_wrapper.root_raw();
         let exp_contract_address = mpt_pi_wrapper.contract_address_data();
         let exp_mapping_slot = mpt_pi_wrapper.mapping_slot();
         let exp_length_slot = mpt_pi_wrapper.length_slot();
