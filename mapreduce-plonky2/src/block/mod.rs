@@ -52,6 +52,20 @@ pub fn block_leaf_hash(
     hash_f.to_bytes().try_into().unwrap()
 }
 
+/// Returns the hash in bytes of the node of the block tree.
+/// NOTE: this method does NOT use the domain separation tag, since the circuit uses the native merkle gadget
+/// from plonky2. As long as it's the only one, it is fine.
+/// TODO: maybe refactor circuit to use our own?
+pub fn block_node_hash(left: HashOutput, right: HashOutput) -> HashOutput {
+    let f_slice = HashOut::<GoldilocksField>::from_bytes(&left)
+        .elements
+        .into_iter()
+        .chain(HashOut::from_bytes(&right).elements)
+        .collect::<Vec<_>>();
+    let hash_f = PoseidonHash::hash_no_pad(&f_slice);
+    hash_f.to_bytes().try_into().unwrap()
+}
+
 /// Block tree wires
 pub struct BlockTreeWires<const MAX_DEPTH: usize> {
     /// The flag identifies if this is the first block inserted to the tree.
