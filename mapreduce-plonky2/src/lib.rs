@@ -18,6 +18,7 @@ mod benches;
 pub mod eth;
 
 mod array;
+mod block;
 pub(crate) mod circuit;
 mod group_hashing;
 mod hash;
@@ -28,6 +29,7 @@ mod mpt_sequential;
 mod rlp;
 mod state;
 mod storage;
+mod types;
 mod utils;
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.
