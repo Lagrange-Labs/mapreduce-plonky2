@@ -19,7 +19,6 @@ mod utils;
 pub(crate) const N: usize = 5;
 
 /// Field-to-curve and curve point addition functions
-pub use curve_add::add_curve_point;
 pub use field_to_curve::map_to_curve_point;
 
 /// Trait for adding field-to-curve and curve point addition functions to
@@ -27,6 +26,9 @@ pub use field_to_curve::map_to_curve_point;
 pub trait CircuitBuilderGroupHashing {
     /// Calculate the curve target addition.
     fn add_curve_point(&mut self, targets: &[CurveTarget]) -> CurveTarget;
+
+    /// Convert the field target to a curve target.
+    fn map_one_to_curve_point(&mut self, target: Target) -> CurveTarget;
 
     /// Convert the field targets to a curve target.
     fn map_to_curve_point(&mut self, targets: &[Target]) -> CurveTarget;
@@ -44,6 +46,10 @@ where
 {
     fn add_curve_point(&mut self, targets: &[CurveTarget]) -> CurveTarget {
         curve_add::add_curve_target(self, targets)
+    }
+
+    fn map_one_to_curve_point(&mut self, target: Target) -> CurveTarget {
+        self.map_to_curve_point(&[target])
     }
 
     fn map_to_curve_point(&mut self, targets: &[Target]) -> CurveTarget {

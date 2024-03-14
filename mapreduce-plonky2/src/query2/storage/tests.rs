@@ -23,7 +23,6 @@ use rand::{rngs::StdRng, RngCore, SeedableRng};
 use crate::{
     circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
-    group_hashing::map_to_curve_point,
     storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
 };
 
@@ -108,7 +107,6 @@ impl<'a> UserCircuit<GoldilocksField, 2> for FullInnerNodeCircuitValidator<'a> {
 
 struct LeafProofResult {
     proof: ProofWithPublicInputs<F, C, D>,
-    kv_gl: Vec<F>,
     owner_gl: Vec<F>,
 }
 impl LeafProofResult {
@@ -121,20 +119,12 @@ fn run_leaf_proof<'data>(k: &[u8], v: &[u8]) -> LeafProofResult {
     let k = left_pad32(k);
     let v = left_pad32(v);
 
-    let kv_gl = k
-        .iter()
-        .chain(v.iter())
-        .copied()
-        .map(F::from_canonical_u8)
-        .collect_vec();
-
     let owner_gl = v.iter().copied().map(F::from_canonical_u8).collect_vec();
 
     let circuit = LeafCircuit { key: k, value: v };
 
     LeafProofResult {
         proof: run_circuit(circuit),
-        kv_gl,
         owner_gl,
     }
 }

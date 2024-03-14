@@ -15,7 +15,7 @@ use plonky2_ecgfp5::{
 };
 
 use crate::{
-    storage::CURVE_TARGET_GL_SIZE,
+    storage::CURVE_TARGET_SIZE,
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 

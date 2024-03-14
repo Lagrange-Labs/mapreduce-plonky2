@@ -2,8 +2,9 @@
 
 pkgs.mkShell {
   buildInputs = [
-    pkgs.rustup
+    pkgs.rustup ]
+  ++ (if pkgs.stdenv.targetPlatform.isDarwin then [
     pkgs.libiconv
     pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-  ];
+  ] else []);
 }
