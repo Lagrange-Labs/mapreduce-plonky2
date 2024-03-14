@@ -21,7 +21,7 @@ const STORAGE_CIRCUIT_SET_SIZE: usize = 2;
 const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 
 /// Inputs to the storage database related circuits (specifically for mapping)
-pub enum Inputs {
+pub enum Input {
     Leaf(LeafCircuit),
     Node(NodeInputs),
 }
@@ -68,9 +68,9 @@ impl PublicParameters {
 
     /// Generate a proof for a leaf or node in the storage database and returns its
     /// serialized form.
-    pub fn generate_proof(&self, inputs: Inputs) -> Result<Vec<u8>> {
+    pub fn generate_proof(&self, inputs: Input) -> Result<Vec<u8>> {
         match inputs {
-            Inputs::Leaf(leaf) => {
+            Input::Leaf(leaf) => {
                 let proof = self.set.generate_proof(&self.leaf_circuit, [], [], leaf)?;
                 ProofWithVK {
                     proof,
@@ -78,7 +78,7 @@ impl PublicParameters {
                 }
                 .serialize()
             }
-            Inputs::Node(node) => {
+            Input::Node(node) => {
                 let left = ProofWithVK::deserialize(&node.left)?;
                 let right = ProofWithVK::deserialize(&node.right)?;
                 let proof = self.set.generate_proof(
@@ -116,13 +116,13 @@ mod test {
         let (k2, v2) = gen_input("0badf00d", "deedbaaf");
         let params = PublicParameters::build();
         let p1 = params
-            .generate_proof(Inputs::Leaf(LeafCircuit { key: k1, value: v1 }))
+            .generate_proof(Input::Leaf(LeafCircuit { key: k1, value: v1 }))
             .unwrap();
         let p2 = params
-            .generate_proof(Inputs::Leaf(LeafCircuit { key: k2, value: v2 }))
+            .generate_proof(Input::Leaf(LeafCircuit { key: k2, value: v2 }))
             .unwrap();
         params
-            .generate_proof(Inputs::Node(NodeInputs {
+            .generate_proof(Input::Node(NodeInputs {
                 left: p1,
                 right: p2,
             }))

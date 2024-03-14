@@ -3,6 +3,9 @@ mod inner_node;
 mod leaf;
 mod public_inputs;
 
+pub use api::{Input, NodeInputs, PublicParameters};
+pub use leaf::LeafCircuit;
+
 use plonky2_ecgfp5::curve::curve::Point as Digest;
 pub use public_inputs::PublicInputs;
 #[cfg(test)]

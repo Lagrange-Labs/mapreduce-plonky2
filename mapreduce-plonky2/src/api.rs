@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub use crate::storage::{
     self,
     length_extract::{self},
-    mapping,
+    lpn, mapping,
 };
 
 // TODO: put every references here. remove one from mapping
@@ -21,18 +21,21 @@ pub(crate) type F = <C as GenericConfig<D>>::F;
 pub enum CircuitInput {
     Mapping(mapping::CircuitInput),
     LengthExtract(storage::length_extract::CircuitInput),
+    Storage(lpn::Input),
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct PublicParameters {
     mapping: mapping::PublicParameters,
     length_extract: length_extract::PublicParameters,
+    lpn_storage: lpn::PublicParameters,
 }
 
 pub fn build_circuits_params() -> PublicParameters {
     PublicParameters {
         mapping: mapping::build_circuits_params(),
         length_extract: length_extract::PublicParameters::build(),
+        lpn_storage: lpn::PublicParameters::build(),
     }
 }
 
@@ -44,6 +47,7 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
         CircuitInput::LengthExtract(length_extract_input) => {
             params.length_extract.generate(length_extract_input)
         }
+        CircuitInput::Storage(storage_input) => params.lpn_storage.generate_proof(storage_input),
     }
 }
 
@@ -62,7 +66,7 @@ impl ProofWithVK {
     }
 
     pub(crate) fn deserialize(buff: &[u8]) -> Result<Self> {
-        let s = bincode::deserialize(&buff)?;
+        let s = bincode::deserialize(buff)?;
         Ok(s)
     }
 }
