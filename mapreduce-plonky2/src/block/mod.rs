@@ -7,9 +7,13 @@
 
 mod public_inputs;
 
-use crate::state::LeafInputs;
+use crate::{
+    state::StateInputs,
+    types::HashOutput,
+    utils::{convert_u8_to_u32_slice, hash_two_to_one},
+};
 use plonky2::{
-    field::extension::Extendable,
+    field::{extension::Extendable, goldilocks_field::GoldilocksField, types::Field},
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField},
         merkle_proofs::{MerkleProof, MerkleProofTarget},
@@ -19,12 +23,44 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        config::{GenericHashOut, Hasher},
+    },
 };
 use public_inputs::PublicInputs;
 use std::array;
 
-/// Block tree wires
+/// Returns the hash in bytes of the leaf of the block tree. It takes as parameters
+/// the block number, the block header in bytes and the state root in bytes.
+/// The block header is the one coming from the block chain. The state root is the one
+/// created by the LPN state logic.
+pub fn block_leaf_hash(
+    block_number: u32,
+    block_header: &HashOutput,
+    state_root: &HashOutput,
+) -> HashOutput {
+    let bh = convert_u8_to_u32_slice(block_header);
+    let sr = HashOut::from_bytes(state_root);
+    let f_slice = std::iter::once(block_number)
+        .chain(bh)
+        .map(GoldilocksField::from_canonical_u32)
+        .chain(sr.elements)
+        .collect::<Vec<_>>();
+    assert!(f_slice.len() != 8, "f_slice must NOT be of length 8");
+    let hash_f = PoseidonHash::hash_no_pad(&f_slice);
+    hash_f.to_bytes().try_into().unwrap()
+}
+
+/// Returns the hash in bytes of the node of the block tree.
+/// NOTE: this method does NOT use the domain separation tag, since the circuit uses the native merkle gadget
+/// from plonky2. As long as it's the only one, it is fine.
+/// TODO: maybe refactor circuit to use our own?
+pub fn block_node_hash(left: HashOutput, right: HashOutput) -> HashOutput {
+    hash_two_to_one::<GoldilocksField, PoseidonHash>(left, right)
+}
+
+/// Block tree wires to assign
 pub struct BlockTreeWires<const MAX_DEPTH: usize> {
     /// The flag identifies if this is the first block inserted to the tree.
     is_first: BoolTarget,
@@ -87,7 +123,7 @@ where
     {
         // Wrap the public inputs.
         let prev_pi = PublicInputs::from(prev_pi);
-        let new_leaf_pi = LeafInputs::from_slice(new_leaf_pi);
+        let new_state_pi = StateInputs::from_slice(new_leaf_pi);
 
         // Initialize the targets in wires.
         let leaf_index_bits = array::from_fn(|_| cb.add_virtual_bool_target_safe());
@@ -102,11 +138,11 @@ where
         let is_first = cb.is_equal(leaf_index, zero);
 
         // Verify the previous outputs and the new leaf (block) public inputs.
-        verify_proofs(cb, &prev_pi, &new_leaf_pi, leaf_index, is_first);
+        verify_proofs(cb, &prev_pi, &new_state_pi, leaf_index, is_first);
 
         // Verify both the old and new roots of the block tree which are
         // calculated from the leaves sequentially.
-        verify_append_only(cb, &prev_pi, &new_leaf_pi, &leaf_index_bits, &root, &path);
+        verify_append_only(cb, &prev_pi, &new_state_pi, &leaf_index_bits, &root, &path);
 
         let wires = BlockTreeWires {
             is_first,
@@ -121,8 +157,8 @@ where
             &prev_pi.init_root(),
             &root,
             prev_pi.first_block_number(),
-            new_leaf_pi.block_number(),
-            &new_leaf_pi.block_header(),
+            new_state_pi.block_number(),
+            &new_state_pi.block_header(),
         );
 
         wires
@@ -141,6 +177,8 @@ where
             pw.set_bool_target(wires.leaf_index_bits[i], bit == 1);
         }
 
+        pw.set_hash_target(wires.root, self.root);
+
         wires
             .path
             .siblings
@@ -154,18 +192,18 @@ where
 fn verify_proofs<F: RichField + Extendable<D>, const D: usize>(
     cb: &mut CircuitBuilder<F, D>,
     prev_pi: &PublicInputs<Target>,
-    new_leaf_pi: &LeafInputs<Target>,
+    new_state_pi: &StateInputs<Target>,
     leaf_index: Target,
     is_first: BoolTarget,
 ) {
     // Check the previous block header.
     prev_pi
         .block_header()
-        .enforce_equal(cb, &new_leaf_pi.prev_block_header());
+        .enforce_equal(cb, &new_state_pi.prev_block_header());
 
     let first_block_num = prev_pi.first_block_number();
     let prev_block_num = prev_pi.block_number();
-    let new_block_num = new_leaf_pi.block_number();
+    let new_block_num = new_state_pi.block_number();
 
     // Check `first_block_number + leaf_index = new_block_number`.
     let exp_block_num = cb.add(first_block_num.0, leaf_index);
@@ -195,7 +233,7 @@ fn verify_proofs<F: RichField + Extendable<D>, const D: usize>(
 fn verify_append_only<F: RichField + Extendable<D>, const D: usize>(
     cb: &mut CircuitBuilder<F, D>,
     prev_pi: &PublicInputs<Target>,
-    new_leaf_pi: &LeafInputs<Target>,
+    new_state_pi: &StateInputs<Target>,
     leaf_index_bits: &[BoolTarget],
     new_root: &HashOutTarget,
     path: &MerkleProofTarget,
@@ -203,7 +241,7 @@ fn verify_append_only<F: RichField + Extendable<D>, const D: usize>(
     let old_root = prev_pi.root();
 
     // Get the new leaf data.
-    let leaf_data = leaf_data(cb, new_leaf_pi);
+    let leaf_data = leaf_data(cb, new_state_pi);
 
     // Verify the new leaf is present at the given index in Merkle tree with the new root.
     cb.verify_merkle_proof::<PoseidonHash>(leaf_data, leaf_index_bits, *new_root, path);
@@ -215,17 +253,16 @@ fn verify_append_only<F: RichField + Extendable<D>, const D: usize>(
 /// Get the leaf data from public inputs.
 fn leaf_data<F: RichField + Extendable<D>, const D: usize>(
     cb: &mut CircuitBuilder<F, D>,
-    leaf_pi: &LeafInputs<Target>,
+    leaf_pi: &StateInputs<Target>,
 ) -> Vec<Target> {
     let state_root = leaf_pi.root().elements;
     let block_number = leaf_pi.block_number().0;
     let block_header = leaf_pi.block_header().arr.map(|u32_target| u32_target.0);
 
-    // Join as [state_root, block_number, block_header].
-    state_root
-        .into_iter()
-        .chain([block_number])
+    // mimick block_leaf_hash
+    std::iter::once(block_number)
         .chain(block_header)
+        .chain(state_root)
         .collect()
 }
 
@@ -233,20 +270,22 @@ fn leaf_data<F: RichField + Extendable<D>, const D: usize>(
 mod tests {
     use super::*;
     use crate::{
+        array::Array,
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        keccak::PACKED_HASH_LEN,
+        keccak::{HASH_LEN, PACKED_HASH_LEN},
         utils::test::random_vector,
     };
     use anyhow::Result;
     use plonky2::{
-        field::types::Field,
+        field::types::{Field, PrimeField64, Sample},
         hash::{
             hash_types::NUM_HASH_OUT_ELTS, merkle_proofs::verify_merkle_proof,
             merkle_tree::MerkleTree,
         },
         plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
+    use plonky2_crypto::hash::CircuitBuilderHash;
     use rand::{thread_rng, Rng};
 
     const D: usize = 2;
@@ -273,7 +312,7 @@ mod tests {
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let is_first = cb.add_virtual_bool_target_safe();
             let prev_pi = cb.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
-            let new_leaf_pi = cb.add_virtual_targets(LeafInputs::<Target>::TOTAL_LEN);
+            let new_leaf_pi = cb.add_virtual_targets(StateInputs::<Target>::TOTAL_LEN);
 
             let wires = BlockTreeCircuit::build(cb, &prev_pi, &new_leaf_pi);
 
@@ -425,16 +464,16 @@ mod tests {
         // All leaves are empty for the init root.
         let init_root = merkle_root(vec![vec![]; 1 << MAX_DEPTH]);
 
-        // [state_root, block_number, block_header]
-        assert_eq!(leaf_data.len(), NUM_HASH_OUT_ELTS + 1 + PACKED_HASH_LEN);
-        let block_header = leaf_data[NUM_HASH_OUT_ELTS + 1..].to_vec();
+        // [block_number, block_header, state_root]
+        assert_eq!(leaf_data.len(), 1 + PACKED_HASH_LEN + NUM_HASH_OUT_ELTS);
+        let block_header = leaf_data[1..1 + PACKED_HASH_LEN].to_vec();
 
         // The block number is set to `first_block_number - 1` for dummy proofs.
         let first_block_num = F::from_canonical_usize(first_block_num);
         let block_num = if is_dummy {
             first_block_num - F::ONE
         } else {
-            leaf_data[NUM_HASH_OUT_ELTS]
+            leaf_data[0]
         };
 
         // [init_root, root, first_block_number, block_number, block_header]
@@ -449,11 +488,11 @@ mod tests {
 
     /// Generate the public inputs of new Merkle leaf (state root).
     fn new_leaf_inputs(leaf_data: &[F], prev_pi: &[F]) -> Vec<F> {
-        // [state_root, block_number, block_header]
-        assert_eq!(leaf_data.len(), NUM_HASH_OUT_ELTS + 1 + PACKED_HASH_LEN);
-        let state_root = &leaf_data[..NUM_HASH_OUT_ELTS];
-        let block_num = leaf_data[NUM_HASH_OUT_ELTS];
-        let block_header = &leaf_data[NUM_HASH_OUT_ELTS + 1..];
+        // [block_number, block_header, state_root]
+        assert_eq!(leaf_data.len(), 1 + PACKED_HASH_LEN + NUM_HASH_OUT_ELTS);
+        let block_num = leaf_data[0];
+        let block_header = &leaf_data[1..1 + PACKED_HASH_LEN];
+        let state_root = &leaf_data[1 + PACKED_HASH_LEN..];
 
         let prev_pi = PublicInputs::from(prev_pi);
         let prev_block_header = prev_pi.block_header_data();
@@ -471,7 +510,7 @@ mod tests {
     /// Get the expected outputs.
     fn expected_outputs(prev_pi: &[F], new_leaf_pi: &[F], new_root: &HashOut<F>) -> Vec<F> {
         let prev_pi = PublicInputs::from(prev_pi);
-        let new_leaf_pi = LeafInputs::from(new_leaf_pi);
+        let new_leaf_pi = StateInputs::from_slice(new_leaf_pi);
 
         // [init_root, root, first_block_number, block_number, block_header]
         prev_pi
@@ -489,15 +528,85 @@ mod tests {
 
     /// Generate the random leaf data.
     fn rand_leaf_data(block_num: usize) -> Vec<F> {
-        // Generate as [state_root, block_number, block_header].
-        let mut data: Vec<_> = random_vector(NUM_HASH_OUT_ELTS + 1 + PACKED_HASH_LEN)
+        // Generate as [block_number, block_header, state_root].
+        let mut data: Vec<_> = random_vector(1 + PACKED_HASH_LEN + NUM_HASH_OUT_ELTS)
             .into_iter()
             .map(F::from_canonical_usize)
             .collect();
 
         // Set the block number.
-        data[NUM_HASH_OUT_ELTS] = F::from_canonical_usize(block_num);
+        data[0] = F::from_canonical_usize(block_num);
 
         data
+    }
+
+    #[test]
+    fn test_hash_leaf() {
+        let block_number = thread_rng().gen_range(1..10_000);
+        let block_header = random_vector::<u8>(HASH_LEN).try_into().unwrap();
+        let state_root = HashOut {
+            elements: GoldilocksField::rand_vec(NUM_HASH_OUT_ELTS)
+                .try_into()
+                .unwrap(),
+        };
+
+        let expected = block_leaf_hash(
+            block_number,
+            &block_header,
+            &state_root.to_bytes().try_into().unwrap(),
+        );
+        let expected_f = HashOut::<GoldilocksField>::from_bytes(&expected);
+
+        let mut pi = Vec::new();
+        // state root
+        pi.extend(&state_root.elements);
+        // block header from blockchain in packed format
+        pi.extend(
+            convert_u8_to_u32_slice(&block_header)
+                .into_iter()
+                .map(F::from_canonical_u32),
+        );
+        // block number in u32 format
+        pi.push(F::from_canonical_u32(block_number));
+        // previous block hash - useless in this case but still
+        pi.extend(GoldilocksField::rand_vec(PACKED_HASH_LEN));
+        let circuit = TestCircuit {
+            expected: expected_f,
+            state_inputs: pi,
+        };
+
+        run_circuit::<GoldilocksField, 2, C, _>(circuit);
+
+        #[derive(Clone, Debug)]
+        struct TestCircuit {
+            expected: HashOut<GoldilocksField>,
+            state_inputs: Vec<F>,
+        }
+
+        impl UserCircuit<GoldilocksField, 2> for TestCircuit {
+            type Wires = (
+                Array<Target, { StateInputs::<Target>::TOTAL_LEN }>,
+                HashOutTarget,
+            );
+
+            fn build(c: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
+                let state_pi = Array::<Target, _>::new(c);
+                let pi = StateInputs::from_slice(&state_pi.arr);
+                let preimage = leaf_data(c, &pi);
+                let out_target = c.hash_n_to_hash_no_pad::<PoseidonHash>(preimage);
+                let exp_target = c.add_virtual_hash();
+                c.connect_hashes(out_target, exp_target);
+                (state_pi, exp_target)
+            }
+
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                // assign the inputs
+                wires
+                    .0
+                    .assign(pw, &self.state_inputs.clone().try_into().unwrap());
+                // assign the expect hash output
+                pw.set_hash_target(wires.1, self.expected);
+            }
+        }
     }
 }

@@ -4,7 +4,7 @@
 //!     leaf-circuit --> ...
 
 mod block_linking;
-mod lpn;
+pub mod lpn;
 
 pub use block_linking::BlockLinkingInputs;
-pub use lpn::LeafInputs;
+pub use lpn::StateInputs;

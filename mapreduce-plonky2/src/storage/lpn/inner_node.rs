@@ -1,5 +1,5 @@
 use plonky2::{
-    field::goldilocks_field::GoldilocksField,
+    field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{hash_types::NUM_HASH_OUT_ELTS, poseidon::PoseidonHash},
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
@@ -7,7 +7,7 @@ use plonky2::{
 
 use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 
-use super::{PublicInputs, NODE_MARKER};
+use super::PublicInputs;
 
 pub struct NodeWires {}
 
@@ -20,13 +20,14 @@ impl NodeCircuit {
         inputs: [PublicInputs<Target>; 2],
     ) -> NodeWires {
         let (left_child, right_child) = (&inputs[0], &inputs[1]);
-        let node_str = b.constant(NODE_MARKER());
 
         let digest = b.add_curve_point(&[left_child.digest(), right_child.digest()]);
-        let to_hash = Array::<Target, { 1 + 2 * NUM_HASH_OUT_ELTS }>::try_from(
-            std::iter::once(node_str)
-                .chain(left_child.root().elements.iter().copied())
-                .chain(right_child.root().elements.iter().copied())
+        let to_hash = Array::<Target, { 2 * NUM_HASH_OUT_ELTS }>::try_from(
+            left_child
+                .root_raw()
+                .iter()
+                .chain(right_child.root_raw())
+                .copied()
                 .collect::<Vec<_>>(),
         )
         .unwrap();
@@ -37,5 +38,5 @@ impl NodeCircuit {
         NodeWires {}
     }
 
-    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &NodeWires) {}
+    pub fn assign(&self, _: &mut PartialWitness<GoldilocksField>, _: &NodeWires) {}
 }

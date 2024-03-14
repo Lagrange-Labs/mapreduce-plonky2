@@ -33,11 +33,11 @@ use crate::{
 /// - S: Storage slot of the variable holding the length
 /// - M: Storage slot of the mapping
 #[derive(Clone, Debug)]
-pub struct LeafInputs<'a, T: Clone> {
+pub struct StateInputs<'a, T: Clone> {
     pub(crate) proof_inputs: &'a [T],
 }
 
-impl<'a> LeafInputs<'a, Target> {
+impl<'a> StateInputs<'a, Target> {
     /// Registers the public inputs into the circuit builder.
     pub fn register<F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
@@ -86,9 +86,11 @@ impl<'a> LeafInputs<'a, Target> {
     }
 }
 
-impl<'a, T: Copy> LeafInputs<'a, T> {
+impl<'a, T: Copy> StateInputs<'a, T> {
     pub(crate) const C_LEN: usize = NUM_HASH_OUT_ELTS;
     pub(crate) const H_LEN: usize = PACKED_HASH_LEN;
+    // Number can be encoded into a full target on 64 bits so no need to keep
+    // an array of bytes/targets as we do when reading the block header from chain
     pub(crate) const N_LEN: usize = 1;
     pub(crate) const PREV_H_LEN: usize = PACKED_HASH_LEN;
     pub(crate) const TOTAL_LEN: usize = Self::C_LEN + Self::H_LEN + Self::N_LEN + Self::PREV_H_LEN;

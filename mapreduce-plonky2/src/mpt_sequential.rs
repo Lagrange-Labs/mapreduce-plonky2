@@ -19,6 +19,10 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use recursion_framework::serialization::deserialize_array;
+use recursion_framework::serialization::deserialize_long_array;
+use recursion_framework::serialization::serialize_array;
+use recursion_framework::serialization::serialize_long_array;
 use serde::{Deserialize, Serialize};
 
 use crate::keccak::{compute_size_with_padding, KeccakCircuit, OutputHash};
@@ -53,6 +57,7 @@ pub struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
     /// whose length == MAX_KEY_NIBBLE_LEN
     key: [u8; MAX_KEY_NIBBLE_LEN / 2],
 }
+#[derive(Serialize, Deserialize)]
 pub struct InputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
@@ -64,13 +69,23 @@ where
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
     /// way to define everything according to max size of the data and
     /// "not care" about the padding size (almost!)
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     pub(crate) nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
     /// in the case of a fixed circuit, the actual tree depth might be smaller.
     /// In this case, we set false on the part of the path we should not process.
     /// NOTE: for node at index i in the path, the boolean indicating if we should
     /// process it is at index i-1
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
     should_process: [BoolTarget; DEPTH - 1],
 }
+
+#[derive(Serialize, Deserialize)]
 pub struct OutputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
@@ -78,6 +93,10 @@ where
 {
     /// We need to keep around the hashes wires because keccak needs to assign
     /// some additional wires for each input (see keccak circuit for more info.).
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; DEPTH],
     /// The leaf value wires. It is provably extracted from the leaf node.
     pub(crate) leaf: Array<Target, MAX_LEAF_VALUE_LEN>,
@@ -454,7 +473,6 @@ impl MPTKeyWire {
                     .arr
                     .iter()
                     .flat_map(|u32_limb| {
-                        let four = b.constant(F::from_canonical_u8(4));
                         // decompose the `U32Target` in 16 limbs of 2 bits each; the output limbs are already range-checked
                         // by the `split_le_base` operation
                         let limbs: [Target; 16] =

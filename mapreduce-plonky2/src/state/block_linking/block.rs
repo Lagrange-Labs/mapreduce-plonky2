@@ -152,7 +152,7 @@ impl<const NUMBER_LEN: usize> BlockHeader<NUMBER_LEN> {
         let expected_state_root: OutputHash = convert_u8_targets_to_u32(cb, expected_state_root)
             .try_into()
             .unwrap();
-        expected_state_root.enforce_equal(cb, &state_root_hash);
+        expected_state_root.enforce_equal(cb, state_root_hash);
     }
 }
 
@@ -173,7 +173,6 @@ mod test {
         arithmetic_u32::{CircuitBuilderU32, U32Target},
         witness::WitnessU32,
     };
-    use serial_test::serial;
 
     use crate::{
         array::Array,

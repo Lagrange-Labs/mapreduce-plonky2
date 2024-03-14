@@ -12,17 +12,17 @@ use plonky2::{
 
 use crate::{
     circuit::{test::run_circuit, UserCircuit},
-    state::{lpn::node::NodeCircuit, LeafInputs},
+    state::{lpn::node::NodeCircuit, StateInputs},
 };
 
 #[test]
 fn prove_and_verify_node_circuit() {
     let depth = 3;
-    let mut left = LeafInputs::values_from_seed(0xbeef);
+    let mut left = StateInputs::values_from_seed(0xbeef);
     let mut right = left;
-    let mut node = LeafInputs::from_slice(&left).root_data().to_vec();
+    let mut node = StateInputs::from_slice(&left).root_data().to_vec();
 
-    let right_inputs = LeafInputs::from_slice(&right);
+    let right_inputs = StateInputs::from_slice(&right);
     let block_header = right_inputs.block_header_data().to_vec();
     let block_number = right_inputs.block_number_data();
     let prev_block_header = right_inputs.prev_block_header_data().to_vec();
@@ -30,16 +30,16 @@ fn prove_and_verify_node_circuit() {
     for d in 0..depth {
         let is_left_sibling = (d & 1) == 0;
         if is_left_sibling {
-            LeafInputs::update_root_data_from_seed(&mut right, d);
-            LeafInputs::update_root_data(&mut left, &node);
+            StateInputs::update_root_data_from_seed(&mut right, d);
+            StateInputs::update_root_data(&mut left, &node);
         } else {
-            LeafInputs::update_root_data_from_seed(&mut left, d);
-            LeafInputs::update_root_data(&mut right, &node);
+            StateInputs::update_root_data_from_seed(&mut left, d);
+            StateInputs::update_root_data(&mut right, &node);
         }
 
         let mut preimage = vec![GoldilocksField::ZERO];
-        preimage.extend_from_slice(&LeafInputs::from_slice(&left).root_data());
-        preimage.extend_from_slice(&LeafInputs::from_slice(&right).root_data());
+        preimage.extend_from_slice(&StateInputs::from_slice(&left).root_data());
+        preimage.extend_from_slice(&StateInputs::from_slice(&right).root_data());
         node = hash_n_to_hash_no_pad::<_, PoseidonPermutation<_>>(&preimage)
             .elements
             .to_vec();
@@ -51,7 +51,7 @@ fn prove_and_verify_node_circuit() {
         };
 
         let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit);
-        let pi = LeafInputs::from_slice(proof.public_inputs.as_slice());
+        let pi = StateInputs::from_slice(proof.public_inputs.as_slice());
 
         assert_eq!(pi.root_data(), node);
         assert_eq!(pi.block_header_data(), &block_header);
@@ -77,11 +77,11 @@ impl UserCircuit<GoldilocksField, 2> for TestNodeCircuit {
     type Wires = TestNodeWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
-        let left = b.add_virtual_targets(LeafInputs::<()>::TOTAL_LEN);
-        let right = b.add_virtual_targets(LeafInputs::<()>::TOTAL_LEN);
+        let left = b.add_virtual_targets(StateInputs::<()>::TOTAL_LEN);
+        let right = b.add_virtual_targets(StateInputs::<()>::TOTAL_LEN);
 
-        let left_sibling = LeafInputs::from_slice(&left);
-        let right_sibling = LeafInputs::from_slice(&right);
+        let left_sibling = StateInputs::from_slice(&left);
+        let right_sibling = StateInputs::from_slice(&right);
 
         NodeCircuit::build(b, left_sibling, right_sibling);
 

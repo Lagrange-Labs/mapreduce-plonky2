@@ -14,7 +14,7 @@ use plonky2::{
 
 use crate::state::BlockLinkingInputs;
 
-use super::LeafInputs;
+use crate::state::StateInputs;
 
 #[cfg(test)]
 mod tests;
@@ -88,8 +88,8 @@ impl NodeCircuit {
     /// constraints.
     pub fn build<'i, F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-        left_sibling: LeafInputs<'i, Target>,
-        right_sibling: LeafInputs<'i, Target>,
+        left_sibling: StateInputs<'i, Target>,
+        right_sibling: StateInputs<'i, Target>,
     ) -> HashOutTarget
     where
         F: RichField + Extendable<D>,
