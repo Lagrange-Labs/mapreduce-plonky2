@@ -1,18 +1,18 @@
 use anyhow::Result;
 use itertools::Itertools;
 use plonky2::field::extension::Extendable;
-use plonky2::hash::hash_types::RichField;
+use plonky2::hash::hash_types::{HashOut, RichField};
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::VerifierCircuitData;
-use plonky2::plonk::config::GenericConfig;
+use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher};
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
 use sha3::Digest;
 use sha3::Keccak256;
 
-use crate::{group_hashing::N, ProofTuple};
+use crate::{group_hashing::N, types::HashOutput, ProofTuple};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
@@ -250,6 +250,15 @@ pub fn convert_point_to_curve_target(point: ([Target; 5], [Target; 5], Target)) 
     let flag = BoolTarget::new_unsafe(is_inf);
 
     CurveTarget(([x, y], flag))
+}
+
+/// Hash left and right children to one value.
+pub fn hash_two_to_one<F: RichField, H: Hasher<F>>(
+    left: HashOutput,
+    right: HashOutput,
+) -> HashOutput {
+    let [left, right] = [left, right].map(|bytes| H::Hash::from_bytes(&bytes));
+    H::two_to_one(left, right).to_bytes().try_into().unwrap()
 }
 
 #[cfg(test)]
