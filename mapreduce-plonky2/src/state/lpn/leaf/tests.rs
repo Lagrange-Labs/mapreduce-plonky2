@@ -40,7 +40,6 @@ fn prove_and_verify_leaf_circuit() {
     let block_linking = BlockLinkingInputs::from_slice(&block_linking_values);
 
     let preimage = LeafCircuit::node_preimage(&block_linking).collect::<Vec<_>>();
-    println!("test preimage: {:?}", preimage);
     let root = hash_n_to_hash_no_pad::<_, PoseidonPermutation<_>>(&preimage);
     // ensuring the public method using bytes is returning the same output
     {
