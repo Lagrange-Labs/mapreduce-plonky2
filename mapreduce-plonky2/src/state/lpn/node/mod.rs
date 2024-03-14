@@ -85,7 +85,9 @@ impl NodeCircuit {
     }
 
     /// Composes the circuit structure by assigning the virtual targets and performing the
-    /// constraints.
+    /// constraints. This circuit specifically ensures both children proofs are proving inclusion for
+    /// the same block header, same previous block header, and same block number. The circuit
+    /// then exposes the relevant information as public for the next proof layer to consume.
     pub fn build<'i, F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         left_sibling: StateInputs<'i, Target>,
