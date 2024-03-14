@@ -382,13 +382,6 @@ impl PublicParameters {
 
         set
     }
-
-    #[cfg(test)]
-    pub(crate) fn get_testing_circuit_set(
-        &self
-    ) -> &TestingRecursiveCircuits<F, C, D, NUM_IO> {
-        &self.set
-    }
 }
 
 #[cfg(test)]

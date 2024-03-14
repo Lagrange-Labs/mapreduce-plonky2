@@ -1,6 +1,6 @@
 use anyhow::Result;
 use plonky2::{iop::witness::{PartialWitness, WitnessWrite}, plonk::{
-    circuit_builder::CircuitBuilder, circuit_data::{VerifierCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData}, config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig}, proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget}
+    circuit_builder::CircuitBuilder, circuit_data::{CircuitConfig, VerifierCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData}, config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig}, proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget}
 }};
 use recursion_framework::serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize};
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,10 @@ pub struct PublicParameters {
     length_extract: length_extract::PublicParameters,
     length_match: length_match::Parameters,
     lpn_storage: lpn::PublicParameters,
+}
+
+pub(crate) fn get_config() -> CircuitConfig {
+    CircuitConfig::standard_recursion_config()
 }
 
 pub fn build_circuits_params() -> PublicParameters {
