@@ -182,6 +182,8 @@ where
             pw.set_bool_target(wires.leaf_index_bits[i], bit == 1);
         }
 
+        pw.set_hash_target(wire.root, self.root);
+
         wires
             .path
             .siblings
