@@ -57,7 +57,7 @@ pub fn block_leaf_hash(
 /// from plonky2. As long as it's the only one, it is fine.
 /// TODO: maybe refactor circuit to use our own?
 pub fn block_node_hash(left: HashOutput, right: HashOutput) -> HashOutput {
-    hash_two_to_one(left, right)
+    hash_two_to_one::<GoldilocksField, PoseidonHash>(left, right)
 }
 
 /// Block tree wires to assign
@@ -177,7 +177,7 @@ where
             pw.set_bool_target(wires.leaf_index_bits[i], bit == 1);
         }
 
-        pw.set_hash_target(wire.root, self.root);
+        pw.set_hash_target(wires.root, self.root);
 
         wires
             .path
