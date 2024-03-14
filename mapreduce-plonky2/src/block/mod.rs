@@ -8,8 +8,9 @@
 mod public_inputs;
 
 use crate::{
-    state::lpn::leaf::PublicInputs as StateInputs, types::HashOutput,
-    utils::convert_u8_to_u32_slice,
+    state::lpn::leaf::PublicInputs as StateInputs,
+    types::HashOutput,
+    utils::{convert_u8_to_u32_slice, hash_two_to_one},
 };
 use plonky2::{
     field::{extension::Extendable, goldilocks_field::GoldilocksField, types::Field},
@@ -56,13 +57,7 @@ pub fn block_leaf_hash(
 /// from plonky2. As long as it's the only one, it is fine.
 /// TODO: maybe refactor circuit to use our own?
 pub fn block_node_hash(left: HashOutput, right: HashOutput) -> HashOutput {
-    let f_slice = HashOut::<GoldilocksField>::from_bytes(&left)
-        .elements
-        .into_iter()
-        .chain(HashOut::from_bytes(&right).elements)
-        .collect::<Vec<_>>();
-    let hash_f = PoseidonHash::hash_no_pad(&f_slice);
-    hash_f.to_bytes().try_into().unwrap()
+    hash_two_to_one(left, right)
 }
 
 /// Block tree wires to assign
