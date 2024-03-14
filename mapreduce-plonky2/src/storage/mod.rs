@@ -2,7 +2,7 @@ mod digest_equal;
 mod key;
 pub mod length_extract;
 mod length_match;
-mod lpn;
+pub mod lpn;
 pub mod mapping;
 
 pub use digest_equal::PublicInputs;
