@@ -167,6 +167,13 @@ where
     }
 }
 
+impl<T: Targetable + Clone + Serialize, const N: usize> Array<T, N>
+where
+    for<'d> T: Deserialize<'d>,
+{
+    pub const LEN: usize = N;
+}
+
 impl<T: Targetable + Clone + Serialize, const N: usize> Eq for Array<T, N> where
     for<'d> T: Deserialize<'d>
 {

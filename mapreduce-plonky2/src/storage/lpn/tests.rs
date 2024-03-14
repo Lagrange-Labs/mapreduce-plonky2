@@ -3,7 +3,10 @@ use std::ops::Add;
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::HashOut,
-    iop::{target::Target, witness::WitnessWrite},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{
         circuit_builder::CircuitBuilder,
         config::{GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
@@ -46,11 +49,7 @@ impl UserCircuit<GoldilocksField, 2> for NodeCircuitValidator<'_> {
         (wires, child_inputs)
     }
 
-    fn prove(
-        &self,
-        pw: &mut plonky2::iop::witness::PartialWitness<GoldilocksField>,
-        wires: &Self::Wires,
-    ) {
+    fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
         pw.set_target_arr(&wires.1[0], self.children[0].inputs);
         pw.set_target_arr(&wires.1[1], self.children[1].inputs);
         self.validated.assign(pw, &wires.0);
@@ -146,7 +145,7 @@ fn test_mini_tree(k1s: &'_ str, v1s: &'_ str, k2s: &'_ str, v2s: &'_ str) {
         .to_weierstrass();
     let found_digest = ios.digest();
     assert_eq!(expected_digest, found_digest);
-    // The digest commutes
+    // The digest must commute
     assert_eq!(expected_other_digest, found_digest);
 
     // Check the nested root hash

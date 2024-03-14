@@ -8,64 +8,75 @@ use plonky2::{
     iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
-
 use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
 
 use crate::{
+    array::Array,
     storage::CURVE_TARGET_GL_SIZE,
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 
-/// Stores the public input used to prove the inclusion of a value in a *binary* merkle tree.
-///
-///  * R - the hash born by the current node
-///  * D – the digest of the values encoutered up until R
-#[derive(Debug)]
-pub struct PublicInputs<'input, FieldElt: Clone> {
-    pub inputs: &'input [FieldElt],
-}
+use super::AddressTarget;
 
-impl<'a, T: Clone> From<&'a [T]> for PublicInputs<'a, T> {
+/// The public inputs required for the storage proof of query #2
+///   - hash of this subtree (NUM_HASH_OUT_ELTS);
+///   - digest of this subtree (CURVE_TARGET_GL_SIZE);
+///   - value (owner) forwarded bottom-up (AddressTarget::LEN)
+#[derive(Debug)]
+pub struct PublicInputs<'input, T: Clone> {
+    pub inputs: &'input [T],
+}
+impl<'a, T: Clone + Copy> From<&'a [T]> for PublicInputs<'a, T> {
     fn from(inputs: &'a [T]) -> Self {
+        assert_eq!(inputs.len(), Self::TOTAL_LEN);
         Self { inputs }
     }
 }
 
-impl<'a, T: Copy> PublicInputs<'a, T> {
-    pub const ROOT_OFFSET: usize = 0;
-    pub const ROOT_LEN: usize = NUM_HASH_OUT_ELTS;
-    pub const D_IDX: usize = 4;
-    pub const D_LEN: usize = 11;
+impl<'a, T: Clone + Copy> PublicInputs<'a, T> {
+    const ROOT_OFFSET: usize = 0;
+    const ROOT_LEN: usize = NUM_HASH_OUT_ELTS;
+    const DIGEST_OFFSET: usize = Self::ROOT_LEN;
+    const DIGEST_LEN: usize = CURVE_TARGET_GL_SIZE;
+    const OWNER_OFFSET: usize = Self::ROOT_LEN + Self::DIGEST_LEN;
+    const OWNER_LEN: usize = AddressTarget::LEN;
 
-    pub const TOTAL_LEN: usize = Self::ROOT_LEN + Self::D_LEN;
+    pub const TOTAL_LEN: usize = Self::ROOT_LEN + Self::DIGEST_LEN + Self::OWNER_LEN;
 
     pub fn register(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
         root: &HashOutTarget,
         digest: &CurveTarget,
+        user: &AddressTarget,
     ) {
         b.register_public_inputs(&root.elements);
         b.register_curve_public_input(*digest);
+        user.register_as_public_input(b);
     }
 
     /// Extracts the root hash components from the raw input
-    pub(crate) fn root_raw(&self) -> &[T] {
+    fn root_raw(&self) -> &[T] {
         &self.inputs[Self::ROOT_OFFSET..Self::ROOT_OFFSET + Self::ROOT_LEN]
     }
 
     /// Extracts curve coordinates from the raw input
-    pub(crate) fn digest_raw(
+    pub fn digest_raw(
         &self,
     ) -> (
         [T; crate::group_hashing::N],
         [T; crate::group_hashing::N],
         T,
     ) {
-        let raw = &self.inputs[Self::D_IDX..Self::D_IDX + Self::D_LEN];
+        let raw = &self.inputs[Self::DIGEST_OFFSET..Self::DIGEST_OFFSET + Self::DIGEST_LEN];
         convert_slice_to_curve_point(raw)
+    }
+
+    /// Extracts the owner address
+    fn owner_raw(&self) -> &[T] {
+        &self.inputs[Self::OWNER_OFFSET..Self::OWNER_OFFSET + Self::OWNER_LEN]
     }
 }
 
@@ -76,9 +87,14 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     /// The root hash of the current subtree
-    pub fn root_hash(&self) -> HashOutTarget {
+    pub fn root(&self) -> HashOutTarget {
         HashOutTarget::try_from(std::array::from_fn(|i| self.inputs[Self::ROOT_OFFSET + i]))
             .unwrap()
+    }
+
+    /// The owner address
+    pub fn owner(&self) -> AddressTarget {
+        Array::try_from(self.owner_raw().to_vec()).unwrap()
     }
 }
 
@@ -102,7 +118,12 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
     }
 
     /// The GLs forming the hash of the current subtree
-    pub fn root_hash(&self) -> HashOut<GoldilocksField> {
+    pub fn root(&self) -> HashOut<GoldilocksField> {
         HashOut::from_vec(self.root_raw().to_owned())
+    }
+
+    /// The owner address as an array of GL
+    pub fn owner(&self) -> &[GoldilocksField] {
+        self.owner_raw()
     }
 }

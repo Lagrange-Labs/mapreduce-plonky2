@@ -41,6 +41,7 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
         let value = Array::<Target, LEAF_SIZE>::new(b);
         let value_u32 = value.convert_u8_to_u32(b);
         let kv = key_u32.concat(&value_u32).to_targets();
+
         let digest = b.map_to_curve_point(&kv.arr);
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(kv.arr));
 
