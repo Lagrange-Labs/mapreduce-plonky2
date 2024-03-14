@@ -42,7 +42,7 @@ struct PartialInnerNodeCircuitValidator<'a> {
 
     proved_child: &'a PublicInputs<'a, F>,
     unproved_hash: Vec<F>,
-    unproved_is_left: F,
+    proved_is_left: F,
 }
 impl<'a> UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuitValidator<'a> {
     type Wires = (PartialInnerNodeWires, Vec<Target>, Vec<Target>, Target);
@@ -70,7 +70,7 @@ impl<'a> UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuitValidator<'a
     fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
         pw.set_target_arr(&wires.1, self.proved_child.inputs);
         pw.set_target_arr(&wires.2, &self.unproved_hash);
-        pw.set_target(wires.3, self.unproved_is_left);
+        pw.set_target(wires.3, self.proved_is_left);
         self.validated.assign(pw, &wires.0);
     }
 }
@@ -247,7 +247,7 @@ fn test_mini_tree(k: &str, v: &str) {
         validated: PartialInnerNodeCircuit {},
         proved_child: &middle_ios,
         unproved_hash: some_hash.to_vec(),
-        unproved_is_left: F::from_bool(true),
+        proved_is_left: F::from_bool(true),
     };
     let top_proof = run_circuit::<F, D, C, _>(top);
     let top_ios = PublicInputs::<F>::from(top_proof.public_inputs.as_slice());

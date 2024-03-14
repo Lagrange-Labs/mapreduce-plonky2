@@ -1,16 +1,19 @@
 //! Mechanism for partially-recomputed inner node, i.e. only one child proof needs to be recomputed
 
+use itertools::Itertools;
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
-    hash::{hash_types::HashOutTarget, poseidon::PoseidonHash},
+    hash::{
+        hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
+        hashing::PlonkyPermutation,
+        poseidon::PoseidonHash,
+    },
     iop::{
         target::{BoolTarget, Target},
         witness::PartialWitness,
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, config::AlgebraicHasher},
 };
-
-use crate::{circuit::UserCircuit, storage::NODE_MARKER};
 
 use super::public_inputs::PublicInputs;
 pub struct PartialInnerNodeWires {}
@@ -21,52 +24,53 @@ pub struct PartialInnerNodeWires {}
 #[derive(Clone)]
 pub struct PartialInnerNodeCircuit {}
 
+type H = PoseidonHash;
+type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
+
+/// Hash the concatenation of the two provided 4-wide inputs, swapping them if specified.
+fn hash_maybe_swap(
+    b: &mut CircuitBuilder<GoldilocksField, 2>,
+    inputs: &[[Target; NUM_HASH_OUT_ELTS]; 2],
+    do_swap: BoolTarget,
+) -> HashOutTarget {
+    let zero = b.zero();
+
+    let inputs = inputs.iter().flat_map(|i| i.iter()).copied().collect_vec();
+    let mut state = P::new(core::iter::repeat(zero));
+    for input_chunk in inputs.chunks(P::RATE) {
+        state.set_from_slice(input_chunk, 0);
+        state = H::permute_swapped(state, do_swap, b);
+    }
+
+    HashOutTarget {
+        elements: {
+            let mut outputs = Vec::with_capacity(NUM_HASH_OUT_ELTS);
+            'aaa: loop {
+                for &s in state.squeeze() {
+                    outputs.push(s);
+                    if outputs.len() == NUM_HASH_OUT_ELTS {
+                        break 'aaa;
+                    }
+                }
+                state = H::permute_swapped(state, do_swap, b);
+            }
+            outputs.try_into().unwrap()
+        },
+    }
+}
+
 impl PartialInnerNodeCircuit {
     pub fn build(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
         proved: &PublicInputs<Target>,
         unproved_hash: HashOutTarget,
-        unproved_is_left: BoolTarget,
+        proved_is_left: BoolTarget,
     ) -> PartialInnerNodeWires {
-        let one = b.one();
-
-        let unproved_is_left = unproved_is_left.target;
-        let unproved_is_right = b.sub(one, unproved_is_left);
-
-        // Left-hand case
-        let unproved_is_left_hash = b.hash_n_to_hash_no_pad::<PoseidonHash>(
-            unproved_hash
-                .elements
-                .iter()
-                .copied()
-                .chain(proved.root().elements.iter().copied())
-                .collect::<Vec<_>>(),
+        let root = hash_maybe_swap(
+            b,
+            &[proved.root().elements, unproved_hash.elements],
+            proved_is_left,
         );
-
-        // Right-hand case
-        // b.verify_merkle_proof(leaf_data, leaf_index_bits, merkle_root, proof)
-        let unproved_is_right_hash = b.hash_n_to_hash_no_pad::<PoseidonHash>(
-            proved
-                .root()
-                .elements
-                .iter()
-                .copied()
-                .chain(unproved_hash.elements.iter().copied())
-                .collect::<Vec<_>>(),
-        );
-
-        let root = HashOutTarget::from_vec(
-            unproved_is_left_hash
-                .elements
-                .iter()
-                .zip(unproved_is_right_hash.elements.iter())
-                .map(|(l, r)| {
-                    let right = b.mul(unproved_is_right, *r);
-                    b.mul_add(unproved_is_left, *l, right)
-                })
-                .collect::<Vec<_>>(),
-        );
-
         PublicInputs::<GoldilocksField>::register(b, &root, &proved.digest(), &proved.owner());
         PartialInnerNodeWires {}
     }

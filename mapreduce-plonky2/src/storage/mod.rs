@@ -3,7 +3,7 @@ mod key;
 pub mod length_extract;
 mod length_match;
 mod lpn;
-mod mapping;
+pub mod mapping;
 mod merkle;
 mod query2;
 
