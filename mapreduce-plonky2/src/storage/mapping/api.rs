@@ -118,11 +118,10 @@ struct ProofInputSerialized<T> {
 impl<T> ProofInputSerialized<T> {
     /// Deserialize child proofs and return the set of deserialized 'MTPProof`s
     fn get_child_proofs(&self) -> Result<Vec<ProofWithVK>> {
-        Ok(self
-            .serialized_child_proofs
+        self.serialized_child_proofs
             .iter()
-            .map(|proof| bincode::deserialize(proof))
-            .collect::<Result<Vec<_>, _>>()?)
+            .map(|proof| ProofWithVK::deserialize(proof))
+            .collect::<Result<Vec<_>, _>>()
     }
 }
 

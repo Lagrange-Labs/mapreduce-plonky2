@@ -121,11 +121,13 @@ mod test {
         let p2 = params
             .generate_proof(Input::Leaf(LeafCircuit { key: k2, value: v2 }))
             .unwrap();
-        params
+        let proof = params
             .generate_proof(Input::Node(NodeInputs {
                 left: p1,
                 right: p2,
             }))
             .unwrap();
+        let p = ProofWithVK::deserialize(&proof).unwrap();
+        params.node_circuit.circuit_data().verify(p.proof).unwrap();
     }
 }
