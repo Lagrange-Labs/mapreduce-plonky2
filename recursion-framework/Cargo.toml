@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = "1.0.79"
 log = "0.4.20"
 plonky2 = { version = "0.1.4" }
-plonky2_crypto = { git = "https://github.com/nikkolasg/plonky2-crypto", branch = "feat/serialization" }
+plonky2_crypto = { git = "https://github.com/Lagrange-Labs/plonky2-crypto", branch = "feat/serialization" }
 plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
 serde = "1.0.197"
 
