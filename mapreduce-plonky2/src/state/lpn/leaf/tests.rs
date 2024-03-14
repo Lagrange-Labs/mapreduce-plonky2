@@ -93,20 +93,14 @@ impl<'a, T: Copy + Default> StateInputs<'a, T> {
         n: &[T; StateInputs::<()>::N_LEN],
         prev_h: &[T; StateInputs::<()>::PREV_H_LEN],
     ) {
-        values[StateInputs::<()>::C_IDX..StateInputs::<()>::C_IDX + StateInputs::<()>::C_LEN]
-            .copy_from_slice(c);
-        values[StateInputs::<()>::H_IDX..StateInputs::<()>::H_IDX + StateInputs::<()>::H_LEN]
-            .copy_from_slice(h);
-        values[StateInputs::<()>::N_IDX..StateInputs::<()>::N_IDX + StateInputs::<()>::N_LEN]
-            .copy_from_slice(n);
-        values[StateInputs::<()>::PREV_H_IDX
-            ..StateInputs::<()>::PREV_H_IDX + StateInputs::<()>::PREV_H_LEN]
-            .copy_from_slice(prev_h);
+        values[Self::C_IDX..Self::C_IDX + Self::C_LEN].copy_from_slice(c);
+        values[Self::H_IDX..Self::H_IDX + Self::H_LEN].copy_from_slice(h);
+        values[Self::N_IDX..Self::N_IDX + Self::N_LEN].copy_from_slice(n);
+        values[Self::PREV_H_IDX..Self::PREV_H_IDX + Self::PREV_H_LEN].copy_from_slice(prev_h);
     }
 
     pub fn update_root_data(values: &mut [T; StateInputs::<()>::TOTAL_LEN], data: &[T]) {
-        values[StateInputs::<()>::C_IDX..StateInputs::<()>::C_IDX + StateInputs::<()>::C_LEN]
-            .copy_from_slice(data);
+        values[Self::C_IDX..Self::C_IDX + Self::C_LEN].copy_from_slice(data);
     }
 }
 
