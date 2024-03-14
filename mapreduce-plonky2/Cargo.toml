@@ -13,7 +13,7 @@ plonky2 = { version = "0.1.4" }
 recursion_framework = { path = "../recursion-framework" }
 
 # supporting latest plonky2
-plonky2_crypto = { git = "https://github.com/nikkolasg/plonky2-crypto", branch = "feat/serialization" }
+plonky2_crypto = { git = "https://github.com/Lagrange-Labs/plonky2-crypto", branch = "feat/serialization" }
 plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
 rand = "0.8.5"
 serde = "1.0.193"
