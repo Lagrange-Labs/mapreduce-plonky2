@@ -345,7 +345,6 @@ mod tests {
 
         // Get the latest block number.
         let block_number = provider.get_block_number().await?;
-        println!("Block number: {:?}", block_number);
         // Get block.
         let block = provider.get_block(block_number).await?.unwrap();
         // Query the MPT proof.
