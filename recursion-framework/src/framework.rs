@@ -1,7 +1,7 @@
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::{HashOut, RichField},
-    iop::witness::PartialWitness,
+    iop::{target::Target, witness::PartialWitness},
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, VerifierCircuitTarget, VerifierOnlyCircuitData},
@@ -12,7 +12,7 @@ use plonky2::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifier},
+    circuit_builder::{public_input_targets, CircuitLogicWires, CircuitWithUniversalVerifier},
     serialization::circuit_data_serialization::SerializableRichField,
     universal_verifier_gadget::{
         verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
@@ -170,6 +170,13 @@ impl<const D: usize> RecursiveCircuitsVerifierTarget<D> {
             proof,
             verifier_data,
         )
+    }
+
+    /// Returns a set of targets corresponding to the public inputs of the proof being recursively
+    /// verified
+    pub fn get_public_input_targets<F: SerializableRichField<D>, const NUM_PUBLIC_INPUTS: usize>(&self) -> &[Target] {
+        let pt = self.0.get_proof_target();
+        public_input_targets::<F, D, NUM_PUBLIC_INPUTS>(pt)
     }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -135,7 +135,7 @@ type ExtensionInput = ProofInputSerialized<InputNode>;
 
 type BranchInput = ProofInputSerialized<InputNode>;
 
-const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
+pub(crate) const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 /// generate a macro filling the BranchCircuit structs manually
 macro_rules! impl_branch_circuits {
     ($struct_name:ty, $($i:expr),*) => {
@@ -197,9 +197,9 @@ macro_rules! impl_branch_circuits {
                         if arr.len() == 1 {
                             true
                         } else {
-                            let pi1 = PublicInputs::<F>::from(&arr[0].proof.public_inputs);
+                            let pi1 = PublicInputs::<F>::from(&arr[0].get_proof().public_inputs);
                             let (k1, p1) = pi1.mpt_key_info();
-                            let pi2 = PublicInputs::<F>::from(&arr[1].proof.public_inputs);
+                            let pi2 = PublicInputs::<F>::from(&arr[1].get_proof().public_inputs);
                             let (k2, p2) = pi2.mpt_key_info();
                             let up1 = p1.to_canonical_u64() as usize;
                             let up2 = p2.to_canonical_u64() as usize;
@@ -218,7 +218,7 @@ macro_rules! impl_branch_circuits {
 
                 // we just take the first one,it doesn't matter which one we take as long
                 // as all prefixes and pointers are equal.
-                let pi = PublicInputs::<F>::from(&child_proofs[0].proof.public_inputs);
+                let pi = PublicInputs::<F>::from(&child_proofs[0].get_proof().public_inputs);
                 let (key, ptr) = pi.mpt_key_info();
                 let mapping_slot = pi.mapping_slot().to_canonical_u64() as usize;
                 let common_prefix = key
@@ -229,19 +229,22 @@ macro_rules! impl_branch_circuits {
                 // pointer by one in the branch circuit.
                 // TODO: refactor circuit to only advance the pointer by one _after_
                 // the comparison, so we don't need to do this?
-                let pointer = ptr.to_canonical_u64() as usize - 1;
-                let proofs = child_proofs
+                let pointer = ptr.to_canonical_u64() as usize - 1; 
+                let (proofs, vks): (Vec<_>, Vec<_>) = child_proofs
                     .iter()
                     // TODO: didn't find a way to get rid of the useless clone - it's either on the vk or on the proof
-                    .map(|p| p.proof.clone())
-                    .collect::<Vec<_>>();
+                    .map(|p| {
+                        let (proof, vk) = p.into();
+                        (proof.clone(), vk)
+                    })
+                    .unzip();
                 let min_range = MAX_BRANCH_NODE_LEN / 2;
                  match child_proofs.len() {
                      $($i if branch_node.node.len() > min_range => {
                          set.generate_proof(
                              &self.[< b $i >],
                              proofs.try_into().unwrap(),
-                             create_array(|i| &child_proofs[i].vk),
+                             create_array(|i| vks[i]),
                              BranchCircuit {
                                  node: branch_node.node,
                                  common_prefix,
@@ -254,7 +257,7 @@ macro_rules! impl_branch_circuits {
                          set.generate_proof(
                              &self.[< b $i _over_2 >],
                              proofs.try_into().unwrap(),
-                             create_array(|i| &child_proofs[i].vk),
+                             create_array(|i| vks[i]),
                              BranchCircuit {
                                  node: branch_node.node,
                                  common_prefix,
@@ -348,13 +351,13 @@ impl PublicParameters {
                 .map(|p| (p, self.leaf_circuit.get_verifier_data().clone()).into()),
             CircuitInput::Extension(ext) => {
                 let mut child_proofs = ext.get_child_proofs()?;
-                let child_proof = child_proofs.pop().ok_or(anyhow::Error::msg(
+                let (child_proof, child_vk) = child_proofs.pop().ok_or(anyhow::Error::msg(
                     "No proof found in input for extension node",
-                ))?;
+                ))?.into();
                 set.generate_proof(
                     &self.ext_circuit,
-                    [child_proof.proof],
-                    [&child_proof.vk],
+                    [child_proof],
+                    [&child_vk],
                     ExtensionNodeCircuit {
                         node: ext.input.node,
                     },
@@ -367,6 +370,24 @@ impl PublicParameters {
                     .generate_proof(&set, branch.input, child_proofs)
             }
         }
+    }
+
+    pub(crate) fn get_mapping_circuit_set(
+        &self
+    ) -> &RecursiveCircuits<F, C, D> {
+        #[cfg(not(test))]
+        let set = &self.set;
+        #[cfg(test)]
+        let set = self.set.get_recursive_circuit_set();
+
+        set
+    }
+
+    #[cfg(test)]
+    pub(crate) fn get_testing_circuit_set(
+        &self
+    ) -> &TestingRecursiveCircuits<F, C, D, NUM_IO> {
+        &self.set
     }
 }
 
@@ -494,7 +515,7 @@ mod test {
         };
         // generate a leaf then a branch proof with only this leaf
         let leaf1_proof = params.generate_proof(CircuitInput::Leaf(l1)).unwrap();
-        let pub1 = leaf1_proof.proof.public_inputs[..NUM_IO].to_vec();
+        let pub1 = leaf1_proof.get_proof().public_inputs[..NUM_IO].to_vec();
         let pi1 = PublicInputs::from(&pub1);
         assert_eq!(pi1.proof_inputs.len(), NUM_IO);
         let (_, comp_ptr) = pi1.mpt_key_info();
@@ -512,7 +533,7 @@ mod test {
         } else {
             params.branchs.b1.get_verifier_data().clone()
         };
-        assert_eq!(branch1.vk, exp_vk);
+        assert_eq!(branch1.get_verifier_data(), &exp_vk);
 
         // generate  a branch proof with two leafs inputs now but using the testing framework
         // we simulate another leaf at the right key, so we just modify the nibble at the pointer
@@ -545,10 +566,10 @@ mod test {
             .generate_input_proofs([pub2.try_into().unwrap()])
             .unwrap();
         let vk = params.set.verifier_data_for_input_proofs::<1>()[0].clone();
-        let leaf2_proof_vk = ProofWithVK {
-            proof: leaf2_proof[0].clone(),
+        let leaf2_proof_vk = ProofWithVK::from((
+            leaf2_proof[0].clone(),
             vk,
-        };
+        ));
         let branch_inputs = CircuitInput::Branch(BranchInput {
             input: InputNode {
                 node: branch_node.clone(),
@@ -564,6 +585,6 @@ mod test {
         } else {
             params.branchs.b2.get_verifier_data().clone()
         };
-        assert_eq!(branch2.vk, exp_vk);
+        assert_eq!(branch2.get_verifier_data(), &exp_vk);
     }
 }

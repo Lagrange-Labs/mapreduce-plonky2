@@ -5,13 +5,9 @@ use super::{
     MAX_BRANCH_NODE_LEN,
 };
 use crate::{
-    circuit::UserCircuit,
-    keccak::{OutputHash, PACKED_HASH_LEN},
-    mpt_sequential::{
+    api::serialize_proof, circuit::UserCircuit, keccak::{OutputHash, PACKED_HASH_LEN}, mpt_sequential::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
-    },
-    types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
-    utils::convert_u8_targets_to_u32,
+    }, types::{PackedAddressTarget, PACKED_ADDRESS_LEN}, utils::convert_u8_targets_to_u32
 };
 use anyhow::Result;
 use ethers::types::H160;
@@ -223,8 +219,11 @@ where
         inputs.assign::<F, D>(&mut pw, &self.wires)?;
         let proof = self.data.prove(pw)?;
         // TODO: move serialization to common place
-        let b = bincode::serialize(&proof)?;
-        Ok(b)
+        serialize_proof(&proof)
+    }
+
+    pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {
+        &self.data
     }
 }
 

@@ -25,7 +25,9 @@ use crate::{
 
 use anyhow::Result;
 #[derive(Serialize, Deserialize, Eq, PartialEq)]
-struct DummyCircuitWires<const NUM_PUBLIC_INPUTS: usize>(
+/// Wirs of a circuit employing for testing purposes, which imply exposes 
+/// `NUM_PUBLIC_INPUTS` unconstrained public inputs in the generated proofs
+pub struct DummyCircuitWires<const NUM_PUBLIC_INPUTS: usize>(
     #[serde(
         serialize_with = "serialize_array",
         deserialize_with = "deserialize_array"
@@ -102,6 +104,28 @@ where
 }
 
 impl<
+    F: SerializableRichField<D>,
+    C: GenericConfig<D, F = F> + 'static,
+    const D: usize,
+    const NUM_PUBLIC_INPUTS: usize,
+> Default for TestingRecursiveCircuits<F, C, D, NUM_PUBLIC_INPUTS>
+where 
+    C::Hasher: AlgebraicHasher<F>,
+    [(); C::Hasher::HASH_SIZE]:,
+    {
+        /// Build a `TestingRecursiveCircuits` for an empty set of circuits and employing 
+        /// `standard_recursion_config` as the circuit configuration
+        fn default() -> Self {
+            let config = CircuitConfig::standard_recursion_config();
+            let circuit_builder = new_universal_circuit_builder_for_testing::<F, C, D, NUM_PUBLIC_INPUTS>(
+                config,
+                0,
+            );
+            // we create an instance of `TestingRecursiveCircuits` where the set of circuits comprises only the dummy circuit
+            TestingRecursiveCircuits::<F, C, D, NUM_PUBLIC_INPUTS>::new(&circuit_builder, vec![])
+    }
+    }
+impl<
         F: SerializableRichField<D>,
         C: GenericConfig<D, F = F> + 'static,
         const D: usize,
@@ -124,6 +148,7 @@ where
 
         Self::new_from_circuit_digests(builder, circuit_digests)
     }
+
     /// Instantiate a `TestingRecursiveCircuits` for the set of circuits given by `circuit_digests`;
     /// `builder` must be instantiated
     pub fn new_from_circuit_digests(
@@ -308,13 +333,9 @@ mod tests {
         // This test shows how to employ th `TestingRecursiveCircuits` framework to test circuits that employ the `RecursiveCircuitsVerifierGadget`
         let config = CircuitConfig::standard_recursion_config();
         const NUM_PUBLIC_INPUTS: usize = NUM_PUBLIC_INPUTS_TEST_CIRCUITS;
-        let circuit_builder = new_universal_circuit_builder_for_testing::<F, C, D, NUM_PUBLIC_INPUTS>(
-            config.clone(),
-            0,
-        );
         // we create an instance of `TestingRecursiveCircuits` where the set of circuits comprises only the dummy circuit
         let testing_framework =
-            TestingRecursiveCircuits::<F, C, D, NUM_PUBLIC_INPUTS>::new(&circuit_builder, vec![]);
+            TestingRecursiveCircuits::<F, C, D, NUM_PUBLIC_INPUTS>::default();
 
         // we build 2 circuits employing the `RecursiveCircuitsVerifierGadget`
         let circuit_builder = CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::new::<
