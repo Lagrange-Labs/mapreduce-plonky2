@@ -6,4 +6,5 @@
 mod block_linking;
 pub mod lpn;
 
-pub use block_linking::PublicInputs as BlockLinkingPublicInputs;
+pub use block_linking::BlockLinkingInputs;
+pub use lpn::StateInputs;

@@ -8,7 +8,7 @@
 mod public_inputs;
 
 use crate::{
-    state::lpn::leaf::PublicInputs as StateInputs,
+    state::StateInputs,
     types::HashOutput,
     utils::{convert_u8_to_u32_slice, hash_two_to_one},
 };

@@ -1,16 +1,20 @@
 //! Lagrange Proving Network circuits
 
+pub(crate) mod leaf;
+mod node;
+mod public_inputs;
+
 use ethers::types::Address;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{hash_types::HashOut, poseidon::PoseidonHash},
     plonk::config::{GenericHashOut, Hasher},
 };
+pub use public_inputs::StateInputs;
 
 use crate::{types::HashOutput, utils::convert_u8_to_u32_slice};
 
 // TODO: remove public after moving the public inputs outside of leaf.
-pub(crate) mod leaf;
 
 /// Returns the hash in bytes of the leaf of the state database. It takes as parameters
 /// * the address of the contract,

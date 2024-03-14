@@ -16,7 +16,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
-pub use public_inputs::PublicInputs;
+pub use public_inputs::BlockLinkingInputs;
 
 /// Main block-linking wires
 pub struct BlockLinkingWires<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>
@@ -109,7 +109,7 @@ where
         };
 
         // Register the public inputs.
-        PublicInputs::<F>::register(cb, &wires, &storage_pi);
+        BlockLinkingInputs::<F>::register(cb, &wires, &storage_pi);
 
         wires
     }
@@ -345,7 +345,6 @@ mod tests {
 
         // Get the latest block number.
         let block_number = provider.get_block_number().await?;
-        println!("Block number: {:?}", block_number);
         // Get block.
         let block = provider.get_block(block_number).await?.unwrap();
         // Query the MPT proof.
@@ -385,7 +384,7 @@ mod tests {
             storage_pi,
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        let pi = PublicInputs::<F>::from_slice(&proof.public_inputs);
+        let pi = BlockLinkingInputs::<F>::from_slice(&proof.public_inputs);
         let computed_bn = pi.block_number();
         assert_eq!(
             F::from_canonical_u32(block.number.unwrap().as_u32()),

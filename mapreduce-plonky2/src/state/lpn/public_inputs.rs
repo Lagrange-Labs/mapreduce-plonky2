@@ -12,7 +12,7 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 use crate::{
     keccak::{OutputHash, PACKED_HASH_LEN},
-    state::BlockLinkingPublicInputs,
+    state::BlockLinkingInputs,
 };
 
 /// The public inputs for the leaf circuit.
@@ -33,16 +33,16 @@ use crate::{
 /// - S: Storage slot of the variable holding the length
 /// - M: Storage slot of the mapping
 #[derive(Clone, Debug)]
-pub struct PublicInputs<'a, T: Clone> {
+pub struct StateInputs<'a, T: Clone> {
     pub(crate) proof_inputs: &'a [T],
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl<'a> StateInputs<'a, Target> {
     /// Registers the public inputs into the circuit builder.
     pub fn register<F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         root: &HashOutTarget,
-        block_linking: &BlockLinkingPublicInputs<'a, Target>,
+        block_linking: &BlockLinkingInputs<'a, Target>,
     ) where
         F: RichField + Extendable<D>,
     {
@@ -50,6 +50,16 @@ impl<'a> PublicInputs<'a, Target> {
         b.register_public_inputs(block_linking.block_hash());
         b.register_public_input(*block_linking.block_number());
         b.register_public_inputs(block_linking.prev_block_hash());
+    }
+
+    /// Registers the public inputs of the instance into the circuit builder.
+    pub fn register_block_linking_data<F, const D: usize>(&self, b: &mut CircuitBuilder<F, D>)
+    where
+        F: RichField + Extendable<D>,
+    {
+        self.block_header().register_as_public_input(b);
+        b.register_public_input(self.block_number().0);
+        self.prev_block_header().register_as_public_input(b);
     }
 
     /// Returns the root hash.
@@ -76,7 +86,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 }
 
-impl<'a, T: Copy> PublicInputs<'a, T> {
+impl<'a, T: Copy> StateInputs<'a, T> {
     pub(crate) const C_LEN: usize = NUM_HASH_OUT_ELTS;
     pub(crate) const H_LEN: usize = PACKED_HASH_LEN;
     // Number can be encoded into a full target on 64 bits so no need to keep
