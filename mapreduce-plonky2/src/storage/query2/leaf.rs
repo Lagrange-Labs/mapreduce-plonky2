@@ -40,15 +40,10 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
         let key = Array::<Target, KEY_GL_SIZE>::new(b);
+        let key_u32 = key.convert_u8_to_u32(b);
         let value = Array::<Target, { AddressTarget::LEN }>::new(b);
-        let kv = Array::<Target, { KEY_GL_SIZE + LEAF_GL_SIZE }>::try_from(
-            key.arr
-                .iter()
-                .chain(value.arr.iter())
-                .copied()
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
+        let value_u32 = value.convert_u8_to_u32(b);
+        let kv = key_u32.concat(&value_u32).to_targets();
 
         let digest = b.map_to_curve_point(&kv.arr);
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(kv.arr));

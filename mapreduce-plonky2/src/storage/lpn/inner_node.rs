@@ -5,7 +5,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 
-use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing, storage::NODE_MARKER};
+use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 
 use super::PublicInputs;
 

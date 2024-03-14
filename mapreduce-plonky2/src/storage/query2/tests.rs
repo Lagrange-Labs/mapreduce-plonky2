@@ -4,7 +4,7 @@ use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{
-        hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
         hashing::hash_n_to_hash_no_pad,
         poseidon::PoseidonPermutation,
     },
@@ -23,6 +23,7 @@ use crate::{
     circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
     group_hashing::map_to_curve_point,
+    storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
 };
 
 use super::{
@@ -115,31 +116,20 @@ impl LeafProofResult {
     }
 }
 
-fn run_leaf_proof<'data>(k: &'_ str, v: &'_ str) -> LeafProofResult {
-    let key = left_pad32(hex::decode(k).unwrap().as_slice())
-        .into_iter()
-        .collect_vec();
-    let value = left_pad32(hex::decode(v).unwrap().as_slice())
-        .into_iter()
-        .collect_vec();
+fn run_leaf_proof<'data>(k: &[u8], v: &[u8]) -> LeafProofResult {
+    let k = left_pad32(k);
+    let v = left_pad32(v);
 
-    let kv_gl = key
+    let kv_gl = k
         .iter()
-        .copied()
-        .chain(value.iter().copied())
-        .map(F::from_canonical_u8)
-        .collect_vec();
-
-    let owner_gl = value
-        .iter()
+        .chain(v.iter())
         .copied()
         .map(F::from_canonical_u8)
         .collect_vec();
 
-    let circuit = LeafCircuit {
-        key: key.try_into().unwrap(),
-        value: value.try_into().unwrap(),
-    };
+    let owner_gl = v.iter().copied().map(F::from_canonical_u8).collect_vec();
+
+    let circuit = LeafCircuit { key: k, value: v };
 
     LeafProofResult {
         proof: run_circuit(circuit),
@@ -148,35 +138,35 @@ fn run_leaf_proof<'data>(k: &'_ str, v: &'_ str) -> LeafProofResult {
     }
 }
 
-fn test_leaf(k: &str, v: &str) {
+fn test_leaf(k: &[u8], v: &[u8]) {
     let r = run_leaf_proof(k, v);
 
     // Check the generated root hash
-    let exp_root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(r.kv_gl.as_slice());
+    let exp_root = HashOut::from_bytes(&leaf_hash_for_mapping(k, v));
     assert_eq!(exp_root, r.io().root());
 
     // Check that the owner is correctly forwared
-    assert_eq!(r.owner_gl, r.io().owner());
+    assert_eq!(&r.owner_gl, r.io().owner());
 }
 
 #[test]
 fn test_leaf_whatever() {
-    test_leaf("deadbeef", "0badf00d");
+    test_leaf(b"deadbeef", b"0badf00d");
 }
 
 #[test]
 fn test_leaf_all0() {
-    test_leaf("", "");
+    test_leaf(b"", b"");
 }
 
 #[test]
 fn test_leaf_0_nonzero() {
-    test_leaf("", "a278bf");
+    test_leaf(b"", b"a278bf");
 }
 
 #[test]
 fn test_leaf_nonzero_zero() {
-    test_leaf("1235", "00");
+    test_leaf(b"1235", b"00");
 }
 
 /// Builds & proves the following tree
@@ -186,9 +176,11 @@ fn test_leaf_nonzero_zero() {
 /// │   ├── LeafCircuit - K, V
 /// │   └── LeafCircuit - K, V
 /// └── Untouched sub-tree – hash == Poseidon("jean-michel")
-fn test_mini_tree(k: &str, v: &str) {
+fn test_mini_tree(k: &[u8], v: &[u8]) {
     let left = run_leaf_proof(k, v);
     let middle = run_leaf_proof(k, v);
+    let (k1, v1) = (k, v);
+    let (k2, v2) = (k, v);
 
     // Build the inner node circuit wrapper
     let inner = FullInnerNodeCircuitValidator {
@@ -202,11 +194,11 @@ fn test_mini_tree(k: &str, v: &str) {
     let middle_ios = PublicInputs::<F>::from(middle_proof.public_inputs.as_slice());
 
     // Check the digest
-    let expected_digest = map_to_curve_point(&left.kv_gl)
-        .add(map_to_curve_point(&middle.kv_gl))
+    let expected_digest = leaf_digest_for_mapping(k1, v1)
+        .add(leaf_digest_for_mapping(k2, v2))
         .to_weierstrass();
-    let expected_other_digest = map_to_curve_point(&middle.kv_gl)
-        .add(map_to_curve_point(&left.kv_gl))
+    let expected_other_digest = leaf_digest_for_mapping(k2, v2)
+        .add(leaf_digest_for_mapping(k1, v1))
         .to_weierstrass();
     let found_digest = middle_ios.digest();
     assert_eq!(expected_digest, found_digest);
@@ -214,20 +206,11 @@ fn test_mini_tree(k: &str, v: &str) {
     assert_eq!(expected_other_digest, found_digest);
 
     // Check the nested root hash
-    // Left child
-    let hash_left = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(left.kv_gl.as_slice());
+    let expected_hash = HashOut::from_bytes(&intermediate_node_hash(
+        &leaf_hash_for_mapping(k1, v1),
+        &leaf_hash_for_mapping(k2, v2),
+    ));
 
-    // Right child
-    let hash_right = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(middle.kv_gl.as_slice());
-
-    // Mini tree root
-    let to_hash = hash_left
-        .elements
-        .iter()
-        .copied()
-        .chain(hash_right.elements.iter().copied())
-        .collect::<Vec<_>>();
-    let expected_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
     assert_eq!(expected_hash, middle_ios.root());
 
     // Check that the owner is correctly forwarded
@@ -235,8 +218,7 @@ fn test_mini_tree(k: &str, v: &str) {
     assert_eq!(middle.owner_gl, middle_ios.owner());
 
     let some_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
-        &"jean-michel"
-            .as_bytes()
+        &b"jean-michel"
             .iter()
             .copied()
             .map(F::from_canonical_u8)
@@ -282,5 +264,5 @@ fn test_mini_tree(k: &str, v: &str) {
 
 #[test]
 fn test_inner_node() {
-    test_mini_tree("012345", "900600");
+    test_mini_tree(b"012345", b"900600");
 }
