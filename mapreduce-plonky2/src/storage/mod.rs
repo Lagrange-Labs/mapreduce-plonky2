@@ -1,10 +1,9 @@
 mod digest_equal;
-mod inclusion;
 mod key;
 pub mod length_extract;
 mod length_match;
+mod lpn;
 pub mod mapping;
-mod merkle;
 
 pub use digest_equal::PublicInputs;
 

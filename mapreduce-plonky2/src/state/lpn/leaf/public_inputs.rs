@@ -79,6 +79,8 @@ impl<'a> PublicInputs<'a, Target> {
 impl<'a, T: Copy> PublicInputs<'a, T> {
     pub(crate) const C_LEN: usize = NUM_HASH_OUT_ELTS;
     pub(crate) const H_LEN: usize = PACKED_HASH_LEN;
+    // Number can be encoded into a full target on 64 bits so no need to keep
+    // an array of bytes/targets as we do when reading the block header from chain
     pub(crate) const N_LEN: usize = 1;
     pub(crate) const PREV_H_LEN: usize = PACKED_HASH_LEN;
     pub(crate) const TOTAL_LEN: usize = Self::C_LEN + Self::H_LEN + Self::N_LEN + Self::PREV_H_LEN;

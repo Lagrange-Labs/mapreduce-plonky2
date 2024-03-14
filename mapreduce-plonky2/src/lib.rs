@@ -24,7 +24,6 @@ pub(crate) mod circuit;
 mod group_hashing;
 mod hash;
 mod keccak;
-pub mod merkle;
 mod merkle_tree;
 mod mpt_sequential;
 mod rlp;

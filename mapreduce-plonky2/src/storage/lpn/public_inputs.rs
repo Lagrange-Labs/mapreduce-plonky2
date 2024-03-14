@@ -32,12 +32,12 @@ impl<'a, T: Clone> From<&'a [T]> for PublicInputs<'a, T> {
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
-    const ROOT_OFFSET: usize = 0;
-    const ROOT_LEN: usize = NUM_HASH_OUT_ELTS;
-    const DIGEST_OFFSET: usize = 4;
-    const DIGEST_LEN: usize = 11;
+    pub const ROOT_OFFSET: usize = 0;
+    pub const ROOT_LEN: usize = NUM_HASH_OUT_ELTS;
+    pub const D_IDX: usize = 4;
+    pub const D_LEN: usize = 11;
 
-    pub const TOTAL_LEN: usize = Self::ROOT_LEN + Self::DIGEST_LEN;
+    pub const TOTAL_LEN: usize = Self::ROOT_LEN + Self::D_LEN;
 
     pub fn register(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
@@ -49,19 +49,19 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     /// Extracts the root hash components from the raw input
-    fn root_raw(&self) -> &[T] {
+    pub(crate) fn root_raw(&self) -> &[T] {
         &self.inputs[Self::ROOT_OFFSET..Self::ROOT_OFFSET + Self::ROOT_LEN]
     }
 
     /// Extracts curve coordinates from the raw input
-    pub fn digest_raw(
+    pub(crate) fn digest_raw(
         &self,
     ) -> (
         [T; crate::group_hashing::N],
         [T; crate::group_hashing::N],
         T,
     ) {
-        let raw = &self.inputs[Self::DIGEST_OFFSET..Self::DIGEST_OFFSET + Self::DIGEST_LEN];
+        let raw = &self.inputs[Self::D_IDX..Self::D_IDX + Self::D_LEN];
         convert_slice_to_curve_point(raw)
     }
 }
@@ -73,7 +73,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     /// The root hash of the current subtree
-    pub fn root(&self) -> HashOutTarget {
+    pub fn root_hash(&self) -> HashOutTarget {
         HashOutTarget::try_from(std::array::from_fn(|i| self.inputs[Self::ROOT_OFFSET + i]))
             .unwrap()
     }
@@ -99,7 +99,7 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
     }
 
     /// The GLs forming the hash of the current subtree
-    pub fn root(&self) -> HashOut<GoldilocksField> {
+    pub fn root_hash(&self) -> HashOut<GoldilocksField> {
         HashOut::from_vec(self.root_raw().to_owned())
     }
 }

@@ -1,12 +1,12 @@
 use std::ops::Add;
 
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
+    field::goldilocks_field::GoldilocksField,
+    hash::hash_types::HashOut,
     iop::{target::Target, witness::WitnessWrite},
     plonk::{
         circuit_builder::CircuitBuilder,
-        config::{GenericConfig, PoseidonGoldilocksConfig},
+        config::{GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
         proof::ProofWithPublicInputs,
     },
 };
@@ -14,8 +14,7 @@ use plonky2::{
 use crate::{
     circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
-    group_hashing::map_to_curve_point,
-    storage::inclusion::{LEAF_MARKER, NODE_MARKER},
+    storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
 };
 
 use super::{
@@ -44,7 +43,7 @@ impl UserCircuit<GoldilocksField, 2> for NodeCircuitValidator<'_> {
         ];
         let children_io = std::array::from_fn(|i| PublicInputs::from(child_inputs[i].as_slice()));
         let wires = NodeCircuit::build(c, children_io);
-        (wires, child_inputs.try_into().unwrap())
+        (wires, child_inputs)
     }
 
     fn prove(
@@ -80,7 +79,6 @@ fn test_leaf_nonzero_zero() {
 
 struct LeafProofResult {
     proof: ProofWithPublicInputs<F, C, D>,
-    kv_gl: Vec<F>,
 }
 impl LeafProofResult {
     fn io(&self) -> PublicInputs<F> {
@@ -88,48 +86,28 @@ impl LeafProofResult {
     }
 }
 
-fn run_leaf_proof<'data>(k: &'_ str, v: &'_ str) -> LeafProofResult {
-    let key = left_pad32(hex::decode(k).unwrap().as_slice());
-    let key_gl = key
-        .iter()
-        .map(|x| F::from_canonical_u8(*x))
-        .collect::<Vec<_>>();
-
-    let value = left_pad32(hex::decode(v).unwrap().as_slice());
-    let value_gl = value
-        .iter()
-        .map(|x| F::from_canonical_u8(*x))
-        .collect::<Vec<_>>();
-
-    let kv_gl = key_gl
-        .iter()
-        .copied()
-        .chain(value_gl.iter().copied())
-        .collect::<Vec<_>>();
-
+fn run_leaf_proof(k: &[u8], v: &[u8]) -> LeafProofResult {
     let circuit = LeafCircuit {
-        key: key.try_into().unwrap(),
-        value: value.try_into().unwrap(),
+        key: left_pad32(k),
+        value: left_pad32(v),
     };
 
     let proof = run_circuit::<F, D, C, _>(circuit);
-    LeafProofResult { proof, kv_gl }
+    LeafProofResult { proof }
 }
 
-fn test_leaf(k: &str, v: &str) {
+fn test_leaf(ks: &'_ str, vs: &'_ str) {
+    let (k, v) = (ks.as_bytes(), vs.as_bytes());
     let r = run_leaf_proof(k, v);
 
     // Check the digest
-    let exp_digest = map_to_curve_point(&r.kv_gl).to_weierstrass();
+    let exp_digest = leaf_digest_for_mapping(k, v).to_weierstrass();
     let found_digest = r.io().digest();
     assert_eq!(exp_digest, found_digest);
 
     // Check the root hash
-    let to_hash = std::iter::once(LEAF_MARKER())
-        .chain(r.kv_gl.iter().copied())
-        .collect::<Vec<_>>();
-    let exp_root = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
-    let found_root = r.io().root();
+    let exp_root = HashOut::from_bytes(&leaf_hash_for_mapping(k, v));
+    let found_root = r.io().root_hash();
     assert_eq!(exp_root, found_root);
 }
 
@@ -138,7 +116,13 @@ fn test_inner_node() {
     test_mini_tree("012345", "900600", "dead", "beef");
 }
 
-fn test_mini_tree(k1: &str, v1: &str, k2: &str, v2: &str) {
+fn test_mini_tree(k1s: &'_ str, v1s: &'_ str, k2s: &'_ str, v2s: &'_ str) {
+    let (k1, v1, k2, v2) = (
+        k1s.as_bytes(),
+        v1s.as_bytes(),
+        k2s.as_bytes(),
+        v2s.as_bytes(),
+    );
     let left = run_leaf_proof(k1, v1);
     let right = run_leaf_proof(k2, v2);
 
@@ -154,11 +138,11 @@ fn test_mini_tree(k1: &str, v1: &str, k2: &str, v2: &str) {
     let ios = PublicInputs::<F>::from(proof.public_inputs.as_slice());
 
     // Check the digest
-    let expected_digest = map_to_curve_point(&left.kv_gl)
-        .add(map_to_curve_point(&right.kv_gl))
+    let expected_digest = leaf_digest_for_mapping(k1, v1)
+        .add(leaf_digest_for_mapping(k2, v2))
         .to_weierstrass();
-    let expected_other_digest = map_to_curve_point(&right.kv_gl)
-        .add(map_to_curve_point(&left.kv_gl))
+    let expected_other_digest = leaf_digest_for_mapping(k2, v2)
+        .add(leaf_digest_for_mapping(k1, v1))
         .to_weierstrass();
     let found_digest = ios.digest();
     assert_eq!(expected_digest, found_digest);
@@ -167,32 +151,20 @@ fn test_mini_tree(k1: &str, v1: &str, k2: &str, v2: &str) {
 
     // Check the nested root hash
     // Left child
-    let to_hash_left = std::iter::once(LEAF_MARKER())
-        .chain(left.kv_gl.iter().copied())
-        .collect::<Vec<_>>();
-    let hash_left = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash_left.as_slice());
-
+    let hash_left = leaf_hash_for_mapping(k1, v1);
+    let exp_left = PublicInputs::from(left.proof.public_inputs.as_slice()).root_hash();
+    assert!(exp_left == HashOut::from_bytes(&hash_left));
     // Right child
-    let to_hash_right = std::iter::once(LEAF_MARKER())
-        .chain(right.kv_gl.iter().copied())
-        .collect::<Vec<_>>();
-    let hash_right = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash_right.as_slice());
+    let hash_right = leaf_hash_for_mapping(k2, v2);
+    let exp_right = PublicInputs::from(right.proof.public_inputs.as_slice()).root_hash();
+    assert!(exp_right == HashOut::from_bytes(&hash_right));
 
     // Mini tree
-    let to_hash = std::iter::once(NODE_MARKER())
-        .chain(hash_left.elements.iter().copied())
-        .chain(hash_right.elements.iter().copied())
-        .collect::<Vec<_>>();
-    let expected_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_hash.as_slice());
-
-    let found_hash = ios.root();
+    let expected_hash = HashOut::from_bytes(&intermediate_node_hash(&hash_left, &hash_right));
+    let found_hash = ios.root_hash();
     assert_eq!(expected_hash, found_hash);
 
     // Hash is not commutative
-    let to_wrongly_hash = std::iter::once(NODE_MARKER())
-        .chain(hash_right.elements.iter().copied())
-        .chain(hash_left.elements.iter().copied())
-        .collect::<Vec<_>>();
-    let wrong_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(to_wrongly_hash.as_slice());
+    let wrong_hash = HashOut::from_bytes(&intermediate_node_hash(&hash_right, &hash_left));
     assert_ne!(wrong_hash, found_hash);
 }

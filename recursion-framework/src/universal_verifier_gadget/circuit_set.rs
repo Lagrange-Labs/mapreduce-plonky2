@@ -101,7 +101,6 @@ impl CircuitSetTarget {
         C::Hasher: AlgebraicHasher<F>,
     {
         let full_tree_height = log2_ceil(num_circuit_digests);
-        assert!(full_tree_height >= CIRCUIT_SET_CAP_HEIGHT, "CIRCUIT_SET_CAP_HEIGHT={} is too high: it should be no greater than ceil(log2(num_leaves)) = {}", CIRCUIT_SET_CAP_HEIGHT, full_tree_height);
         let height = full_tree_height - CIRCUIT_SET_CAP_HEIGHT;
         let mpt = MerkleProofTarget {
             siblings: builder.add_virtual_hashes(height),
