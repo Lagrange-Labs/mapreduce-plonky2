@@ -16,7 +16,8 @@ use plonky2_ecgfp5::{
 use crate::{
     array::Array,
     query2::AddressTarget,
-    storage::CURVE_TARGET_GL_SIZE,
+    storage::CURVE_TARGET_SIZE,
+    types::CURVE_TARGET_LEN,
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 
@@ -39,7 +40,7 @@ impl<'a, T: Clone + Copy> PublicInputs<'a, T> {
     pub(crate) const ROOT_OFFSET: usize = 0;
     pub(crate) const ROOT_LEN: usize = NUM_HASH_OUT_ELTS;
     pub(crate) const DIGEST_OFFSET: usize = Self::ROOT_LEN;
-    pub(crate) const DIGEST_LEN: usize = CURVE_TARGET_GL_SIZE;
+    pub(crate) const DIGEST_LEN: usize = CURVE_TARGET_SIZE;
     pub(crate) const OWNER_OFFSET: usize = Self::ROOT_LEN + Self::DIGEST_LEN;
     pub(crate) const OWNER_LEN: usize = AddressTarget::LEN;
 

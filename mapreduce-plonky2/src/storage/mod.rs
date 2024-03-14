@@ -17,7 +17,7 @@ pub(super) const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
 pub(crate) const MAX_EXTENSION_NODE_LEN: usize = 69;
 
 // Number of Goldilocks elements in CurveTarget
-pub(crate) const CURVE_TARGET_GL_SIZE: usize = 11;
+pub(crate) const CURVE_TARGET_SIZE: usize = 11;
 
 // A key is 32B-long
 pub(crate) const KEY_SIZE: usize = 32;

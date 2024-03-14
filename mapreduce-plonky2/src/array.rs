@@ -522,12 +522,9 @@ where
     }
 }
 /// Returns the size of the array in 32-bit units, rounded up.
+#[allow(non_upper_case_globals)]
 pub(crate) const fn L32(a: usize) -> usize {
-    if a % 4 != 0 {
-        a / 4 + 1
-    } else {
-        a / 4
-    }
+    (a + 3) / 4
 }
 impl<const SIZE: usize> Array<Target, SIZE>
 where

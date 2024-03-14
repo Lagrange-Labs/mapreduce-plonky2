@@ -5,7 +5,7 @@
 //! - Prove the append-only property, that we keep appending blocks without
 //!   deletion and modification.
 
-mod public_inputs;
+pub mod public_inputs;
 
 use crate::{
     api::{default_config, ProofWithVK},
