@@ -4,7 +4,6 @@ pub mod length_extract;
 mod length_match;
 mod lpn;
 pub mod mapping;
-mod merkle;
 mod query2;
 
 use plonky2::iop::target::Target;

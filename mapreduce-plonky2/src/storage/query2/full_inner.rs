@@ -33,14 +33,7 @@ impl FullInnerNodeCircuit {
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(to_hash.arr));
 
         // Assert that both children owners are equal
-        inputs[0]
-            .owner()
-            .arr
-            .iter()
-            .zip(inputs[1].owner().arr.iter())
-            .for_each(|(l, r)| {
-                b.connect(*l, *r);
-            });
+        inputs[0].owner().enforce_equal(b, &inputs[1].owner());
 
         // Compute the new digest
         let digest = b.add_curve_point(&[inputs[0].digest(), inputs[1].digest()]);

@@ -39,9 +39,12 @@ impl<'a, T: Clone + Copy> From<&'a [T]> for PublicInputs<'a, T> {
 impl<'a, T: Clone + Copy> PublicInputs<'a, T> {
     const ROOT_OFFSET: usize = 0;
     const ROOT_LEN: usize = NUM_HASH_OUT_ELTS;
-    const DIGEST_OFFSET: usize = 4;
+    const DIGEST_OFFSET: usize = Self::ROOT_LEN;
+    const DIGEST_LEN: usize = CURVE_TARGET_GL_SIZE;
+    const OWNER_OFFSET: usize = Self::ROOT_LEN + Self::DIGEST_LEN;
+    const OWNER_LEN: usize = AddressTarget::LEN;
 
-    pub const TOTAL_LEN: usize = Self::ROOT_LEN + CURVE_TARGET_GL_SIZE + AddressTarget::LEN;
+    pub const TOTAL_LEN: usize = Self::ROOT_LEN + Self::DIGEST_LEN + Self::OWNER_LEN;
 
     pub fn register(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
@@ -67,14 +70,13 @@ impl<'a, T: Clone + Copy> PublicInputs<'a, T> {
         [T; crate::group_hashing::N],
         T,
     ) {
-        let raw = &self.inputs[Self::DIGEST_OFFSET..Self::DIGEST_OFFSET + CURVE_TARGET_GL_SIZE];
+        let raw = &self.inputs[Self::DIGEST_OFFSET..Self::DIGEST_OFFSET + Self::DIGEST_LEN];
         convert_slice_to_curve_point(raw)
     }
 
     /// Extracts the owner address
     fn owner_raw(&self) -> &[T] {
-        let start = Self::ROOT_LEN + CURVE_TARGET_GL_SIZE;
-        &self.inputs[start..start + AddressTarget::LEN]
+        &self.inputs[Self::OWNER_OFFSET..Self::OWNER_OFFSET + Self::OWNER_LEN]
     }
 }
 

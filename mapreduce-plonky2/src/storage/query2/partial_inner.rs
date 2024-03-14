@@ -64,12 +64,12 @@ impl PartialInnerNodeCircuit {
         b: &mut CircuitBuilder<GoldilocksField, 2>,
         proved: &PublicInputs<Target>,
         unproved_hash: HashOutTarget,
-        proved_is_left: BoolTarget,
+        proved_is_right: BoolTarget,
     ) -> PartialInnerNodeWires {
         let root = hash_maybe_swap(
             b,
             &[proved.root().elements, unproved_hash.elements],
-            proved_is_left,
+            proved_is_right,
         );
         PublicInputs::<GoldilocksField>::register(b, &root, &proved.digest(), &proved.owner());
         PartialInnerNodeWires {}
