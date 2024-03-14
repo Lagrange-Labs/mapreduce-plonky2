@@ -4,6 +4,7 @@ use super::leaf::LeafCircuit;
 use super::leaf::LeafWires;
 use super::leaf::StorageLeafWire;
 use super::PublicInputs;
+use crate::api::ProofWithVK;
 use crate::mpt_sequential::PAD_LEN;
 use crate::storage::key::MappingSlot;
 use crate::storage::mapping::branch::BranchCircuit;
@@ -103,8 +104,7 @@ pub fn generate_proof(
     circuit_params: &PublicParameters,
     circuit_type: CircuitInput,
 ) -> Result<Vec<u8>> {
-    let proof = circuit_params.generate_proof(circuit_type)?;
-    Ok(bincode::serialize(&proof)?)
+    circuit_params.generate_proof(circuit_type)?.serialize()
 }
 #[derive(Serialize, Deserialize)]
 /// This data structure allows to specify the inputs for a circuit that needs to recursively verify
@@ -117,7 +117,7 @@ struct ProofInputSerialized<T> {
 
 impl<T> ProofInputSerialized<T> {
     /// Deserialize child proofs and return the set of deserialized 'MTPProof`s
-    fn get_child_proofs(&self) -> Result<Vec<MPTProof>> {
+    fn get_child_proofs(&self) -> Result<Vec<ProofWithVK>> {
         Ok(self
             .serialized_child_proofs
             .iter()
@@ -126,29 +126,6 @@ impl<T> ProofInputSerialized<T> {
     }
 }
 
-/// MPTProof is a generic struct holding a child proof and its associated verification key.
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-struct MPTProof {
-    proof: ProofWithPublicInputs<F, C, D>,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    vk: VerifierOnlyCircuitData<C, D>,
-}
-
-impl
-    From<(
-        ProofWithPublicInputs<F, C, D>,
-        VerifierOnlyCircuitData<C, D>,
-    )> for MPTProof
-{
-    fn from(
-        (proof, vk): (
-            ProofWithPublicInputs<F, C, D>,
-            VerifierOnlyCircuitData<C, D>,
-        ),
-    ) -> Self {
-        MPTProof { proof, vk }
-    }
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Struct containing the expected input MPT Extension/Branch node.
 struct InputNode {
@@ -209,8 +186,8 @@ macro_rules! impl_branch_circuits {
                 &self,
                 set: &RecursiveCircuits<F, C, D>,
                 branch_node: InputNode,
-                child_proofs: Vec<MPTProof>,
-            ) -> Result<MPTProof> {
+                child_proofs: Vec<ProofWithVK>,
+            ) -> Result<ProofWithVK> {
                 // first, determine manually the common prefix, the ptr and the mapping slot
                 // from the public inputs of the children proofs.
                 // Note this is done outside circuits, more as a sanity check. The circuits is enforcing
@@ -361,7 +338,7 @@ impl PublicParameters {
         }
     }
 
-    fn generate_proof(&self, circuit_type: CircuitInput) -> Result<MPTProof> {
+    fn generate_proof(&self, circuit_type: CircuitInput) -> Result<ProofWithVK> {
         #[cfg(not(test))]
         let set = &self.set;
         #[cfg(test)]
@@ -471,7 +448,7 @@ mod test {
         // generate the proof
         let leaf_proof = params.generate_proof(decoded_input).unwrap();
         let encoded = bincode::serialize(&leaf_proof).unwrap();
-        let decoded_proof: MPTProof = bincode::deserialize(&encoded).unwrap();
+        let decoded_proof: ProofWithVK = bincode::deserialize(&encoded).unwrap();
 
         assert_eq!(leaf_proof, decoded_proof);
 
@@ -491,7 +468,7 @@ mod test {
         let proof = params.generate_proof(decoded_input).unwrap();
 
         let encoded = bincode::serialize(&proof).unwrap();
-        let decoded_proof: MPTProof = bincode::deserialize(&encoded).unwrap();
+        let decoded_proof: ProofWithVK = bincode::deserialize(&encoded).unwrap();
 
         assert_eq!(proof, decoded_proof);
     }
@@ -569,7 +546,7 @@ mod test {
             .generate_input_proofs([pub2.try_into().unwrap()])
             .unwrap();
         let vk = params.set.verifier_data_for_input_proofs::<1>()[0].clone();
-        let leaf2_proof_vk = MPTProof {
+        let leaf2_proof_vk = ProofWithVK {
             proof: leaf2_proof[0].clone(),
             vk,
         };

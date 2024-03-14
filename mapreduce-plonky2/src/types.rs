@@ -1,8 +1,15 @@
 //! Custom types
 
 use crate::array::Array;
-use plonky2::iop::target::Target;
+use plonky2::{
+    iop::target::Target,
+    plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
+};
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+
+const D: usize = 2;
+type C = PoseidonGoldilocksConfig;
+type F = <C as GenericConfig<D>>::F;
 
 /// Length of an U64
 pub const U64_LEN: usize = 8;

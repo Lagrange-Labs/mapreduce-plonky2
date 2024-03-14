@@ -60,7 +60,7 @@ pub trait CircuitLogicWires<F: SerializableRichField<D>, const D: usize, const N
     /// a `CircuitWithUniversalVerifier` circuit implementing the additional circuit logid specified by `Self`,
     /// returns the set of `Self::NUM_PUBLIC_INPUTS` targets corresponding to all the public inputs of the
     /// proof except for the ones representing the digest of the circuit set
-    fn public_input_targets<'b>(&self, proof: &'b ProofWithPublicInputsTarget<D>) -> &'b [Target]
+    fn public_input_targets(proof: &ProofWithPublicInputsTarget<D>) -> &[Target]
     where
         [(); Self::NUM_PUBLIC_INPUTS]:,
     {
