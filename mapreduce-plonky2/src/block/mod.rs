@@ -464,16 +464,16 @@ mod tests {
         // All leaves are empty for the init root.
         let init_root = merkle_root(vec![vec![]; 1 << MAX_DEPTH]);
 
-        // [state_root, block_number, block_header]
-        assert_eq!(leaf_data.len(), NUM_HASH_OUT_ELTS + 1 + PACKED_HASH_LEN);
-        let block_header = leaf_data[NUM_HASH_OUT_ELTS + 1..].to_vec();
+        // [block_number, block_header, state_root]
+        assert_eq!(leaf_data.len(), 1 + PACKED_HASH_LEN + NUM_HASH_OUT_ELTS);
+        let block_header = leaf_data[1..1 + PACKED_HASH_LEN].to_vec();
 
         // The block number is set to `first_block_number - 1` for dummy proofs.
         let first_block_num = F::from_canonical_usize(first_block_num);
         let block_num = if is_dummy {
             first_block_num - F::ONE
         } else {
-            leaf_data[NUM_HASH_OUT_ELTS]
+            leaf_data[0]
         };
 
         // [init_root, root, first_block_number, block_number, block_header]
@@ -488,11 +488,11 @@ mod tests {
 
     /// Generate the public inputs of new Merkle leaf (state root).
     fn new_leaf_inputs(leaf_data: &[F], prev_pi: &[F]) -> Vec<F> {
-        // [state_root, block_number, block_header]
-        assert_eq!(leaf_data.len(), NUM_HASH_OUT_ELTS + 1 + PACKED_HASH_LEN);
-        let state_root = &leaf_data[..NUM_HASH_OUT_ELTS];
-        let block_num = leaf_data[NUM_HASH_OUT_ELTS];
-        let block_header = &leaf_data[NUM_HASH_OUT_ELTS + 1..];
+        // [block_number, block_header, state_root]
+        assert_eq!(leaf_data.len(), 1 + PACKED_HASH_LEN + NUM_HASH_OUT_ELTS);
+        let block_num = leaf_data[0];
+        let block_header = &leaf_data[1..1 + PACKED_HASH_LEN];
+        let state_root = &leaf_data[1 + PACKED_HASH_LEN..];
 
         let prev_pi = PublicInputs::from(prev_pi);
         let prev_block_header = prev_pi.block_header_data();
@@ -528,14 +528,14 @@ mod tests {
 
     /// Generate the random leaf data.
     fn rand_leaf_data(block_num: usize) -> Vec<F> {
-        // Generate as [state_root, block_number, block_header].
-        let mut data: Vec<_> = random_vector(NUM_HASH_OUT_ELTS + 1 + PACKED_HASH_LEN)
+        // Generate as [block_number, block_header, state_root].
+        let mut data: Vec<_> = random_vector(1 + PACKED_HASH_LEN + NUM_HASH_OUT_ELTS)
             .into_iter()
             .map(F::from_canonical_usize)
             .collect();
 
         // Set the block number.
-        data[NUM_HASH_OUT_ELTS] = F::from_canonical_usize(block_num);
+        data[0] = F::from_canonical_usize(block_num);
 
         data
     }
