@@ -22,7 +22,7 @@ impl NodeCircuit {
         let (left_child, right_child) = (&inputs[0], &inputs[1]);
 
         let digest = b.add_curve_point(&[left_child.digest(), right_child.digest()]);
-        let to_hash = Array::<Target, { 1 + 2 * NUM_HASH_OUT_ELTS }>::try_from(
+        let to_hash = Array::<Target, { 2 * NUM_HASH_OUT_ELTS }>::try_from(
             left_child
                 .root_raw()
                 .iter()
