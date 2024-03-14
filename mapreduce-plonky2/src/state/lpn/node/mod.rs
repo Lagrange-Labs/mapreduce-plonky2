@@ -68,7 +68,6 @@ impl NodeCircuit {
     ///
     /// Such iterator will be used to compute the root of the intermediate node.
     pub fn node_preimage<'i, T, L, R>(
-        zero: T,
         left_sibling: L,
         right_sibling: R,
     ) -> impl Iterator<Item = T> + 'i
@@ -79,9 +78,10 @@ impl NodeCircuit {
         R: IntoIterator<Item = &'i T>,
         <R as IntoIterator>::IntoIter: 'i,
     {
-        iter::once(zero)
-            .chain(left_sibling.into_iter().cloned())
-            .chain(right_sibling.into_iter().cloned())
+        left_sibling
+            .into_iter()
+            .chain(right_sibling.into_iter())
+            .cloned()
     }
 
     /// Composes the circuit structure by assigning the virtual targets and performing the
@@ -115,8 +115,7 @@ impl NodeCircuit {
 
         let left = left_sibling.root();
         let right = right_sibling.root();
-        let preimage =
-            Self::node_preimage(b.zero(), &left.elements, &right.elements).collect::<Vec<_>>();
+        let preimage = Self::node_preimage(&left.elements, &right.elements).collect::<Vec<_>>();
 
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(preimage);
 
