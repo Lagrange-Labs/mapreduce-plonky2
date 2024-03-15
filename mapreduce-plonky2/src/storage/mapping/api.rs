@@ -18,6 +18,7 @@ use paste::paste;
 use plonky2::field::types::PrimeField64;
 use plonky2::hash::hash_types::HashOut;
 use plonky2::plonk::circuit_data::CircuitConfig;
+use plonky2::plonk::circuit_data::CommonCircuitData;
 use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::plonk::proof::ProofWithPublicInputs;
@@ -248,7 +249,7 @@ macro_rules! impl_branch_circuits {
                                  expected_pointer: pointer,
                                  mapping_slot,
                              }
-                         ).map(|p| (p, self.[< b $i >].get_verifier_data().clone()).into())
+                         ).map(|p| (p, self.[< b $i >].get_common_data().clone(), self.[< b $i >].get_verifier_data().clone()).into())
                      },
                          $i if branch_node.node.len() <= min_range => {
                          set.generate_proof(
@@ -261,7 +262,7 @@ macro_rules! impl_branch_circuits {
                                  expected_pointer: pointer,
                                  mapping_slot,
                              }
-                         ).map(|p| (p, self.[< b $i _over_2>].get_verifier_data().clone()).into())
+                         ).map(|p| (p, self.[< b $i _over_2>].get_common_data().clone(), self.[< b $i _over_2>].get_verifier_data().clone()).into())
                      }
                  )+
                      _ => bail!("invalid child proof len"),
@@ -343,9 +344,17 @@ impl PublicParameters {
         #[cfg(test)]
         let set = &self.set.get_recursive_circuit_set();
         match circuit_type {
-            CircuitInput::Leaf(leaf) => set
-                .generate_proof(&self.leaf_circuit, [], [], leaf)
-                .map(|p| (p, self.leaf_circuit.get_verifier_data().clone()).into()),
+            CircuitInput::Leaf(leaf) => {
+                set.generate_proof(&self.leaf_circuit, [], [], leaf)
+                    .map(|p| {
+                        (
+                            p,
+                            self.leaf_circuit.get_common_data().clone(),
+                            self.leaf_circuit.get_verifier_data().clone(),
+                        )
+                            .into()
+                    })
+            }
             CircuitInput::Extension(ext) => {
                 let mut child_proofs = ext.get_child_proofs()?;
                 let child_proof = child_proofs.pop().ok_or(anyhow::Error::msg(
@@ -359,7 +368,14 @@ impl PublicParameters {
                         node: ext.input.node,
                     },
                 )
-                .map(|p| (p, self.ext_circuit.get_verifier_data().clone()).into())
+                .map(|p| {
+                    (
+                        p,
+                        self.ext_circuit.get_common_data().clone(),
+                        self.ext_circuit.get_verifier_data().clone(),
+                    )
+                        .into()
+                })
             }
             CircuitInput::Branch(branch) => {
                 let child_proofs = branch.get_child_proofs()?;
@@ -544,9 +560,11 @@ mod test {
             .set
             .generate_input_proofs([pub2.try_into().unwrap()])
             .unwrap();
+        let common = params.set.common_data_for_input_proofs::<1>()[0].clone();
         let vk = params.set.verifier_data_for_input_proofs::<1>()[0].clone();
         let leaf2_proof_vk = ProofWithVK {
             proof: leaf2_proof[0].clone(),
+            common,
             vk,
         };
         let branch_inputs = CircuitInput::Branch(BranchInput {

@@ -6,7 +6,7 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, VerifierOnlyCircuitData},
+        circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
         config::{AlgebraicHasher, GenericConfig, Hasher},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
@@ -179,6 +179,14 @@ where
             .collect::<Result<Vec<_>>>()?;
 
         Ok(input_proofs.try_into().unwrap())
+    }
+
+    /// Utility function to get the common data for the circuit being employed to generate the input proofs
+    /// computed by the `generate_input_proofs` method
+    pub fn common_data_for_input_proofs<const NUM_VERIFIERS: usize>(
+        &self,
+    ) -> [&CommonCircuitData<F, D>; NUM_VERIFIERS] {
+        [self.dummy_circuit.get_common_data(); NUM_VERIFIERS]
     }
 
     /// Utility function to get the verifier data for the circuit being employed to generate the input proofs

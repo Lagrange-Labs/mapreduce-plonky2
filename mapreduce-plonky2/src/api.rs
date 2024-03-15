@@ -1,4 +1,5 @@
 use anyhow::Result;
+use plonky2::plonk::circuit_data::CommonCircuitData;
 use plonky2::plonk::{
     circuit_data::VerifierOnlyCircuitData,
     config::{GenericConfig, PoseidonGoldilocksConfig},
@@ -56,6 +57,8 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
 pub(crate) struct ProofWithVK {
     pub(crate) proof: ProofWithPublicInputs<F, C, D>,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    pub(crate) common: CommonCircuitData<F, D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub(crate) vk: VerifierOnlyCircuitData<C, D>,
 }
 
@@ -74,15 +77,17 @@ impl ProofWithVK {
 impl
     From<(
         ProofWithPublicInputs<F, C, D>,
+        CommonCircuitData<F, D>,
         VerifierOnlyCircuitData<C, D>,
     )> for ProofWithVK
 {
     fn from(
-        (proof, vk): (
+        (proof, common, vk): (
             ProofWithPublicInputs<F, C, D>,
+            CommonCircuitData<F, D>,
             VerifierOnlyCircuitData<C, D>,
         ),
     ) -> Self {
-        ProofWithVK { proof, vk }
+        ProofWithVK { proof, common, vk }
     }
 }

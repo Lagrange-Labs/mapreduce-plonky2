@@ -74,6 +74,7 @@ impl PublicParameters {
                 let proof = self.set.generate_proof(&self.leaf_circuit, [], [], leaf)?;
                 ProofWithVK {
                     proof,
+                    common: self.leaf_circuit.get_common_data().clone(),
                     vk: self.leaf_circuit.get_verifier_data().clone(),
                 }
                 .serialize()
@@ -89,6 +90,7 @@ impl PublicParameters {
                 )?;
                 ProofWithVK {
                     proof,
+                    common: self.node_circuit.get_common_data().clone(),
                     vk: self.node_circuit.get_verifier_data().clone(),
                 }
                 .serialize()

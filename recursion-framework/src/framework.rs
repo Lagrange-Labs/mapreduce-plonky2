@@ -4,7 +4,9 @@ use plonky2::{
     iop::witness::PartialWitness,
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, VerifierCircuitTarget, VerifierOnlyCircuitData},
+        circuit_data::{
+            CircuitConfig, CommonCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData,
+        },
         config::{AlgebraicHasher, GenericConfig, Hasher},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
@@ -29,6 +31,9 @@ where
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
 {
+    /// Returns a reference to the `CommonCircuitData` of the circuit implementing this trait
+    fn get_common_data(&self) -> &CommonCircuitData<F, D>;
+
     /// Returns a reference to the `VerifierOnlyCircuitData` of the circuit implementing this trait
     fn get_verifier_data(&self) -> &VerifierOnlyCircuitData<C, D>;
 }
@@ -44,6 +49,10 @@ where
     [(); C::Hasher::HASH_SIZE]:,
     CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
 {
+    fn get_common_data(&self) -> &CommonCircuitData<F, D> {
+        &self.circuit_data().common
+    }
+
     fn get_verifier_data(&self) -> &VerifierOnlyCircuitData<C, D> {
         &self.circuit_data().verifier_only
     }
@@ -55,6 +64,10 @@ where
     C: GenericConfig<D, F = F>,
     T: RecursiveCircuitInfo<F, C, D>,
 {
+    fn get_common_data(&self) -> &CommonCircuitData<F, D> {
+        (*self).get_common_data()
+    }
+
     fn get_verifier_data(&self) -> &VerifierOnlyCircuitData<C, D> {
         (*self).get_verifier_data()
     }
