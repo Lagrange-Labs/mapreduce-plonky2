@@ -24,7 +24,7 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Keccak input padded length for address
 const INPUT_PADDED_ADDRESS_LEN: usize = PAD_LEN(ADDRESS_LEN);

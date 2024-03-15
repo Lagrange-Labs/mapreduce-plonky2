@@ -3,22 +3,42 @@
 
 use super::{
     length_extract::{self, PublicInputs as LengthPublicInputs},
-    mapping::{PublicInputs as MappingPublicInputs},
+    mapping::PublicInputs as MappingPublicInputs,
 };
 use crate::{
-    api::{deserialize_proof, ProofWithVK, RecursiveVerifierTarget}, circuit::UserCircuit, keccak::{OutputHash, PACKED_HASH_LEN}, types::{PackedAddressTarget, PACKED_ADDRESS_LEN}, utils::{convert_point_to_curve_target, convert_slice_to_curve_point}
+    api::{deserialize_proof, get_config, ProofWithVK, RecursiveVerifierTarget},
+    circuit::UserCircuit,
+    keccak::{OutputHash, PACKED_HASH_LEN},
+    types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
+    utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
+use anyhow::Result;
 use plonky2::{
-    field::goldilocks_field::GoldilocksField, iop::{target::Target, witness::{PartialWitness, WitnessWrite}},
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData}, config::{AlgebraicHasher, GenericConfig, Hasher}, 
-    proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget}},
+    field::goldilocks_field::GoldilocksField,
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{
+            CircuitConfig, CircuitData, VerifierCircuitData, VerifierCircuitTarget,
+            VerifierOnlyCircuitData,
+        },
+        config::{AlgebraicHasher, GenericConfig, Hasher},
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+    },
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
+use recursion_framework::{
+    framework::{
+        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+    },
+    serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize},
+};
 use serde::{Deserialize, Serialize};
 use std::array;
-use recursion_framework::{framework::{RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget}, serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize}};
-use anyhow::Result;
 /// This is a wrapper around an array of targets set as public inputs of any
 /// proof generated in this module. They all share the same structure.
 /// `D` Digest of the all mapping values
@@ -149,70 +169,60 @@ type C = crate::api::C;
 const D: usize = crate::api::D;
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Parameters {
-        #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-        data: CircuitData<F, C, D>,
-        length_proof_wires: RecursiveVerifierTarget<D>,
-        mapping_proof_wires: RecursiveCircuitsVerifierTarget<D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    data: CircuitData<F, C, D>,
+    length_proof_wires: RecursiveVerifierTarget<D>,
+    mapping_proof_wires: RecursiveCircuitsVerifierTarget<D>,
+}
+
+impl Parameters {
+    /// Build circuit parameters for length matching circuit
+    pub(crate) fn build(
+        mapping_circuit_set: &RecursiveCircuits<F, C, D>,
+        length_extract_vk: &VerifierCircuitData<F, C, D>,
+    ) -> Self {
+        let config = get_config();
+        const NUM_PUBLIC_INPUTS: usize = MappingPublicInputs::<'_, Target>::TOTAL_LEN;
+        let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, NUM_PUBLIC_INPUTS>::new(
+            config.clone(),
+            mapping_circuit_set,
+        );
+        let mut cb = CircuitBuilder::<F, D>::new(config);
+        let mapping_proof_wires = verifier_gadget.verify_proof_in_circuit_set(&mut cb);
+        let length_proof_wires = RecursiveVerifierTarget::verify_proof(&mut cb, length_extract_vk);
+        let mapping_pi = mapping_proof_wires.get_public_input_targets::<F, NUM_PUBLIC_INPUTS>();
+        let length_pi = length_proof_wires.get_proof().public_inputs.as_slice();
+        LengthMatchCircuit::build(&mut cb, length_pi, mapping_pi);
+        let data = cb.build::<C>();
+        Self {
+            data,
+            mapping_proof_wires,
+            length_proof_wires,
+        }
+    }
+    /// Generate a proof for length matching circuit employing the circuit parameters found in  `self`
+    pub(crate) fn generate_proof(
+        &self,
+        mapping_circuit_set: &RecursiveCircuits<F, C, D>,
+        mapping_proof: &ProofWithVK,
+        length_proof: &ProofWithVK,
+    ) -> Result<Vec<u8>> {
+        let mut pw = PartialWitness::<F>::new();
+        let (proof, vd) = mapping_proof.into();
+        self.mapping_proof_wires
+            .set_target(&mut pw, mapping_circuit_set, &proof, &vd)?;
+        let (proof, vd) = length_proof.into();
+        self.length_proof_wires.set_target(&mut pw, &proof, &vd);
+        let proof = self.data.prove(pw)?;
+        // TODO: move serialization to common place
+        let b = bincode::serialize(&proof)?;
+        Ok(b)
     }
 
-impl Parameters
-{
-        /// Build circuit parameters for length matching circuit 
-        pub(crate) fn build(
-            mapping_circuit_set: &RecursiveCircuits<F, C, D>,
-            length_extract_vk: &VerifierCircuitData<F, C, D>,
-        ) -> Self {
-            let config = CircuitConfig::standard_recursion_config();
-            const NUM_PUBLIC_INPUTS: usize = MappingPublicInputs::<'_, Target>::TOTAL_LEN;
-            let verifier_gadget = RecursiveCircuitsVerifierGagdet::<
-                    F, 
-                    C, 
-                    D,
-                    NUM_PUBLIC_INPUTS
-                >::new(
-                    config.clone(),
-                mapping_circuit_set
-            );
-            let mut cb = CircuitBuilder::<F,D>::new(config);
-            let mapping_proof_wires = verifier_gadget.verify_proof_in_circuit_set(&mut cb);
-            let length_proof_wires = RecursiveVerifierTarget::verify_proof(&mut cb, length_extract_vk);
-            let mapping_pi = mapping_proof_wires
-                .get_public_input_targets::<F, NUM_PUBLIC_INPUTS>();
-            let length_pi = length_proof_wires.get_proof().public_inputs.as_slice();
-            LengthMatchCircuit::build(
-                &mut cb, 
-                length_pi, 
-                mapping_pi
-            );
-            let data = cb.build::<C>();
-            Self {
-                data,
-                mapping_proof_wires,
-                length_proof_wires,
-            }
-        }
-        /// Generate a proof for length matching circuit employing the circuit parameters found in  `self`
-        pub(crate) fn generate_proof(
-            &self,
-            mapping_circuit_set: &RecursiveCircuits<F, C, D>,
-            mapping_proof: &ProofWithVK,
-            length_proof: &ProofWithVK,
-        ) -> Result<Vec<u8>> {
-            let mut pw = PartialWitness::<F>::new();
-            let (proof, vd) = mapping_proof.into();
-            self.mapping_proof_wires.set_target(&mut pw, 
-                mapping_circuit_set, 
-                &proof, 
-                &vd,
-            )?;
-            let (proof, vd) = length_proof.into();
-            self.length_proof_wires.set_target(&mut pw, &proof, &vd);
-            let proof = self.data.prove(pw)?;
-            // TODO: move serialization to common place
-            let b = bincode::serialize(&proof)?;
-            Ok(b)
-        }
+    pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {
+        &self.data
     }
+}
 pub struct CircuitInput {
     mapping_proof: Vec<u8>,
     length_extract_proof: Vec<u8>,
@@ -226,21 +236,15 @@ impl CircuitInput {
         }
     }
 }
-impl TryInto<
-    (
-        ProofWithVK,
-        ProofWithPublicInputs<F, C, D>,
-    )
-> for CircuitInput {
+impl TryInto<(ProofWithVK, ProofWithPublicInputs<F, C, D>)> for CircuitInput {
     type Error = anyhow::Error;
 
-    fn try_into(self) -> std::prelude::v1::Result<(
-        ProofWithVK,
-        ProofWithPublicInputs<F, C, D>,
-    ), Self::Error> {
+    fn try_into(
+        self,
+    ) -> std::prelude::v1::Result<(ProofWithVK, ProofWithPublicInputs<F, C, D>), Self::Error> {
         Ok((
-            ProofWithVK::deserialize(&self.mapping_proof)?, 
-            deserialize_proof(&self.length_extract_proof)?
+            ProofWithVK::deserialize(&self.mapping_proof)?,
+            deserialize_proof(&self.length_extract_proof)?,
         ))
     }
 }
@@ -251,7 +255,13 @@ mod tests {
 
     use super::*;
     use crate::{
-        api::{mapping::{api::NUM_IO, build_circuits_params}, tests::TestDummyCircuit}, benches::init_logging, circuit::{test::run_circuit, UserCircuit}, utils::test::random_vector
+        api::{
+            mapping::{api::NUM_IO, build_circuits_params},
+            tests::TestDummyCircuit,
+        },
+        benches::init_logging,
+        circuit::{test::run_circuit, UserCircuit},
+        utils::test::random_vector,
     };
     use plonky2::{
         field::types::Field,
@@ -317,10 +327,11 @@ mod tests {
     #[test]
     fn test_length_match_circuit_parameters() {
         let testing_framework = TestingRecursiveCircuits::<F, C, D, NUM_IO>::default();
-        let length_extract_dummy_circuit = TestDummyCircuit::<{LengthPublicInputs::<'_, Target>::TOTAL_LEN}>::build();
-        
+        let length_extract_dummy_circuit =
+            TestDummyCircuit::<{ LengthPublicInputs::<'_, Target>::TOTAL_LEN }>::build();
+
         let length_match_circuit = Parameters::build(
-            testing_framework.get_recursive_circuit_set(), 
+            testing_framework.get_recursive_circuit_set(),
             &length_extract_dummy_circuit.circuit_data().verifier_data(),
         );
         // generate public inputs o proofs to be verified
@@ -333,33 +344,43 @@ mod tests {
         let mapping_pi = generate_mapping_public_inputs(length_value, &mpt_root_hash);
 
         // generate mapping proof with `mapping_pi` as public inputs
-        let mapping_proof = testing_framework.generate_input_proofs::<1>(
-            [mapping_pi.try_into().unwrap()]
-        ).unwrap().first().unwrap().clone();
-        let length_proof = length_extract_dummy_circuit.generate_proof(
-            length_pi.try_into().unwrap()
-        ).unwrap();
-
+        let mapping_proof = testing_framework
+            .generate_input_proofs::<1>([mapping_pi.try_into().unwrap()])
+            .unwrap()
+            .first()
+            .unwrap()
+            .clone();
+        let length_proof = length_extract_dummy_circuit
+            .generate_proof(length_pi.try_into().unwrap())
+            .unwrap();
 
         let mapping_proof = (
             mapping_proof,
-            testing_framework.verifier_data_for_input_proofs::<1>()[0].clone()
-        ).into();
+            testing_framework.verifier_data_for_input_proofs::<1>()[0].clone(),
+        )
+            .into();
 
         let length_proof = (
             length_proof,
-            length_extract_dummy_circuit.circuit_data().verifier_only.clone(),
-        ).into();
+            length_extract_dummy_circuit
+                .circuit_data()
+                .verifier_only
+                .clone(),
+        )
+            .into();
 
-        let proof = length_match_circuit.generate_proof(
-            testing_framework.get_recursive_circuit_set(), 
-            &mapping_proof, 
-            &length_proof
-        ).unwrap();
+        let proof = length_match_circuit
+            .generate_proof(
+                testing_framework.get_recursive_circuit_set(),
+                &mapping_proof,
+                &length_proof,
+            )
+            .unwrap();
 
-        length_match_circuit.data.verify(
-            bincode::deserialize(&proof).unwrap()
-        ).unwrap()
+        length_match_circuit
+            .data
+            .verify(bincode::deserialize(&proof).unwrap())
+            .unwrap()
     }
 
     fn generate_length_public_inputs(length_value: F, mpt_root_hash: &[F]) -> Vec<F> {

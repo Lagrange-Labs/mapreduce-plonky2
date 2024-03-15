@@ -1,4 +1,4 @@
-mod digest_equal;
+pub mod digest_equal;
 mod key;
 pub mod length_extract;
 pub mod length_match;

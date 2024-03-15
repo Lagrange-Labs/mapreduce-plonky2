@@ -5,9 +5,14 @@ use super::{
     MAX_BRANCH_NODE_LEN,
 };
 use crate::{
-    api::serialize_proof, circuit::UserCircuit, keccak::{OutputHash, PACKED_HASH_LEN}, mpt_sequential::{
+    api::{get_config, serialize_proof},
+    circuit::UserCircuit,
+    keccak::{OutputHash, PACKED_HASH_LEN},
+    mpt_sequential::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
-    }, types::{PackedAddressTarget, PACKED_ADDRESS_LEN}, utils::convert_u8_targets_to_u32
+    },
+    types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
+    utils::convert_u8_targets_to_u32,
 };
 use anyhow::Result;
 use ethers::types::H160;
@@ -209,7 +214,7 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     pub fn build() -> Self {
-        let mut cb = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
+        let mut cb = CircuitBuilder::<F, D>::new(get_config());
         let wires = LengthExtractCircuit::<DEPTH, NODE_LEN>::build(&mut cb);
         let data = cb.build();
         Self { data, wires }
