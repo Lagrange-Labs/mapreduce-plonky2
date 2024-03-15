@@ -393,7 +393,8 @@ mod test {
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         assert_eq!(leaf_list.len(), 2);
-        println!("leaf value = {}", hex::encode(&leaf_list[1]));
+        let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
+        println!("leaf value = {}", hex::encode(&leaf_value));
         //let value = ProofQuery::verify_storage_proof(&res)?;
         //println!("value at slot 8: {}", value);
         Ok(())
