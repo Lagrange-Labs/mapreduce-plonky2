@@ -397,17 +397,31 @@ mod test {
         println!("leaf value = {}", hex::encode(&leaf_value));
         // try if it's an array or not.
         // for storage slot 8 it should be an array so the proof should be valid.
-
         {
             let memdb = Arc::new(MemoryDB::new(true));
             let tx_trie = EthTrie::new(Arc::clone(&memdb));
             let array_slot = 8 as u8;
+            // Case 1: location = keccak(left_pad32()) and mpt_key = keccak(location) ---> storage proof is invalid
+            // Case 2: location = keccak([array_slot]) and mpt_key = keccak(location) ---> value does not EXIST ???
+            // Case 3: location = keccak(left_pad32()) and mpt_key = location ---> storage proof invalid XXX
+            // Case 4: location = keccak([array_slot]) and mpt_key = location ---> storage proof invalid XX
+            // Case 5: location = U256::big_endian(keccak([array_slot])) + 1
             let location = keccak256(&left_pad32(&[array_slot]));
+            //println!(
+            //    "location keccak(left_pad32([slot])) = {}",
+            //    hex::encode(&location)
+            //);
+            //let mut location = [0u8; 32];
+            //(U256::from_big_endian(&keccak256(&[array_slot])) + U256::one())
+            //    .to_big_endian(&mut location[..]);
+            println!("location keccak([array_slot]) = {}", hex::encode(&location));
             let res = provider
                 .get_proof(pidgy_address, vec![H256::from_slice(&location)], None)
                 .await?;
 
-            let proof_key_bytes: [u8; 32] = res.storage_proof[0].key.into();
+            let proof_key_bytes: [u8; 32] = res.storage_proof[0].key.into(); // rpc key == location
+            println!("res.proof key bytes = {}", hex::encode(&proof_key_bytes));
+            assert!(&proof_key_bytes.to_vec() == &location);
             let mpt_key = keccak256(&proof_key_bytes[..]);
             let is_valid = tx_trie.verify_proof(
                 res.storage_hash,
@@ -420,7 +434,7 @@ mod test {
             );
 
             if is_valid.is_err() {
-                bail!("storage proof is invalid");
+                bail!("storage proof is invalid: {}", is_valid.unwrap_err());
             }
             if is_valid.unwrap().is_none() {
                 bail!("storage proof says the value associated with that key does not exist");
