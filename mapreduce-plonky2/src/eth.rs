@@ -305,7 +305,7 @@ impl ProofQuery {
             .await?;
         Ok(res)
     }
-    pub fn verify_storage_proof(proof: &EIP1186ProofResponse) -> Result<()> {
+    pub fn verify_storage_proof(proof: &EIP1186ProofResponse) -> Result<U256> {
         let memdb = Arc::new(MemoryDB::new(true));
         let tx_trie = EthTrie::new(Arc::clone(&memdb));
         let proof_key_bytes: [u8; 32] = proof.storage_proof[0].key.into();
@@ -324,14 +324,19 @@ impl ProofQuery {
             bail!("proof is not valid");
         }
         if let Some(ext_value) = is_valid.unwrap() {
-            let found = U256::from_big_endian(&ext_value);
+            let found = U256::from_little_endian(&ext_value);
             if found != proof.storage_proof[0].value {
-                bail!("proof does not return right value");
+                bail!(
+                    "proof does not return right value: found {} (ext {:?}) vs expected {}",
+                    found,
+                    hex::encode(ext_value),
+                    proof.storage_proof[0].value
+                );
             }
         } else {
             bail!("proof says the value associated with that key does not exist");
         }
-        Ok(())
+        Ok(proof.storage_proof[0].value)
     }
     pub fn verify_state_proof(&self, res: &EIP1186ProofResponse) -> Result<()> {
         let memdb = Arc::new(MemoryDB::new(true));
@@ -374,6 +379,21 @@ mod test {
     use crate::utils::find_index_subvector;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_pidgy_pinguins_slots() -> Result<()> {
+        let url = "https://eth.llamarpc.com";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // sepolia contract
+        let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_simple_slot(pidgy_address, 8);
+        let res = query.query_mpt_proof(&provider, None).await?;
+        let value = ProofQuery::verify_storage_proof(&res)?;
+        println!("value at slot 8: {}", value);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_kashish_contract_proof_query() -> Result<()> {
