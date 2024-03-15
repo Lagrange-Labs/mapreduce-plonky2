@@ -266,7 +266,7 @@ pub struct CircuitWithUniversalVerifier<
     circuit_data: CircuitData<F, C, D>,
     circuit_logic_wires: CLW,
     circuit_set_target: CircuitSetTarget,
-    wrap_circuit: WrapCircuit<F, C, D>,
+    pub wrap_circuit: WrapCircuit<F, C, D>,
 }
 
 impl<

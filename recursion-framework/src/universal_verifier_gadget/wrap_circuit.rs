@@ -27,7 +27,7 @@ use anyhow::Result;
 /// of targets and a `CircuitData` for each wrap step.
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(bound = "")]
-pub(crate) struct WrapCircuit<
+pub struct WrapCircuit<
     F: SerializableRichField<D>,
     C: GenericConfig<D, F = F> + 'static,
     const D: usize,
@@ -37,7 +37,7 @@ pub(crate) struct WrapCircuit<
     #[serde(serialize_with = "serialize_vec", deserialize_with = "deserialize_vec")]
     proof_targets: Vec<ProofWithPublicInputsTarget<D>>,
     #[serde(serialize_with = "serialize_vec", deserialize_with = "deserialize_vec")]
-    circuit_data: Vec<CircuitData<F, C, D>>,
+    pub circuit_data: Vec<CircuitData<F, C, D>>,
     #[serde(serialize_with = "serialize_vec", deserialize_with = "deserialize_vec")]
     inner_data: Vec<VerifierCircuitTarget>,
 }

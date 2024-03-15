@@ -15,12 +15,21 @@ use anyhow::bail;
 use anyhow::Result;
 use log::debug;
 use paste::paste;
+use plonky2::field::extension::quadratic::QuadraticExtension;
+use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::PrimeField64;
 use plonky2::hash::hash_types::HashOut;
+use plonky2::hash::poseidon::{PoseidonHash, PoseidonPermutation};
 use plonky2::plonk::circuit_data::CircuitConfig;
+use plonky2::plonk::circuit_data::CircuitData;
+use plonky2::plonk::circuit_data::CommonCircuitData;
 use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::plonk::proof::ProofWithPublicInputs;
+use plonky2x::backend::circuit::config::{DefaultParameters, Groth16WrapperParameters};
+use plonky2x::backend::circuit::CircuitBuild;
+use plonky2x::backend::wrapper::wrap::WrappedCircuit;
+use plonky2x::prelude::CircuitBuilder as CBuilder;
 use recursion_framework::circuit_builder::CircuitWithUniversalVerifier;
 use recursion_framework::circuit_builder::CircuitWithUniversalVerifierBuilder;
 use recursion_framework::framework::RecursiveCircuitInfo;
@@ -83,15 +92,7 @@ impl CircuitInput {
 /// circuits according to the situation.
 pub struct PublicParameters {
     leaf_circuit: CircuitWithUniversalVerifier<F, C, D, 0, StorageLeafWire>,
-    ext_circuit: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionWires>,
-    #[cfg(not(test))]
-    branchs: BranchCircuits,
-    #[cfg(test)]
-    branchs: TestBranchCircuits,
-    #[cfg(not(test))]
     set: RecursiveCircuits<F, C, D>,
-    #[cfg(test)]
-    set: TestingRecursiveCircuits<F, C, D, NUM_IO>,
 }
 /// Public API employed to build the MPT circuits, which are returned in serialized form
 pub fn build_circuits_params() -> PublicParameters {
@@ -101,7 +102,7 @@ pub fn build_circuits_params() -> PublicParameters {
 /// Public API employed to generate a proof for the circuit specified by `CircuitType`,
 /// employing the `circuit_params` generated with the `build_circuits_params` API
 pub fn generate_proof(
-    circuit_params: &PublicParameters,
+    circuit_params: PublicParameters,
     circuit_type: CircuitInput,
 ) -> Result<Vec<u8>> {
     circuit_params.generate_proof(circuit_type)?.serialize()
@@ -298,74 +299,67 @@ impl PublicParameters {
     /// Generates the circuit parameters for the MPT circuits.
     fn build() -> Self {
         let config = CircuitConfig::standard_recursion_config();
-        #[cfg(not(test))]
         let circuit_builder = CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(
-            config,
-            MAPPING_CIRCUIT_SET_SIZE,
-        );
-        #[cfg(test)]
-        let circuit_builder = new_universal_circuit_builder_for_testing::<F, C, D, NUM_IO>(
             config,
             MAPPING_CIRCUIT_SET_SIZE,
         );
 
         debug!("Building leaf circuit");
         let leaf_circuit = circuit_builder.build_circuit::<C, 0, LeafWires<MAX_LEAF_NODE_LEN>>(());
-
-        debug!("Building extension circuit");
-        let ext_circuit = circuit_builder.build_circuit::<C, 1, ExtensionWires>(());
-
-        debug!("Building branch circuits");
-        #[cfg(not(test))]
-        let branch_circuits = BranchCircuits::new(&circuit_builder);
-        #[cfg(test)]
-        let branch_circuits = TestBranchCircuits::new(&circuit_builder);
-        let mut circuits_set = vec![
-            leaf_circuit.get_verifier_data().circuit_digest,
-            ext_circuit.get_verifier_data().circuit_digest,
-        ];
-        circuits_set.extend(branch_circuits.circuit_set());
+        let mut circuits_set = vec![leaf_circuit.get_verifier_data().circuit_digest];
 
         PublicParameters {
             leaf_circuit,
-            ext_circuit,
-            branchs: branch_circuits,
-            #[cfg(not(test))]
             set: RecursiveCircuits::new_from_circuit_digests(circuits_set),
-            #[cfg(test)]
-            set: TestingRecursiveCircuits::new_from_circuit_digests(&circuit_builder, circuits_set),
         }
     }
 
-    fn generate_proof(&self, circuit_type: CircuitInput) -> Result<ProofWithVK> {
-        #[cfg(not(test))]
+    fn generate_proof(mut self, circuit_type: CircuitInput) -> Result<ProofWithVK> {
         let set = &self.set;
-        #[cfg(test)]
-        let set = &self.set.get_recursive_circuit_set();
         match circuit_type {
-            CircuitInput::Leaf(leaf) => set
-                .generate_proof(&self.leaf_circuit, [], [], leaf)
-                .map(|p| (p, self.leaf_circuit.get_verifier_data().clone()).into()),
-            CircuitInput::Extension(ext) => {
-                let mut child_proofs = ext.get_child_proofs()?;
-                let child_proof = child_proofs.pop().ok_or(anyhow::Error::msg(
-                    "No proof found in input for extension node",
-                ))?;
-                set.generate_proof(
-                    &self.ext_circuit,
-                    [child_proof.proof],
-                    [&child_proof.vk],
-                    ExtensionNodeCircuit {
-                        node: ext.input.node,
-                    },
-                )
-                .map(|p| (p, self.ext_circuit.get_verifier_data().clone()).into())
+            CircuitInput::Leaf(leaf) => {
+                let proof: ProofWithVK = set
+                    .generate_proof(&self.leaf_circuit, [], [], leaf)
+                    .map(|p| (p, self.leaf_circuit.get_verifier_data().clone()).into())
+                    .unwrap();
+
+                // Dump the proof, common-circuit-data and verifier-only-data for Groth16 test.
+                {
+                    type L = DefaultParameters;
+
+                    // TRICKY: get the circuit-data to build WrappedCircuit of plonkyx.
+                    let circuit_data = self.leaf_circuit.wrap_circuit.circuit_data.pop().unwrap();
+
+                    let mut builder = CBuilder::<L, D>::new();
+                    builder.pre_build();
+                    let async_hints = CBuilder::<L, D>::async_hint_map(
+                        circuit_data.prover_only.generators.as_slice(),
+                        builder.async_hints,
+                    );
+
+                    let circuit = CircuitBuild {
+                        data: circuit_data,
+                        io: builder.io,
+                        async_hints,
+                    };
+
+                    let wrapper: WrappedCircuit<_, _, 2> =
+                        WrappedCircuit::<L, Groth16WrapperParameters, D>::build(circuit);
+                    let wrapped_proof = wrapper.prove(&proof.proof).unwrap();
+
+                    let pi = serde_json::to_string_pretty(&wrapped_proof.proof).unwrap();
+                    std::fs::write("proof_with_public_inputs.json", pi).unwrap();
+
+                    let common = serde_json::to_string_pretty(&wrapped_proof.common_data).unwrap();
+                    std::fs::write("common_circuit_data.json", common).unwrap();
+
+                    let vk = serde_json::to_string_pretty(&wrapped_proof.verifier_data).unwrap();
+                    std::fs::write("verifier_only_circuit_data.json", vk).unwrap();
+                }
+
+                Ok(proof)
             }
-            CircuitInput::Branch(branch) => {
-                let child_proofs = branch.get_child_proofs()?;
-                self.branchs
-                    .generate_proof(&set, branch.input, child_proofs)
-            }
+            _ => panic!("Not support"),
         }
     }
 }
@@ -446,124 +440,5 @@ mod test {
         // we test serialization of `CircuitType::Leaf` by employing the deserialized input to
         // generate the proof
         let leaf_proof = params.generate_proof(decoded_input).unwrap();
-        let encoded = bincode::serialize(&leaf_proof).unwrap();
-        let decoded_proof: ProofWithVK = bincode::deserialize(&encoded).unwrap();
-
-        assert_eq!(leaf_proof, decoded_proof);
-
-        let branch_node = p1[p1.len() - 2].to_vec();
-        let branch_inputs = CircuitInput::Branch(BranchInput {
-            input: InputNode {
-                node: branch_node.clone(),
-            },
-            serialized_child_proofs: vec![encoded],
-        });
-
-        let encoded = bincode::serialize(&branch_inputs).unwrap();
-        let decoded_input: CircuitInput = bincode::deserialize(&encoded).unwrap();
-
-        // we test serialization of `CircuitType::Branch` by employing the deserialized input to
-        // generate the proof
-        let proof = params.generate_proof(decoded_input).unwrap();
-
-        let encoded = bincode::serialize(&proof).unwrap();
-        let decoded_proof: ProofWithVK = bincode::deserialize(&encoded).unwrap();
-
-        assert_eq!(proof, decoded_proof);
-    }
-
-    /// test if the selection of the circuits is correct
-    #[test]
-    #[serial]
-    fn test_branch_logic() {
-        let params = PublicParameters::build();
-        let slot = 1;
-        let mut test_data = generate_storage_trie_and_keys(slot);
-        let trie = &mut test_data.trie;
-        let key = &test_data.key;
-        let mpt1 = &test_data.mpt_key1;
-        let mpt2 = &test_data.mpt_key2;
-        let p1 = trie.get_proof(&mpt1).unwrap();
-        let p2 = trie.get_proof(&mpt2).unwrap();
-        // they should share the same branch node
-        assert_eq!(p1.len(), p2.len());
-        assert_eq!(p1[p1.len() - 2], p2[p2.len() - 2]);
-        let l1 = LeafCircuit {
-            node: p1.last().unwrap().to_vec(),
-            slot: MappingSlot::new(slot as u8, key.clone()),
-        };
-        // generate a leaf then a branch proof with only this leaf
-        let leaf1_proof = params.generate_proof(CircuitInput::Leaf(l1)).unwrap();
-        let pub1 = leaf1_proof.proof.public_inputs[..NUM_IO].to_vec();
-        let pi1 = PublicInputs::from(&pub1);
-        assert_eq!(pi1.proof_inputs.len(), NUM_IO);
-        let (_, comp_ptr) = pi1.mpt_key_info();
-        assert_eq!(comp_ptr, F::from_canonical_usize(63));
-        let branch_node = p1[p1.len() - 2].to_vec();
-        let branch_inputs = CircuitInput::Branch(BranchInput {
-            input: InputNode {
-                node: branch_node.clone(),
-            },
-            serialized_child_proofs: vec![bincode::serialize(&leaf1_proof).unwrap()],
-        });
-        let branch1 = params.generate_proof(branch_inputs).unwrap();
-        let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
-            params.branchs.b1_over_2.get_verifier_data().clone()
-        } else {
-            params.branchs.b1.get_verifier_data().clone()
-        };
-        assert_eq!(branch1.vk, exp_vk);
-
-        // generate  a branch proof with two leafs inputs now but using the testing framework
-        // we simulate another leaf at the right key, so we just modify the nibble at the pointer
-        // generate fake dummy proofs but with expected public inputs
-        let mut pub2 = pub1.clone();
-        assert_eq!(pub2.len(), NUM_IO);
-        pub2[PublicInputs::<F>::KEY_IDX..PublicInputs::<F>::T_IDX].copy_from_slice(
-            &bytes_to_nibbles(&mpt2)
-                .into_iter()
-                .map(F::from_canonical_u8)
-                .collect::<Vec<_>>(),
-        );
-        assert_eq!(pub2.len(), pub1.len());
-
-        let pi2 = PublicInputs::from(&pub2);
-        {
-            let (k1, p1) = pi1.mpt_key_info();
-            let (k2, p2) = pi2.mpt_key_info();
-            let (pt1, pt2) = (
-                p1.to_canonical_u64() as usize,
-                p2.to_canonical_u64() as usize,
-            );
-            assert!(pt1 < k1.len() && pt2 < k2.len());
-            assert!(p1 == p2);
-            assert!(k1[..pt1] == k2[..pt2]);
-        }
-
-        let leaf2_proof = params
-            .set
-            .generate_input_proofs([pub2.try_into().unwrap()])
-            .unwrap();
-        let vk = params.set.verifier_data_for_input_proofs::<1>()[0].clone();
-        let leaf2_proof_vk = ProofWithVK {
-            proof: leaf2_proof[0].clone(),
-            vk,
-        };
-        let branch_inputs = CircuitInput::Branch(BranchInput {
-            input: InputNode {
-                node: branch_node.clone(),
-            },
-            serialized_child_proofs: vec![
-                bincode::serialize(&leaf1_proof).unwrap(),
-                bincode::serialize(&leaf2_proof_vk).unwrap(),
-            ],
-        });
-        let branch2 = params.generate_proof(branch_inputs).unwrap();
-        let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
-            params.branchs.b2_over_2.get_verifier_data().clone()
-        } else {
-            params.branchs.b2.get_verifier_data().clone()
-        };
-        assert_eq!(branch2.vk, exp_vk);
     }
 }

@@ -39,10 +39,10 @@ pub fn build_circuits_params() -> PublicParameters {
     }
 }
 
-pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
+pub fn generate_proof(params: PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
     match input {
         CircuitInput::Mapping(mapping_input) => {
-            mapping::generate_proof(&params.mapping, mapping_input)
+            mapping::generate_proof(params.mapping, mapping_input)
         }
         CircuitInput::LengthExtract(length_extract_input) => {
             params.length_extract.generate(length_extract_input)
