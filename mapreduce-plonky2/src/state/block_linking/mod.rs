@@ -5,7 +5,7 @@ mod account;
 mod block;
 mod public_inputs;
 
-use crate::{api::{get_config, MPTProof, RecursiveVerifierTarget}, mpt_sequential::PAD_LEN, storage::PublicInputs as StorageInputs};
+use crate::{api::{get_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget}, mpt_sequential::PAD_LEN, storage::PublicInputs as StorageInputs};
 use account::{Account, AccountInputsWires};
 use anyhow::Result;
 use block::{BlockHeader, BlockInputsWires};
@@ -17,9 +17,12 @@ use plonky2::{
 };
 
 pub use public_inputs::BlockLinkingInputs;
+use recursion_framework::serialization::{deserialize, serialize};
+use serde::{Deserialize, Serialize};
 
 use self::block::MAINNET_NUMBER_LEN;
 
+#[derive(Serialize, Deserialize)]
 /// Main block-linking wires
 pub struct BlockLinkingWires<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>
 where
@@ -139,15 +142,24 @@ const MAX_NODE_LEN: usize = 512;
 const MAX_BLOCK_LEN: usize = 620;
 const NUMBER_LEN: usize = MAINNET_NUMBER_LEN;
 
-pub(crate) struct Parameters {
+#[derive(Serialize, Deserialize)]
+pub(crate) struct Parameters<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize> 
+where
+    [(); DEPTH - 1]:,
+    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(BLOCK_LEN)]:
+{
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     data: CircuitData<F, C, D>,
-    wires: BlockLinkingWires<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN>,
+    wires: BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>,
     storage_circuit_wires: RecursiveVerifierTarget<D>,
 }
 
+pub(crate) type PublicParameters = Parameters<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN>;
+
 pub type BlockLinkingCircuitInputs = BlockLinkingCircuit<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, NUMBER_LEN>;
 
-impl Parameters {
+impl PublicParameters {
     pub(crate) fn build(
         storage_circuit_vk: &VerifierCircuitData<F, C, D>,
     ) -> Self {
@@ -170,15 +182,15 @@ impl Parameters {
 
     pub(crate) fn generate_proof(
         &self, 
-        storage_proof: MPTProof,
+        storage_proof: &ProofWithVK,
         input: BlockLinkingCircuitInputs,
     ) -> Result<Vec<u8>> {
         let mut pw = PartialWitness::<F>::new();
         input.assign::<F, D>(&mut pw, &self.wires)?;
         let (input_proof, vk) = storage_proof.into();
-        self.storage_circuit_wires.set_target(&mut pw, &input_proof, &vk);
+        self.storage_circuit_wires.set_target(&mut pw, input_proof, vk);
         let proof = self.data.prove(pw)?;
-        Ok(bincode::serialize(&proof)?)
+        serialize_proof(&proof)
     }
 
     pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {
@@ -187,16 +199,16 @@ impl Parameters {
 }
 
 pub struct CircuitInput {
-    storage_proof: ProofWithPublicInputs<F, C, D>,
+    storage_proof: Vec<u8>,
     inputs: BlockLinkingCircuitInputs,
 }
 
 impl From<(
-    ProofWithPublicInputs<F, C, D>,
+    Vec<u8>,
     BlockLinkingCircuitInputs,
 )> for CircuitInput {
     fn from(value: (
-            ProofWithPublicInputs<F, C, D>,
+            Vec<u8>,
             BlockLinkingCircuitInputs,
         )) -> Self {
         Self {
@@ -358,7 +370,7 @@ mod tests {
         const VALUE_LEN: usize = 50;
 
         let test_storage_circuit = TestDummyCircuit::<NUM_PUBLIC_INPUTS>::build();
-        let params = Parameters::build(
+        let params = PublicParameters::build(
             &test_storage_circuit.circuit_data().verifier_data()
         );
 
@@ -380,7 +392,7 @@ mod tests {
             storage_proof,
             test_storage_circuit.circuit_data().verifier_only.clone(), 
         ).into();
-        let proof = params.generate_proof(storage_proof, inputs).unwrap();
+        let proof = params.generate_proof(&storage_proof, inputs).unwrap();
 
         params.data.verify(
             bincode::deserialize(&proof).unwrap()

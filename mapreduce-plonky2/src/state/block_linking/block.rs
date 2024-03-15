@@ -15,6 +15,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use serde::{Deserialize, Serialize};
 use std::array;
 
 /// Parent hash offset in RLP encoded header
@@ -29,6 +30,7 @@ pub(super) const SEPOLIA_NUMBER_LEN: usize = 3;
 /// On mainnet, the block number is encoded on 4 bytes (u32)
 pub(super) const MAINNET_NUMBER_LEN: usize = 4;
 
+#[derive(Serialize, Deserialize)]
 /// The block input wires
 pub struct BlockInputsWires<const MAX_LEN: usize>
 where

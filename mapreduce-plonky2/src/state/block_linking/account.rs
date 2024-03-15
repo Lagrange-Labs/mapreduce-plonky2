@@ -24,10 +24,12 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+use serde::{Serialize, Deserialize};
 
 /// Keccak input padded length for address
 const INPUT_PADDED_ADDRESS_LEN: usize = PAD_LEN(ADDRESS_LEN);
 
+#[derive(Serialize, Deserialize)]
 /// The account input wires
 pub struct AccountInputsWires<const DEPTH: usize, const NODE_LEN: usize>
 where

@@ -7,24 +7,23 @@ use super::{
     length_match::PublicInputs as MPTPublicInputs, lpn::PublicInputs as MerklePublicInputs,
 };
 use crate::{
-    array::Array,
-    group_hashing::{CircuitBuilderGroupHashing, N},
-    keccak::{OutputHash, PACKED_HASH_LEN},
-    types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
-    utils::{
+    api::{get_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget}, array::Array, group_hashing::{CircuitBuilderGroupHashing, N}, keccak::{OutputHash, PACKED_HASH_LEN}, types::{PackedAddressTarget, PACKED_ADDRESS_LEN}, utils::{
         convert_point_to_curve_target, convert_slice_to_curve_point, convert_u32_fields_to_u8_vec,
-    },
+    }
 };
 use ethers::types::{H160, H256};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
-    iop::target::Target,
-    plonk::circuit_builder::CircuitBuilder,
+    iop::{target::Target, witness::PartialWitness},
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::{CircuitData, VerifierCircuitData}, proof::ProofWithPublicInputs},
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
+use recursion_framework::{framework::{RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget}, serialization::{deserialize, serialize}};
+use serde::{Serialize, Deserialize};
 use std::array;
+use anyhow::Result;
 
 /// This is a wrapper around an array of targets set as public inputs of any
 /// proof generated in this module. They all share the same structure.
@@ -172,13 +171,80 @@ impl DigestEqualCircuit {
     }
 }
 
+type F = crate::api::F;
+type C = crate::api::C;
+const D: usize = crate::api::D;
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct Parameters {
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    data: CircuitData<F, C, D>,
+    lpn_wires: RecursiveCircuitsVerifierTarget<D>,
+    mpt_wires: RecursiveVerifierTarget<D>,
+}
+
+impl Parameters {
+    pub(crate) fn build(
+        lpn_circuit_set: &RecursiveCircuits<F, C, D>,
+        mpt_circuit_vd: &VerifierCircuitData<F, C, D>
+    ) -> Self {
+        const MPT_PUBLIC_INPUTS: usize = MerklePublicInputs::<Target>::TOTAL_LEN;
+        let mut cb = CircuitBuilder::<F, D>::new(get_config());
+        let mpt_wires = RecursiveVerifierTarget::verify_proof(
+            &mut cb, 
+            mpt_circuit_vd,
+        );
+        let verifier_gadget = RecursiveCircuitsVerifierGagdet::<
+            F,
+            C,
+            D, 
+            MPT_PUBLIC_INPUTS,
+        >::new(
+            get_config(), 
+            lpn_circuit_set,
+        );
+        let lpn_wires = verifier_gadget.verify_proof_in_circuit_set(&mut cb);
+        let mpt_pi = mpt_wires.get_proof().public_inputs.as_slice();
+        let lpn_pi = lpn_wires.get_public_input_targets::<
+            F, 
+            MPT_PUBLIC_INPUTS,
+        >();
+        DigestEqualCircuit::build(&mut cb, mpt_pi, lpn_pi);
+
+        let data = cb.build::<C>();
+
+        Self {
+            data,
+            lpn_wires,
+            mpt_wires,
+        }
+    }
+
+    pub(crate)fn generate_proof(
+        &self,
+        lpn_circuit_set: &RecursiveCircuits<F, C, D>,
+        lpn_proof: &ProofWithVK,
+        mpt_proof: &ProofWithVK,
+    ) -> Result<Vec<u8>> {
+        let mut pw = PartialWitness::<F>::new();
+        let (lpn_proof, lpn_vd) = lpn_proof.into();
+        self.lpn_wires.set_target(&mut pw, lpn_circuit_set, lpn_proof, lpn_vd).unwrap();
+        let (mpt_proof, mpt_vd) = mpt_proof.into();
+        self.mpt_wires.set_target(&mut pw, mpt_proof, mpt_vd);
+        let proof = self.data.prove(pw)?;
+        serialize_proof(&proof)
+    }
+
+    pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {
+        &self.data
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        benches::init_logging,
-        circuit::{test::run_circuit, UserCircuit},
-        utils::test::random_vector,
+        api::tests::TestDummyCircuit, benches::init_logging, circuit::{test::run_circuit, UserCircuit}, utils::test::random_vector
     };
     use plonky2::{
         field::types::{Field, Sample},
@@ -190,6 +256,7 @@ mod tests {
     };
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use rand::{thread_rng, Rng};
+    use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use std::array;
 
     const D: usize = 2;
@@ -258,6 +325,51 @@ mod tests {
         assert_eq!(pi.contract_address_data(), exp_contract_address);
         assert_eq!(pi.mapping_slot(), exp_mapping_slot);
         assert_eq!(pi.length_slot(), exp_length_slot);
+    }
+
+    #[test]
+    fn test_digest_equal_circuit_parameters() {
+        const LPN_PUBLIC_INPUTS: usize = MerklePublicInputs::<'_, Target>::TOTAL_LEN;
+        const MPT_PUBLIC_INPUTS: usize = MPTPublicInputs::<'_, Target>::TOTAL_LEN;
+        let testing_framework = TestingRecursiveCircuits::<F, C, D, LPN_PUBLIC_INPUTS>::default();
+        let mpt_dummy_circuit = TestDummyCircuit::<MPT_PUBLIC_INPUTS>::build();
+        let digest_eq_circuit = Parameters::build(
+            testing_framework.get_recursive_circuit_set(), 
+            &mpt_dummy_circuit.circuit_data().verifier_data(),
+        );
+        // generate inputs
+        let mut rng = thread_rng();
+        let digest = Point::sample(&mut rng).to_weierstrass();
+
+        let mpt_pi = generate_mpt_public_inputs(&digest);
+        let lpn_pi = generate_merkle_public_inputs(&digest);
+
+        // generate input proofs
+        let lpn_proof = testing_framework.generate_input_proofs::<1>(
+            [lpn_pi.try_into().unwrap()]
+        ).unwrap()[0].clone();
+        let mpt_proof = mpt_dummy_circuit.generate_proof(
+            mpt_pi.try_into().unwrap()
+        ).unwrap();
+
+        let lpn_proof = (
+            lpn_proof, 
+            testing_framework.verifier_data_for_input_proofs::<1>()[0].clone()
+        ).into();
+        let mpt_proof = (
+            mpt_proof,
+            mpt_dummy_circuit.circuit_data().verifier_only.clone(),
+        ).into();
+        // generate digest equal circuit proof
+        let proof = digest_eq_circuit.generate_proof(
+            testing_framework.get_recursive_circuit_set(), 
+            &lpn_proof, 
+            &mpt_proof
+        ).unwrap();
+
+        digest_eq_circuit.data.verify(
+            bincode::deserialize(&proof).unwrap()
+        ).unwrap();
     }
 
     fn generate_mpt_public_inputs(digest: &WeierstrassPoint) -> Vec<F> {
