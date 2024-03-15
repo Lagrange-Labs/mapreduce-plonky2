@@ -145,7 +145,7 @@ pub(crate) struct Parameters {
     storage_circuit_wires: RecursiveVerifierTarget<D>,
 }
 
-pub type BlockLinkingInputs = BlockLinkingCircuit<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, NUMBER_LEN>;
+pub type BlockLinkingCircuitInputs = BlockLinkingCircuit<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, NUMBER_LEN>;
 
 impl Parameters {
     pub(crate) fn build(
@@ -158,7 +158,7 @@ impl Parameters {
             storage_circuit_vk,
         );
         let storage_pi = storage_circuit_wires.get_proof().public_inputs.as_slice();
-        let wires = BlockLinkingInputs::build(&mut cb, storage_pi);
+        let wires = BlockLinkingCircuitInputs::build(&mut cb, storage_pi);
         let data = cb.build::<C>();
 
         Self {
@@ -171,7 +171,7 @@ impl Parameters {
     pub(crate) fn generate_proof(
         &self, 
         storage_proof: MPTProof,
-        input: BlockLinkingInputs,
+        input: BlockLinkingCircuitInputs,
     ) -> Result<Vec<u8>> {
         let mut pw = PartialWitness::<F>::new();
         input.assign::<F, D>(&mut pw, &self.wires)?;
@@ -188,16 +188,16 @@ impl Parameters {
 
 pub struct CircuitInput {
     storage_proof: ProofWithPublicInputs<F, C, D>,
-    inputs: BlockLinkingInputs,
+    inputs: BlockLinkingCircuitInputs,
 }
 
 impl From<(
     ProofWithPublicInputs<F, C, D>,
-    BlockLinkingInputs,
+    BlockLinkingCircuitInputs,
 )> for CircuitInput {
     fn from(value: (
             ProofWithPublicInputs<F, C, D>,
-            BlockLinkingInputs,
+            BlockLinkingCircuitInputs,
         )) -> Self {
         Self {
             storage_proof: value.0,
@@ -367,7 +367,7 @@ mod tests {
         let storage_pi = generate_storage_inputs::<_, VALUE_LEN>(&state_mpt);
         let block = generate_block(&state_mpt);
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
-        let inputs = BlockLinkingInputs::new(
+        let inputs = BlockLinkingCircuitInputs::new(
         &storage_pi, 
             header_rlp, 
             state_mpt.nodes
