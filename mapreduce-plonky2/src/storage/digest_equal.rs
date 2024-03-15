@@ -198,6 +198,7 @@ pub(crate) struct Parameters {
 }
 
 impl Parameters {
+    /// Build circuit parameters for digest equal circuit
     pub(crate) fn build(
         lpn_circuit_set: &RecursiveCircuits<F, C, D>,
         mpt_circuit_vd: &VerifierCircuitData<F, C, D>,
@@ -222,7 +223,8 @@ impl Parameters {
             mpt_wires,
         }
     }
-
+    /// Generate proof for digest equal circuit employiing the circuit parameters found in  `self`
+    /// and the necessary inputs values
     pub(crate) fn generate_proof(
         &self,
         lpn_circuit_set: &RecursiveCircuits<F, C, D>,
@@ -240,21 +242,25 @@ impl Parameters {
         serialize_proof(&proof)
     }
 
+    /// Get the `CircuitData` of the digest equal circuit
     pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {
         &self.data
     }
 }
-
+/// Data structure containing the inputs to be provided to the API in order to
+/// generate a proof for the digest equal circuit
 pub struct CircuitInput {
     lpn_proof: Vec<u8>,
     mpt_proof: Vec<u8>,
 }
 
-impl From<(Vec<u8>, Vec<u8>)> for CircuitInput {
-    fn from(value: (Vec<u8>, Vec<u8>)) -> Self {
+impl CircuitInput {
+    /// Instantiate `CircuitInput` for digest equal circuit employing a proof for LPN storage circuits
+    /// and a proof for the MPT length match circuits
+    pub fn new(lpn_proof: Vec<u8>, mpt_proof: Vec<u8>) -> Self {
         Self {
-            lpn_proof: value.0,
-            mpt_proof: value.1,
+            lpn_proof,
+            mpt_proof,
         }
     }
 }

@@ -164,11 +164,13 @@ where
 }
 
 pub(crate) type PublicParameters = Parameters<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN>;
-
+/// Data structure holding the portion of inputs related to block linking logic,
+/// which are necessary to generate a proof for the block linking circuit
 pub type BlockLinkingCircuitInputs =
     BlockLinkingCircuit<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, NUMBER_LEN>;
 
 impl PublicParameters {
+    /// Build circuit parameters for block linking circuit
     pub(crate) fn build(storage_circuit_vk: &VerifierCircuitData<F, C, D>) -> Self {
         let config = get_config();
         let mut cb = CircuitBuilder::<F, D>::new(config);
@@ -185,6 +187,8 @@ impl PublicParameters {
         }
     }
 
+    /// Generate proof for digest equal circuit employiing the circuit parameters found in  `self`
+    /// and the necessary inputs values
     pub(crate) fn generate_proof(
         &self,
         storage_proof: &ProofWithVK,
@@ -199,14 +203,28 @@ impl PublicParameters {
         serialize_proof(&proof)
     }
 
+    /// Get the `CircuitData` of the digest equal circuit
     pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {
         &self.data
     }
 }
 
+/// Data structure containing the inputs to be provided to the API in order to
+/// generate a proof for the block linking circuit
 pub struct CircuitInput {
     storage_proof: Vec<u8>,
     inputs: BlockLinkingCircuitInputs,
+}
+
+impl CircuitInput {
+    /// Instantiate `CircuitInput` for block linking circuit employing a proof for the
+    /// digest equal circuit and the set of inputs to prove block linkink logic
+    pub fn new(storage_proof: Vec<u8>, bl_inputs: BlockLinkingCircuitInputs) -> Self {
+        Self {
+            storage_proof,
+            inputs: bl_inputs,
+        }
+    }
 }
 
 impl From<(Vec<u8>, BlockLinkingCircuitInputs)> for CircuitInput {

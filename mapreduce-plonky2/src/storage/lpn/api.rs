@@ -33,6 +33,16 @@ pub struct NodeInputs {
     right: Vec<u8>,
 }
 
+impl NodeInputs {
+    /// Construct an instance of `NodeInputs` from 2 child proofs
+    pub fn new(left_proof: Vec<u8>, right_proof: Vec<u8>) -> Self {
+        Self {
+            left: left_proof,
+            right: right_proof,
+        }
+    }
+}
+
 /// Parameters containing the public information for proving both leaves and nodes
 /// of the storage database
 #[derive(Serialize, Deserialize)]
@@ -95,7 +105,7 @@ impl PublicParameters {
             }
         }
     }
-
+    /// Get the set of circuits related to the storage database in LPN
     pub(crate) fn get_lpn_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
         &self.set
     }

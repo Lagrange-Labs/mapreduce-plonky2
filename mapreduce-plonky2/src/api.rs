@@ -30,16 +30,26 @@ pub(crate) const D: usize = 2;
 pub(crate) type C = PoseidonGoldilocksConfig;
 pub(crate) type F = <C as GenericConfig<D>>::F;
 
+/// Set of inputs necessary to generate proofs for each circuit employed in the pre-processing
+/// stage of LPN
 pub enum CircuitInput {
+    /// Input for circuits proving inclusion of entries of a mapping in an MPT
     Mapping(mapping::CircuitInput),
+    /// Input for circuit extracting length of a mapping from MPT
     LengthExtract(storage::length_extract::CircuitInput),
+    /// Input for circuit building the storage DB of LPN
     Storage(lpn::Input),
+    /// Input for circuit binding the proofs for `Mapping` and `LengthExtract` circuits
     LengthMatch(length_match::CircuitInput),
+    // Input for circuit binding the proofs for `LengthMatch` and `Storage` circuits
     DigestEqual(digest_equal::CircuitInput),
+    /// Input for circuit linking the constructed storage DB to a specific block of the
+    /// mainchain
     BlockLinking(block_linking::CircuitInput),
 }
 
 #[derive(Serialize, Deserialize)]
+/// Parameters defining all the circuits employed for the pre-processing stage of LPN
 pub struct PublicParameters {
     mapping: mapping::PublicParameters,
     length_extract: length_extract::PublicParameters,
@@ -49,10 +59,13 @@ pub struct PublicParameters {
     block_linking: block_linking::PublicParameters,
 }
 
+/// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits
+/// employed for the pre-processing statge of LPN
 pub(crate) fn get_config() -> CircuitConfig {
     CircuitConfig::standard_recursion_config()
 }
-
+/// Instantiate the circuits employed for the pre-processing stage of LPN, returning their
+/// corresponding parameters
 pub fn build_circuits_params() -> PublicParameters {
     let mapping = mapping::build_circuits_params();
     let length_extract = length_extract::PublicParameters::build();
@@ -77,6 +90,8 @@ pub fn build_circuits_params() -> PublicParameters {
     }
 }
 
+/// Generate a proof for a circuit in the set of circuits employed in the pre-processing stage
+/// of LPN, employing `CircuitInput` to specify for which circuit the proof should be generated
 pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
     match input {
         CircuitInput::Mapping(mapping_input) => {

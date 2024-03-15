@@ -6,7 +6,7 @@ use super::{
     mapping::PublicInputs as MappingPublicInputs,
 };
 use crate::{
-    api::{deserialize_proof, get_config, ProofWithVK, RecursiveVerifierTarget},
+    api::{deserialize_proof, get_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget},
     circuit::UserCircuit,
     keccak::{OutputHash, PACKED_HASH_LEN},
     types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
@@ -214,21 +214,23 @@ impl Parameters {
         let (proof, vd) = length_proof.into();
         self.length_proof_wires.set_target(&mut pw, &proof, &vd);
         let proof = self.data.prove(pw)?;
-        // TODO: move serialization to common place
-        let b = bincode::serialize(&proof)?;
-        Ok(b)
+        serialize_proof(&proof)
     }
-
+    /// Get the `CircuitData` associated to the length matching circuit
     pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {
         &self.data
     }
 }
+
+/// Data structure containing the inputs to be provided to the API in order to
+/// generate a proof for the length matching circuit
 pub struct CircuitInput {
     mapping_proof: Vec<u8>,
     length_extract_proof: Vec<u8>,
 }
 
 impl CircuitInput {
+    /// Initialize `CircuitInput`
     pub fn new(mapping_proof: Vec<u8>, length_extract_proof: Vec<u8>) -> Self {
         Self {
             mapping_proof,
