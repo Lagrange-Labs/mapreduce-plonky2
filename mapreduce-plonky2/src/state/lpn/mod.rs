@@ -1,6 +1,5 @@
 //! Lagrange Proving Network circuits
 
-pub mod api;
 pub(crate) mod leaf;
 mod node;
 mod public_inputs;
