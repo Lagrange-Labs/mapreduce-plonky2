@@ -395,6 +395,37 @@ mod test {
         assert_eq!(leaf_list.len(), 2);
         let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
         println!("leaf value = {}", hex::encode(&leaf_value));
+        // try if it's an array or not.
+        // for storage slot 8 it should be an array so the proof should be valid.
+
+        {
+            let memdb = Arc::new(MemoryDB::new(true));
+            let tx_trie = EthTrie::new(Arc::clone(&memdb));
+            let array_slot = 8 as u8;
+            let location = keccak256(&left_pad32(&[array_slot]));
+            let res = provider
+                .get_proof(pidgy_address, vec![H256::from_slice(&location)], None)
+                .await?;
+
+            let proof_key_bytes: [u8; 32] = res.storage_proof[0].key.into();
+            let mpt_key = keccak256(&proof_key_bytes[..]);
+            let is_valid = tx_trie.verify_proof(
+                res.storage_hash,
+                &mpt_key,
+                res.storage_proof[0]
+                    .proof
+                    .iter()
+                    .map(|b| b.to_vec())
+                    .collect(),
+            );
+
+            if is_valid.is_err() {
+                bail!("storage proof is invalid");
+            }
+            if is_valid.unwrap().is_none() {
+                bail!("storage proof says the value associated with that key does not exist");
+            }
+        }
         //let value = ProofQuery::verify_storage_proof(&res)?;
         //println!("value at slot 8: {}", value);
         Ok(())
