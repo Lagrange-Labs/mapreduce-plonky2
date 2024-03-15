@@ -174,7 +174,9 @@ impl<const D: usize> RecursiveCircuitsVerifierTarget<D> {
 
     /// Returns a set of targets corresponding to the public inputs of the proof being recursively
     /// verified
-    pub fn get_public_input_targets<F: SerializableRichField<D>, const NUM_PUBLIC_INPUTS: usize>(&self) -> &[Target] {
+    pub fn get_public_input_targets<F: SerializableRichField<D>, const NUM_PUBLIC_INPUTS: usize>(
+        &self,
+    ) -> &[Target] {
         let pt = self.0.get_proof_target();
         public_input_targets::<F, D, NUM_PUBLIC_INPUTS>(pt)
     }
