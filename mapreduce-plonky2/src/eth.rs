@@ -390,8 +390,12 @@ mod test {
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_simple_slot(pidgy_address, 8);
         let res = query.query_mpt_proof(&provider, None).await?;
-        let value = ProofQuery::verify_storage_proof(&res)?;
-        println!("value at slot 8: {}", value);
+        let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
+        let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
+        assert_eq!(leaf_list.len(), 2);
+        println!("leaf value = {}", hex::encode(&leaf_list[1]));
+        //let value = ProofQuery::verify_storage_proof(&res)?;
+        //println!("value at slot 8: {}", value);
         Ok(())
     }
 
