@@ -98,7 +98,7 @@ impl CircuitLogicWires<GoldilocksField, 2, 1> for ExtensionWires {
     fn circuit_logic(
         builder: &mut CircuitBuilder<GoldilocksField, 2>,
         verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; 1],
-        builder_parameters: Self::CircuitBuilderParams,
+        _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         let inputs = PublicInputs::from(&verified_proofs[0].public_inputs);
         ExtensionNodeCircuit::build(builder, inputs)
