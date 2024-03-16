@@ -406,15 +406,23 @@ mod test {
             // Case 3: location = keccak(left_pad32()) and mpt_key = location ---> storage proof invalid XXX
             // Case 4: location = keccak([array_slot]) and mpt_key = location ---> storage proof invalid XX
             // Case 5: location = U256::big_endian(keccak([array_slot])) + 1
-            let location = keccak256(&left_pad32(&[array_slot]));
+            //let location = keccak256(&left_pad32(&[array_slot]));
             //println!(
             //    "location keccak(left_pad32([slot])) = {}",
             //    hex::encode(&location)
             //);
             //let mut location = [0u8; 32];
-            //(U256::from_big_endian(&keccak256(&[array_slot])) + U256::one())
+            //(U256::from_big_endian(&keccak256(&left_pad32(&[array_slot]))))
             //    .to_big_endian(&mut location[..]);
-            println!("location keccak([array_slot]) = {}", hex::encode(&location));
+
+            // TLDR:  we know we can access the _second_ item of the array but NOT the first one
+            // if second item of the array IS maybe not zero, then the proof should be valid
+            // if the proof is not valid then that means the storage slot is NOT an array.
+            let mut location = [0u8; 32];
+            (U256::from_big_endian(&keccak256(&left_pad32(&[array_slot]))) + U256::one())
+                .to_big_endian(&mut location[..]);
+
+            println!("location  = {}", hex::encode(&location));
             let res = provider
                 .get_proof(pidgy_address, vec![H256::from_slice(&location)], None)
                 .await?;
@@ -432,6 +440,7 @@ mod test {
                     .map(|b| b.to_vec())
                     .collect(),
             );
+            println!("res.value = {}", res.storage_proof[0].value);
 
             if is_valid.is_err() {
                 bail!("storage proof is invalid: {}", is_valid.unwrap_err());
