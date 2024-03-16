@@ -14,6 +14,8 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
+mod groth16_tests;
+
 mod benches;
 pub mod eth;
 
@@ -97,10 +99,8 @@ impl ByteProofTuple {
 
 #[cfg(test)]
 mod test {
-    use anyhow::Result;
     use ethers::utils::keccak256;
     use plonky2::{
-        field::types::Field,
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder,
@@ -112,14 +112,11 @@ mod test {
         keccak256::{CircuitBuilderHashKeccak, WitnessHashKeccak, KECCAK256_R},
         CircuitBuilderHash,
     };
-    use plonky2x::backend::circuit::config::{DefaultParameters, Groth16WrapperParameters};
-    use plonky2x::backend::circuit::CircuitBuild;
-    use plonky2x::backend::wrapper::wrap::WrappedCircuit;
-    use plonky2x::prelude::CircuitBuilder as CBuilder;
     use rand::Rng;
 
     use crate::{utils::verify_proof_tuple, ByteProofTuple};
-
+    use anyhow::Result;
+    use plonky2::field::types::Field;
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
@@ -150,49 +147,5 @@ mod test {
         let deserialized = ByteProofTuple::into_proof_tuple::<F, C, D>(&serialized).unwrap();
         assert_eq!(expected, deserialized);
         Ok(())
-    }
-
-    #[test]
-    fn test_groth16() {
-        type L = DefaultParameters;
-        let config = CircuitConfig::standard_recursion_config();
-        let mut cb = CircuitBuilder::<F, D>::new(config);
-
-        let [a, b] = [0; 2].map(|_| cb.add_virtual_target());
-        let c = cb.add(a, b);
-
-        let mut pw = PartialWitness::new();
-        pw.set_target(a, F::ZERO);
-        pw.set_target(b, F::ONE);
-        pw.set_target(c, F::ONE);
-
-        let data = cb.build::<C>();
-        let proof = data.prove(pw).unwrap();
-
-        let mut builder = CBuilder::<L, D>::new();
-        builder.pre_build();
-        let async_hints = CBuilder::<L, D>::async_hint_map(
-            data.prover_only.generators.as_slice(),
-            builder.async_hints,
-        );
-
-        let circuit = CircuitBuild {
-            data,
-            io: builder.io,
-            async_hints,
-        };
-
-        let wrapper: WrappedCircuit<_, _, 2> =
-            WrappedCircuit::<L, Groth16WrapperParameters, D>::build(circuit);
-        let wrapped_proof = wrapper.prove(&proof).unwrap();
-
-        let pi = serde_json::to_string_pretty(&wrapped_proof.proof).unwrap();
-        std::fs::write("proof_with_public_inputs.json", pi).unwrap();
-
-        let common = serde_json::to_string_pretty(&wrapped_proof.common_data).unwrap();
-        std::fs::write("common_circuit_data.json", common).unwrap();
-
-        let vk = serde_json::to_string_pretty(&wrapped_proof.verifier_data).unwrap();
-        std::fs::write("verifier_only_circuit_data.json", vk).unwrap();
     }
 }
