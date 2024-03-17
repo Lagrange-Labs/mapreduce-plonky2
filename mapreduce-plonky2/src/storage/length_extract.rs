@@ -29,7 +29,7 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use recursion_framework::serialization::circuit_data_serialization::SerializableRichField;
 use recursion_framework::serialization::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
-use std::array;
+use std::array::{self, from_fn as create_array};
 
 /// This is a wrapper around an array of targets set as public inputs of any
 /// proof generated in this module. They all share the same structure.
@@ -148,8 +148,12 @@ where
         // Range check to constrain only bytes for each node of state MPT input.
         mpt_input.nodes.iter().for_each(|n| n.assert_bytes(cb));
 
-        // The length value shouldn't exceed 4-bytes (U32).
-        let length_value = convert_u8_targets_to_u32(cb, &mpt_output.leaf.arr);
+        // a. The length value shouldn't exceed 4-bytes (U32).
+        // b. We skip the first byte since it's the RLP header of a value < 55 bytes
+        let extract_len: [Target; 4] = create_array(|i| {
+            mpt_output.leaf.arr[i + 1] // skip the RLP header
+        });
+        let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
 
         // Register the public inputs.
         PublicInputs::register(
@@ -157,7 +161,7 @@ where
             &mpt_output.root,
             &packed_contract_address,
             slot.slot,
-            length_value[0].0,
+            length_value,
         );
 
         LengthExtractWires {
@@ -265,7 +269,7 @@ mod tests {
         /// Storage slot
         slot: u8,
         /// Expected length value
-        value: u8,
+        value: u32,
         /// Contract address
         contract_address: H160,
         /// MPT nodes
@@ -310,7 +314,7 @@ mod tests {
 
         // Get the expected public inputs.
         let exp_slot = F::from_canonical_u8(test_data.slot);
-        let exp_value = F::from_canonical_u8(test_data.value);
+        let exp_value = F::from_canonical_u32(test_data.value);
         let exp_root_hash: Vec<_> =
             convert_u8_to_u32_slice(&keccak256(test_data.nodes.last().unwrap()))
                 .into_iter()
@@ -358,8 +362,8 @@ mod tests {
             let key = SimpleSlot::new(slot, contract_address).mpt_key();
 
             // Insert the key and value.
-            let value = rng.gen::<u8>();
-            trie.insert(&key, &[value]).unwrap();
+            let value = rng.gen::<u32>();
+            trie.insert(&key, &rlp::encode(&value)).unwrap();
             trie.root_hash().unwrap();
 
             // Save the slot, contract address and key temporarily.
@@ -375,7 +379,8 @@ mod tests {
         };
 
         let root_hash = trie.root_hash().unwrap();
-        let value = trie.get(mpt_key).unwrap().unwrap()[0];
+        let value_buff: Vec<u8> = rlp::decode(&trie.get(mpt_key).unwrap().unwrap()).unwrap();
+        let value = convert_u8_to_u32_slice(&value_buff)[0];
         let mut nodes = trie.get_proof(mpt_key).unwrap();
         nodes.reverse();
         assert!(keccak256(nodes.last().unwrap()) == root_hash.to_fixed_bytes());

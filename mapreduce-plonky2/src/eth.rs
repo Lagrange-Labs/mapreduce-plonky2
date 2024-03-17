@@ -386,7 +386,7 @@ mod test {
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
-        // sepolia contract
+        // pidgy pinguins address
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_simple_slot(pidgy_address, 8);
         let res = query.query_mpt_proof(&provider, None).await?;
@@ -394,30 +394,21 @@ mod test {
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         assert_eq!(leaf_list.len(), 2);
         let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
-        println!("leaf value = {}", hex::encode(&leaf_value));
+        // making sure we can simply skip the first byte
+        let sliced = &leaf_list[1][1..];
+        assert_eq!(sliced, leaf_value.as_slice());
         // try if it's an array or not.
         // for storage slot 8 it should be an array so the proof should be valid.
+        // for storage slot 11, it should be a variable so the proof to access the second
+        // item of this variable should be invalid (since the location doesn't exist)
         {
             let memdb = Arc::new(MemoryDB::new(true));
             let tx_trie = EthTrie::new(Arc::clone(&memdb));
             let array_slot = 8 as u8;
-            // Case 1: location = keccak(left_pad32()) and mpt_key = keccak(location) ---> storage proof is invalid
-            // Case 2: location = keccak([array_slot]) and mpt_key = keccak(location) ---> value does not EXIST ???
-            // Case 3: location = keccak(left_pad32()) and mpt_key = location ---> storage proof invalid XXX
-            // Case 4: location = keccak([array_slot]) and mpt_key = location ---> storage proof invalid XX
-            // Case 5: location = U256::big_endian(keccak([array_slot])) + 1
-            //let location = keccak256(&left_pad32(&[array_slot]));
-            //println!(
-            //    "location keccak(left_pad32([slot])) = {}",
-            //    hex::encode(&location)
-            //);
-            //let mut location = [0u8; 32];
-            //(U256::from_big_endian(&keccak256(&left_pad32(&[array_slot]))))
-            //    .to_big_endian(&mut location[..]);
 
             // TLDR:  we know we can access the _second_ item of the array but NOT the first one
-            // if second item of the array IS maybe not zero, then the proof should be valid
-            // if the proof is not valid then that means the storage slot is NOT an array.
+            // it's because in this case, the first value is 0 and it may not exist in the MPT
+            // https://github.com/ethereumjs/merkle-patricia-tree/issues/47#issue-328846240
             let mut location = [0u8; 32];
             (U256::from_big_endian(&keccak256(&left_pad32(&[array_slot]))) + U256::one())
                 .to_big_endian(&mut location[..]);
