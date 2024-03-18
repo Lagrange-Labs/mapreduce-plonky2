@@ -3,6 +3,7 @@
 pub(crate) mod leaf;
 mod node;
 mod public_inputs;
+pub mod api;
 
 use ethers::types::Address;
 use plonky2::{

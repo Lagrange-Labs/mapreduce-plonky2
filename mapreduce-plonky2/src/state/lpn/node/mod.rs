@@ -5,14 +5,14 @@ use std::iter;
 use plonky2::{
     field::extension::Extendable,
     hash::{
-        hash_types::{HashOutTarget, RichField},
+        hash_types::RichField,
         poseidon::PoseidonHash,
     },
     iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
-
-use crate::state::BlockLinkingInputs;
+use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Serialize, Deserialize};
 
 use crate::state::StateInputs;
 
@@ -92,7 +92,7 @@ impl NodeCircuit {
         b: &mut CircuitBuilder<F, D>,
         left_sibling: StateInputs<'i, Target>,
         right_sibling: StateInputs<'i, Target>,
-    ) -> HashOutTarget
+    )
     where
         F: RichField + Extendable<D>,
     {
@@ -123,7 +123,39 @@ impl NodeCircuit {
 
         b.register_public_inputs(&root.elements);
         left_sibling.register_block_linking_data(b);
+    }
+}
+#[derive(Serialize, Deserialize)]
+pub(crate) struct NodeCircuitWires;
 
-        root
+type F = crate::api::F;
+type C = crate::api::C;
+const D: usize = crate::api::D;
+
+impl CircuitLogicWires<F, D, 2> for NodeCircuitWires {
+    type CircuitBuilderParams = ();
+
+    type Inputs = ();
+
+    const NUM_PUBLIC_INPUTS: usize = StateInputs::<Target>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 2],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        let left_sibling = StateInputs::from_slice(
+            Self::public_input_targets(verified_proofs[0])
+        );
+        let right_sibling = StateInputs::from_slice(
+            Self::public_input_targets(verified_proofs[1])
+        );
+        NodeCircuit::build(builder, left_sibling, right_sibling);
+
+        NodeCircuitWires{}
+    }
+
+    fn assign_input(&self, _inputs: Self::Inputs, _pw: &mut plonky2::iop::witness::PartialWitness<F>) -> anyhow::Result<()> {
+        Ok(())
     }
 }
