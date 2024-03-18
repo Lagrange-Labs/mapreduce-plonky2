@@ -5,6 +5,7 @@ use super::leaf::LeafWires;
 use super::leaf::StorageLeafWire;
 use super::PublicInputs;
 use crate::api::ProofWithVK;
+use crate::groth16_tests::gen_groth16_proof;
 use crate::mpt_sequential::PAD_LEN;
 use crate::storage::key::MappingSlot;
 use crate::storage::mapping::branch::BranchCircuit;
@@ -41,7 +42,6 @@ use recursion_framework::serialization::serialize;
 use serde::Deserialize;
 use serde::Serialize;
 use std::array::from_fn as create_array;
-use crate::groth16_tests::gen_groth16_proof;
 
 const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
@@ -329,10 +329,10 @@ impl PublicParameters {
                     type L = DefaultParameters;
 
                     // TRICKY: get the circuit-data to build WrappedCircuit of plonkyx.
-                    let circuit_data = self.leaf_circuit.wrap_circuit.circuit_data.pop().unwrap();
+                    // let circuit_data = self.leaf_circuit.wrap_circuit.circuit_data.pop().unwrap();
 
                     // TODO: Not work for now, since the public inputs must be bytes.
-                    gen_groth16_proof(circuit_data, &proof.proof);
+                    // gen_groth16_proof(circuit_data, &proof.proof);
                 }
 
                 Ok(proof)

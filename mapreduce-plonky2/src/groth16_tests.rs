@@ -9,25 +9,21 @@ use plonky2::{
     field::types::{Field, Sample},
     hash::hash_types::RichField,
     iop::{
-        target::{Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_data::CircuitData,
+    plonk::proof::ProofWithPublicInputs,
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::CircuitConfig,
         config::{GenericConfig, PoseidonGoldilocksConfig},
     },
-    plonk::{
-        proof::{ProofWithPublicInputs},
-    },
 };
 use plonky2_ecgfp5::{
     curve::curve::Point,
-    gadgets::{
-        curve::{CircuitBuilderEcGFp5, CurveTarget},
-    },
-    gadgets::{curve::PartialWitnessCurve},
+    gadgets::curve::PartialWitnessCurve,
+    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
 use plonky2x::backend::circuit::config::{DefaultParameters, Groth16WrapperParameters};
 use plonky2x::backend::wrapper::wrap::WrappedCircuit;
@@ -50,32 +46,36 @@ pub fn convert_u64_targets_to_u8<F: RichField + Extendable<D>, const D: usize>(
     let four_cube = b.constant(F::from_canonical_usize(64));
 
     // Convert each u64 to [u8; 8].
-    data.iter().flat_map(|u64_element| {
-        // Convert an u64 to [u2; 32], each limb is an u2, it means
-        // BASE is 4 (2^2), and total 32 limbs.
-        let u2_elements = b.split_le_base::<4>(*u64_element, 32);
+    data.iter()
+        .flat_map(|u64_element| {
+            // Convert an u64 to [u2; 32], each limb is an u2, it means
+            // BASE is 4 (2^2), and total 32 limbs.
+            let u2_elements = b.split_le_base::<4>(*u64_element, 32);
 
-        // Convert each [u2; 4] to an u8 as:
-        // u[0] + u[1] * 4 + u[2] * 16 + u[3] * 64
-        u2_elements
-            .chunks(4)
-            .map(|u| {
-                // acc = u[0] + u[1] * 4
-                let acc = b.mul_add(u[1], four, u[0]);
-                // acc += [u2] * 4^2
-                let acc = b.mul_add(u[2], four_square, acc);
-                // acc += [u3] * 4^3
-                b.mul_add(u[3], four_cube, acc)
-            })
-            .collect::<Vec<_>>()
-    }).collect()
+            // Convert each [u2; 4] to an u8 as:
+            // u[0] + u[1] * 4 + u[2] * 16 + u[3] * 64
+            u2_elements
+                .chunks(4)
+                .map(|u| {
+                    // acc = u[0] + u[1] * 4
+                    let acc = b.mul_add(u[1], four, u[0]);
+                    // acc += [u2] * 4^2
+                    let acc = b.mul_add(u[2], four_square, acc);
+                    // acc += [u3] * 4^3
+                    b.mul_add(u[3], four_cube, acc)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
-fn register_curve_target_as_bytes(cb: &mut CircuitBuilder::<F, D>, c: &CurveTarget) {
-    let x = convert_u64_targets_to_u8(cb, &c.0.0[0].0);
-    let y = convert_u64_targets_to_u8(cb, &c.0.0[1].0);
-    x.into_iter().chain(y).for_each(|t| cb.register_public_input(t));
-    cb.register_public_input(c.0.1.target);
+fn register_curve_target_as_bytes(cb: &mut CircuitBuilder<F, D>, c: &CurveTarget) {
+    let x = convert_u64_targets_to_u8(cb, &c.0 .0[0].0);
+    let y = convert_u64_targets_to_u8(cb, &c.0 .0[1].0);
+    x.into_iter()
+        .chain(y)
+        .for_each(|t| cb.register_public_input(t));
+    cb.register_public_input(c.0 .1.target);
 }
 
 pub fn gen_groth16_proof(data: CircuitData<F, C, D>, proof: &ProofWithPublicInputs<F, C, D>) {
