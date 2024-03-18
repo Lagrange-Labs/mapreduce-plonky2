@@ -9,7 +9,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::api::{get_config, ProofWithVK, C, D, F};
+use crate::api::{default_config, ProofWithVK, C, D, F};
 
 use super::{
     inner_node::{NodeCircuit, NodeWires},
@@ -55,7 +55,7 @@ pub struct PublicParameters {
 impl PublicParameters {
     /// Build the public parameters for the storage database related circuits
     pub fn build() -> Self {
-        let config = get_config();
+        let config = default_config();
         let circuit_builder = CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(
             config,
             STORAGE_CIRCUIT_SET_SIZE,

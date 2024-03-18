@@ -6,7 +6,7 @@ use super::{
     mapping::PublicInputs as MappingPublicInputs,
 };
 use crate::{
-    api::{deserialize_proof, get_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget},
+    api::{deserialize_proof, default_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget},
     circuit::UserCircuit,
     keccak::{OutputHash, PACKED_HASH_LEN},
     types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
@@ -181,7 +181,7 @@ impl Parameters {
         mapping_circuit_set: &RecursiveCircuits<F, C, D>,
         length_extract_vk: &VerifierCircuitData<F, C, D>,
     ) -> Self {
-        let config = get_config();
+        let config = default_config();
         const NUM_PUBLIC_INPUTS: usize = MappingPublicInputs::<'_, Target>::TOTAL_LEN;
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, NUM_PUBLIC_INPUTS>::new(
             config.clone(),

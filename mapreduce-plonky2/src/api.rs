@@ -1,5 +1,4 @@
 use anyhow::Result;
-use ethers::core::k256::elliptic_curve::rand_core::block;
 use plonky2::{
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{
@@ -61,7 +60,7 @@ pub struct PublicParameters {
 
 /// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits
 /// employed for the pre-processing statge of LPN
-pub(crate) fn get_config() -> CircuitConfig {
+pub(crate) fn default_config() -> CircuitConfig {
     CircuitConfig::standard_recursion_config()
 }
 /// Instantiate the circuits employed for the pre-processing stage of LPN, returning their
@@ -155,11 +154,11 @@ impl ProofWithVK {
         Ok(s)
     }
 
-    pub(crate) fn get_proof(&self) -> &ProofWithPublicInputs<F, C, D> {
+    pub(crate) fn proof(&self) -> &ProofWithPublicInputs<F, C, D> {
         &self.proof
     }
 
-    pub(crate) fn get_verifier_data(&self) -> &VerifierOnlyCircuitData<C, D> {
+    pub(crate) fn verifier_data(&self) -> &VerifierOnlyCircuitData<C, D> {
         &self.vk
     }
 }
@@ -271,7 +270,7 @@ impl<'a>
         &'a ProofWithPublicInputs<F, C, D>,
         &'a VerifierOnlyCircuitData<C, D>,
     ) {
-        (self.get_proof(), self.get_verifier_data())
+        (self.proof(), self.verifier_data())
     }
 }
 
@@ -290,7 +289,9 @@ pub(crate) mod tests {
     use recursion_framework::{
         circuit_builder::CircuitLogicWires, framework_testing::DummyCircuitWires,
     };
-
+    
+    /// Circuit that does nothing but can be passed as a children proof to some circuit when testing the aggregation
+    /// logic. See state/block_linking/mod.rs tests for example.
     pub(crate) struct TestDummyCircuit<const NUM_PUBLIC_INPUTS: usize> {
         data: CircuitData<F, C, D>,
         wires: DummyCircuitWires<NUM_PUBLIC_INPUTS>,

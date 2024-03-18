@@ -5,7 +5,7 @@ use super::{
     MAX_BRANCH_NODE_LEN,
 };
 use crate::{
-    api::{get_config, serialize_proof},
+    api::{default_config, serialize_proof},
     circuit::UserCircuit,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::{
@@ -214,7 +214,7 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     pub fn build() -> Self {
-        let mut cb = CircuitBuilder::<F, D>::new(get_config());
+        let mut cb = CircuitBuilder::<F, D>::new(default_config());
         let wires = LengthExtractCircuit::<DEPTH, NODE_LEN>::build(&mut cb);
         let data = cb.build();
         Self { data, wires }

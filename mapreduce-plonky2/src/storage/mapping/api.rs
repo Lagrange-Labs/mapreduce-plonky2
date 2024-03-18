@@ -4,7 +4,7 @@ use super::leaf::LeafCircuit;
 use super::leaf::LeafWires;
 use super::leaf::StorageLeafWire;
 use super::PublicInputs;
-use crate::api::get_config;
+use crate::api::default_config;
 use crate::api::ProofWithVK;
 use crate::mpt_sequential::PAD_LEN;
 use crate::storage::key::MappingSlot;
@@ -198,9 +198,9 @@ macro_rules! impl_branch_circuits {
                         if arr.len() == 1 {
                             true
                         } else {
-                            let pi1 = PublicInputs::<F>::from(&arr[0].get_proof().public_inputs);
+                            let pi1 = PublicInputs::<F>::from(&arr[0].proof().public_inputs);
                             let (k1, p1) = pi1.mpt_key_info();
-                            let pi2 = PublicInputs::<F>::from(&arr[1].get_proof().public_inputs);
+                            let pi2 = PublicInputs::<F>::from(&arr[1].proof().public_inputs);
                             let (k2, p2) = pi2.mpt_key_info();
                             let up1 = p1.to_canonical_u64() as usize;
                             let up2 = p2.to_canonical_u64() as usize;
@@ -219,7 +219,7 @@ macro_rules! impl_branch_circuits {
 
                 // we just take the first one,it doesn't matter which one we take as long
                 // as all prefixes and pointers are equal.
-                let pi = PublicInputs::<F>::from(&child_proofs[0].get_proof().public_inputs);
+                let pi = PublicInputs::<F>::from(&child_proofs[0].proof().public_inputs);
                 let (key, ptr) = pi.mpt_key_info();
                 let mapping_slot = pi.mapping_slot().to_canonical_u64() as usize;
                 let common_prefix = key
@@ -301,7 +301,7 @@ impl_branch_circuits!(TestBranchCircuits, 1, 2);
 impl PublicParameters {
     /// Generates the circuit parameters for the MPT circuits.
     fn build() -> Self {
-        let config = get_config();
+        let config = default_config();
         #[cfg(not(test))]
         let circuit_builder = CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(
             config,
@@ -510,7 +510,7 @@ mod test {
         };
         // generate a leaf then a branch proof with only this leaf
         let leaf1_proof = params.generate_proof(CircuitInput::Leaf(l1)).unwrap();
-        let pub1 = leaf1_proof.get_proof().public_inputs[..NUM_IO].to_vec();
+        let pub1 = leaf1_proof.proof().public_inputs[..NUM_IO].to_vec();
         let pi1 = PublicInputs::from(&pub1);
         assert_eq!(pi1.proof_inputs.len(), NUM_IO);
         let (_, comp_ptr) = pi1.mpt_key_info();
@@ -528,7 +528,7 @@ mod test {
         } else {
             params.branchs.b1.get_verifier_data().clone()
         };
-        assert_eq!(branch1.get_verifier_data(), &exp_vk);
+        assert_eq!(branch1.verifier_data(), &exp_vk);
 
         // generate  a branch proof with two leafs inputs now but using the testing framework
         // we simulate another leaf at the right key, so we just modify the nibble at the pointer
@@ -577,6 +577,6 @@ mod test {
         } else {
             params.branchs.b2.get_verifier_data().clone()
         };
-        assert_eq!(branch2.get_verifier_data(), &exp_vk);
+        assert_eq!(branch2.verifier_data(), &exp_vk);
     }
 }

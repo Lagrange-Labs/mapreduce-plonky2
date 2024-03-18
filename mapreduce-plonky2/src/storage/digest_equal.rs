@@ -7,7 +7,7 @@ use super::{
     length_match::PublicInputs as MPTPublicInputs, lpn::PublicInputs as MerklePublicInputs,
 };
 use crate::{
-    api::{deserialize_proof, get_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget},
+    api::{deserialize_proof, default_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget},
     array::Array,
     group_hashing::{CircuitBuilderGroupHashing, N},
     keccak::{OutputHash, PACKED_HASH_LEN},
@@ -203,16 +203,16 @@ impl Parameters {
         lpn_circuit_set: &RecursiveCircuits<F, C, D>,
         mpt_circuit_vd: &VerifierCircuitData<F, C, D>,
     ) -> Self {
-        const MPT_PUBLIC_INPUTS: usize = MerklePublicInputs::<Target>::TOTAL_LEN;
-        let mut cb = CircuitBuilder::<F, D>::new(get_config());
+        const LPN_PUBLIC_INPUTS: usize = MerklePublicInputs::<Target>::TOTAL_LEN;
+        let mut cb = CircuitBuilder::<F, D>::new(default_config());
         let mpt_wires = RecursiveVerifierTarget::verify_proof(&mut cb, mpt_circuit_vd);
-        let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, MPT_PUBLIC_INPUTS>::new(
-            get_config(),
+        let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, LPN_PUBLIC_INPUTS>::new(
+            default_config(),
             lpn_circuit_set,
         );
         let lpn_wires = verifier_gadget.verify_proof_in_circuit_set(&mut cb);
         let mpt_pi = mpt_wires.get_proof().public_inputs.as_slice();
-        let lpn_pi = lpn_wires.get_public_input_targets::<F, MPT_PUBLIC_INPUTS>();
+        let lpn_pi = lpn_wires.get_public_input_targets::<F, LPN_PUBLIC_INPUTS>();
         DigestEqualCircuit::build(&mut cb, mpt_pi, lpn_pi);
 
         let data = cb.build::<C>();

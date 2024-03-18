@@ -6,7 +6,7 @@ mod block;
 mod public_inputs;
 
 use crate::{
-    api::{deserialize_proof, get_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget},
+    api::{deserialize_proof, default_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget},
     mpt_sequential::PAD_LEN,
     storage::PublicInputs as StorageInputs,
 };
@@ -170,9 +170,10 @@ pub type BlockLinkingCircuitInputs =
     BlockLinkingCircuit<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, NUMBER_LEN>;
 
 impl PublicParameters {
-    /// Build circuit parameters for block linking circuit
+    /// Build circuit parameters for block linking circuit. It expects the circuit parameters
+    /// of the digest_equal circuit. See `state/storage/digest_equal.rs` for more info.
     pub(crate) fn build(storage_circuit_vk: &VerifierCircuitData<F, C, D>) -> Self {
-        let config = get_config();
+        let config = default_config();
         let mut cb = CircuitBuilder::<F, D>::new(config);
         let storage_circuit_wires =
             RecursiveVerifierTarget::verify_proof(&mut cb, storage_circuit_vk);
@@ -241,9 +242,8 @@ impl TryInto<(ProofWithPublicInputs<F, C, D>, BlockLinkingCircuitInputs)> for Ci
 
     fn try_into(
         self,
-    ) -> std::prelude::v1::Result<
+    ) -> anyhow::Result<
         (ProofWithPublicInputs<F, C, D>, BlockLinkingCircuitInputs),
-        Self::Error,
     > {
         Ok((deserialize_proof(&self.storage_proof)?, self.inputs))
     }
