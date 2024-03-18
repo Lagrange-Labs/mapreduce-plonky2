@@ -376,7 +376,7 @@ mod test {
     use ethers::types::{BlockNumber, H256, U256};
     use rand::{thread_rng, Rng};
 
-    use crate::utils::find_index_subvector;
+    use crate::utils::{convert_u8_to_u32_slice, find_index_subvector};
 
     use super::*;
 
@@ -392,11 +392,33 @@ mod test {
         let res = query.query_mpt_proof(&provider, None).await?;
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
+        println!("leaf[1].len() = {}", leaf_list[1].len());
         assert_eq!(leaf_list.len(), 2);
         let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
         // making sure we can simply skip the first byte
         let sliced = &leaf_list[1][1..];
         assert_eq!(sliced, leaf_value.as_slice());
+        println!(
+            "length of storage proof: {}",
+            res.storage_proof[0].proof.len()
+        );
+        println!(
+            "max node length: {}",
+            res.storage_proof[0]
+                .proof
+                .iter()
+                .map(|x| x.len())
+                .max()
+                .unwrap()
+        );
+        let mut n = sliced.to_vec();
+        n.resize(4, 0); // what happens in circuit effectively
+        println!("sliced: {:?} - hex {}", sliced, hex::encode(&sliced));
+        let length = convert_u8_to_u32_slice(&n)[0];
+        let length2 =
+            convert_u8_to_u32_slice(&sliced.iter().cloned().rev().collect::<Vec<u8>>())[0];
+        println!("length extracted = {}", length);
+        println!("length 2 extracted = {}", length2);
         // try if it's an array or not.
         // for storage slot 8 it should be an array so the proof should be valid.
         // for storage slot 11, it should be a variable so the proof to access the second

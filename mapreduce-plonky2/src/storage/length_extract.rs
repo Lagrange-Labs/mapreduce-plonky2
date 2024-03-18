@@ -11,7 +11,7 @@ use crate::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
     },
     types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
-    utils::convert_u8_targets_to_u32,
+    utils::{convert_u8_targets_to_u32, less_than},
 };
 use anyhow::Result;
 use ethers::types::H160;
@@ -64,7 +64,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     pub fn contract_address(&self) -> PackedAddressTarget {
-        let data = self.contract_address_data();
+        let data = self.packed_contract_address();
         PackedAddressTarget::from_array(array::from_fn(|i| U32Target(data[i])))
     }
 }
@@ -84,7 +84,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         &self.proof_inputs[Self::C_IDX..Self::A_IDX]
     }
 
-    pub fn contract_address_data(&self) -> &[T] {
+    pub fn packed_contract_address(&self) -> &[T] {
         &self.proof_inputs[Self::A_IDX..Self::S_IDX]
     }
 
@@ -138,6 +138,8 @@ where
     where
         F: RichField + Extendable<D>,
     {
+        let zero = cb.zero();
+        let one = cb.one();
         let slot = SimpleSlot::build(cb);
         let packed_contract_address = slot.contract_address.convert_u8_to_u32(cb);
 
@@ -148,10 +150,27 @@ where
         // Range check to constrain only bytes for each node of state MPT input.
         mpt_input.nodes.iter().for_each(|n| n.assert_bytes(cb));
 
-        // a. The length value shouldn't exceed 4-bytes (U32).
-        // b. We skip the first byte since it's the RLP header of a value < 55 bytes
+        // NOTE: The length value shouldn't exceed 4-bytes (U32).
+        // We read the RLP header but knowing it is a value that is always <55bytes long
+        // we can hardcode the type of RLP header it is and directly get the real number len
+        // in this case, the header marker is 0x80 that we can directly take out from first byte
+        let byte_80 = cb.constant(F::from_canonical_usize(128));
+        let value_len = cb.sub(mpt_output.leaf.arr[0], byte_80);
+        // Normally one should do the following to access element with index
+        // let value_len_it = cb.sub(value_len, one);
+        // but in our case, since the first byte is the RLP header, we have to do +1
+        // so we just keep the same value
+        let mut value_len_it = value_len;
+        // Then we need to convert from big endian to little endian only on this len
         let extract_len: [Target; 4] = create_array(|i| {
-            mpt_output.leaf.arr[i + 1] // skip the RLP header
+            let it = cb.constant(F::from_canonical_usize(i));
+            let in_value = less_than(cb, it, value_len, 3); // log2(4) = 2, putting upper bound
+            let rev_value = mpt_output.leaf.value_at(cb, value_len_it);
+            // we can't access index < 0 with b.random_access so a small tweak to avoid it
+            let is_done = cb.is_equal(value_len_it, zero);
+            let value_len_it_minus_one = cb.sub(value_len_it, one);
+            value_len_it = cb.select(is_done, zero, value_len_it_minus_one);
+            cb.select(in_value, rev_value, zero)
         });
         let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
 
@@ -248,17 +267,21 @@ mod tests {
     use crate::{
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
+        eth::ProofQuery,
         utils::{convert_u8_to_u32_slice, keccak256},
     };
     use eth_trie::{EthTrie, MemoryDB, Trie};
-    use ethers::types::H160;
+    use ethers::{
+        providers::{Http, Provider},
+        types::{Address, H160},
+    };
     use plonky2::{
         field::types::Field,
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
     use rand::{thread_rng, Rng};
-    use std::sync::Arc;
+    use std::{convert, str::FromStr, sync::Arc};
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -339,7 +362,75 @@ mod tests {
         assert_eq!(pi.storage_slot(), exp_slot);
         assert_eq!(pi.length_value(), exp_value);
         assert_eq!(pi.root_hash_data(), exp_root_hash);
-        assert_eq!(pi.contract_address_data(), exp_contract_address);
+        assert_eq!(pi.packed_contract_address(), exp_contract_address);
+    }
+
+    #[tokio::test]
+    async fn test_length_extract_pidgy() -> Result<()> {
+        let url = "https://eth.llamarpc.com";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // extractd from test_pidgy_pinguins_slot
+        const DEPTH: usize = 5;
+        const MAX_NODE_LEN: usize = 532;
+        let slot = 8;
+        // pidgy pinguins address
+        let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_simple_slot(pidgy_address, 8);
+        let res = query.query_mpt_proof(&provider, None).await?;
+
+        let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
+        let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
+        assert_eq!(leaf_list.len(), 2);
+        let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
+        // making sure we can simply skip the first byte - imitate circuit
+        let sliced = &leaf_list[1][1..];
+        assert_eq!(sliced, leaf_value.as_slice());
+        // extracting len from RLP header - imitate circuit
+        let len_slice = rlp::Rlp::new(&leaf_list[1])
+            .payload_info()
+            .unwrap()
+            .value_len;
+        // check that subbing 0x80 works
+        let rlp_len_slice = leaf_list[1][0] - 128;
+        assert_eq!(rlp_len_slice as usize, len_slice);
+        let le_value: [u8; 4] = create_array(|i| {
+            if i < len_slice {
+                sliced[len_slice - 1 - i]
+            } else {
+                0
+            }
+        });
+        let comp_value = convert_u8_to_u32_slice(&le_value)[0];
+        assert_eq!(comp_value, 8888); // from contract
+        println!("correct conversion ! ");
+        let nodes = res.storage_proof[0]
+            .proof
+            .iter()
+            .rev()
+            .map(|x| x.to_vec())
+            .collect::<Vec<_>>();
+        let test_circuit = TestCircuit::<DEPTH, MAX_NODE_LEN> {
+            c: LengthExtractCircuit::new(slot, pidgy_address, nodes),
+        };
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
+
+        // Verify the public inputs.
+        let pi = PublicInputs::<F>::from(&proof.public_inputs);
+        assert_eq!(pi.storage_slot(), F::from_canonical_u8(slot));
+        assert_eq!(pi.length_value(), F::from_canonical_u32(comp_value));
+        let packed_root = convert_u8_to_u32_slice(res.storage_hash.as_bytes())
+            .into_iter()
+            .map(F::from_canonical_u32)
+            .collect::<Vec<_>>();
+        assert_eq!(pi.root_hash_data(), packed_root);
+        let packed_address = convert_u8_to_u32_slice(&pidgy_address.as_bytes())
+            .into_iter()
+            .map(F::from_canonical_u32)
+            .collect::<Vec<_>>();
+        assert_eq!(pi.packed_contract_address(), packed_address);
+        Ok(())
     }
 
     fn generate_test_data<const DEPTH: usize>() -> TestData {
@@ -350,7 +441,7 @@ mod tests {
         // Loop to insert random elements as long as a random selected proof is
         // not of the right length.
         let mut rng = thread_rng();
-        let (slot, contract_address, mpt_key) = loop {
+        let (slot, contract_address, mpt_key, value_int) = loop {
             println!(
                 "[+] Random mpt: insertion of {} elements so far...",
                 elements.len(),
@@ -362,25 +453,38 @@ mod tests {
             let key = SimpleSlot::new(slot, contract_address).mpt_key();
 
             // Insert the key and value.
-            let value = rng.gen::<u32>();
-            trie.insert(&key, &rlp::encode(&value)).unwrap();
+            let value = rng.gen::<u16>();
+            // in eth, integers are big endian
+            trie.insert(&key, &rlp::encode(&value.to_be_bytes().to_vec()))
+                .unwrap();
             trie.root_hash().unwrap();
 
             // Save the slot, contract address and key temporarily.
-            elements.push((slot, contract_address, key));
+            elements.push((slot, contract_address, key, value));
 
             // Check if any node has the DEPTH elements.
-            if let Some((slot, contract_address, key)) = elements
+            if let Some((slot, contract_address, key, value)) = elements
                 .iter()
-                .find(|(_, _, key)| trie.get_proof(key).unwrap().len() == DEPTH)
+                .find(|(_, _, key, _)| trie.get_proof(key).unwrap().len() == DEPTH)
             {
-                break (*slot, *contract_address, key);
+                break (*slot, *contract_address, key, value);
             }
         };
 
         let root_hash = trie.root_hash().unwrap();
         let value_buff: Vec<u8> = rlp::decode(&trie.get(mpt_key).unwrap().unwrap()).unwrap();
-        let value = convert_u8_to_u32_slice(&value_buff)[0];
+        // value is encoded with bigendian but our conversion to u32 expects little endian
+        // and we exactly take 4 bytes so we need padding at the end
+        let value_le_padded = value_buff
+            .clone()
+            .into_iter()
+            .rev()
+            .chain(std::iter::repeat(0))
+            .take(4)
+            .collect::<Vec<u8>>();
+
+        let value = convert_u8_to_u32_slice(&value_le_padded)[0];
+        assert_eq!(value, *value_int as u32);
         let mut nodes = trie.get_proof(mpt_key).unwrap();
         nodes.reverse();
         assert!(keccak256(nodes.last().unwrap()) == root_hash.to_fixed_bytes());
