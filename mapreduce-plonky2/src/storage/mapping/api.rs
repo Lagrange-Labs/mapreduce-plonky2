@@ -15,6 +15,7 @@ use anyhow::bail;
 use anyhow::Result;
 use log::debug;
 use paste::paste;
+use plonky2::field::types::Field;
 use plonky2::field::types::PrimeField64;
 use plonky2::hash::hash_types::HashOut;
 use plonky2::plonk::circuit_data::CircuitConfig;
@@ -225,11 +226,7 @@ macro_rules! impl_branch_circuits {
                     .iter()
                     .map(|nib| nib.to_canonical_u64() as u8)
                     .collect::<Vec<_>>();
-                // -1 because it's the expected pointer _after_ advancing the
-                // pointer by one in the branch circuit.
-                // TODO: refactor circuit to only advance the pointer by one _after_
-                // the comparison, so we don't need to do this?
-                let pointer = ptr.to_canonical_u64() as usize - 1;
+                let pointer = ptr.to_canonical_u64() as usize;
                 let proofs = child_proofs
                     .iter()
                     // TODO: didn't find a way to get rid of the useless clone - it's either on the vk or on the proof
@@ -477,7 +474,7 @@ mod test {
     #[serial]
     fn test_branch_logic() {
         let params = PublicParameters::build();
-        let slot = 1;
+        let slot = 0;
         let mut test_data = generate_storage_trie_and_keys(slot);
         let trie = &mut test_data.trie;
         let key = &test_data.key;
@@ -488,25 +485,21 @@ mod test {
         // they should share the same branch node
         assert_eq!(p1.len(), p2.len());
         assert_eq!(p1[p1.len() - 2], p2[p2.len() - 2]);
-        let l1 = LeafCircuit {
-            node: p1.last().unwrap().to_vec(),
-            slot: MappingSlot::new(slot as u8, key.clone()),
-        };
+        let l1_inputs = CircuitInput::new_leaf(p1.last().unwrap().to_vec(), slot, key.clone());
         // generate a leaf then a branch proof with only this leaf
-        let leaf1_proof = params.generate_proof(CircuitInput::Leaf(l1)).unwrap();
+        let leaf1_proof_buff = generate_proof(&params, l1_inputs).unwrap();
+        // some testing on the public inputs of the proof
+        let leaf1_proof = ProofWithVK::deserialize(&leaf1_proof_buff).unwrap();
         let pub1 = leaf1_proof.proof.public_inputs[..NUM_IO].to_vec();
         let pi1 = PublicInputs::from(&pub1);
         assert_eq!(pi1.proof_inputs.len(), NUM_IO);
         let (_, comp_ptr) = pi1.mpt_key_info();
         assert_eq!(comp_ptr, F::from_canonical_usize(63));
+
         let branch_node = p1[p1.len() - 2].to_vec();
-        let branch_inputs = CircuitInput::Branch(BranchInput {
-            input: InputNode {
-                node: branch_node.clone(),
-            },
-            serialized_child_proofs: vec![bincode::serialize(&leaf1_proof).unwrap()],
-        });
-        let branch1 = params.generate_proof(branch_inputs).unwrap();
+        let branch_inputs = CircuitInput::new_branch(branch_node.clone(), vec![leaf1_proof_buff]);
+        let branch1_buff = generate_proof(&params, branch_inputs).unwrap();
+        let branch1 = ProofWithVK::deserialize(&branch1_buff).unwrap();
         let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
             params.branchs.b1_over_2.get_verifier_data().clone()
         } else {

@@ -88,7 +88,7 @@ where
             // add the number of leaves this proof has processed
             n = b.add(n, proof_inputs.n());
             let child_key = proof_inputs.mpt_key();
-            let (new_key, hash, is_valid, nibble) =
+            let (_, hash, is_valid, nibble) =
                 MPTCircuit::<1, NODE_LEN>::advance_key_branch(b, &node.arr, &child_key, &headers);
             // we always enforce it's a branch node, i.e. that it has 17 entries
             b.connect(is_valid.target, tru.target);
@@ -110,14 +110,18 @@ where
             // by the prover. Reason why it is secure is because this circuit only cares
             // that _all_ keys share the _same_ prefix, so if they're all equal
             // to `common_prefix`, they're all equal.
-            common_prefix.enforce_prefix_equal(b, &new_key);
+            common_prefix.enforce_prefix_equal(b, &child_key);
             // We also check proof is valid for the _same_ mapping slot
             b.connect(mapping_slot, proof_inputs.mapping_slot());
         }
+        let one = b.one();
+        // We've compared the pointers _before_ advancing the key for each leaf
+        // so now we can advance the pointer to move to the next node - if any
+        let new_prefix = common_prefix.advance_by(b, one);
 
         // we now extract the public input to register for this proofs
         let c = root.output_array.clone();
-        PublicInputs::register(b, &common_prefix, mapping_slot, n, &c, &accumulator);
+        PublicInputs::register(b, &new_prefix, mapping_slot, n, &c, &accumulator);
         BranchWires {
             node,
             common_prefix,

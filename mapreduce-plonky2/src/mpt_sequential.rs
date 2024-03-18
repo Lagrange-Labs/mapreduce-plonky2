@@ -282,7 +282,6 @@ where
         key: &MPTKeyWire,
     ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget) {
         let zero = b.zero();
-        let tt = b._true();
         // It will try to decode a RLP list of the maximum number of items there can be
         // in a list, which is 16 for a branch node (Excluding value).
         // It returns the actual number of items decoded.
