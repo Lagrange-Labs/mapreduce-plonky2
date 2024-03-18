@@ -6,11 +6,11 @@ use super::{
     mapping::PublicInputs as MappingPublicInputs,
 };
 use crate::{
-    api::{deserialize_proof, default_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget},
+    api::{default_config, deserialize_proof, serialize_proof, ProofWithVK},
     circuit::UserCircuit,
     keccak::{OutputHash, PACKED_HASH_LEN},
     types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
-    utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
+    utils::{convert_point_to_curve_target, convert_slice_to_curve_point}, verifier_gadget::VerifierTarget,
 };
 use anyhow::Result;
 use plonky2::{
@@ -171,7 +171,7 @@ const D: usize = crate::api::D;
 pub(crate) struct Parameters {
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     data: CircuitData<F, C, D>,
-    length_proof_wires: RecursiveVerifierTarget<D>,
+    length_proof_wires: VerifierTarget<D>,
     mapping_proof_wires: RecursiveCircuitsVerifierTarget<D>,
 }
 
@@ -189,7 +189,7 @@ impl Parameters {
         );
         let mut cb = CircuitBuilder::<F, D>::new(config);
         let mapping_proof_wires = verifier_gadget.verify_proof_in_circuit_set(&mut cb);
-        let length_proof_wires = RecursiveVerifierTarget::verify_proof(&mut cb, length_extract_vk);
+        let length_proof_wires = VerifierTarget::verify_proof(&mut cb, length_extract_vk);
         let mapping_pi = mapping_proof_wires.get_public_input_targets::<F, NUM_PUBLIC_INPUTS>();
         let length_pi = length_proof_wires.get_proof().public_inputs.as_slice();
         LengthMatchCircuit::build(&mut cb, length_pi, mapping_pi);

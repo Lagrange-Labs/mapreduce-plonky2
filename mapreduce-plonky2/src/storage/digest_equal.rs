@@ -7,14 +7,14 @@ use super::{
     length_match::PublicInputs as MPTPublicInputs, lpn::PublicInputs as MerklePublicInputs,
 };
 use crate::{
-    api::{deserialize_proof, default_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget},
+    api::{default_config, deserialize_proof, serialize_proof, ProofWithVK},
     array::Array,
     group_hashing::{CircuitBuilderGroupHashing, N},
     keccak::{OutputHash, PACKED_HASH_LEN},
     types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
     utils::{
         convert_point_to_curve_target, convert_slice_to_curve_point, convert_u32_fields_to_u8_vec,
-    },
+    }, verifier_gadget::VerifierTarget,
 };
 use anyhow::Result;
 use ethers::types::{H160, H256};
@@ -194,7 +194,7 @@ pub(crate) struct Parameters {
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     data: CircuitData<F, C, D>,
     lpn_wires: RecursiveCircuitsVerifierTarget<D>,
-    mpt_wires: RecursiveVerifierTarget<D>,
+    mpt_wires: VerifierTarget<D>,
 }
 
 impl Parameters {
@@ -205,7 +205,7 @@ impl Parameters {
     ) -> Self {
         const LPN_PUBLIC_INPUTS: usize = MerklePublicInputs::<Target>::TOTAL_LEN;
         let mut cb = CircuitBuilder::<F, D>::new(default_config());
-        let mpt_wires = RecursiveVerifierTarget::verify_proof(&mut cb, mpt_circuit_vd);
+        let mpt_wires = VerifierTarget::verify_proof(&mut cb, mpt_circuit_vd);
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, LPN_PUBLIC_INPUTS>::new(
             default_config(),
             lpn_circuit_set,

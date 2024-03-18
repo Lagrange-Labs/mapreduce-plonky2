@@ -6,9 +6,9 @@ mod block;
 mod public_inputs;
 
 use crate::{
-    api::{deserialize_proof, default_config, serialize_proof, ProofWithVK, RecursiveVerifierTarget},
+    api::{default_config, deserialize_proof, serialize_proof, ProofWithVK},
     mpt_sequential::PAD_LEN,
-    storage::PublicInputs as StorageInputs,
+    storage::PublicInputs as StorageInputs, verifier_gadget::VerifierTarget,
 };
 use account::{Account, AccountInputsWires};
 use anyhow::Result;
@@ -160,7 +160,7 @@ where
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     data: CircuitData<F, C, D>,
     wires: BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>,
-    storage_circuit_wires: RecursiveVerifierTarget<D>,
+    storage_circuit_wires: VerifierTarget<D>,
 }
 
 pub(crate) type PublicParameters = Parameters<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN>;
@@ -176,7 +176,7 @@ impl PublicParameters {
         let config = default_config();
         let mut cb = CircuitBuilder::<F, D>::new(config);
         let storage_circuit_wires =
-            RecursiveVerifierTarget::verify_proof(&mut cb, storage_circuit_vk);
+            VerifierTarget::verify_proof(&mut cb, storage_circuit_vk);
         let storage_pi = storage_circuit_wires.get_proof().public_inputs.as_slice();
         let wires = BlockLinkingCircuitInputs::build(&mut cb, storage_pi);
         let data = cb.build::<C>();
