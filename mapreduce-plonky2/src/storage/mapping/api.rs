@@ -329,10 +329,10 @@ impl PublicParameters {
                     type L = DefaultParameters;
 
                     // TRICKY: get the circuit-data to build WrappedCircuit of plonkyx.
-                    // let circuit_data = self.leaf_circuit.wrap_circuit.circuit_data.pop().unwrap();
+                    let circuit_data = self.leaf_circuit.wrap_circuit.circuit_data.pop().unwrap();
 
                     // TODO: Not work for now, since the public inputs must be bytes.
-                    // gen_groth16_proof(circuit_data, &proof.proof);
+                    gen_groth16_proof(circuit_data, &proof.proof);
                 }
 
                 Ok(proof)

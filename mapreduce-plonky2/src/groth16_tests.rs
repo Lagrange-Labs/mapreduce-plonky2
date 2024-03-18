@@ -21,9 +21,7 @@ use plonky2::{
     },
 };
 use plonky2_ecgfp5::{
-    curve::curve::Point,
-    gadgets::curve::PartialWitnessCurve,
-    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
+    curve::curve::Point, gadgets::curve::CircuitBuilderEcGFp5, gadgets::curve::PartialWitnessCurve,
 };
 use plonky2x::backend::circuit::config::{DefaultParameters, Groth16WrapperParameters};
 use plonky2x::backend::wrapper::wrap::WrappedCircuit;
@@ -69,15 +67,6 @@ pub fn convert_u64_targets_to_u8<F: RichField + Extendable<D>, const D: usize>(
         .collect()
 }
 
-fn register_curve_target_as_bytes(cb: &mut CircuitBuilder<F, D>, c: &CurveTarget) {
-    let x = convert_u64_targets_to_u8(cb, &c.0 .0[0].0);
-    let y = convert_u64_targets_to_u8(cb, &c.0 .0[1].0);
-    x.into_iter()
-        .chain(y)
-        .for_each(|t| cb.register_public_input(t));
-    cb.register_public_input(c.0 .1.target);
-}
-
 pub fn gen_groth16_proof(data: CircuitData<F, C, D>, proof: &ProofWithPublicInputs<F, C, D>) {
     let wrapper: WrappedCircuit<_, _, 2> =
         WrappedCircuit::<L, Groth16WrapperParameters, D>::build_from_raw_data(data);
@@ -99,6 +88,8 @@ fn simple() {
 
     let [a, b] = [0; 2].map(|_| cb.add_virtual_target());
     let c = cb.add(a, b);
+
+    cb.register_public_input(c);
     cb.register_public_input(c);
 
     let mut pw = PartialWitness::new();
@@ -148,8 +139,9 @@ fn group_hashing_add() {
     let b = cb.add_virtual_curve_target();
     let c = cb.add_curve_point(&[a, b]);
 
-    // TODO: only support register for bytes as public inputs.
-    register_curve_target_as_bytes(&mut cb, &c);
+    // Register twice for test.
+    cb.register_curve_public_input(c);
+    cb.register_curve_public_input(c);
 
     let mut pw = PartialWitness::new();
     let mut rng = thread_rng();
@@ -169,8 +161,9 @@ fn group_hashing_map() {
     let inputs = [0; 2].map(|_| cb.add_virtual_target());
     let output = cb.map_to_curve_point(&inputs);
 
-    // TODO: only support register for bytes as public inputs.
-    register_curve_target_as_bytes(&mut cb, &output);
+    // Register twice for test.
+    cb.register_curve_public_input(output);
+    cb.register_curve_public_input(output);
 
     let mut pw = PartialWitness::new();
     let mut rng = thread_rng();
