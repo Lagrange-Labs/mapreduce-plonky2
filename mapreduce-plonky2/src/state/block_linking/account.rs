@@ -232,7 +232,7 @@ mod test {
         circuit::{test::run_circuit, UserCircuit},
         eth::{BlockData, ProofQuery},
         mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
-        state::block_linking::block::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN},
+        state::block_linking::block::SEPOLIA_NUMBER_LEN,
         storage::PublicInputs as StorageInputs,
         utils::{
             convert_u8_slice_to_u32_fields, find_index_subvector, keccak256, test::random_vector,
@@ -301,7 +301,7 @@ mod test {
         const NODE_LEN: usize = 532;
         const BLOCK_LEN: usize = 620;
 
-        test_account_inputs::<DEPTH, NODE_LEN, BLOCK_LEN, MAINNET_NUMBER_LEN>(url, contract_address)
+        test_account_inputs::<DEPTH, NODE_LEN, BLOCK_LEN, SEPOLIA_NUMBER_LEN>(url, contract_address)
             .await
     }
 

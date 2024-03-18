@@ -28,7 +28,7 @@ pub use public_inputs::BlockLinkingInputs;
 use recursion_framework::serialization::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 
-use self::block::MAINNET_NUMBER_LEN;
+use self::block::SEPOLIA_NUMBER_LEN;
 
 #[derive(Serialize, Deserialize)]
 /// Main block-linking wires
@@ -148,7 +148,7 @@ const D: usize = crate::api::D;
 const MAX_DEPTH_TRIE: usize = 8;
 const MAX_NODE_LEN: usize = 512;
 const MAX_BLOCK_LEN: usize = 620;
-const NUMBER_LEN: usize = MAINNET_NUMBER_LEN;
+const NUMBER_LEN: usize = SEPOLIA_NUMBER_LEN;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Parameters<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>
@@ -281,7 +281,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use serial_test::serial;
     use std::{str::FromStr, sync::Arc};
-    use tests::block::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN};
+    use tests::block::SEPOLIA_NUMBER_LEN;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -466,7 +466,7 @@ mod tests {
         // Written as constants from the result.
         const VALUE_LEN: usize = 50;
 
-        test_with_rpc::<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, VALUE_LEN, MAINNET_NUMBER_LEN>(
+        test_with_rpc::<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
             url,
             contract_address,
         )

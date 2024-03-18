@@ -5,7 +5,7 @@ use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, OutputHash, HASH_LEN},
     mpt_sequential::PAD_LEN,
-    utils::convert_u8_targets_to_u32,
+    utils::{convert_u8_targets_to_u32, less_than},
 };
 use anyhow::Result;
 use plonky2::{
@@ -22,13 +22,12 @@ use std::array;
 const HEADER_RLP_PARENT_HASH_OFFSET: usize = 4;
 /// State root offset in RLP encoded header
 const HEADER_RLP_STATE_ROOT_OFFSET: usize = 91;
+const HEADER_RLP_NUMBER_LEN: usize = HEADER_RLP_NUMBER_OFFSET-1;
 /// Number offset in RLP encoded header
 const HEADER_RLP_NUMBER_OFFSET: usize = 450;
 
 /// On sepolia, the block number is encoded on 3 bytes (u24)
 pub(super) const SEPOLIA_NUMBER_LEN: usize = 3;
-/// On mainnet, the block number is encoded on 4 bytes (u32)
-pub(super) const MAINNET_NUMBER_LEN: usize = 4;
 
 #[derive(Serialize, Deserialize)]
 /// The block input wires
@@ -53,14 +52,15 @@ pub struct BlockHeader<const NUMBER_LEN: usize> {
     header_rlp: Vec<u8>,
 }
 
-impl<const NUMBER_LEN: usize> BlockHeader<NUMBER_LEN> {
+impl<const MIN_NUMBER_LEN: usize> BlockHeader<MIN_NUMBER_LEN> {
     pub fn new(header_rlp: Vec<u8>) -> Self {
         Self { header_rlp }
     }
 
     /// Build for circuit.
     /// NOTE: It assumes the block number is encoded on maximum 4 bytes. It can be
-    /// encoded using less, for example on Sepolia.
+    /// encoded using less, for example on Sepolia, but it assumes that at least 
+    /// `MIN_NUMBER_LEN` bytes should be employed for encoding
     pub fn build<F, const D: usize, const MAX_LEN: usize>(
         cb: &mut CircuitBuilder<F, D>,
     ) -> BlockInputsWires<MAX_LEN>
@@ -88,17 +88,45 @@ impl<const NUMBER_LEN: usize> BlockHeader<NUMBER_LEN> {
             .try_into()
             .unwrap();
 
+        // fetch the length of block number, which may vary across chains. Length is RLP encoded,
+        // so it is computed as `header[HEADER_RLP_NUMBER_LEN] - 0x80``
+        let length_offset = cb.constant(F::from_canonical_u8(128));
+        let block_number_len = cb.sub(
+            header_rlp.arr.arr[HEADER_RLP_NUMBER_LEN],
+            length_offset,
+        );
+
         // We assume so far it always fit in 32 bits, which give block number < 4 billion so it
-        // should be ok. And we get the array with reverse order.
-        // This logic handles the case where block number is encoded on 4 bytes or on 3 bytes.
+        // should be ok. This logic handles the case where block number is encoded on at most 
+        // 4 bytes, but with at least `MIN_NUMBER_LEN` bytes. 
+        // First, we get the `MIN_NUMBER_LEN` bytes in reverse order, as the block
+        // number is encoded in big-endian order in the header, padding with zero bytes
+        // the other `4 - MIN_NUMBER_LEN` bytes
         let number = Array::<Target, 4>::from(array::from_fn(|i| {
-            if i < NUMBER_LEN {
-                header_rlp.arr.arr[HEADER_RLP_NUMBER_OFFSET + NUMBER_LEN - 1 - i]
+            if i < MIN_NUMBER_LEN {
+                header_rlp.arr.arr[HEADER_RLP_NUMBER_OFFSET + MIN_NUMBER_LEN - 1 - i]
             } else {
                 zero
             }
         }));
+        // we compute the `u32` value corresponding to the extracted `MIN_NUMBER_LEN` bytes in
+        // little-endian order
         let number = number.convert_u8_to_u32(cb)[0];
+        // then, for each of the remaining `block_number_len - MIN_NUMBER_LEN` bytes, we add them 
+        // as the least significant bytes in the computed `u32` 
+        let number = U32Target(
+                (MIN_NUMBER_LEN..4).fold(number.0, |num, i| {
+                let index = cb.constant(F::from_canonical_usize(i));
+                let is_block_number_byte = less_than(cb, index, block_number_len, 2);
+                let current_byte = header_rlp.arr.arr[HEADER_RLP_NUMBER_OFFSET + i];
+                // if `is_block_number_byte == true`, then we add current_byte as the lowest significant byte of `num`;
+                // otherwise, we just leave `num` unchanged. Indeed:
+                // - if `is_block_number_byte == true`, result will be `255*num + current_byte + num = 256*num + current_byte`
+                // - otherwise, the result will just be `num`
+                let shifted_number = cb.mul_const_add(F::from_canonical_u8(255), num, current_byte);
+                cb.mul_add(is_block_number_byte.target, shifted_number, num)
+            })
+        );
 
         BlockInputsWires {
             number,
@@ -183,7 +211,7 @@ mod test {
         keccak::{OutputByteHash, HASH_LEN},
         mpt_sequential::PAD_LEN,
         state::block_linking::block::{
-            HEADER_RLP_PARENT_HASH_OFFSET, MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN,
+            HEADER_RLP_PARENT_HASH_OFFSET, SEPOLIA_NUMBER_LEN,
         },
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
@@ -250,7 +278,7 @@ mod test {
     async fn test_block_header_decoding_on_mainnet() -> Result<()> {
         let url = "https://eth.llamarpc.com";
 
-        test_block_header_decoding::<MAINNET_NUMBER_LEN>(url).await
+        test_block_header_decoding::<SEPOLIA_NUMBER_LEN>(url).await
     }
 
     async fn test_block_header_decoding<const NUMBER_LEN: usize>(url: &str) -> Result<()> {
