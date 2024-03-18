@@ -246,7 +246,7 @@ pub(crate) mod tests {
     use recursion_framework::{
         circuit_builder::CircuitLogicWires, framework_testing::DummyCircuitWires,
     };
-    
+
     /// Circuit that does nothing but can be passed as a children proof to some circuit when testing the aggregation
     /// logic. See state/block_linking/mod.rs tests for example.
     pub(crate) struct TestDummyCircuit<const NUM_PUBLIC_INPUTS: usize> {

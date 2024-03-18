@@ -1,8 +1,18 @@
 //! This module contains a data structure employed to recursively verify a Plonky2
 //! proof inside a circuit identified by its `VerifierCircuitData`
 
-use plonky2::{iop::witness::{PartialWitness, WitnessWrite}, plonk::{circuit_builder::CircuitBuilder, circuit_data::{VerifierCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData}, config::{AlgebraicHasher, GenericConfig}, proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget}}};
-use recursion_framework::serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize};
+use plonky2::{
+    iop::witness::{PartialWitness, WitnessWrite},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{VerifierCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData},
+        config::{AlgebraicHasher, GenericConfig},
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+    },
+};
+use recursion_framework::serialization::{
+    circuit_data_serialization::SerializableRichField, deserialize, serialize,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]

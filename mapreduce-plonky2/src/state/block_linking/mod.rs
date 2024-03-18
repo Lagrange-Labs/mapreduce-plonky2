@@ -8,7 +8,8 @@ mod public_inputs;
 use crate::{
     api::{default_config, deserialize_proof, serialize_proof, ProofWithVK},
     mpt_sequential::PAD_LEN,
-    storage::PublicInputs as StorageInputs, verifier_gadget::VerifierTarget,
+    storage::PublicInputs as StorageInputs,
+    verifier_gadget::VerifierTarget,
 };
 use account::{Account, AccountInputsWires};
 use anyhow::Result;
@@ -175,8 +176,7 @@ impl PublicParameters {
     pub(crate) fn build(storage_circuit_vk: &VerifierCircuitData<F, C, D>) -> Self {
         let config = default_config();
         let mut cb = CircuitBuilder::<F, D>::new(config);
-        let storage_circuit_wires =
-            VerifierTarget::verify_proof(&mut cb, storage_circuit_vk);
+        let storage_circuit_wires = VerifierTarget::verify_proof(&mut cb, storage_circuit_vk);
         let storage_pi = storage_circuit_wires.get_proof().public_inputs.as_slice();
         let wires = BlockLinkingCircuitInputs::build(&mut cb, storage_pi);
         let data = cb.build::<C>();
@@ -242,9 +242,7 @@ impl TryInto<(ProofWithPublicInputs<F, C, D>, BlockLinkingCircuitInputs)> for Ci
 
     fn try_into(
         self,
-    ) -> anyhow::Result<
-        (ProofWithPublicInputs<F, C, D>, BlockLinkingCircuitInputs),
-    > {
+    ) -> anyhow::Result<(ProofWithPublicInputs<F, C, D>, BlockLinkingCircuitInputs)> {
         Ok((deserialize_proof(&self.storage_proof)?, self.inputs))
     }
 }

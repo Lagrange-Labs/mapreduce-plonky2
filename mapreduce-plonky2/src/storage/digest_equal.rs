@@ -14,7 +14,8 @@ use crate::{
     types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
     utils::{
         convert_point_to_curve_target, convert_slice_to_curve_point, convert_u32_fields_to_u8_vec,
-    }, verifier_gadget::VerifierTarget,
+    },
+    verifier_gadget::VerifierTarget,
 };
 use anyhow::Result;
 use ethers::types::{H160, H256};

@@ -10,7 +10,8 @@ use crate::{
     circuit::UserCircuit,
     keccak::{OutputHash, PACKED_HASH_LEN},
     types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
-    utils::{convert_point_to_curve_target, convert_slice_to_curve_point}, verifier_gadget::VerifierTarget,
+    utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
+    verifier_gadget::VerifierTarget,
 };
 use anyhow::Result;
 use plonky2::{
