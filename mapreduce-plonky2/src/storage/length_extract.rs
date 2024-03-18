@@ -154,25 +154,26 @@ where
         // We read the RLP header but knowing it is a value that is always <55bytes long
         // we can hardcode the type of RLP header it is and directly get the real number len
         // in this case, the header marker is 0x80 that we can directly take out from first byte
-        let byte_80 = cb.constant(F::from_canonical_usize(128));
-        let value_len = cb.sub(mpt_output.leaf.arr[0], byte_80);
-        // Normally one should do the following to access element with index
-        // let value_len_it = cb.sub(value_len, one);
-        // but in our case, since the first byte is the RLP header, we have to do +1
-        // so we just keep the same value
-        let mut value_len_it = value_len;
-        // Then we need to convert from big endian to little endian only on this len
-        let extract_len: [Target; 4] = create_array(|i| {
-            let it = cb.constant(F::from_canonical_usize(i));
-            let in_value = less_than(cb, it, value_len, 3); // log2(4) = 2, putting upper bound
-            let rev_value = mpt_output.leaf.value_at(cb, value_len_it);
-            // we can't access index < 0 with b.random_access so a small tweak to avoid it
-            let is_done = cb.is_equal(value_len_it, zero);
-            let value_len_it_minus_one = cb.sub(value_len_it, one);
-            value_len_it = cb.select(is_done, zero, value_len_it_minus_one);
-            cb.select(in_value, rev_value, zero)
-        });
-        let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
+        //let byte_80 = cb.constant(F::from_canonical_usize(128));
+        //let value_len = cb.sub(mpt_output.leaf.arr[0], byte_80);
+        //// Normally one should do the following to access element with index
+        //// let value_len_it = cb.sub(value_len, one);
+        //// but in our case, since the first byte is the RLP header, we have to do +1
+        //// so we just keep the same value
+        //let mut value_len_it = value_len;
+        //// Then we need to convert from big endian to little endian only on this len
+        //let extract_len: [Target; 4] = create_array(|i| {
+        //    let it = cb.constant(F::from_canonical_usize(i));
+        //    let in_value = less_than(cb, it, value_len, 3); // log2(4) = 2, putting upper bound
+        //    let rev_value = mpt_output.leaf.value_at(cb, value_len_it);
+        //    // we can't access index < 0 with b.random_access so a small tweak to avoid it
+        //    let is_done = cb.is_equal(value_len_it, zero);
+        //    let value_len_it_minus_one = cb.sub(value_len_it, one);
+        //    value_len_it = cb.select(is_done, zero, value_len_it_minus_one);
+        //    cb.select(in_value, rev_value, zero)
+        //});
+        //let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
+        let length_value = convert_u8_targets_to_u32(cb, &mpt_output.leaf.arr)[0].0;
 
         // Register the public inputs.
         PublicInputs::register(
@@ -268,6 +269,7 @@ mod tests {
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::ProofQuery,
+        mpt_sequential::test::verify_storage_proof_from_query,
         utils::{convert_u8_to_u32_slice, keccak256},
     };
     use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -374,12 +376,12 @@ mod tests {
         // extractd from test_pidgy_pinguins_slot
         const DEPTH: usize = 5;
         const MAX_NODE_LEN: usize = 532;
-        let slot = 8;
+        let slot: u8 = 8;
         // pidgy pinguins address
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
-        let query = ProofQuery::new_simple_slot(pidgy_address, 8);
+        let query = ProofQuery::new_simple_slot(pidgy_address, slot as usize);
         let res = query.query_mpt_proof(&provider, None).await?;
-
+        verify_storage_proof_from_query(&query, &res).unwrap();
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         assert_eq!(leaf_list.len(), 2);
@@ -453,7 +455,7 @@ mod tests {
             let key = SimpleSlot::new(slot, contract_address).mpt_key();
 
             // Insert the key and value.
-            let value = rng.gen::<u16>();
+            let value = rng.gen::<u32>();
             // in eth, integers are big endian
             trie.insert(&key, &rlp::encode(&value.to_be_bytes().to_vec()))
                 .unwrap();

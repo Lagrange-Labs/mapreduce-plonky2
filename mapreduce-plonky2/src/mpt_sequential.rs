@@ -659,7 +659,7 @@ pub mod test {
     }
 
     /// Verify the storage proof from query result.
-    fn verify_storage_proof_from_query(
+    pub(crate) fn verify_storage_proof_from_query(
         query: &ProofQuery,
         res: &EIP1186ProofResponse,
     ) -> Result<()> {

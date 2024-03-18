@@ -325,10 +325,13 @@ impl ProofQuery {
         }
         if let Some(ext_value) = is_valid.unwrap() {
             let found = U256::from_little_endian(&ext_value);
-            if found != proof.storage_proof[0].value {
+            // in some conditions the value is RLP before, so check for both
+            let found_dec = U256::from_big_endian(&rlp::decode::<Vec<u8>>(&ext_value).unwrap());
+            if found != proof.storage_proof[0].value && found_dec != proof.storage_proof[0].value {
                 bail!(
-                    "proof does not return right value: found {} (ext {:?}) vs expected {}",
+                    "proof does not return right value: found {}(dec {}) (ext {:?}) vs expected {}",
                     found,
+                    found_dec,
                     hex::encode(ext_value),
                     proof.storage_proof[0].value
                 );
@@ -419,6 +422,7 @@ mod test {
             convert_u8_to_u32_slice(&sliced.iter().cloned().rev().collect::<Vec<u8>>())[0];
         println!("length extracted = {}", length);
         println!("length 2 extracted = {}", length2);
+        println!("res.storage_proof.value = {}", res.storage_proof[0].value);
         // try if it's an array or not.
         // for storage slot 8 it should be an array so the proof should be valid.
         // for storage slot 11, it should be a variable so the proof to access the second
