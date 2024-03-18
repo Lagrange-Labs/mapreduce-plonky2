@@ -41,6 +41,7 @@ use recursion_framework::serialization::serialize;
 use serde::Deserialize;
 use serde::Serialize;
 use std::array::from_fn as create_array;
+use crate::groth16_tests::gen_groth16_proof;
 
 const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
@@ -330,31 +331,8 @@ impl PublicParameters {
                     // TRICKY: get the circuit-data to build WrappedCircuit of plonkyx.
                     let circuit_data = self.leaf_circuit.wrap_circuit.circuit_data.pop().unwrap();
 
-                    let mut builder = CBuilder::<L, D>::new();
-                    builder.pre_build();
-                    let async_hints = CBuilder::<L, D>::async_hint_map(
-                        circuit_data.prover_only.generators.as_slice(),
-                        builder.async_hints,
-                    );
-
-                    let circuit = CircuitBuild {
-                        data: circuit_data,
-                        io: builder.io,
-                        async_hints,
-                    };
-
-                    let wrapper: WrappedCircuit<_, _, 2> =
-                        WrappedCircuit::<L, Groth16WrapperParameters, D>::build(circuit);
-                    let wrapped_proof = wrapper.prove(&proof.proof).unwrap();
-
-                    let pi = serde_json::to_string_pretty(&wrapped_proof.proof).unwrap();
-                    std::fs::write("proof_with_public_inputs.json", pi).unwrap();
-
-                    let common = serde_json::to_string_pretty(&wrapped_proof.common_data).unwrap();
-                    std::fs::write("common_circuit_data.json", common).unwrap();
-
-                    let vk = serde_json::to_string_pretty(&wrapped_proof.verifier_data).unwrap();
-                    std::fs::write("verifier_only_circuit_data.json", vk).unwrap();
+                    // TODO: Not work for now, since the public inputs must be bytes.
+                    gen_groth16_proof(circuit_data, &proof.proof);
                 }
 
                 Ok(proof)

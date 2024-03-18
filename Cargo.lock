@@ -3131,7 +3131,7 @@ source = "git+https://github.com/Lagrange-Labs/plonky2#b1e3e4af7f5b482fe1edf321b
 [[package]]
 name = "plonky2x"
 version = "0.1.0"
-source = "git+https://github.com/silathdiir/succinctx?branch=lagrange#253a077bfaeacae27b610682fc808acb20f55b9b"
+source = "git+https://github.com/Lagrange-Labs/succinctx?branch=lagrange#a48d57de493f934c68afa45f34277aa4a7a48509"
 dependencies = [
  "anyhow",
  "array-macro",
@@ -3155,6 +3155,7 @@ dependencies = [
  "num",
  "num-bigint 0.4.4",
  "plonky2",
+ "plonky2_ecgfp5",
  "plonky2x-derive",
  "rand",
  "reqwest",
@@ -3173,7 +3174,7 @@ dependencies = [
 [[package]]
 name = "plonky2x-derive"
 version = "0.1.0"
-source = "git+https://github.com/silathdiir/succinctx?branch=lagrange#253a077bfaeacae27b610682fc808acb20f55b9b"
+source = "git+https://github.com/Lagrange-Labs/succinctx?branch=lagrange#a48d57de493f934c68afa45f34277aa4a7a48509"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4101,7 +4102,7 @@ dependencies = [
 [[package]]
 name = "starkyx"
 version = "0.1.0"
-source = "git+https://github.com/silathdiir/starkyx.git?branch=lagrange#13b28d7f2890d7e25ebe7ff27fe574841ab38728"
+source = "git+https://github.com/Lagrange-Labs/starkyx?branch=lagrange#d5d2c38d0aab5157315c789d25643d53150c194e"
 dependencies = [
  "anyhow",
  "bincode",

@@ -11,5 +11,7 @@ opt-level = 3
 
 [patch.crates-io]
 plonky2 = { git = "https://github.com/Lagrange-Labs/plonky2" }
+
+# plonky2 = { path = "../plonky2/plonky2" }
 # [patch."https://github.com/mir-protocol/plonky2.git"]
 # plonky2 = { git = "https://github.com/Lagrange-Labs/plonky2" }

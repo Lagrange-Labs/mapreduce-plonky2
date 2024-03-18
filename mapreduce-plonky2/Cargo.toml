@@ -9,12 +9,20 @@ edition = "2021"
 anyhow = "1.0.75"
 itertools = "0.12.0"
 ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features = false, features = ["rustls"], branch = "get-proof-0x" }
+
+# plonky2 = { path = "../../plonky2/plonky2" }
+# plonky2x = { path = "../../succinctx/plonky2x/core" }
 plonky2 = { version = "0.1.4" }
+plonky2x = { git = "https://github.com/Lagrange-Labs/succinctx", branch = "lagrange" }
+
 recursion_framework = { path = "../recursion-framework" }
 
 # supporting latest plonky2
+# plonky2_crypto = { path = "../../plonky2-crypto" }
+# plonky2_ecgfp5 = { path = "../../plonky2-ecgfp5" }
 plonky2_crypto = { git = "https://github.com/Lagrange-Labs/plonky2-crypto", branch = "feat/serialization" }
 plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
+
 rand = "0.8.5"
 serde = "1.0.193"
 # TODO: see if we can revert to upstream repo: originally used 
@@ -31,8 +39,6 @@ serde_json = "1.0.108"
 ff = { package = "ff", version = "0.13", features = ["derive"] }
 lazy_static = "1.4.0"
 num = { version = "0.4", default-features = false }
-# plonky2x = { path = "../../succinctx/plonky2x/core" }
-plonky2x = { git = "https://github.com/silathdiir/succinctx", branch = "lagrange" }
 
 [dev-dependencies]
 anyhow = "1.0.75"

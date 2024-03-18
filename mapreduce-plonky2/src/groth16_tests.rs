@@ -1,17 +1,15 @@
 use crate::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
-    keccak::{InputData, KeccakCircuit, KeccakWires, OutputByteHash, OutputHash},
+    keccak::{InputData, KeccakCircuit},
     mpt_sequential::PAD_LEN,
 };
-use anyhow::Result;
-use ethers::utils::keccak256;
 use plonky2::{
     field::extension::Extendable,
     field::types::{Field, Sample},
     hash::hash_types::RichField,
     iop::{
-        target::{BoolTarget, Target},
+        target::{Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_data::CircuitData,
@@ -21,28 +19,19 @@ use plonky2::{
         config::{GenericConfig, PoseidonGoldilocksConfig},
     },
     plonk::{
-        circuit_data::{CommonCircuitData, VerifierOnlyCircuitData},
-        proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs},
+        proof::{ProofWithPublicInputs},
     },
-};
-use plonky2_crypto::hash::{
-    keccak256::{CircuitBuilderHashKeccak, WitnessHashKeccak, KECCAK256_R},
-    CircuitBuilderHash,
 };
 use plonky2_ecgfp5::{
     curve::curve::Point,
-    curve::curve::WeierstrassPoint,
     gadgets::{
-        base_field::CircuitBuilderGFp5,
         curve::{CircuitBuilderEcGFp5, CurveTarget},
     },
-    gadgets::{base_field::PartialWitnessQuinticExt, curve::PartialWitnessCurve},
+    gadgets::{curve::PartialWitnessCurve},
 };
 use plonky2x::backend::circuit::config::{DefaultParameters, Groth16WrapperParameters};
-use plonky2x::backend::circuit::CircuitBuild;
 use plonky2x::backend::wrapper::wrap::WrappedCircuit;
-use plonky2x::prelude::CircuitBuilder as CBuilder;
-use rand::{thread_rng, Rng, RngCore};
+use rand::{thread_rng, Rng};
 use std::array;
 
 const D: usize = 2;
@@ -50,23 +39,49 @@ type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 type L = DefaultParameters;
 
-fn gen_groth16_proof(data: CircuitData<F, C, D>, proof: ProofWithPublicInputs<F, C, D>) {
-    let mut builder = CBuilder::<L, D>::new();
-    builder.pre_build();
-    let async_hints = CBuilder::<L, D>::async_hint_map(
-        data.prover_only.generators.as_slice(),
-        builder.async_hints,
-    );
+// Only for test.
+pub fn convert_u64_targets_to_u8<F: RichField + Extendable<D>, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    // TODO: range check
+    data: &[Target],
+) -> Vec<Target> {
+    let four = b.constant(F::from_canonical_usize(4));
+    let four_square = b.constant(F::from_canonical_usize(16));
+    let four_cube = b.constant(F::from_canonical_usize(64));
 
-    let circuit = CircuitBuild {
-        data,
-        io: builder.io,
-        async_hints,
-    };
+    // Convert each u64 to [u8; 8].
+    data.iter().flat_map(|u64_element| {
+        // Convert an u64 to [u2; 32], each limb is an u2, it means
+        // BASE is 4 (2^2), and total 32 limbs.
+        let u2_elements = b.split_le_base::<4>(*u64_element, 32);
 
+        // Convert each [u2; 4] to an u8 as:
+        // u[0] + u[1] * 4 + u[2] * 16 + u[3] * 64
+        u2_elements
+            .chunks(4)
+            .map(|u| {
+                // acc = u[0] + u[1] * 4
+                let acc = b.mul_add(u[1], four, u[0]);
+                // acc += [u2] * 4^2
+                let acc = b.mul_add(u[2], four_square, acc);
+                // acc += [u3] * 4^3
+                b.mul_add(u[3], four_cube, acc)
+            })
+            .collect::<Vec<_>>()
+    }).collect()
+}
+
+fn register_curve_target_as_bytes(cb: &mut CircuitBuilder::<F, D>, c: &CurveTarget) {
+    let x = convert_u64_targets_to_u8(cb, &c.0.0[0].0);
+    let y = convert_u64_targets_to_u8(cb, &c.0.0[1].0);
+    x.into_iter().chain(y).for_each(|t| cb.register_public_input(t));
+    cb.register_public_input(c.0.1.target);
+}
+
+pub fn gen_groth16_proof(data: CircuitData<F, C, D>, proof: &ProofWithPublicInputs<F, C, D>) {
     let wrapper: WrappedCircuit<_, _, 2> =
-        WrappedCircuit::<L, Groth16WrapperParameters, D>::build(circuit);
-    let wrapped_proof = wrapper.prove(&proof).unwrap();
+        WrappedCircuit::<L, Groth16WrapperParameters, D>::build_from_raw_data(data);
+    let wrapped_proof = wrapper.prove(proof).unwrap();
 
     let pi = serde_json::to_string_pretty(&wrapped_proof.proof).unwrap();
     std::fs::write("proof_with_public_inputs.json", pi).unwrap();
@@ -84,16 +99,16 @@ fn simple() {
 
     let [a, b] = [0; 2].map(|_| cb.add_virtual_target());
     let c = cb.add(a, b);
+    cb.register_public_input(c);
 
     let mut pw = PartialWitness::new();
     pw.set_target(a, F::ZERO);
     pw.set_target(b, F::ONE);
-    pw.set_target(c, F::ONE);
 
     let data = cb.build::<C>();
     let proof = data.prove(pw).unwrap();
 
-    gen_groth16_proof(data, proof);
+    gen_groth16_proof(data, &proof);
 }
 
 fn keccak() {
@@ -122,31 +137,29 @@ fn keccak() {
     let data = cb.build::<C>();
     let proof = data.prove(pw).unwrap();
 
-    gen_groth16_proof(data, proof);
+    gen_groth16_proof(data, &proof);
 }
 
 fn group_hashing_add() {
-    let config = CircuitConfig::standard_recursion_config();
+    let mut config = CircuitConfig::standard_recursion_config();
     let mut cb = CircuitBuilder::<F, D>::new(config);
 
-    let inputs = [0; 2].map(|_| cb.add_virtual_curve_target());
-    let output = cb.add_curve_point(&inputs);
-    cb.register_curve_public_input(output);
-    inputs
-        .into_iter()
-        .for_each(|it| cb.register_curve_public_input(it));
+    let a = cb.add_virtual_curve_target();
+    let b = cb.add_virtual_curve_target();
+    let c = cb.add_curve_point(&[a, b]);
+
+    // TODO: only support register for bytes as public inputs.
+    register_curve_target_as_bytes(&mut cb, &c);
 
     let mut pw = PartialWitness::new();
     let mut rng = thread_rng();
-    inputs
-        .into_iter()
-        .zip([0; 2].map(|_| Point::sample(&mut rng)))
-        .for_each(|(it, iv)| pw.set_curve_target(it, iv.to_weierstrass()));
+    pw.set_curve_target(a, Point::sample(&mut rng).to_weierstrass());
+    pw.set_curve_target(b, Point::sample(&mut rng).to_weierstrass());
 
     let data = cb.build::<C>();
     let proof = data.prove(pw).unwrap();
 
-    gen_groth16_proof(data, proof);
+    gen_groth16_proof(data, &proof);
 }
 
 fn group_hashing_map() {
@@ -155,19 +168,21 @@ fn group_hashing_map() {
 
     let inputs = [0; 2].map(|_| cb.add_virtual_target());
     let output = cb.map_to_curve_point(&inputs);
-    cb.register_curve_public_input(output);
+
+    // TODO: only support register for bytes as public inputs.
+    register_curve_target_as_bytes(&mut cb, &output);
 
     let mut pw = PartialWitness::new();
     let mut rng = thread_rng();
     inputs
         .into_iter()
-        .zip([0; 2].map(|_| F::from_canonical_u8(rng.gen())))
+        .zip([0; 2].map(|_| F::from_canonical_u64(rng.gen())))
         .for_each(|(it, iv)| pw.set_target(it, iv));
 
     let data = cb.build::<C>();
     let proof = data.prove(pw).unwrap();
 
-    gen_groth16_proof(data, proof);
+    gen_groth16_proof(data, &proof);
 }
 
 #[cfg(test)]
