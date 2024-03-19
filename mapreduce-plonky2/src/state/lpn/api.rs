@@ -1,5 +1,13 @@
-use plonky2::{iop::{target::Target, witness::PartialWitness}, plonk::circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData}};
-use recursion_framework::{circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder}, framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuitInfo, RecursiveCircuits}};
+use plonky2::{
+    iop::{target::Target, witness::PartialWitness},
+    plonk::circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData},
+};
+use recursion_framework::{
+    circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
+    framework::{
+        prepare_recursive_circuit_for_circuit_set, RecursiveCircuitInfo, RecursiveCircuits,
+    },
+};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{default_config, deserialize_proof, ProofWithVK};
@@ -26,13 +34,10 @@ impl Parameters {
     /// Build parameters for circuits related to the state DB of LPN
     pub(crate) fn build(block_linking_circuit_vd: VerifierCircuitData<F, C, D>) -> Self {
         let builder = CircuitWithUniversalVerifierBuilder::<
-            F, 
-            D, 
-            {StateInputs::<Target>::TOTAL_LEN}
-        >::new::<C>(
-            default_config(), 
-            STATE_CIRCUIT_SET_SIZE,
-        );
+            F,
+            D,
+            { StateInputs::<Target>::TOTAL_LEN },
+        >::new::<C>(default_config(), STATE_CIRCUIT_SET_SIZE);
         let leaf = builder.build_circuit(block_linking_circuit_vd);
         let node = builder.build_circuit(());
 
@@ -41,41 +46,26 @@ impl Parameters {
             prepare_recursive_circuit_for_circuit_set(&node),
         ]);
 
-        Self {
-            leaf,
-            node,
-            set,
-        }        
+        Self { leaf, node, set }
     }
 
     pub(crate) fn generate_proof(&self, input: ProofInputs) -> Result<Vec<u8>> {
         let mut pw = PartialWitness::<F>::new();
         let proof_with_vk: ProofWithVK = match input {
             ProofInputs::Leaf(input) => {
-                let proof = self.set.generate_proof(
-                    &self.leaf,
-                    [],
-                    [],
-                    input,
-                )?;
-                (
-                    proof,
-                    self.leaf.get_verifier_data().clone()
-                ).into()
-            },
+                let proof = self.set.generate_proof(&self.leaf, [], [], input)?;
+                (proof, self.leaf.get_verifier_data().clone()).into()
+            }
             ProofInputs::Node((left_proof, right_proof)) => {
                 let (left_proof, left_vd) = left_proof.into();
                 let (right_proof, right_vd) = right_proof.into();
                 let proof = self.set.generate_proof(
-                    &self.node, 
-                    [left_proof, right_proof], 
-                    [&left_vd, &right_vd], 
-                    ()
+                    &self.node,
+                    [left_proof, right_proof],
+                    [&left_vd, &right_vd],
+                    (),
                 )?;
-                (
-                    proof,
-                    self.node.get_verifier_data().clone()
-                ).into()
+                (proof, self.node.get_verifier_data().clone()).into()
             }
         };
         proof_with_vk.serialize()
@@ -86,15 +76,11 @@ impl Parameters {
         let proof = ProofWithVK::deserialize(serialized_proof)?;
         let (proof, vd) = proof.into();
         let circuit_data = match () {
-            () if vd == self.leaf.circuit_data().verifier_only => {
-                Ok(self.leaf.circuit_data())
-            },
-            () if vd == self.node.circuit_data().verifier_only => {
-                Ok(self.node.circuit_data())
-            },
-            () => {
-                Err(anyhow::Error::msg("No circuit found for provided verifier data"))
-            }
+            () if vd == self.leaf.circuit_data().verifier_only => Ok(self.leaf.circuit_data()),
+            () if vd == self.node.circuit_data().verifier_only => Ok(self.node.circuit_data()),
+            () => Err(anyhow::Error::msg(
+                "No circuit found for provided verifier data",
+            )),
         }?;
         circuit_data.verify(proof)
     }
@@ -102,28 +88,24 @@ impl Parameters {
 
 pub(crate) enum ProofInputs {
     Leaf(ProofWithVK),
-    Node((ProofWithVK, ProofWithVK))
+    Node((ProofWithVK, ProofWithVK)),
 }
 
 impl ProofInputs {
     pub(crate) fn build_leaf_input(
-        block_linking_proof: Vec<u8>, 
-        block_linking_vd: &VerifierOnlyCircuitData<C, D>
+        block_linking_proof: Vec<u8>,
+        block_linking_vd: &VerifierOnlyCircuitData<C, D>,
     ) -> Result<Self> {
         let proof = deserialize_proof(&block_linking_proof)?;
         let proof_with_vk = (proof, block_linking_vd.clone()).into();
         Ok(ProofInputs::Leaf(proof_with_vk))
     }
 
-    pub(crate) fn build_node_input(
-        input: &NodeInputs
-    ) -> Result<Self> {
-        Ok(
-            ProofInputs::Node((
-                ProofWithVK::deserialize(&input.left)?,
-                ProofWithVK::deserialize(&input.right)?,
-            ))
-        )
+    pub(crate) fn build_node_input(input: &NodeInputs) -> Result<Self> {
+        Ok(ProofInputs::Node((
+            ProofWithVK::deserialize(&input.left)?,
+            ProofWithVK::deserialize(&input.right)?,
+        )))
     }
 }
 
@@ -157,63 +139,61 @@ mod tests {
 
     use super::*;
 
-
     const NUM_PUBLIC_INPUTS: usize = BlockLinkingInputs::<Target>::TOTAL_LEN;
-
 
     fn generate_leaf_proof_from_public_inputs(
         circuit_params: &Parameters,
         dummy_circuit: &TestDummyCircuit<NUM_PUBLIC_INPUTS>,
-        public_inputs: [F; NUM_PUBLIC_INPUTS]
+        public_inputs: [F; NUM_PUBLIC_INPUTS],
     ) -> Result<Vec<u8>> {
         let block_linking_proof = dummy_circuit.generate_proof(public_inputs).unwrap();
         let block_linking_proof = (
             block_linking_proof,
             dummy_circuit.circuit_data().verifier_only.clone(),
-        ).into();
+        )
+            .into();
         circuit_params.generate_proof(ProofInputs::Leaf(block_linking_proof))
-
     }
 
     #[test]
     #[serial]
     fn test_state_circuit_parameters() {
         let block_linking_dummy_circuit = TestDummyCircuit::<NUM_PUBLIC_INPUTS>::build();
-        let state_circuit_params = Parameters::build(
-            block_linking_dummy_circuit.circuit_data().verifier_data(),
-        );
+        let state_circuit_params =
+            Parameters::build(block_linking_dummy_circuit.circuit_data().verifier_data());
 
         // generate block linking public inputs for leaf proofs
-        let block_linking_pi = array::from_fn(|_|
-            F::rand()
-        );
+        let block_linking_pi = array::from_fn(|_| F::rand());
         // generate block linking proof for lefth children
         let left_proof = generate_leaf_proof_from_public_inputs(
-            &state_circuit_params, 
-            &block_linking_dummy_circuit, 
-            block_linking_pi
-        ).unwrap();
+            &state_circuit_params,
+            &block_linking_dummy_circuit,
+            block_linking_pi,
+        )
+        .unwrap();
 
         state_circuit_params.verify_proof(&left_proof).unwrap();
-        
+
         // generate block linking proof for right children, employing the same set of block linking public inputs
         // for simplicity
         let right_proof = generate_leaf_proof_from_public_inputs(
-            &state_circuit_params, 
-            &block_linking_dummy_circuit, 
-            block_linking_pi
-        ).unwrap();
+            &state_circuit_params,
+            &block_linking_dummy_circuit,
+            block_linking_pi,
+        )
+        .unwrap();
 
         state_circuit_params.verify_proof(&right_proof).unwrap();
 
         // build proof for intermediate node
-        let intermediate_proof = state_circuit_params.generate_proof(
-            ProofInputs::build_node_input(
-                &NodeInputs::new(left_proof, right_proof)
-            ).unwrap()
-        ).unwrap();
+        let intermediate_proof = state_circuit_params
+            .generate_proof(
+                ProofInputs::build_node_input(&NodeInputs::new(left_proof, right_proof)).unwrap(),
+            )
+            .unwrap();
 
-        state_circuit_params.verify_proof(&intermediate_proof).unwrap();
-        
+        state_circuit_params
+            .verify_proof(&intermediate_proof)
+            .unwrap();
     }
 }

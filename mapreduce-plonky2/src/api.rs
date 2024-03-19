@@ -16,7 +16,10 @@ use recursion_framework::serialization::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::{block_linking, lpn::{self as lpn_state, api::ProofInputs}};
+use crate::state::{
+    block_linking,
+    lpn::{self as lpn_state, api::ProofInputs},
+};
 pub use crate::storage::{
     self,
     length_extract::{self},
@@ -140,12 +143,10 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
         }
         CircuitInput::State(state_input) => {
             let proof_input = match state_input {
-                lpn_state::api::CircuitInput::Leaf(leaf_proof) => {
-                    ProofInputs::build_leaf_input(
-                        leaf_proof,
-                        &params.block_linking.circuit_data().verifier_only,
-                    )
-                },
+                lpn_state::api::CircuitInput::Leaf(leaf_proof) => ProofInputs::build_leaf_input(
+                    leaf_proof,
+                    &params.block_linking.circuit_data().verifier_only,
+                ),
                 lpn_state::api::CircuitInput::Node(node_inputs) => {
                     ProofInputs::build_node_input(&node_inputs)
                 }

@@ -12,14 +12,21 @@ use plonky2::{
     },
     iop::target::Target,
     plonk::{
-        circuit_builder::CircuitBuilder, circuit_data::VerifierCircuitData, config::{GenericHashOut, Hasher}, proof::ProofWithPublicInputsTarget
+        circuit_builder::CircuitBuilder,
+        circuit_data::VerifierCircuitData,
+        config::{GenericHashOut, Hasher},
+        proof::ProofWithPublicInputsTarget,
     },
 };
 use recursion_framework::circuit_builder::CircuitLogicWires;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    api::ProofWithVK, state::{lpn::StateInputs, BlockLinkingInputs}, types::HashOutput, utils::convert_u8_to_u32_slice, verifier_gadget::VerifierTarget
+    api::ProofWithVK,
+    state::{lpn::StateInputs, BlockLinkingInputs},
+    types::HashOutput,
+    utils::convert_u8_to_u32_slice,
+    verifier_gadget::VerifierTarget,
 };
 
 #[cfg(test)]
@@ -61,8 +68,7 @@ impl LeafCircuit {
     pub fn build<F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         block_linking: &BlockLinkingInputs<Target>,
-    ) 
-    where
+    ) where
         F: RichField + Extendable<D>,
     {
         let preimage = Self::node_preimage(block_linking).collect::<Vec<_>>();
@@ -71,7 +77,6 @@ impl LeafCircuit {
         StateInputs::register(b, &root, block_linking);
     }
 }
-
 
 type F = crate::api::F;
 type C = crate::api::C;
@@ -93,18 +98,18 @@ impl CircuitLogicWires<F, D, 0> for LeafCircuitWires {
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         // verify block linking proof
-        let block_linking_proof_wires = VerifierTarget::verify_proof(
-            builder, 
-            &builder_parameters,
-        );
-        let block_linking_pi = BlockLinkingInputs::from_slice(
-            &block_linking_proof_wires.get_proof().public_inputs
-        );
+        let block_linking_proof_wires = VerifierTarget::verify_proof(builder, &builder_parameters);
+        let block_linking_pi =
+            BlockLinkingInputs::from_slice(&block_linking_proof_wires.get_proof().public_inputs);
         LeafCircuit::build(builder, &block_linking_pi);
         Self(block_linking_proof_wires)
     }
 
-    fn assign_input(&self, inputs: Self::Inputs, pw: &mut plonky2::iop::witness::PartialWitness<F>) -> anyhow::Result<()> {
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut plonky2::iop::witness::PartialWitness<F>,
+    ) -> anyhow::Result<()> {
         let (proof, vd) = inputs.into();
         Ok(self.0.set_target(pw, &proof, &vd))
     }
