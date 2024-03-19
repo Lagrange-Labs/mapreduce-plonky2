@@ -18,14 +18,14 @@ mod benches;
 pub mod eth;
 
 pub mod api;
-mod array;
+pub mod array;
 mod block;
 pub(crate) mod circuit;
-mod group_hashing;
+pub mod group_hashing;
 mod hash;
-mod keccak;
+pub mod keccak;
 mod merkle_tree;
-mod mpt_sequential;
+pub mod mpt_sequential;
 mod rlp;
 pub mod state;
 pub mod storage;

@@ -1,5 +1,5 @@
 [workspace]
-members = ["mapreduce-plonky2", "recursion-framework"]
+members = ["mapreduce-plonky2", "recursion-framework", "groth16-framework"]
 resolver = "2"
 
 [profile.release]
