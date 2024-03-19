@@ -428,7 +428,9 @@ mod tests {
                         arr: extracted_hash_u32.try_into().unwrap(),
                     },
                 );
-                cb.connect(t.target, found_hash_in_parent.target);
+                if i < 2 {
+                    cb.connect(t.target, found_hash_in_parent.target);
+                }
                 let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &nodes[i]);
                 iterative_key = new_key;
                 keccak_wires.push(hash_wires)
