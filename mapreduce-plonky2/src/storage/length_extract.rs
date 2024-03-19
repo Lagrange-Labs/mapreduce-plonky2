@@ -466,6 +466,8 @@ mod tests {
         // extractd from test_pidgy_pinguins_slot
         const DEPTH: usize = 5;
         const NODE_LEN: usize = 532;
+        assert!(nodes.iter().all(|x| x.len() <= NODE_LEN));
+        assert!(nodes.len() <= DEPTH);
         // this works
         //verify_storage_proof_from_query::<DEPTH, NODE_LEN, false>(&query, &res).unwrap();
         let circuit = PidgyTest::<DEPTH, NODE_LEN> {
