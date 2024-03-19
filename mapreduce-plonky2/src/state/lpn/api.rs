@@ -151,6 +151,7 @@ mod tests {
     use std::array;
 
     use plonky2::field::types::Sample;
+    use serial_test::serial;
 
     use crate::{api::tests::TestDummyCircuit, state::BlockLinkingInputs};
 
@@ -175,6 +176,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_state_circuit_parameters() {
         let block_linking_dummy_circuit = TestDummyCircuit::<NUM_PUBLIC_INPUTS>::build();
         let state_circuit_params = Parameters::build(
