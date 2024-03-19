@@ -305,7 +305,10 @@ mod tests {
     async fn test_block_linking_circuit_on_mainnet() -> Result<()> {
         let url = "https://eth.llamarpc.com";
         // TODO: this Mainnet contract address only works with state proof
-        let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
+        //let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
+
+        // pidgy pinguins
+        let contract_address = "0xBd3531dA5CF5857e7CfAA92426877b022e612cf8";
 
         // Written as constants from the result.
         const DEPTH: usize = 8;
