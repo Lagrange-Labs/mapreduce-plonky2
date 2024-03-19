@@ -386,7 +386,7 @@ mod tests {
         [(); DEPTH - 1]:,
     {
         slot: SimpleSlotWires,
-        nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; 1],
+        nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
         keccak_wires: Vec<KeccakWires<{ PAD_LEN(NODE_LEN) }>>,
     }
     use crate::mpt_sequential::Circuit;
@@ -406,7 +406,7 @@ mod tests {
             let t = cb._true();
             let key = slot.keccak_mpt.mpt_key.clone();
             // nodes should be ordered from leaf to root and padded at the end
-            let nodes: [VectorWire<Target, _>; 1] =
+            let nodes: [VectorWire<Target, _>; DEPTH] =
                 create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(cb));
             // small optimization here as we only need to decode two items for a leaf, since we know it's a leaf
             let leaf_headers = decode_fixed_list::<_, _, 2>(cb, &nodes[0].arr.arr, zero);
@@ -415,7 +415,24 @@ mod tests {
             cb.connect(t.target, is_leaf.target);
             let mut keccak_wires = vec![];
             let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &nodes[0]);
+            let mut last_hash_output = leaf_hash.output_array.clone();
             keccak_wires.push(leaf_hash);
+            for i in 1..DEPTH {
+                // look if hash is inside the node
+                let (new_key, extracted_child_hash, valid_node) =
+                    Circuit::advance_key(cb, &nodes[i].arr, &iterative_key);
+                let extracted_hash_u32 = convert_u8_targets_to_u32(cb, &extracted_child_hash.arr);
+                let found_hash_in_parent = last_hash_output.equals(
+                    cb,
+                    &Array::<U32Target, PACKED_HASH_LEN> {
+                        arr: extracted_hash_u32.try_into().unwrap(),
+                    },
+                );
+                cb.connect(t.target, found_hash_in_parent.target);
+                let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &nodes[i]);
+                iterative_key = new_key;
+                keccak_wires.push(hash_wires)
+            }
             PidgyWires {
                 slot,
                 nodes,
