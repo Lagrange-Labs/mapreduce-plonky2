@@ -259,7 +259,6 @@ where
                 find_index_subvector(&self.nodes[i], &child_hash)
                     .ok_or(anyhow!("can't find hash in parent node!"))?;
             } else {
-                println!("[-----] setting is_real[{}] = false", i - 1);
                 p.set_bool_target(inputs.should_process[i - 1], false);
             }
         }

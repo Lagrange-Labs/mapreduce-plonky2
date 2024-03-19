@@ -266,9 +266,11 @@ pub type PublicParameters = Parameters<
 mod tests {
     use super::*;
     use crate::{
+        array::{Vector, VectorWire},
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::ProofQuery,
+        keccak::{InputData, KeccakCircuit, KeccakWires},
         mpt_sequential::test::verify_storage_proof_from_query,
         utils::{convert_u8_to_u32_slice, keccak256},
     };
@@ -368,6 +370,7 @@ mod tests {
         assert_eq!(pi.packed_contract_address(), exp_contract_address);
     }
 
+    use anyhow::anyhow;
     use serial_test::serial;
 
     #[derive(Clone, Debug)]
@@ -383,9 +386,11 @@ mod tests {
         [(); DEPTH - 1]:,
     {
         slot: SimpleSlotWires,
-        mpt_input: MPTInputWires<DEPTH, NODE_LEN>,
-        mpt_output: MPTOutputWires<DEPTH, NODE_LEN>,
+        nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
+        keccak_wires: Vec<KeccakWires<{ PAD_LEN(NODE_LEN) }>>,
     }
+    use crate::mpt_sequential::Circuit;
+    use crate::rlp::decode_fixed_list;
 
     impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D> for PidgyTest<DEPTH, NODE_LEN>
     where
@@ -397,14 +402,24 @@ mod tests {
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let slot = SimpleSlot::build(cb);
             let packed_contract_address = slot.contract_address.convert_u8_to_u32(cb);
-            let mpt_input =
-                MPTCircuit::create_input_wires(cb, Some(slot.keccak_mpt.mpt_key.clone()));
-            let mpt_output = MPTCircuit::verify_mpt_proof(cb, &mpt_input);
-
+            let zero = cb.zero();
+            let t = cb._true();
+            let key = slot.keccak_mpt.mpt_key.clone();
+            // nodes should be ordered from leaf to root and padded at the end
+            let nodes: [VectorWire<Target, _>; DEPTH] =
+                create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(cb));
+            // small optimization here as we only need to decode two items for a leaf, since we know it's a leaf
+            let leaf_headers = decode_fixed_list::<_, _, 2>(cb, &nodes[0].arr.arr, zero);
+            let (mut iterative_key, leaf_value, is_leaf) =
+                Circuit::advance_key_leaf_or_extension(cb, &nodes[0].arr, &key, &leaf_headers);
+            cb.connect(t.target, is_leaf.target);
+            let mut keccak_wires = vec![];
+            //let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &nodes[0]);
+            //keccak_wires.push(leaf_hash);
             PidgyWires {
                 slot,
-                mpt_input,
-                mpt_output,
+                nodes,
+                keccak_wires,
             }
         }
 
@@ -413,9 +428,32 @@ mod tests {
             slot.assign(pw, &wires.slot);
             let mpt_circuit =
                 MPTCircuit::<DEPTH, NODE_LEN>::new(slot.mpt_key(), self.nodes.clone());
-            mpt_circuit
-                .assign_wires::<F, D>(pw, &wires.mpt_input, &wires.mpt_output)
+            let pad_len = DEPTH
+                .checked_sub(self.nodes.len())
+                .ok_or(anyhow!(
+                    "Circuit depth {} too small for this MPT proof {}!",
+                    DEPTH,
+                    self.nodes.len()
+                ))
                 .unwrap();
+            let padded_nodes = self
+                .nodes
+                .iter()
+                .map(|n| Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(n))
+                .chain((0..pad_len).map(|_| Ok(Vector::<u8, { PAD_LEN(NODE_LEN) }>::empty())))
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            for (i, (wire, node)) in wires.nodes.iter().zip(padded_nodes.iter()).enumerate() {
+                wire.assign(pw, node);
+                KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
+                    pw,
+                    &wires.keccak_wires[i],
+                    // Given we already assign the input data elsewhere, we notify to keccak circuit
+                    // that it doesn't need to assign it again, just its add. wires.
+                    // TODO: this might be doable via a generator implementation with Plonky2...?
+                    &InputData::Assigned(node),
+                );
+            }
         }
     }
 
