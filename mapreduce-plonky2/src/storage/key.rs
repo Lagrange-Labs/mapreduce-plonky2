@@ -130,7 +130,7 @@ impl SimpleSlot {
 }
 
 /// Wires associated with the MPT key derivation logic of simple storage slot
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SimpleSlotWires {
     /// Simple storage slot which is assumed to fit in a single byte
     pub(crate) slot: Target,

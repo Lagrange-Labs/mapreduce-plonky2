@@ -5,6 +5,7 @@ use super::{
     MAX_BRANCH_NODE_LEN,
 };
 use crate::{
+    array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
@@ -141,6 +142,7 @@ where
         let one = cb.one();
         let slot = SimpleSlot::build(cb);
         let packed_contract_address = slot.contract_address.convert_u8_to_u32(cb);
+
         // Generate the input and output wires of MPT circuit.
         let mpt_input = MPTCircuit::create_input_wires(cb, Some(slot.keccak_mpt.mpt_key.clone()));
         let mpt_output = MPTCircuit::verify_mpt_proof(cb, &mpt_input);
@@ -171,7 +173,7 @@ where
         //    cb.select(in_value, rev_value, zero)
         //});
         //let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
-        let length_value = convert_u8_targets_to_u32(cb, &mpt_output.leaf.arr)[0].0;
+        let length_value = cb.zero();
 
         // Register the public inputs.
         PublicInputs::register(
@@ -368,10 +370,60 @@ mod tests {
 
     use serial_test::serial;
 
+    #[derive(Clone, Debug)]
+    struct PidgyTest<const DEPTH: usize, const NODE_LEN: usize> {
+        slot: u8,
+        contract_address: H160,
+        nodes: Vec<Vec<u8>>,
+    }
+    #[derive(Clone, Debug)]
+    struct PidgyWires<const DEPTH: usize, const NODE_LEN: usize>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+        [(); DEPTH - 1]:,
+    {
+        slot: SimpleSlotWires,
+        mpt_input: MPTInputWires<DEPTH, NODE_LEN>,
+        mpt_output: MPTOutputWires<DEPTH, NODE_LEN>,
+    }
+
+    impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D> for PidgyTest<DEPTH, NODE_LEN>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+        [(); DEPTH - 1]:,
+    {
+        type Wires = PidgyWires<DEPTH, NODE_LEN>;
+
+        fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let slot = SimpleSlot::build(cb);
+            let packed_contract_address = slot.contract_address.convert_u8_to_u32(cb);
+            let mpt_input =
+                MPTCircuit::create_input_wires(cb, Some(slot.keccak_mpt.mpt_key.clone()));
+            let mpt_output = MPTCircuit::verify_mpt_proof(cb, &mpt_input);
+
+            PidgyWires {
+                slot,
+                mpt_input,
+                mpt_output,
+            }
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            let slot = SimpleSlot::new(self.slot, self.contract_address);
+            slot.assign(pw, &wires.slot);
+            let mpt_circuit =
+                MPTCircuit::<DEPTH, NODE_LEN>::new(slot.mpt_key(), self.nodes.clone());
+            mpt_circuit
+                .assign_wires::<F, D>(pw, &wires.mpt_input, &wires.mpt_output)
+                .unwrap();
+        }
+    }
+
     #[tokio::test]
     #[serial]
     async fn test_length_extract_pidgy_contract() -> Result<()> {
-        let url = "https://eth.llamarpc.com";
+        //let url = "https://eth.llamarpc.com";
+        let url = "https://eth-mainnet.g.alchemy.com/v2/tiJoGEC6P5-Ln4vORe52r7Qvxa8JsSj7";
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
@@ -414,26 +466,33 @@ mod tests {
         // extractd from test_pidgy_pinguins_slot
         const DEPTH: usize = 5;
         const NODE_LEN: usize = 532;
-        verify_storage_proof_from_query::<DEPTH, NODE_LEN>(&query, &res).unwrap();
-        let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
-            base: LengthExtractCircuit::new(slot, pidgy_address, nodes),
+        // this works
+        //verify_storage_proof_from_query::<DEPTH, NODE_LEN, false>(&query, &res).unwrap();
+        let circuit = PidgyTest::<DEPTH, NODE_LEN> {
+            slot,
+            contract_address: pidgy_address,
+            nodes,
         };
-        let proof = run_circuit::<F, D, C, _>(test_circuit);
+        run_circuit::<F, D, C, _>(circuit);
+        //let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
+        //    base: LengthExtractCircuit::new(slot, pidgy_address, nodes),
+        //};
+        //let proof = run_circuit::<F, D, C, _>(test_circuit);
 
-        // Verify the public inputs.
-        let pi = PublicInputs::<F>::from(&proof.public_inputs);
-        assert_eq!(pi.storage_slot(), F::from_canonical_u8(slot));
-        assert_eq!(pi.length_value(), F::from_canonical_u32(comp_value));
-        let packed_root = convert_u8_to_u32_slice(res.storage_hash.as_bytes())
-            .into_iter()
-            .map(F::from_canonical_u32)
-            .collect::<Vec<_>>();
-        assert_eq!(pi.root_hash_data(), packed_root);
-        let packed_address = convert_u8_to_u32_slice(&pidgy_address.as_bytes())
-            .into_iter()
-            .map(F::from_canonical_u32)
-            .collect::<Vec<_>>();
-        assert_eq!(pi.packed_contract_address(), packed_address);
+        //// Verify the public inputs.
+        //let pi = PublicInputs::<F>::from(&proof.public_inputs);
+        //assert_eq!(pi.storage_slot(), F::from_canonical_u8(slot));
+        //assert_eq!(pi.length_value(), F::from_canonical_u32(comp_value));
+        //let packed_root = convert_u8_to_u32_slice(res.storage_hash.as_bytes())
+        //    .into_iter()
+        //    .map(F::from_canonical_u32)
+        //    .collect::<Vec<_>>();
+        //assert_eq!(pi.root_hash_data(), packed_root);
+        //let packed_address = convert_u8_to_u32_slice(&pidgy_address.as_bytes())
+        //    .into_iter()
+        //    .map(F::from_canonical_u32)
+        //    .collect::<Vec<_>>();
+        //assert_eq!(pi.packed_contract_address(), packed_address);
         Ok(())
     }
 

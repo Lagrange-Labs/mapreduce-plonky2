@@ -57,7 +57,7 @@ pub struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
     /// whose length == MAX_KEY_NIBBLE_LEN
     key: [u8; MAX_KEY_NIBBLE_LEN / 2],
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct InputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
@@ -85,7 +85,7 @@ where
     should_process: [BoolTarget; DEPTH - 1],
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct OutputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
@@ -674,7 +674,7 @@ pub mod test {
     where
         [(); PAD_LEN(NODE_LEN)]:,
         [(); DEPTH - 1]:,
-        [(); PAD_LEN(NODE_LEN) / 4]:
+        [(); PAD_LEN(NODE_LEN) / 4]:,
     {
         ProofQuery::verify_storage_proof(&res)?;
 
