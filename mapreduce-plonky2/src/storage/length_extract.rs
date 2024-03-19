@@ -5,6 +5,7 @@ use super::{
     MAX_BRANCH_NODE_LEN,
 };
 use crate::{
+    api::{default_config, serialize_proof},
     circuit::UserCircuit,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::{
@@ -213,7 +214,7 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     pub fn build() -> Self {
-        let mut cb = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
+        let mut cb = CircuitBuilder::<F, D>::new(default_config());
         let wires = LengthExtractCircuit::<DEPTH, NODE_LEN>::build(&mut cb);
         let data = cb.build();
         Self { data, wires }
@@ -223,8 +224,11 @@ where
         inputs.assign::<F, D>(&mut pw, &self.wires)?;
         let proof = self.data.prove(pw)?;
         // TODO: move serialization to common place
-        let b = bincode::serialize(&proof)?;
-        Ok(b)
+        serialize_proof(&proof)
+    }
+
+    pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {
+        &self.data
     }
 }
 

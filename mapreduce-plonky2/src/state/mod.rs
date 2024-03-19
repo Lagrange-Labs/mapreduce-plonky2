@@ -3,7 +3,7 @@
 //!     block-linking-circuit --> ...
 //!     leaf-circuit --> ...
 
-mod block_linking;
+pub mod block_linking;
 pub mod lpn;
 
 pub use block_linking::BlockLinkingInputs;
