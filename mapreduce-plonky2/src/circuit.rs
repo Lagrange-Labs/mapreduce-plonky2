@@ -362,10 +362,16 @@ pub(crate) mod test {
     ) -> ProofWithPublicInputs<F, C, D> {
         let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut pw = PartialWitness::new();
+        println!("[+] Building circuit data...");
+        let now = std::time::Instant::now();
         let wires = U::build(&mut b);
         let circuit_data = b.build::<C>();
+        println!("[+] Circuit data built in {:?}s", now.elapsed().as_secs());
+        println!("[+] Generating a proof ... ");
+        let now = std::time::Instant::now();
         u.prove(&mut pw, &wires);
         let proof = circuit_data.prove(pw).expect("invalid proof");
+        println!("[+] Proof generated in {:?}s", now.elapsed().as_secs());
         verify_proof_tuple(&(
             proof.clone(),
             circuit_data.verifier_only,
