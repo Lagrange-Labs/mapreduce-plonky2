@@ -160,20 +160,20 @@ where
         // let value_len_it = cb.sub(value_len, one);
         // but in our case, since the first byte is the RLP header, we have to do +1
         // so we just keep the same value
-        let mut value_len_it = value_len;
-        // Then we need to convert from big endian to little endian only on this len
-        let extract_len: [Target; 4] = create_array(|i| {
-            let it = cb.constant(F::from_canonical_usize(i));
-            let in_value = less_than(cb, it, value_len, 3); // log2(4) = 2, putting upper bound
-            let rev_value = mpt_output.leaf.value_at(cb, value_len_it);
-            // we can't access index < 0 with b.random_access so a small tweak to avoid it
-            let is_done = cb.is_equal(value_len_it, zero);
-            let value_len_it_minus_one = cb.sub(value_len_it, one);
-            value_len_it = cb.select(is_done, zero, value_len_it_minus_one);
-            cb.select(in_value, rev_value, zero)
-        });
-        let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
-        //let length_value = convert_u8_targets_to_u32(cb, &mpt_output.leaf.arr)[0].0;
+        //let mut value_len_it = value_len;
+        //// Then we need to convert from big endian to little endian only on this len
+        //let extract_len: [Target; 4] = create_array(|i| {
+        //    let it = cb.constant(F::from_canonical_usize(i));
+        //    let in_value = less_than(cb, it, value_len, 3); // log2(4) = 2, putting upper bound
+        //    let rev_value = mpt_output.leaf.value_at(cb, value_len_it);
+        //    // we can't access index < 0 with b.random_access so a small tweak to avoid it
+        //    let is_done = cb.is_equal(value_len_it, zero);
+        //    let value_len_it_minus_one = cb.sub(value_len_it, one);
+        //    value_len_it = cb.select(is_done, zero, value_len_it_minus_one);
+        //    cb.select(in_value, rev_value, zero)
+        //});
+        //let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
+        let length_value = convert_u8_targets_to_u32(cb, &mpt_output.leaf.arr)[0].0;
 
         // Register the public inputs.
         PublicInputs::register(
@@ -377,7 +377,7 @@ mod tests {
         const DEPTH: usize = 5;
         const MAX_NODE_LEN: usize = 532;
         let slot: u8 = 8;
-        // pidgy pinguins 
+        // pidgy pinguins
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_simple_slot(pidgy_address, slot as usize);
         let res = query.query_mpt_proof(&provider, None).await?;
