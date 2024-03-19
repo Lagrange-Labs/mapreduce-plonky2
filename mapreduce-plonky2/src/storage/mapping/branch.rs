@@ -300,8 +300,7 @@ mod test {
             node: node.clone(),
             // any of the two keys will do since we only care about the common prefix
             common_prefix: bytes_to_nibbles(&key1),
-            // - 1 because we compare pointers _after_ advancing the key for each leaf
-            expected_pointer: ptr1 - 1,
+            expected_pointer: ptr1,
             mapping_slot: slot,
         };
         // create the public inputs
@@ -364,6 +363,7 @@ mod test {
                 .collect::<Vec<_>>();
             let (fkey, fptr) = pi.mpt_key_info();
             assert_eq!(fkey, common_prefix);
+            // -1 because branch circuit exposes the new pointer
             let exp_ptr = ptr1 - 1;
             assert_eq!(fptr, F::from_canonical_usize(exp_ptr));
         }
