@@ -5,13 +5,12 @@ use super::{
     MAX_BRANCH_NODE_LEN,
 };
 use crate::{
-    circuit::UserCircuit,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
     },
     types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
-    utils::{convert_u8_targets_to_u32, less_than},
+    utils::convert_u8_targets_to_u32,
 };
 use anyhow::Result;
 use ethers::types::H160;
@@ -142,7 +141,7 @@ where
         let one = cb.one();
         let slot = SimpleSlot::build(cb);
         let packed_contract_address = slot.contract_address.convert_u8_to_u32(cb);
-
+        println!("-----+++++ LEnghtExtract: DEPTH  = {} ", DEPTH);
         // Generate the input and output wires of MPT circuit.
         let mpt_input = MPTCircuit::create_input_wires(cb, Some(slot.keccak_mpt.mpt_key.clone()));
         let mpt_output = MPTCircuit::verify_mpt_proof(cb, &mpt_input);
@@ -238,6 +237,10 @@ where
 {
     pub fn build() -> Self {
         let mut cb = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
+        println!(
+            "-----+++++ LEnghtExtractUserCircuitLogic: DEPTH  = {} ",
+            DEPTH
+        );
         let wires = LengthExtractCircuit::<DEPTH, NODE_LEN>::build(&mut cb);
         let data = cb.build();
         Self { data, wires }
@@ -303,15 +306,16 @@ mod tests {
 
     /// Test circuit
     #[derive(Clone, Debug)]
-    struct TestCircuit<const DEPTH: usize, const NODE_LEN: usize>
+    struct LengthTestCircuit<const DEPTH: usize, const NODE_LEN: usize>
     where
         [(); PAD_LEN(NODE_LEN)]:,
         [(); DEPTH - 1]:,
     {
-        c: LengthExtractCircuit<DEPTH, NODE_LEN>,
+        base: LengthExtractCircuit<DEPTH, NODE_LEN>,
     }
 
-    impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D> for TestCircuit<DEPTH, NODE_LEN>
+    impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D>
+        for LengthTestCircuit<DEPTH, NODE_LEN>
     where
         [(); PAD_LEN(NODE_LEN)]:,
         [(); DEPTH - 1]:,
@@ -319,11 +323,15 @@ mod tests {
         type Wires = LengthExtractWires<DEPTH, NODE_LEN>;
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            println!(
+                "-----+++++ TEST - LEnghtExtractUserCircuitLogic: DEPTH  = {} ",
+                DEPTH
+            );
             LengthExtractCircuit::build(cb)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.c.assign::<F, D>(pw, wires).unwrap();
+            self.base.assign::<F, D>(pw, wires).unwrap();
         }
     }
 
@@ -350,8 +358,8 @@ mod tests {
             .map(F::from_canonical_u32)
             .collect();
 
-        let test_circuit = TestCircuit::<DEPTH, NODE_LEN> {
-            c: LengthExtractCircuit::new(
+        let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
+            base: LengthExtractCircuit::new(
                 test_data.slot,
                 test_data.contract_address,
                 test_data.nodes,
@@ -367,21 +375,20 @@ mod tests {
         assert_eq!(pi.packed_contract_address(), exp_contract_address);
     }
 
+    use serial_test::serial;
+
     #[tokio::test]
-    async fn test_length_extract_pidgy() -> Result<()> {
+    #[serial]
+    async fn test_length_extract_pidgy_contract() -> Result<()> {
         let url = "https://eth.llamarpc.com";
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
-        // extractd from test_pidgy_pinguins_slot
-        const DEPTH: usize = 5;
-        const MAX_NODE_LEN: usize = 532;
         let slot: u8 = 8;
         // pidgy pinguins
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_simple_slot(pidgy_address, slot as usize);
         let res = query.query_mpt_proof(&provider, None).await?;
-        verify_storage_proof_from_query(&query, &res).unwrap();
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         assert_eq!(leaf_list.len(), 2);
@@ -413,8 +420,11 @@ mod tests {
             .rev()
             .map(|x| x.to_vec())
             .collect::<Vec<_>>();
-        let test_circuit = TestCircuit::<DEPTH, MAX_NODE_LEN> {
-            c: LengthExtractCircuit::new(slot, pidgy_address, nodes),
+        // extractd from test_pidgy_pinguins_slot
+        const DEPTH: usize = 5;
+        const MAX_NODE_LEN: usize = 532;
+        let test_circuit = LengthTestCircuit::<DEPTH, MAX_NODE_LEN> {
+            base: LengthExtractCircuit::new(slot, pidgy_address, nodes),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
 

@@ -224,7 +224,11 @@ where
         inputs: &InputWires<DEPTH, NODE_LEN>,
         outputs: &OutputWires<DEPTH, NODE_LEN>,
     ) -> Result<()> {
-        let pad_len = DEPTH - self.nodes.len();
+        let pad_len = DEPTH.checked_sub(self.nodes.len()).ok_or(anyhow!(
+            "Circuit depth {} too small for this MPT proof {}!",
+            DEPTH,
+            self.nodes.len()
+        ))?;
         // convert nodes to array and pad with empty array if needed
         let padded_nodes = self
             .nodes

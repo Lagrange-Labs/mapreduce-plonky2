@@ -22,7 +22,7 @@ pub struct InclusionWires {
 }
 
 /// This circuit prove the new root hash of a leaf containing the requested data
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LeafCircuit {
     pub key: [u8; KEY_SIZE],
     pub value: [u8; AddressTarget::LEN],

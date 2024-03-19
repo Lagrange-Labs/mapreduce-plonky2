@@ -54,7 +54,7 @@ mod tests;
 /// +------------------+                     | |
 /// | node.merkle root +----------------+H(0,+,+)
 /// +------------------+
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NodeCircuit;
 
 impl NodeCircuit {

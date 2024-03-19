@@ -29,7 +29,7 @@ mod tests;
 /// Circuit to prove the correct formation of the leaf node.
 ///
 /// Will take the [BlockLinkingInputs] as argument.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LeafCircuit;
 
 impl LeafCircuit {

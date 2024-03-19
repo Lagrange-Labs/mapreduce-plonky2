@@ -327,7 +327,7 @@ where
 
 #[cfg(test)]
 pub(crate) mod test {
-    use std::time;
+    use std::{fmt::Debug, time};
 
     use plonky2::{
         field::extension::Extendable,
@@ -356,13 +356,13 @@ pub(crate) mod test {
         F: RichField + Extendable<D>,
         const D: usize,
         C: GenericConfig<D, F = F>,
-        U: UserCircuit<F, D>,
+        U: UserCircuit<F, D> + Debug,
     >(
         u: U,
     ) -> ProofWithPublicInputs<F, C, D> {
         let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut pw = PartialWitness::new();
-        println!("[+] Building circuit data...");
+        println!("[+] Building circuit data with circuit {:?}...", u);
         let now = std::time::Instant::now();
         let wires = U::build(&mut b);
         let circuit_data = b.build::<C>();

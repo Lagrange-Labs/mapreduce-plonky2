@@ -133,7 +133,7 @@ struct TestLeafWires {
     root: HashOutTarget,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TestLeafCircuit {
     block_linking_values: Vec<GoldilocksField>,
     c: LeafCircuit,
