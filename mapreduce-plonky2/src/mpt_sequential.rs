@@ -440,8 +440,10 @@ impl MPTKeyWire {
         p.set_target(self.pointer, F::from_canonical_usize(ptr));
     }
 
-    /// Proves the prefix of this key and other's key up to pointer are the same.
-    /// Proves both pointers are the same.
+    /// Proves the prefix of this key and other's key up to pointer, not included,
+    /// are the same and check both pointers are the same.
+    /// i.e. check self.key[0..self.pointer] == other.key[0..other.pointer]
+    /// Note how it's not `0..=self.pointer`, we check up to pointer excluded.
     pub fn enforce_prefix_equal<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
