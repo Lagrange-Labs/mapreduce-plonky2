@@ -386,7 +386,7 @@ mod tests {
         [(); DEPTH - 1]:,
     {
         slot: SimpleSlotWires,
-        nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
+        nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; 1],
         keccak_wires: Vec<KeccakWires<{ PAD_LEN(NODE_LEN) }>>,
     }
     use crate::mpt_sequential::Circuit;
@@ -406,7 +406,7 @@ mod tests {
             let t = cb._true();
             let key = slot.keccak_mpt.mpt_key.clone();
             // nodes should be ordered from leaf to root and padded at the end
-            let nodes: [VectorWire<Target, _>; DEPTH] =
+            let nodes: [VectorWire<Target, _>; 1] =
                 create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(cb));
             // small optimization here as we only need to decode two items for a leaf, since we know it's a leaf
             let leaf_headers = decode_fixed_list::<_, _, 2>(cb, &nodes[0].arr.arr, zero);
@@ -414,8 +414,8 @@ mod tests {
                 Circuit::advance_key_leaf_or_extension(cb, &nodes[0].arr, &key, &leaf_headers);
             cb.connect(t.target, is_leaf.target);
             let mut keccak_wires = vec![];
-            //let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &nodes[0]);
-            //keccak_wires.push(leaf_hash);
+            let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &nodes[0]);
+            keccak_wires.push(leaf_hash);
             PidgyWires {
                 slot,
                 nodes,
