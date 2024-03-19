@@ -377,7 +377,7 @@ mod tests {
         const DEPTH: usize = 5;
         const MAX_NODE_LEN: usize = 532;
         let slot: u8 = 8;
-        // pidgy pinguins address
+        // pidgy pinguins 
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_simple_slot(pidgy_address, slot as usize);
         let res = query.query_mpt_proof(&provider, None).await?;
