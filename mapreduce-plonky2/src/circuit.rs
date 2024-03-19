@@ -362,7 +362,11 @@ pub(crate) mod test {
     ) -> ProofWithPublicInputs<F, C, D> {
         let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut pw = PartialWitness::new();
-        println!("[+] Building circuit data with circuit {:?}...", u);
+        // small hack to print the name of the circuit being generated
+        println!(
+            "[+] Building circuit data with circuit {:?}...",
+            &format!("{:?}", u)[0..20]
+        );
         let now = std::time::Instant::now();
         let wires = U::build(&mut b);
         let circuit_data = b.build::<C>();
