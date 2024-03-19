@@ -658,15 +658,24 @@ pub mod test {
         let res = query.query_mpt_proof(&provider, None).await?;
 
         // Verify both storage and state proofs by this MPT circuit.
-        verify_storage_proof_from_query(&query, &res)?;
+
+        // Written as constant from ^
+        const DEPTH: usize = 2;
+        const NODE_LEN: usize = 150;
+        verify_storage_proof_from_query::<DEPTH, NODE_LEN>(&query, &res)?;
         verify_state_proof_from_query(&query, &res)
     }
 
     /// Verify the storage proof from query result.
-    pub(crate) fn verify_storage_proof_from_query(
+    pub(crate) fn verify_storage_proof_from_query<const DEPTH: usize, const NODE_LEN: usize>(
         query: &ProofQuery,
         res: &EIP1186ProofResponse,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+        [(); DEPTH - 1]:,
+        [(); PAD_LEN(NODE_LEN) / 4]:
+    {
         ProofQuery::verify_storage_proof(&res)?;
 
         let value = res.storage_proof[0].value;
@@ -685,9 +694,6 @@ pub mod test {
             "proof max len node : {}",
             mpt_proof.iter().map(|node| node.len()).max().unwrap()
         );
-        // Written as constant from ^
-        const DEPTH: usize = 2;
-        const NODE_LEN: usize = 150;
         visit_proof(&mpt_proof);
         for i in 1..mpt_proof.len() {
             let child_hash = keccak256(&mpt_proof[i - 1]);

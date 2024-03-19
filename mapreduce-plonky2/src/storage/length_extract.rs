@@ -141,20 +141,19 @@ where
         let one = cb.one();
         let slot = SimpleSlot::build(cb);
         let packed_contract_address = slot.contract_address.convert_u8_to_u32(cb);
-        println!("-----+++++ LEnghtExtract: DEPTH  = {} ", DEPTH);
         // Generate the input and output wires of MPT circuit.
         let mpt_input = MPTCircuit::create_input_wires(cb, Some(slot.keccak_mpt.mpt_key.clone()));
         let mpt_output = MPTCircuit::verify_mpt_proof(cb, &mpt_input);
 
         // Range check to constrain only bytes for each node of state MPT input.
-        mpt_input.nodes.iter().for_each(|n| n.assert_bytes(cb));
+        //mpt_input.nodes.iter().for_each(|n| n.assert_bytes(cb));
 
         // NOTE: The length value shouldn't exceed 4-bytes (U32).
         // We read the RLP header but knowing it is a value that is always <55bytes long
         // we can hardcode the type of RLP header it is and directly get the real number len
         // in this case, the header marker is 0x80 that we can directly take out from first byte
-        let byte_80 = cb.constant(F::from_canonical_usize(128));
-        let value_len = cb.sub(mpt_output.leaf.arr[0], byte_80);
+        //let byte_80 = cb.constant(F::from_canonical_usize(128));
+        //let value_len = cb.sub(mpt_output.leaf.arr[0], byte_80);
         // Normally one should do the following to access element with index
         // let value_len_it = cb.sub(value_len, one);
         // but in our case, since the first byte is the RLP header, we have to do +1
@@ -237,10 +236,6 @@ where
 {
     pub fn build() -> Self {
         let mut cb = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
-        println!(
-            "-----+++++ LEnghtExtractUserCircuitLogic: DEPTH  = {} ",
-            DEPTH
-        );
         let wires = LengthExtractCircuit::<DEPTH, NODE_LEN>::build(&mut cb);
         let data = cb.build();
         Self { data, wires }
@@ -323,10 +318,6 @@ mod tests {
         type Wires = LengthExtractWires<DEPTH, NODE_LEN>;
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            println!(
-                "-----+++++ TEST - LEnghtExtractUserCircuitLogic: DEPTH  = {} ",
-                DEPTH
-            );
             LengthExtractCircuit::build(cb)
         }
 
@@ -422,8 +413,9 @@ mod tests {
             .collect::<Vec<_>>();
         // extractd from test_pidgy_pinguins_slot
         const DEPTH: usize = 5;
-        const MAX_NODE_LEN: usize = 532;
-        let test_circuit = LengthTestCircuit::<DEPTH, MAX_NODE_LEN> {
+        const NODE_LEN: usize = 532;
+        verify_storage_proof_from_query::<DEPTH, NODE_LEN>(&query, &res).unwrap();
+        let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
             base: LengthExtractCircuit::new(slot, pidgy_address, nodes),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
