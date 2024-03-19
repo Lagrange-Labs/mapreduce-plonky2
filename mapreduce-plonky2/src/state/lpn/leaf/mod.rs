@@ -19,7 +19,7 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Serialize, Deserialize};
 
 use crate::{
-    api::{ProofWithVK, RecursiveVerifierTarget}, state::{lpn::StateInputs, BlockLinkingInputs}, types::HashOutput, utils::convert_u8_to_u32_slice
+    api::ProofWithVK, state::{lpn::StateInputs, BlockLinkingInputs}, types::HashOutput, utils::convert_u8_to_u32_slice, verifier_gadget::VerifierTarget
 };
 
 #[cfg(test)]
@@ -78,7 +78,7 @@ type C = crate::api::C;
 const D: usize = crate::api::D;
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct LeafCircuitWires(RecursiveVerifierTarget<D>);
+pub(crate) struct LeafCircuitWires(VerifierTarget<D>);
 
 impl CircuitLogicWires<F, D, 0> for LeafCircuitWires {
     type CircuitBuilderParams = VerifierCircuitData<F, C, D>;
@@ -93,7 +93,7 @@ impl CircuitLogicWires<F, D, 0> for LeafCircuitWires {
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         // verify block linking proof
-        let block_linking_proof_wires = RecursiveVerifierTarget::verify_proof(
+        let block_linking_proof_wires = VerifierTarget::verify_proof(
             builder, 
             &builder_parameters,
         );
