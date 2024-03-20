@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use plonky2::{
-    field::extension::Extendable,
+    field::{extension::Extendable, types::Field},
     hash::hash_types::RichField,
     iop::{
         target::{BoolTarget, Target},
@@ -164,6 +164,12 @@ where
             .iter()
             .zip(other.arr.iter())
             .all(|(first, second)| first.to_target() == second.to_target())
+    }
+}
+
+impl<F: Field, const N: usize> Default for Array<F, N> {
+    fn default() -> Self {
+        Self { arr: [F::ZERO; N] }
     }
 }
 

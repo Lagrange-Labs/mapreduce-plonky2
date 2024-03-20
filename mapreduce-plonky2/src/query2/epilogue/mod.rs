@@ -1,4 +1,4 @@
-use std::ops;
+use std::{array, marker, ops};
 
 use plonky2::{
     field::extension::Extendable,
@@ -6,12 +6,16 @@ use plonky2::{
     iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
 use crate::{
-    types::{AddressTarget, CURVE_TARGET_LEN},
+    types::{AddressTarget, PackedAddressTarget, CURVE_TARGET_LEN},
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
+
+#[cfg(test)]
+mod tests;
 
 /// Used to tag the provenance aspect of the PublicInputs
 #[derive(Clone, Copy)]
@@ -38,14 +42,28 @@ impl CommonInput {
         NUM_HASH_OUT_ELTS,
         1,
         1,
-        AddressTarget::LEN,
-        AddressTarget::LEN,
+        PackedAddressTarget::LEN,
+        PackedAddressTarget::LEN,
         1,
         1,
     ];
 
     fn total_len() -> usize {
         Self::SIZES.iter().sum()
+    }
+
+    const fn len(&self) -> usize {
+        match self {
+            Self::BlockNumber => Self::SIZES[0],
+            Self::Range => Self::SIZES[1],
+            Self::Root => Self::SIZES[2],
+            Self::MinBlockNumber => Self::SIZES[3],
+            Self::MaxBlockNumber => Self::SIZES[4],
+            Self::SmartContractAddress => Self::SIZES[5],
+            Self::UserAddress => Self::SIZES[6],
+            Self::MappingSlot => Self::SIZES[7],
+            Self::LengthSlot => Self::SIZES[8],
+        }
     }
 
     const fn offset(&self) -> usize {
@@ -81,7 +99,36 @@ impl CommonInput {
 #[derive(Clone)]
 pub struct PublicInputs<'input, T: Clone, Variant, const L: usize> {
     pub inputs: &'input [T],
-    variant: std::marker::PhantomData<Variant>,
+    variant: marker::PhantomData<Variant>,
+}
+impl<'input, T: Clone, Variant, const L: usize> PublicInputs<'input, T, Variant, L> {
+    pub const TOTAL_COMMON_LEN: usize = CommonInput::SIZES[0]
+        + CommonInput::SIZES[1]
+        + CommonInput::SIZES[2]
+        + CommonInput::SIZES[3]
+        + CommonInput::SIZES[4]
+        + CommonInput::SIZES[5]
+        + CommonInput::SIZES[6]
+        + CommonInput::SIZES[7]
+        + CommonInput::SIZES[8];
+
+    /// Creates a representation of the public inputs from the provided slice.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the length of the provided slice is smaller than
+    /// [Self::TOTAL_COMMON_LEN].
+    pub fn from_slice(arr: &'input [T]) -> Self {
+        assert!(
+            Self::TOTAL_COMMON_LEN <= arr.len(),
+            "The public inputs slice length must be equal or greater than the expected length."
+        );
+
+        Self {
+            inputs: arr,
+            variant: marker::PhantomData,
+        }
+    }
 }
 impl<'a, T: Clone + Copy, Variant, const L: usize> PublicInputs<'a, T, Variant, L> {
     pub(crate) fn block_number_raw(&self) -> &T {
@@ -121,7 +168,7 @@ impl<'a, T: Clone + Copy, Variant, const L: usize> PublicInputs<'a, T, Variant, 
     }
 }
 impl<'a, T: Clone + Copy, const L: usize> PublicInputs<'a, T, Provenance, L> {
-    fn total_len() -> usize {
+    pub(crate) fn total_len() -> usize {
         CommonInput::total_len() + CURVE_TARGET_LEN
     }
 
@@ -132,9 +179,7 @@ impl<'a, T: Clone + Copy, const L: usize> PublicInputs<'a, T, Provenance, L> {
         [T; crate::group_hashing::N],
         T,
     ) {
-        convert_slice_to_curve_point(
-            &self.inputs[CommonInput::total_len()..CommonInput::total_len() + 1],
-        )
+        convert_slice_to_curve_point(&self.inputs[Self::TOTAL_COMMON_LEN..Self::total_len()])
     }
 }
 impl<'a, Variant, const L: usize> PublicInputs<'a, Target, Variant, L> {
@@ -160,12 +205,14 @@ impl<'a, Variant, const L: usize> PublicInputs<'a, Target, Variant, L> {
         *self.max_block_number_raw()
     }
 
-    pub(crate) fn smart_contract_address(&self) -> AddressTarget {
-        AddressTarget::from_array(self.smart_contract_address_raw().try_into().unwrap())
+    pub(crate) fn smart_contract_address(&self) -> PackedAddressTarget {
+        PackedAddressTarget::from_array(array::from_fn(|i| {
+            U32Target(self.smart_contract_address_raw()[i])
+        }))
     }
 
-    pub(crate) fn user_address(&self) -> AddressTarget {
-        AddressTarget::from_array(self.user_address_raw().try_into().unwrap())
+    pub(crate) fn user_address(&self) -> PackedAddressTarget {
+        PackedAddressTarget::from_array(array::from_fn(|i| U32Target(self.user_address_raw()[i])))
     }
 
     pub(crate) fn mapping_slot(&self) -> Target {
@@ -184,8 +231,8 @@ impl<'a, const L: usize> PublicInputs<'a, Target, Provenance, L> {
         root: &HashOutTarget,
         min_block_number: Target,
         max_block_number: Target,
-        smc_address: &AddressTarget,
-        user_address: &AddressTarget,
+        smc_address: &PackedAddressTarget,
+        user_address: &PackedAddressTarget,
         mapping_slot: Target,
         length_slot: Target,
         digest: &CurveTarget,
@@ -197,8 +244,8 @@ impl<'a, const L: usize> PublicInputs<'a, Target, Provenance, L> {
         b.register_public_inputs(&root.elements);
         b.register_public_input(min_block_number);
         b.register_public_input(max_block_number);
-        b.register_public_inputs(&smc_address.arr);
-        b.register_public_inputs(&user_address.arr);
+        smc_address.register_as_public_input(b);
+        user_address.register_as_public_input(b);
         b.register_public_input(mapping_slot);
         b.register_public_input(length_slot);
         b.register_public_inputs(&digest.0 .0[0].0);

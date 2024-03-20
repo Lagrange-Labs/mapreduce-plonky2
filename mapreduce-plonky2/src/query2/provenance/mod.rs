@@ -21,7 +21,11 @@ use crate::{
     query2::epilogue::{Provenance, PublicInputs},
 };
 
+#[cfg(test)]
+mod tests;
+
 /// The witnesses of [ProvenanceCircuit].
+#[derive(Debug, Clone)]
 pub struct ProvenanceWires {
     /// The merkle root of the path opening.
     pub state_root: HashOutTarget,
@@ -34,6 +38,7 @@ pub struct ProvenanceWires {
 }
 
 /// The provenance db circuit
+#[derive(Debug, Clone)]
 pub struct ProvenanceCircuit<const L: usize, F: RichField> {
     state_root: HashOut<F>,
     siblings: Vec<HashOut<F>>,
@@ -42,6 +47,20 @@ pub struct ProvenanceCircuit<const L: usize, F: RichField> {
 }
 
 impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
+    pub fn new(
+        state_root: HashOut<F>,
+        siblings: Vec<HashOut<F>>,
+        positions: Vec<bool>,
+        block_hash: Array<F, PACKED_HASH_LEN>,
+    ) -> Self {
+        Self {
+            state_root,
+            siblings,
+            positions,
+            block_hash,
+        }
+    }
+
     pub fn build<const D: usize>(
         cb: &mut CircuitBuilder<F, D>,
         db_proof: &PublicInputs<Target, Provenance, L>,
@@ -65,10 +84,10 @@ impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
         let state_leaf = a
             .arr
             .iter()
-            .chain(iter::once(&m))
-            .chain(iter::once(&s))
-            .chain(c.elements.iter())
-            .copied()
+            .map(|t| t.0)
+            .chain(iter::once(m))
+            .chain(iter::once(s))
+            .chain(c.elements.iter().copied())
             .collect();
 
         let mut state_root = cb.hash_n_to_hash_no_pad::<PoseidonHash>(state_leaf);
@@ -83,8 +102,8 @@ impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
                 let mut right = HashOutTarget::from_partial(&[], cb.zero());
 
                 for i in 0..NUM_HASH_OUT_ELTS {
-                    left.elements[i] = cb.select(pos, sibling.elements[i], state_root.elements[i]);
-                    right.elements[i] = cb.select(pos, state_root.elements[i], sibling.elements[i]);
+                    left.elements[i] = cb.select(pos, state_root.elements[i], sibling.elements[i]);
+                    right.elements[i] = cb.select(pos, sibling.elements[i], state_root.elements[i]);
                 }
 
                 let preimage = left
@@ -112,7 +131,17 @@ impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
         cb.connect(r, one);
 
         PublicInputs::<Target, Provenance, L>::register(
-            cb, b, r, &c, b_min, b_max, &a, &x, m, s, &digest,
+            cb,
+            b,
+            r,
+            &block_leaf_hash,
+            b_min,
+            b_max,
+            &a,
+            &x,
+            m,
+            s,
+            &digest,
         );
 
         ProvenanceWires {
