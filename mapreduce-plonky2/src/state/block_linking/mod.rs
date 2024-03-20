@@ -310,6 +310,8 @@ mod tests {
     #[serial]
     async fn test_block_linking_circuit_on_mainnet() -> Result<()> {
         let url = "https://eth.llamarpc.com";
+
+        let url = "https://eth-mainnet.g.alchemy.com/v2/tiJoGEC6P5-Ln4vORe52r7Qvxa8JsSj7";
         // TODO: this Mainnet contract address only works with state proof
         //let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
 
@@ -317,7 +319,7 @@ mod tests {
         let contract_address = "0xBd3531dA5CF5857e7CfAA92426877b022e612cf8";
 
         // Written as constants from the result.
-        const DEPTH: usize = 8;
+        const DEPTH: usize = 9;
         const NODE_LEN: usize = 532;
         const BLOCK_LEN: usize = 620;
         const VALUE_LEN: usize = 50;
