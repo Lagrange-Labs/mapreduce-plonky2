@@ -39,6 +39,7 @@ mod tests {
     };
     use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
     use rand::{thread_rng, Rng};
+    use serial_test::serial;
     use std::array;
 
     /// Test proving with a simple circuit.
@@ -65,8 +66,6 @@ mod tests {
     }
 
     /// Test proving with the keccak circuit.
-    /// Ignore for long running.
-    #[ignore]
     #[serial]
     #[test]
     fn test_groth16_proving_with_keccak() {
@@ -99,8 +98,6 @@ mod tests {
     }
 
     /// Test proving with the group-hashing circuit.
-    /// Ignore for long running.
-    #[ignore]
     #[serial]
     #[test]
     fn test_groth16_proving_with_group_hashing() {
