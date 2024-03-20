@@ -1,7 +1,7 @@
-mod digest_equal;
-mod key;
+pub mod digest_equal;
+pub mod key;
 pub mod length_extract;
-mod length_match;
+pub mod length_match;
 pub mod lpn;
 pub mod mapping;
 mod query2;

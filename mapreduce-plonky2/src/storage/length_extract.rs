@@ -5,12 +5,11 @@ use super::{
     MAX_BRANCH_NODE_LEN,
 };
 use crate::{
-    array::Array,
+    api::{default_config, serialize_proof},
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
     },
-    types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
     utils::{convert_u8_targets_to_u32, less_than},
 };
 use anyhow::Result;
@@ -21,7 +20,7 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData},
+        circuit_data::CircuitData,
         config::{AlgebraicHasher, GenericConfig},
     },
 };
@@ -98,15 +97,20 @@ where
     mpt_output: MPTOutputWires<DEPTH, NODE_LEN>,
 }
 
+/// Circuit extracting the length from an array variable from the storage trie
+/// i.e. the mpt key = keccak(left_pad32(slot)) indicates the length of the array
+/// in the storage trie. This length is RLP encoded however and circuit takes care
+/// of extracting it in a U32.
+/// Assumption is the the length is always < 2**32.
 #[derive(Clone, Debug)]
-pub struct LengthExtractCircuit<const DEPTH: usize, const NODE_LEN: usize> {
+pub struct ArrayLengthExtractCircuit<const DEPTH: usize, const NODE_LEN: usize> {
     /// Storage slot saved the length value
     slot: SimpleSlot,
     /// MPT circuit used to verify the nodes of storage Merkle Tree
     mpt_circuit: MPTCircuit<DEPTH, NODE_LEN>,
 }
 
-impl<const DEPTH: usize, const NODE_LEN: usize> LengthExtractCircuit<DEPTH, NODE_LEN>
+impl<const DEPTH: usize, const NODE_LEN: usize> ArrayLengthExtractCircuit<DEPTH, NODE_LEN>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
@@ -218,23 +222,26 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     pub fn build() -> Self {
-        let mut cb = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
-        let wires = LengthExtractCircuit::<DEPTH, NODE_LEN>::build(&mut cb);
+        let mut cb = CircuitBuilder::<F, D>::new(default_config());
+        let wires = ArrayLengthExtractCircuit::<DEPTH, NODE_LEN>::build(&mut cb);
         let data = cb.build();
         Self { data, wires }
     }
-    pub fn generate(&self, inputs: LengthExtractCircuit<DEPTH, NODE_LEN>) -> Result<Vec<u8>> {
+    pub fn generate(&self, inputs: ArrayLengthExtractCircuit<DEPTH, NODE_LEN>) -> Result<Vec<u8>> {
         let mut pw = PartialWitness::new();
         inputs.assign::<F, D>(&mut pw, &self.wires)?;
         let proof = self.data.prove(pw)?;
         // TODO: move serialization to common place
-        let b = bincode::serialize(&proof)?;
-        Ok(b)
+        serialize_proof(&proof)
+    }
+
+    pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {
+        &self.data
     }
 }
 
 pub const MAX_DEPTH_TRIE: usize = 4;
-pub type CircuitInput = LengthExtractCircuit<MAX_DEPTH_TRIE, MAX_BRANCH_NODE_LEN>;
+pub type CircuitInput = ArrayLengthExtractCircuit<MAX_DEPTH_TRIE, MAX_BRANCH_NODE_LEN>;
 pub type PublicParameters = Parameters<
     MAX_DEPTH_TRIE,
     MAX_BRANCH_NODE_LEN,
@@ -247,7 +254,7 @@ pub type PublicParameters = Parameters<
 mod tests {
     use super::*;
     use crate::{
-        array::{Vector, VectorWire},
+        array::{Array, Vector, VectorWire},
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::{ProofQuery, StorageSlot},
@@ -296,7 +303,7 @@ mod tests {
         [(); PAD_LEN(NODE_LEN)]:,
         [(); DEPTH - 1]:,
     {
-        base: LengthExtractCircuit<DEPTH, NODE_LEN>,
+        base: ArrayLengthExtractCircuit<DEPTH, NODE_LEN>,
     }
 
     impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D>
@@ -308,7 +315,7 @@ mod tests {
         type Wires = LengthExtractWires<DEPTH, NODE_LEN>;
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            LengthExtractCircuit::build(cb)
+            ArrayLengthExtractCircuit::build(cb)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -340,7 +347,7 @@ mod tests {
             .collect();
 
         let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
-            base: LengthExtractCircuit::new(
+            base: ArrayLengthExtractCircuit::new(
                 test_data.slot,
                 test_data.contract_address,
                 test_data.nodes,
@@ -504,7 +511,7 @@ mod tests {
         //let proof = run_circuit::<F, D, C, _>(circuit);
         //assert_eq!(F::from_canonical_u32(comp_value), proof.public_inputs[0]);
         let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
-            base: LengthExtractCircuit::new(slot, pidgy_address, nodes),
+            base: ArrayLengthExtractCircuit::new(slot, pidgy_address, nodes),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
 

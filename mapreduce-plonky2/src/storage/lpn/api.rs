@@ -9,7 +9,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::api::{ProofWithVK, C, D, F};
+use crate::api::{default_config, ProofWithVK, C, D, F};
 
 use super::{
     inner_node::{NodeCircuit, NodeWires},
@@ -33,6 +33,16 @@ pub struct NodeInputs {
     right: Vec<u8>,
 }
 
+impl NodeInputs {
+    /// Construct an instance of `NodeInputs` from 2 child proofs
+    pub fn new(left_proof: Vec<u8>, right_proof: Vec<u8>) -> Self {
+        Self {
+            left: left_proof,
+            right: right_proof,
+        }
+    }
+}
+
 /// Parameters containing the public information for proving both leaves and nodes
 /// of the storage database
 #[derive(Serialize, Deserialize)]
@@ -45,7 +55,7 @@ pub struct PublicParameters {
 impl PublicParameters {
     /// Build the public parameters for the storage database related circuits
     pub fn build() -> Self {
-        let config = CircuitConfig::standard_recursion_config();
+        let config = default_config();
         let circuit_builder = CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(
             config,
             STORAGE_CIRCUIT_SET_SIZE,
@@ -94,6 +104,10 @@ impl PublicParameters {
                 .serialize()
             }
         }
+    }
+    /// Get the set of circuits related to the storage database in LPN
+    pub(crate) fn get_lpn_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.set
     }
 }
 

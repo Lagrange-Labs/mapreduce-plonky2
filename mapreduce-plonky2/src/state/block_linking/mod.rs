@@ -5,7 +5,12 @@ mod account;
 mod block;
 mod public_inputs;
 
-use crate::{mpt_sequential::PAD_LEN, storage::PublicInputs as StorageInputs};
+use crate::{
+    api::{default_config, deserialize_proof, serialize_proof, ProofWithVK},
+    mpt_sequential::PAD_LEN,
+    storage::PublicInputs as StorageInputs,
+    verifier_gadget::VerifierTarget,
+};
 use account::{Account, AccountInputsWires};
 use anyhow::Result;
 use block::{BlockHeader, BlockInputsWires};
@@ -14,11 +19,20 @@ use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
     iop::{target::Target, witness::PartialWitness},
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData},
+        proof::ProofWithPublicInputs,
+    },
 };
 
 pub use public_inputs::BlockLinkingInputs;
+use recursion_framework::serialization::{deserialize, serialize};
+use serde::{Deserialize, Serialize};
 
+use self::block::SEPOLIA_NUMBER_LEN;
+
+#[derive(Serialize, Deserialize)]
 /// Main block-linking wires
 pub struct BlockLinkingWires<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>
 where
@@ -129,10 +143,117 @@ where
     }
 }
 
+type F = crate::api::F;
+type C = crate::api::C;
+const D: usize = crate::api::D;
+
+const MAX_DEPTH_TRIE: usize = 9;
+// 16*32 hashes + 16 RLP headers associated + 1 empty RLP headers (last slot) + (1 + 2) list RLP header
+const MAX_NODE_LEN: usize = 532;
+const MAX_BLOCK_LEN: usize = 620;
+const NUMBER_LEN: usize = SEPOLIA_NUMBER_LEN;
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct Parameters<const DEPTH: usize, const NODE_LEN: usize, const BLOCK_LEN: usize>
+where
+    [(); DEPTH - 1]:,
+    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(BLOCK_LEN)]:,
+{
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    data: CircuitData<F, C, D>,
+    wires: BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>,
+    storage_circuit_wires: VerifierTarget<D>,
+}
+
+pub(crate) type PublicParameters = Parameters<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN>;
+/// Data structure holding the portion of inputs related to block linking logic,
+/// which are necessary to generate a proof for the block linking circuit
+pub type BlockLinkingCircuitInputs =
+    BlockLinkingCircuit<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, NUMBER_LEN>;
+
+impl PublicParameters {
+    /// Build circuit parameters for block linking circuit. It expects the circuit parameters
+    /// of the digest_equal circuit. See `state/storage/digest_equal.rs` for more info.
+    pub(crate) fn build(storage_circuit_vk: &VerifierCircuitData<F, C, D>) -> Self {
+        let config = default_config();
+        let mut cb = CircuitBuilder::<F, D>::new(config);
+        let storage_circuit_wires = VerifierTarget::verify_proof(&mut cb, storage_circuit_vk);
+        let storage_pi = storage_circuit_wires.get_proof().public_inputs.as_slice();
+        let wires = BlockLinkingCircuitInputs::build(&mut cb, storage_pi);
+        let data = cb.build::<C>();
+
+        Self {
+            data,
+            wires,
+            storage_circuit_wires,
+        }
+    }
+
+    /// Generate proof for digest equal circuit employiing the circuit parameters found in  `self`
+    /// and the necessary inputs values
+    pub(crate) fn generate_proof(
+        &self,
+        storage_proof: &ProofWithVK,
+        input: BlockLinkingCircuitInputs,
+    ) -> Result<Vec<u8>> {
+        let mut pw = PartialWitness::<F>::new();
+        input.assign::<F, D>(&mut pw, &self.wires)?;
+        let (input_proof, vk) = storage_proof.into();
+        self.storage_circuit_wires
+            .set_target(&mut pw, input_proof, vk);
+        let proof = self.data.prove(pw)?;
+        serialize_proof(&proof)
+    }
+
+    /// Get the `CircuitData` of the digest equal circuit
+    pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {
+        &self.data
+    }
+}
+
+/// Data structure containing the inputs to be provided to the API in order to
+/// generate a proof for the block linking circuit
+pub struct CircuitInput {
+    storage_proof: Vec<u8>,
+    inputs: BlockLinkingCircuitInputs,
+}
+
+impl CircuitInput {
+    /// Instantiate `CircuitInput` for block linking circuit employing a proof for the
+    /// digest equal circuit and the set of inputs to prove block linkink logic
+    pub fn new(storage_proof: Vec<u8>, bl_inputs: BlockLinkingCircuitInputs) -> Self {
+        Self {
+            storage_proof,
+            inputs: bl_inputs,
+        }
+    }
+}
+
+impl From<(Vec<u8>, BlockLinkingCircuitInputs)> for CircuitInput {
+    fn from(value: (Vec<u8>, BlockLinkingCircuitInputs)) -> Self {
+        Self {
+            storage_proof: value.0,
+            inputs: value.1,
+        }
+    }
+}
+
+impl TryInto<(ProofWithPublicInputs<F, C, D>, BlockLinkingCircuitInputs)> for CircuitInput {
+    type Error = anyhow::Error;
+
+    fn try_into(
+        self,
+    ) -> anyhow::Result<(ProofWithPublicInputs<F, C, D>, BlockLinkingCircuitInputs)> {
+        Ok((deserialize_proof(&self.storage_proof)?, self.inputs))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
+        api::tests::TestDummyCircuit,
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::{ProofQuery, RLPBlock},
@@ -160,7 +281,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use serial_test::serial;
     use std::{str::FromStr, sync::Arc};
-    use tests::block::{MAINNET_NUMBER_LEN, SEPOLIA_NUMBER_LEN};
+    use tests::block::SEPOLIA_NUMBER_LEN;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -281,6 +402,40 @@ mod tests {
         run_circuit::<F, D, C, _>(test_circuit);
     }
 
+    #[test]
+    #[serial]
+    fn test_block_linking_circuit_parameters() {
+        init_logging();
+
+        const NUM_PUBLIC_INPUTS: usize = StorageInputs::<'_, Target>::TOTAL_LEN;
+        const VALUE_LEN: usize = 50;
+
+        let test_storage_circuit = TestDummyCircuit::<NUM_PUBLIC_INPUTS>::build();
+        let params = PublicParameters::build(&test_storage_circuit.circuit_data().verifier_data());
+
+        // generate inputs
+        let state_mpt = generate_state_mpt::<3, VALUE_LEN>();
+        let storage_pi = generate_storage_inputs::<_, VALUE_LEN>(&state_mpt);
+        let block = generate_block(&state_mpt);
+        let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
+        let inputs = BlockLinkingCircuitInputs::new(&storage_pi, header_rlp, state_mpt.nodes);
+        // generate dummy storage proof with expected public inputs
+        let storage_proof = test_storage_circuit
+            .generate_proof(storage_pi.try_into().unwrap())
+            .unwrap();
+        let storage_proof = (
+            storage_proof,
+            test_storage_circuit.circuit_data().verifier_only.clone(),
+        )
+            .into();
+        let proof = params.generate_proof(&storage_proof, inputs).unwrap();
+
+        params
+            .data
+            .verify(bincode::deserialize(&proof).unwrap())
+            .unwrap()
+    }
+
     /// Test the block-linking circuit with Sepolia RPC.
     #[tokio::test]
     #[serial]
@@ -324,7 +479,7 @@ mod tests {
         const BLOCK_LEN: usize = 620;
         const VALUE_LEN: usize = 50;
 
-        test_with_rpc::<DEPTH, NODE_LEN, BLOCK_LEN, VALUE_LEN, MAINNET_NUMBER_LEN>(
+        test_with_rpc::<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
             url,
             contract_address,
         )
