@@ -27,8 +27,6 @@ mod tests;
 /// The witnesses of [ProvenanceCircuit].
 #[derive(Debug, Clone)]
 pub struct ProvenanceWires {
-    /// The merkle root of the path opening.
-    pub state_root: HashOutTarget,
     /// The siblings that opens to `state_root`.
     pub siblings: Vec<HashOutTarget>,
     /// The boolean flags to describe the path. `true` equals right; `false` equals left.
@@ -40,7 +38,6 @@ pub struct ProvenanceWires {
 /// The provenance db circuit
 #[derive(Debug, Clone)]
 pub struct ProvenanceCircuit<const L: usize, F: RichField> {
-    state_root: HashOut<F>,
     siblings: Vec<HashOut<F>>,
     positions: Vec<bool>,
     block_hash: Array<F, PACKED_HASH_LEN>,
@@ -48,13 +45,11 @@ pub struct ProvenanceCircuit<const L: usize, F: RichField> {
 
 impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
     pub fn new(
-        state_root: HashOut<F>,
         siblings: Vec<HashOut<F>>,
         positions: Vec<bool>,
         block_hash: Array<F, PACKED_HASH_LEN>,
     ) -> Self {
         Self {
-            state_root,
             siblings,
             positions,
             block_hash,
@@ -124,6 +119,7 @@ impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
         let block_hash = OutputHash::new(cb);
         let block_leaf = iter::once(b)
             .chain(block_hash.arr.iter().map(|a| a.0))
+            .chain(state_root.elements.iter().copied())
             .collect();
         let block_leaf_hash = cb.hash_n_to_hash_no_pad::<PoseidonHash>(block_leaf);
 
@@ -145,7 +141,6 @@ impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
         );
 
         ProvenanceWires {
-            state_root,
             siblings,
             positions,
             block_hash,
@@ -153,13 +148,6 @@ impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
     }
 
     pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &ProvenanceWires) {
-        wires
-            .state_root
-            .elements
-            .iter()
-            .zip(self.state_root.elements.iter())
-            .for_each(|(&w, &v)| pw.set_target(w, v));
-
         wires
             .siblings
             .iter()

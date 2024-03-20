@@ -1,3 +1,5 @@
+use std::iter;
+
 use ethers::types::Address;
 use plonky2::plonk::config::GenericHashOut;
 use plonky2::{
@@ -16,7 +18,6 @@ use plonky2::{
     },
     plonk::{circuit_builder::CircuitBuilder, config::PoseidonGoldilocksConfig},
 };
-use plonky2_ecgfp5::curve::curve::Point;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 
 use crate::{
@@ -39,12 +40,22 @@ fn prove_and_verify_provenance_circuit() {
     let epilogue_values = PublicInputs::values_from_seed(seed);
     let epilogue = PublicInputs::from_slice(&epilogue_values);
     let circuit = TestProvenanceCircuit::from_seed(seed, &epilogue);
+    let block_leaf_hash = circuit.block_leaf_hash;
     let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit);
     let pi = PublicInputs::from_slice(proof.public_inputs.as_slice());
 
     assert_eq!(pi.block_number_raw(), epilogue.block_number_raw());
     assert_eq!(pi.range_raw(), epilogue.range_raw());
-    //assert_eq!(pi.root_raw(), epilogue.root_raw());
+    assert_eq!(pi.root_raw(), &block_leaf_hash.elements);
+    assert_eq!(pi.min_block_number_raw(), epilogue.min_block_number_raw());
+    assert_eq!(pi.max_block_number_raw(), epilogue.max_block_number_raw());
+    assert_eq!(
+        pi.smart_contract_address_raw(),
+        epilogue.smart_contract_address_raw()
+    );
+    assert_eq!(pi.user_address_raw(), epilogue.user_address_raw());
+    assert_eq!(pi.mapping_slot_raw(), epilogue.mapping_slot_raw());
+    assert_eq!(pi.length_slot_raw(), epilogue.length_slot_raw());
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +68,7 @@ struct TestProvenanceWires {
 struct TestProvenanceCircuit {
     epilogue_values: Vec<GoldilocksField>,
     c: ProvenanceCircuit,
+    block_leaf_hash: HashOut<GoldilocksField>,
 }
 
 impl TestProvenanceCircuit {
@@ -75,27 +87,19 @@ impl TestProvenanceCircuit {
 
         let positions: Vec<_> = (0..L).map(|_| rng.next_u32() & 1 == 1).collect();
 
-        let address = Address::from_slice(
-            &epilogue
-                .smart_contract_address_raw()
-                .iter()
-                .map(|x| x.to_canonical_u64() as u32)
-                .flat_map(|x| x.to_le_bytes())
-                .collect::<Vec<_>>(),
-        );
-        let mapping_slot = epilogue.mapping_slot_raw().to_canonical_u64() as u8;
-        let length_slot = epilogue.length_slot_raw().to_canonical_u64() as u8;
-        let storage_root = HashOut {
-            elements: epilogue.root_raw().try_into().unwrap(),
-        };
-
-        let state_root = state_leaf_hash(
-            address,
-            mapping_slot,
-            length_slot,
-            storage_root.to_bytes().try_into().unwrap(),
-        );
-        let mut state_root = HashOut::from_bytes(&state_root);
+        // FIXME use crate::state::lpn::state_leaf_hash
+        let preimage: Vec<_> = epilogue
+            .smart_contract_address_raw()
+            .iter()
+            .chain(iter::once(epilogue.mapping_slot_raw()))
+            .chain(iter::once(epilogue.length_slot_raw()))
+            .chain(epilogue.root_raw())
+            .copied()
+            .collect();
+        let mut state_root = hash_n_to_hash_no_pad::<
+            GoldilocksField,
+            PoseidonPermutation<GoldilocksField>,
+        >(preimage.as_slice());
 
         for i in 0..L {
             let (left, right) = if positions[i] {
@@ -120,11 +124,21 @@ impl TestProvenanceCircuit {
             .iter_mut()
             .for_each(|h| *h = GoldilocksField::from_canonical_u32(rng.next_u32()));
 
-        let c = ProvenanceCircuit::new(state_root, siblings, positions, block_hash);
+        let mut preimage = vec![*epilogue.block_number_raw()];
+        preimage.extend_from_slice(&block_hash.arr);
+        preimage.extend_from_slice(&state_root.elements);
+
+        let block_leaf_hash = hash_n_to_hash_no_pad::<
+            GoldilocksField,
+            PoseidonPermutation<GoldilocksField>,
+        >(preimage.as_slice());
+
+        let c = ProvenanceCircuit::new(siblings, positions, block_hash);
 
         Self {
             epilogue_values: epilogue.inputs.to_vec(),
             c,
+            block_leaf_hash,
         }
     }
 }
