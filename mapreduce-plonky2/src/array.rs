@@ -449,6 +449,23 @@ where
         }
     }
 
+    /// Inneficient method to extract a value from an array but that works
+    /// all the time, when b.random_access does not work.
+    pub fn value_at_failover<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        at: Target,
+    ) -> T {
+        let mut acc = b.zero();
+        for (i, el) in self.arr.iter().enumerate() {
+            let i_target = b.constant(F::from_canonical_usize(i));
+            let is_eq = b.is_equal(i_target, at);
+            // SUM_i (i == n (idx) ) * element
+            // -> sum = element
+            acc = b.mul_add(is_eq.target, el.to_target(), acc);
+        }
+        T::from_target(acc)
+    }
     /// Extract the value from the array at the index givne by `at`.
     /// Note the cost is O(SIZE) in general, and less for arrays
     /// which are powers of two and <= 64.
@@ -465,17 +482,9 @@ where
                 at,
                 self.arr.iter().map(|v| v.to_target()).collect::<Vec<_>>(),
             ));
+        } else {
+            self.value_at_failover(b, at)
         }
-        // Otherwise, need to make it manually
-        let mut acc = b.zero();
-        for (i, el) in self.arr.iter().enumerate() {
-            let i_target = b.constant(F::from_canonical_usize(i));
-            let is_eq = b.is_equal(i_target, at);
-            // SUM_i (i == n (idx) ) * element
-            // -> sum = element
-            acc = b.mul_add(is_eq.target, el.to_target(), acc);
-        }
-        T::from_target(acc)
     }
 
     pub fn reverse(&self) -> Self {

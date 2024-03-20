@@ -11,7 +11,7 @@ use crate::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
     },
     types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
-    utils::convert_u8_targets_to_u32,
+    utils::{convert_u8_targets_to_u32, less_than},
 };
 use anyhow::Result;
 use ethers::types::H160;
@@ -134,32 +134,33 @@ where
         let mpt_output = MPTCircuit::verify_mpt_proof(cb, &mpt_input);
 
         // Range check to constrain only bytes for each node of state MPT input.
-        //mpt_input.nodes.iter().for_each(|n| n.assert_bytes(cb));
+        mpt_input.nodes.iter().for_each(|n| n.assert_bytes(cb));
 
         // NOTE: The length value shouldn't exceed 4-bytes (U32).
         // We read the RLP header but knowing it is a value that is always <55bytes long
         // we can hardcode the type of RLP header it is and directly get the real number len
         // in this case, the header marker is 0x80 that we can directly take out from first byte
-        //let byte_80 = cb.constant(F::from_canonical_usize(128));
-        //let value_len = cb.sub(mpt_output.leaf.arr[0], byte_80);
+        let byte_80 = cb.constant(F::from_canonical_usize(128));
+        // value_len_it
+        let value_len = cb.sub(mpt_output.leaf.arr[0], byte_80);
+        // end_iterator is used to reverse the array which is of a dynamic length
         // Normally one should do the following to access element with index
-        // let value_len_it = cb.sub(value_len, one);
+        // let end_iterator = cb.sub(value_len, one);
         // but in our case, since the first byte is the RLP header, we have to do +1
         // so we just keep the same value
-        //let mut value_len_it = value_len;
-        //// Then we need to convert from big endian to little endian only on this len
-        //let extract_len: [Target; 4] = create_array(|i| {
-        //    let it = cb.constant(F::from_canonical_usize(i));
-        //    let in_value = less_than(cb, it, value_len, 3); // log2(4) = 2, putting upper bound
-        //    let rev_value = mpt_output.leaf.value_at(cb, value_len_it);
-        //    // we can't access index < 0 with b.random_access so a small tweak to avoid it
-        //    let is_done = cb.is_equal(value_len_it, zero);
-        //    let value_len_it_minus_one = cb.sub(value_len_it, one);
-        //    value_len_it = cb.select(is_done, zero, value_len_it_minus_one);
-        //    cb.select(in_value, rev_value, zero)
-        //});
-        //let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
-        let length_value = cb.zero();
+        let mut end_iterator = value_len;
+        // Then we need to convert from big endian to little endian only on this len
+        let extract_len: [Target; 4] = create_array(|i| {
+            let it = cb.constant(F::from_canonical_usize(i));
+            let in_value = less_than(cb, it, value_len, 3); // log2(4) = 2, putting upper bound
+            let rev_value = mpt_output.leaf.value_at_failover(cb, end_iterator);
+            // we can't access index < 0 with b.random_access so a small tweak to avoid it
+            let is_done = cb.is_equal(end_iterator, one); // since first byte is RLP header
+            let end_iterator_minus_one = cb.sub(end_iterator, one);
+            end_iterator = cb.select(is_done, zero, end_iterator_minus_one);
+            cb.select(in_value, rev_value, zero)
+        });
+        let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
 
         // Register the public inputs.
         PublicInputs::register(cb, &mpt_output.root, slot.slot, length_value);
@@ -360,7 +361,6 @@ mod tests {
     #[derive(Clone, Debug)]
     struct PidgyTest<const DEPTH: usize, const NODE_LEN: usize> {
         slot: u8,
-        contract_address: H160,
         nodes: Vec<Vec<u8>>,
     }
     #[derive(Clone, Debug)]
@@ -371,8 +371,6 @@ mod tests {
     {
         slot: SimpleSlotWires,
         nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
-        keccak_wires: Vec<KeccakWires<{ PAD_LEN(NODE_LEN) }>>,
-        child_hashes: [Array<Target, 32>; DEPTH - 1],
     }
     use crate::mpt_sequential::Circuit;
     use crate::rlp::decode_fixed_list;
@@ -397,38 +395,28 @@ mod tests {
             let (mut iterative_key, leaf_value, is_leaf) =
                 Circuit::advance_key_leaf_or_extension(cb, &nodes[0].arr, &key, &leaf_headers);
             cb.connect(t.target, is_leaf.target);
-            let mut keccak_wires = vec![];
-            let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &nodes[0]);
-            let mut last_hash_output = leaf_hash.output_array.clone();
-            keccak_wires.push(leaf_hash);
-            let expected_hashes_bytes: [Array<Target, 32>; DEPTH - 1] =
-                create_array(|i| Array::new(cb));
-            for i in 1..DEPTH {
-                // look if hash is inside the node
-                let (new_key, extracted_child_hash, valid_node) =
-                    Circuit::advance_key(cb, &nodes[i].arr, &iterative_key);
-                let extracted_hash_u32 = convert_u8_targets_to_u32(cb, &extracted_child_hash.arr);
-                let found_hash_in_parent = last_hash_output.equals(
-                    cb,
-                    &Array::<U32Target, PACKED_HASH_LEN> {
-                        arr: extracted_hash_u32.try_into().unwrap(),
-                    },
-                );
-                if i < 2 {
-                    //cb.connect(valid_node.target,t.target);
-                    extracted_child_hash.enforce_equal(cb, &expected_hashes_bytes[i - 1]);
-                    //cb.connect(t.target, found_hash_in_parent.target);
-                }
-                let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &nodes[i]);
-                iterative_key = new_key;
-                keccak_wires.push(hash_wires)
-            }
-            PidgyWires {
-                slot,
-                nodes,
-                keccak_wires,
-                child_hashes: expected_hashes_bytes,
-            }
+            let one = cb.one();
+            let byte_80 = cb.constant(F::from_canonical_usize(128));
+            let value_len = cb.sub(leaf_value.arr[0], byte_80);
+            let mut end_iterator = cb.sub(value_len, one);
+
+            let value_arr = Array::<Target, 4> {
+                arr: create_array(|i| leaf_value.arr[i + 1]),
+            };
+            // Then we need to convert from big endian to little endian only on this len
+            let extract_len: [Target; 4] = create_array(|i| {
+                let it = cb.constant(F::from_canonical_usize(i));
+                let in_value = less_than(cb, it, value_len, 4); // log2(4bytes) = 2, putting upper bound
+                let rev_value = value_arr.value_at_failover(cb, end_iterator);
+                // we can't access index < 0 with b.random_access so a small tweak to avoid it
+                let is_done = cb.is_equal(end_iterator, one); // since first byte is RLP header
+                let end_iterator_minus_one = cb.sub(end_iterator, one);
+                end_iterator = cb.select(is_done, zero, end_iterator_minus_one);
+                cb.select(in_value, rev_value, zero)
+            });
+            let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
+            cb.register_public_input(length_value);
+            PidgyWires { slot, nodes }
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -453,26 +441,7 @@ mod tests {
                 .unwrap();
             for (i, (wire, node)) in wires.nodes.iter().zip(padded_nodes.iter()).enumerate() {
                 wire.assign(pw, node);
-                KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
-                    pw,
-                    &wires.keccak_wires[i],
-                    // Given we already assign the input data elsewhere, we notify to keccak circuit
-                    // that it doesn't need to assign it again, just its add. wires.
-                    // TODO: this might be doable via a generator implementation with Plonky2...?
-                    &InputData::Assigned(node),
-                );
             }
-            // assign child hashes
-            self.nodes
-                .iter()
-                .map(|n| keccak256(n))
-                .take(DEPTH - 1)
-                .zip(wires.child_hashes.iter())
-                .enumerate()
-                .for_each(|(i, (hash, wire))| {
-                    println!("hash {}: {:?}", i, hash);
-                    wire.assign_from_data(pw, &hash.try_into().unwrap());
-                });
         }
     }
 
@@ -679,7 +648,7 @@ mod tests {
         assert_eq!(rlp_len_slice as usize, len_slice);
         let le_value: [u8; 4] = create_array(|i| {
             if i < len_slice {
-                sliced[len_slice - 1 - i]
+                leaf_list[1][len_slice - i]
             } else {
                 0
             }
@@ -701,11 +670,9 @@ mod tests {
         assert!(nodes.len() <= DEPTH);
         // this works
         //verify_storage_proof_from_query::<DEPTH, NODE_LEN>(&query, &res).unwrap();
-        //let circuit = PidgyTest::<DEPTH, NODE_LEN> {
-        //    slot,
-        //    contract_address: pidgy_address,
-        //    nodes,
-        //};
+        //let circuit = PidgyTest::<DEPTH, NODE_LEN> { slot, nodes };
+        //let proof = run_circuit::<F, D, C, _>(circuit);
+        //assert_eq!(F::from_canonical_u32(comp_value), proof.public_inputs[0]);
         //let circuit = ExtractionHashPidgy::<DEPTH, NODE_LEN> {
         //    slot,
         //    contract_address: pidgy_address,
@@ -742,19 +709,14 @@ mod tests {
         let proof = run_circuit::<F, D, C, _>(test_circuit);
 
         //// Verify the public inputs.
-        //let pi = PublicInputs::<F>::from(&proof.public_inputs);
-        //assert_eq!(pi.storage_slot(), F::from_canonical_u8(slot));
-        //assert_eq!(pi.length_value(), F::from_canonical_u32(comp_value));
-        //let packed_root = convert_u8_to_u32_slice(res.storage_hash.as_bytes())
-        //    .into_iter()
-        //    .map(F::from_canonical_u32)
-        //    .collect::<Vec<_>>();
-        //assert_eq!(pi.root_hash_data(), packed_root);
-        //let packed_address = convert_u8_to_u32_slice(&pidgy_address.as_bytes())
-        //    .into_iter()
-        //    .map(F::from_canonical_u32)
-        //    .collect::<Vec<_>>();
-        //assert_eq!(pi.packed_contract_address(), packed_address);
+        let pi = PublicInputs::<F>::from(&proof.public_inputs);
+        assert_eq!(pi.storage_slot(), F::from_canonical_u8(slot));
+        assert_eq!(pi.length_value(), F::from_canonical_u32(comp_value));
+        let packed_root = convert_u8_to_u32_slice(res.storage_hash.as_bytes())
+            .into_iter()
+            .map(F::from_canonical_u32)
+            .collect::<Vec<_>>();
+        assert_eq!(pi.root_hash_data(), packed_root);
         Ok(())
     }
 
