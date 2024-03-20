@@ -271,7 +271,11 @@ mod tests {
         circuit::{test::run_circuit, UserCircuit},
         eth::ProofQuery,
         keccak::{InputData, KeccakCircuit, KeccakWires},
-        mpt_sequential::test::{verify_storage_proof_from_query, visit_proof},
+        mpt_sequential::{
+            bytes_to_nibbles,
+            test::{verify_storage_proof_from_query, visit_proof},
+        },
+        rlp::MAX_KEY_NIBBLE_LEN,
         utils::{convert_u8_to_u32_slice, keccak256},
     };
     use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -506,8 +510,9 @@ mod tests {
         [(); DEPTH - 1]:,
     {
         slot: SimpleSlotWires,
-        nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
-        child_hashes: [Array<Target, 32>; DEPTH - 1],
+        exp_mpt_key: Array<Target, MAX_KEY_NIBBLE_LEN>,
+        //nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
+        //child_hashes: [Array<Target, 32>; DEPTH - 1],
     }
 
     impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D>
@@ -522,59 +527,65 @@ mod tests {
             let zero = b.zero();
             let slot = SimpleSlot::build(b);
             let key = slot.keccak_mpt.mpt_key.clone();
-            let nodes: [VectorWire<Target, _>; DEPTH] =
-                create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b));
-            let expected_hashes_bytes: [Array<Target, 32>; DEPTH - 1] =
-                create_array(|i| Array::new(b));
+            let exp_key = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b);
+            key.key.enforce_equal(b, &exp_key);
+            //let nodes: [VectorWire<Target, _>; DEPTH] =
+            //    create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b));
+            //let expected_hashes_bytes: [Array<Target, 32>; DEPTH - 1] =
+            //    create_array(|i| Array::new(b));
 
-            let leaf_headers = decode_fixed_list::<_, _, 2>(b, &nodes[0].arr.arr, zero);
-            let (mut iterative_key, leaf_value, is_leaf) =
-                Circuit::advance_key_leaf_or_extension(b, &nodes[0].arr, &key, &leaf_headers);
-            for i in 1..DEPTH {
-                let (_, extracted_child_hash, _) =
-                    Circuit::advance_key(b, &nodes[i].arr, &iterative_key);
-                if i < 2 {
-                    //cb.connect(valid_node.target,t.target);
-                    extracted_child_hash.enforce_equal(b, &expected_hashes_bytes[i - 1]);
-                    //cb.connect(t.target, found_hash_in_parent.target);
-                }
-            }
+            //let leaf_headers = decode_fixed_list::<_, _, 2>(b, &nodes[0].arr.arr, zero);
+            //let (mut iterative_key, leaf_value, is_leaf) =
+            //    Circuit::advance_key_leaf_or_extension(b, &nodes[0].arr, &key, &leaf_headers);
+            //for i in 1..DEPTH {
+            //    let (_, extracted_child_hash, _) =
+            //        Circuit::advance_key(b, &nodes[i].arr, &iterative_key);
+            //    if i < 2 {
+            //        //cb.connect(valid_node.target,t.target);
+            //        extracted_child_hash.enforce_equal(b, &expected_hashes_bytes[i - 1]);
+            //        //cb.connect(t.target, found_hash_in_parent.target);
+            //    }
+            //}
             ExtractionWires {
                 slot,
-                nodes,
-                child_hashes: expected_hashes_bytes,
+                exp_mpt_key: exp_key,
+                //nodes,
+                //child_hashes: expected_hashes_bytes,
             }
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             let slot = SimpleSlot::new(self.slot, self.contract_address);
             slot.assign(pw, &wires.slot);
+            wires
+                .exp_mpt_key
+                .assign_bytes(pw, &bytes_to_nibbles(&slot.mpt_key()).try_into().unwrap());
             let mpt_circuit =
                 MPTCircuit::<DEPTH, NODE_LEN>::new(slot.mpt_key(), self.nodes.clone());
-            let pad_len = DEPTH
-                .checked_sub(self.nodes.len())
-                .ok_or(anyhow!(
-                    "Circuit depth {} too small for this MPT proof {}!",
-                    DEPTH,
-                    self.nodes.len()
-                ))
-                .unwrap();
-            let padded_nodes = self
-                .nodes
-                .iter()
-                .map(|n| Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(n))
-                .chain((0..pad_len).map(|_| Ok(Vector::<u8, { PAD_LEN(NODE_LEN) }>::empty())))
-                .collect::<Result<Vec<_>>>()
-                .unwrap();
-            // assign child hashes
-            self.nodes
-                .iter()
-                .map(|n| keccak256(n))
-                .take(DEPTH - 1)
-                .zip(wires.child_hashes.iter())
-                .for_each(|(hash, wire)| {
-                    wire.assign_from_data(pw, &hash.try_into().unwrap());
-                });
+            //let pad_len = DEPTH
+            //    .checked_sub(self.nodes.len())
+            //    .ok_or(anyhow!(
+            //        "Circuit depth {} too small for this MPT proof {}!",
+            //        DEPTH,
+            //        self.nodes.len()
+            //    ))
+            //    .unwrap();
+            //let padded_nodes = self
+            //    .nodes
+            //    .iter()
+            //    .map(|n| Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(n))
+            //    .chain((0..pad_len).map(|_| Ok(Vector::<u8, { PAD_LEN(NODE_LEN) }>::empty())))
+            //    .collect::<Result<Vec<_>>>()
+            //    .unwrap();
+            //// assign child hashes
+            //self.nodes
+            //    .iter()
+            //    .map(|n| keccak256(n))
+            //    .take(DEPTH - 1)
+            //    .zip(wires.child_hashes.iter())
+            //    .for_each(|(hash, wire)| {
+            //        wire.assign_from_data(pw, &hash.try_into().unwrap());
+            //    });
         }
     }
 
