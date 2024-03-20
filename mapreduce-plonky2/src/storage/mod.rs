@@ -4,7 +4,6 @@ pub mod length_extract;
 pub mod length_match;
 pub mod lpn;
 pub mod mapping;
-mod query2;
 
 use plonky2::iop::target::Target;
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;

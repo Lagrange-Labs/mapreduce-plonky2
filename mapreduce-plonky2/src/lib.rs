@@ -26,6 +26,7 @@ mod hash;
 mod keccak;
 mod merkle_tree;
 mod mpt_sequential;
+pub mod query2;
 mod rlp;
 pub mod state;
 pub mod storage;
