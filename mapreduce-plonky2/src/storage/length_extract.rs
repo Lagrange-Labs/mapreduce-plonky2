@@ -125,8 +125,8 @@ where
     [(); DEPTH - 1]:,
 {
     pub fn new(slot: u8, contract_address: H160, nodes: Vec<Vec<u8>>) -> Self {
-        let slot = SimpleSlot::new(slot, contract_address);
-        let mpt_circuit = MPTCircuit::new(slot.mpt_key(), nodes);
+        let slot = SimpleSlot::new(slot);
+        let mpt_circuit = MPTCircuit::new(slot.0.mpt_key(), nodes);
 
         Self { slot, mpt_circuit }
     }
@@ -141,10 +141,10 @@ where
         let zero = cb.zero();
         let one = cb.one();
         let slot = SimpleSlot::build(cb);
-        let packed_contract_address = slot.contract_address.convert_u8_to_u32(cb);
+        let packed_contract_address = PackedAddressTarget::new(cb);
 
         // Generate the input and output wires of MPT circuit.
-        let mpt_input = MPTCircuit::create_input_wires(cb, Some(slot.keccak_mpt.mpt_key.clone()));
+        let mpt_input = MPTCircuit::create_input_wires(cb, Some(slot.mpt_key.clone()));
         let mpt_output = MPTCircuit::verify_mpt_proof(cb, &mpt_input);
 
         // Range check to constrain only bytes for each node of state MPT input.
@@ -269,7 +269,7 @@ mod tests {
         array::{Vector, VectorWire},
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        eth::ProofQuery,
+        eth::{ProofQuery, StorageSlot},
         keccak::{InputData, KeccakCircuit, KeccakWires},
         mpt_sequential::{
             bytes_to_nibbles,
@@ -407,10 +407,9 @@ mod tests {
 
         fn build(cb: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let slot = SimpleSlot::build(cb);
-            let packed_contract_address = slot.contract_address.convert_u8_to_u32(cb);
             let zero = cb.zero();
             let t = cb._true();
-            let key = slot.keccak_mpt.mpt_key.clone();
+            let key = slot.mpt_key.clone();
             // nodes should be ordered from leaf to root and padded at the end
             let nodes: [VectorWire<Target, _>; DEPTH] =
                 create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(cb));
@@ -454,10 +453,10 @@ mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            let slot = SimpleSlot::new(self.slot, self.contract_address);
+            let slot = SimpleSlot::new(self.slot);
             slot.assign(pw, &wires.slot);
             let mpt_circuit =
-                MPTCircuit::<DEPTH, NODE_LEN>::new(slot.mpt_key(), self.nodes.clone());
+                MPTCircuit::<DEPTH, NODE_LEN>::new(slot.0.mpt_key(), self.nodes.clone());
             let pad_len = DEPTH
                 .checked_sub(self.nodes.len())
                 .ok_or(anyhow!(
@@ -532,7 +531,7 @@ mod tests {
             let zero = b.zero();
             let t = b._true();
             let slot = SimpleSlot::build(b);
-            let key = slot.keccak_mpt.mpt_key.clone();
+            let key = slot.mpt_key.clone();
             let exp_key = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b);
             key.key.enforce_equal(b, &exp_key);
             let exp_leaf_key = MPTKeyWire::new(b);
@@ -610,19 +609,25 @@ mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            let slot = SimpleSlot::new(self.slot, self.contract_address);
-            slot.assign(pw, &wires.slot);
+            let storage_slot = StorageSlot::Simple(self.slot as usize);
+            let slot_circuit = SimpleSlot::from(storage_slot.clone());
+            slot_circuit.assign(pw, &wires.slot);
             wires.exp_leaf_key.assign(
                 pw,
                 &self.after_leaf_key.0.clone().try_into().unwrap(),
                 self.after_leaf_key.1,
             );
-            assert!(bytes_to_nibbles(&slot.mpt_key()) == self.after_leaf_key.0);
-            wires
-                .exp_mpt_key
-                .assign_bytes(pw, &bytes_to_nibbles(&slot.mpt_key()).try_into().unwrap());
-            let mpt_circuit =
-                MPTCircuit::<DEPTH, NODE_LEN>::new(slot.mpt_key(), self.nodes.clone());
+            assert!(bytes_to_nibbles(&storage_slot.mpt_key_vec()) == self.after_leaf_key.0);
+            wires.exp_mpt_key.assign_bytes(
+                pw,
+                &bytes_to_nibbles(&storage_slot.mpt_key_vec())
+                    .try_into()
+                    .unwrap(),
+            );
+            let mpt_circuit = MPTCircuit::<DEPTH, NODE_LEN>::new(
+                storage_slot.mpt_key_vec().try_into().unwrap(),
+                self.nodes.clone(),
+            );
             let pad_len = DEPTH
                 .checked_sub(self.nodes.len())
                 .ok_or(anyhow!(
@@ -732,10 +737,10 @@ mod tests {
                 let key_nibbles = key_nibbles_struct.nibbles();
                 let ptr = MAX_KEY_NIBBLE_LEN - 1 - key_nibbles.len();
                 let branch: Vec<Vec<u8>> = rlp::decode_list(&nodes[1]);
-                let mpt_key_nibbles = bytes_to_nibbles(&query.slot.mpt_key());
+                let mpt_key_nibbles = bytes_to_nibbles(&query.slot.mpt_key_vec());
                 {
-                    let slot = SimpleSlot::new(slot, pidgy_address);
-                    let slot_key_nibbles = bytes_to_nibbles(&slot.mpt_key());
+                    let slot = SimpleSlot::new(slot);
+                    let slot_key_nibbles = bytes_to_nibbles(&slot.0.mpt_key_vec());
                     assert!(
                         mpt_key_nibbles == slot_key_nibbles,
                         "MPT SLOT vs Query SLOT (eth) failing"
@@ -746,7 +751,7 @@ mod tests {
                 assert_eq!(leaf_hash, exp_hash);
                 println!(
                     "Check hash inclusion of leaf done -> FULL {:?}",
-                    bytes_to_nibbles(&query.slot.mpt_key())
+                    bytes_to_nibbles(&query.slot.mpt_key_vec())
                 );
                 (mpt_key_nibbles, ptr)
             },
@@ -791,7 +796,8 @@ mod tests {
             // Generate a MPT key from the slot and contract address.
             let slot = rng.gen::<u8>();
             let contract_address = H160(rng.gen::<[u8; 20]>());
-            let key = SimpleSlot::new(slot, contract_address).mpt_key();
+            let storage_slot = StorageSlot::Simple(slot as usize);
+            let key = storage_slot.mpt_key_vec();
 
             // Insert the key and value.
             let value = rng.gen::<u32>();

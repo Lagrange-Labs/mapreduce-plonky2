@@ -687,7 +687,7 @@ pub mod test {
             .map(|b| b.to_vec())
             .collect::<Vec<Vec<u8>>>();
         let root = keccak256(mpt_proof.last().unwrap());
-        let mpt_key = query.slot.mpt_key();
+        let mpt_key = query.slot.mpt_key_vec();
         println!("proof depth : {}", mpt_proof.len());
         println!(
             "proof max len node : {}",
