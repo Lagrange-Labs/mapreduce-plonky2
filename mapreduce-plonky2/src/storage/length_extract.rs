@@ -271,7 +271,7 @@ mod tests {
         circuit::{test::run_circuit, UserCircuit},
         eth::ProofQuery,
         keccak::{InputData, KeccakCircuit, KeccakWires},
-        mpt_sequential::test::verify_storage_proof_from_query,
+        mpt_sequential::test::{verify_storage_proof_from_query, visit_proof},
         utils::{convert_u8_to_u32_slice, keccak256},
     };
     use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -388,6 +388,7 @@ mod tests {
         slot: SimpleSlotWires,
         nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
         keccak_wires: Vec<KeccakWires<{ PAD_LEN(NODE_LEN) }>>,
+        child_hashes: [Array<Target, 32>; DEPTH - 1],
     }
     use crate::mpt_sequential::Circuit;
     use crate::rlp::decode_fixed_list;
@@ -417,6 +418,8 @@ mod tests {
             let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &nodes[0]);
             let mut last_hash_output = leaf_hash.output_array.clone();
             keccak_wires.push(leaf_hash);
+            let expected_hashes_bytes: [Array<Target, 32>; DEPTH - 1] =
+                create_array(|i| Array::new(cb));
             for i in 1..DEPTH {
                 // look if hash is inside the node
                 let (new_key, extracted_child_hash, valid_node) =
@@ -429,7 +432,8 @@ mod tests {
                     },
                 );
                 if i < 2 {
-                    cb.connect(t.target, found_hash_in_parent.target);
+                    extracted_child_hash.enforce_equal(cb, &expected_hashes_bytes[i - 1]);
+                    //cb.connect(t.target, found_hash_in_parent.target);
                 }
                 let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &nodes[i]);
                 iterative_key = new_key;
@@ -439,6 +443,7 @@ mod tests {
                 slot,
                 nodes,
                 keccak_wires,
+                child_hashes: expected_hashes_bytes,
             }
         }
 
@@ -473,6 +478,14 @@ mod tests {
                     &InputData::Assigned(node),
                 );
             }
+            // assign child hashes
+            self.nodes
+                .iter()
+                .map(|n| keccak256(n))
+                .zip(wires.child_hashes.iter())
+                .for_each(|(hash, wire)| {
+                    wire.assign_from_data(pw, &hash.try_into().unwrap());
+                });
         }
     }
 
@@ -489,6 +502,7 @@ mod tests {
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_simple_slot(pidgy_address, slot as usize);
         let res = query.query_mpt_proof(&provider, None).await?;
+        ProofQuery::verify_storage_proof(&res)?;
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         assert_eq!(leaf_list.len(), 2);
@@ -520,6 +534,7 @@ mod tests {
             .rev()
             .map(|x| x.to_vec())
             .collect::<Vec<_>>();
+        visit_proof(&nodes);
         // extractd from test_pidgy_pinguins_slot
         const DEPTH: usize = 5;
         const NODE_LEN: usize = 532;

@@ -802,7 +802,7 @@ pub mod test {
         run_circuit::<F, D, C, _>(circuit);
     }
 
-    fn visit_proof(proof: &[Vec<u8>]) {
+    pub(crate) fn visit_proof(proof: &[Vec<u8>]) {
         let mut child_hash = vec![];
         let mut partial_key = vec![];
         for node in proof.iter() {
@@ -829,7 +829,7 @@ pub mod test {
                 let key_nibbles_struct = Nibbles::from_compact(&node_list[0]);
                 let key_nibbles = key_nibbles_struct.nibbles();
                 println!(
-                    "[+] Leaf/Extension node: partial key extracted: {:?}",
+                    "\t=> Leaf/Extension node: partial key extracted: {:?}",
                     hex::encode(nibbles_to_bytes(key_nibbles))
                 );
                 partial_key.splice(0..0, key_nibbles.to_vec());
@@ -843,7 +843,7 @@ pub mod test {
                     .map(|(i, _)| i)
                     .expect("didn't find hash in parent") as u8;
                 println!(
-                    "[+] Branch node: (len branch = {}) partial key (nibble): {:?}",
+                    "\t=> Branch node: (len branch = {}) partial key (nibble): {:?}",
                     node_list.len(),
                     hex::encode(vec![branch_idx]).pop().unwrap()
                 );
