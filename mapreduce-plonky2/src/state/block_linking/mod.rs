@@ -9,6 +9,7 @@ use crate::{mpt_sequential::PAD_LEN, storage::PublicInputs as StorageInputs};
 use account::{Account, AccountInputsWires};
 use anyhow::Result;
 use block::{BlockHeader, BlockInputsWires};
+use ethers::types::H160;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -26,7 +27,7 @@ where
     [(); DEPTH - 1]:,
 {
     /// Account input data
-    account_inputs: AccountInputsWires<DEPTH, NODE_LEN>,
+    pub(super) account_inputs: AccountInputsWires<DEPTH, NODE_LEN>,
     /// Block input data
     block_inputs: BlockInputsWires<BLOCK_LEN>,
 }
@@ -59,6 +60,7 @@ where
 {
     pub fn new<F: RichField>(
         storage_pi: &[F],
+        contract_address: H160,
         header_rlp: Vec<u8>,
         // Nodes of state MPT, it's ordered from leaf to root.
         state_mpt_nodes: Vec<Vec<u8>>,
@@ -69,7 +71,6 @@ where
         // Get the contract address and hash of storage MPT root, and create the
         // account inputs gadget.
         let storage_pi = StorageInputs::from(storage_pi);
-        let contract_address = storage_pi.contract_address_value();
         let storage_mpt_root = storage_pi.mpt_root_value();
         let account_inputs = Account::new(contract_address, storage_mpt_root, state_mpt_nodes);
 
@@ -269,7 +270,12 @@ mod tests {
             exp_block_number: block.number.unwrap(),
             exp_parent_hash: block.parent_hash,
             exp_hash,
-            c: BlockLinkingCircuit::new(&storage_pi, header_rlp, state_mpt.nodes),
+            c: BlockLinkingCircuit::new(
+                &storage_pi,
+                state_mpt.account_address,
+                header_rlp,
+                state_mpt.nodes,
+            ),
             storage_pi,
         };
         run_circuit::<F, D, C, _>(test_circuit);
@@ -383,7 +389,7 @@ mod tests {
             exp_block_number: block.number.unwrap(),
             exp_parent_hash: block.parent_hash,
             exp_hash,
-            c: BlockLinkingCircuit::new(&storage_pi, header_rlp, state_mpt.nodes),
+            c: BlockLinkingCircuit::new(&storage_pi, account_address, header_rlp, state_mpt.nodes),
             storage_pi,
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
@@ -473,11 +479,6 @@ mod tests {
         let mut storage_pi: Vec<_> = (0..StorageInputs::<F>::TOTAL_LEN)
             .map(|_| F::from_canonical_u64(thread_rng().gen::<u64>()))
             .collect();
-
-        // Set the contract address to the public inputs of storage proof.
-        let contract_address = convert_u8_slice_to_u32_fields(&mpt.account_address.0);
-        storage_pi[StorageInputs::<F>::A_IDX..StorageInputs::<F>::M_IDX]
-            .copy_from_slice(&contract_address);
 
         // Set the storage root hash to the public inputs of storage proof.
         let account_node = &mpt.nodes[0];

@@ -31,7 +31,6 @@ use std::array;
 /// `D` Digest of all the values processed
 /// `C1` MPT root of blockchain storage trie
 /// `C2` Merkle root of LPN’s storage database (merkle tree)
-/// `A` Address of smart contract
 /// `M` Storage slot of the mapping
 /// `S` Storage slot of the variable holding the length
 #[derive(Clone, Debug)]
@@ -40,14 +39,13 @@ pub struct PublicInputs<'a, T: Clone> {
 }
 
 impl<'a, F: RichField> PublicInputs<'a, F> {
-    /// Get the contract address (A).
-    pub fn contract_address_value(&self) -> H160 {
-        // The contract address is packed as [u32; 5] in public inputs. This
-        // code converts it to [u8; 20] as H160.
-        let bytes = convert_u32_fields_to_u8_vec(self.contract_address_data());
+    //pub fn contract_address_value(&self) -> H160 {
+    //    // The contract address is packed as [u32; 5] in public inputs. This
+    //    // code converts it to [u8; 20] as H160.
+    //    let bytes = convert_u32_fields_to_u8_vec(self.contract_address_data());
 
-        H160(bytes.try_into().unwrap())
-    }
+    //    H160(bytes.try_into().unwrap())
+    //}
 
     /// Get the hash value of storage MPT root (C1).
     pub fn mpt_root_value(&self) -> H256 {
@@ -65,14 +63,12 @@ impl<'a> PublicInputs<'a, Target> {
         digest: &CurveTarget,
         mpt_root_hash: &OutputHash,
         merkle_root_hash: &HashOutTarget,
-        contract_address: &PackedAddressTarget,
         mapping_slot: Target,
         length_slot: Target,
     ) {
         cb.register_curve_public_input(*digest);
         mpt_root_hash.register_as_input(cb);
         cb.register_public_inputs(&merkle_root_hash.elements);
-        contract_address.register_as_input(cb);
         cb.register_public_input(mapping_slot);
         cb.register_public_input(length_slot);
     }
@@ -82,12 +78,12 @@ impl<'a> PublicInputs<'a, Target> {
         convert_point_to_curve_target(self.digest_data())
     }
 
-    pub fn contract_address(&self) -> PackedAddressTarget {
-        let data = self.contract_address_data();
-        Array {
-            arr: array::from_fn(|i| U32Target(data[i])),
-        }
-    }
+    //pub fn contract_address(&self) -> PackedAddressTarget {
+    //    let data = self.contract_address_data();
+    //    Array {
+    //        arr: array::from_fn(|i| U32Target(data[i])),
+    //    }
+    //}
 
     pub fn mpt_root(&self) -> OutputHash {
         let data = self.mpt_root_data();
@@ -105,8 +101,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     pub(crate) const D_IDX: usize = 0;
     pub(crate) const C1_IDX: usize = Self::D_IDX + 2 * N + 1; // 2*N+1 for curve target
     pub(crate) const C2_IDX: usize = Self::C1_IDX + PACKED_HASH_LEN;
-    pub(crate) const A_IDX: usize = Self::C2_IDX + NUM_HASH_OUT_ELTS;
-    pub(crate) const M_IDX: usize = Self::A_IDX + PACKED_ADDRESS_LEN;
+    pub(crate) const M_IDX: usize = Self::C2_IDX + NUM_HASH_OUT_ELTS;
     pub(crate) const S_IDX: usize = Self::M_IDX + 1;
     pub(crate) const TOTAL_LEN: usize = Self::S_IDX + 1;
 
@@ -124,11 +119,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     pub fn merkle_root_data(&self) -> &[T] {
-        &self.proof_inputs[Self::C2_IDX..Self::A_IDX]
-    }
-
-    pub fn contract_address_data(&self) -> &[T] {
-        &self.proof_inputs[Self::A_IDX..Self::M_IDX]
+        &self.proof_inputs[Self::C2_IDX..Self::M_IDX]
     }
 
     pub fn mapping_slot(&self) -> T {
@@ -165,7 +156,6 @@ impl DigestEqualCircuit {
             &mpt_digest,
             &mpt_pi.root_hash(),
             &merkle_pi.root_hash(),
-            &mpt_pi.contract_address(),
             mpt_pi.mapping_slot(),
             mpt_pi.length_slot(),
         );
@@ -240,7 +230,6 @@ mod tests {
         let exp_digest = (digest.x.0, digest.y.0, F::from_bool(digest.is_inf));
         let exp_mpt_root = mpt_pi_wrapper.root_hash_data();
         let exp_merkle_root = merkle_pi_wrapper.root_raw();
-        let exp_contract_address = mpt_pi_wrapper.contract_address_data();
         let exp_mapping_slot = mpt_pi_wrapper.mapping_slot();
         let exp_length_slot = mpt_pi_wrapper.length_slot();
 
@@ -255,7 +244,6 @@ mod tests {
         assert_eq!(pi.digest_data(), exp_digest);
         assert_eq!(pi.mpt_root_data(), exp_mpt_root);
         assert_eq!(pi.merkle_root_data(), exp_merkle_root);
-        assert_eq!(pi.contract_address_data(), exp_contract_address);
         assert_eq!(pi.mapping_slot(), exp_mapping_slot);
         assert_eq!(pi.length_slot(), exp_length_slot);
     }

@@ -34,7 +34,6 @@ use std::array::{self, from_fn as create_array};
 /// This is a wrapper around an array of targets set as public inputs of any
 /// proof generated in this module. They all share the same structure.
 /// `C` MPT root hash
-/// `A` Contract address
 /// `S` storage slot of the variable holding the length
 /// `V` Integer value stored at key `S` (can be given by prover)
 #[derive(Clone, Debug)]
@@ -46,14 +45,12 @@ impl<'a> PublicInputs<'a, Target> {
     pub fn register<F, const D: usize>(
         cb: &mut CircuitBuilder<F, D>,
         mpt_root_hash: &OutputHash,
-        contract_address: &PackedAddressTarget,
         storage_slot: Target,
         length_value: Target,
     ) where
         F: RichField + Extendable<D>,
     {
         mpt_root_hash.register_as_input(cb);
-        contract_address.register_as_input(cb);
         cb.register_public_input(storage_slot);
         cb.register_public_input(length_value);
     }
@@ -62,17 +59,11 @@ impl<'a> PublicInputs<'a, Target> {
         let data = self.root_hash_data();
         OutputHash::from_array(array::from_fn(|i| U32Target(data[i])))
     }
-
-    pub fn contract_address(&self) -> PackedAddressTarget {
-        let data = self.packed_contract_address();
-        PackedAddressTarget::from_array(array::from_fn(|i| U32Target(data[i])))
-    }
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
     pub(crate) const C_IDX: usize = 0;
-    pub(crate) const A_IDX: usize = Self::C_IDX + PACKED_HASH_LEN;
-    pub(crate) const S_IDX: usize = Self::A_IDX + PACKED_ADDRESS_LEN;
+    pub(crate) const S_IDX: usize = Self::C_IDX + PACKED_HASH_LEN;
     pub(crate) const V_IDX: usize = Self::S_IDX + 1;
     pub(crate) const TOTAL_LEN: usize = Self::V_IDX + 1;
 
@@ -81,11 +72,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     pub fn root_hash_data(&self) -> &[T] {
-        &self.proof_inputs[Self::C_IDX..Self::A_IDX]
-    }
-
-    pub fn packed_contract_address(&self) -> &[T] {
-        &self.proof_inputs[Self::A_IDX..Self::S_IDX]
+        &self.proof_inputs[Self::C_IDX..Self::S_IDX]
     }
 
     pub fn storage_slot(&self) -> T {
@@ -141,7 +128,6 @@ where
         let zero = cb.zero();
         let one = cb.one();
         let slot = SimpleSlot::build(cb);
-        let packed_contract_address = PackedAddressTarget::new(cb);
 
         // Generate the input and output wires of MPT circuit.
         let mpt_input = MPTCircuit::create_input_wires(cb, Some(slot.mpt_key.clone()));
@@ -176,13 +162,7 @@ where
         let length_value = cb.zero();
 
         // Register the public inputs.
-        PublicInputs::register(
-            cb,
-            &mpt_output.root,
-            &packed_contract_address,
-            slot.slot,
-            length_value,
-        );
+        PublicInputs::register(cb, &mpt_output.root, slot.slot, length_value);
 
         LengthExtractWires {
             slot,
@@ -372,7 +352,6 @@ mod tests {
         assert_eq!(pi.storage_slot(), exp_slot);
         assert_eq!(pi.length_value(), exp_value);
         assert_eq!(pi.root_hash_data(), exp_root_hash);
-        assert_eq!(pi.packed_contract_address(), exp_contract_address);
     }
 
     use anyhow::anyhow;
@@ -727,40 +706,40 @@ mod tests {
         //    contract_address: pidgy_address,
         //    nodes,
         //};
-        let circuit = ExtractionHashPidgy::<DEPTH, NODE_LEN> {
-            slot,
-            contract_address: pidgy_address,
-            nodes: nodes.clone(),
-            after_leaf_key: {
-                let leaf: Vec<Vec<u8>> = rlp::decode_list(&nodes[0]);
-                let key_nibbles_struct = Nibbles::from_compact(&leaf[0]);
-                let key_nibbles = key_nibbles_struct.nibbles();
-                let ptr = MAX_KEY_NIBBLE_LEN - 1 - key_nibbles.len();
-                let branch: Vec<Vec<u8>> = rlp::decode_list(&nodes[1]);
-                let mpt_key_nibbles = bytes_to_nibbles(&query.slot.mpt_key_vec());
-                {
-                    let slot = SimpleSlot::new(slot);
-                    let slot_key_nibbles = bytes_to_nibbles(&slot.0.mpt_key_vec());
-                    assert!(
-                        mpt_key_nibbles == slot_key_nibbles,
-                        "MPT SLOT vs Query SLOT (eth) failing"
-                    );
-                }
-                let leaf_hash = branch[mpt_key_nibbles[ptr] as usize].clone();
-                let exp_hash = keccak256(&nodes[0]);
-                assert_eq!(leaf_hash, exp_hash);
-                println!(
-                    "Check hash inclusion of leaf done -> FULL {:?}",
-                    bytes_to_nibbles(&query.slot.mpt_key_vec())
-                );
-                (mpt_key_nibbles, ptr)
-            },
-        };
-        run_circuit::<F, D, C, _>(circuit);
-        //let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
-        //    base: LengthExtractCircuit::new(slot, pidgy_address, nodes),
+        //let circuit = ExtractionHashPidgy::<DEPTH, NODE_LEN> {
+        //    slot,
+        //    contract_address: pidgy_address,
+        //    nodes: nodes.clone(),
+        //    after_leaf_key: {
+        //        let leaf: Vec<Vec<u8>> = rlp::decode_list(&nodes[0]);
+        //        let key_nibbles_struct = Nibbles::from_compact(&leaf[0]);
+        //        let key_nibbles = key_nibbles_struct.nibbles();
+        //        let ptr = MAX_KEY_NIBBLE_LEN - 1 - key_nibbles.len();
+        //        let branch: Vec<Vec<u8>> = rlp::decode_list(&nodes[1]);
+        //        let mpt_key_nibbles = bytes_to_nibbles(&query.slot.mpt_key_vec());
+        //        {
+        //            let slot = SimpleSlot::new(slot);
+        //            let slot_key_nibbles = bytes_to_nibbles(&slot.0.mpt_key_vec());
+        //            assert!(
+        //                mpt_key_nibbles == slot_key_nibbles,
+        //                "MPT SLOT vs Query SLOT (eth) failing"
+        //            );
+        //        }
+        //        let leaf_hash = branch[mpt_key_nibbles[ptr] as usize].clone();
+        //        let exp_hash = keccak256(&nodes[0]);
+        //        assert_eq!(leaf_hash, exp_hash);
+        //        println!(
+        //            "Check hash inclusion of leaf done -> FULL {:?}",
+        //            bytes_to_nibbles(&query.slot.mpt_key_vec())
+        //        );
+        //        (mpt_key_nibbles, ptr)
+        //    },
         //};
-        //let proof = run_circuit::<F, D, C, _>(test_circuit);
+        //run_circuit::<F, D, C, _>(circuit);
+        let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
+            base: LengthExtractCircuit::new(slot, pidgy_address, nodes),
+        };
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
 
         //// Verify the public inputs.
         //let pi = PublicInputs::<F>::from(&proof.public_inputs);
