@@ -418,7 +418,12 @@ mod tests {
         let storage_pi = generate_storage_inputs::<_, VALUE_LEN>(&state_mpt);
         let block = generate_block(&state_mpt);
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
-        let inputs = BlockLinkingCircuitInputs::new(&storage_pi, header_rlp, state_mpt.nodes);
+        let inputs = BlockLinkingCircuitInputs::new(
+            &storage_pi,
+            state_mpt.account_address,
+            header_rlp,
+            state_mpt.nodes,
+        );
         // generate dummy storage proof with expected public inputs
         let storage_proof = test_storage_circuit
             .generate_proof(storage_pi.try_into().unwrap())
