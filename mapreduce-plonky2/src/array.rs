@@ -413,17 +413,18 @@ where
             .for_each(|(our, other)| b.connect(our.to_target(), other.to_target()));
     }
 
+    /// Enforces both array contains the same subslice array[..slice_len].
     pub fn enforce_slice_equals<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
         other: &Self,
-        end_idx: Target,
+        slice_len: Target,
     ) {
         let tru = b._true();
         for (i, (our, other)) in self.arr.iter().zip(other.arr.iter()).enumerate() {
             let it = b.constant(F::from_canonical_usize(i));
             // TODO: fixed to 6 becaues max nibble len = 64 - TO CHANGE
-            let before_end = less_than(b, it, end_idx, 6);
+            let before_end = less_than(b, it, slice_len, 6);
             let eq = b.is_equal(our.to_target(), other.to_target());
             let res = b.select(before_end, eq.target, tru.target);
             b.connect(res, tru.target);

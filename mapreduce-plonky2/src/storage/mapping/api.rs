@@ -16,6 +16,7 @@ use anyhow::bail;
 use anyhow::Result;
 use log::debug;
 use paste::paste;
+use plonky2::field::types::Field;
 use plonky2::field::types::PrimeField64;
 use plonky2::hash::hash_types::HashOut;
 use plonky2::plonk::circuit_data::CircuitConfig;
@@ -226,11 +227,7 @@ macro_rules! impl_branch_circuits {
                     .iter()
                     .map(|nib| nib.to_canonical_u64() as u8)
                     .collect::<Vec<_>>();
-                // -1 because it's the expected pointer _after_ advancing the
-                // pointer by one in the branch circuit.
-                // TODO: refactor circuit to only advance the pointer by one _after_
-                // the comparison, so we don't need to do this?
-                let pointer = ptr.to_canonical_u64() as usize - 1;
+                let pointer = ptr.to_canonical_u64() as usize;
                 let (proofs, vks): (Vec<_>, Vec<_>) = child_proofs
                     .iter()
                     // TODO: didn't find a way to get rid of the useless clone - it's either on the vk or on the proof
@@ -388,8 +385,10 @@ impl PublicParameters {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use eth_trie::{EthTrie, MemoryDB, Trie};
-    use plonky2::field::types::Field;
+    use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
     use rand::{thread_rng, Rng};
     use serial_test::serial;
 
@@ -493,7 +492,7 @@ mod test {
     #[serial]
     fn test_branch_logic() {
         let params = PublicParameters::build();
-        let slot = 1;
+        let slot = 0;
         let mut test_data = generate_storage_trie_and_keys(slot);
         let trie = &mut test_data.trie;
         let key = &test_data.key;
@@ -504,25 +503,21 @@ mod test {
         // they should share the same branch node
         assert_eq!(p1.len(), p2.len());
         assert_eq!(p1[p1.len() - 2], p2[p2.len() - 2]);
-        let l1 = LeafCircuit {
-            node: p1.last().unwrap().to_vec(),
-            slot: MappingSlot::new(slot as u8, key.clone()),
-        };
+        let l1_inputs = CircuitInput::new_leaf(p1.last().unwrap().to_vec(), slot, key.clone());
         // generate a leaf then a branch proof with only this leaf
-        let leaf1_proof = params.generate_proof(CircuitInput::Leaf(l1)).unwrap();
-        let pub1 = leaf1_proof.proof().public_inputs[..NUM_IO].to_vec();
+        let leaf1_proof_buff = generate_proof(&params, l1_inputs).unwrap();
+        // some testing on the public inputs of the proof
+        let leaf1_proof = ProofWithVK::deserialize(&leaf1_proof_buff).unwrap();
+        let pub1 = leaf1_proof.proof.public_inputs[..NUM_IO].to_vec();
         let pi1 = PublicInputs::from(&pub1);
         assert_eq!(pi1.proof_inputs.len(), NUM_IO);
         let (_, comp_ptr) = pi1.mpt_key_info();
         assert_eq!(comp_ptr, F::from_canonical_usize(63));
+
         let branch_node = p1[p1.len() - 2].to_vec();
-        let branch_inputs = CircuitInput::Branch(BranchInput {
-            input: InputNode {
-                node: branch_node.clone(),
-            },
-            serialized_child_proofs: vec![bincode::serialize(&leaf1_proof).unwrap()],
-        });
-        let branch1 = params.generate_proof(branch_inputs).unwrap();
+        let branch_inputs = CircuitInput::new_branch(branch_node.clone(), vec![leaf1_proof_buff]);
+        let branch1_buff = generate_proof(&params, branch_inputs).unwrap();
+        let branch1 = ProofWithVK::deserialize(&branch1_buff).unwrap();
         let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
             params.branchs.b1_over_2.get_verifier_data().clone()
         } else {
@@ -578,5 +573,61 @@ mod test {
             params.branchs.b2.get_verifier_data().clone()
         };
         assert_eq!(branch2.verifier_data(), &exp_vk);
+    }
+
+    #[test]
+    fn test_mapping_api() {
+        let memdb = Arc::new(MemoryDB::new(true));
+        let mut trie = EthTrie::new(memdb.clone());
+
+        let key1 = [1; 20].to_vec();
+        let val1 = [2; 32].to_vec();
+        let slot1 = StorageSlot::Mapping(key1.clone(), 0);
+        let mpt_key1 = slot1.mpt_key();
+
+        let key2 = [3; 20].to_vec();
+        let val2 = [4; 32].to_vec();
+        let slot2 = StorageSlot::Mapping(key2.clone(), 0);
+        let mpt_key2 = slot2.mpt_key();
+
+        trie.insert(&mpt_key1, &val1).unwrap();
+        trie.insert(&mpt_key2, &val2).unwrap();
+        trie.root_hash().unwrap();
+
+        let proof1 = trie.get_proof(&mpt_key1).unwrap();
+        let proof2 = trie.get_proof(&mpt_key2).unwrap();
+
+        assert_eq!(proof1.len(), 2);
+        assert_eq!(proof2.len(), 2);
+        assert_eq!(proof1[0], proof2[0]);
+        assert!(rlp::decode_list::<Vec<u8>>(&proof1[0]).len() == 17);
+        use crate::storage::mapping::{self};
+        println!("Generating params...");
+        let params = mapping::api::build_circuits_params();
+        println!("Proving leaf 1...");
+
+        let leaf_input1 = mapping::CircuitInput::new_leaf(proof1[1].clone(), 0, key1);
+        let leaf_proof1 = mapping::api::generate_proof(&params, leaf_input1).unwrap();
+        {
+            let lp = ProofWithVK::deserialize(&leaf_proof1).unwrap();
+            let pub1 = mapping::PublicInputs::from(&lp.proof.public_inputs);
+            let (_, ptr) = pub1.mpt_key_info();
+            assert_eq!(ptr, GoldilocksField::ZERO);
+        }
+
+        println!("Proving leaf 2...");
+
+        let leaf_input2 = mapping::CircuitInput::new_leaf(proof2[1].clone(), 0, key2);
+
+        let leaf_proof2 = mapping::api::generate_proof(&params, leaf_input2).unwrap();
+
+        println!("Proving branch...");
+
+        let branch_input = mapping::api::CircuitInput::new_branch(
+            proof1[0].clone(),
+            vec![leaf_proof1, leaf_proof2],
+        );
+
+        mapping::api::generate_proof(&params, branch_input).unwrap();
     }
 }
