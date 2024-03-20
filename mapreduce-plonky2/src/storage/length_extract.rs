@@ -274,11 +274,12 @@ mod tests {
         mpt_sequential::{
             bytes_to_nibbles,
             test::{verify_storage_proof_from_query, visit_proof},
+            MPTKeyWire,
         },
         rlp::{MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
         utils::{convert_u8_to_u32_slice, keccak256},
     };
-    use eth_trie::{EthTrie, MemoryDB, Trie};
+    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use ethers::{
         providers::{Http, Provider},
         types::{Address, H160},
@@ -516,6 +517,7 @@ mod tests {
         nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
         child_hashes: [Array<Target, 32>; DEPTH - 1],
         keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; 1],
+        exp_leaf_key: MPTKeyWire,
     }
 
     impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D>
@@ -533,6 +535,8 @@ mod tests {
             let key = slot.keccak_mpt.mpt_key.clone();
             let exp_key = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b);
             key.key.enforce_equal(b, &exp_key);
+            let exp_leaf_key = MPTKeyWire::new(b);
+            exp_key.enforce_equal(b, &exp_leaf_key.key);
             let nodes: [VectorWire<Target, _>; DEPTH] =
                 create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b));
             let expected_hashes_bytes: [Array<Target, 32>; DEPTH - 1] =
@@ -542,6 +546,17 @@ mod tests {
             let (mut iterative_key, leaf_value, is_leaf) =
                 Circuit::advance_key_leaf_or_extension(b, &nodes[0].arr, &key, &leaf_headers);
             b.connect(t.target, is_leaf.target);
+            for (i, (comp_nib, exp_nib)) in iterative_key
+                .key
+                .arr
+                .iter()
+                .zip(exp_leaf_key.key.arr.iter())
+                .enumerate()
+            {
+                if i < 0 {
+                    b.connect(*comp_nib, *exp_nib);
+                }
+            }
 
             let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]);
             let mut last_hash_output = leaf_hash.output_array.clone();
@@ -590,12 +605,19 @@ mod tests {
                 nodes,
                 child_hashes: expected_hashes_bytes,
                 keccak_wires: keccak_wires.try_into().unwrap(),
+                exp_leaf_key,
             }
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             let slot = SimpleSlot::new(self.slot, self.contract_address);
             slot.assign(pw, &wires.slot);
+            wires.exp_leaf_key.assign(
+                pw,
+                &self.after_leaf_key.0.clone().try_into().unwrap(),
+                self.after_leaf_key.1,
+            );
+            assert!(bytes_to_nibbles(&slot.mpt_key()) == self.after_leaf_key.0);
             wires
                 .exp_mpt_key
                 .assign_bytes(pw, &bytes_to_nibbles(&slot.mpt_key()).try_into().unwrap());
@@ -639,7 +661,6 @@ mod tests {
                     );
                 }
             }
-            
         }
     }
 
@@ -704,7 +725,7 @@ mod tests {
         let circuit = ExtractionHashPidgy::<DEPTH, NODE_LEN> {
             slot,
             contract_address: pidgy_address,
-            nodes,
+            nodes: nodes.clone(),
             after_leaf_key: {
                 let leaf: Vec<Vec<u8>> = rlp::decode_list(&nodes[0]);
                 let key_nibbles_struct = Nibbles::from_compact(&leaf[0]);
@@ -712,9 +733,21 @@ mod tests {
                 let ptr = MAX_KEY_NIBBLE_LEN - 1 - key_nibbles.len();
                 let branch: Vec<Vec<u8>> = rlp::decode_list(&nodes[1]);
                 let mpt_key_nibbles = bytes_to_nibbles(&query.slot.mpt_key());
-                let leaf_hash = branch[mpt_key_nibbles[ptr] as usize];
+                {
+                    let slot = SimpleSlot::new(slot, pidgy_address);
+                    let slot_key_nibbles = bytes_to_nibbles(&slot.mpt_key());
+                    assert!(
+                        mpt_key_nibbles == slot_key_nibbles,
+                        "MPT SLOT vs Query SLOT (eth) failing"
+                    );
+                }
+                let leaf_hash = branch[mpt_key_nibbles[ptr] as usize].clone();
                 let exp_hash = keccak256(&nodes[0]);
                 assert_eq!(leaf_hash, exp_hash);
+                println!(
+                    "Check hash inclusion of leaf done -> FULL {:?}",
+                    bytes_to_nibbles(&query.slot.mpt_key())
+                );
                 (mpt_key_nibbles, ptr)
             },
         };

@@ -3,7 +3,7 @@
 
 use crate::{
     array::{Array, Vector, VectorWire},
-    eth::left_pad32,
+    eth::{left_pad32, StorageSlot},
     keccak::{ByteKeccakWires, InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, PAD_LEN},
     types::{AddressTarget, ADDRESS_LEN},
@@ -108,24 +108,16 @@ impl KeccakMPT {
 /// Circuit gadget that proves the correct derivation of a MPT key from a simple
 /// storage slot.
 /// Deriving a MPT key from simple slot is done like:
-/// 1. location = keccak(left_pad32(contract_address), left_pad32(slot))
+/// 1. location = keccak(left_pad32(slot))
 /// 2. mpt_key = keccak(location)
 /// WARNING: Currently takes the assumption that the storage slot number fits
 /// inside a single byte.
 #[derive(Clone, Debug)]
-pub struct SimpleSlot {
-    /// Simple storage slot
-    slot: u8,
-    /// Contract address
-    contract_address: Address,
-}
+pub struct SimpleSlot(StorageSlot);
 
 impl SimpleSlot {
-    pub fn new(slot: u8, contract_address: Address) -> Self {
-        Self {
-            slot,
-            contract_address,
-        }
+    pub fn new(slot: u8) -> Self {
+        Self(StorageSlot::Simple(slot as usize))
     }
 }
 
@@ -134,8 +126,6 @@ impl SimpleSlot {
 pub struct SimpleSlotWires {
     /// Simple storage slot which is assumed to fit in a single byte
     pub(crate) slot: Target,
-    /// Contract address used to calculate the "location"
-    pub(crate) contract_address: AddressTarget,
     /// Wires associated with the MPT key
     pub(crate) keccak_mpt: KeccakMPTWires,
 }
@@ -154,15 +144,12 @@ impl SimpleSlot {
         b: &mut CircuitBuilder<F, D>,
     ) -> SimpleSlotWires {
         let slot = b.add_virtual_target();
-        let contract_address = AddressTarget::new(b);
 
-        // keccak(left_pad32(contract_address), left_pad32(slot))
+        // keccak(left_pad32(slot))
         let mut arr = [b.zero(); INPUT_PADDED_LEN];
-        arr[INPUT_ELEMENT_LEN - ADDRESS_LEN..INPUT_ELEMENT_LEN]
-            .copy_from_slice(&contract_address.arr);
-        arr[INPUT_TUPLE_LEN - 1] = slot;
+        arr[INPUT_ELEMENT_LEN - 1] = slot;
         let inputs = VectorWire::<Target, INPUT_PADDED_LEN> {
-            real_len: b.constant(F::from_canonical_usize(INPUT_TUPLE_LEN)),
+            real_len: b.constant(F::from_canonical_usize(INPUT_ELEMENT_LEN)),
             arr: Array { arr },
         };
         // Build for keccak MPT.

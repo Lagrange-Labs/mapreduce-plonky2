@@ -252,6 +252,8 @@ pub(crate) struct ProofQuery {
     pub(crate) contract: Address,
     pub(crate) slot: StorageSlot,
 }
+
+#[derive(Clone, Debug)]
 pub(crate) enum StorageSlot {
     /// simple storage slot like a uin256 etc that fits in 32bytes
     /// Argument is the slot location in the contract
@@ -379,7 +381,10 @@ mod test {
     use ethers::types::{BlockNumber, H256, U256};
     use rand::{thread_rng, Rng};
 
-    use crate::utils::{convert_u8_to_u32_slice, find_index_subvector};
+    use crate::{
+        mpt_sequential::test::verify_storage_proof_from_query,
+        utils::{convert_u8_to_u32_slice, find_index_subvector},
+    };
 
     use super::*;
 
@@ -393,6 +398,7 @@ mod test {
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_simple_slot(pidgy_address, 8);
         let res = query.query_mpt_proof(&provider, None).await?;
+        ProofQuery::verify_storage_proof(&res)?;
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         println!("leaf[1].len() = {}", leaf_list[1].len());
