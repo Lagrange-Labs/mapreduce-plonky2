@@ -42,6 +42,7 @@ mod tests {
     use std::array;
 
     /// Test proving with a simple circuit.
+    #[serial]
     #[test]
     fn test_groth16_proving_simple() {
         let config = CircuitConfig::standard_recursion_config();
@@ -66,6 +67,7 @@ mod tests {
     /// Test proving with the keccak circuit.
     /// Ignore for long running.
     #[ignore]
+    #[serial]
     #[test]
     fn test_groth16_proving_with_keccak() {
         let config = CircuitConfig::standard_recursion_config();
@@ -99,6 +101,7 @@ mod tests {
     /// Test proving with the group-hashing circuit.
     /// Ignore for long running.
     #[ignore]
+    #[serial]
     #[test]
     fn test_groth16_proving_with_group_hashing() {
         let config = CircuitConfig::standard_recursion_config();

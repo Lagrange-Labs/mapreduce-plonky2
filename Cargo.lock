@@ -1913,6 +1913,7 @@ dependencies = [
  "plonky2_ecgfp5",
  "plonky2x",
  "rand",
+ "serial_test",
 ]
 
 [[package]]

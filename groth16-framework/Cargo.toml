@@ -12,3 +12,4 @@ plonky2x = { git = "https://github.com/Lagrange-Labs/succinctx", branch = "lagra
 mapreduce-plonky2 = { path = "../mapreduce-plonky2" }
 plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
 rand = "0.8"
+serial_test = "3.0"
