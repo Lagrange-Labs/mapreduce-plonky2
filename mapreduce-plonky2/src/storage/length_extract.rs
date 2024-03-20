@@ -432,6 +432,7 @@ mod tests {
                     },
                 );
                 if i < 2 {
+                    //cb.connect(valid_node.target,t.target);
                     extracted_child_hash.enforce_equal(cb, &expected_hashes_bytes[i - 1]);
                     //cb.connect(t.target, found_hash_in_parent.target);
                 }
@@ -481,6 +482,7 @@ mod tests {
             // assign child hashes
             self.nodes
                 .iter()
+                .skip(1)
                 .map(|n| keccak256(n))
                 .zip(wires.child_hashes.iter())
                 .for_each(|(hash, wire)| {
@@ -488,6 +490,7 @@ mod tests {
                 });
         }
     }
+
 
     #[tokio::test]
     #[serial]
