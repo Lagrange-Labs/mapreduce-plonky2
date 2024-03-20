@@ -1,4 +1,5 @@
 use ethers::types::Address;
+use plonky2::plonk::config::GenericHashOut;
 use plonky2::{
     field::{
         goldilocks_field::GoldilocksField,
@@ -84,14 +85,17 @@ impl TestProvenanceCircuit {
         );
         let mapping_slot = epilogue.mapping_slot_raw().to_canonical_u64() as u8;
         let length_slot = epilogue.length_slot_raw().to_canonical_u64() as u8;
-        let storage_root = convert_u32_fields_to_u8_vec(epilogue.root_raw())
-            .as_slice()
-            .try_into()
-            .unwrap();
+        let storage_root = HashOut {
+            elements: epilogue.root_raw().try_into().unwrap(),
+        };
 
-        let state_root = state_leaf_hash(address, mapping_slot, length_slot, storage_root);
-        let state_root = convert_u8_slice_to_u32_fields(&state_root);
-        let mut state_root = HashOut::from_vec(state_root);
+        let state_root = state_leaf_hash(
+            address,
+            mapping_slot,
+            length_slot,
+            storage_root.to_bytes().try_into().unwrap(),
+        );
+        let mut state_root = HashOut::from_bytes(&state_root);
 
         for i in 0..L {
             let (left, right) = if positions[i] {
