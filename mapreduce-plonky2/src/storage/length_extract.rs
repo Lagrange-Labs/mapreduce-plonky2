@@ -487,9 +487,11 @@ mod tests {
             self.nodes
                 .iter()
                 .map(|n| keccak256(n))
-                .zip(wires.child_hashes.iter())
                 .take(DEPTH - 1)
-                .for_each(|(hash, wire)| {
+                .zip(wires.child_hashes.iter())
+                .enumerate()
+                .for_each(|(i, (hash, wire))| {
+                    println!("hash {}: {:?}", i, hash);
                     wire.assign_from_data(pw, &hash.try_into().unwrap());
                 });
         }
@@ -500,7 +502,6 @@ mod tests {
         slot: u8,
         contract_address: H160,
         nodes: Vec<Vec<u8>>,
-        child_hashes: Vec<u8>,
     }
 
     #[derive(Clone, Debug)]
@@ -511,8 +512,8 @@ mod tests {
     {
         slot: SimpleSlotWires,
         exp_mpt_key: Array<Target, MAX_KEY_NIBBLE_LEN>,
-        //nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
-        //child_hashes: [Array<Target, 32>; DEPTH - 1],
+        nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
+        child_hashes: [Array<Target, 32>; DEPTH - 1],
     }
 
     impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D>
@@ -525,32 +526,33 @@ mod tests {
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let zero = b.zero();
+            let t = b._true();
             let slot = SimpleSlot::build(b);
             let key = slot.keccak_mpt.mpt_key.clone();
             let exp_key = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b);
             key.key.enforce_equal(b, &exp_key);
-            //let nodes: [VectorWire<Target, _>; DEPTH] =
-            //    create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b));
-            //let expected_hashes_bytes: [Array<Target, 32>; DEPTH - 1] =
-            //    create_array(|i| Array::new(b));
+            let nodes: [VectorWire<Target, _>; DEPTH] =
+                create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b));
+            let expected_hashes_bytes: [Array<Target, 32>; DEPTH - 1] =
+                create_array(|i| Array::new(b));
 
-            //let leaf_headers = decode_fixed_list::<_, _, 2>(b, &nodes[0].arr.arr, zero);
-            //let (mut iterative_key, leaf_value, is_leaf) =
-            //    Circuit::advance_key_leaf_or_extension(b, &nodes[0].arr, &key, &leaf_headers);
-            //for i in 1..DEPTH {
-            //    let (_, extracted_child_hash, _) =
-            //        Circuit::advance_key(b, &nodes[i].arr, &iterative_key);
-            //    if i < 2 {
-            //        //cb.connect(valid_node.target,t.target);
-            //        extracted_child_hash.enforce_equal(b, &expected_hashes_bytes[i - 1]);
-            //        //cb.connect(t.target, found_hash_in_parent.target);
-            //    }
-            //}
+            let leaf_headers = decode_fixed_list::<_, _, 2>(b, &nodes[0].arr.arr, zero);
+            let (mut iterative_key, leaf_value, is_leaf) =
+                Circuit::advance_key_leaf_or_extension(b, &nodes[0].arr, &key, &leaf_headers);
+            b.connect(t.target, is_leaf.target);
+            // read from parent node
+            for i in 1..DEPTH {
+                let (new_key, extracted_child_hash, valid_node) =
+                    Circuit::<DEPTH, NODE_LEN>::advance_key(b, &nodes[i].arr, &iterative_key);
+                extracted_child_hash.enforce_equal(b, &expected_hashes_bytes[i - 1]);
+                iterative_key = new_key;
+            }
+
             ExtractionWires {
                 slot,
                 exp_mpt_key: exp_key,
-                //nodes,
-                //child_hashes: expected_hashes_bytes,
+                nodes,
+                child_hashes: expected_hashes_bytes,
             }
         }
 
@@ -562,30 +564,30 @@ mod tests {
                 .assign_bytes(pw, &bytes_to_nibbles(&slot.mpt_key()).try_into().unwrap());
             let mpt_circuit =
                 MPTCircuit::<DEPTH, NODE_LEN>::new(slot.mpt_key(), self.nodes.clone());
-            //let pad_len = DEPTH
-            //    .checked_sub(self.nodes.len())
-            //    .ok_or(anyhow!(
-            //        "Circuit depth {} too small for this MPT proof {}!",
-            //        DEPTH,
-            //        self.nodes.len()
-            //    ))
-            //    .unwrap();
-            //let padded_nodes = self
-            //    .nodes
-            //    .iter()
-            //    .map(|n| Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(n))
-            //    .chain((0..pad_len).map(|_| Ok(Vector::<u8, { PAD_LEN(NODE_LEN) }>::empty())))
-            //    .collect::<Result<Vec<_>>>()
-            //    .unwrap();
-            //// assign child hashes
-            //self.nodes
-            //    .iter()
-            //    .map(|n| keccak256(n))
-            //    .take(DEPTH - 1)
-            //    .zip(wires.child_hashes.iter())
-            //    .for_each(|(hash, wire)| {
-            //        wire.assign_from_data(pw, &hash.try_into().unwrap());
-            //    });
+            let pad_len = DEPTH
+                .checked_sub(self.nodes.len())
+                .ok_or(anyhow!(
+                    "Circuit depth {} too small for this MPT proof {}!",
+                    DEPTH,
+                    self.nodes.len()
+                ))
+                .unwrap();
+            let padded_nodes = self
+                .nodes
+                .iter()
+                .map(|n| Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(n))
+                .chain((0..pad_len).map(|_| Ok(Vector::<u8, { PAD_LEN(NODE_LEN) }>::empty())))
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            // assign child hashes
+            self.nodes
+                .iter()
+                .map(|n| keccak256(n))
+                .take(DEPTH - 1)
+                .zip(wires.child_hashes.iter())
+                .for_each(|(hash, wire)| {
+                    wire.assign_from_data(pw, &hash.try_into().unwrap());
+                });
         }
     }
 
@@ -641,13 +643,18 @@ mod tests {
         assert!(nodes.iter().all(|x| x.len() <= NODE_LEN));
         assert!(nodes.len() <= DEPTH);
         // this works
-        //verify_storage_proof_from_query::<DEPTH, NODE_LEN, false>(&query, &res).unwrap();
+        //verify_storage_proof_from_query::<DEPTH, NODE_LEN>(&query, &res).unwrap();
         let circuit = PidgyTest::<DEPTH, NODE_LEN> {
             slot,
             contract_address: pidgy_address,
             nodes,
         };
-        run_circuit::<F, D, C, _>(circuit);
+        //let circuit = ExtractionHashPidgy::<DEPTH,NODE_LEN> {
+        //    slot,
+        //    contract_address: pidgy_address,
+        //    nodes,
+        //};
+        //run_circuit::<F, D, C, _>(circuit);
         //let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
         //    base: LengthExtractCircuit::new(slot, pidgy_address, nodes),
         //};

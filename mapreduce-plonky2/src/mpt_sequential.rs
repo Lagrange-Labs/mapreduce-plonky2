@@ -703,7 +703,7 @@ pub mod test {
             c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
             exp_root: root.try_into().unwrap(),
             exp_value: value_bytes,
-            checking_value: true,
+            checking_value: false,
         };
         run_circuit::<F, D, C, _>(circuit);
 
