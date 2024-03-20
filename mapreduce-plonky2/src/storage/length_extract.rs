@@ -275,7 +275,7 @@ mod tests {
             bytes_to_nibbles,
             test::{verify_storage_proof_from_query, visit_proof},
         },
-        rlp::MAX_KEY_NIBBLE_LEN,
+        rlp::{MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
         utils::{convert_u8_to_u32_slice, keccak256},
     };
     use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -502,6 +502,7 @@ mod tests {
         slot: u8,
         contract_address: H160,
         nodes: Vec<Vec<u8>>,
+        after_leaf_key: (Vec<u8>, usize),
     }
 
     #[derive(Clone, Debug)]
@@ -514,6 +515,7 @@ mod tests {
         exp_mpt_key: Array<Target, MAX_KEY_NIBBLE_LEN>,
         nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
         child_hashes: [Array<Target, 32>; DEPTH - 1],
+        keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; 1],
     }
 
     impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D>
@@ -540,11 +542,45 @@ mod tests {
             let (mut iterative_key, leaf_value, is_leaf) =
                 Circuit::advance_key_leaf_or_extension(b, &nodes[0].arr, &key, &leaf_headers);
             b.connect(t.target, is_leaf.target);
+
+            let leaf_hash = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[0]);
+            let mut last_hash_output = leaf_hash.output_array.clone();
+            let mut keccak_wires = vec![leaf_hash];
             // read from parent node
-            for i in 1..DEPTH {
-                let (new_key, extracted_child_hash, valid_node) =
-                    Circuit::<DEPTH, NODE_LEN>::advance_key(b, &nodes[i].arr, &iterative_key);
-                extracted_child_hash.enforce_equal(b, &expected_hashes_bytes[i - 1]);
+            for i in 1..2 {
+                //let (new_key, extracted_child_hash, valid_node) =
+                // Circuit::<DEPTH, NODE_LEN>::advance_key(b, &nodes[i].arr, &iterative_key);
+
+                let (new_key, extracted_child_hash) = {
+                    let rlp_headers =
+                        decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(b, &nodes[i].arr.arr, zero);
+                    let leaf_info = Circuit::advance_key_leaf_or_extension(
+                        b,
+                        &nodes[i].arr,
+                        &key,
+                        &rlp_headers,
+                    );
+                    let tuple_condition = leaf_info.2;
+                    let branch_info =
+                        Circuit::advance_key_branch(b, &nodes[i].arr, &key, &rlp_headers);
+                    let tuple_or_branch = b.or(leaf_info.2, branch_info.2);
+                    let child_hash = leaf_info.1.select(b, tuple_condition, &branch_info.1);
+                    let new_key = leaf_info.0.select(b, tuple_condition, &branch_info.0);
+                    new_key.key.enforce_equal(b, &branch_info.0.key);
+                    (new_key, child_hash)
+                };
+
+                //extracted_child_hash.enforce_equal(b, &expected_hashes_bytes[i - 1]);
+                //let hash_wires = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &nodes[i]);
+                //let extracted_hash_u32 = convert_u8_targets_to_u32(b, &extracted_child_hash.arr);
+                //last_hash_output.enforce_equal(
+                //    b,
+                //    &Array::<U32Target, PACKED_HASH_LEN> {
+                //        arr: extracted_hash_u32.try_into().unwrap(),
+                //    },
+                //);
+                //last_hash_output = hash_wires.output_array.clone();
+                //keccak_wires.push(hash_wires);
                 iterative_key = new_key;
             }
 
@@ -553,6 +589,7 @@ mod tests {
                 exp_mpt_key: exp_key,
                 nodes,
                 child_hashes: expected_hashes_bytes,
+                keccak_wires: keccak_wires.try_into().unwrap(),
             }
         }
 
@@ -588,6 +625,21 @@ mod tests {
                 .for_each(|(hash, wire)| {
                     wire.assign_from_data(pw, &hash.try_into().unwrap());
                 });
+
+            for (i, (wire, node)) in wires.nodes.iter().zip(padded_nodes.iter()).enumerate() {
+                wire.assign(pw, node);
+                if i < 1 {
+                    KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
+                        pw,
+                        &wires.keccak_wires[i],
+                        // Given we already assign the input data elsewhere, we notify to keccak circuit
+                        // that it doesn't need to assign it again, just its add. wires.
+                        // TODO: this might be doable via a generator implementation with Plonky2...?
+                        &InputData::Assigned(node),
+                    );
+                }
+            }
+            
         }
     }
 
@@ -644,17 +696,29 @@ mod tests {
         assert!(nodes.len() <= DEPTH);
         // this works
         //verify_storage_proof_from_query::<DEPTH, NODE_LEN>(&query, &res).unwrap();
-        let circuit = PidgyTest::<DEPTH, NODE_LEN> {
-            slot,
-            contract_address: pidgy_address,
-            nodes,
-        };
-        //let circuit = ExtractionHashPidgy::<DEPTH,NODE_LEN> {
+        //let circuit = PidgyTest::<DEPTH, NODE_LEN> {
         //    slot,
         //    contract_address: pidgy_address,
         //    nodes,
         //};
-        //run_circuit::<F, D, C, _>(circuit);
+        let circuit = ExtractionHashPidgy::<DEPTH, NODE_LEN> {
+            slot,
+            contract_address: pidgy_address,
+            nodes,
+            after_leaf_key: {
+                let leaf: Vec<Vec<u8>> = rlp::decode_list(&nodes[0]);
+                let key_nibbles_struct = Nibbles::from_compact(&leaf[0]);
+                let key_nibbles = key_nibbles_struct.nibbles();
+                let ptr = MAX_KEY_NIBBLE_LEN - 1 - key_nibbles.len();
+                let branch: Vec<Vec<u8>> = rlp::decode_list(&nodes[1]);
+                let mpt_key_nibbles = bytes_to_nibbles(&query.slot.mpt_key());
+                let leaf_hash = branch[mpt_key_nibbles[ptr] as usize];
+                let exp_hash = keccak256(&nodes[0]);
+                assert_eq!(leaf_hash, exp_hash);
+                (mpt_key_nibbles, ptr)
+            },
+        };
+        run_circuit::<F, D, C, _>(circuit);
         //let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
         //    base: LengthExtractCircuit::new(slot, pidgy_address, nodes),
         //};
