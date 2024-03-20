@@ -455,8 +455,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_length_extract_pidgy_contract() -> Result<()> {
-        //let url = "https://eth.llamarpc.com";
-        let url = "https://eth-mainnet.g.alchemy.com/v2/tiJoGEC6P5-Ln4vORe52r7Qvxa8JsSj7";
+        let url = "https://eth.llamarpc.com";
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
