@@ -484,8 +484,10 @@ mod tests {
                 .iter()
                 .map(|n| keccak256(n))
                 .zip(wires.child_hashes.iter())
-                .take(DEPTH - 1)
-                .for_each(|(hash, wire)| {
+                .take(DEPTH-1)
+                .enumerate()
+                .for_each(|(i,(hash, wire))| {
+                    println!("hash {}: {:?}",i,hash);
                     wire.assign_from_data(pw, &hash.try_into().unwrap());
                 });
         }
@@ -496,7 +498,6 @@ mod tests {
         slot: u8,
         contract_address: H160,
         nodes: Vec<Vec<u8>>,
-        child_hashes: Vec<u8>,
     }
 
     #[derive(Clone, Debug)]
@@ -572,7 +573,9 @@ mod tests {
                 .map(|n| keccak256(n))
                 .take(DEPTH - 1)
                 .zip(wires.child_hashes.iter())
-                .for_each(|(hash, wire)| {
+                .enumerate()
+                .for_each(|(i,(hash, wire))| {
+                    println!("hash {}: {:?}",i,hash);
                     wire.assign_from_data(pw, &hash.try_into().unwrap());
                 });
         }
@@ -630,13 +633,18 @@ mod tests {
         assert!(nodes.iter().all(|x| x.len() <= NODE_LEN));
         assert!(nodes.len() <= DEPTH);
         // this works
-        //verify_storage_proof_from_query::<DEPTH, NODE_LEN, false>(&query, &res).unwrap();
-        let circuit = PidgyTest::<DEPTH, NODE_LEN> {
-            slot,
-            contract_address: pidgy_address,
-            nodes,
-        };
-        run_circuit::<F, D, C, _>(circuit);
+        verify_storage_proof_from_query::<DEPTH, NODE_LEN>(&query, &res).unwrap();
+        //let circuit = PidgyTest::<DEPTH, NODE_LEN> {
+        //    slot,
+        //    contract_address: pidgy_address,
+        //    nodes,
+        //};
+        //let circuit = ExtractionHashPidgy::<DEPTH,NODE_LEN> {
+        //    slot,
+        //    contract_address: pidgy_address,
+        //    nodes,
+        //};
+        //run_circuit::<F, D, C, _>(circuit);
         //let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
         //    base: LengthExtractCircuit::new(slot, pidgy_address, nodes),
         //};
