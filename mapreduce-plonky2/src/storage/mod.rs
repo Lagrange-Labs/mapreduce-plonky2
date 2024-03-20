@@ -1,5 +1,5 @@
 pub mod digest_equal;
-mod key;
+pub mod key;
 pub mod length_extract;
 pub mod length_match;
 pub mod lpn;
