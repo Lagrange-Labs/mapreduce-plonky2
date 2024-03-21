@@ -1,6 +1,8 @@
 //! Module handling the recursive proving of mapping entries specically
 //! inside a storage trie.
 
+use std::array::from_fn as create_array;
+
 use crate::circuit::UserCircuit;
 use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
 use crate::storage::key::MappingSlotWires;
@@ -27,6 +29,11 @@ use serde::{Deserialize, Serialize};
 use super::super::key::{MappingSlot, MAPPING_KEY_LEN};
 use crate::storage::mapping::public_inputs::PublicInputs;
 
+/// This constant represents the maximum size a value can be inside the storage trie.
+/// It is different than the `MAX_LEAF_VALUE_LEN` constant because it represents the
+/// **not** RLP encoded.
+const VALUE_LEN: usize = 32;
+
 /// Circuit implementing the circuit to prove the correct derivation of the
 /// MPT key from a mapping key and mapping slot. It also do the usual recursive
 /// MPT proof verification logic.
@@ -44,7 +51,7 @@ where
     node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     mapping_slot: MappingSlotWires,
-    value: Array<Target, MAX_LEAF_VALUE_LEN>,
+    value: Array<Target, VALUE_LEN>,
 }
 impl<const N: usize> LeafWires<N>
 where
@@ -79,13 +86,18 @@ where
         // Then advance the key and extract the value
         // only decode two headers in the case of leaf
         let rlp_headers = decode_fixed_list::<_, _, 2>(b, &node.arr.arr, zero);
-        let (new_key, value, is_valid) = MPTCircuit::<1, NODE_LEN>::advance_key_leaf_or_extension(
-            b,
-            &node.arr,
-            &mapping_slot_wires.keccak_mpt.mpt_key,
-            &rlp_headers,
-        );
+        let (new_key, encoded_value, is_valid) =
+            MPTCircuit::<1, NODE_LEN>::advance_key_leaf_or_extension::<_, _, _, MAX_LEAF_VALUE_LEN>(
+                b,
+                &node.arr,
+                &mapping_slot_wires.keccak_mpt.mpt_key,
+                &rlp_headers,
+            );
         b.connect(tru.target, is_valid.target);
+        // extract the value by skipping the RLP header
+        let value = Array::<Target, VALUE_LEN> {
+            arr: create_array(|i| encoded_value[i + 1]),
+        };
         // Then creates the initial accumulator from the (mapping_key, value)
         let mut inputs = [b.zero(); HASH_LEN * 2];
         inputs[0..HASH_LEN].copy_from_slice(&mapping_slot_wires.mapping_key.arr);
@@ -165,7 +177,7 @@ mod test {
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use rand::{thread_rng, Rng};
 
-    use super::{LeafCircuit, LeafWires, PublicInputs};
+    use super::{LeafCircuit, LeafWires, PublicInputs, VALUE_LEN};
     use crate::array::Array;
     use crate::circuit::UserCircuit;
     use crate::eth::{left_pad32, StorageSlot};
@@ -189,10 +201,10 @@ mod test {
         [(); PAD_LEN(NODE_LEN)]:,
     {
         // normal wires + expected extracted value
-        type Wires = (LeafWires<NODE_LEN>, Array<Target, MAX_LEAF_VALUE_LEN>);
+        type Wires = (LeafWires<NODE_LEN>, Array<Target, VALUE_LEN>);
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let exp_value = Array::<Target, MAX_LEAF_VALUE_LEN>::new(b);
+            let exp_value = Array::<Target, VALUE_LEN>::new(b);
             let leaf_wires = LeafCircuit::<NODE_LEN>::build(b);
             let eq = leaf_wires.value.equals(b, &exp_value);
             let tt = b._true();
