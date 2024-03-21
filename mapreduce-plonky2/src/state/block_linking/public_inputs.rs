@@ -95,7 +95,6 @@ impl<'a, T: Clone> BlockLinkingInputs<'a, T> {
     ///
     /// This function will panic if the length of the provided slice is smaller than
     /// [Self::TOTAL_LEN].
-    #[cfg(test)]
     pub fn from_slice(arr: &'a [T]) -> Self {
         assert!(
             TOTAL_LEN <= arr.len(),

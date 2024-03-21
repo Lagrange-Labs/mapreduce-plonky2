@@ -1,4 +1,5 @@
 use anyhow::Result;
+use ethers::core::k256::elliptic_curve::rand_core::le;
 use plonky2::{
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{
@@ -15,11 +16,14 @@ use recursion_framework::serialization::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::block_linking;
+use crate::state::{
+    block_linking,
+    lpn::{self as lpn_state, api::ProofInputs},
+};
 pub use crate::storage::{
     self,
     length_extract::{self},
-    lpn, mapping,
+    lpn as lpn_storage, mapping,
 };
 
 use self::storage::{digest_equal, length_match};
@@ -37,7 +41,7 @@ pub enum CircuitInput {
     /// Input for circuit extracting length of a mapping from MPT
     LengthExtract(storage::length_extract::CircuitInput),
     /// Input for circuit building the storage DB of LPN
-    Storage(lpn::Input),
+    Storage(lpn_storage::Input),
     /// Input for circuit binding the proofs for `Mapping` and `LengthExtract` circuits
     LengthMatch(length_match::CircuitInput),
     // Input for circuit binding the proofs for `LengthMatch` and `Storage` circuits
@@ -45,6 +49,8 @@ pub enum CircuitInput {
     /// Input for circuit linking the constructed storage DB to a specific block of the
     /// mainchain
     BlockLinking(block_linking::CircuitInput),
+    /// Input for circuit bulding the state DB of LPN
+    State(lpn_state::api::CircuitInput),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -53,9 +59,10 @@ pub struct PublicParameters {
     mapping: mapping::PublicParameters,
     length_extract: length_extract::PublicParameters,
     length_match: length_match::Parameters,
-    lpn_storage: lpn::PublicParameters,
+    lpn_storage: lpn_storage::PublicParameters,
     digest_equal: digest_equal::Parameters,
     block_linking: block_linking::PublicParameters,
+    lpn_state: lpn_state::api::Parameters,
 }
 
 /// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits
@@ -72,13 +79,14 @@ pub fn build_circuits_params() -> PublicParameters {
         mapping.get_mapping_circuit_set(),
         &length_extract.circuit_data().verifier_data(),
     );
-    let lpn_storage = lpn::PublicParameters::build();
+    let lpn_storage = lpn_storage::PublicParameters::build();
     let digest_equal = digest_equal::Parameters::build(
         lpn_storage.get_lpn_circuit_set(),
         &length_match.circuit_data().verifier_data(),
     );
     let block_linking =
         block_linking::PublicParameters::build(&digest_equal.circuit_data().verifier_data());
+    let lpn_state = lpn_state::api::Parameters::build(block_linking.circuit_data().verifier_data());
     PublicParameters {
         mapping,
         length_extract,
@@ -86,6 +94,7 @@ pub fn build_circuits_params() -> PublicParameters {
         lpn_storage,
         digest_equal,
         block_linking,
+        lpn_state,
     }
 }
 
@@ -131,6 +140,18 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
                 params.digest_equal.circuit_data().verifier_only.clone(),
             ));
             params.block_linking.generate_proof(&storage_proof, inputs)
+        }
+        CircuitInput::State(state_input) => {
+            let proof_input = match state_input {
+                lpn_state::api::CircuitInput::Leaf(leaf_proof) => ProofInputs::from_leaf_input(
+                    leaf_proof,
+                    &params.block_linking.circuit_data().verifier_only,
+                ),
+                lpn_state::api::CircuitInput::Node((left, right)) => {
+                    ProofInputs::from_node_input(&left, &right)
+                }
+            }?;
+            params.lpn_state.generate_proof(proof_input)
         }
     }
 }
