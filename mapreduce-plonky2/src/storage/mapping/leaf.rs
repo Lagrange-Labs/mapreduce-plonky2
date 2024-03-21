@@ -32,8 +32,8 @@ use crate::storage::mapping::public_inputs::PublicInputs;
 /// MPT proof verification logic.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafCircuit<const NODE_LEN: usize> {
-    pub(super) node: Vec<u8>,
-    pub(super) slot: MappingSlot,
+    pub(crate) node: Vec<u8>,
+    pub(crate) slot: MappingSlot,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -274,6 +274,19 @@ mod test {
             let n = pi.n();
             let exp_n = F::ONE;
             assert_eq!(n, exp_n);
+        }
+    }
+
+    impl<const NODE_LEN: usize> UserCircuit<F, D> for LeafCircuit<NODE_LEN>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+    {
+        type Wires = LeafWires<NODE_LEN>;
+        fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            LeafCircuit::build(b)
+        }
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.assign(pw, wires);
         }
     }
 }

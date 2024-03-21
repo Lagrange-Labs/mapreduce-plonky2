@@ -281,12 +281,22 @@ impl TryInto<(ProofWithVK, ProofWithPublicInputs<F, C, D>)> for CircuitInput {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::{
         api::tests::TestDummyCircuit,
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        utils::test::random_vector,
+        eth::{left_pad32, ProofQuery, StorageSlot},
+        mpt_sequential::test::generate_random_storage_mpt,
+        storage::{self, key::MappingSlot},
+        utils::{convert_u8_to_u32_slice, test::random_vector},
+    };
+    use eth_trie::Trie;
+    use ethers::{
+        providers::{Http, Provider},
+        types::Address,
     };
     use plonky2::{
         field::types::{Field, Sample},
@@ -300,6 +310,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use std::array;
+    use serial_test::serial;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -450,5 +461,61 @@ mod tests {
         pi[MerklePublicInputs::<F>::D_IDX + 2 * N] = F::from_bool(digest.is_inf);
 
         pi
+    }
+    use anyhow::Result;
+    use storage::lpn::{leaf_digest_for_mapping, leaf_hash_for_mapping};
+    #[tokio::test]
+    #[serial]
+    async fn test_mapping_extraction_equivalence() -> Result<()> {
+        // first pinguin holder https://dune.com/queries/2450476/4027653
+        // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
+        // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
+        let mapping_value =
+            Address::from_str("0x188B264AA1456B869C3a92eeeD32117EbB835f47").unwrap();
+        let nft_id: u32 = 1116;
+        let mapping_key = left_pad32(&nft_id.to_be_bytes());
+        let url = "https://eth.llamarpc.com";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // extracting from
+        // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol
+        // assuming it's using ERC731Enumerable that inherits ERC721
+        let mapping_slot = 2;
+        // pudgy pinguins
+        let pudgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_mapping_slot(pudgy_address, mapping_slot, mapping_key.to_vec());
+        let res = query.query_mpt_proof(&provider, None).await?;
+        let raw_address = ProofQuery::verify_storage_proof(&res)?;
+        // the value is actually RLP encoded !
+        let decoded_address: Vec<u8> = rlp::decode(&raw_address).unwrap();
+        // this is read in the same order
+        let found_address = Address::from_slice(&decoded_address.into_iter().collect::<Vec<u8>>());
+        assert_eq!(found_address, mapping_value);
+        let slot = MappingSlot::new(mapping_slot as u8, mapping_key.to_vec());
+
+        let leaf_node = res.storage_proof[0].proof.last().unwrap();
+        let mpt_circuit = storage::mapping::leaf::LeafCircuit::<80> {
+            node: leaf_node.to_vec(),
+            slot,
+        };
+        let mpt_proof = run_circuit::<F, D, C, _>(mpt_circuit);
+        let mpt_pi = storage::mapping::PublicInputs::from(&mpt_proof.public_inputs);
+        // Check hash
+        let exp_hash = leaf_hash_for_mapping(&mapping_key, mapping_value.as_bytes());
+        let packed_hash = convert_u8_to_u32_slice(&exp_hash);
+        let computed_hash = mpt_pi.root_hash();
+        assert_eq!(packed_hash, computed_hash);
+        // Check the digest
+        //let expected_digest = leaf_digest_for_mapping(&mapping_key, &mapping_value.as_bytes());
+        //    .add(leaf_digest_for_mapping(k2, v2))
+        //    .to_weierstrass();
+
+        //// use the _same_ inputs to the lpn leaf circuit
+        //let lpn_circuit = storage::lpn::leaf::LeafCircuit {
+        //    key: mapping_key.clone(),
+        //    value: left_pad32(mapping_value.as_bytes()),
+        //};
+        Ok(())
     }
 }

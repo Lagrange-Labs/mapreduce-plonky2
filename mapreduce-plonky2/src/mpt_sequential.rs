@@ -30,8 +30,8 @@ use crate::keccak::{compute_size_with_padding, KeccakCircuit, OutputHash};
 const NB_ITEMS_LEAF: usize = 2;
 /// Currently a constant set to denote the length of the value we are extracting from the MPT trie.
 /// This can later be also be done in a generic way to allow different sizes.
-/// Given we target MPT storage proof, the value is 32 bytes.
-pub const MAX_LEAF_VALUE_LEN: usize = HASH_LEN;
+/// Given we target MPT storage proof, the value is 32 bytes + 1 byte for RLP encoding.
+pub const MAX_LEAF_VALUE_LEN: usize = 33;
 
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
@@ -267,15 +267,17 @@ where
         Ok(())
     }
 
-    /// Returns the MPT key advanced, depending on if it's a branch of leaf node, and returns
-    /// the designated children value/hash from the node.
+    /// Returns the MPT key advanced, depending on if it's a branch node, or extension node
+    /// and returns the designated children value/hash from the node.
     ///
-    /// It tries to decode the node as a branch node, and as an extension / leaf node,
+    /// It tries to decode the node as a branch node, and as an extension node,
     /// and select the right key depending on the number of elements found in the node.
     /// nibble is used to lookup the right item if it's a branch node
     /// Return is the (key,value). Key is in nibble format. Value is in bytes,
     /// and is either the hash of the child node, or the value of the leaf.
-    /// ASSUMPTION: value of leaf is always 32 bytes.
+    /// WARNING: Do NOT call this function on a leaf node, it will return potentially truncated
+    /// result since the length can be up to 33 bytes there. On extension, the raw hash
+    /// of 32 bytes is returned.
     pub fn advance_key<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
@@ -285,11 +287,10 @@ where
         // It will try to decode a RLP list of the maximum number of items there can be
         // in a list, which is 16 for a branch node (Excluding value).
         // It returns the actual number of items decoded.
-        // If it's 2 ==> node's a leaf or an extension
-        //              RLP ( RLP ( enc (key)), RLP (hash / value) )
+        // If it's 2 ==> node's a leaf or an extension <-- FOCUS on extension in this method
+        //              RLP ( RLP ( enc (key)), RLP (hash ) )
         // if it's more ==> node's a branch node
         //              RLP ( RLP(hash1), RLP(hash2), ... RLP(hash16), RLP(value))
-        //              (can be shorter than that ofc)
         let rlp_headers = decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(b, &node.arr, zero);
         let leaf_info = Self::advance_key_leaf_or_extension(b, node, key, &rlp_headers);
         let tuple_condition = leaf_info.2;
@@ -338,18 +339,22 @@ where
         let branch_child_hash = node.extract_array::<F, D, HASH_LEN>(b, nibble_header.offset);
         (new_key, branch_child_hash, branch_condition, nibble)
     }
+
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
     pub(crate) fn advance_key_leaf_or_extension<
         F: RichField + Extendable<D>,
         const D: usize,
         const LIST_LEN: usize,
+        // in case of a leaf, the value can be up to 33 bytes because of additional RLP encoding
+        // in case of extension, the value is 32 bytes
+        const VALUE_LEN: usize,
     >(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
         rlp_headers: &RlpList<LIST_LEN>,
-    ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget) {
+    ) -> (MPTKeyWire, Array<Target, VALUE_LEN>, BoolTarget) {
         let two = b.two();
         let condition = b.is_equal(rlp_headers.num_fields, two);
         let key_header = RlpHeader {
@@ -359,7 +364,7 @@ where
         };
         let (extracted_key, should_true) = decode_compact_encoding(b, node, &key_header);
         // it's either the _value_ of the leaf, OR the _hash_ of the child node if node = ext.
-        let leaf_child_hash = node.extract_array::<F, D, HASH_LEN>(b, rlp_headers.offset[1]);
+        let leaf_child_hash = node.extract_array::<F, D, VALUE_LEN>(b, rlp_headers.offset[1]);
         // note we are going _backwards_ on the key, so we need to substract the expected key length
         // we want to check against
         let new_key = key.advance_by(b, extracted_key.real_len);
@@ -566,7 +571,7 @@ pub mod test {
         utils::{find_index_subvector, keccak256},
     };
 
-    use super::{Circuit, InputWires, OutputWires, PAD_LEN};
+    use super::{Circuit, InputWires, OutputWires, MAX_LEAF_VALUE_LEN, PAD_LEN};
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
@@ -592,9 +597,9 @@ pub mod test {
         type Wires = (
             InputWires<DEPTH, NODE_LEN>,
             OutputWires<DEPTH, NODE_LEN>,
-            Array<Target, HASH_LEN>, // root
-            Array<Target, 32>,       // value
-            BoolTarget,              // checking_value
+            Array<Target, HASH_LEN>,           // root
+            Array<Target, MAX_LEAF_VALUE_LEN>, // value
+            BoolTarget,                        // checking_value
         );
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
@@ -608,7 +613,7 @@ pub mod test {
             let is_equal = output_wires.root.equals(c, &arr);
             let tt = c._true();
             c.connect(is_equal.target, tt.target);
-            let value_wire = Array::<Target, 32>::new(c);
+            let value_wire = Array::<Target, MAX_LEAF_VALUE_LEN>::new(c);
             let values_equal = value_wire.equals(c, &output_wires.leaf);
             let checking_value = c.add_virtual_bool_target_safe();
             let values_equal = c.select(checking_value, values_equal.target, tt.target);

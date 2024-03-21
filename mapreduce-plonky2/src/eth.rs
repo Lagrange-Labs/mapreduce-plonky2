@@ -305,7 +305,9 @@ impl ProofQuery {
             .await?;
         Ok(res)
     }
-    pub fn verify_storage_proof(proof: &EIP1186ProofResponse) -> Result<()> {
+    /// Returns the raw value from the storage proof, not the one "interpreted" by the
+    /// JSON RPC so we can see how the encoding is done.
+    pub fn verify_storage_proof(proof: &EIP1186ProofResponse) -> Result<Vec<u8>> {
         let memdb = Arc::new(MemoryDB::new(true));
         let tx_trie = EthTrie::new(Arc::clone(&memdb));
         let proof_key_bytes: [u8; 32] = proof.storage_proof[0].key.into();
@@ -324,14 +326,10 @@ impl ProofQuery {
             bail!("proof is not valid");
         }
         if let Some(ext_value) = is_valid.unwrap() {
-            let found = U256::from_big_endian(&ext_value);
-            if found != proof.storage_proof[0].value {
-                bail!("proof does not return right value");
-            }
+            Ok(ext_value)
         } else {
             bail!("proof says the value associated with that key does not exist");
         }
-        Ok(())
     }
     pub fn verify_state_proof(&self, res: &EIP1186ProofResponse) -> Result<()> {
         let memdb = Arc::new(MemoryDB::new(true));
@@ -374,6 +372,38 @@ mod test {
     use crate::utils::find_index_subvector;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_pidgy_pinguin_mapping_slot() -> Result<()> {
+        // first pinguin holder https://dune.com/queries/2450476/4027653
+        // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
+        // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
+        let mapping_value =
+            Address::from_str("0x188B264AA1456B869C3a92eeeD32117EbB835f47").unwrap();
+        let nft_id: u32 = 1116;
+        let mapping_key = left_pad32(&nft_id.to_be_bytes());
+        let url = "https://eth.llamarpc.com";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // extracting from
+        // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol
+        // assuming it's using ERC731Enumerable that inherits ERC721
+        let mapping_slot = 2;
+        // pudgy pinguins
+        let pudgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_mapping_slot(pudgy_address, mapping_slot, mapping_key.to_vec());
+        let res = query.query_mpt_proof(&provider, None).await?;
+        let raw_address = ProofQuery::verify_storage_proof(&res)?;
+        // the value is actually RLP encoded !
+        let decoded_address: Vec<u8> = rlp::decode(&raw_address).unwrap();
+        let leaf_node: Vec<Vec<u8>> = rlp::decode_list(&res.storage_proof[0].proof.last().unwrap());
+        println!("leaf_node[1].len() = {}", leaf_node[1].len());
+        // this is read in the same order
+        let found_address = Address::from_slice(&decoded_address.into_iter().collect::<Vec<u8>>());
+        assert_eq!(found_address, mapping_value);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_kashish_contract_proof_query() -> Result<()> {
