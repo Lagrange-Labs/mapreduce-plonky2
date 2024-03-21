@@ -143,12 +143,12 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
         }
         CircuitInput::State(state_input) => {
             let proof_input = match state_input {
-                lpn_state::api::CircuitInput::Leaf(leaf_proof) => ProofInputs::build_leaf_input(
+                lpn_state::api::CircuitInput::Leaf(leaf_proof) => ProofInputs::from_leaf_input(
                     leaf_proof,
                     &params.block_linking.circuit_data().verifier_only,
                 ),
-                lpn_state::api::CircuitInput::Node(node_inputs) => {
-                    ProofInputs::build_node_input(&node_inputs)
+                lpn_state::api::CircuitInput::Node((left, right)) => {
+                    ProofInputs::from_node_input(&left, &right)
                 }
             }?;
             params.lpn_state.generate_proof(proof_input)
