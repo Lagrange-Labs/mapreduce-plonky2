@@ -19,8 +19,13 @@ use plonky2::{
 use crate::{
     array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
-    query2::epilogue::{Provenance, PublicInputs},
+    query2::storage::public_inputs::PublicInputs as StorageInputs,
+    query2::{Address, AddressTarget},
 };
+
+mod public_inputs;
+
+pub(crate) use public_inputs::PublicInputs;
 
 #[cfg(test)]
 mod tests;
@@ -28,10 +33,24 @@ mod tests;
 /// The witnesses of [ProvenanceCircuit].
 #[derive(Debug, Clone)]
 pub struct ProvenanceWires {
+    /// Smart contract address (unpacked)
+    pub smart_contract_address: AddressTarget,
+    /// Mapping of the storage slot
+    pub mapping_slot: Target,
+    /// Length of the storage slot
+    pub length_slot: Target,
+    /// Block number
+    pub block_number: Target,
+    /// Block number minimum range
+    pub block_number_min: Target,
+    /// Block number maximum range
+    pub block_number_max: Target,
+    /// Aggregated range
+    pub range: Target,
     /// The merkle root of the opening.
     pub state_root: HashOutTarget,
     /// The siblings that opens to `state_root`.
-    pub siblings: Vec<HashOutTarget>,
+    pub siblings: MerkleProofTarget,
     /// The boolean flags to describe the path. `true` equals right; `false` equals left.
     pub positions: Vec<BoolTarget>,
     /// The block hash as stored in the leaf of the block db.
@@ -40,21 +59,42 @@ pub struct ProvenanceWires {
 
 /// The provenance db circuit
 #[derive(Debug, Clone)]
-pub struct ProvenanceCircuit<const L: usize, const DEPTH: usize, F: RichField> {
+pub struct ProvenanceCircuit<const DEPTH: usize, F: RichField> {
+    smart_contract_address: Address<F>,
+    mapping_slot: F,
+    length_slot: F,
+    block_number: F,
+    block_number_min: F,
+    block_number_max: F,
+    range: F,
     state_root: HashOut<F>,
     siblings: Vec<HashOut<F>>,
     positions: Vec<bool>,
     block_hash: Array<F, PACKED_HASH_LEN>,
 }
 
-impl<const L: usize, const DEPTH: usize, F: RichField> ProvenanceCircuit<L, DEPTH, F> {
+impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
     pub fn new(
+        smart_contract_address: Address<F>,
+        mapping_slot: F,
+        length_slot: F,
+        block_number: F,
+        block_number_min: F,
+        block_number_max: F,
+        range: F,
         state_root: HashOut<F>,
         siblings: Vec<HashOut<F>>,
         positions: Vec<bool>,
         block_hash: Array<F, PACKED_HASH_LEN>,
     ) -> Self {
         Self {
+            smart_contract_address,
+            mapping_slot,
+            length_slot,
+            block_number,
+            block_number_min,
+            block_number_max,
+            range,
             state_root,
             siblings,
             positions,
@@ -64,32 +104,22 @@ impl<const L: usize, const DEPTH: usize, F: RichField> ProvenanceCircuit<L, DEPT
 
     pub fn build<const D: usize>(
         cb: &mut CircuitBuilder<F, D>,
-        db_proof: &PublicInputs<Target, Provenance, L>,
+        storage_proof: &StorageInputs<Target>,
     ) -> ProvenanceWires
     where
         F: Extendable<D>,
     {
-        let a = db_proof.smart_contract_address();
-        let x = db_proof.user_address();
-        let m = db_proof.mapping_slot();
-        let s = db_proof.length_slot();
-        let c = db_proof.root();
-        let b = db_proof.block_number();
-        let b_min = db_proof.min_block_number();
-        let b_max = db_proof.max_block_number();
-        let r = db_proof.range();
-        let digest = db_proof.digest();
+        let x = storage_proof.owner();
+        let c = storage_proof.root();
+        let digest = storage_proof.digest();
 
-        // FIXME the optimized version without the length slot is unimplemented
-        // https://www.notion.so/lagrangelabs/Encoding-Specs-ccaa31d1598b4626860e26ac149705c4?pvs=4#fe2b40982352464ba39164cf4b41d301
-        let state_leaf = a
-            .arr
-            .iter()
-            .map(|t| t.0)
-            .chain(iter::once(m))
-            .chain(iter::once(s))
-            .chain(c.elements.iter().copied())
-            .collect();
+        let a = AddressTarget::new(cb);
+        let m = cb.add_virtual_target();
+        let s = cb.add_virtual_target();
+        let b = cb.add_virtual_target();
+        let b_min = cb.add_virtual_target();
+        let b_max = cb.add_virtual_target();
+        let r = cb.add_virtual_target();
 
         let (siblings, positions): (Vec<_>, Vec<_>) = (0..DEPTH)
             .map(|_| {
@@ -100,6 +130,17 @@ impl<const L: usize, const DEPTH: usize, F: RichField> ProvenanceCircuit<L, DEPT
             })
             .unzip();
         let siblings = MerkleProofTarget { siblings };
+
+        // FIXME the optimized version without the length slot is unimplemented
+        // https://www.notion.so/lagrangelabs/Encoding-Specs-ccaa31d1598b4626860e26ac149705c4?pvs=4#fe2b40982352464ba39164cf4b41d301
+        let state_leaf = a
+            .arr
+            .iter()
+            .copied()
+            .chain(iter::once(m))
+            .chain(iter::once(s))
+            .chain(c.elements.iter().copied())
+            .collect();
 
         let state_root = cb.add_virtual_hash();
         cb.verify_merkle_proof::<PoseidonHash>(
@@ -121,7 +162,7 @@ impl<const L: usize, const DEPTH: usize, F: RichField> ProvenanceCircuit<L, DEPT
         let one = cb.one();
         cb.connect(r, one);
 
-        PublicInputs::<Target, Provenance, L>::register(
+        PublicInputs::register(
             cb,
             b,
             r,
@@ -136,14 +177,35 @@ impl<const L: usize, const DEPTH: usize, F: RichField> ProvenanceCircuit<L, DEPT
         );
 
         ProvenanceWires {
+            smart_contract_address: a,
+            mapping_slot: m,
+            length_slot: s,
+            block_number: b,
+            block_number_min: b_min,
+            block_number_max: b_max,
+            range: r,
             state_root,
-            siblings: siblings.siblings,
+            siblings,
             positions,
             block_hash,
         }
     }
 
     pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &ProvenanceWires) {
+        wires
+            .smart_contract_address
+            .arr
+            .iter()
+            .zip(self.smart_contract_address.arr.iter())
+            .for_each(|(&w, &v)| pw.set_target(w, v));
+
+        pw.set_target(wires.mapping_slot, self.mapping_slot);
+        pw.set_target(wires.length_slot, self.length_slot);
+        pw.set_target(wires.block_number, self.block_number);
+        pw.set_target(wires.block_number_min, self.block_number_min);
+        pw.set_target(wires.block_number_max, self.block_number_max);
+        pw.set_target(wires.range, self.range);
+
         wires
             .state_root
             .elements
@@ -152,6 +214,7 @@ impl<const L: usize, const DEPTH: usize, F: RichField> ProvenanceCircuit<L, DEPT
             .for_each(|(&w, &v)| pw.set_target(w, v));
 
         wires
+            .siblings
             .siblings
             .iter()
             .map(|s| s.elements.iter())

@@ -193,6 +193,7 @@ where
         Self { arr: value }
     }
 }
+
 impl<T: Clone + Debug + Serialize, const N: usize> TryFrom<Vec<T>> for Array<T, N>
 where
     for<'de> T: Deserialize<'de>,
@@ -203,6 +204,20 @@ where
             arr: value
                 .try_into()
                 .map_err(|e| anyhow!("can't conver to array: {:?}", e))?,
+        })
+    }
+}
+
+impl<T: Clone + Debug + Serialize, const N: usize> TryFrom<&[T]> for Array<T, N>
+where
+    for<'de> T: Deserialize<'de>,
+    T: Copy,
+{
+    type Error = anyhow::Error;
+    fn try_from(value: &[T]) -> Result<Self> {
+        anyhow::ensure!(value.len() == N);
+        Ok(Self {
+            arr: value.try_into().unwrap(),
         })
     }
 }

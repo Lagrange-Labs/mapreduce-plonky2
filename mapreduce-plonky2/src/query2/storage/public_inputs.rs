@@ -15,11 +15,10 @@ use plonky2_ecgfp5::{
 
 use crate::{
     array::Array,
+    query2::AddressTarget,
     storage::CURVE_TARGET_GL_SIZE,
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
-
-use super::AddressTarget;
 
 /// The public inputs required for the storage proof of query #2
 ///   - hash of this subtree (NUM_HASH_OUT_ELTS);
@@ -37,14 +36,29 @@ impl<'a, T: Clone + Copy> From<&'a [T]> for PublicInputs<'a, T> {
 }
 
 impl<'a, T: Clone + Copy> PublicInputs<'a, T> {
-    const ROOT_OFFSET: usize = 0;
-    const ROOT_LEN: usize = NUM_HASH_OUT_ELTS;
-    const DIGEST_OFFSET: usize = Self::ROOT_LEN;
-    const DIGEST_LEN: usize = CURVE_TARGET_GL_SIZE;
-    const OWNER_OFFSET: usize = Self::ROOT_LEN + Self::DIGEST_LEN;
-    const OWNER_LEN: usize = AddressTarget::LEN;
+    pub(crate) const ROOT_OFFSET: usize = 0;
+    pub(crate) const ROOT_LEN: usize = NUM_HASH_OUT_ELTS;
+    pub(crate) const DIGEST_OFFSET: usize = Self::ROOT_LEN;
+    pub(crate) const DIGEST_LEN: usize = CURVE_TARGET_GL_SIZE;
+    pub(crate) const OWNER_OFFSET: usize = Self::ROOT_LEN + Self::DIGEST_LEN;
+    pub(crate) const OWNER_LEN: usize = AddressTarget::LEN;
 
     pub const TOTAL_LEN: usize = Self::ROOT_LEN + Self::DIGEST_LEN + Self::OWNER_LEN;
+
+    /// Creates a representation of the public inputs from the provided slice.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the length of the provided slice is smaller than
+    /// [Self::TOTAL_LEN].
+    pub fn from_slice(arr: &'a [T]) -> Self {
+        assert!(
+            Self::TOTAL_LEN <= arr.len(),
+            "The public inputs slice length must be equal or greater than the expected length."
+        );
+
+        Self { inputs: arr }
+    }
 
     pub fn register(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
@@ -58,7 +72,7 @@ impl<'a, T: Clone + Copy> PublicInputs<'a, T> {
     }
 
     /// Extracts the root hash components from the raw input
-    fn root_raw(&self) -> &[T] {
+    pub(crate) fn root_raw(&self) -> &[T] {
         &self.inputs[Self::ROOT_OFFSET..Self::ROOT_OFFSET + Self::ROOT_LEN]
     }
 
