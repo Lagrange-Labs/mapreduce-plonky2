@@ -4,14 +4,10 @@
 use plonky2::iop::target::Target;
 
 use crate::array::Array;
-
-mod epilogue;
 mod full_inner;
 mod leaf;
 mod partial_inner;
-mod provenance;
 mod public_inputs;
-
 #[cfg(test)]
 mod tests;
 
