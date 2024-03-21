@@ -14,7 +14,7 @@ use crate::api::{default_config, deserialize_proof, ProofWithVK};
 
 use super::{leaf::LeafCircuitWires, node::NodeCircuitWires, StateInputs};
 
-use anyhow::{Error, Result};
+use anyhow::Result;
 
 const STATE_CIRCUIT_SET_SIZE: usize = 2;
 
@@ -50,7 +50,6 @@ impl Parameters {
     }
 
     pub(crate) fn generate_proof(&self, input: ProofInputs) -> Result<Vec<u8>> {
-        let mut pw = PartialWitness::<F>::new();
         let proof_with_vk: ProofWithVK = match input {
             ProofInputs::Leaf(input) => {
                 let proof = self.set.generate_proof(&self.leaf, [], [], input)?;
@@ -86,13 +85,14 @@ impl Parameters {
     }
 }
 
+/// Intermediate struct handling the deserialization of the CircuitInput enum
 pub(crate) enum ProofInputs {
     Leaf(ProofWithVK),
     Node((ProofWithVK, ProofWithVK)),
 }
 
 impl ProofInputs {
-    pub(crate) fn build_leaf_input(
+    pub(crate) fn from_leaf_input(
         block_linking_proof: Vec<u8>,
         block_linking_vd: &VerifierOnlyCircuitData<C, D>,
     ) -> Result<Self> {
@@ -101,33 +101,33 @@ impl ProofInputs {
         Ok(ProofInputs::Leaf(proof_with_vk))
     }
 
-    pub(crate) fn build_node_input(input: &NodeInputs) -> Result<Self> {
+    pub(crate) fn from_node_input(left_proof: &[u8], right_proof: &[u8]) -> Result<Self> {
         Ok(ProofInputs::Node((
-            ProofWithVK::deserialize(&input.left)?,
-            ProofWithVK::deserialize(&input.right)?,
+            ProofWithVK::deserialize(left_proof)?,
+            ProofWithVK::deserialize(right_proof)?,
         )))
     }
 }
 
-pub struct NodeInputs {
-    left: Vec<u8>,
-    right: Vec<u8>,
+/// Circuit inputs for the state DB of LPN. One can give inputs to generate
+/// a leaf proof or an intermediate node proof.
+pub enum CircuitInput {
+    /// Leaf takes the block linking serialized proof as input
+    Leaf(Vec<u8>),
+    /// Node takes the serialized proofs of the left and right children of its
+    /// corresponding node in the state lpn database
+    Node((Vec<u8>, Vec<u8>)),
 }
-
-impl NodeInputs {
-    pub fn new(left_proof: Vec<u8>, right_proof: Vec<u8>) -> Self {
-        Self {
-            left: left_proof,
-            right: right_proof,
-        }
+impl CircuitInput {
+    /// Returns a new circuit input enum for generating a node proof
+    pub fn new_node(left_proof: Vec<u8>, right_proof: Vec<u8>) -> Self {
+        CircuitInput::Node((left_proof, right_proof))
+    }
+    /// Returns a new circuit input enum for generating a leaf proof
+    pub fn new_leaf(block_linking_proof: Vec<u8>) -> Self {
+        CircuitInput::Leaf(block_linking_proof)
     }
 }
-
-pub enum CircuitInput {
-    Leaf(Vec<u8>),
-    Node(NodeInputs),
-}
-
 #[cfg(test)]
 mod tests {
     use std::array;
@@ -187,9 +187,7 @@ mod tests {
 
         // build proof for intermediate node
         let intermediate_proof = state_circuit_params
-            .generate_proof(
-                ProofInputs::build_node_input(&NodeInputs::new(left_proof, right_proof)).unwrap(),
-            )
+            .generate_proof(ProofInputs::from_node_input(&left_proof, &right_proof).unwrap())
             .unwrap();
 
         state_circuit_params
