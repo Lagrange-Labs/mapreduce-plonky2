@@ -39,7 +39,7 @@ fn prove_and_verify_provenance_circuit() {
     let pi = PublicInputs::from_slice(proof.public_inputs.as_slice());
 
     assert_eq!(pi.block_number_data(), circuit.block_number);
-    assert_eq!(pi.range_data(), circuit.range);
+    assert_eq!(pi.range_data(), GoldilocksField::ONE);
     assert_eq!(pi.root_data(), &circuit.root.elements);
     assert_eq!(pi.block_number_min_data(), circuit.block_number_min);
     assert_eq!(pi.block_number_max_data(), circuit.block_number_max);
@@ -120,7 +120,6 @@ struct TestProvenanceCircuit {
     storage_values: Vec<GoldilocksField>,
     c: ProvenanceCircuit,
     block_number: GoldilocksField,
-    range: GoldilocksField,
     root: HashOut<GoldilocksField>,
     block_number_min: GoldilocksField,
     block_number_max: GoldilocksField,
@@ -144,7 +143,6 @@ impl TestProvenanceCircuit {
         let block_number = GoldilocksField::from_canonical_u32(rng.next_u32());
         let block_number_min = GoldilocksField::from_canonical_u32(rng.next_u32());
         let block_number_max = GoldilocksField::from_canonical_u32(rng.next_u32());
-        let range = GoldilocksField::ONE;
 
         let siblings: Vec<_> = (0..DEPTH)
             .map(|_| {
@@ -212,7 +210,6 @@ impl TestProvenanceCircuit {
             block_number,
             block_number_min,
             block_number_max,
-            range,
             state_root,
             siblings,
             positions,
@@ -223,7 +220,6 @@ impl TestProvenanceCircuit {
             storage_values: storage.inputs.to_vec(),
             c,
             block_number,
-            range,
             root: block_leaf_hash,
             block_number_min,
             block_number_max,

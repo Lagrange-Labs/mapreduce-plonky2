@@ -105,7 +105,6 @@ pub struct ProvenanceCircuit<const DEPTH: usize, F: RichField> {
     block_number: F,
     block_number_min: F,
     block_number_max: F,
-    range: F,
     state_root: HashOut<F>,
     siblings: Vec<HashOut<F>>,
     positions: Vec<bool>,
@@ -121,7 +120,6 @@ impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
         block_number: F,
         block_number_min: F,
         block_number_max: F,
-        range: F,
         state_root: HashOut<F>,
         siblings: Vec<HashOut<F>>,
         positions: Vec<bool>,
@@ -134,7 +132,6 @@ impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
             block_number,
             block_number_min,
             block_number_max,
-            range,
             state_root,
             siblings,
             positions,
@@ -160,7 +157,7 @@ impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
         let b = cb.add_virtual_target();
         let b_min = cb.add_virtual_target();
         let b_max = cb.add_virtual_target();
-        let r = cb.add_virtual_target();
+        let r = cb.constant(F::ONE);
 
         let (siblings, positions): (Vec<_>, Vec<_>) = (0..DEPTH)
             .map(|_| {
@@ -199,9 +196,6 @@ impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
             .chain(state_root.elements.iter().copied())
             .collect();
         let block_leaf_hash = cb.hash_n_to_hash_no_pad::<PoseidonHash>(block_leaf);
-
-        let one = cb.one();
-        cb.connect(r, one);
 
         PublicInputs::register(
             cb,
@@ -246,7 +240,6 @@ impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
         pw.set_target(wires.block_number, self.block_number);
         pw.set_target(wires.block_number_min, self.block_number_min);
         pw.set_target(wires.block_number_max, self.block_number_max);
-        pw.set_target(wires.range, self.range);
 
         wires
             .state_root
