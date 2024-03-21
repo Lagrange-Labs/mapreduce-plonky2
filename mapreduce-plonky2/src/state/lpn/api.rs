@@ -1,6 +1,9 @@
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
-    plonk::circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData},
+    plonk::{
+        circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData},
+        proof::ProofWithPublicInputs,
+    },
 };
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -82,6 +85,14 @@ impl Parameters {
             )),
         }?;
         circuit_data.verify(proof)
+    }
+
+    pub(crate) fn public_inputs(proof: &ProofWithPublicInputs<F, C, D>) -> &[F] {
+        CircuitWithUniversalVerifier::<F, C, D, 2, NodeCircuitWires>::public_inputs(proof)
+    }
+
+    pub(crate) fn get_lpn_state_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.set
     }
 }
 

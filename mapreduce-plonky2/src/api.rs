@@ -16,17 +16,21 @@ use recursion_framework::serialization::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::{
-    block_linking,
-    lpn::{self as lpn_state, api::ProofInputs},
-};
 pub use crate::storage::{
     self,
     length_extract::{self},
     lpn as lpn_storage, mapping,
 };
+use crate::{
+    block::Inputs,
+    state::{
+        block_linking,
+        lpn::{self as lpn_state, api::ProofInputs},
+    },
+};
 
 use self::storage::{digest_equal, length_match};
+use crate::block;
 
 // TODO: put every references here. remove one from mapping
 pub(crate) const D: usize = 2;
@@ -51,6 +55,8 @@ pub enum CircuitInput {
     BlockLinking(block_linking::CircuitInput),
     /// Input for circuit bulding the state DB of LPN
     State(lpn_state::api::CircuitInput),
+    /// Input for circuit building the block tree DB of LPN
+    BlockDB(block::CircuitInput),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -63,6 +69,7 @@ pub struct PublicParameters {
     digest_equal: digest_equal::Parameters,
     block_linking: block_linking::PublicParameters,
     lpn_state: lpn_state::api::Parameters,
+    block_db: block::Parameters,
 }
 
 /// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits
@@ -87,6 +94,7 @@ pub fn build_circuits_params() -> PublicParameters {
     let block_linking =
         block_linking::PublicParameters::build(&digest_equal.circuit_data().verifier_data());
     let lpn_state = lpn_state::api::Parameters::build(block_linking.circuit_data().verifier_data());
+    let block_db = block::Parameters::build(lpn_state.get_lpn_state_circuit_set());
     PublicParameters {
         mapping,
         length_extract,
@@ -95,6 +103,7 @@ pub fn build_circuits_params() -> PublicParameters {
         digest_equal,
         block_linking,
         lpn_state,
+        block_db,
     }
 }
 
@@ -152,6 +161,18 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
                 }
             }?;
             params.lpn_state.generate_proof(proof_input)
+        }
+        CircuitInput::BlockDB(block_db_input) => {
+            let proof_input = match block_db_input {
+                block::CircuitInput::First(input) => Inputs::input_for_first_block(
+                    input,
+                    params.lpn_state.get_lpn_state_circuit_set(),
+                ),
+                block::CircuitInput::Subsequent(input) => {
+                    Inputs::input_for_new_block(input, params.lpn_state.get_lpn_state_circuit_set())
+                }
+            }?;
+            params.block_db.generate_proof(proof_input)
         }
     }
 }
