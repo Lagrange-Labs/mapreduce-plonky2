@@ -444,6 +444,9 @@ impl Parameters {
         let dummy = builder.build_circuit(());
         let ivc_circuit = builder.build_circuit(state_circuit_set.clone());
 
+        // It's okay to use the circuit set mechanism here since the prover can not give a dummy proof after the first
+        // block insertion because the regular circuit checks if it's the first insertion or not and sets a flag accordingly.
+        // that flag should be false after the first insertion, always, while the dummy circuit always expose 1. 
         let circuits = vec![
             prepare_recursive_circuit_for_circuit_set(&dummy),
             prepare_recursive_circuit_for_circuit_set(&ivc_circuit),
@@ -517,7 +520,8 @@ impl Parameters {
 }
 
 /// This data structure contains all the inputs necessary to generate a proof for
-/// the block tree IVC circuit
+/// the block tree IVC circuit. These are the internal structs with the deserialized inputs
+/// from the public API.
 struct BlockTreeCircuitInputs {
     base_inputs: BlockTreeInputs,
     previous_proof: ProofWithVK,
