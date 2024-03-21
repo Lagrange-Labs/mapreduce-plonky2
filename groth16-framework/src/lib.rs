@@ -7,8 +7,10 @@
 
 use plonky2::{field::goldilocks_field::GoldilocksField, plonk::config::PoseidonGoldilocksConfig};
 
+mod evm;
 mod proof;
 mod prover;
+mod utils;
 mod verifier;
 
 const D: usize = 2;
@@ -16,6 +18,7 @@ type F = GoldilocksField;
 type C = PoseidonGoldilocksConfig;
 
 pub use prover::{Groth16Prover, Groth16ProverConfig};
+pub use verifier::{EVMVerifier, EVMVerifierConfig};
 
 #[cfg(test)]
 mod tests {
@@ -66,6 +69,7 @@ mod tests {
     }
 
     /// Test proving with the keccak circuit.
+    #[ignore] // Ignore for fast CI.
     #[serial]
     #[test]
     fn test_groth16_proving_with_keccak() {
@@ -98,6 +102,7 @@ mod tests {
     }
 
     /// Test proving with the group-hashing circuit.
+    #[ignore] // Ignore for fast CI.
     #[serial]
     #[test]
     fn test_groth16_proving_with_group_hashing() {

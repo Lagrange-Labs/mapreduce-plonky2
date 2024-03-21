@@ -1,7 +1,8 @@
 //! Groth16 proof data
 
+use crate::utils::read_file;
 use anyhow::Result;
-use std::{fs::File, io::Read, path::Path};
+use std::path::Path;
 
 /// Groth16 proof
 #[derive(Debug)]
@@ -13,9 +14,7 @@ pub struct Groth16Proof {
 impl Groth16Proof {
     /// Read the Groth16 proof from a file.
     pub fn from_file<P: AsRef<Path>>(file_path: P) -> Result<Self> {
-        let mut proof = vec![];
-        let mut fd = File::open(file_path)?;
-        fd.read_to_end(&mut proof)?;
+        let proof = read_file(file_path)?;
 
         Ok(Self { proof })
     }
