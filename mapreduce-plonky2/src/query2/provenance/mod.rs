@@ -40,14 +40,14 @@ pub struct ProvenanceWires {
 
 /// The provenance db circuit
 #[derive(Debug, Clone)]
-pub struct ProvenanceCircuit<const L: usize, F: RichField> {
+pub struct ProvenanceCircuit<const L: usize, const DEPTH: usize, F: RichField> {
     state_root: HashOut<F>,
     siblings: Vec<HashOut<F>>,
     positions: Vec<bool>,
     block_hash: Array<F, PACKED_HASH_LEN>,
 }
 
-impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
+impl<const L: usize, const DEPTH: usize, F: RichField> ProvenanceCircuit<L, DEPTH, F> {
     pub fn new(
         state_root: HashOut<F>,
         siblings: Vec<HashOut<F>>,
@@ -91,7 +91,7 @@ impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
             .chain(c.elements.iter().copied())
             .collect();
 
-        let (siblings, positions): (Vec<_>, Vec<_>) = (0..L)
+        let (siblings, positions): (Vec<_>, Vec<_>) = (0..DEPTH)
             .map(|_| {
                 let pos = cb.add_virtual_bool_target_safe();
                 let sibling = cb.add_virtual_hash();

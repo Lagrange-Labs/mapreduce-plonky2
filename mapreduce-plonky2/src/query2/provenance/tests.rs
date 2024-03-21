@@ -31,8 +31,9 @@ use crate::{
 use super::ProvenanceWires;
 
 const L: usize = 2;
+const DEPTH: usize = 3;
 type PublicInputs<'a> = EpilogueInputs<'a, GoldilocksField, Provenance, L>;
-type ProvenanceCircuit = super::ProvenanceCircuit<L, GoldilocksField>;
+type ProvenanceCircuit = super::ProvenanceCircuit<L, DEPTH, GoldilocksField>;
 
 #[test]
 fn prove_and_verify_provenance_circuit() {
@@ -75,7 +76,7 @@ impl TestProvenanceCircuit {
     pub fn from_seed(seed: u64, epilogue: &EpilogueInputs<GoldilocksField, Provenance, L>) -> Self {
         let rng = &mut StdRng::seed_from_u64(seed);
 
-        let siblings: Vec<_> = (0..L)
+        let siblings: Vec<_> = (0..DEPTH)
             .map(|_| {
                 let mut s = HashOut::default();
                 s.elements
@@ -85,7 +86,7 @@ impl TestProvenanceCircuit {
             })
             .collect();
 
-        let positions: Vec<_> = (0..L).map(|_| rng.next_u32() & 1 == 1).collect();
+        let positions: Vec<_> = (0..DEPTH).map(|_| rng.next_u32() & 1 == 1).collect();
 
         // FIXME use crate::state::lpn::state_leaf_hash
         let preimage: Vec<_> = epilogue
@@ -101,7 +102,7 @@ impl TestProvenanceCircuit {
             PoseidonPermutation<GoldilocksField>,
         >(preimage.as_slice());
 
-        for i in 0..L {
+        for i in 0..DEPTH {
             let (left, right) = if positions[i] {
                 (siblings[i].clone(), state_root.clone())
             } else {
@@ -149,7 +150,7 @@ impl UserCircuit<GoldilocksField, L> for TestProvenanceCircuit {
     fn build(b: &mut CircuitBuilder<GoldilocksField, L>) -> Self::Wires {
         let targets = b.add_virtual_targets(PublicInputs::total_len());
         let epilogue = EpilogueInputs::<Target, Provenance, L>::from_slice(&targets);
-        let provenance = super::ProvenanceCircuit::build(b, &epilogue);
+        let provenance = super::ProvenanceCircuit::<_, DEPTH, _>::build(b, &epilogue);
 
         TestProvenanceWires {
             epilogue: targets,
