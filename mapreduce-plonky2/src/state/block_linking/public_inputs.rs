@@ -151,7 +151,6 @@ mod tests {
 
     impl<'a, T: Copy + Default> BlockLinkingInputs<'a, T> {
         /// Writes the parts of the block liking public inputs into the provided target array.
-        #[cfg(test)]
         #[allow(clippy::too_many_arguments)]
         pub fn parts_into_values(
             values: &mut [T; TOTAL_LEN],
