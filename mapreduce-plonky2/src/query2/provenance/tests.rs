@@ -103,9 +103,9 @@ impl TestProvenanceCircuit {
 
         for i in 0..L {
             let (left, right) = if positions[i] {
-                (state_root.clone(), siblings[i].clone())
-            } else {
                 (siblings[i].clone(), state_root.clone())
+            } else {
+                (state_root.clone(), siblings[i].clone())
             };
 
             let mut preimage = left.elements.to_vec();
@@ -133,7 +133,7 @@ impl TestProvenanceCircuit {
             PoseidonPermutation<GoldilocksField>,
         >(preimage.as_slice());
 
-        let c = ProvenanceCircuit::new(siblings, positions, block_hash);
+        let c = ProvenanceCircuit::new(state_root, siblings, positions, block_hash);
 
         Self {
             epilogue_values: epilogue.inputs.to_vec(),

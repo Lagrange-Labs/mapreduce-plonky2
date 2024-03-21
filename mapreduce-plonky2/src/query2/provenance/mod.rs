@@ -6,6 +6,7 @@ use plonky2::{
     field::extension::Extendable,
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+        merkle_proofs::MerkleProofTarget,
         poseidon::PoseidonHash,
     },
     iop::{
@@ -27,6 +28,8 @@ mod tests;
 /// The witnesses of [ProvenanceCircuit].
 #[derive(Debug, Clone)]
 pub struct ProvenanceWires {
+    /// The merkle root of the opening.
+    pub state_root: HashOutTarget,
     /// The siblings that opens to `state_root`.
     pub siblings: Vec<HashOutTarget>,
     /// The boolean flags to describe the path. `true` equals right; `false` equals left.
@@ -38,6 +41,7 @@ pub struct ProvenanceWires {
 /// The provenance db circuit
 #[derive(Debug, Clone)]
 pub struct ProvenanceCircuit<const L: usize, F: RichField> {
+    state_root: HashOut<F>,
     siblings: Vec<HashOut<F>>,
     positions: Vec<bool>,
     block_hash: Array<F, PACKED_HASH_LEN>,
@@ -45,11 +49,13 @@ pub struct ProvenanceCircuit<const L: usize, F: RichField> {
 
 impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
     pub fn new(
+        state_root: HashOut<F>,
         siblings: Vec<HashOut<F>>,
         positions: Vec<bool>,
         block_hash: Array<F, PACKED_HASH_LEN>,
     ) -> Self {
         Self {
+            state_root,
             siblings,
             positions,
             block_hash,
@@ -85,34 +91,23 @@ impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
             .chain(c.elements.iter().copied())
             .collect();
 
-        let mut state_root = cb.hash_n_to_hash_no_pad::<PoseidonHash>(state_leaf);
-
-        // FIXME what is the depth of the merkle tree?
         let (siblings, positions): (Vec<_>, Vec<_>) = (0..L)
             .map(|_| {
                 let pos = cb.add_virtual_bool_target_safe();
                 let sibling = cb.add_virtual_hash();
 
-                let mut left = HashOutTarget::from_partial(&[], cb.zero());
-                let mut right = HashOutTarget::from_partial(&[], cb.zero());
-
-                for i in 0..NUM_HASH_OUT_ELTS {
-                    left.elements[i] = cb.select(pos, state_root.elements[i], sibling.elements[i]);
-                    right.elements[i] = cb.select(pos, sibling.elements[i], state_root.elements[i]);
-                }
-
-                let preimage = left
-                    .elements
-                    .iter()
-                    .chain(right.elements.iter())
-                    .copied()
-                    .collect();
-
-                state_root = cb.hash_n_to_hash_no_pad::<PoseidonHash>(preimage);
-
                 (sibling, pos)
             })
             .unzip();
+        let siblings = MerkleProofTarget { siblings };
+
+        let state_root = cb.add_virtual_hash();
+        cb.verify_merkle_proof::<PoseidonHash>(
+            state_leaf,
+            positions.as_slice(),
+            state_root,
+            &siblings,
+        );
 
         // FIXME optimized version unimplemented
         // https://www.notion.so/lagrangelabs/Encoding-Specs-ccaa31d1598b4626860e26ac149705c4?pvs=4#5e8e6f06e2554b0caee4904258cbbca2
@@ -141,13 +136,21 @@ impl<const L: usize, F: RichField> ProvenanceCircuit<L, F> {
         );
 
         ProvenanceWires {
-            siblings,
+            state_root,
+            siblings: siblings.siblings,
             positions,
             block_hash,
         }
     }
 
     pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &ProvenanceWires) {
+        wires
+            .state_root
+            .elements
+            .iter()
+            .zip(self.state_root.elements.iter())
+            .for_each(|(&w, &v)| pw.set_target(w, v));
+
         wires
             .siblings
             .iter()
