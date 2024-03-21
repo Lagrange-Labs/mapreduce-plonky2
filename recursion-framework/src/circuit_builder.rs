@@ -333,7 +333,7 @@ where
         self.circuit_data.common.degree()
     }
 
-    /// This method, given a proof generated with by `Self` circuit, returns the public inputs 
+    /// This method, given a proof generated with by `Self` circuit, returns the public inputs
     /// of the proof except for the ones representing the digest of the circuit set
     pub fn public_inputs(proof: &ProofWithPublicInputs<F, C, D>) -> &[F] {
         &proof.public_inputs[..CLW::NUM_PUBLIC_INPUTS]

@@ -1,5 +1,8 @@
 use plonky2::{
-    hash::{hash_types::{HashOutTarget, MerkleCapTarget}, merkle_proofs::MerkleProofTarget},
+    hash::{
+        hash_types::{HashOutTarget, MerkleCapTarget},
+        merkle_proofs::MerkleProofTarget,
+    },
     iop::target::{BoolTarget, Target},
     plonk::{circuit_data::VerifierCircuitTarget, proof::ProofWithPublicInputsTarget},
     util::serialization::{Buffer, Read, Write},
