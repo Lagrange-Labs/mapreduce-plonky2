@@ -43,7 +43,6 @@ fn prove_and_verify_provenance_circuit() {
     assert_eq!(pi.root_data(), &circuit.root.elements);
     assert_eq!(pi.block_number_min_data(), circuit.block_number_min);
     assert_eq!(pi.block_number_max_data(), circuit.block_number_max);
-    assert_eq!(pi.block_number_max_data(), circuit.block_number_max);
     assert_eq!(
         pi.smart_contract_address_data(),
         &circuit.smart_contract_address.arr

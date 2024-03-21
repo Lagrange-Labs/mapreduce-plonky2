@@ -14,6 +14,18 @@ use crate::{
     utils::convert_point_to_curve_target,
 };
 
+/// Public inputs of the provenance circuit
+///
+/// - `B` Block number
+/// - `R` Aggregated range
+/// - `C` Block leaf hash
+/// - `B_MIN` Minimum block number
+/// - `B_MAX` Maximum block number
+/// - `A` Smart contract address
+/// - `X` User/Owner address
+/// - `M` Mapping slot
+/// - `S` Length of the slot
+/// - `Y` Aggregated storage digest
 #[derive(Clone, Debug)]
 pub struct PublicInputs<'a, T: Clone> {
     pub(crate) proof_inputs: &'a [T],
@@ -69,42 +81,52 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         Self { proof_inputs: arr }
     }
 
+    /// Block number
     pub fn block_number_data(&self) -> T {
         self.proof_inputs[Self::B_IDX]
     }
 
+    /// Aggregated range
     pub fn range_data(&self) -> T {
         self.proof_inputs[Self::R_IDX]
     }
 
+    /// Block leaf hash
     pub fn root_data(&self) -> &[T] {
         &self.proof_inputs[Self::C_IDX..Self::C_IDX + Self::C_LEN]
     }
 
+    /// Minimum block number
     pub fn block_number_min_data(&self) -> T {
         self.proof_inputs[Self::B_MIN_IDX]
     }
 
+    /// Maximum block number
     pub fn block_number_max_data(&self) -> T {
         self.proof_inputs[Self::B_MAX_IDX]
     }
 
+    /// Smart contract address
     pub fn smart_contract_address_data(&self) -> &[T] {
         &self.proof_inputs[Self::A_IDX..Self::A_IDX + Self::A_LEN]
     }
 
+    /// User/Owner address
     pub fn user_address_data(&self) -> &[T] {
         &self.proof_inputs[Self::X_IDX..Self::X_IDX + Self::X_LEN]
     }
 
+    /// Mapping slot
     pub fn mapping_slot_data(&self) -> T {
         self.proof_inputs[Self::M_IDX]
     }
 
+    /// Length of the slot
     pub fn length_slot_data(&self) -> T {
         self.proof_inputs[Self::S_IDX]
     }
 
+    /// Aggregated storage digest
     pub fn digest_data(&self) -> &[T] {
         &self.proof_inputs[Self::D_IDX..Self::D_IDX + Self::D_LEN]
     }
@@ -140,43 +162,53 @@ impl<'a> PublicInputs<'a, Target> {
         b.register_public_input(digest.0 .1.target);
     }
 
+    /// Block number
     pub fn block_number(&self) -> Target {
         self.proof_inputs[Self::B_IDX]
     }
 
+    /// Aggregated range
     pub fn range(&self) -> Target {
         self.proof_inputs[Self::R_IDX]
     }
 
+    /// Block leaf hash
     pub fn root(&self) -> HashOutTarget {
         HashOutTarget::try_from(self.root_data()).expect("len defined as constant")
     }
 
+    /// Minimum block number
     pub fn block_number_min(&self) -> Target {
         self.proof_inputs[Self::B_MIN_IDX]
     }
 
+    /// Maximum block number
     pub fn block_number_max(&self) -> Target {
         self.proof_inputs[Self::B_MAX_IDX]
     }
 
+    /// Smart contract address
     pub fn smart_contract_address(&self) -> AddressTarget {
         AddressTarget::try_from(self.smart_contract_address_data())
             .expect("len defined as constant")
     }
 
+    /// User/Owner address
     pub fn user_address(&self) -> AddressTarget {
         AddressTarget::try_from(self.user_address_data()).expect("len defined as constant")
     }
 
+    /// Mapping slot
     pub fn mapping_slot(&self) -> Target {
         self.proof_inputs[Self::M_IDX]
     }
 
+    /// Length of the slot
     pub fn length_slot(&self) -> Target {
         self.proof_inputs[Self::S_IDX]
     }
 
+    /// Aggregated storage digest
     pub fn digest(&self) -> CurveTarget {
         let target = self.digest_data();
         let x = &target[0..group_hashing::N];

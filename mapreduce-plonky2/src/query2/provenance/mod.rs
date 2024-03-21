@@ -58,6 +58,45 @@ pub struct ProvenanceWires {
 }
 
 /// The provenance db circuit
+///
+/// # Arguments
+///
+/// - [StorageInputs]
+///
+/// # Witnesses
+///
+/// - `A` Smart contract address
+/// - `M` Mapping slot
+/// - `S` Length of the slot
+/// - `B` Block number
+/// - `B_MIN` Minimum block number
+/// - `B_MAX` Maximum block number
+/// - `R` Aggregated range
+/// - `Z` State root of the leaf opening
+/// - `P` Siblings path from leaf hash to `Z`
+/// - `T` Little-endian positions flags for the merkle opening path
+/// - `Y` Aggregated storage digest
+/// - `H` Block hash as stored in the leaf of the block db
+///
+/// # Public Inputs
+///
+/// - `B` Block number
+/// - `R` Aggregated range
+/// - `C` Block leaf hash
+/// - `B_MIN` Minimum block number
+/// - `B_MAX` Maximum block number
+/// - `A` Smart contract address
+/// - `X` User/Owner address
+/// - `M` Mapping slot
+/// - `S` Length of the slot
+/// - `Y` Aggregated storage digest
+///
+/// # Circuit
+///
+/// 1. `state_leaf := Poseidon(A || M || S || C)`
+/// 2. Open the Merkle path `(P, T)` from `state_leaf` to `Z`
+/// 3. `C := Poseidon(B || H || Z)`
+/// 4. `R == 1`
 #[derive(Debug, Clone)]
 pub struct ProvenanceCircuit<const DEPTH: usize, F: RichField> {
     smart_contract_address: Address<F>,
@@ -74,6 +113,7 @@ pub struct ProvenanceCircuit<const DEPTH: usize, F: RichField> {
 }
 
 impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
+    /// Creates a new instance of the provenance circuit with the provided witness values.
     pub fn new(
         smart_contract_address: Address<F>,
         mapping_slot: F,
@@ -102,6 +142,7 @@ impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
         }
     }
 
+    /// Builds the circuit wires with virtual targets.
     pub fn build<const D: usize>(
         cb: &mut CircuitBuilder<F, D>,
         storage_proof: &StorageInputs<Target>,
@@ -191,6 +232,7 @@ impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
         }
     }
 
+    /// Assigns the instance witness values to the provided wires.
     pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &ProvenanceWires) {
         wires
             .smart_contract_address
