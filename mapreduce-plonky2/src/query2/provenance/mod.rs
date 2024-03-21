@@ -3,7 +3,7 @@
 use std::iter;
 
 use plonky2::{
-    field::extension::Extendable,
+    field::{extension::Extendable, goldilocks_field::GoldilocksField, types::Field},
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         merkle_proofs::MerkleProofTarget,
@@ -140,13 +140,10 @@ impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
     }
 
     /// Builds the circuit wires with virtual targets.
-    pub fn build<const D: usize>(
-        cb: &mut CircuitBuilder<F, D>,
+    pub fn build(
+        cb: &mut CircuitBuilder<GoldilocksField, 2>,
         storage_proof: &StorageInputs<Target>,
-    ) -> ProvenanceWires
-    where
-        F: Extendable<D>,
-    {
+    ) -> ProvenanceWires {
         let x = storage_proof.owner();
         let c = storage_proof.root();
         let digest = storage_proof.digest();
@@ -157,7 +154,7 @@ impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
         let b = cb.add_virtual_target();
         let b_min = cb.add_virtual_target();
         let b_max = cb.add_virtual_target();
-        let r = cb.constant(F::ONE);
+        let r = cb.constant(GoldilocksField::ONE);
 
         let (siblings, positions): (Vec<_>, Vec<_>) = (0..DEPTH)
             .map(|_| {
@@ -208,7 +205,7 @@ impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
             &x,
             m,
             s,
-            &digest,
+            digest,
         );
 
         ProvenanceWires {

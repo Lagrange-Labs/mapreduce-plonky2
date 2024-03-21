@@ -1,10 +1,10 @@
 use plonky2::{
-    field::extension::Extendable,
+    field::{extension::Extendable, goldilocks_field::GoldilocksField},
     hash::hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
     iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::CurveTarget;
+use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 
 use crate::{
     group_hashing,
@@ -133,8 +133,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 }
 
 impl<'a> PublicInputs<'a, Target> {
-    pub fn register<F, const D: usize>(
-        b: &mut CircuitBuilder<F, D>,
+    pub fn register(
+        b: &mut CircuitBuilder<GoldilocksField, 2>,
         block_number: Target,
         range: Target,
         root: &HashOutTarget,
@@ -144,10 +144,8 @@ impl<'a> PublicInputs<'a, Target> {
         user_address: &AddressTarget,
         mapping_slot: Target,
         length_slot: Target,
-        digest: &CurveTarget,
-    ) where
-        F: RichField + Extendable<D>,
-    {
+        digest: CurveTarget,
+    ) {
         b.register_public_input(block_number);
         b.register_public_input(range);
         b.register_public_inputs(&root.elements);
@@ -157,9 +155,7 @@ impl<'a> PublicInputs<'a, Target> {
         user_address.register_as_public_input(b);
         b.register_public_input(mapping_slot);
         b.register_public_input(length_slot);
-        b.register_public_inputs(&digest.0 .0[0].0);
-        b.register_public_inputs(&digest.0 .0[1].0);
-        b.register_public_input(digest.0 .1.target);
+        b.register_curve_public_input(digest);
     }
 
     /// Block number
