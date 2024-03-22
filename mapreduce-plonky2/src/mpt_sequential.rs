@@ -580,7 +580,7 @@ pub mod test {
     struct TestCircuit<const DEPTH: usize, const NODE_LEN: usize> {
         c: Circuit<DEPTH, NODE_LEN>,
         exp_root: [u8; 32],
-        exp_value: [u8; 32],
+        exp_value: [u8; MAX_LEAF_VALUE_LEN],
         // The flag identifies if need to check the expected leaf value, it's
         // set to true for storage proof, and false for state proof (unconcern).
         checking_value: bool,
@@ -672,7 +672,7 @@ pub mod test {
         ProofQuery::verify_storage_proof(&res)?;
 
         let value = res.storage_proof[0].value;
-        let mut value_bytes = [0u8; 32];
+        let mut value_bytes = [0u8; MAX_LEAF_VALUE_LEN];
         value.to_little_endian(&mut value_bytes);
         let mpt_proof = res.storage_proof[0]
             .proof
@@ -736,7 +736,7 @@ pub mod test {
         let circuit = TestCircuit::<DEPTH, NODE_LEN> {
             c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
             exp_root: root.try_into().unwrap(),
-            exp_value: [0; 32],
+            exp_value: [0; MAX_LEAF_VALUE_LEN],
             // the reason we don't check the value is the circuit is made for storage proof and it extracts a 32bytes
             // value. In the case of state trie, the value is 104 bytes so value is never gonna be equal.
             checking_value: false,
@@ -793,7 +793,8 @@ pub mod test {
         let circuit = TestCircuit::<DEPTH, NODE_LEN> {
             c: Circuit::<DEPTH, NODE_LEN>::new(key.try_into().unwrap(), proof),
             exp_root: root,
-            exp_value: value.try_into().unwrap(),
+            // simply pad it to max size
+            exp_value: create_array(|i| if i < VALUE_LEN { value[i] } else { 0 }),
             checking_value: true,
         };
         run_circuit::<F, D, C, _>(circuit);
