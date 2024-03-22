@@ -11,10 +11,9 @@ use crate::{
     array::Array,
     circuit::UserCircuit,
     group_hashing::CircuitBuilderGroupHashing,
+    query2::{storage::public_inputs::PublicInputs, AddressTarget},
     storage::{KEY_SIZE, LEAF_SIZE},
 };
-
-use super::{public_inputs::PublicInputs, AddressTarget};
 
 pub struct InclusionWires {
     pub key: Array<Target, KEY_SIZE>,

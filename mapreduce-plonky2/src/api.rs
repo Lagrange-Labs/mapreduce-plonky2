@@ -1,4 +1,5 @@
 use anyhow::Result;
+use ethers::core::k256::elliptic_curve::rand_core::le;
 use plonky2::{
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{
@@ -15,14 +16,21 @@ use recursion_framework::serialization::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::block_linking;
 pub use crate::storage::{
     self,
     length_extract::{self},
-    lpn, mapping,
+    lpn as lpn_storage, mapping,
+};
+use crate::{
+    block::Inputs,
+    state::{
+        block_linking,
+        lpn::{self as lpn_state, api::ProofInputs},
+    },
 };
 
 use self::storage::{digest_equal, length_match};
+use crate::block;
 
 // TODO: put every references here. remove one from mapping
 pub(crate) const D: usize = 2;
@@ -31,13 +39,13 @@ pub(crate) type F = <C as GenericConfig<D>>::F;
 
 /// Set of inputs necessary to generate proofs for each circuit employed in the pre-processing
 /// stage of LPN
-pub enum CircuitInput {
+pub enum CircuitInput<const MAX_DEPTH: usize> {
     /// Input for circuits proving inclusion of entries of a mapping in an MPT
     Mapping(mapping::CircuitInput),
     /// Input for circuit extracting length of a mapping from MPT
     LengthExtract(storage::length_extract::CircuitInput),
     /// Input for circuit building the storage DB of LPN
-    Storage(lpn::Input),
+    Storage(lpn_storage::Input),
     /// Input for circuit binding the proofs for `Mapping` and `LengthExtract` circuits
     LengthMatch(length_match::CircuitInput),
     // Input for circuit binding the proofs for `LengthMatch` and `Storage` circuits
@@ -45,17 +53,23 @@ pub enum CircuitInput {
     /// Input for circuit linking the constructed storage DB to a specific block of the
     /// mainchain
     BlockLinking(block_linking::CircuitInput),
+    /// Input for circuit bulding the state DB of LPN
+    State(lpn_state::api::CircuitInput),
+    /// Input for circuit building the block tree DB of LPN
+    BlockDB(block::CircuitInput<MAX_DEPTH>),
 }
 
 #[derive(Serialize, Deserialize)]
 /// Parameters defining all the circuits employed for the pre-processing stage of LPN
-pub struct PublicParameters {
+pub struct PublicParameters<const MAX_DEPTH: usize> {
     mapping: mapping::PublicParameters,
     length_extract: length_extract::PublicParameters,
     length_match: length_match::Parameters,
-    lpn_storage: lpn::PublicParameters,
+    lpn_storage: lpn_storage::PublicParameters,
     digest_equal: digest_equal::Parameters,
     block_linking: block_linking::PublicParameters,
+    lpn_state: lpn_state::api::Parameters,
+    block_db: block::Parameters<MAX_DEPTH>,
 }
 
 /// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits
@@ -65,20 +79,22 @@ pub(crate) fn default_config() -> CircuitConfig {
 }
 /// Instantiate the circuits employed for the pre-processing stage of LPN, returning their
 /// corresponding parameters
-pub fn build_circuits_params() -> PublicParameters {
+pub fn build_circuits_params<const MAX_DEPTH: usize>() -> PublicParameters<MAX_DEPTH> {
     let mapping = mapping::build_circuits_params();
     let length_extract = length_extract::PublicParameters::build();
     let length_match = length_match::Parameters::build(
         mapping.get_mapping_circuit_set(),
         &length_extract.circuit_data().verifier_data(),
     );
-    let lpn_storage = lpn::PublicParameters::build();
+    let lpn_storage = lpn_storage::PublicParameters::build();
     let digest_equal = digest_equal::Parameters::build(
         lpn_storage.get_lpn_circuit_set(),
         &length_match.circuit_data().verifier_data(),
     );
     let block_linking =
         block_linking::PublicParameters::build(&digest_equal.circuit_data().verifier_data());
+    let lpn_state = lpn_state::api::Parameters::build(block_linking.circuit_data().verifier_data());
+    let block_db = block::Parameters::build(lpn_state.get_lpn_state_circuit_set());
     PublicParameters {
         mapping,
         length_extract,
@@ -86,12 +102,17 @@ pub fn build_circuits_params() -> PublicParameters {
         lpn_storage,
         digest_equal,
         block_linking,
+        lpn_state,
+        block_db,
     }
 }
 
 /// Generate a proof for a circuit in the set of circuits employed in the pre-processing stage
 /// of LPN, employing `CircuitInput` to specify for which circuit the proof should be generated
-pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
+pub fn generate_proof<const MAX_DEPTH: usize>(
+    params: &PublicParameters<MAX_DEPTH>,
+    input: CircuitInput<MAX_DEPTH>,
+) -> Result<Vec<u8>> {
     match input {
         CircuitInput::Mapping(mapping_input) => {
             mapping::generate_proof(&params.mapping, mapping_input)
@@ -125,12 +146,38 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
             )
         }
         CircuitInput::BlockLinking(block_linking_input) => {
-            let (storage_proof, inputs) = block_linking_input.try_into()?;
             let storage_proof = ProofWithVK::from((
-                storage_proof,
+                block_linking_input.storage_proof.clone(),
                 params.digest_equal.circuit_data().verifier_only.clone(),
             ));
-            params.block_linking.generate_proof(&storage_proof, inputs)
+            params.block_linking.generate_proof(
+                &block_linking_input,
+                &params.digest_equal.circuit_data().verifier_only,
+            )
+        }
+        CircuitInput::State(state_input) => {
+            let proof_input = match state_input {
+                lpn_state::api::CircuitInput::Leaf(leaf_proof) => ProofInputs::from_leaf_input(
+                    leaf_proof,
+                    &params.block_linking.circuit_data().verifier_only,
+                ),
+                lpn_state::api::CircuitInput::Node((left, right)) => {
+                    ProofInputs::from_node_input(&left, &right)
+                }
+            }?;
+            params.lpn_state.generate_proof(proof_input)
+        }
+        CircuitInput::BlockDB(block_db_input) => {
+            let proof_input = match block_db_input {
+                block::CircuitInput::First(input) => Inputs::input_for_first_block(
+                    input,
+                    params.lpn_state.get_lpn_state_circuit_set(),
+                ),
+                block::CircuitInput::Subsequent(input) => {
+                    Inputs::input_for_new_block(input, params.lpn_state.get_lpn_state_circuit_set())
+                }
+            }?;
+            params.block_db.generate_proof(proof_input)
         }
     }
 }

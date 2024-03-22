@@ -99,7 +99,6 @@ impl<'a, T: Clone> BlockLinkingInputs<'a, T> {
     ///
     /// This function will panic if the length of the provided slice is smaller than
     /// [Self::TOTAL_LEN].
-    #[cfg(test)]
     pub fn from_slice(arr: &'a [T]) -> Self {
         assert!(
             TOTAL_LEN <= arr.len(),
@@ -156,7 +155,6 @@ mod tests {
 
     impl<'a, T: Copy + Default> BlockLinkingInputs<'a, T> {
         /// Writes the parts of the block liking public inputs into the provided target array.
-        #[cfg(test)]
         #[allow(clippy::too_many_arguments)]
         pub fn parts_into_values(
             values: &mut [T; TOTAL_LEN],
