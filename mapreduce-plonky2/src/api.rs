@@ -39,7 +39,7 @@ pub(crate) type F = <C as GenericConfig<D>>::F;
 
 /// Set of inputs necessary to generate proofs for each circuit employed in the pre-processing
 /// stage of LPN
-pub enum CircuitInput {
+pub enum CircuitInput<const MAX_DEPTH: usize> {
     /// Input for circuits proving inclusion of entries of a mapping in an MPT
     Mapping(mapping::CircuitInput),
     /// Input for circuit extracting length of a mapping from MPT
@@ -56,12 +56,12 @@ pub enum CircuitInput {
     /// Input for circuit bulding the state DB of LPN
     State(lpn_state::api::CircuitInput),
     /// Input for circuit building the block tree DB of LPN
-    BlockDB(block::CircuitInput),
+    BlockDB(block::CircuitInput<MAX_DEPTH>),
 }
 
 #[derive(Serialize, Deserialize)]
 /// Parameters defining all the circuits employed for the pre-processing stage of LPN
-pub struct PublicParameters {
+pub struct PublicParameters<const MAX_DEPTH: usize> {
     mapping: mapping::PublicParameters,
     length_extract: length_extract::PublicParameters,
     length_match: length_match::Parameters,
@@ -69,7 +69,7 @@ pub struct PublicParameters {
     digest_equal: digest_equal::Parameters,
     block_linking: block_linking::PublicParameters,
     lpn_state: lpn_state::api::Parameters,
-    block_db: block::Parameters,
+    block_db: block::Parameters<MAX_DEPTH>,
 }
 
 /// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits
@@ -79,7 +79,7 @@ pub(crate) fn default_config() -> CircuitConfig {
 }
 /// Instantiate the circuits employed for the pre-processing stage of LPN, returning their
 /// corresponding parameters
-pub fn build_circuits_params() -> PublicParameters {
+pub fn build_circuits_params<const MAX_DEPTH: usize>() -> PublicParameters<MAX_DEPTH> {
     let mapping = mapping::build_circuits_params();
     let length_extract = length_extract::PublicParameters::build();
     let length_match = length_match::Parameters::build(
@@ -109,7 +109,7 @@ pub fn build_circuits_params() -> PublicParameters {
 
 /// Generate a proof for a circuit in the set of circuits employed in the pre-processing stage
 /// of LPN, employing `CircuitInput` to specify for which circuit the proof should be generated
-pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
+pub fn generate_proof<const MAX_DEPTH: usize>(params: &PublicParameters<MAX_DEPTH>, input: CircuitInput<MAX_DEPTH>) -> Result<Vec<u8>> {
     match input {
         CircuitInput::Mapping(mapping_input) => {
             mapping::generate_proof(&params.mapping, mapping_input)

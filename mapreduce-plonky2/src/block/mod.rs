@@ -300,7 +300,6 @@ fn leaf_data<F: RichField + Extendable<D>, const D: usize>(
 type F = crate::api::F;
 type C = crate::api::C;
 const D: usize = crate::api::D;
-const MAX_DEPTH: usize = 26;
 const NUM_IO: usize = PublicInputs::<Target>::TOTAL_LEN;
 const NUM_STATE_PUBLIC_INPUTS: usize = StateInputs::<Target>::TOTAL_LEN;
 // number of public inputs for IVC block DB circuit; it has one additional
@@ -314,7 +313,7 @@ const NUM_IVC_PUBLIC_INPUTS: usize = NUM_IO + 1;
 /// This data strcuture contains the input values related to the additional
 /// logic enforced in the block tree IVC circuit besides recursive verification
 /// of  previously generated IVC proof
-struct BlockTreeInputs {
+struct BlockTreeInputs<const MAX_DEPTH: usize> {
     block_tree: BlockTreeCircuit<F, MAX_DEPTH>,
     new_leaf_proof: ProofWithVK,
     state_circuit_set: RecursiveCircuits<F, C, D>,
@@ -327,10 +326,14 @@ struct BlockTreeRecursiveWires<const MAX_DEPTH: usize, const D: usize> {
     state_verifier: RecursiveCircuitsVerifierTarget<D>,
 }
 
-impl CircuitLogicWires<F, D, 1> for BlockTreeRecursiveWires<MAX_DEPTH, D> {
+impl<const MAX_DEPTH: usize> CircuitLogicWires<F, D, 1> for BlockTreeRecursiveWires<MAX_DEPTH, D> 
+where 
+    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+    [(); NUM_IVC_PUBLIC_INPUTS]:,
+{
     type CircuitBuilderParams = RecursiveCircuits<F, C, D>;
 
-    type Inputs = BlockTreeInputs;
+    type Inputs = BlockTreeInputs<MAX_DEPTH>;
 
     const NUM_PUBLIC_INPUTS: usize = NUM_IVC_PUBLIC_INPUTS;
 
@@ -373,7 +376,7 @@ impl CircuitLogicWires<F, D, 1> for BlockTreeRecursiveWires<MAX_DEPTH, D> {
 #[derive(Serialize, Deserialize)]
 /// Wires for the circuit employed to generate the dummy proofs being recursively verified in place
 /// of a real one when generating the proof of insertion of the first block in the block tree DB
-struct DummyCircuitWires {
+struct DummyCircuitWires<const MAX_DEPTH: usize> {
     pi: [Target; NUM_IO],
 }
 
@@ -382,7 +385,7 @@ struct DummyCircuitInputs {
     parent_hash: [F; PACKED_HASH_LEN],
 }
 
-impl CircuitLogicWires<F, D, 0> for DummyCircuitWires {
+impl<const MAX_DEPTH: usize> CircuitLogicWires<F, D, 0> for DummyCircuitWires<MAX_DEPTH> {
     type CircuitBuilderParams = ();
 
     type Inputs = DummyCircuitInputs;
@@ -427,13 +430,16 @@ impl CircuitLogicWires<F, D, 0> for DummyCircuitWires {
 
 #[derive(Serialize, Deserialize)]
 /// Parameters representing the circuits employed to build the block tree DB
-pub(crate) struct Parameters {
-    dummy: CircuitWithUniversalVerifier<F, C, D, 0, DummyCircuitWires>,
+pub(crate) struct Parameters<const MAX_DEPTH: usize> {
+    dummy: CircuitWithUniversalVerifier<F, C, D, 0, DummyCircuitWires<MAX_DEPTH>>,
     ivc_circuit: CircuitWithUniversalVerifier<F, C, D, 1, BlockTreeRecursiveWires<MAX_DEPTH, D>>,
     set: RecursiveCircuits<F, C, D>,
 }
 
-impl Parameters {
+impl<const MAX_DEPTH: usize> Parameters<MAX_DEPTH> 
+where 
+    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+{
     /// Build parameters for circuits related to the construction of the block DB tree
     pub(crate) fn build(state_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
         const IVC_CIRCUIT_SET_SIZE: usize = 2;
@@ -462,7 +468,7 @@ impl Parameters {
     }
 
     /// Generate a proof block tree DB circuit employing the circuit parameters found in  `self`
-    pub(crate) fn generate_proof(&self, input: Inputs) -> Result<Vec<u8>> {
+    pub(crate) fn generate_proof(&self, input: Inputs<MAX_DEPTH>) -> Result<Vec<u8>> {
         match input {
             Inputs::First(input) => {
                 // in this case we need to first generate a dummy proof with the
@@ -522,32 +528,32 @@ impl Parameters {
 /// This data structure contains all the inputs necessary to generate a proof for
 /// the block tree IVC circuit. These are the internal structs with the deserialized inputs
 /// from the public API.
-struct BlockTreeCircuitInputs {
-    base_inputs: BlockTreeInputs,
+struct BlockTreeCircuitInputs<const MAX_DEPTH: usize> {
+    base_inputs: BlockTreeInputs<MAX_DEPTH>,
     previous_proof: ProofWithVK,
 }
 
-impl Into<(BlockTreeInputs, ProofWithVK)> for BlockTreeCircuitInputs {
-    fn into(self) -> (BlockTreeInputs, ProofWithVK) {
+impl<const MAX_DEPTH: usize> Into<(BlockTreeInputs<MAX_DEPTH>, ProofWithVK)> for BlockTreeCircuitInputs<MAX_DEPTH> {
+    fn into(self) -> (BlockTreeInputs<MAX_DEPTH>, ProofWithVK) {
         (self.base_inputs, self.previous_proof)
     }
 }
 
 /// Wrapper to represent inputs for block tree IVC proofs
-pub(crate) enum Inputs {
+pub(crate) enum Inputs<const MAX_DEPTH: usize> {
     /// inputs to generate the first IVC proof, which doesn't verify a previously generated
     /// IVC proof
-    First(BlockTreeInputs),
+    First(BlockTreeInputs<MAX_DEPTH>),
     /// Inputs to generate a generic IVC proof, which recursively verify a previously generated
     /// IVC proof
-    Subsequent(BlockTreeCircuitInputs),
+    Subsequent(BlockTreeCircuitInputs<MAX_DEPTH>),
 }
 
-impl Inputs {
+impl<const MAX_DEPTH: usize> Inputs<MAX_DEPTH> {
     /// Instantiate a new instance of `Inputs` containing inputs to generate the IVC proof for the
     /// first block being inserted in the DB
     pub(crate) fn input_for_first_block(
-        input: BaseCircuitInput,
+        input: BaseCircuitInput<MAX_DEPTH>,
         state_circuit_set: &RecursiveCircuits<F, C, D>,
     ) -> Result<Self> {
         Ok(Self::First(BlockTreeInputs {
@@ -560,7 +566,7 @@ impl Inputs {
     /// Instantiate a new instance of `Inputs` containing inputs to generate the IVC proof for any
     /// new block being inserted in the DB (expect for the first one)
     pub(crate) fn input_for_new_block(
-        input: RecursiveCircuitInput,
+        input: RecursiveCircuitInput<MAX_DEPTH>,
         state_circuit_set: &RecursiveCircuits<F, C, D>,
     ) -> Result<Self> {
         Ok(Self::Subsequent(BlockTreeCircuitInputs {
@@ -575,30 +581,30 @@ impl Inputs {
 }
 /// `BaseCircuitInput` contains the inputs to be provided to the public APIs in order to generate
 /// a proof for the insertion of the first block in the block tree DB
-pub struct BaseCircuitInput {
+pub struct BaseCircuitInput<const MAX_DEPTH: usize> {
     block_tree: BlockTreeCircuit<F, MAX_DEPTH>,
     new_leaf_proof: Vec<u8>,
 }
 /// `RecursiveCircuitInput` contains the input to be provided to the public APIs in order to
 /// generate a proof for the insertion of a new block (except for the first one) in the
 /// block tree DB
-pub struct RecursiveCircuitInput {
-    base_inputs: BaseCircuitInput,
+pub struct RecursiveCircuitInput<const MAX_DEPTH: usize> {
+    base_inputs: BaseCircuitInput<MAX_DEPTH>,
     previous_proof: Vec<u8>,
 }
 
 /// `CircuitInput` represents the inputs that need to be provided to the public APIs in order
 /// to generate a proof of insertion in the block tree DB
-pub enum CircuitInput {
+pub enum CircuitInput<const MAX_DEPTH: usize> {
     /// inputs to generate the first IVC proof, which doesn't verify a previously generated
     /// IVC proof
-    First(BaseCircuitInput),
+    First(BaseCircuitInput<MAX_DEPTH>),
     /// Inputs to generate a generic IVC proof, which recursively verify a previously generated
     /// IVC proof
-    Subsequent(RecursiveCircuitInput),
+    Subsequent(RecursiveCircuitInput<MAX_DEPTH>),
 }
 
-impl CircuitInput {
+impl<const MAX_DEPTH: usize> CircuitInput<MAX_DEPTH> {
     /// Instantiate a new instance of `CircuitInput` containing inputs to generate the IVC proof for the
     /// first block being inserted in the DB
     pub fn input_for_first_block(
@@ -712,9 +718,11 @@ mod tests {
     fn test_block_tree_circuit_parameters() {
         init_logging();
 
+        const MAX_DEPTH: usize = 26;
+
         let testing_framework =
             TestingRecursiveCircuits::<F, C, D, NUM_STATE_PUBLIC_INPUTS>::default();
-        let params = Parameters::build(testing_framework.get_recursive_circuit_set());
+        let params = Parameters::<MAX_DEPTH>::build(testing_framework.get_recursive_circuit_set());
         println!("ivc circuit: {}", params.ivc_circuit.wrapped_circuit_size());
 
         let first_block_num = thread_rng().gen_range(1..10_000);
@@ -753,7 +761,7 @@ mod tests {
         leaves[leaf_index] = rand_leaf_data(first_block_num + 1);
         let previous_proof = ProofWithVK::deserialize(&proof).unwrap();
         let (proof, _) = (&previous_proof).into();
-        let prev_pi = Parameters::block_tree_public_inputs(proof);
+        let prev_pi = Parameters::<MAX_DEPTH>::block_tree_public_inputs(proof);
 
         let (root, path, new_leaf_proof) = gen_input(leaf_index, leaves, prev_pi);
 
