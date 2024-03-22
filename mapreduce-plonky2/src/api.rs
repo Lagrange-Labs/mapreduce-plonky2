@@ -109,7 +109,10 @@ pub fn build_circuits_params<const MAX_DEPTH: usize>() -> PublicParameters<MAX_D
 
 /// Generate a proof for a circuit in the set of circuits employed in the pre-processing stage
 /// of LPN, employing `CircuitInput` to specify for which circuit the proof should be generated
-pub fn generate_proof<const MAX_DEPTH: usize>(params: &PublicParameters<MAX_DEPTH>, input: CircuitInput<MAX_DEPTH>) -> Result<Vec<u8>> {
+pub fn generate_proof<const MAX_DEPTH: usize>(
+    params: &PublicParameters<MAX_DEPTH>,
+    input: CircuitInput<MAX_DEPTH>,
+) -> Result<Vec<u8>> {
     match input {
         CircuitInput::Mapping(mapping_input) => {
             mapping::generate_proof(&params.mapping, mapping_input)

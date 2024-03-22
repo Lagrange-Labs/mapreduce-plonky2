@@ -326,8 +326,8 @@ struct BlockTreeRecursiveWires<const MAX_DEPTH: usize, const D: usize> {
     state_verifier: RecursiveCircuitsVerifierTarget<D>,
 }
 
-impl<const MAX_DEPTH: usize> CircuitLogicWires<F, D, 1> for BlockTreeRecursiveWires<MAX_DEPTH, D> 
-where 
+impl<const MAX_DEPTH: usize> CircuitLogicWires<F, D, 1> for BlockTreeRecursiveWires<MAX_DEPTH, D>
+where
     [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
     [(); NUM_IVC_PUBLIC_INPUTS]:,
 {
@@ -436,8 +436,8 @@ pub(crate) struct Parameters<const MAX_DEPTH: usize> {
     set: RecursiveCircuits<F, C, D>,
 }
 
-impl<const MAX_DEPTH: usize> Parameters<MAX_DEPTH> 
-where 
+impl<const MAX_DEPTH: usize> Parameters<MAX_DEPTH>
+where
     [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
 {
     /// Build parameters for circuits related to the construction of the block DB tree
@@ -452,7 +452,7 @@ where
 
         // It's okay to use the circuit set mechanism here since the prover can not give a dummy proof after the first
         // block insertion because the regular circuit checks if it's the first insertion or not and sets a flag accordingly.
-        // that flag should be false after the first insertion, always, while the dummy circuit always expose 1. 
+        // that flag should be false after the first insertion, always, while the dummy circuit always expose 1.
         let circuits = vec![
             prepare_recursive_circuit_for_circuit_set(&dummy),
             prepare_recursive_circuit_for_circuit_set(&ivc_circuit),
@@ -533,7 +533,9 @@ struct BlockTreeCircuitInputs<const MAX_DEPTH: usize> {
     previous_proof: ProofWithVK,
 }
 
-impl<const MAX_DEPTH: usize> Into<(BlockTreeInputs<MAX_DEPTH>, ProofWithVK)> for BlockTreeCircuitInputs<MAX_DEPTH> {
+impl<const MAX_DEPTH: usize> Into<(BlockTreeInputs<MAX_DEPTH>, ProofWithVK)>
+    for BlockTreeCircuitInputs<MAX_DEPTH>
+{
     fn into(self) -> (BlockTreeInputs<MAX_DEPTH>, ProofWithVK) {
         (self.base_inputs, self.previous_proof)
     }
@@ -635,10 +637,9 @@ impl<const MAX_DEPTH: usize> CircuitInput<MAX_DEPTH> {
 
 fn empty_merkle_root<F: SerializableRichField<D>, const D: usize, const MAX_DEPTH: usize>(
 ) -> HashOut<F> {
-    (0..MAX_DEPTH).fold(
-        HashOut::<F>::from_partial(&vec![]), 
-        |hash, _| PoseidonHash::two_to_one(hash, hash)
-    )
+    (0..MAX_DEPTH).fold(HashOut::<F>::from_partial(&vec![]), |hash, _| {
+        PoseidonHash::two_to_one(hash, hash)
+    })
 }
 
 /// Generate the Merkle root from leaves.
