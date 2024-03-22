@@ -100,14 +100,11 @@ where
         // Read the length of the relevant data (RLP header - 0x80)
         let data_len = short_string_len(b, &encoded_value[0]);
         // Create vector of only the relevant data - skipping the RLP header
-        let value = VectorWire::<Target, VALUE_LEN> {
-            arr: Array {
-                arr: create_array(|i| encoded_value[i + 1]),
-            },
-            real_len: data_len,
-        };
-        // stick with the same encoding of the data but pad_left32.
-        let big_endian_left_padded = value.normalize_left::<_, _, VALUE_LEN>(b);
+        // + stick with the same encoding of the data but pad_left32.
+        let big_endian_left_padded = encoded_value
+            .take_last::<GoldilocksField, 2, VALUE_LEN>()
+            .into_vec(data_len)
+            .normalize_left::<_, _, VALUE_LEN>(b);
         // Then creates the initial accumulator from the (mapping_key, value)
         let mut inputs = [b.zero(); MAPPING_INPUT_TOTAL_LEN];
         inputs[0..MAPPING_KEY_LEN].copy_from_slice(&mapping_slot_wires.mapping_key.arr);

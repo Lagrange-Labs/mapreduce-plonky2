@@ -342,6 +342,14 @@ where
         self.assign(pw, &create_array(|i| F::from_canonical_u8(array[i])))
     }
 
+    pub fn take_last<F: RichField + Extendable<D>, const D: usize, const TAKE: usize>(
+        &self,
+    ) -> Array<T, TAKE> {
+        Array {
+            arr: create_array(|i| self.arr[SIZE - TAKE + i]),
+        }
+    }
+
     /// Conditionally select this array if condition is true or the other array
     /// if condition is false. Cost is O(SIZE) call to select()
     pub fn select<F: RichField + Extendable<D>, const D: usize>(
@@ -530,6 +538,13 @@ where
         b: &mut CircuitBuilder<F, D>,
     ) {
         b.register_public_inputs(&self.arr.iter().map(|t| t.to_target()).collect::<Vec<_>>());
+    }
+
+    pub fn into_vec(&self, real_len: Target) -> VectorWire<T, SIZE> {
+        VectorWire {
+            arr: self.clone(),
+            real_len,
+        }
     }
 }
 /// Returns the size of the array in 32-bit units, rounded up.

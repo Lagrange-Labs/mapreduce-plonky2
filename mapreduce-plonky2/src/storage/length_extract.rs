@@ -2,6 +2,7 @@
 
 use super::{
     key::{SimpleSlot, SimpleSlotWires},
+    mapping::leaf::VALUE_LEN,
     MAX_BRANCH_NODE_LEN,
 };
 use crate::{
@@ -150,7 +151,8 @@ where
         mpt_input.nodes.iter().for_each(|n| n.assert_bytes(cb));
 
         // The length value shouldn't exceed 4-bytes (U32).
-        let length_value = convert_u8_targets_to_u32(cb, &mpt_output.leaf.arr);
+        let length_value =
+            convert_u8_targets_to_u32(cb, &mpt_output.leaf.arr);
 
         // Register the public inputs.
         PublicInputs::register(
