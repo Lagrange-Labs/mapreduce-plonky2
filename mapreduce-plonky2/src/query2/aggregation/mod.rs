@@ -37,10 +37,10 @@ pub enum Inputs {
     UserAddress,
     /// M - mapping slot
     MappingSlot,
-    /// D - aggregated digest
-    Digest,
     /// S - storage slot length
     StorageSlotLength,
+    /// D - aggregated digest
+    Digest,
 }
 impl Inputs {
     const SIZES: [usize; 8] = [
@@ -50,12 +50,12 @@ impl Inputs {
         AddressTarget::LEN,
         AddressTarget::LEN,
         1,
-        CURVE_TARGET_LEN,
         1,
+        CURVE_TARGET_LEN,
     ];
 
-    fn total_len() -> usize {
-        Self::SIZES.iter().sum()
+    const fn total_len() -> usize {
+        1 + 1 + NUM_HASH_OUT_ELTS + 2 * AddressTarget::LEN + 1 + CURVE_TARGET_LEN + 1
     }
 
     pub const fn len(&self) -> usize {
@@ -108,6 +108,10 @@ impl<'a, T: Clone + Copy, const L: usize> AggregationPublicInputs<'a, T, L> {
         &self.inputs[Inputs::MappingSlot.range()]
     }
 
+    pub(crate) fn storage_slot_length_raw(&self) -> &[T] {
+        &self.inputs[Inputs::StorageSlotLength.range()]
+    }
+
     fn digest_raw(
         &self,
     ) -> (
@@ -115,15 +119,11 @@ impl<'a, T: Clone + Copy, const L: usize> AggregationPublicInputs<'a, T, L> {
         [T; crate::group_hashing::N],
         T,
     ) {
-        convert_slice_to_curve_point(&self.inputs[Inputs::total_len()..Self::total_len()])
+        convert_slice_to_curve_point(&self.inputs[Inputs::Digest.range()])
     }
 
-    pub(crate) fn storage_slot_length_raw(&self) -> &[T] {
-        &self.inputs[Inputs::StorageSlotLength.range()]
-    }
-
-    pub(crate) fn total_len() -> usize {
-        Inputs::total_len() + CURVE_TARGET_LEN
+    pub(crate) const fn total_len() -> usize {
+        Inputs::total_len()
     }
 }
 
