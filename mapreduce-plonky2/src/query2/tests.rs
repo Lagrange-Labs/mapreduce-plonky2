@@ -32,7 +32,7 @@ use super::{
         circuit::{RevelationCircuit, RevelationWires},
         RevelationPublicInputs,
     },
-    EWordTarget, EWORD_LEN,
+    EWord, EWordTarget, EWORD_LEN,
 };
 
 const D: usize = 2;
@@ -112,7 +112,7 @@ struct RevelationCircuitValidator<'a, const L: usize> {
     validated: RevelationCircuit<L>,
     db_proof: BlockPublicInputs<'a, F>,
     root_proof: AggregationPublicInputs<'a, F, L>,
-    values: [GoldilocksField; L],
+    values: [EWord; L],
 }
 impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
     type Wires = (RevelationWires, Vec<Target>, Vec<Target>, Vec<EWordTarget>);
@@ -137,7 +137,7 @@ impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
         pw.set_target_arr(&wires.1, self.db_proof.proof_inputs);
         pw.set_target_arr(&wires.2, self.root_proof.inputs);
         for (i, eword) in wires.3.iter().enumerate() {
-            pw.set_target_arr(eword, &self.values[i * EWORD_LEN..(i + 1) * EWORD_LEN]);
+            pw.set_target_arr(eword, &self.values[i]);
         }
         self.validated.assign(pw, &wires.0);
     }
@@ -155,12 +155,15 @@ fn test_mini_tree() {
     // Need integration with leaf proof @Victor
     let values = [0, 0, 0xdead, 0xbeef];
 
-    let left_leaf_proof_pi = run_provenance_circuit(0xdead);
-    let right_leaf_proof_pi = run_provenance_circuit(0xbeef);
+    let left_leaf_proof_io = run_provenance_circuit(0xdead);
+    let right_leaf_proof_io = run_provenance_circuit(0xbeef);
+
+    let left_leaf_pi = AggregationPublicInputs::<'_, F, L>::from(left_leaf_proof_io.as_slice());
+    let right_leaf_pi = AggregationPublicInputs::<'_, F, L>::from(right_leaf_proof_io.as_slice());
 
     let middle_proof = run_circuit::<F, D, C, _>(FullNodeCircuitValidator {
         validated: FullNodeCircuit::<L> {},
-        children: &[left_leaf_proof_pi, right_leaf_proof_pi],
+        children: &[left_leaf_pi, right_leaf_pi],
     });
 
     let proved = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
