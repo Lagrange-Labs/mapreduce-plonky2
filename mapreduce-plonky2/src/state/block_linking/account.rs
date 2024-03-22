@@ -98,9 +98,6 @@ where
         F: RichField + Extendable<D>,
     {
         let contract_address = Array::new(cb);
-        // make sure address is the same as the one in the public inputs which is
-        // in compact form
-        let packed_address: PackedAddressTarget = contract_address.convert_u8_to_u32(cb);
         let storage_pi = StorageInputs::from(storage_pi);
 
         let storage_root_offset = cb.add_virtual_target();

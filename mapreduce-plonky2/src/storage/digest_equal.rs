@@ -53,19 +53,11 @@ pub struct PublicInputs<'a, T: Clone> {
 }
 
 impl<'a, F: RichField> PublicInputs<'a, F> {
-    //pub fn contract_address_value(&self) -> H160 {
-    //    // The contract address is packed as [u32; 5] in public inputs. This
-    //    // code converts it to [u8; 20] as H160.
-    //    let bytes = convert_u32_fields_to_u8_vec(self.contract_address_data());
-
-    //    H160(bytes.try_into().unwrap())
-    //}
-
     /// Get the hash value of storage MPT root (C1).
     pub fn mpt_root_value(&self) -> H256 {
         // The root hash is packed as [u32; 8] in public inputs. This code
         // converts it to [u8; 32] as H256.
-        let bytes = convert_u32_fields_to_u8_vec(&self.mpt_root_data());
+        let bytes = convert_u32_fields_to_u8_vec(self.mpt_root_data());
 
         H256(bytes.try_into().unwrap())
     }
@@ -91,13 +83,6 @@ impl<'a> PublicInputs<'a, Target> {
     pub fn digest(&self) -> CurveTarget {
         convert_point_to_curve_target(self.digest_data())
     }
-
-    //pub fn contract_address(&self) -> PackedAddressTarget {
-    //    let data = self.contract_address_data();
-    //    Array {
-    //        arr: array::from_fn(|i| U32Target(data[i])),
-    //    }
-    //}
 
     pub fn mpt_root(&self) -> OutputHash {
         let data = self.mpt_root_data();
@@ -287,9 +272,8 @@ mod tests {
         },
     };
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
-    use rand::{thread_rng, Rng};
+    use rand::thread_rng;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
-    use std::array;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
