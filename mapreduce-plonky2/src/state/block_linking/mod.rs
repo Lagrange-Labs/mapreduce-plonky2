@@ -221,10 +221,16 @@ pub struct CircuitInput {
 impl CircuitInput {
     /// Instantiate `CircuitInput` for block linking circuit employing a proof for the
     /// digest equal circuit and the set of inputs to prove block linkink logic
-    pub fn new(storage_proof: Vec<u8>, header_rlp: Vec<u8>, state_mpt_nodes: Vec<Vec<u8>>) -> Self {
+    pub fn new(
+        storage_proof: Vec<u8>,
+        header_rlp: Vec<u8>,
+        state_mpt_nodes: Vec<Vec<u8>>,
+        contract_address: H160,
+    ) -> Self {
         let storage_proof = deserialize_proof(&storage_proof).unwrap();
         let inputs = BlockLinkingCircuitInputs::new(
             &storage_proof.public_inputs,
+            contract_address,
             header_rlp,
             state_mpt_nodes,
         );
