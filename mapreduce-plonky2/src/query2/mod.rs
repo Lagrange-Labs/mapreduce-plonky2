@@ -3,7 +3,7 @@
 
 use plonky2::{field::goldilocks_field::GoldilocksField, iop::target::Target};
 
-use crate::array::Array;
+use crate::{array::Array, types::PACKED_ADDRESS_LEN};
 
 pub(crate) mod aggregation;
 mod provenance;
@@ -20,6 +20,8 @@ pub(crate) type AddressTarget = Array<Target, ADDRESS_LEN>;
 
 // TODO: use 32B for address for now, see later if we prefer 20B
 pub(crate) type Address<F> = Array<F, ADDRESS_LEN>;
+
+pub(crate) type PackedSCAddress<F> = Array<F, PACKED_ADDRESS_LEN>;
 
 // An EWord (EVM Word) is a 256-bits/8×32B integer
 pub const EWORD_LEN: usize = 8;

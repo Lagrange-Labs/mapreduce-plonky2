@@ -20,10 +20,10 @@ use crate::{
     array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
     query2::storage::public_inputs::PublicInputs as StorageInputs,
-    query2::{Address, AddressTarget},
+    types::PackedAddressTarget,
 };
 
-use super::aggregation::AggregationPublicInputs;
+use super::{aggregation::AggregationPublicInputs, PackedSCAddress};
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -32,17 +32,13 @@ pub(crate) mod tests;
 #[derive(Debug, Clone)]
 pub struct ProvenanceWires {
     /// Smart contract address (unpacked)
-    pub smart_contract_address: AddressTarget,
+    pub smart_contract_address: PackedAddressTarget,
     /// Mapping of the storage slot
     pub mapping_slot: Target,
     /// Length of the storage slot
     pub length_slot: Target,
     /// Block number
     pub block_number: Target,
-    /// Block number minimum range
-    pub block_number_min: Target,
-    /// Block number maximum range
-    pub block_number_max: Target,
     /// Aggregated range
     pub range: Target,
     /// The merkle root of the opening.
@@ -97,12 +93,10 @@ pub struct ProvenanceWires {
 /// 4. `R == 1`
 #[derive(Debug, Clone)]
 pub struct ProvenanceCircuit<const DEPTH: usize, const L: usize, F: RichField> {
-    smart_contract_address: Address<F>,
+    smart_contract_address: PackedSCAddress<F>,
     mapping_slot: F,
     length_slot: F,
     block_number: F,
-    block_number_min: F,
-    block_number_max: F,
     state_root: HashOut<F>,
     siblings: Vec<HashOut<F>>,
     positions: Vec<bool>,
@@ -112,12 +106,10 @@ pub struct ProvenanceCircuit<const DEPTH: usize, const L: usize, F: RichField> {
 impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, L, F> {
     /// Creates a new instance of the provenance circuit with the provided witness values.
     pub fn new(
-        smart_contract_address: Address<F>,
+        smart_contract_address: PackedSCAddress<F>,
         mapping_slot: F,
         length_slot: F,
         block_number: F,
-        block_number_min: F,
-        block_number_max: F,
         state_root: HashOut<F>,
         siblings: Vec<HashOut<F>>,
         positions: Vec<bool>,
@@ -128,8 +120,6 @@ impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, 
             mapping_slot,
             length_slot,
             block_number,
-            block_number_min,
-            block_number_max,
             state_root,
             siblings,
             positions,
@@ -146,12 +136,10 @@ impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, 
         let c = storage_proof.root();
         let digest = storage_proof.digest();
 
-        let a = AddressTarget::new(cb);
+        let a = PackedAddressTarget::new(cb);
         let m = cb.add_virtual_target();
         let s = cb.add_virtual_target();
         let b = cb.add_virtual_target();
-        let b_min = cb.add_virtual_target();
-        let b_max = cb.add_virtual_target();
         let r = cb.constant(GoldilocksField::ONE);
 
         let (siblings, positions): (Vec<_>, Vec<_>) = (0..DEPTH)
@@ -169,7 +157,7 @@ impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, 
         let state_leaf = a
             .arr
             .iter()
-            .copied()
+            .map(|u32_t| u32_t.0)
             .chain(iter::once(m))
             .chain(iter::once(s))
             .chain(c.elements.iter().copied())
@@ -199,8 +187,6 @@ impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, 
             mapping_slot: m,
             length_slot: s,
             block_number: b,
-            block_number_min: b_min,
-            block_number_max: b_max,
             range: r,
             state_root,
             siblings,
@@ -211,18 +197,11 @@ impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, 
 
     /// Assigns the instance witness values to the provided wires.
     pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &ProvenanceWires) {
-        wires
-            .smart_contract_address
-            .arr
-            .iter()
-            .zip(self.smart_contract_address.arr.iter())
-            .for_each(|(&w, &v)| pw.set_target(w, v));
+        wires.smart_contract_address.assign(pw, &self.smart_contract_address.arr);
 
         pw.set_target(wires.mapping_slot, self.mapping_slot);
         pw.set_target(wires.length_slot, self.length_slot);
         pw.set_target(wires.block_number, self.block_number);
-        pw.set_target(wires.block_number_min, self.block_number_min);
-        pw.set_target(wires.block_number_max, self.block_number_max);
 
         wires
             .state_root

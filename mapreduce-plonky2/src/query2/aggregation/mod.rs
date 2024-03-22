@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use plonky2::{
     field::{
         extension::{quintic::QuinticExtension, FieldExtension},
@@ -8,15 +9,14 @@ use plonky2::{
     iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
 
 use crate::{
-    query2::AddressTarget,
-    types::CURVE_TARGET_LEN,
-    utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
+    array::Targetable, query2::AddressTarget, types::{PackedAddressTarget, CURVE_TARGET_LEN}, utils::{convert_point_to_curve_target, convert_slice_to_curve_point}
 };
 
 pub mod full_node;
@@ -47,7 +47,7 @@ impl Inputs {
         1,
         1,
         NUM_HASH_OUT_ELTS,
-        AddressTarget::LEN,
+        PackedAddressTarget::LEN,
         AddressTarget::LEN,
         1,
         1,
@@ -142,8 +142,8 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         }
     }
 
-    pub(crate) fn smart_contract_address(&self) -> AddressTarget {
-        AddressTarget::from_array(self.smart_contract_address_raw().try_into().unwrap())
+    pub(crate) fn smart_contract_address(&self) -> PackedAddressTarget {
+        PackedAddressTarget::try_from(self.smart_contract_address_raw().iter().map(|&t| U32Target(t)).collect_vec()).unwrap()
     }
 
     pub(crate) fn user_address(&self) -> AddressTarget {
@@ -167,7 +167,7 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         block_number: Target,
         range: Target,
         root: &HashOutTarget,
-        smc_address: &AddressTarget,
+        smc_address: &PackedAddressTarget,
         user_address: &AddressTarget,
         mapping_slot: Target,
         mapping_slot_length: Target,
@@ -176,7 +176,7 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         b.register_public_input(block_number);
         b.register_public_input(range);
         b.register_public_inputs(&root.elements);
-        b.register_public_inputs(&smc_address.arr);
+        smc_address.register_as_public_input(b);
         b.register_public_inputs(&user_address.arr);
         b.register_public_input(mapping_slot);
         b.register_public_input(mapping_slot_length);

@@ -6,7 +6,7 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
-use crate::{keccak::OutputHash, query2::AddressTarget, types::CURVE_TARGET_LEN};
+use crate::{keccak::OutputHash, query2::AddressTarget, types::{PackedAddressTarget, CURVE_TARGET_LEN}};
 
 pub mod circuit;
 
@@ -31,7 +31,7 @@ impl<const L: usize> Inputs<L> {
         NUM_HASH_OUT_ELTS,
         1,
         1,
-        AddressTarget::LEN,
+        PackedAddressTarget::LEN,
         AddressTarget::LEN,
         CURVE_TARGET_LEN,
         L * 8,
@@ -112,7 +112,7 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
         root: &HashOutTarget,
         min_block_number: Target,
         max_block_number: Target,
-        smc_address: &AddressTarget,
+        smc_address: &PackedAddressTarget,
         user_address: &AddressTarget,
         mapping_slot: Target,
         nft_ids: &[[Target; 8]],
@@ -123,7 +123,7 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
         b.register_public_inputs(&root.elements);
         b.register_public_input(min_block_number);
         b.register_public_input(max_block_number);
-        b.register_public_inputs(&smc_address.arr);
+        smc_address.register_as_public_input(b);
         b.register_public_inputs(&user_address.arr);
         b.register_public_input(mapping_slot);
         for nft_id in nft_ids {

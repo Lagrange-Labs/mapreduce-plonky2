@@ -20,7 +20,7 @@ use crate::{
     circuit::{test::run_circuit, UserCircuit},
     query2::{
         aggregation::AggregationPublicInputs,
-        storage::public_inputs::PublicInputs as StorageInputs, Address,
+        storage::public_inputs::PublicInputs as StorageInputs, PackedSCAddress,
     },
 };
 
@@ -72,9 +72,7 @@ pub struct TestProvenanceCircuit<const L: usize> {
     c: ProvenanceCircuit<L>,
     block_number: GoldilocksField,
     root: HashOut<GoldilocksField>,
-    block_number_min: GoldilocksField,
-    block_number_max: GoldilocksField,
-    smart_contract_address: Address<GoldilocksField>,
+    smart_contract_address: PackedSCAddress<GoldilocksField>,
     mapping_slot: GoldilocksField,
     length_slot: GoldilocksField,
 }
@@ -83,7 +81,7 @@ impl<const L: usize> TestProvenanceCircuit<L> {
     pub fn from_seed(seed: u64, storage: &StorageInputs<GoldilocksField>) -> Self {
         let rng = &mut StdRng::seed_from_u64(seed);
 
-        let mut smart_contract_address = Address::default();
+        let mut smart_contract_address = PackedSCAddress::default();
         smart_contract_address
             .arr
             .iter_mut()
@@ -92,8 +90,6 @@ impl<const L: usize> TestProvenanceCircuit<L> {
         let mapping_slot = GoldilocksField::from_canonical_u32(rng.next_u32());
         let length_slot = GoldilocksField::from_canonical_u32(rng.next_u32());
         let block_number = GoldilocksField::from_canonical_u32(rng.next_u32());
-        let block_number_min = GoldilocksField::from_canonical_u32(rng.next_u32());
-        let block_number_max = GoldilocksField::from_canonical_u32(rng.next_u32());
 
         let siblings: Vec<_> = (0..DEPTH)
             .map(|_| {
@@ -159,8 +155,6 @@ impl<const L: usize> TestProvenanceCircuit<L> {
             mapping_slot,
             length_slot,
             block_number,
-            block_number_min,
-            block_number_max,
             state_root,
             siblings,
             positions,
@@ -172,8 +166,6 @@ impl<const L: usize> TestProvenanceCircuit<L> {
             c,
             block_number,
             root: block_leaf_hash,
-            block_number_min,
-            block_number_max,
             smart_contract_address,
             mapping_slot,
             length_slot,
