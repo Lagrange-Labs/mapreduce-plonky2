@@ -20,7 +20,7 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData},
+        circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierOnlyCircuitData},
         proof::ProofWithPublicInputs,
     },
 };
@@ -192,14 +192,13 @@ impl PublicParameters {
     /// and the necessary inputs values
     pub(crate) fn generate_proof(
         &self,
-        storage_proof: &ProofWithVK,
-        input: BlockLinkingCircuitInputs,
+        inputs: &CircuitInput,
+        vk: &VerifierOnlyCircuitData<C, D>,
     ) -> Result<Vec<u8>> {
         let mut pw = PartialWitness::<F>::new();
-        input.assign::<F, D>(&mut pw, &self.wires)?;
-        let (input_proof, vk) = storage_proof.into();
+        inputs.circuit_inputs.assign::<F, D>(&mut pw, &self.wires)?;
         self.storage_circuit_wires
-            .set_target(&mut pw, input_proof, vk);
+            .set_target(&mut pw, &inputs.storage_proof, vk);
         let proof = self.data.prove(pw)?;
         serialize_proof(&proof)
     }
@@ -213,37 +212,24 @@ impl PublicParameters {
 /// Data structure containing the inputs to be provided to the API in order to
 /// generate a proof for the block linking circuit
 pub struct CircuitInput {
-    storage_proof: Vec<u8>,
-    inputs: BlockLinkingCircuitInputs,
+    pub(crate) storage_proof: ProofWithPublicInputs<F, C, D>,
+    circuit_inputs: BlockLinkingCircuitInputs,
 }
 
 impl CircuitInput {
     /// Instantiate `CircuitInput` for block linking circuit employing a proof for the
     /// digest equal circuit and the set of inputs to prove block linkink logic
-    pub fn new(storage_proof: Vec<u8>, bl_inputs: BlockLinkingCircuitInputs) -> Self {
+    pub fn new(storage_proof: Vec<u8>, header_rlp: Vec<u8>, state_mpt_nodes: Vec<Vec<u8>>) -> Self {
+        let storage_proof = deserialize_proof(&storage_proof).unwrap();
+        let inputs = BlockLinkingCircuitInputs::new(
+            &storage_proof.public_inputs,
+            header_rlp,
+            state_mpt_nodes,
+        );
         Self {
             storage_proof,
-            inputs: bl_inputs,
+            circuit_inputs: inputs,
         }
-    }
-}
-
-impl From<(Vec<u8>, BlockLinkingCircuitInputs)> for CircuitInput {
-    fn from(value: (Vec<u8>, BlockLinkingCircuitInputs)) -> Self {
-        Self {
-            storage_proof: value.0,
-            inputs: value.1,
-        }
-    }
-}
-
-impl TryInto<(ProofWithPublicInputs<F, C, D>, BlockLinkingCircuitInputs)> for CircuitInput {
-    type Error = anyhow::Error;
-
-    fn try_into(
-        self,
-    ) -> anyhow::Result<(ProofWithPublicInputs<F, C, D>, BlockLinkingCircuitInputs)> {
-        Ok((deserialize_proof(&self.storage_proof)?, self.inputs))
     }
 }
 
@@ -416,12 +402,13 @@ mod tests {
         let storage_proof = test_storage_circuit
             .generate_proof(storage_pi.try_into().unwrap())
             .unwrap();
-        let storage_proof = (
+        let inputs = CircuitInput {
             storage_proof,
-            test_storage_circuit.circuit_data().verifier_only.clone(),
-        )
-            .into();
-        let proof = params.generate_proof(&storage_proof, inputs).unwrap();
+            circuit_inputs: inputs,
+        };
+        let proof = params
+            .generate_proof(&inputs, &test_storage_circuit.circuit_data().verifier_only)
+            .unwrap();
 
         params
             .data

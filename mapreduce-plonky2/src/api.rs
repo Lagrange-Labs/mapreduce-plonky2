@@ -134,12 +134,14 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
             )
         }
         CircuitInput::BlockLinking(block_linking_input) => {
-            let (storage_proof, inputs) = block_linking_input.try_into()?;
             let storage_proof = ProofWithVK::from((
-                storage_proof,
+                block_linking_input.storage_proof.clone(),
                 params.digest_equal.circuit_data().verifier_only.clone(),
             ));
-            params.block_linking.generate_proof(&storage_proof, inputs)
+            params.block_linking.generate_proof(
+                &block_linking_input,
+                &params.digest_equal.circuit_data().verifier_only,
+            )
         }
         CircuitInput::State(state_input) => {
             let proof_input = match state_input {
