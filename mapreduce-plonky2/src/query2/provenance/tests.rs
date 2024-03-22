@@ -31,14 +31,13 @@ const TEST_L: usize = 4;
 type PublicInputs<'a, const L: usize> = AggregationPublicInputs<'a, GoldilocksField, L>;
 type ProvenanceCircuit<const L: usize> = super::ProvenanceCircuit<DEPTH, L, GoldilocksField>;
 
-pub(crate) fn run_provenance_circuit<'a, const L: usize>(
-    seed: u64,
-) -> AggregationPublicInputs<'a, GoldilocksField, L> {
+pub(crate) fn run_provenance_circuit<'a, const L: usize>(seed: u64) -> Vec<GoldilocksField> {
     let values = StorageInputs::values_from_seed(seed);
     let storage_pi = StorageInputs::from_slice(&values);
     let circuit = TestProvenanceCircuit::<L>::from_seed(seed, &storage_pi);
     let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit.clone());
-    let pi = PublicInputs::from(proof.public_inputs.as_slice());
+    let pi =
+        AggregationPublicInputs::<'_, GoldilocksField, L>::from(proof.public_inputs.as_slice());
     assert_eq!(pi.block_number(), circuit.block_number);
     assert_eq!(pi.range(), GoldilocksField::ONE);
     assert_eq!(pi.root(), circuit.root);
@@ -52,17 +51,17 @@ pub(crate) fn run_provenance_circuit<'a, const L: usize>(
     let (x, y, f) = storage_pi.digest_raw();
     assert_eq!(&pi.digest().x.0, &x);
     assert_eq!(&pi.digest().y.0, &y);
-    assert!(if f.is_one() {
-        pi.digest().is_inf
-    } else {
+    assert!(if f.is_zero() {
         !pi.digest().is_inf
+    } else {
+        pi.digest().is_inf
     });
 
-    pi
+    proof.public_inputs.to_owned()
 }
 
 #[derive(Debug, Clone)]
-struct TestProvenanceWires {
+pub struct TestProvenanceWires {
     storage: Vec<Target>,
     provenance: ProvenanceWires,
 }
