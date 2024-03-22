@@ -28,7 +28,7 @@ pub(crate) type Address<F> = Array<F, ADDRESS_LEN>;
 
 pub(crate) type PackedSCAddress<F> = Array<F, PACKED_SC_ADDRESS_LEN>;
 
-// An EWord (EVM Word) is a 256-bits/8×32B integer
+/// An EWord (EVM Word) is a 256-bits/8×32B integer
 pub const EWORD_LEN: usize = 8;
 // Targets for an EVM word
 type EWordTarget = [Target; EWORD_LEN];

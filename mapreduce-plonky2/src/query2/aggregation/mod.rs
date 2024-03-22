@@ -81,7 +81,7 @@ impl Inputs {
 
 /// On top of the habitual T, this type is parametrized by:
 ///   - L :: the LIMIT argument of the query
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AggregationPublicInputs<'input, T: Clone, const L: usize> {
     pub inputs: &'input [T],
 }

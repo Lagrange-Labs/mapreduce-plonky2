@@ -14,9 +14,9 @@ use plonky2::hash::keccak;
 use rlp::{Encodable, Rlp, RlpStream};
 #[cfg(feature = "ci")]
 use std::env;
-use std::{str::FromStr, sync::Arc};
+use std::{array::from_fn as create_array, str::FromStr, sync::Arc};
 
-use crate::utils::keccak256;
+use crate::{mpt_sequential::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
 /// bad transactions, so we only compute over valid transactions.
 pub struct TxAndReceipt(Transaction, TransactionReceipt);
@@ -252,6 +252,8 @@ pub(crate) struct ProofQuery {
     pub(crate) contract: Address,
     pub(crate) slot: StorageSlot,
 }
+
+#[derive(Clone, Debug)]
 pub(crate) enum StorageSlot {
     /// simple storage slot like a uin256 etc that fits in 32bytes
     /// Argument is the slot location in the contract
@@ -278,8 +280,15 @@ impl StorageSlot {
             }
         }
     }
-    pub fn mpt_key(&self) -> Vec<u8> {
+    pub fn mpt_key_vec(&self) -> Vec<u8> {
         keccak256(&self.location().to_fixed_bytes())
+    }
+    pub fn mpt_key(&self) -> [u8; 32] {
+        let hash = keccak256(&self.location().to_fixed_bytes());
+        create_array(|i| hash[i])
+    }
+    pub fn mpt_nibbles(&self) -> [u8; MAX_KEY_NIBBLE_LEN] {
+        bytes_to_nibbles(&self.mpt_key_vec()).try_into().unwrap()
     }
 }
 impl ProofQuery {
@@ -305,7 +314,7 @@ impl ProofQuery {
             .await?;
         Ok(res)
     }
-    pub fn verify_storage_proof(proof: &EIP1186ProofResponse) -> Result<()> {
+    pub fn verify_storage_proof(proof: &EIP1186ProofResponse) -> Result<U256> {
         let memdb = Arc::new(MemoryDB::new(true));
         let tx_trie = EthTrie::new(Arc::clone(&memdb));
         let proof_key_bytes: [u8; 32] = proof.storage_proof[0].key.into();
@@ -324,14 +333,22 @@ impl ProofQuery {
             bail!("proof is not valid");
         }
         if let Some(ext_value) = is_valid.unwrap() {
-            let found = U256::from_big_endian(&ext_value);
-            if found != proof.storage_proof[0].value {
-                bail!("proof does not return right value");
+            let found = U256::from_little_endian(&ext_value);
+            // in some conditions the value is RLP before, so check for both
+            let found_dec = U256::from_big_endian(&rlp::decode::<Vec<u8>>(&ext_value).unwrap());
+            if found != proof.storage_proof[0].value && found_dec != proof.storage_proof[0].value {
+                bail!(
+                    "proof does not return right value: found {}(dec {}) (ext {:?}) vs expected {}",
+                    found,
+                    found_dec,
+                    hex::encode(ext_value),
+                    proof.storage_proof[0].value
+                );
             }
         } else {
             bail!("proof says the value associated with that key does not exist");
         }
-        Ok(())
+        Ok(proof.storage_proof[0].value)
     }
     pub fn verify_state_proof(&self, res: &EIP1186ProofResponse) -> Result<()> {
         let memdb = Arc::new(MemoryDB::new(true));
@@ -371,9 +388,101 @@ mod test {
     use ethers::types::{BlockNumber, H256, U256};
     use rand::{thread_rng, Rng};
 
-    use crate::utils::find_index_subvector;
+    use crate::{
+        mpt_sequential::test::verify_storage_proof_from_query,
+        utils::{convert_u8_to_u32_slice, find_index_subvector},
+    };
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_pidgy_pinguins_slots() -> Result<()> {
+        let url = "https://eth.llamarpc.com";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // pidgy pinguins address
+        let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_simple_slot(pidgy_address, 8);
+        let res = query.query_mpt_proof(&provider, None).await?;
+        ProofQuery::verify_storage_proof(&res)?;
+        let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
+        let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
+        println!("leaf[1].len() = {}", leaf_list[1].len());
+        assert_eq!(leaf_list.len(), 2);
+        let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
+        // making sure we can simply skip the first byte
+        let sliced = &leaf_list[1][1..];
+        assert_eq!(sliced, leaf_value.as_slice());
+        println!(
+            "length of storage proof: {}",
+            res.storage_proof[0].proof.len()
+        );
+        println!(
+            "max node length: {}",
+            res.storage_proof[0]
+                .proof
+                .iter()
+                .map(|x| x.len())
+                .max()
+                .unwrap()
+        );
+        let mut n = sliced.to_vec();
+        n.resize(4, 0); // what happens in circuit effectively
+        println!("sliced: {:?} - hex {}", sliced, hex::encode(&sliced));
+        let length = convert_u8_to_u32_slice(&n)[0];
+        let length2 =
+            convert_u8_to_u32_slice(&sliced.iter().cloned().rev().collect::<Vec<u8>>())[0];
+        println!("length extracted = {}", length);
+        println!("length 2 extracted = {}", length2);
+        println!("res.storage_proof.value = {}", res.storage_proof[0].value);
+        // try if it's an array or not.
+        // for storage slot 8 it should be an array so the proof should be valid.
+        // for storage slot 11, it should be a variable so the proof to access the second
+        // item of this variable should be invalid (since the location doesn't exist)
+        {
+            let memdb = Arc::new(MemoryDB::new(true));
+            let tx_trie = EthTrie::new(Arc::clone(&memdb));
+            let array_slot = 8 as u8;
+
+            // TLDR:  we know we can access the _second_ item of the array but NOT the first one
+            // it's because in this case, the first value is 0 and it may not exist in the MPT
+            // https://github.com/ethereumjs/merkle-patricia-tree/issues/47#issue-328846240
+            let mut location = [0u8; 32];
+            (U256::from_big_endian(&keccak256(&left_pad32(&[array_slot]))) + U256::one())
+                .to_big_endian(&mut location[..]);
+
+            println!("location  = {}", hex::encode(&location));
+            let res = provider
+                .get_proof(pidgy_address, vec![H256::from_slice(&location)], None)
+                .await?;
+
+            let proof_key_bytes: [u8; 32] = res.storage_proof[0].key.into(); // rpc key == location
+            println!("res.proof key bytes = {}", hex::encode(&proof_key_bytes));
+            assert!(&proof_key_bytes.to_vec() == &location);
+            let mpt_key = keccak256(&proof_key_bytes[..]);
+            let is_valid = tx_trie.verify_proof(
+                res.storage_hash,
+                &mpt_key,
+                res.storage_proof[0]
+                    .proof
+                    .iter()
+                    .map(|b| b.to_vec())
+                    .collect(),
+            );
+            println!("res.value = {}", res.storage_proof[0].value);
+
+            if is_valid.is_err() {
+                bail!("storage proof is invalid: {}", is_valid.unwrap_err());
+            }
+            if is_valid.unwrap().is_none() {
+                bail!("storage proof says the value associated with that key does not exist");
+            }
+        }
+        //let value = ProofQuery::verify_storage_proof(&res)?;
+        //println!("value at slot 8: {}", value);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_kashish_contract_proof_query() -> Result<()> {

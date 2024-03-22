@@ -327,6 +327,8 @@ where
 
 #[cfg(test)]
 pub(crate) mod test {
+    use std::{fmt::Debug, time};
+
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -354,16 +356,26 @@ pub(crate) mod test {
         F: RichField + Extendable<D>,
         const D: usize,
         C: GenericConfig<D, F = F>,
-        U: UserCircuit<F, D>,
+        U: UserCircuit<F, D> + Debug,
     >(
         u: U,
     ) -> ProofWithPublicInputs<F, C, D> {
         let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut pw = PartialWitness::new();
+        // small hack to print the name of the circuit being generated
+        println!(
+            "[+] Building circuit data with circuit {:?}...",
+            &format!("{:?}", u)[0..20]
+        );
+        let now = std::time::Instant::now();
         let wires = U::build(&mut b);
         let circuit_data = b.build::<C>();
+        println!("[+] Circuit data built in {:?}s", now.elapsed().as_secs());
+        println!("[+] Generating a proof ... ");
+        let now = std::time::Instant::now();
         u.prove(&mut pw, &wires);
         let proof = circuit_data.prove(pw).expect("invalid proof");
+        println!("[+] Proof generated in {:?}s", now.elapsed().as_secs());
         verify_proof_tuple(&(
             proof.clone(),
             circuit_data.verifier_only,

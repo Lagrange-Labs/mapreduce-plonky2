@@ -43,7 +43,6 @@ use std::array;
 /// This is a wrapper around an array of targets set as public inputs of any
 /// proof generated in this module. They all share the same structure.
 /// `D` Digest of the all mapping values
-/// `A` contract address
 /// `C` MPT root of the trie
 /// `M` storage slot of the mapping
 /// `S` storage slot of the variable holding the length
@@ -56,13 +55,11 @@ impl<'a> PublicInputs<'a, Target> {
     pub fn register(
         cb: &mut CircuitBuilder<GoldilocksField, 2>,
         digest: &CurveTarget,
-        contract_address: &PackedAddressTarget,
         mpt_root_hash: &OutputHash,
         mapping_slot: Target,
         length_slot: Target,
     ) {
         cb.register_curve_public_input(*digest);
-        contract_address.register_as_input(cb);
         mpt_root_hash.register_as_input(cb);
         cb.register_public_input(mapping_slot);
         cb.register_public_input(length_slot);
@@ -73,11 +70,6 @@ impl<'a> PublicInputs<'a, Target> {
         convert_point_to_curve_target(self.digest_data())
     }
 
-    pub fn contract_address(&self) -> PackedAddressTarget {
-        let data = self.contract_address_data();
-        array::from_fn(|i| U32Target(data[i])).into()
-    }
-
     pub fn root_hash(&self) -> OutputHash {
         let data = self.root_hash_data();
         array::from_fn(|i| U32Target(data[i])).into()
@@ -86,8 +78,7 @@ impl<'a> PublicInputs<'a, Target> {
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
     pub(crate) const D_IDX: usize = 0;
-    pub(crate) const A_IDX: usize = Self::D_IDX + 11; // 5*2+1 for curve target
-    pub(crate) const C_IDX: usize = Self::A_IDX + PACKED_ADDRESS_LEN;
+    pub(crate) const C_IDX: usize = Self::D_IDX + 11;
     pub(crate) const M_IDX: usize = Self::C_IDX + PACKED_HASH_LEN;
     pub(crate) const S_IDX: usize = Self::M_IDX + 1;
     pub(crate) const TOTAL_LEN: usize = Self::S_IDX + 1;
@@ -99,10 +90,6 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     /// Transform a list of elements to a curve point.
     pub fn digest_data(&self) -> ([T; 5], [T; 5], T) {
         convert_slice_to_curve_point(&self.proof_inputs[Self::D_IDX..])
-    }
-
-    pub fn contract_address_data(&self) -> &[T] {
-        &self.proof_inputs[Self::A_IDX..Self::C_IDX]
     }
 
     pub fn root_hash_data(&self) -> &[T] {
@@ -134,7 +121,6 @@ impl LengthMatchCircuit {
 
         let mapping_slot = mapping_pi.mapping_slot();
         let length_slot = length_pi.storage_slot();
-        let contract_address = length_pi.contract_address();
         let digest = mapping_pi.accumulator();
 
         // The MPT key pointer must be equal to -1 after traversing from leaf to
@@ -154,14 +140,7 @@ impl LengthMatchCircuit {
         length_root_hash.enforce_equal(cb, &mapping_root_hash);
 
         // Register the public inputs.
-        PublicInputs::register(
-            cb,
-            &digest,
-            &contract_address,
-            &length_root_hash,
-            mapping_slot,
-            length_slot,
-        );
+        PublicInputs::register(cb, &digest, &length_root_hash, mapping_slot, length_slot);
     }
 }
 
@@ -393,7 +372,7 @@ mod tests {
             .collect();
 
         pi[LengthPublicInputs::<F>::V_IDX] = length_value;
-        pi[LengthPublicInputs::<F>::C_IDX..LengthPublicInputs::<F>::A_IDX]
+        pi[LengthPublicInputs::<F>::C_IDX..LengthPublicInputs::<F>::S_IDX]
             .copy_from_slice(mpt_root_hash);
 
         pi

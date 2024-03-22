@@ -39,7 +39,7 @@ const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct FullNodeCircuitValidator<'a, const L: usize> {
     validated: FullNodeCircuit<L>,
     children: &'a [AggregationPublicInputs<'a, F, L>; 2],
@@ -67,7 +67,7 @@ impl<const L: usize> UserCircuit<GoldilocksField, D> for FullNodeCircuitValidato
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct PartialNodeCircuitValidator<'a, const L: usize> {
     validated: PartialNodeCircuit<L>,
     child_to_prove: AggregationPublicInputs<'a, F, L>,
@@ -107,7 +107,7 @@ impl<const L: usize> UserCircuit<F, D> for PartialNodeCircuitValidator<'_, L> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct RevelationCircuitValidator<'a, const L: usize> {
     validated: RevelationCircuit<L>,
     db_proof: BlockPublicInputs<'a, F>,

@@ -411,7 +411,7 @@ mod test {
         let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
         // insert two keys that share the same prefix
         let key = random_vector(20); // like address
-        let mpt1 = StorageSlot::Mapping(key.clone(), slot).mpt_key();
+        let mpt1 = StorageSlot::Mapping(key.clone(), slot).mpt_key_vec();
         let mut mpt2 = mpt1.clone();
         let last_byte = mpt2[mpt1.len() - 1];
         let first_nibble = last_byte & 0xF0;

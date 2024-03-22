@@ -93,7 +93,7 @@ struct TestNodeWires {
     right: Vec<Target>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TestNodeCircuit {
     left: Vec<GoldilocksField>,
     right: Vec<GoldilocksField>,

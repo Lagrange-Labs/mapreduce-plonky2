@@ -57,7 +57,7 @@ fn greater_than_eword(
 }
 
 pub struct RevelationWires;
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RevelationCircuit<const L: usize>;
 impl<const L: usize> RevelationCircuit<L> {
     pub fn build(

@@ -75,7 +75,11 @@ impl<'a, T: Clone> BlockLinkingInputs<'a, T> {
             .register_as_public_input(cb);
         cb.register_public_input(wires.block_inputs.number.0);
         wires.block_inputs.parent_hash.register_as_public_input(cb);
-        cb.register_public_inputs(storage_inputs.contract_address_data());
+        wires
+            .account_inputs
+            .contract_address
+            .convert_u8_to_u32(cb) // always register the packed version
+            .register_as_public_input(cb);
         // Register the curve point of digest (avoid F must be GoldilocksField).
         let digest_data = storage_inputs.digest_data();
         cb.register_public_inputs(&digest_data.0);
