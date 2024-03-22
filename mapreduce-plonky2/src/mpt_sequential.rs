@@ -57,7 +57,7 @@ pub struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
     /// whose length == MAX_KEY_NIBBLE_LEN
     key: [u8; MAX_KEY_NIBBLE_LEN / 2],
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct InputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
@@ -85,7 +85,7 @@ where
     should_process: [BoolTarget; DEPTH - 1],
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct OutputWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
@@ -224,7 +224,11 @@ where
         inputs: &InputWires<DEPTH, NODE_LEN>,
         outputs: &OutputWires<DEPTH, NODE_LEN>,
     ) -> Result<()> {
-        let pad_len = DEPTH - self.nodes.len();
+        let pad_len = DEPTH.checked_sub(self.nodes.len()).ok_or(anyhow!(
+            "Circuit depth {} too small for this MPT proof {}!",
+            DEPTH,
+            self.nodes.len()
+        ))?;
         // convert nodes to array and pad with empty array if needed
         let padded_nodes = self
             .nodes
@@ -255,7 +259,6 @@ where
                 find_index_subvector(&self.nodes[i], &child_hash)
                     .ok_or(anyhow!("can't find hash in parent node!"))?;
             } else {
-                println!("[-----] setting is_real[{}] = false", i - 1);
                 p.set_bool_target(inputs.should_process[i - 1], false);
             }
         }
@@ -655,15 +658,24 @@ pub mod test {
         let res = query.query_mpt_proof(&provider, None).await?;
 
         // Verify both storage and state proofs by this MPT circuit.
-        verify_storage_proof_from_query(&query, &res)?;
+
+        // Written as constant from ^
+        const DEPTH: usize = 2;
+        const NODE_LEN: usize = 150;
+        verify_storage_proof_from_query::<DEPTH, NODE_LEN>(&query, &res)?;
         verify_state_proof_from_query(&query, &res)
     }
 
     /// Verify the storage proof from query result.
-    fn verify_storage_proof_from_query(
+    pub(crate) fn verify_storage_proof_from_query<const DEPTH: usize, const NODE_LEN: usize>(
         query: &ProofQuery,
         res: &EIP1186ProofResponse,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+        [(); DEPTH - 1]:,
+        [(); PAD_LEN(NODE_LEN) / 4]:,
+    {
         ProofQuery::verify_storage_proof(&res)?;
 
         let value = res.storage_proof[0].value;
@@ -676,15 +688,12 @@ pub mod test {
             .map(|b| b.to_vec())
             .collect::<Vec<Vec<u8>>>();
         let root = keccak256(mpt_proof.last().unwrap());
-        let mpt_key = query.slot.mpt_key();
+        let mpt_key = query.slot.mpt_key_vec();
         println!("proof depth : {}", mpt_proof.len());
         println!(
             "proof max len node : {}",
             mpt_proof.iter().map(|node| node.len()).max().unwrap()
         );
-        // Written as constant from ^
-        const DEPTH: usize = 2;
-        const NODE_LEN: usize = 150;
         visit_proof(&mpt_proof);
         for i in 1..mpt_proof.len() {
             let child_hash = keccak256(&mpt_proof[i - 1]);
@@ -695,7 +704,7 @@ pub mod test {
             c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
             exp_root: root.try_into().unwrap(),
             exp_value: value_bytes,
-            checking_value: true,
+            checking_value: false,
         };
         run_circuit::<F, D, C, _>(circuit);
 
@@ -794,7 +803,7 @@ pub mod test {
         run_circuit::<F, D, C, _>(circuit);
     }
 
-    fn visit_proof(proof: &[Vec<u8>]) {
+    pub(crate) fn visit_proof(proof: &[Vec<u8>]) {
         let mut child_hash = vec![];
         let mut partial_key = vec![];
         for node in proof.iter() {
@@ -821,7 +830,7 @@ pub mod test {
                 let key_nibbles_struct = Nibbles::from_compact(&node_list[0]);
                 let key_nibbles = key_nibbles_struct.nibbles();
                 println!(
-                    "[+] Leaf/Extension node: partial key extracted: {:?}",
+                    "\t=> Leaf/Extension node: partial key extracted: {:?}",
                     hex::encode(nibbles_to_bytes(key_nibbles))
                 );
                 partial_key.splice(0..0, key_nibbles.to_vec());
@@ -835,7 +844,7 @@ pub mod test {
                     .map(|(i, _)| i)
                     .expect("didn't find hash in parent") as u8;
                 println!(
-                    "[+] Branch node: (len branch = {}) partial key (nibble): {:?}",
+                    "\t=> Branch node: (len branch = {}) partial key (nibble): {:?}",
                     node_list.len(),
                     hex::encode(vec![branch_idx]).pop().unwrap()
                 );

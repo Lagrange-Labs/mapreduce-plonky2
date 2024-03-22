@@ -38,7 +38,7 @@ const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct PartialInnerNodeCircuitValidator<'a> {
     validated: PartialInnerNodeCircuit,
 
@@ -77,7 +77,7 @@ impl<'a> UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuitValidator<'a
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct FullInnerNodeCircuitValidator<'a> {
     validated: FullInnerNodeCircuit,
     children: &'a [PublicInputs<'a, F>; 2],

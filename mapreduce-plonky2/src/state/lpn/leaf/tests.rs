@@ -132,7 +132,7 @@ struct TestLeafWires {
     block_linking: Vec<Target>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TestLeafCircuit {
     block_linking_values: Vec<GoldilocksField>,
     c: LeafCircuit,

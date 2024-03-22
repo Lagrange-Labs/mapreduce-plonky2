@@ -14,6 +14,7 @@ use crate::{
 use account::{Account, AccountInputsWires};
 use anyhow::Result;
 use block::{BlockHeader, BlockInputsWires};
+use ethers::types::H160;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -40,7 +41,7 @@ where
     [(); DEPTH - 1]:,
 {
     /// Account input data
-    account_inputs: AccountInputsWires<DEPTH, NODE_LEN>,
+    pub(super) account_inputs: AccountInputsWires<DEPTH, NODE_LEN>,
     /// Block input data
     block_inputs: BlockInputsWires<BLOCK_LEN>,
 }
@@ -73,6 +74,7 @@ where
 {
     pub fn new<F: RichField>(
         storage_pi: &[F],
+        contract_address: H160,
         header_rlp: Vec<u8>,
         // Nodes of state MPT, it's ordered from leaf to root.
         state_mpt_nodes: Vec<Vec<u8>>,
@@ -83,7 +85,6 @@ where
         // Get the contract address and hash of storage MPT root, and create the
         // account inputs gadget.
         let storage_pi = StorageInputs::from(storage_pi);
-        let contract_address = storage_pi.contract_address_value();
         let storage_mpt_root = storage_pi.mpt_root_value();
         let account_inputs = Account::new(contract_address, storage_mpt_root, state_mpt_nodes);
 
@@ -146,8 +147,9 @@ type F = crate::api::F;
 type C = crate::api::C;
 const D: usize = crate::api::D;
 
-const MAX_DEPTH_TRIE: usize = 8;
-const MAX_NODE_LEN: usize = 512;
+const MAX_DEPTH_TRIE: usize = 9;
+// 16*32 hashes + 16 RLP headers associated + 1 empty RLP headers (last slot) + (1 + 2) list RLP header
+const MAX_NODE_LEN: usize = 532;
 const MAX_BLOCK_LEN: usize = 620;
 const NUMBER_LEN: usize = SEPOLIA_NUMBER_LEN;
 
@@ -219,10 +221,16 @@ pub struct CircuitInput {
 impl CircuitInput {
     /// Instantiate `CircuitInput` for block linking circuit employing a proof for the
     /// digest equal circuit and the set of inputs to prove block linkink logic
-    pub fn new(storage_proof: Vec<u8>, header_rlp: Vec<u8>, state_mpt_nodes: Vec<Vec<u8>>) -> Self {
+    pub fn new(
+        storage_proof: Vec<u8>,
+        header_rlp: Vec<u8>,
+        state_mpt_nodes: Vec<Vec<u8>>,
+        contract_address: H160,
+    ) -> Self {
         let storage_proof = deserialize_proof(&storage_proof).unwrap();
         let inputs = BlockLinkingCircuitInputs::new(
             &storage_proof.public_inputs,
+            contract_address,
             header_rlp,
             state_mpt_nodes,
         );
@@ -375,7 +383,12 @@ mod tests {
             exp_block_number: block.number.unwrap(),
             exp_parent_hash: block.parent_hash,
             exp_hash,
-            c: BlockLinkingCircuit::new(&storage_pi, header_rlp, state_mpt.nodes),
+            c: BlockLinkingCircuit::new(
+                &storage_pi,
+                state_mpt.account_address,
+                header_rlp,
+                state_mpt.nodes,
+            ),
             storage_pi,
         };
         run_circuit::<F, D, C, _>(test_circuit);
@@ -397,7 +410,12 @@ mod tests {
         let storage_pi = generate_storage_inputs::<_, VALUE_LEN>(&state_mpt);
         let block = generate_block(&state_mpt);
         let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
-        let inputs = BlockLinkingCircuitInputs::new(&storage_pi, header_rlp, state_mpt.nodes);
+        let inputs = BlockLinkingCircuitInputs::new(
+            &storage_pi,
+            state_mpt.account_address,
+            header_rlp,
+            state_mpt.nodes,
+        );
         // generate dummy storage proof with expected public inputs
         let storage_proof = test_storage_circuit
             .generate_proof(storage_pi.try_into().unwrap())
@@ -446,9 +464,15 @@ mod tests {
     async fn test_block_linking_circuit_on_mainnet() -> Result<()> {
         let url = "https://eth.llamarpc.com";
         // TODO: this Mainnet contract address only works with state proof
-        let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
+        //let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
+
+        // pidgy pinguins
+        let contract_address = "0xBd3531dA5CF5857e7CfAA92426877b022e612cf8";
 
         // Written as constants from the result.
+        const DEPTH: usize = 9;
+        const NODE_LEN: usize = 532;
+        const BLOCK_LEN: usize = 620;
         const VALUE_LEN: usize = 50;
 
         test_with_rpc::<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
@@ -518,7 +542,7 @@ mod tests {
             exp_block_number: block.number.unwrap(),
             exp_parent_hash: block.parent_hash,
             exp_hash,
-            c: BlockLinkingCircuit::new(&storage_pi, header_rlp, state_mpt.nodes),
+            c: BlockLinkingCircuit::new(&storage_pi, account_address, header_rlp, state_mpt.nodes),
             storage_pi,
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
@@ -608,11 +632,6 @@ mod tests {
         let mut storage_pi: Vec<_> = (0..StorageInputs::<F>::TOTAL_LEN)
             .map(|_| F::from_canonical_u64(thread_rng().gen::<u64>()))
             .collect();
-
-        // Set the contract address to the public inputs of storage proof.
-        let contract_address = convert_u8_slice_to_u32_fields(&mpt.account_address.0);
-        storage_pi[StorageInputs::<F>::A_IDX..StorageInputs::<F>::M_IDX]
-            .copy_from_slice(&contract_address);
 
         // Set the storage root hash to the public inputs of storage proof.
         let account_node = &mpt.nodes[0];

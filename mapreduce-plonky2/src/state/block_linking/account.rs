@@ -36,8 +36,8 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
 {
-    /// The contract address, TODO: should get from previous public inputs
-    contract_address: AddressTarget,
+    /// The contract address
+    pub(super) contract_address: AddressTarget,
     /// The keccak wires computed from contract address, which is set to the
     /// state MPT root hash
     keccak_contract_address: KeccakWires<INPUT_PADDED_ADDRESS_LEN>,
@@ -98,11 +98,7 @@ where
         F: RichField + Extendable<D>,
     {
         let contract_address = Array::new(cb);
-        // make sure address is the same as the one in the public inputs which is
-        // in compact form
-        let packed_address: PackedAddressTarget = contract_address.convert_u8_to_u32(cb);
         let storage_pi = StorageInputs::from(storage_pi);
-        packed_address.enforce_equal(cb, &storage_pi.contract_address());
 
         let storage_root_offset = cb.add_virtual_target();
 
@@ -368,8 +364,6 @@ mod test {
             .into_iter()
             .map(F::from_canonical_u32)
             .collect();
-        storage_pi[StorageInputs::<F>::A_IDX..StorageInputs::<F>::M_IDX]
-            .copy_from_slice(&convert_u8_slice_to_u32_fields(contract_address.as_bytes()));
         storage_pi[StorageInputs::<F>::C1_IDX..StorageInputs::<F>::C2_IDX]
             .copy_from_slice(&convert_u8_slice_to_u32_fields(&storage_root));
         run_circuit::<F, D, C, _>(TestAccountInputs { a: acc, storage_pi });
