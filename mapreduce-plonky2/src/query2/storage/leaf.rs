@@ -13,10 +13,11 @@ use crate::{
     circuit::UserCircuit,
     group_hashing::CircuitBuilderGroupHashing,
     query2::{storage::public_inputs::PublicInputs, AddressTarget, PackedAddressTarget},
-    storage::{KEY_SIZE, LEAF_SIZE}, utils::convert_u8_to_u32_slice,
+    storage::{KEY_SIZE, LEAF_SIZE},
+    utils::convert_u8_to_u32_slice,
 };
 
-const PACKED_KEY_SIZE: usize = KEY_SIZE/4;
+const PACKED_KEY_SIZE: usize = KEY_SIZE / 4;
 
 pub struct InclusionWires {
     pub key: Array<U32Target, PACKED_KEY_SIZE>,
@@ -35,7 +36,9 @@ impl LeafCircuit {
         let key_u32 = convert_u8_to_u32_slice(&self.key);
         wires.key.assign_from_data(pw, &key_u32.try_into().unwrap());
         let value_u32 = convert_u8_to_u32_slice(&self.value);
-        wires.value.assign_from_data(pw, &value_u32.try_into().unwrap());
+        wires
+            .value
+            .assign_from_data(pw, &value_u32.try_into().unwrap());
     }
 }
 

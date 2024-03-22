@@ -29,7 +29,8 @@ use crate::{
     eth::left_pad32,
     group_hashing::{field_to_curve::ToCurvePoint, map_to_curve_point},
     query2::EWORD_LEN,
-    storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping}, utils::convert_u8_to_u32_slice,
+    storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
+    utils::convert_u8_to_u32_slice,
 };
 
 use super::{
@@ -127,7 +128,11 @@ fn run_leaf_proof<'data>(k: &[u8], v: &[u8]) -> LeafProofResult {
 
     let v_u32 = convert_u8_to_u32_slice(&v);
 
-    let owner_gl = v_u32.iter().copied().map(F::from_canonical_u32).collect_vec();
+    let owner_gl = v_u32
+        .iter()
+        .copied()
+        .map(F::from_canonical_u32)
+        .collect_vec();
 
     let circuit = LeafCircuit { key: k, value: v };
 

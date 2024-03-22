@@ -197,7 +197,9 @@ impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, 
 
     /// Assigns the instance witness values to the provided wires.
     pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &ProvenanceWires) {
-        wires.smart_contract_address.assign(pw, &self.smart_contract_address.arr);
+        wires
+            .smart_contract_address
+            .assign(pw, &self.smart_contract_address.arr);
 
         pw.set_target(wires.mapping_slot, self.mapping_slot);
         pw.set_target(wires.length_slot, self.length_slot);

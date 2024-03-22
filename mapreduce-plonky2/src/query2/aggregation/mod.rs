@@ -16,7 +16,10 @@ use plonky2_ecgfp5::{
 };
 
 use crate::{
-    array::Targetable, query2::AddressTarget, types::{PackedAddressTarget as PackedSCAddressTarget, CURVE_TARGET_LEN}, utils::{convert_point_to_curve_target, convert_slice_to_curve_point}
+    array::Targetable,
+    query2::AddressTarget,
+    types::{PackedAddressTarget as PackedSCAddressTarget, CURVE_TARGET_LEN},
+    utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 
 use super::PackedAddressTarget;
@@ -145,11 +148,23 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
     }
 
     pub(crate) fn smart_contract_address(&self) -> PackedSCAddressTarget {
-        PackedSCAddressTarget::try_from(self.smart_contract_address_raw().iter().map(|&t| U32Target(t)).collect_vec()).unwrap()
+        PackedSCAddressTarget::try_from(
+            self.smart_contract_address_raw()
+                .iter()
+                .map(|&t| U32Target(t))
+                .collect_vec(),
+        )
+        .unwrap()
     }
 
     pub(crate) fn user_address(&self) -> PackedAddressTarget {
-        PackedAddressTarget::try_from(self.user_address_raw().iter().map(|&t| U32Target(t)).collect_vec()).unwrap()
+        PackedAddressTarget::try_from(
+            self.user_address_raw()
+                .iter()
+                .map(|&t| U32Target(t))
+                .collect_vec(),
+        )
+        .unwrap()
     }
 
     pub(crate) fn mapping_slot(&self) -> Target {

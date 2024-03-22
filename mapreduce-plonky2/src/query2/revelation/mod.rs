@@ -7,7 +7,11 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
-use crate::{keccak::OutputHash, query2::AddressTarget, types::{PackedAddressTarget as PackedSCAddressTarget, CURVE_TARGET_LEN}};
+use crate::{
+    keccak::OutputHash,
+    query2::AddressTarget,
+    types::{PackedAddressTarget as PackedSCAddressTarget, CURVE_TARGET_LEN},
+};
 
 use super::PackedAddressTarget;
 
@@ -158,11 +162,23 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
     }
 
     pub(crate) fn smart_contract_address(&self) -> PackedSCAddressTarget {
-        PackedSCAddressTarget::try_from(self.smart_contract_address_raw().iter().map(|&t| U32Target(t)).collect_vec()).unwrap()
+        PackedSCAddressTarget::try_from(
+            self.smart_contract_address_raw()
+                .iter()
+                .map(|&t| U32Target(t))
+                .collect_vec(),
+        )
+        .unwrap()
     }
 
     pub(crate) fn user_address(&self) -> PackedAddressTarget {
-        PackedAddressTarget::try_from(self.user_address_raw().iter().map(|&t| U32Target(t)).collect_vec()).unwrap()
+        PackedAddressTarget::try_from(
+            self.user_address_raw()
+                .iter()
+                .map(|&t| U32Target(t))
+                .collect_vec(),
+        )
+        .unwrap()
     }
 
     fn mapping_slot(&self) -> Target {
