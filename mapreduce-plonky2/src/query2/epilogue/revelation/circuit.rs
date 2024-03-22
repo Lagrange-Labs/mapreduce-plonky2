@@ -12,7 +12,7 @@ use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use crate::{
     block::public_inputs::PublicInputs as BlockPublicInputs,
     group_hashing::CircuitBuilderGroupHashing,
-    query2::epilogue::{aggregation::AggregationPublicInputs, EWordTarget, EWORD_LEN},
+    query2::epilogue::{aggregation::AggregationPublicInputs, EWordTarget},
     utils::{greater_than, greater_than_or_equal_to, less_than_or_equal_to},
 };
 

@@ -1,6 +1,6 @@
 use plonky2::{field::goldilocks_field::GoldilocksField, iop::target::Target};
 
-mod aggregation;
+pub mod aggregation;
 mod revelation;
 #[cfg(test)]
 mod tests;

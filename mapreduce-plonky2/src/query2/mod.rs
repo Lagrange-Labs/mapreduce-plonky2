@@ -5,7 +5,7 @@ use plonky2::iop::target::Target;
 
 use crate::array::Array;
 
-mod epilogue;
+pub(crate) mod epilogue;
 mod provenance;
 mod storage;
 

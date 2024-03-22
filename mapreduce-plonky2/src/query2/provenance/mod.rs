@@ -3,9 +3,9 @@
 use std::iter;
 
 use plonky2::{
-    field::{extension::Extendable, goldilocks_field::GoldilocksField, types::Field},
+    field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{
-        hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOut, HashOutTarget, RichField},
         merkle_proofs::MerkleProofTarget,
         poseidon::PoseidonHash,
     },
@@ -23,12 +23,10 @@ use crate::{
     query2::{Address, AddressTarget},
 };
 
-mod public_inputs;
-
-pub(crate) use public_inputs::PublicInputs;
+use super::epilogue::aggregation::AggregationPublicInputs;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// The witnesses of [ProvenanceCircuit].
 #[derive(Debug, Clone)]
@@ -98,7 +96,7 @@ pub struct ProvenanceWires {
 /// 3. `C := Poseidon(B || H || Z)`
 /// 4. `R == 1`
 #[derive(Debug, Clone)]
-pub struct ProvenanceCircuit<const DEPTH: usize, F: RichField> {
+pub struct ProvenanceCircuit<const DEPTH: usize, const L: usize, F: RichField> {
     smart_contract_address: Address<F>,
     mapping_slot: F,
     length_slot: F,
@@ -111,7 +109,7 @@ pub struct ProvenanceCircuit<const DEPTH: usize, F: RichField> {
     block_hash: Array<F, PACKED_HASH_LEN>,
 }
 
-impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
+impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, L, F> {
     /// Creates a new instance of the provenance circuit with the provided witness values.
     pub fn new(
         smart_contract_address: Address<F>,
@@ -194,19 +192,7 @@ impl<const DEPTH: usize, F: RichField> ProvenanceCircuit<DEPTH, F> {
             .collect();
         let block_leaf_hash = cb.hash_n_to_hash_no_pad::<PoseidonHash>(block_leaf);
 
-        PublicInputs::register(
-            cb,
-            b,
-            r,
-            &block_leaf_hash,
-            b_min,
-            b_max,
-            &a,
-            &x,
-            m,
-            s,
-            digest,
-        );
+        AggregationPublicInputs::<_, L>::register(cb, b, r, &block_leaf_hash, &a, &x, m, s, digest);
 
         ProvenanceWires {
             smart_contract_address: a,

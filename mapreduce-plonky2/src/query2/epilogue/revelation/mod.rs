@@ -6,10 +6,7 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
-use crate::{
-    keccak::OutputHash,
-    types::{AddressTarget, CURVE_TARGET_LEN},
-};
+use crate::{keccak::OutputHash, query2::AddressTarget, types::CURVE_TARGET_LEN};
 
 pub mod circuit;
 

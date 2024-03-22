@@ -1,3 +1,4 @@
+use crate::query2::provenance::tests::run_provenance_circuit;
 use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
@@ -142,11 +143,6 @@ impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
     }
 }
 
-fn make_revelation_public_inputs<'a, const L: usize>(
-) -> RevelationPublicInputs<'a, GoldilocksField, L> {
-    todo!()
-}
-
 /// Builds & proves the following tree
 ///
 /// Top-level - PartialInnerCircuit
@@ -154,20 +150,13 @@ fn make_revelation_public_inputs<'a, const L: usize>(
 /// │   ├── LeafCircuit - // TODO: @victor
 /// │   └── LeafCircuit - // TODO: @victor
 /// └── Untouched sub-tree – hash == Poseidon("ernesto")
-fn test_mini_tree<const L: usize>() {
+fn test_mini_tree() {
+    const L: usize = 4;
     // Need integration with leaf proof @Victor
-    let values = todo!(); // @Victor fill with the leaf values, left-pad to L with 0's
+    let values = [0, 0, 0xdead, 0xbeef];
 
-    // Leaf proof checking here -- TODO: @Victor
-    let left_leaf_proof = run_circuit(todo!());
-    let right_leaf_proof = run_circuit(todo!());
-
-    let left_leaf_proof_pi = AggregationPublicInputs::<GoldilocksField, L>::from(
-        left_leaf_proof.public_inputs.as_slice(),
-    );
-    let right_leaf_proof_pi = AggregationPublicInputs::<GoldilocksField, L>::from(
-        right_leaf_proof.public_inputs.as_slice(),
-    );
+    let left_leaf_proof_pi = run_provenance_circuit(0xdead);
+    let right_leaf_proof_pi = run_provenance_circuit(0xbeef);
 
     let middle_proof = run_circuit::<F, D, C, _>(FullNodeCircuitValidator {
         validated: FullNodeCircuit::<L> {},

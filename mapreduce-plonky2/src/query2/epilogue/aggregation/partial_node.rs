@@ -37,7 +37,8 @@ impl<const L: usize> PartialNodeCircuit<L> {
             &proved.smart_contract_address(),
             &proved.user_address(),
             proved.mapping_slot(),
-            &proved.digest(),
+            proved.mapping_slot_length(),
+            proved.digest(),
         );
 
         PartialNodeWires {}

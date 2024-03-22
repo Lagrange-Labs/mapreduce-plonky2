@@ -3,7 +3,7 @@ use std::{array, iter, process::Output};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{
-        hash_types::{HashOut, RichField},
+        hash_types::{HashOut, RichField, NUM_HASH_OUT_ELTS},
         hashing::hash_n_to_hash_no_pad,
         poseidon::PoseidonPermutation,
     },
@@ -18,95 +18,47 @@ use rand::{rngs::StdRng, RngCore, SeedableRng};
 use crate::{
     array::Array,
     circuit::{test::run_circuit, UserCircuit},
-    group_hashing,
-    keccak::OutputHash,
-    query2::{storage::public_inputs::PublicInputs as StorageInputs, Address},
+    query2::{
+        epilogue::aggregation::AggregationPublicInputs,
+        storage::public_inputs::PublicInputs as StorageInputs, Address,
+    },
 };
 
 use super::ProvenanceWires;
 
 const DEPTH: usize = 3;
-type PublicInputs<'a> = super::PublicInputs<'a, GoldilocksField>;
-type ProvenanceCircuit = super::ProvenanceCircuit<DEPTH, GoldilocksField>;
+const TEST_L: usize = 4;
+type PublicInputs<'a, const L: usize> = AggregationPublicInputs<'a, GoldilocksField, L>;
+type ProvenanceCircuit<const L: usize> = super::ProvenanceCircuit<DEPTH, L, GoldilocksField>;
 
-#[test]
-fn prove_and_verify_provenance_circuit() {
-    let seed = 0xdead;
+pub(crate) fn run_provenance_circuit<'a, const L: usize>(
+    seed: u64,
+) -> AggregationPublicInputs<'a, GoldilocksField, L> {
     let values = StorageInputs::values_from_seed(seed);
     let storage_pi = StorageInputs::from_slice(&values);
     let circuit = TestProvenanceCircuit::from_seed(seed, &storage_pi);
     let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit.clone());
-    let pi = PublicInputs::from_slice(proof.public_inputs.as_slice());
-
-    assert_eq!(pi.block_number_data(), circuit.block_number);
-    assert_eq!(pi.range_data(), GoldilocksField::ONE);
-    assert_eq!(pi.root_data(), &circuit.root.elements);
-    assert_eq!(pi.block_number_min_data(), circuit.block_number_min);
-    assert_eq!(pi.block_number_max_data(), circuit.block_number_max);
+    let pi = PublicInputs::from(proof.public_inputs.as_slice());
+    assert_eq!(pi.block_number(), circuit.block_number);
+    assert_eq!(pi.range(), GoldilocksField::ONE);
+    assert_eq!(pi.root(), circuit.root);
     assert_eq!(
-        pi.smart_contract_address_data(),
+        pi.smart_contract_address(),
         &circuit.smart_contract_address.arr
     );
-    assert_eq!(pi.mapping_slot_data(), circuit.mapping_slot);
-    assert_eq!(pi.length_slot_data(), circuit.length_slot);
+    assert_eq!(pi.mapping_slot(), circuit.mapping_slot);
+    assert_eq!(pi.mapping_slot_length(), circuit.length_slot);
 
     let (x, y, f) = storage_pi.digest_raw();
-    assert_eq!(&pi.digest_data()[0..group_hashing::N], &x);
-    assert_eq!(
-        &pi.digest_data()[group_hashing::N..2 * group_hashing::N],
-        &y
-    );
-    assert_eq!(&pi.digest_data()[2 * group_hashing::N], &f);
-}
+    assert_eq!(&pi.digest().x.0, &x);
+    assert_eq!(&pi.digest().y.0, &y);
+    assert!(if f.is_one() {
+        pi.digest().is_inf
+    } else {
+        !pi.digest().is_inf
+    });
 
-impl<'a, T: Copy + Default> super::PublicInputs<'a, T> {
-    /// Writes the parts of the public inputs into the provided target array.
-    pub fn parts_into_values(
-        values: &mut [T; PublicInputs::TOTAL_LEN],
-        b: &[T; PublicInputs::B_LEN],
-        r: &[T; PublicInputs::R_LEN],
-        c: &[T; PublicInputs::C_LEN],
-        b_min: &[T; PublicInputs::B_MIN_LEN],
-        b_max: &[T; PublicInputs::B_MAX_LEN],
-        a: &[T; PublicInputs::A_LEN],
-        x: &[T; PublicInputs::X_LEN],
-        m: &[T; PublicInputs::M_LEN],
-        s: &[T; PublicInputs::S_LEN],
-        d: &[T; PublicInputs::D_LEN],
-    ) {
-        values[Self::B_IDX..Self::B_IDX + Self::B_LEN].copy_from_slice(b);
-        values[Self::R_IDX..Self::R_IDX + Self::R_LEN].copy_from_slice(r);
-        values[Self::C_IDX..Self::C_IDX + Self::C_LEN].copy_from_slice(c);
-        values[Self::B_MIN_IDX..Self::B_MIN_IDX + Self::B_MIN_LEN].copy_from_slice(b_min);
-        values[Self::B_MAX_IDX..Self::B_MAX_IDX + Self::B_MAX_LEN].copy_from_slice(b_max);
-        values[Self::A_IDX..Self::A_IDX + Self::A_LEN].copy_from_slice(a);
-        values[Self::X_IDX..Self::X_IDX + Self::X_LEN].copy_from_slice(x);
-        values[Self::M_IDX..Self::M_IDX + Self::M_LEN].copy_from_slice(m);
-        values[Self::S_IDX..Self::S_IDX + Self::S_LEN].copy_from_slice(s);
-        values[Self::D_IDX..Self::D_IDX + Self::D_LEN].copy_from_slice(d);
-    }
-}
-
-impl<'a, F: RichField> super::PublicInputs<'a, F> {
-    pub fn values_from_seed(seed: u64) -> [F; PublicInputs::TOTAL_LEN] {
-        let rng = &mut StdRng::seed_from_u64(seed);
-
-        let b = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let r = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let c = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let b_min = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let b_max = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let a = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let x = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let m = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let s = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let d = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-
-        let mut values = array::from_fn(|_| F::ZERO);
-        Self::parts_into_values(&mut values, &b, &r, &c, &b_min, &b_max, &a, &x, &m, &s, &d);
-
-        values
-    }
+    pi
 }
 
 #[derive(Debug, Clone)]
@@ -116,9 +68,9 @@ struct TestProvenanceWires {
 }
 
 #[derive(Debug, Clone)]
-struct TestProvenanceCircuit {
+pub struct TestProvenanceCircuit {
     storage_values: Vec<GoldilocksField>,
-    c: ProvenanceCircuit,
+    c: ProvenanceCircuit<TEST_L>,
     block_number: GoldilocksField,
     root: HashOut<GoldilocksField>,
     block_number_min: GoldilocksField,
@@ -187,7 +139,7 @@ impl TestProvenanceCircuit {
             >(preimage.as_slice());
         }
 
-        let mut block_hash = Array::default();
+        let mut block_hash = Array::<_, TEST_L>::default();
 
         block_hash
             .arr
@@ -252,5 +204,18 @@ impl UserCircuit<GoldilocksField, 2> for TestProvenanceCircuit {
             .for_each(|(&w, &v)| pw.set_target(w, v));
 
         self.c.assign(pw, &wires.provenance);
+    }
+}
+
+#[test]
+fn prove_and_verify_provenance_circuit() {
+    let pi = run_provenance_circuit(0xdead);
+}
+
+impl<'a, F: RichField, const L: usize> AggregationPublicInputs<'a, F, L> {
+    pub fn values_from_seed(seed: u64) -> [F; Self::total_len()] {
+        let rng = &mut StdRng::seed_from_u64(seed);
+
+        array::from_fn(|_| F::from_canonical_u32(rng.next_u32()))
     }
 }
