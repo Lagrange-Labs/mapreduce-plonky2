@@ -635,7 +635,10 @@ impl<const MAX_DEPTH: usize> CircuitInput<MAX_DEPTH> {
 
 fn empty_merkle_root<F: SerializableRichField<D>, const D: usize, const MAX_DEPTH: usize>(
 ) -> HashOut<F> {
-    merkle_root(vec![vec![]; 1 << MAX_DEPTH])
+    (0..MAX_DEPTH).fold(
+        HashOut::<F>::from_partial(&vec![]), 
+        |hash, _| PoseidonHash::two_to_one(hash, hash)
+    )
 }
 
 /// Generate the Merkle root from leaves.
