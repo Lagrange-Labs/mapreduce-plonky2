@@ -342,6 +342,7 @@ where
         self.assign(pw, &create_array(|i| F::from_canonical_u8(array[i])))
     }
 
+    /// Returns the last `TAKE` elements of the array, similar to `skip` on iterators.
     pub fn take_last<F: RichField + Extendable<D>, const D: usize, const TAKE: usize>(
         &self,
     ) -> Array<T, TAKE> {

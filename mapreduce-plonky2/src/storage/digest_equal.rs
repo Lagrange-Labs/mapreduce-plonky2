@@ -506,11 +506,11 @@ mod tests {
         // Check hash
         let computed_hash = mpt_pi.root_hash();
         assert_eq!(
-            convert_u8_to_u32_slice(&keccak256(&leaf_node)),
+            convert_u8_to_u32_slice(&keccak256(leaf_node)),
             computed_hash
         );
         // Check the digest
-        let expected_digest = leaf_digest_for_mapping(&mapping_key, &mapping_value.as_bytes());
+        let expected_digest = leaf_digest_for_mapping(&mapping_key, mapping_value.as_bytes());
         let circuit_digest = mpt_pi.accumulator();
         println!("left_pad32(mapping_key) = \t{:?}", left_pad32(&mapping_key));
         println!(
@@ -538,7 +538,7 @@ mod tests {
         ));
         // use the _same_ inputs to the lpn leaf circuit
         let lpn_circuit = storage::lpn::leaf::LeafCircuit {
-            mapping_key: mapping_key.clone(),
+            mapping_key,
             mapping_value: left_pad32(mapping_value.as_bytes()),
         };
         let lpn_proof = run_circuit::<F, D, C, _>(lpn_circuit);

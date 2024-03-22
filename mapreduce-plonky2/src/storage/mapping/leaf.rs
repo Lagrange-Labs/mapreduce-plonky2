@@ -128,8 +128,8 @@ where
             &root.output_array,
             &leaf_accumulator,
         );
-        mapping_slot_wires.mapping_key.register_as_public_input(b);
-        big_endian_left_padded.register_as_public_input(b);
+        //mapping_slot_wires.mapping_key.register_as_public_input(b);
+        //big_endian_left_padded.register_as_public_input(b);
         LeafWires {
             node,
             root,
@@ -182,6 +182,7 @@ impl CircuitLogicWires<GoldilocksField, 2, 0> for StorageLeafWire {
 mod test {
     use std::array::from_fn as create_array;
 
+    use crate::api::lpn::leaf_digest_for_mapping;
     use crate::circuit::test::run_circuit;
     use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
@@ -223,9 +224,10 @@ mod test {
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let exp_value = Array::<Target, VALUE_LEN>::new(b);
             let leaf_wires = LeafCircuit::<NODE_LEN>::build(b);
-            let eq = leaf_wires.value.equals(b, &exp_value);
-            let tt = b._true();
-            b.connect(tt.target, eq.target);
+            leaf_wires.value.enforce_equal(b, &exp_value);
+            //let eq = leaf_wires.value.equals(b, &exp_value);
+            //let tt = b._true();
+            //b.connect(tt.target, eq.target);
             (leaf_wires, exp_value)
         }
 
@@ -242,7 +244,8 @@ mod test {
         let mapping_key = hex::decode("1234").unwrap();
         let mapping_slot = 2;
         let slot = StorageSlot::Mapping(mapping_key.clone(), mapping_slot);
-        let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
+        let (mut trie, _) = generate_random_storage_mpt::<3, VALUE_LEN>();
+        // generating a fake uint256 value
         let random_value = random_vector(VALUE_LEN);
         let encoded_value: Vec<u8> = rlp::encode(&random_value).to_vec();
         trie.insert(&slot.mpt_key(), &encoded_value).unwrap();
@@ -263,14 +266,9 @@ mod test {
         let pi = PublicInputs::<F>::from(&proof.public_inputs);
         {
             // expected accumulator Acc((mappping_key,value))
-            let inputs_field = left_pad32(&mapping_key)
-                .into_iter()
-                .chain(left_pad32(&random_value))
-                .map(F::from_canonical_u8)
-                .collect::<Vec<_>>();
-            let exp_accumulator = map_to_curve_point(&inputs_field).to_weierstrass();
-            let found_accumulator = pi.accumulator();
-            assert_eq!(exp_accumulator, found_accumulator);
+            let exp_digest = leaf_digest_for_mapping(&mapping_key, &random_value).to_weierstrass();
+            let found_digest = pi.accumulator();
+            assert_eq!(exp_digest, found_digest);
         }
         {
             // expected MPT hash
