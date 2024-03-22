@@ -32,8 +32,8 @@ type PublicInputs<'a, const L: usize> = AggregationPublicInputs<'a, GoldilocksFi
 type ProvenanceCircuit<const L: usize> = super::ProvenanceCircuit<DEPTH, L, GoldilocksField>;
 
 pub(crate) fn run_provenance_circuit<'a, const L: usize>(seed: u64) -> Vec<GoldilocksField> {
-    let values = StorageInputs::values_from_seed(seed);
-    let storage_pi = StorageInputs::from_slice(&values);
+    let inputs = StorageInputs::inputs_from_seed(seed);
+    let storage_pi = StorageInputs::from_slice(&inputs);
     let circuit = TestProvenanceCircuit::<L>::from_seed(seed, &storage_pi);
     let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit.clone());
     let pi =

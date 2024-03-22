@@ -9,6 +9,8 @@ pub(crate) mod aggregation;
 mod provenance;
 mod revelation;
 mod storage;
+#[cfg(test)]
+mod tests;
 
 /// Length of an address (H256 = [u8; 32])
 pub(crate) const ADDRESS_LEN: usize = 32;

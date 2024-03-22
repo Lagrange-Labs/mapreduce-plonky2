@@ -2,7 +2,11 @@ use std::{array, ops::Add};
 
 use itertools::Itertools;
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
+    field::{
+        extension::{quintic::QuinticExtension, Extendable},
+        goldilocks_field::GoldilocksField,
+        types::Field,
+    },
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         hashing::hash_n_to_hash_no_pad,
@@ -23,6 +27,8 @@ use rand::{rngs::StdRng, RngCore, SeedableRng};
 use crate::{
     circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
+    group_hashing::{field_to_curve::ToCurvePoint, map_to_curve_point},
+    query2::EWORD_LEN,
     storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
 };
 
@@ -272,16 +278,30 @@ impl<'a, T: Copy + Default> PublicInputs<'a, T> {
     }
 }
 
-impl<'a, F: RichField> PublicInputs<'a, F> {
-    pub fn values_from_seed(seed: u64) -> [F; PublicInputs::<()>::TOTAL_LEN] {
+impl<'a> PublicInputs<'a, GoldilocksField> {
+    pub fn inputs_from_seed(seed: u64) -> [F; PublicInputs::<()>::TOTAL_LEN] {
         let rng = &mut StdRng::seed_from_u64(seed);
+        let leaf_eword = (0..EWORD_LEN).map(|_| rng.next_u64()).collect_vec();
 
         let root = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let digest = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+        let digest = map_to_curve_point::<F>(&[F::from_canonical_u64(leaf_value)]).to_weierstrass();
+        let digest_fs = digest
+            .x
+            .0
+            .iter()
+            .chain(digest.y.0.iter())
+            .copied()
+            .chain(std::iter::once(GoldilocksField::from_bool(digest.is_inf)))
+            .collect::<Vec<_>>();
         let owner = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
 
         let mut values = array::from_fn(|_| F::ZERO);
-        Self::parts_into_values(&mut values, &root, &digest, &owner);
+        Self::parts_into_values(
+            &mut values,
+            &root,
+            digest_fs.as_slice().try_into().unwrap(),
+            &owner,
+        );
 
         values
     }
