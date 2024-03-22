@@ -53,8 +53,8 @@ impl<'a> PublicInputs<'a, Target> {
     ) where
         F: RichField + Extendable<D>,
     {
-        mpt_root_hash.register_as_input(cb);
-        contract_address.register_as_input(cb);
+        mpt_root_hash.register_as_public_input(cb);
+        contract_address.register_as_public_input(cb);
         cb.register_public_input(storage_slot);
         cb.register_public_input(length_value);
     }

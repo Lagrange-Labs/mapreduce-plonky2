@@ -462,7 +462,7 @@ impl MPTKeyWire {
         &self,
         b: &mut CircuitBuilder<F, D>,
     ) {
-        self.key.register_as_input(b);
+        self.key.register_as_public_input(b);
         b.register_public_input(self.pointer);
     }
 

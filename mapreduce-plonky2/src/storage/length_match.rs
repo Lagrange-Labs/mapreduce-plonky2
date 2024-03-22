@@ -62,8 +62,8 @@ impl<'a> PublicInputs<'a, Target> {
         length_slot: Target,
     ) {
         cb.register_curve_public_input(*digest);
-        contract_address.register_as_input(cb);
-        mpt_root_hash.register_as_input(cb);
+        contract_address.register_as_public_input(cb);
+        mpt_root_hash.register_as_public_input(cb);
         cb.register_public_input(mapping_slot);
         cb.register_public_input(length_slot);
     }

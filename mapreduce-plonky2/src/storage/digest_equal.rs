@@ -84,9 +84,9 @@ impl<'a> PublicInputs<'a, Target> {
         length_slot: Target,
     ) {
         cb.register_curve_public_input(*digest);
-        mpt_root_hash.register_as_input(cb);
+        mpt_root_hash.register_as_public_input(cb);
         cb.register_public_inputs(&merkle_root_hash.elements);
-        contract_address.register_as_input(cb);
+        contract_address.register_as_public_input(cb);
         cb.register_public_input(mapping_slot);
         cb.register_public_input(length_slot);
     }
@@ -291,7 +291,7 @@ mod tests {
         eth::{left_pad32, ProofQuery, StorageSlot},
         mpt_sequential::test::generate_random_storage_mpt,
         storage::{self, key::MappingSlot},
-        utils::{convert_u8_to_u32_slice, test::random_vector},
+        utils::{convert_u8_to_u32_slice, keccak256, test::random_vector},
     };
     use eth_trie::Trie;
     use ethers::{
@@ -300,6 +300,7 @@ mod tests {
     };
     use plonky2::{
         field::types::{Field, Sample},
+        hash::keccak,
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder,
@@ -502,15 +503,18 @@ mod tests {
         let mpt_proof = run_circuit::<F, D, C, _>(mpt_circuit);
         let mpt_pi = storage::mapping::PublicInputs::from(&mpt_proof.public_inputs);
         // Check hash
-        let exp_hash = leaf_hash_for_mapping(&mapping_key, mapping_value.as_bytes());
-        let packed_hash = convert_u8_to_u32_slice(&exp_hash);
         let computed_hash = mpt_pi.root_hash();
-        assert_eq!(packed_hash, computed_hash);
+        assert_eq!(
+            convert_u8_to_u32_slice(&keccak256(&leaf_node)),
+            computed_hash
+        );
         // Check the digest
-        //let expected_digest = leaf_digest_for_mapping(&mapping_key, &mapping_value.as_bytes());
-        //    .add(leaf_digest_for_mapping(k2, v2))
-        //    .to_weierstrass();
+        let expected_digest = leaf_digest_for_mapping(&mapping_key, &mapping_value.as_bytes());
+        let circuit_digest = mpt_pi.accumulator();
+        assert_eq!(expected_digest.to_weierstrass(), circuit_digest);
 
+        //let exp_hash = leaf_hash_for_mapping(&mapping_key, mapping_value.as_bytes());
+        //let packed_hash = convert_u8_to_u32_slice(&exp_hash);
         //// use the _same_ inputs to the lpn leaf circuit
         //let lpn_circuit = storage::lpn::leaf::LeafCircuit {
         //    key: mapping_key.clone(),

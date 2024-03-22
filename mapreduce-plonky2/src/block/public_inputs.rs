@@ -35,7 +35,7 @@ impl<'a> PublicInputs<'a, Target> {
         cb.register_public_inputs(&root.elements);
         cb.register_public_input(first_block_number.0);
         cb.register_public_input(block_number.0);
-        block_header.register_as_input(cb);
+        block_header.register_as_public_input(cb);
     }
 
     /// Return the init root hash.

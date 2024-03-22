@@ -5,6 +5,7 @@ use std::array::from_fn as create_array;
 
 use crate::circuit::UserCircuit;
 use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
+use crate::rlp::short_string_len;
 use crate::storage::key::MappingSlotWires;
 use crate::storage::{MAX_EXTENSION_NODE_LEN, MAX_LEAF_NODE_LEN};
 use crate::{
@@ -94,14 +95,22 @@ where
                 &rlp_headers,
             );
         b.connect(tru.target, is_valid.target);
-        // extract the value by skipping the RLP header
-        let value = Array::<Target, VALUE_LEN> {
-            arr: create_array(|i| encoded_value[i + 1]),
+        // Read the length of the relevant data (RLP header - 0x80)
+        let data_len = short_string_len(b, &encoded_value[0]);
+        // Create vector of only the relevant data - skipping the RLP header
+        let value = VectorWire::<Target, VALUE_LEN> {
+            arr: Array {
+                arr: create_array(|i| encoded_value[i + 1]),
+            },
+            real_len: data_len,
         };
+        // stick with the same encoding of the data but pad_left32.
+        let big_endian_left_padded = value.normalize_left::<_, _, VALUE_LEN>(b);
         // Then creates the initial accumulator from the (mapping_key, value)
-        let mut inputs = [b.zero(); HASH_LEN * 2];
-        inputs[0..HASH_LEN].copy_from_slice(&mapping_slot_wires.mapping_key.arr);
-        inputs[HASH_LEN..2 * HASH_LEN].copy_from_slice(&value.arr);
+        let mut inputs = [b.zero(); MAPPING_KEY_LEN + VALUE_LEN];
+        inputs[0..MAPPING_KEY_LEN].copy_from_slice(&mapping_slot_wires.mapping_key.arr);
+        inputs[MAPPING_KEY_LEN..MAPPING_KEY_LEN + VALUE_LEN]
+            .copy_from_slice(&big_endian_left_padded.arr);
         let leaf_accumulator = b.map_to_curve_point(&inputs);
 
         // and register the public inputs
@@ -118,7 +127,7 @@ where
             node,
             root,
             mapping_slot: mapping_slot_wires,
-            value,
+            value: big_endian_left_padded,
         }
     }
 

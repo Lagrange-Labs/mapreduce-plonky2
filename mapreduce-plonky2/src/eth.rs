@@ -237,12 +237,21 @@ pub(crate) fn compute_key_length(path: &[Node]) -> usize {
 }
 
 pub(crate) fn left_pad32(slice: &[u8]) -> [u8; 32] {
+    left_pad::<32>(slice)
+}
+
+pub(crate) fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     match slice.len() {
-        a if a > 32 => panic!("left_pad32 must not be called with higher slice len than 32"),
-        32 => slice.try_into().unwrap(),
+        a if a > N => panic!(
+            "left_pad{} must not be called with higher slice len than {} (given{})",
+            N,
+            N,
+            slice.len()
+        ),
+        a if a == N => slice.try_into().unwrap(),
         a => {
-            let mut output = [0u8; 32];
-            output[32 - a..].copy_from_slice(slice);
+            let mut output = [0u8; N];
+            output[N - a..].copy_from_slice(slice);
             output
         }
     }
