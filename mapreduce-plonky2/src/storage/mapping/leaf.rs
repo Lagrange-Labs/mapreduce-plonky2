@@ -31,7 +31,7 @@ use crate::storage::mapping::public_inputs::PublicInputs;
 
 /// This constant represents the maximum size a value can be inside the storage trie.
 /// It is different than the `MAX_LEAF_VALUE_LEN` constant because it represents the
-/// **not** RLP encoded.
+/// value **not** RLP encoded,i.e. without the 1-byte RLP header.
 const VALUE_LEN: usize = 32;
 
 /// Circuit implementing the circuit to prove the correct derivation of the
@@ -170,6 +170,7 @@ mod test {
     use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
     use crate::utils::keccak256;
+    use crate::utils::test::random_vector;
     use eth_trie::{Nibbles, Trie};
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
@@ -226,9 +227,9 @@ mod test {
         let mapping_slot = 2;
         let slot = StorageSlot::Mapping(mapping_key.clone(), mapping_slot);
         let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
-        let mut random_value = [0u8; 32];
-        thread_rng().fill(&mut random_value);
-        trie.insert(&slot.mpt_key(), &random_value).unwrap();
+        let random_value = random_vector(VALUE_LEN);
+        let encoded_value: Vec<u8> = rlp::encode(&random_value).to_vec();
+        trie.insert(&slot.mpt_key(), &encoded_value).unwrap();
         trie.root_hash().unwrap();
         let proof = trie.get_proof(&slot.mpt_key()).unwrap();
         let node = proof.last().unwrap().clone(); // proof from RPC gives leaf as last
@@ -240,7 +241,7 @@ mod test {
         };
         let test = TestLeafCircuit {
             c: circuit,
-            exp_value: random_value.to_vec(),
+            exp_value: random_value.clone(),
         };
         let proof = run_circuit::<F, D, C, _>(test);
         let pi = PublicInputs::<F>::from(&proof.public_inputs);

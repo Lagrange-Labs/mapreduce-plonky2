@@ -309,8 +309,8 @@ mod tests {
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
-    use std::array;
     use serial_test::serial;
+    use std::array;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -466,7 +466,7 @@ mod tests {
     use storage::lpn::{leaf_digest_for_mapping, leaf_hash_for_mapping};
     #[tokio::test]
     #[serial]
-    async fn test_mapping_extraction_equivalence() -> Result<()> {
+    async fn test_mapping_extraction_equivalence_pudgy() -> Result<()> {
         // first pinguin holder https://dune.com/queries/2450476/4027653
         // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
         // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
