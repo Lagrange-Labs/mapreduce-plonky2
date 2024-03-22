@@ -553,6 +553,7 @@ pub mod test {
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, Rng, RngCore};
 
+    use crate::api::mapping::leaf::VALUE_LEN;
     use crate::array::Vector;
     use crate::benches::init_logging;
     use crate::eth::ProofQuery;
@@ -661,7 +662,8 @@ pub mod test {
 
         // Verify both storage and state proofs by this MPT circuit.
         verify_storage_proof_from_query(&query, &res)?;
-        verify_state_proof_from_query(&query, &res)
+        verify_state_proof_from_query(&query, &res)?;
+        Ok(())
     }
 
     /// Verify the storage proof from query result.
@@ -672,8 +674,9 @@ pub mod test {
         ProofQuery::verify_storage_proof(&res)?;
 
         let value = res.storage_proof[0].value;
-        let mut value_bytes = [0u8; MAX_LEAF_VALUE_LEN];
-        value.to_little_endian(&mut value_bytes);
+        let mut value_bytes = [0u8; VALUE_LEN];
+        value.to_big_endian(&mut value_bytes);
+        let encoded_value = rlp::encode(&value_bytes.to_vec()).to_vec();
         let mpt_proof = res.storage_proof[0]
             .proof
             .iter()
@@ -699,8 +702,8 @@ pub mod test {
         let circuit = TestCircuit::<DEPTH, NODE_LEN> {
             c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
             exp_root: root.try_into().unwrap(),
-            exp_value: value_bytes,
-            checking_value: true,
+            exp_value: encoded_value.try_into().unwrap(),
+            checking_value: false,
         };
         run_circuit::<F, D, C, _>(circuit);
 
@@ -725,7 +728,7 @@ pub mod test {
             mpt_proof.iter().map(|node| node.len()).max().unwrap()
         );
         // Written as constant from ^.
-        const DEPTH: usize = 8;
+        const DEPTH: usize = 9;
         const NODE_LEN: usize = 532;
         visit_proof(&mpt_proof);
         for i in 1..mpt_proof.len() {
