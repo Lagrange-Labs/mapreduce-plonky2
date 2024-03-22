@@ -16,8 +16,10 @@ use plonky2_ecgfp5::{
 };
 
 use crate::{
-    array::Targetable, query2::AddressTarget, types::{PackedAddressTarget, CURVE_TARGET_LEN}, utils::{convert_point_to_curve_target, convert_slice_to_curve_point}
+    array::Targetable, query2::AddressTarget, types::{PackedAddressTarget as PackedSCAddressTarget, CURVE_TARGET_LEN}, utils::{convert_point_to_curve_target, convert_slice_to_curve_point}
 };
+
+use super::PackedAddressTarget;
 
 pub mod full_node;
 pub mod partial_node;
@@ -47,8 +49,8 @@ impl Inputs {
         1,
         1,
         NUM_HASH_OUT_ELTS,
+        PackedSCAddressTarget::LEN,
         PackedAddressTarget::LEN,
-        AddressTarget::LEN,
         1,
         1,
         CURVE_TARGET_LEN,
@@ -142,12 +144,12 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         }
     }
 
-    pub(crate) fn smart_contract_address(&self) -> PackedAddressTarget {
-        PackedAddressTarget::try_from(self.smart_contract_address_raw().iter().map(|&t| U32Target(t)).collect_vec()).unwrap()
+    pub(crate) fn smart_contract_address(&self) -> PackedSCAddressTarget {
+        PackedSCAddressTarget::try_from(self.smart_contract_address_raw().iter().map(|&t| U32Target(t)).collect_vec()).unwrap()
     }
 
-    pub(crate) fn user_address(&self) -> AddressTarget {
-        AddressTarget::from_array(self.user_address_raw().try_into().unwrap())
+    pub(crate) fn user_address(&self) -> PackedAddressTarget {
+        PackedAddressTarget::try_from(self.user_address_raw().iter().map(|&t| U32Target(t)).collect_vec()).unwrap()
     }
 
     pub(crate) fn mapping_slot(&self) -> Target {
@@ -167,8 +169,8 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         block_number: Target,
         range: Target,
         root: &HashOutTarget,
-        smc_address: &PackedAddressTarget,
-        user_address: &AddressTarget,
+        smc_address: &PackedSCAddressTarget,
+        user_address: &PackedAddressTarget,
         mapping_slot: Target,
         mapping_slot_length: Target,
         digest: CurveTarget,
@@ -177,7 +179,7 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         b.register_public_input(range);
         b.register_public_inputs(&root.elements);
         smc_address.register_as_public_input(b);
-        b.register_public_inputs(&user_address.arr);
+        user_address.register_as_public_input(b);
         b.register_public_input(mapping_slot);
         b.register_public_input(mapping_slot_length);
         b.register_curve_public_input(digest);

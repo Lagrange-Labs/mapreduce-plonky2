@@ -20,7 +20,7 @@ use crate::{
     array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
     query2::storage::public_inputs::PublicInputs as StorageInputs,
-    types::PackedAddressTarget,
+    types::PackedAddressTarget as PackedSCAddressTarget,
 };
 
 use super::{aggregation::AggregationPublicInputs, PackedSCAddress};
@@ -32,7 +32,7 @@ pub(crate) mod tests;
 #[derive(Debug, Clone)]
 pub struct ProvenanceWires {
     /// Smart contract address (unpacked)
-    pub smart_contract_address: PackedAddressTarget,
+    pub smart_contract_address: PackedSCAddressTarget,
     /// Mapping of the storage slot
     pub mapping_slot: Target,
     /// Length of the storage slot
@@ -136,7 +136,7 @@ impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, 
         let c = storage_proof.root();
         let digest = storage_proof.digest();
 
-        let a = PackedAddressTarget::new(cb);
+        let a = PackedSCAddressTarget::new(cb);
         let m = cb.add_virtual_target();
         let s = cb.add_virtual_target();
         let b = cb.add_virtual_target();

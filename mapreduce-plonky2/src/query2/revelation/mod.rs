@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
@@ -6,7 +7,9 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
-use crate::{keccak::OutputHash, query2::AddressTarget, types::{PackedAddressTarget, CURVE_TARGET_LEN}};
+use crate::{keccak::OutputHash, query2::AddressTarget, types::{PackedAddressTarget as PackedSCAddressTarget, CURVE_TARGET_LEN}};
+
+use super::PackedAddressTarget;
 
 pub mod circuit;
 
@@ -31,8 +34,8 @@ impl<const L: usize> Inputs<L> {
         NUM_HASH_OUT_ELTS,
         1,
         1,
+        PackedSCAddressTarget::LEN,
         PackedAddressTarget::LEN,
-        AddressTarget::LEN,
         CURVE_TARGET_LEN,
         L * 8,
         OutputHash::LEN,
@@ -112,8 +115,8 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
         root: &HashOutTarget,
         min_block_number: Target,
         max_block_number: Target,
-        smc_address: &PackedAddressTarget,
-        user_address: &AddressTarget,
+        smc_address: &PackedSCAddressTarget,
+        user_address: &PackedAddressTarget,
         mapping_slot: Target,
         nft_ids: &[[Target; 8]],
         block_header: OutputHash,
@@ -124,7 +127,7 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
         b.register_public_input(min_block_number);
         b.register_public_input(max_block_number);
         smc_address.register_as_public_input(b);
-        b.register_public_inputs(&user_address.arr);
+        user_address.register_as_public_input(b);
         b.register_public_input(mapping_slot);
         for nft_id in nft_ids {
             b.register_public_inputs(nft_id);
@@ -154,12 +157,12 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
         self.max_block_number_raw()[0]
     }
 
-    fn smart_contract_address(&self) -> AddressTarget {
-        AddressTarget::from_array(self.smart_contract_address_raw().try_into().unwrap())
+    pub(crate) fn smart_contract_address(&self) -> PackedSCAddressTarget {
+        PackedSCAddressTarget::try_from(self.smart_contract_address_raw().iter().map(|&t| U32Target(t)).collect_vec()).unwrap()
     }
 
-    fn user_address(&self) -> AddressTarget {
-        AddressTarget::from_array(self.user_address_raw().try_into().unwrap())
+    pub(crate) fn user_address(&self) -> PackedAddressTarget {
+        PackedAddressTarget::try_from(self.user_address_raw().iter().map(|&t| U32Target(t)).collect_vec()).unwrap()
     }
 
     fn mapping_slot(&self) -> Target {
