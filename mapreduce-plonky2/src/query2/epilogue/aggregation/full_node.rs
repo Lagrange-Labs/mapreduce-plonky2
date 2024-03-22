@@ -40,8 +40,8 @@ impl<const L: usize> FullNodeCircuit<L> {
             .equals(b, &inputs[1].smart_contract_address());
         // S[0] == S[1]
         b.connect(
-            inputs[0].storage_slot_length(),
-            inputs[1].storage_slot_length(),
+            inputs[0].mapping_slot_length(),
+            inputs[1].mapping_slot_length(),
         );
 
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(to_hash.arr));
@@ -58,7 +58,8 @@ impl<const L: usize> FullNodeCircuit<L> {
             &inputs[0].smart_contract_address(),
             &inputs[0].user_address(),
             inputs[0].mapping_slot(),
-            &digest,
+            inputs[0].mapping_slot_length(),
+            digest,
         );
 
         FullNodeWires {}

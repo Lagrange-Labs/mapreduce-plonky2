@@ -14,7 +14,8 @@ use plonky2_ecgfp5::{
 };
 
 use crate::{
-    types::{AddressTarget, CURVE_TARGET_LEN},
+    query2::AddressTarget,
+    types::CURVE_TARGET_LEN,
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 
@@ -23,14 +24,22 @@ pub mod partial_node;
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
-enum Inputs {
+pub enum Inputs {
+    /// B - block number of the latest block aggregated
     BlockNumber,
+    /// R - aggregated range
     Range,
+    /// C - Merkle hash of the subtree, or poseidon hash of the leaf
     Root,
+    /// A - SMC address
     SmartContractAddress,
+    /// X - onwer's address
     UserAddress,
+    /// M - mapping slot
     MappingSlot,
+    /// D - aggregated digest
     Digest,
+    /// S - storage slot length
     StorageSlotLength,
 }
 impl Inputs {
@@ -47,6 +56,11 @@ impl Inputs {
 
     fn total_len() -> usize {
         Self::SIZES.iter().sum()
+    }
+
+    pub const fn len(&self) -> usize {
+        let me = *self as u8;
+        Self::SIZES[me as usize]
     }
 
     fn range(&self) -> std::ops::Range<usize> {
@@ -144,7 +158,7 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         convert_point_to_curve_target(self.digest_raw())
     }
 
-    pub(crate) fn storage_slot_length(&self) -> Target {
+    pub(crate) fn mapping_slot_length(&self) -> Target {
         self.storage_slot_length_raw()[0]
     }
 
@@ -156,7 +170,8 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         smc_address: &AddressTarget,
         user_address: &AddressTarget,
         mapping_slot: Target,
-        digest: &CurveTarget,
+        mapping_slot_length: Target,
+        digest: CurveTarget,
     ) {
         b.register_public_input(block_number);
         b.register_public_input(range);
@@ -164,36 +179,37 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         b.register_public_inputs(&smc_address.arr);
         b.register_public_inputs(&user_address.arr);
         b.register_public_input(mapping_slot);
-        b.register_curve_public_input(*digest);
+        b.register_public_input(mapping_slot_length);
+        b.register_curve_public_input(digest);
     }
 }
 
 impl<'a, const L: usize> AggregationPublicInputs<'a, GoldilocksField, L> {
-    fn block_number(&self) -> GoldilocksField {
+    pub fn block_number(&self) -> GoldilocksField {
         self.block_number_raw()[0]
     }
 
-    fn range(&self) -> GoldilocksField {
+    pub fn range(&self) -> GoldilocksField {
         self.range_raw()[0]
     }
 
-    fn root(&self) -> HashOut<GoldilocksField> {
+    pub fn root(&self) -> HashOut<GoldilocksField> {
         HashOut::from_vec(self.root_raw().to_owned())
     }
 
-    fn smart_contract_address(&self) -> &[GoldilocksField] {
+    pub fn smart_contract_address(&self) -> &[GoldilocksField] {
         self.smart_contract_address_raw()
     }
 
-    fn user_address(&self) -> &[GoldilocksField] {
+    pub fn user_address(&self) -> &[GoldilocksField] {
         self.user_address_raw()
     }
 
-    fn mapping_slot(&self) -> GoldilocksField {
+    pub fn mapping_slot(&self) -> GoldilocksField {
         self.mapping_slot_raw()[0]
     }
 
-    fn digest(&self) -> WeierstrassPoint {
+    pub fn digest(&self) -> WeierstrassPoint {
         let (x, y, is_inf) = self.digest_raw();
         WeierstrassPoint {
             x: QuinticExtension::<GoldilocksField>::from_basefield_array(std::array::from_fn::<
@@ -210,7 +226,7 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, GoldilocksField, L> {
         }
     }
 
-    pub(crate) fn storage_slot_length(&self) -> GoldilocksField {
+    pub(crate) fn mapping_slot_length(&self) -> GoldilocksField {
         self.storage_slot_length_raw()[0]
     }
 }
