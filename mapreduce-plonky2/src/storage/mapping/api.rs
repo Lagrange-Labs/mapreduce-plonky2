@@ -424,7 +424,7 @@ mod test {
             hex::encode(&mpt1),
             hex::encode(&mpt2)
         );
-        let v = random_vector(32);
+        let v: Vec<u8> = rlp::encode(&random_vector(32)).to_vec();
         trie.insert(&mpt1, &v).unwrap();
         trie.insert(&mpt2, &v).unwrap();
         trie.root_hash().unwrap();
@@ -505,6 +505,7 @@ mod test {
         assert_eq!(p1[p1.len() - 2], p2[p2.len() - 2]);
         let l1_inputs = CircuitInput::new_leaf(p1.last().unwrap().to_vec(), slot, key.clone());
         // generate a leaf then a branch proof with only this leaf
+        println!("[+] Generating leaf proof 1...");
         let leaf1_proof_buff = generate_proof(&params, l1_inputs).unwrap();
         // some testing on the public inputs of the proof
         let leaf1_proof = ProofWithVK::deserialize(&leaf1_proof_buff).unwrap();
@@ -515,6 +516,7 @@ mod test {
         assert_eq!(comp_ptr, F::from_canonical_usize(63));
 
         let branch_node = p1[p1.len() - 2].to_vec();
+        println!("[+] Generating branch proof 1...");
         let branch_inputs = CircuitInput::new_branch(branch_node.clone(), vec![leaf1_proof_buff]);
         let branch1_buff = generate_proof(&params, branch_inputs).unwrap();
         let branch1 = ProofWithVK::deserialize(&branch1_buff).unwrap();
@@ -531,7 +533,7 @@ mod test {
         let mut pub2 = pub1.clone();
         assert_eq!(pub2.len(), NUM_IO);
         pub2[PublicInputs::<F>::KEY_IDX..PublicInputs::<F>::T_IDX].copy_from_slice(
-            &bytes_to_nibbles(&mpt2)
+            &bytes_to_nibbles(mpt2)
                 .into_iter()
                 .map(F::from_canonical_u8)
                 .collect::<Vec<_>>(),
@@ -551,12 +553,14 @@ mod test {
             assert!(k1[..pt1] == k2[..pt2]);
         }
 
+        println!("[+] Generating leaf proof 2...");
         let leaf2_proof = params
             .set
             .generate_input_proofs([pub2.try_into().unwrap()])
             .unwrap();
         let vk = params.set.verifier_data_for_input_proofs::<1>()[0].clone();
         let leaf2_proof_vk = ProofWithVK::from((leaf2_proof[0].clone(), vk));
+        println!("[+] Generating branch proof 2...");
         let branch_inputs = CircuitInput::Branch(BranchInput {
             input: InputNode {
                 node: branch_node.clone(),
