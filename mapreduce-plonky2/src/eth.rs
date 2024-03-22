@@ -14,9 +14,9 @@ use plonky2::hash::keccak;
 use rlp::{Encodable, Rlp, RlpStream};
 #[cfg(feature = "ci")]
 use std::env;
-use std::{str::FromStr, sync::Arc};
+use std::{array::from_fn as create_array, str::FromStr, sync::Arc};
 
-use crate::utils::keccak256;
+use crate::{mpt_sequential::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
 /// bad transactions, so we only compute over valid transactions.
 pub struct TxAndReceipt(Transaction, TransactionReceipt);
@@ -261,6 +261,8 @@ pub(crate) struct ProofQuery {
     pub(crate) contract: Address,
     pub(crate) slot: StorageSlot,
 }
+
+#[derive(Clone, Debug)]
 pub(crate) enum StorageSlot {
     /// simple storage slot like a uin256 etc that fits in 32bytes
     /// Argument is the slot location in the contract
@@ -287,8 +289,15 @@ impl StorageSlot {
             }
         }
     }
-    pub fn mpt_key(&self) -> Vec<u8> {
+    pub fn mpt_key_vec(&self) -> Vec<u8> {
         keccak256(&self.location().to_fixed_bytes())
+    }
+    pub fn mpt_key(&self) -> [u8; 32] {
+        let hash = keccak256(&self.location().to_fixed_bytes());
+        create_array(|i| hash[i])
+    }
+    pub fn mpt_nibbles(&self) -> [u8; MAX_KEY_NIBBLE_LEN] {
+        bytes_to_nibbles(&self.mpt_key_vec()).try_into().unwrap()
     }
 }
 impl ProofQuery {
@@ -378,7 +387,10 @@ mod test {
     use ethers::types::{BlockNumber, H256, U256};
     use rand::{thread_rng, Rng};
 
-    use crate::utils::find_index_subvector;
+    use crate::{
+        mpt_sequential::test::verify_storage_proof_from_query,
+        utils::{convert_u8_to_u32_slice, find_index_subvector},
+    };
 
     use super::*;
 

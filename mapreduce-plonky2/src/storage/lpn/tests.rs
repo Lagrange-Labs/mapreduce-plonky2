@@ -30,7 +30,7 @@ const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct NodeCircuitValidator<'a> {
     validated: NodeCircuit,
     children: &'a [PublicInputs<'a, F>; 2],

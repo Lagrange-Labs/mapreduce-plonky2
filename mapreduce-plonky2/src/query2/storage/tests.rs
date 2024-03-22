@@ -1,10 +1,10 @@
-use std::ops::Add;
+use std::{array, ops::Add};
 
 use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{
-        hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         hashing::hash_n_to_hash_no_pad,
         poseidon::PoseidonPermutation,
     },
@@ -18,6 +18,7 @@ use plonky2::{
         proof::ProofWithPublicInputs,
     },
 };
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 
 use crate::{
     circuit::{test::run_circuit, UserCircuit},
@@ -37,7 +38,7 @@ const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct PartialInnerNodeCircuitValidator<'a> {
     validated: PartialInnerNodeCircuit,
 
@@ -76,7 +77,7 @@ impl<'a> UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuitValidator<'a
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct FullInnerNodeCircuitValidator<'a> {
     validated: FullInnerNodeCircuit,
     children: &'a [PublicInputs<'a, F>; 2],
@@ -265,4 +266,33 @@ fn test_mini_tree(k: &[u8], v: &[u8]) {
 #[test]
 fn test_inner_node() {
     test_mini_tree(b"012345", b"900600");
+}
+
+impl<'a, T: Copy + Default> PublicInputs<'a, T> {
+    /// Writes the parts of the public inputs into the provided target array.
+    pub fn parts_into_values(
+        values: &mut [T; PublicInputs::<()>::TOTAL_LEN],
+        root: &[T; PublicInputs::<()>::ROOT_LEN],
+        digest: &[T; PublicInputs::<()>::DIGEST_LEN],
+        owner: &[T; PublicInputs::<()>::OWNER_LEN],
+    ) {
+        values[Self::ROOT_OFFSET..Self::ROOT_OFFSET + Self::ROOT_LEN].copy_from_slice(root);
+        values[Self::DIGEST_OFFSET..Self::DIGEST_OFFSET + Self::DIGEST_LEN].copy_from_slice(digest);
+        values[Self::OWNER_OFFSET..Self::OWNER_OFFSET + Self::OWNER_LEN].copy_from_slice(owner);
+    }
+}
+
+impl<'a, F: RichField> PublicInputs<'a, F> {
+    pub fn values_from_seed(seed: u64) -> [F; PublicInputs::<()>::TOTAL_LEN] {
+        let rng = &mut StdRng::seed_from_u64(seed);
+
+        let root = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+        let digest = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+        let owner = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+
+        let mut values = array::from_fn(|_| F::ZERO);
+        Self::parts_into_values(&mut values, &root, &digest, &owner);
+
+        values
+    }
 }

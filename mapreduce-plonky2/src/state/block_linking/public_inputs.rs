@@ -75,7 +75,11 @@ impl<'a, T: Clone> BlockLinkingInputs<'a, T> {
             .register_as_public_input(cb);
         cb.register_public_input(wires.block_inputs.number.0);
         wires.block_inputs.parent_hash.register_as_public_input(cb);
-        cb.register_public_inputs(storage_inputs.contract_address_data());
+        wires
+            .account_inputs
+            .contract_address
+            .convert_u8_to_u32(cb) // always register the packed version
+            .register_as_public_input(cb);
         // Register the curve point of digest (avoid F must be GoldilocksField).
         let digest_data = storage_inputs.digest_data();
         cb.register_public_inputs(&digest_data.0);
@@ -95,7 +99,6 @@ impl<'a, T: Clone> BlockLinkingInputs<'a, T> {
     ///
     /// This function will panic if the length of the provided slice is smaller than
     /// [Self::TOTAL_LEN].
-    #[cfg(test)]
     pub fn from_slice(arr: &'a [T]) -> Self {
         assert!(
             TOTAL_LEN <= arr.len(),
@@ -152,7 +155,6 @@ mod tests {
 
     impl<'a, T: Copy + Default> BlockLinkingInputs<'a, T> {
         /// Writes the parts of the block liking public inputs into the provided target array.
-        #[cfg(test)]
         #[allow(clippy::too_many_arguments)]
         pub fn parts_into_values(
             values: &mut [T; TOTAL_LEN],

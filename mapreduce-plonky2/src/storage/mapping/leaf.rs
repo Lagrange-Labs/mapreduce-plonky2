@@ -182,10 +182,10 @@ impl CircuitLogicWires<GoldilocksField, 2, 0> for StorageLeafWire {
 mod test {
     use std::array::from_fn as create_array;
 
-    use crate::api::lpn::leaf_digest_for_mapping;
     use crate::circuit::test::run_circuit;
     use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
+    use crate::storage::lpn::leaf_digest_for_mapping;
     use crate::utils::keccak256;
     use crate::utils::test::random_vector;
     use eth_trie::{Nibbles, Trie};
@@ -250,9 +250,9 @@ mod test {
         let encoded_value: Vec<u8> = rlp::encode(&random_value).to_vec();
         trie.insert(&slot.mpt_key(), &encoded_value).unwrap();
         trie.root_hash().unwrap();
-        let proof = trie.get_proof(&slot.mpt_key()).unwrap();
+        let proof = trie.get_proof(&slot.mpt_key_vec()).unwrap();
         let node = proof.last().unwrap().clone(); // proof from RPC gives leaf as last
-        let mpt_key = slot.mpt_key();
+        let mpt_key = slot.mpt_key_vec();
         let slot = MappingSlot::new(mapping_slot as u8, mapping_key.clone());
         let circuit = LeafCircuit::<80> {
             node: node.clone(),

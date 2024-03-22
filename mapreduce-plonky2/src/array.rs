@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use plonky2::{
-    field::extension::Extendable,
+    field::{extension::Extendable, types::Field},
     hash::hash_types::RichField,
     iop::{
         target::{BoolTarget, Target},
@@ -199,6 +199,12 @@ where
     }
 }
 
+impl<F: Field, const N: usize> Default for Array<F, N> {
+    fn default() -> Self {
+        Self { arr: [F::ZERO; N] }
+    }
+}
+
 impl<T: Targetable + Clone + Serialize, const N: usize> Array<T, N>
 where
     for<'d> T: Deserialize<'d>,
@@ -219,6 +225,7 @@ where
         Self { arr: value }
     }
 }
+
 impl<T: Clone + Debug + Serialize, const N: usize> TryFrom<Vec<T>> for Array<T, N>
 where
     for<'de> T: Deserialize<'de>,
@@ -229,6 +236,20 @@ where
             arr: value
                 .try_into()
                 .map_err(|e| anyhow!("can't conver to array: {:?}", e))?,
+        })
+    }
+}
+
+impl<T: Clone + Debug + Serialize, const N: usize> TryFrom<&[T]> for Array<T, N>
+where
+    for<'de> T: Deserialize<'de>,
+    T: Copy,
+{
+    type Error = anyhow::Error;
+    fn try_from(value: &[T]) -> Result<Self> {
+        anyhow::ensure!(value.len() == N);
+        Ok(Self {
+            arr: value.try_into().unwrap(),
         })
     }
 }
@@ -484,6 +505,8 @@ where
         }
     }
 
+    /// Inneficient method to extract a value from an array but that works
+    /// all the time, when b.random_access does not work.
     pub fn value_at_failover<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
@@ -499,7 +522,6 @@ where
         }
         T::from_target(acc)
     }
-
     /// Extract the value from the array at the index givne by `at`.
     /// Note the cost is O(SIZE) in general, and less for arrays
     /// which are powers of two and <= 64.
@@ -516,17 +538,9 @@ where
                 at,
                 self.arr.iter().map(|v| v.to_target()).collect::<Vec<_>>(),
             ));
+        } else {
+            self.value_at_failover(b, at)
         }
-        // Otherwise, need to make it manually
-        let mut acc = b.zero();
-        for (i, el) in self.arr.iter().enumerate() {
-            let i_target = b.constant(F::from_canonical_usize(i));
-            let is_eq = b.is_equal(i_target, at);
-            // SUM_i (i == n (idx) ) * element
-            // -> sum = element
-            acc = b.mul_add(is_eq.target, el.to_target(), acc);
-        }
-        T::from_target(acc)
     }
 
     pub fn reverse(&self) -> Self {
