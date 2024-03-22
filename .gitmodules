@@ -1,3 +1,0 @@
-[submodule "groth16-framework/gnark-plonky2-verifier"]
-	path = groth16-framework/gnark-plonky2-verifier
-	url = https://github.com/Lagrange-Labs/gnark-plonky2-verifier

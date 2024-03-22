@@ -1,7 +1,7 @@
 //! The verifier used to test Groth16 proof verification on EVM
 
 use crate::{
-    evm::{compile_solidity, deploy_and_call},
+    evm::{executor::deploy_and_call, utils::compile_solidity},
     utils::read_file,
 };
 use anyhow::Result;
@@ -39,7 +39,7 @@ impl EVMVerifier {
                 true
             }
             Err(error) => {
-                log::info!("Failed to do EVM verification: {error}");
+                log::error!("Failed to do EVM verification: {error}");
                 false
             }
         }

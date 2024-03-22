@@ -14,11 +14,11 @@ use std::{
 };
 
 /// The output dir for wrapped proof data
-const WRAPPED_PROOF_DIR: &str = "wrapped";
+pub const WRAPPED_PROOF_DIR: &str = "wrapped";
 /// The generated filename of Groth16 proof
-const GROTH16_PROOF_FILE: &str = "groth16.proof";
+pub const GROTH16_PROOF_FILE: &str = "proof.json";
 /// The generated file of Solidity verifier contract
-const VERIFIER_CONRTACT_FILE: &str = "verifier.sol";
+pub const VERIFIER_CONRTACT_FILE: &str = "verifier.sol";
 
 /// Groth16 prover configuration
 #[derive(Debug)]

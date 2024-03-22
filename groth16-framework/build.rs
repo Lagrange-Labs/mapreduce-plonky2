@@ -7,8 +7,10 @@ const GROTH16_PROVER_DIR: &str = "gnark-plonky2-verifier";
 /// Build main entry point.
 fn main() {
     check_go_command();
-    check_groth16_prover_path();
-    build_groth16_prover();
+    /*
+        check_groth16_prover_path();
+        build_groth16_prover();
+    */
 }
 
 /// Ensure must have Go command.
