@@ -7,14 +7,20 @@ use plonky2::{
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
-use crate::{array::Array, circuit::UserCircuit, group_hashing::CircuitBuilderGroupHashing};
+use crate::{
+    api::mapping::leaf::VALUE_LEN, array::Array, circuit::UserCircuit,
+    group_hashing::CircuitBuilderGroupHashing, storage::key::MAPPING_KEY_LEN,
+};
 
 use super::{PublicInputs, KEY_SIZE, LEAF_SIZE};
 
+/// Circuit that handles the proving of the leaf of the storage database for a mapping variable
 #[derive(Clone, Debug)]
 pub struct LeafCircuit {
-    pub key: [u8; KEY_SIZE],
-    pub value: [u8; LEAF_SIZE],
+    /// The mapping key we want to insert in our db. Left-padded with zeroes if necessary
+    pub mapping_key: [u8; MAPPING_KEY_LEN],
+    /// The mapping value associated to this mapping key. Left-padded with zeroes if necessary
+    pub mapping_value: [u8; VALUE_LEN],
 }
 
 #[derive(Serialize, Deserialize)]
@@ -23,15 +29,15 @@ pub struct LeafWires {
     // IN
     //
     // The mapping key associated to this leaf, expected in byte format
-    pub key: Array<Target, KEY_SIZE>,
+    pub key: Array<Target, MAPPING_KEY_LEN>,
     // The value encoded in this leaf, expected in byte format
-    pub value: Array<Target, LEAF_SIZE>,
+    pub value: Array<Target, VALUE_LEN>,
 }
 
 impl LeafCircuit {
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &LeafWires) {
-        wires.key.assign_from_data(pw, &self.key);
-        wires.value.assign_from_data(pw, &self.value);
+        wires.key.assign_from_data(pw, &self.mapping_key);
+        wires.value.assign_from_data(pw, &self.mapping_value);
     }
 }
 
@@ -39,14 +45,13 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
     type Wires = LeafWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires {
-        let key = Array::<Target, KEY_SIZE>::new(b);
-        let key_u32 = key.convert_u8_to_u32(b);
-        let value = Array::<Target, LEAF_SIZE>::new(b);
-        let value_u32 = value.convert_u8_to_u32(b);
-        let kv = key_u32.concat(&value_u32).to_targets();
+        let key = Array::<Target, MAPPING_KEY_LEN>::new(b);
+        let value = Array::<Target, VALUE_LEN>::new(b);
+        let kv = key.concat(&value).to_targets();
+        let kv_u32 = kv.convert_u8_to_u32(b).to_targets();
 
-        let digest = b.map_to_curve_point(&kv.arr);
-        let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(kv.arr));
+        let digest = b.map_to_curve_point(&kv_u32.arr);
+        let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(kv_u32.arr));
 
         PublicInputs::<GoldilocksField>::register(b, &root, &digest);
 

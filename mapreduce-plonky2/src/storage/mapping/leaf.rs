@@ -3,11 +3,13 @@
 
 use std::array::from_fn as create_array;
 
+use crate::array::L32;
 use crate::circuit::UserCircuit;
 use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
 use crate::rlp::short_string_len;
-use crate::storage::key::MappingSlotWires;
+use crate::storage::key::{MappingSlotWires, MAPPING_INPUT_TOTAL_LEN};
 use crate::storage::{MAX_EXTENSION_NODE_LEN, MAX_LEAF_NODE_LEN};
+use crate::utils::convert_u8_targets_to_u32;
 use crate::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
@@ -33,7 +35,7 @@ use crate::storage::mapping::public_inputs::PublicInputs;
 /// This constant represents the maximum size a value can be inside the storage trie.
 /// It is different than the `MAX_LEAF_VALUE_LEN` constant because it represents the
 /// value **not** RLP encoded,i.e. without the 1-byte RLP header.
-const VALUE_LEN: usize = 32;
+pub(crate) const VALUE_LEN: usize = 32;
 
 /// Circuit implementing the circuit to prove the correct derivation of the
 /// MPT key from a mapping key and mapping slot. It also do the usual recursive
@@ -107,11 +109,17 @@ where
         // stick with the same encoding of the data but pad_left32.
         let big_endian_left_padded = value.normalize_left::<_, _, VALUE_LEN>(b);
         // Then creates the initial accumulator from the (mapping_key, value)
-        let mut inputs = [b.zero(); MAPPING_KEY_LEN + VALUE_LEN];
+        let mut inputs = [b.zero(); MAPPING_INPUT_TOTAL_LEN];
         inputs[0..MAPPING_KEY_LEN].copy_from_slice(&mapping_slot_wires.mapping_key.arr);
         inputs[MAPPING_KEY_LEN..MAPPING_KEY_LEN + VALUE_LEN]
             .copy_from_slice(&big_endian_left_padded.arr);
-        let leaf_accumulator = b.map_to_curve_point(&inputs);
+        // couldn't make it work with array API because of const generic issue...
+        //let packed = Array { arr: inputs }.convert_u8_to_u32(b);
+        let packed = convert_u8_targets_to_u32(b, &inputs)
+            .into_iter()
+            .map(|x| x.0)
+            .collect::<Vec<_>>();
+        let leaf_accumulator = b.map_to_curve_point(&packed);
 
         // and register the public inputs
         let n = b.one(); // only one leaf seen in that leaf !
@@ -123,6 +131,8 @@ where
             &root.output_array,
             &leaf_accumulator,
         );
+        mapping_slot_wires.mapping_key.register_as_public_input(b);
+        big_endian_left_padded.register_as_public_input(b);
         LeafWires {
             node,
             root,

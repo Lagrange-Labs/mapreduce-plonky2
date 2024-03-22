@@ -87,8 +87,8 @@ impl LeafProofResult {
 
 fn run_leaf_proof(k: &[u8], v: &[u8]) -> LeafProofResult {
     let circuit = LeafCircuit {
-        key: left_pad32(k),
-        value: left_pad32(v),
+        mapping_key: left_pad32(k),
+        mapping_value: left_pad32(v),
     };
 
     let proof = run_circuit::<F, D, C, _>(circuit);

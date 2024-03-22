@@ -296,7 +296,7 @@ mod tests {
     use eth_trie::Trie;
     use ethers::{
         providers::{Http, Provider},
-        types::Address,
+        types::{spoof::storage, Address},
     };
     use plonky2::{
         field::types::{Field, Sample},
@@ -307,6 +307,7 @@ mod tests {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
+    use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
@@ -511,15 +512,39 @@ mod tests {
         // Check the digest
         let expected_digest = leaf_digest_for_mapping(&mapping_key, &mapping_value.as_bytes());
         let circuit_digest = mpt_pi.accumulator();
+        println!("left_pad32(mapping_key) = \t{:?}", left_pad32(&mapping_key));
+        println!(
+            "left_pad32(mapping_value) = \t{:?}",
+            left_pad32(mapping_value.as_bytes())
+        );
+        let low_idx = storage::mapping::PublicInputs::<F>::TOTAL_LEN;
+        let high_idx = low_idx + 32;
+        println!(
+            "public inputs mapping_key = \t{:?}",
+            &mpt_proof.public_inputs[low_idx..high_idx]
+        );
+        let low_idx = high_idx;
+        let high_idx = low_idx + 32;
+        println!(
+            "public inputs mapping_value = \t{:?}",
+            &mpt_proof.public_inputs[low_idx..high_idx]
+        );
+
         assert_eq!(expected_digest.to_weierstrass(), circuit_digest);
 
-        //let exp_hash = leaf_hash_for_mapping(&mapping_key, mapping_value.as_bytes());
-        //let packed_hash = convert_u8_to_u32_slice(&exp_hash);
-        //// use the _same_ inputs to the lpn leaf circuit
-        //let lpn_circuit = storage::lpn::leaf::LeafCircuit {
-        //    key: mapping_key.clone(),
-        //    value: left_pad32(mapping_value.as_bytes()),
-        //};
+        let exp_hash = HashOut::from_bytes(&leaf_hash_for_mapping(
+            &mapping_key,
+            mapping_value.as_bytes(),
+        ));
+        // use the _same_ inputs to the lpn leaf circuit
+        let lpn_circuit = storage::lpn::leaf::LeafCircuit {
+            mapping_key: mapping_key.clone(),
+            mapping_value: left_pad32(mapping_value.as_bytes()),
+        };
+        let lpn_proof = run_circuit::<F, D, C, _>(lpn_circuit);
+        let lpn_pi = storage::lpn::PublicInputs::from(lpn_proof.public_inputs.as_slice());
+        assert_eq!(expected_digest.to_weierstrass(), lpn_pi.digest());
+        assert_eq!(&exp_hash, &lpn_pi.root_hash());
         Ok(())
     }
 }

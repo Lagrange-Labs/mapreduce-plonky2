@@ -540,14 +540,14 @@ pub(crate) const fn L32(a: usize) -> usize {
         a / 4
     }
 }
-impl<const SIZE: usize> Array<Target, SIZE>
-where
-    [(); L32(SIZE)]:,
-{
+impl<const SIZE: usize> Array<Target, SIZE> {
     pub fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
-    ) -> Array<U32Target, { L32(SIZE) }> {
+    ) -> Array<U32Target, { L32(SIZE) }>
+    where
+        [(); L32(SIZE)]:,
+    {
         const TWO_POWER_8: usize = 256;
         const TWO_POWER_16: usize = 65536;
         const TWO_POWER_24: usize = 16777216;
