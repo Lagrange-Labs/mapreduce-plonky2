@@ -394,9 +394,11 @@ mod test {
 
     use super::*;
     use crate::{
+        api::mapping::leaf::VALUE_LEN,
         eth::StorageSlot,
         mpt_sequential::{bytes_to_nibbles, test::generate_random_storage_mpt},
         storage::key::MappingSlot,
+        types::ADDRESS_LEN,
         utils::test::random_vector,
     };
 
@@ -584,18 +586,18 @@ mod test {
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(memdb.clone());
 
-        let key1 = [1; 20].to_vec();
-        let val1 = [2; 32].to_vec();
+        let key1 = random_vector(4);
+        let val1 = random_vector(ADDRESS_LEN);
         let slot1 = StorageSlot::Mapping(key1.clone(), 0);
         let mpt_key1 = slot1.mpt_key();
 
-        let key2 = [3; 20].to_vec();
-        let val2 = [4; 32].to_vec();
+        let key2 = random_vector(4);
+        let val2 = random_vector(ADDRESS_LEN);
         let slot2 = StorageSlot::Mapping(key2.clone(), 0);
         let mpt_key2 = slot2.mpt_key();
 
-        trie.insert(&mpt_key1, &val1).unwrap();
-        trie.insert(&mpt_key2, &val2).unwrap();
+        trie.insert(&mpt_key1, &rlp::encode(&val1)).unwrap();
+        trie.insert(&mpt_key2, &rlp::encode(&val2)).unwrap();
         trie.root_hash().unwrap();
 
         let proof1 = trie.get_proof(&mpt_key1).unwrap();
