@@ -158,10 +158,7 @@ where
             let it = cb.constant(F::from_canonical_usize(i));
             let in_value = less_than(cb, it, value_len, 3); // log2(4) = 2, putting upper bound
             let rev_value = mpt_output.leaf.value_at_failover(cb, end_iterator);
-            // we can't access index < 0 with b.random_access so a small tweak to avoid it
-            let is_done = cb.is_equal(end_iterator, one); // since first byte is RLP header
-            let end_iterator_minus_one = cb.sub(end_iterator, one);
-            end_iterator = cb.select(is_done, zero, end_iterator_minus_one);
+            end_iterator = cb.sub(end_iterator, one);
             cb.select(in_value, rev_value, zero)
         });
         let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;

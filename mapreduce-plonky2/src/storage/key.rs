@@ -108,7 +108,7 @@ impl KeccakMPT {
 /// Circuit gadget that proves the correct derivation of a MPT key from a simple
 /// storage slot.
 /// Deriving a MPT key from simple slot is done like:
-/// 1. location = keccak(left_pad32(slot))
+/// 1. location = left_pad32(slot)
 /// 2. mpt_key = keccak(location)
 /// WARNING: Currently takes the assumption that the storage slot number fits
 /// inside a single byte.
@@ -148,7 +148,7 @@ pub struct SimpleSlotWires {
 impl SimpleSlot {
     /// Derive the MPT key in circuit according to simple storage slot.
     /// Remember the rules to get the MPT key is as follow:
-    /// * location = keccak256(pad32(slot))
+    /// * location = pad32(slot)
     /// * mpt_key = keccak256(location)
     /// Note the simple slot wire and the contract address wires are NOT range
     /// checked, because they are expected to be given by the verifier.
