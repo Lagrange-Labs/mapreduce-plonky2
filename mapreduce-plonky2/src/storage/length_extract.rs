@@ -7,6 +7,7 @@ use super::{
 };
 use crate::{
     api::{default_config, serialize_proof},
+    array::Array,
     circuit::UserCircuit,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::{
@@ -31,7 +32,7 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use recursion_framework::serialization::circuit_data_serialization::SerializableRichField;
 use recursion_framework::serialization::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
-use std::array;
+use std::array::{self, from_fn as create_array};
 
 /// This is a wrapper around an array of targets set as public inputs of any
 /// proof generated in this module. They all share the same structure.
@@ -150,9 +151,13 @@ where
         // Range check to constrain only bytes for each node of state MPT input.
         mpt_input.nodes.iter().for_each(|n| n.assert_bytes(cb));
 
+        // contrived fix to make the test pass but the "real" fix is in
+        // https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/133
+        let arr = Array::<Target, VALUE_LEN> {
+            arr: create_array(|i| mpt_output.leaf.arr[i]),
+        };
         // The length value shouldn't exceed 4-bytes (U32).
-        let length_value =
-            convert_u8_targets_to_u32(cb, &mpt_output.leaf.arr);
+        let length_value = convert_u8_targets_to_u32(cb, &arr.arr);
 
         // Register the public inputs.
         PublicInputs::register(
