@@ -16,17 +16,21 @@ use recursion_framework::serialization::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::{
-    block_linking,
-    lpn::{self as lpn_state, api::ProofInputs},
-};
 pub use crate::storage::{
     self,
     length_extract::{self},
     lpn as lpn_storage, mapping,
 };
+use crate::{
+    block::Inputs,
+    state::{
+        block_linking,
+        lpn::{self as lpn_state, api::ProofInputs},
+    },
+};
 
 use self::storage::{digest_equal, length_match};
+use crate::block;
 
 // TODO: put every references here. remove one from mapping
 pub(crate) const D: usize = 2;
@@ -35,7 +39,7 @@ pub(crate) type F = <C as GenericConfig<D>>::F;
 
 /// Set of inputs necessary to generate proofs for each circuit employed in the pre-processing
 /// stage of LPN
-pub enum CircuitInput {
+pub enum CircuitInput<const MAX_DEPTH: usize> {
     /// Input for circuits proving inclusion of entries of a mapping in an MPT
     Mapping(mapping::CircuitInput),
     /// Input for circuit extracting length of a mapping from MPT
@@ -51,11 +55,13 @@ pub enum CircuitInput {
     BlockLinking(block_linking::CircuitInput),
     /// Input for circuit bulding the state DB of LPN
     State(lpn_state::api::CircuitInput),
+    /// Input for circuit building the block tree DB of LPN
+    BlockDB(block::CircuitInput<MAX_DEPTH>),
 }
 
 #[derive(Serialize, Deserialize)]
 /// Parameters defining all the circuits employed for the pre-processing stage of LPN
-pub struct PublicParameters {
+pub struct PublicParameters<const MAX_DEPTH: usize> {
     mapping: mapping::PublicParameters,
     length_extract: length_extract::PublicParameters,
     length_match: length_match::Parameters,
@@ -63,6 +69,7 @@ pub struct PublicParameters {
     digest_equal: digest_equal::Parameters,
     block_linking: block_linking::PublicParameters,
     lpn_state: lpn_state::api::Parameters,
+    block_db: block::Parameters<MAX_DEPTH>,
 }
 
 /// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits
@@ -72,7 +79,7 @@ pub(crate) fn default_config() -> CircuitConfig {
 }
 /// Instantiate the circuits employed for the pre-processing stage of LPN, returning their
 /// corresponding parameters
-pub fn build_circuits_params() -> PublicParameters {
+pub fn build_circuits_params<const MAX_DEPTH: usize>() -> PublicParameters<MAX_DEPTH> {
     let mapping = mapping::build_circuits_params();
     let length_extract = length_extract::PublicParameters::build();
     let length_match = length_match::Parameters::build(
@@ -87,6 +94,7 @@ pub fn build_circuits_params() -> PublicParameters {
     let block_linking =
         block_linking::PublicParameters::build(&digest_equal.circuit_data().verifier_data());
     let lpn_state = lpn_state::api::Parameters::build(block_linking.circuit_data().verifier_data());
+    let block_db = block::Parameters::build(lpn_state.get_lpn_state_circuit_set());
     PublicParameters {
         mapping,
         length_extract,
@@ -95,12 +103,16 @@ pub fn build_circuits_params() -> PublicParameters {
         digest_equal,
         block_linking,
         lpn_state,
+        block_db,
     }
 }
 
 /// Generate a proof for a circuit in the set of circuits employed in the pre-processing stage
 /// of LPN, employing `CircuitInput` to specify for which circuit the proof should be generated
-pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
+pub fn generate_proof<const MAX_DEPTH: usize>(
+    params: &PublicParameters<MAX_DEPTH>,
+    input: CircuitInput<MAX_DEPTH>,
+) -> Result<Vec<u8>> {
     match input {
         CircuitInput::Mapping(mapping_input) => {
             mapping::generate_proof(&params.mapping, mapping_input)
@@ -154,6 +166,18 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
                 }
             }?;
             params.lpn_state.generate_proof(proof_input)
+        }
+        CircuitInput::BlockDB(block_db_input) => {
+            let proof_input = match block_db_input {
+                block::CircuitInput::First(input) => Inputs::input_for_first_block(
+                    input,
+                    params.lpn_state.get_lpn_state_circuit_set(),
+                ),
+                block::CircuitInput::Subsequent(input) => {
+                    Inputs::input_for_new_block(input, params.lpn_state.get_lpn_state_circuit_set())
+                }
+            }?;
+            params.block_db.generate_proof(proof_input)
         }
     }
 }

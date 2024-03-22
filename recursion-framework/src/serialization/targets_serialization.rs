@@ -1,5 +1,8 @@
 use plonky2::{
-    hash::{hash_types::MerkleCapTarget, merkle_proofs::MerkleProofTarget},
+    hash::{
+        hash_types::{HashOutTarget, MerkleCapTarget},
+        merkle_proofs::MerkleProofTarget,
+    },
     iop::target::{BoolTarget, Target},
     plonk::{circuit_data::VerifierCircuitTarget, proof::ProofWithPublicInputsTarget},
     util::serialization::{Buffer, Read, Write},
@@ -126,6 +129,23 @@ impl FromBytes for Target {
     fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
         let mut buffer = Buffer::new(bytes);
         Ok(buffer.read_target()?)
+    }
+}
+
+impl ToBytes for HashOutTarget {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        buffer
+            .write_target_hash(self)
+            .expect("Writing to a byte-vector cannot fail.");
+        buffer
+    }
+}
+
+impl FromBytes for HashOutTarget {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
+        let mut buffer = Buffer::new(bytes);
+        Ok(buffer.read_target_hash()?)
     }
 }
 
