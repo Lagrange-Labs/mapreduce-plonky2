@@ -23,7 +23,7 @@ use crate::{
     query2::{Address, AddressTarget},
 };
 
-use super::epilogue::aggregation::AggregationPublicInputs;
+use super::aggregation::AggregationPublicInputs;
 
 #[cfg(test)]
 pub(crate) mod tests;
