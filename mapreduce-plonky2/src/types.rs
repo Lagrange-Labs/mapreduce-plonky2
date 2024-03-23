@@ -39,6 +39,7 @@ pub const VALUE_LEN: usize = 32;
 pub const PACKED_VALUE_LEN: usize = VALUE_LEN / 4;
 /// The target for a packed value in U32
 pub type PackedValueTarget = Array<U32Target, PACKED_VALUE_LEN>;
+pub type MappingKeyTarget = Array<Target, MAPPING_KEY_LEN>;
 
 /// Regular hash output function - it can be generated from field elements using
 /// poseidon with the output serialized or via regular hash functions.

@@ -111,7 +111,7 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// The owner address
     pub fn owner(&self) -> PackedValueTarget {
-        PackedAddressTarget::try_from(self.owner_raw().iter().map(|&t| U32Target(t)).collect_vec())
+        PackedValueTarget::try_from(self.owner_raw().iter().map(|&t| U32Target(t)).collect_vec())
             .unwrap()
     }
 }

@@ -16,7 +16,10 @@ use plonky2_ecgfp5::{
 };
 
 use crate::{
-    types::{PackedAddressTarget as PackedSCAddressTarget, CURVE_TARGET_LEN, PACKED_VALUE_LEN},
+    types::{
+        PackedAddressTarget as PackedSCAddressTarget, PackedValueTarget, CURVE_TARGET_LEN,
+        PACKED_VALUE_LEN,
+    },
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 
@@ -190,7 +193,7 @@ impl<'a> AggregationPublicInputs<'a, Target> {
         range: Target,
         root: &HashOutTarget,
         smc_address: &PackedSCAddressTarget,
-        user_address: &PackedAddressTarget,
+        user_address: &PackedValueTarget,
         mapping_slot: Target,
         mapping_slot_length: Target,
         digest: CurveTarget,

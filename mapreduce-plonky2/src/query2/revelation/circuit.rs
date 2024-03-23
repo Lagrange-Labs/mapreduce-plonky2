@@ -1,3 +1,5 @@
+use std::array::from_fn as create_array;
+
 use itertools::Itertools;
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
@@ -13,6 +15,7 @@ use crate::{
     block::public_inputs::PublicInputs as BlockPublicInputs,
     group_hashing::CircuitBuilderGroupHashing,
     query2::{aggregation::AggregationPublicInputs, EWordTarget},
+    types::MappingKeyTarget,
     utils::{greater_than, greater_than_or_equal_to, less_than_or_equal_to},
 };
 
@@ -64,17 +67,18 @@ impl<const L: usize> RevelationCircuit<L> {
         b: &mut CircuitBuilder<GoldilocksField, 2>,
         db_proof: BlockPublicInputs<Target>,
         root_proof: AggregationPublicInputs<Target>,
-        ys: &[EWordTarget],
     ) -> RevelationWires {
         let zero = b.zero();
 
+        let ys: [MappingKeyTarget; L] = create_array(|i| MappingKeyTarget::new(b));
+        y.convert_u8_to_u32(b);
         let min_block_number = b.add_virtual_target();
         let max_block_number = b.add_virtual_target();
 
         let p0 = b.curve_zero();
         let mut digests = Vec::with_capacity(L);
         for y in ys.iter() {
-            let p = b.map_to_curve_point(y);
+            let p = b.map_to_curve_point(&to_targets().arr);
             let y_summed = y.iter().copied().reduce(|ax, x| b.add(ax, x)).unwrap();
             let y_is_zero = b.is_equal(y_summed, zero);
             digests.push(b.curve_select(y_is_zero, p0, p));
