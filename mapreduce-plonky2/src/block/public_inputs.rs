@@ -60,8 +60,8 @@ impl<'a> PublicInputs<'a, Target> {
         U32Target(self.block_number_data())
     }
 
-    /// Return the block header hash.
-    pub fn block_header(&self) -> OutputHash {
+    /// Return the block header hash extracted from the blockchain
+    pub fn original_block_header(&self) -> OutputHash {
         let data = self.block_header_data();
         array::from_fn(|i| U32Target(data[i])).into()
     }

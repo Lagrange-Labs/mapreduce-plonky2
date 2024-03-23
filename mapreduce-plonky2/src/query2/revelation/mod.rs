@@ -1,4 +1,5 @@
-use itertools::Itertools;
+use std::array::from_fn as create_array;
+
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
@@ -9,10 +10,8 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 use crate::{
     keccak::OutputHash,
-    types::{PackedAddressTarget as PackedSCAddressTarget, CURVE_TARGET_LEN},
+    types::{PackedAddressTarget, CURVE_TARGET_LEN},
 };
-
-use super::PackedAddressTarget;
 
 pub mod circuit;
 
@@ -37,7 +36,7 @@ impl<const L: usize> Inputs<L> {
         NUM_HASH_OUT_ELTS,
         1,
         1,
-        PackedSCAddressTarget::LEN,
+        PackedAddressTarget::LEN,
         PackedAddressTarget::LEN,
         CURVE_TARGET_LEN,
         L * 8,
@@ -113,29 +112,29 @@ impl<'a, T: Clone + Copy, const L: usize> RevelationPublicInputs<'a, T, L> {
 impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
     pub fn register(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
-        block_number: Target,
-        range: Target,
-        root: &HashOutTarget,
-        min_block_number: Target,
-        max_block_number: Target,
-        smc_address: &PackedSCAddressTarget,
-        user_address: &PackedAddressTarget,
-        mapping_slot: Target,
-        nft_ids: &[U32Target; L],
-        block_header: OutputHash,
+        query_block_number: Target,
+        query_range: Target,
+        query_min_block: Target,
+        query_max_block: Target,
+        query_contract_address: &PackedAddressTarget,
+        query_user_address: &PackedAddressTarget,
+        query_mapping_slot: Target,
+        query_nft_ids: &[U32Target; L],
+        // the block hash of the latest block inserted at time of building the circuit
+        // i.e. the one who corresponds to the block db proof being verified here.
+        lpn_latest_block: OutputHash,
     ) {
-        b.register_public_input(block_number);
-        b.register_public_input(range);
-        b.register_public_inputs(&root.elements);
-        b.register_public_input(min_block_number);
-        b.register_public_input(max_block_number);
-        smc_address.register_as_public_input(b);
-        user_address.register_as_public_input(b);
-        b.register_public_input(mapping_slot);
-        for nft_id in nft_ids {
+        b.register_public_input(query_block_number);
+        b.register_public_input(query_range);
+        b.register_public_input(query_min_block);
+        b.register_public_input(query_max_block);
+        query_contract_address.register_as_public_input(b);
+        query_user_address.register_as_public_input(b);
+        b.register_public_input(query_mapping_slot);
+        for nft_id in query_nft_ids {
             b.register_public_input(nft_id.0);
         }
-        b.register_public_inputs(&block_header.to_targets().arr);
+        b.register_public_inputs(&lpn_latest_block.to_targets().arr);
     }
 
     fn block_number(&self) -> Target {
@@ -160,24 +159,18 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
         self.max_block_number_raw()[0]
     }
 
-    pub(crate) fn smart_contract_address(&self) -> PackedSCAddressTarget {
-        PackedSCAddressTarget::try_from(
-            self.smart_contract_address_raw()
-                .iter()
-                .map(|&t| U32Target(t))
-                .collect_vec(),
-        )
-        .unwrap()
+    pub(crate) fn smart_contract_address(&self) -> PackedAddressTarget {
+        let arr = self.smart_contract_address_raw();
+        PackedAddressTarget {
+            arr: create_array(|i| U32Target(arr[i])),
+        }
     }
 
     pub(crate) fn user_address(&self) -> PackedAddressTarget {
-        PackedAddressTarget::try_from(
-            self.user_address_raw()
-                .iter()
-                .map(|&t| U32Target(t))
-                .collect_vec(),
-        )
-        .unwrap()
+        let arr = self.user_address_raw();
+        PackedAddressTarget {
+            arr: create_array(|i| U32Target(arr[i])),
+        }
     }
 
     fn mapping_slot(&self) -> Target {
