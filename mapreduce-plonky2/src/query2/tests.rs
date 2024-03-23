@@ -17,10 +17,7 @@ use plonky2::{
     },
 };
 
-use crate::{
-    block::public_inputs::PublicInputs as BlockPublicInputs,
-    circuit::{test::run_circuit, UserCircuit},
-};
+use crate::{block::public_inputs::PublicInputs as BlockPublicInputs, circuit::UserCircuit};
 
 use super::{
     aggregation::{
@@ -115,7 +112,12 @@ struct RevelationCircuitValidator<'a, const L: usize> {
     values: [EWord; L],
 }
 impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
-    type Wires = (RevelationWires, Vec<Target>, Vec<Target>, Vec<EWordTarget>);
+    type Wires = (
+        RevelationWires<L>,
+        Vec<Target>,
+        Vec<Target>,
+        Vec<EWordTarget>,
+    );
 
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
         let db_proof_io = c.add_virtual_targets(BlockPublicInputs::<Target>::TOTAL_LEN);
@@ -128,7 +130,7 @@ impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
             .map(|_| c.add_virtual_target_arr::<EWORD_LEN>())
             .collect_vec();
 
-        let wires = RevelationCircuit::<L>::build(c, db_proof_pi, root_proof_pi, values.as_slice());
+        let wires = RevelationCircuit::<L>::build(c, db_proof_pi, root_proof_pi);
         (wires, db_proof_io, root_proof_io, values)
     }
 
@@ -145,10 +147,10 @@ impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
 /// Builds & proves the following tree
 ///
 /// Top-level - PartialInnerCircuit
-/// ├── Middle sub-tree – FullInnerNodeCircuit
+/// ├── Middle sub-tree - FullInnerNodeCircuit
 /// │   ├── LeafCircuit - // TODO: @victor
 /// │   └── LeafCircuit - // TODO: @victor
-/// └── Untouched sub-tree – hash == Poseidon("ernesto")
+/// └── Untouched sub-tree - hash == Poseidon("ernesto")
 fn test_mini_tree() {
     //const L: usize = 4;
     //// Need integration with leaf proof @Victor

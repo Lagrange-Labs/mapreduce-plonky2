@@ -514,6 +514,9 @@ where
             arr: create_array(|i| self.arr[SIZE - 1 - i]),
         }
     }
+    pub fn last(&self) -> T {
+        self.arr[SIZE - 1]
+    }
     pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,

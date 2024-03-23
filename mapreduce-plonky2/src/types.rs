@@ -33,13 +33,17 @@ pub type PackedAddressTarget = Array<U32Target, PACKED_ADDRESS_LEN>;
 
 /// The length of a mapping key in bytes
 pub const MAPPING_KEY_LEN: usize = 32;
+pub const PACKED_MAPPING_KEY_LEN: usize = MAPPING_KEY_LEN / 4;
 /// A value is never more than 32 bytes in EVM
 pub const VALUE_LEN: usize = 32;
 /// A compact representation of a value in U32
 pub const PACKED_VALUE_LEN: usize = VALUE_LEN / 4;
 /// The target for a packed value in U32
 pub type PackedValueTarget = Array<U32Target, PACKED_VALUE_LEN>;
+/// The target for a mapping key, 32 bytes
 pub type MappingKeyTarget = Array<Target, MAPPING_KEY_LEN>;
+/// The target for representing a mapping key, in packed format in u32
+pub type PackedMappingKeyTarget = Array<U32Target, PACKED_MAPPING_KEY_LEN>;
 
 /// Regular hash output function - it can be generated from field elements using
 /// poseidon with the output serialized or via regular hash functions.

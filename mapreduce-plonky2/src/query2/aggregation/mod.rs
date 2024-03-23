@@ -165,8 +165,8 @@ impl<'a> AggregationPublicInputs<'a, Target> {
         .unwrap()
     }
 
-    pub(crate) fn user_address(&self) -> PackedAddressTarget {
-        PackedAddressTarget::try_from(
+    pub(crate) fn user_address(&self) -> PackedValueTarget {
+        PackedValueTarget::try_from(
             self.user_address_raw()
                 .iter()
                 .map(|&t| U32Target(t))
