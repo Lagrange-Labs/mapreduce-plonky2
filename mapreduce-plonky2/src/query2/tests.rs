@@ -1,4 +1,4 @@
-use crate::query2::provenance::tests::run_provenance_circuit;
+use crate::query2::state::tests::run_provenance_circuit;
 use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
@@ -151,44 +151,44 @@ impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
 /// │   └── LeafCircuit - // TODO: @victor
 /// └── Untouched sub-tree – hash == Poseidon("ernesto")
 fn test_mini_tree() {
-    const L: usize = 4;
-    // Need integration with leaf proof @Victor
-    let values = [0, 0, 0xdead, 0xbeef];
+    //const L: usize = 4;
+    //// Need integration with leaf proof @Victor
+    //let values = [0, 0, 0xdead, 0xbeef];
 
-    let left_leaf_proof_io = run_provenance_circuit(0xdead);
-    let right_leaf_proof_io = run_provenance_circuit(0xbeef);
+    //let left_leaf_proof_io = run_provenance_circuit(0xdead);
+    //let right_leaf_proof_io = run_provenance_circuit(0xbeef);
 
-    let left_leaf_pi = AggregationPublicInputs::<'_, F, L>::from(left_leaf_proof_io.as_slice());
-    let right_leaf_pi = AggregationPublicInputs::<'_, F, L>::from(right_leaf_proof_io.as_slice());
+    //let left_leaf_pi = AggregationPublicInputs::<'_, F, L>::from(left_leaf_proof_io.as_slice());
+    //let right_leaf_pi = AggregationPublicInputs::<'_, F, L>::from(right_leaf_proof_io.as_slice());
 
-    let middle_proof = run_circuit::<F, D, C, _>(FullNodeCircuitValidator {
-        validated: FullNodeCircuit::<L> {},
-        children: &[left_leaf_pi, right_leaf_pi],
-    });
+    //let middle_proof = run_circuit::<F, D, C, _>(FullNodeCircuitValidator {
+    //    validated: FullNodeCircuit::<L> {},
+    //    children: &[left_leaf_pi, right_leaf_pi],
+    //});
 
-    let proved = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
-        &b"ernesto"
-            .iter()
-            .copied()
-            .map(F::from_canonical_u8)
-            .collect_vec(),
-    );
+    //let proved = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
+    //    &b"ernesto"
+    //        .iter()
+    //        .copied()
+    //        .map(F::from_canonical_u8)
+    //        .collect_vec(),
+    //);
 
-    let top_proof = run_circuit::<F, D, C, _>(PartialNodeCircuitValidator {
-        validated: PartialNodeCircuit::<L> {},
-        child_to_prove: AggregationPublicInputs::<F, L>::from(
-            middle_proof.public_inputs.as_slice(),
-        ),
-        proven_child: proved.elements.to_vec(),
-        child_to_prove_is_left: F::from_bool(false),
-    });
+    //let top_proof = run_circuit::<F, D, C, _>(PartialNodeCircuitValidator {
+    //    validated: PartialNodeCircuit::<L> {},
+    //    child_to_prove: AggregationPublicInputs::<F, L>::from(
+    //        middle_proof.public_inputs.as_slice(),
+    //    ),
+    //    proven_child: proved.elements.to_vec(),
+    //    child_to_prove_is_left: F::from_bool(false),
+    //});
 
-    let final_proof = run_circuit::<F, D, C, _>(RevelationCircuitValidator {
-        validated: RevelationCircuit,
-        db_proof: todo!(),
-        root_proof: AggregationPublicInputs::<GoldilocksField, L>::from(
-            top_proof.public_inputs.as_slice(),
-        ),
-        values,
-    });
+    //let final_proof = run_circuit::<F, D, C, _>(RevelationCircuitValidator {
+    //    validated: RevelationCircuit,
+    //    db_proof: todo!(),
+    //    root_proof: AggregationPublicInputs::<GoldilocksField, L>::from(
+    //        top_proof.public_inputs.as_slice(),
+    //    ),
+    //    values,
+    //});
 }

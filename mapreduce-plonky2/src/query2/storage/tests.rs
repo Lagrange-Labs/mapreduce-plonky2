@@ -1,3 +1,4 @@
+use plonky2::field::types::Sample;
 use std::{array, ops::Add};
 
 use itertools::Itertools;
@@ -30,7 +31,8 @@ use crate::{
     group_hashing::{field_to_curve::ToCurvePoint, map_to_curve_point},
     query2::EWORD_LEN,
     storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
-    utils::convert_u8_to_u32_slice,
+    types::{MAPPING_KEY_LEN, VALUE_LEN},
+    utils::{convert_u8_to_u32_slice, test::random_vector},
 };
 
 use super::{
@@ -134,7 +136,10 @@ fn run_leaf_proof<'data>(k: &[u8], v: &[u8]) -> LeafProofResult {
         .map(F::from_canonical_u32)
         .collect_vec();
 
-    let circuit = LeafCircuit { key: k, value: v };
+    let circuit = LeafCircuit {
+        mapping_key: k,
+        mapping_value: v,
+    };
 
     LeafProofResult {
         proof: run_circuit(circuit),
@@ -198,16 +203,24 @@ fn test_mini_tree(k: &[u8], v: &[u8]) {
     let middle_ios = PublicInputs::<F>::from(middle_proof.public_inputs.as_slice());
 
     // Check the digest
-    let expected_digest = leaf_digest_for_mapping(k1, v1)
-        .add(leaf_digest_for_mapping(k2, v2))
-        .to_weierstrass();
-    let expected_other_digest = leaf_digest_for_mapping(k2, v2)
-        .add(leaf_digest_for_mapping(k1, v1))
-        .to_weierstrass();
+    let leaf1 = map_to_curve_point(
+        &convert_u8_to_u32_slice(&left_pad32(k1))
+            .into_iter()
+            .map(F::from_canonical_u32)
+            .collect::<Vec<_>>(),
+    );
+    let leaf2 = map_to_curve_point(
+        &convert_u8_to_u32_slice(&left_pad32(k2))
+            .into_iter()
+            .map(F::from_canonical_u32)
+            .collect::<Vec<_>>(),
+    );
+    let exp_node_digest = leaf1.add(leaf2);
+    let exp_other_node_digest = leaf2.add(leaf1);
     let found_digest = middle_ios.digest();
-    assert_eq!(expected_digest, found_digest);
+    assert_eq!(exp_node_digest.to_weierstrass(), found_digest);
     // The digest must commute
-    assert_eq!(expected_other_digest, found_digest);
+    assert_eq!(exp_other_node_digest.to_weierstrass(), found_digest);
 
     // Check the nested root hash
     let expected_hash = HashOut::from_bytes(&intermediate_node_hash(
@@ -286,12 +299,22 @@ impl<'a, T: Copy + Default> PublicInputs<'a, T> {
 }
 
 impl<'a> PublicInputs<'a, GoldilocksField> {
-    pub fn inputs_from_seed(seed: u64) -> [F; PublicInputs::<()>::TOTAL_LEN] {
+    pub fn inputs_from_seed(
+        seed: u64,
+    ) -> [GoldilocksField; PublicInputs::<GoldilocksField>::TOTAL_LEN] {
+        let mut pis = [GoldilocksField::ZERO; PublicInputs::<GoldilocksField>::TOTAL_LEN];
         let rng = &mut StdRng::seed_from_u64(seed);
-        let leaf_eword = (0..EWORD_LEN).map(|_| rng.next_u64()).collect_vec();
+        let leaf_value = random_vector(VALUE_LEN)
+            .into_iter()
+            .map(F::from_canonical_u8)
+            .collect::<Vec<_>>();
+        let leaf_key = random_vector(MAPPING_KEY_LEN)
+            .into_iter()
+            .map(F::from_canonical_u8)
+            .collect::<Vec<_>>();
 
-        let root = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let digest = map_to_curve_point::<F>(&[F::from_canonical_u64(leaf_eword)]).to_weierstrass();
+        let root = F::rand_vec(NUM_HASH_OUT_ELTS).try_into().unwrap();
+        let digest = map_to_curve_point::<F>(&leaf_value).to_weierstrass();
         let digest_fs = digest
             .x
             .0
@@ -302,14 +325,13 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
             .collect::<Vec<_>>();
         let owner = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
 
-        let mut values = array::from_fn(|_| F::ZERO);
         Self::parts_into_values(
-            &mut values,
+            &mut pis,
             &root,
             digest_fs.as_slice().try_into().unwrap(),
             &owner,
         );
 
-        values
+        pis
     }
 }

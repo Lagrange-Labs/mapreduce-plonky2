@@ -5,6 +5,7 @@ use crate::circuit::UserCircuit;
 use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
 use crate::storage::key::MappingSlotWires;
 use crate::storage::{MAX_EXTENSION_NODE_LEN, MAX_LEAF_NODE_LEN};
+use crate::types::MAPPING_KEY_LEN;
 use crate::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
@@ -17,14 +18,10 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
-use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
-use super::super::key::{MappingSlot, MAPPING_KEY_LEN};
+use super::super::key::MappingSlot;
 use crate::storage::mapping::public_inputs::PublicInputs;
 
 /// Circuit implementing the circuit to prove the correct derivation of the

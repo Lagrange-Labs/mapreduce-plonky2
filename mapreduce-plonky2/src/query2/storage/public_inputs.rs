@@ -19,14 +19,14 @@ use crate::{
     array::Array,
     query2::{AddressTarget, PackedAddressTarget},
     storage::CURVE_TARGET_SIZE,
-    types::CURVE_TARGET_LEN,
+    types::{PackedValueTarget, CURVE_TARGET_LEN, PACKED_VALUE_LEN},
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 
 /// The public inputs required for the storage proof of query #2
 ///   - hash of this subtree (NUM_HASH_OUT_ELTS);
 ///   - digest of this subtree (CURVE_TARGET_GL_SIZE);
-///   - value (owner) forwarded bottom-up (AddressTarget::LEN)
+///   - value (owner) forwarded bottom-up (PACKED_VALUE_LEN)
 #[derive(Debug)]
 pub struct PublicInputs<'input, T: Clone> {
     pub inputs: &'input [T],
@@ -44,7 +44,7 @@ impl<'a, T: Clone + Copy> PublicInputs<'a, T> {
     pub(crate) const DIGEST_OFFSET: usize = Self::ROOT_LEN;
     pub(crate) const DIGEST_LEN: usize = CURVE_TARGET_SIZE;
     pub(crate) const OWNER_OFFSET: usize = Self::ROOT_LEN + Self::DIGEST_LEN;
-    pub(crate) const OWNER_LEN: usize = PackedAddressTarget::LEN;
+    pub(crate) const OWNER_LEN: usize = PACKED_VALUE_LEN;
 
     pub const TOTAL_LEN: usize = Self::ROOT_LEN + Self::DIGEST_LEN + Self::OWNER_LEN;
 
@@ -67,7 +67,7 @@ impl<'a, T: Clone + Copy> PublicInputs<'a, T> {
         b: &mut CircuitBuilder<GoldilocksField, 2>,
         root: &HashOutTarget,
         digest: &CurveTarget,
-        user: &PackedAddressTarget,
+        user: &PackedValueTarget,
     ) {
         b.register_public_inputs(&root.elements);
         b.register_curve_public_input(*digest);
@@ -110,7 +110,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     /// The owner address
-    pub fn owner(&self) -> PackedAddressTarget {
+    pub fn owner(&self) -> PackedValueTarget {
         PackedAddressTarget::try_from(self.owner_raw().iter().map(|&t| U32Target(t)).collect_vec())
             .unwrap()
     }
