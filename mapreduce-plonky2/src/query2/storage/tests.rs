@@ -31,7 +31,7 @@ use crate::{
     group_hashing::{field_to_curve::ToCurvePoint, map_to_curve_point},
     query2::EWORD_LEN,
     storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
-    types::{MAPPING_KEY_LEN, VALUE_LEN},
+    types::{MAPPING_KEY_LEN, PACKED_VALUE_LEN, VALUE_LEN},
     utils::{convert_u8_to_u32_slice, test::random_vector},
 };
 
@@ -304,14 +304,14 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
     ) -> [GoldilocksField; PublicInputs::<GoldilocksField>::TOTAL_LEN] {
         let mut pis = [GoldilocksField::ZERO; PublicInputs::<GoldilocksField>::TOTAL_LEN];
         let rng = &mut StdRng::seed_from_u64(seed);
-        let leaf_value = random_vector(VALUE_LEN)
-            .into_iter()
-            .map(F::from_canonical_u8)
-            .collect::<Vec<_>>();
         let leaf_key = random_vector(MAPPING_KEY_LEN)
             .into_iter()
             .map(F::from_canonical_u8)
             .collect::<Vec<_>>();
+
+        // leaf value == owner address
+        let leaf_value: [GoldilocksField; PACKED_VALUE_LEN] =
+            array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
 
         let root = F::rand_vec(NUM_HASH_OUT_ELTS).try_into().unwrap();
         let digest = map_to_curve_point::<F>(&leaf_key).to_weierstrass();
@@ -323,13 +323,12 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
             .copied()
             .chain(std::iter::once(GoldilocksField::from_bool(digest.is_inf)))
             .collect::<Vec<_>>();
-        let owner = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
 
         Self::parts_into_values(
             &mut pis,
             &root,
             digest_fs.as_slice().try_into().unwrap(),
-            &owner,
+            &leaf_value,
         );
 
         pis
