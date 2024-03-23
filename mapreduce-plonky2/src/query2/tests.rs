@@ -1,4 +1,4 @@
-use crate::query2::state::tests::run_provenance_circuit;
+use crate::query2::state::tests::run_state_circuit;
 use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
@@ -40,21 +40,21 @@ type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 
 #[derive(Debug, Clone)]
-struct FullNodeCircuitValidator<'a, const L: usize> {
-    validated: FullNodeCircuit<L>,
-    children: &'a [AggregationPublicInputs<'a, F, L>; 2],
+struct FullNodeCircuitValidator<'a> {
+    validated: FullNodeCircuit,
+    children: &'a [AggregationPublicInputs<'a, F>; 2],
 }
 
-impl<const L: usize> UserCircuit<GoldilocksField, D> for FullNodeCircuitValidator<'_, L> {
+impl UserCircuit<GoldilocksField, D> for FullNodeCircuitValidator<'_> {
     type Wires = (FullNodeWires, [Vec<Target>; 2]);
 
     fn build(c: &mut CircuitBuilder<GoldilocksField, D>) -> Self::Wires {
         let child_inputs = [
-            c.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len()),
-            c.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len()),
+            c.add_virtual_targets(AggregationPublicInputs::<Target>::total_len()),
+            c.add_virtual_targets(AggregationPublicInputs::<Target>::total_len()),
         ];
         let children_io = std::array::from_fn(|i| {
-            AggregationPublicInputs::<Target, L>::from(child_inputs[i].as_slice())
+            AggregationPublicInputs::<Target>::from(child_inputs[i].as_slice())
         });
         let wires = FullNodeCircuit::build(c, children_io);
         (wires, child_inputs)
@@ -68,23 +68,23 @@ impl<const L: usize> UserCircuit<GoldilocksField, D> for FullNodeCircuitValidato
 }
 
 #[derive(Clone, Debug)]
-struct PartialNodeCircuitValidator<'a, const L: usize> {
-    validated: PartialNodeCircuit<L>,
-    child_to_prove: AggregationPublicInputs<'a, F, L>,
+struct PartialNodeCircuitValidator<'a> {
+    validated: PartialNodeCircuit,
+    child_to_prove: AggregationPublicInputs<'a, F>,
     proven_child: Vec<F>,
     child_to_prove_is_left: F,
 }
-impl<const L: usize> UserCircuit<F, D> for PartialNodeCircuitValidator<'_, L> {
+impl UserCircuit<F, D> for PartialNodeCircuitValidator<'_> {
     type Wires = (PartialNodeWires, Vec<Target>, Vec<Target>, Target);
 
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
         let child_to_prove_pi =
-            c.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len());
+            c.add_virtual_targets(AggregationPublicInputs::<Target>::total_len());
         let child_to_prove_io =
-            AggregationPublicInputs::<Target, L>::from(child_to_prove_pi.as_slice());
+            AggregationPublicInputs::<Target>::from(child_to_prove_pi.as_slice());
         let proven_child_hash_targets = c.add_virtual_targets(NUM_HASH_OUT_ELTS);
         let child_to_prove_position_target = c.add_virtual_target();
-        let wires = PartialNodeCircuit::<L>::build(
+        let wires = PartialNodeCircuit::build(
             c,
             &child_to_prove_io,
             HashOutTarget::from_vec(proven_child_hash_targets.clone()),
@@ -111,7 +111,7 @@ impl<const L: usize> UserCircuit<F, D> for PartialNodeCircuitValidator<'_, L> {
 struct RevelationCircuitValidator<'a, const L: usize> {
     validated: RevelationCircuit<L>,
     db_proof: BlockPublicInputs<'a, F>,
-    root_proof: AggregationPublicInputs<'a, F, L>,
+    root_proof: AggregationPublicInputs<'a, F>,
     values: [EWord; L],
 }
 impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
@@ -121,9 +121,8 @@ impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
         let db_proof_io = c.add_virtual_targets(BlockPublicInputs::<Target>::TOTAL_LEN);
         let db_proof_pi = BlockPublicInputs::<Target>::from(db_proof_io.as_slice());
 
-        let root_proof_io =
-            c.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len());
-        let root_proof_pi = AggregationPublicInputs::<Target, L>::from(root_proof_io.as_slice());
+        let root_proof_io = c.add_virtual_targets(AggregationPublicInputs::<Target>::total_len());
+        let root_proof_pi = AggregationPublicInputs::<Target>::from(root_proof_io.as_slice());
 
         let values = (0..L)
             .map(|_| c.add_virtual_target_arr::<EWORD_LEN>())

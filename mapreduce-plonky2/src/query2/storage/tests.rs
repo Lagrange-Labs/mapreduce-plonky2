@@ -314,7 +314,7 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
             .collect::<Vec<_>>();
 
         let root = F::rand_vec(NUM_HASH_OUT_ELTS).try_into().unwrap();
-        let digest = map_to_curve_point::<F>(&leaf_value).to_weierstrass();
+        let digest = map_to_curve_point::<F>(&leaf_key).to_weierstrass();
         let digest_fs = digest
             .x
             .0

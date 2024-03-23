@@ -179,12 +179,12 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
         // https://www.notion.so/lagrangelabs/Encoding-Specs-ccaa31d1598b4626860e26ac149705c4?pvs=4#5e8e6f06e2554b0caee4904258cbbca2
         let block_hash = OutputHash::new(cb);
         let block_leaf = iter::once(b)
-            .chain(block_hash.arr.iter().map(|a| a.0))
+            .chain(block_hash.to_targets().arr.into_iter())
             .chain(state_root.elements.iter().copied())
             .collect();
         let block_leaf_hash = cb.hash_n_to_hash_no_pad::<PoseidonHash>(block_leaf);
 
-        AggregationPublicInputs::<_, L>::register(cb, b, r, &block_leaf_hash, &a, &x, m, s, digest);
+        AggregationPublicInputs::register(cb, b, r, &block_leaf_hash, &a, &x, m, s, digest);
 
         StateWires {
             smart_contract_address: a,

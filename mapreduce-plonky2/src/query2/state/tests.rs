@@ -27,17 +27,15 @@ use crate::{
 use super::StateWires;
 
 const DEPTH: usize = 3;
-const TEST_L: usize = 4;
-type PublicInputs<'a, const L: usize> = AggregationPublicInputs<'a, GoldilocksField, L>;
-type ProvenanceCircuit<const L: usize> = super::StateCircuit<DEPTH, L, GoldilocksField>;
+type PublicInputs<'a> = AggregationPublicInputs<'a, GoldilocksField>;
+type StateCircuit = super::StateCircuit<DEPTH, GoldilocksField>;
 
-pub(crate) fn run_provenance_circuit<'a, const L: usize>(seed: u64) -> Vec<GoldilocksField> {
+pub(crate) fn run_state_circuit<'a, const L: usize>(seed: u64) -> Vec<GoldilocksField> {
     let inputs = StorageInputs::inputs_from_seed(seed);
     let storage_pi = StorageInputs::from_slice(&inputs);
     let circuit = TestProvenanceCircuit::<L>::from_seed(seed, &storage_pi);
     let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit.clone());
-    let pi =
-        AggregationPublicInputs::<'_, GoldilocksField, L>::from(proof.public_inputs.as_slice());
+    let pi = AggregationPublicInputs::<'_, GoldilocksField>::from(proof.public_inputs.as_slice());
     assert_eq!(pi.block_number(), circuit.block_number);
     assert_eq!(pi.range(), GoldilocksField::ONE);
     assert_eq!(pi.root(), circuit.root);
@@ -69,7 +67,7 @@ pub struct TestProvenanceWires {
 #[derive(Debug, Clone)]
 pub struct TestProvenanceCircuit<const L: usize> {
     storage_values: Vec<GoldilocksField>,
-    c: ProvenanceCircuit<L>,
+    c: StateCircuit,
     block_number: GoldilocksField,
     root: HashOut<GoldilocksField>,
     smart_contract_address: PackedSCAddress<GoldilocksField>,
@@ -150,7 +148,7 @@ impl<const L: usize> TestProvenanceCircuit<L> {
             PoseidonPermutation<GoldilocksField>,
         >(preimage.as_slice());
 
-        let c = ProvenanceCircuit::<L>::new(
+        let c = StateCircuit::new(
             smart_contract_address.clone(),
             mapping_slot,
             length_slot,
@@ -179,7 +177,7 @@ impl<const L: usize> UserCircuit<GoldilocksField, 2> for TestProvenanceCircuit<L
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
         let targets = b.add_virtual_targets(StorageInputs::<()>::TOTAL_LEN);
         let storage = StorageInputs::from_slice(&targets);
-        let provenance = ProvenanceCircuit::<L>::build(b, &storage);
+        let provenance = StateCircuit::build(b, &storage);
 
         TestProvenanceWires {
             storage: targets,
@@ -200,10 +198,10 @@ impl<const L: usize> UserCircuit<GoldilocksField, 2> for TestProvenanceCircuit<L
 
 #[test]
 fn prove_and_verify_provenance_circuit() {
-    let pi = run_provenance_circuit::<10>(0xdead);
+    let pi = run_state_circuit::<10>(0xdead);
 }
 
-impl<'a, F: RichField, const L: usize> AggregationPublicInputs<'a, F, L> {
+impl<'a, F: RichField> AggregationPublicInputs<'a, F> {
     pub fn values_from_seed(seed: u64) -> [F; Self::total_len()] {
         let rng = &mut StdRng::seed_from_u64(seed);
 

@@ -11,11 +11,11 @@ use super::AggregationPublicInputs;
 
 pub struct FullNodeWires {}
 #[derive(Clone, Debug)]
-pub struct FullNodeCircuit<const L: usize> {}
-impl<const L: usize> FullNodeCircuit<L> {
+pub struct FullNodeCircuit {}
+impl FullNodeCircuit {
     pub fn build(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
-        inputs: [AggregationPublicInputs<Target, L>; 2],
+        inputs: [AggregationPublicInputs<Target>; 2],
     ) -> FullNodeWires {
         let to_hash = Array::<Target, { 2 * NUM_HASH_OUT_ELTS }>::try_from(
             inputs[0]
@@ -50,7 +50,7 @@ impl<const L: usize> FullNodeCircuit<L> {
         let new_range = b.sub(new_range_max, new_range_min);
         let digest = b.add_curve_point(&[inputs[0].digest(), inputs[1].digest()]);
 
-        AggregationPublicInputs::<Target, L>::register(
+        AggregationPublicInputs::<Target>::register(
             b,
             new_range_max,
             new_range,

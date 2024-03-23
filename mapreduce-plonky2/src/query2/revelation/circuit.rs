@@ -63,7 +63,7 @@ impl<const L: usize> RevelationCircuit<L> {
     pub fn build(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
         db_proof: BlockPublicInputs<Target>,
-        root_proof: AggregationPublicInputs<Target, L>,
+        root_proof: AggregationPublicInputs<Target>,
         ys: &[EWordTarget],
     ) -> RevelationWires {
         let zero = b.zero();
