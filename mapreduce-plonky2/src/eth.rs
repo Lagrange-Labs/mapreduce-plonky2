@@ -237,12 +237,21 @@ pub(crate) fn compute_key_length(path: &[Node]) -> usize {
 }
 
 pub(crate) fn left_pad32(slice: &[u8]) -> [u8; 32] {
+    left_pad::<32>(slice)
+}
+
+pub(crate) fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     match slice.len() {
-        a if a > 32 => panic!("left_pad32 must not be called with higher slice len than 32"),
-        32 => slice.try_into().unwrap(),
+        a if a > N => panic!(
+            "left_pad{} must not be called with higher slice len than {} (given{})",
+            N,
+            N,
+            slice.len()
+        ),
+        a if a == N => slice.try_into().unwrap(),
         a => {
-            let mut output = [0u8; 32];
-            output[32 - a..].copy_from_slice(slice);
+            let mut output = [0u8; N];
+            output[N - a..].copy_from_slice(slice);
             output
         }
     }
@@ -314,7 +323,9 @@ impl ProofQuery {
             .await?;
         Ok(res)
     }
-    pub fn verify_storage_proof(proof: &EIP1186ProofResponse) -> Result<U256> {
+    /// Returns the raw value from the storage proof, not the one "interpreted" by the
+    /// JSON RPC so we can see how the encoding is done.
+    pub fn verify_storage_proof(proof: &EIP1186ProofResponse) -> Result<Vec<u8>> {
         let memdb = Arc::new(MemoryDB::new(true));
         let tx_trie = EthTrie::new(Arc::clone(&memdb));
         let proof_key_bytes: [u8; 32] = proof.storage_proof[0].key.into();
@@ -333,22 +344,10 @@ impl ProofQuery {
             bail!("proof is not valid");
         }
         if let Some(ext_value) = is_valid.unwrap() {
-            let found = U256::from_little_endian(&ext_value);
-            // in some conditions the value is RLP before, so check for both
-            let found_dec = U256::from_big_endian(&rlp::decode::<Vec<u8>>(&ext_value).unwrap());
-            if found != proof.storage_proof[0].value && found_dec != proof.storage_proof[0].value {
-                bail!(
-                    "proof does not return right value: found {}(dec {}) (ext {:?}) vs expected {}",
-                    found,
-                    found_dec,
-                    hex::encode(ext_value),
-                    proof.storage_proof[0].value
-                );
-            }
+            Ok(ext_value)
         } else {
             bail!("proof says the value associated with that key does not exist");
         }
-        Ok(proof.storage_proof[0].value)
     }
     pub fn verify_state_proof(&self, res: &EIP1186ProofResponse) -> Result<()> {
         let memdb = Arc::new(MemoryDB::new(true));
@@ -396,91 +395,34 @@ mod test {
     use super::*;
 
     #[tokio::test]
-    async fn test_pidgy_pinguins_slots() -> Result<()> {
+    async fn test_pidgy_pinguin_mapping_slot() -> Result<()> {
+        // first pinguin holder https://dune.com/queries/2450476/4027653
+        // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
+        // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
+        let mapping_value =
+            Address::from_str("0x188B264AA1456B869C3a92eeeD32117EbB835f47").unwrap();
+        let nft_id: u32 = 1116;
+        let mapping_key = left_pad32(&nft_id.to_be_bytes());
         let url = "https://eth.llamarpc.com";
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
-        // pidgy pinguins address
-        let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
-        let query = ProofQuery::new_simple_slot(pidgy_address, 8);
+        // extracting from
+        // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol
+        // assuming it's using ERC731Enumerable that inherits ERC721
+        let mapping_slot = 2;
+        // pudgy pinguins
+        let pudgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_mapping_slot(pudgy_address, mapping_slot, mapping_key.to_vec());
         let res = query.query_mpt_proof(&provider, None).await?;
-        ProofQuery::verify_storage_proof(&res)?;
-        let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
-        let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
-        println!("leaf[1].len() = {}", leaf_list[1].len());
-        assert_eq!(leaf_list.len(), 2);
-        let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
-        // making sure we can simply skip the first byte
-        let sliced = &leaf_list[1][1..];
-        assert_eq!(sliced, leaf_value.as_slice());
-        println!(
-            "length of storage proof: {}",
-            res.storage_proof[0].proof.len()
-        );
-        println!(
-            "max node length: {}",
-            res.storage_proof[0]
-                .proof
-                .iter()
-                .map(|x| x.len())
-                .max()
-                .unwrap()
-        );
-        let mut n = sliced.to_vec();
-        n.resize(4, 0); // what happens in circuit effectively
-        println!("sliced: {:?} - hex {}", sliced, hex::encode(&sliced));
-        let length = convert_u8_to_u32_slice(&n)[0];
-        let length2 =
-            convert_u8_to_u32_slice(&sliced.iter().cloned().rev().collect::<Vec<u8>>())[0];
-        println!("length extracted = {}", length);
-        println!("length 2 extracted = {}", length2);
-        println!("res.storage_proof.value = {}", res.storage_proof[0].value);
-        // try if it's an array or not.
-        // for storage slot 8 it should be an array so the proof should be valid.
-        // for storage slot 11, it should be a variable so the proof to access the second
-        // item of this variable should be invalid (since the location doesn't exist)
-        {
-            let memdb = Arc::new(MemoryDB::new(true));
-            let tx_trie = EthTrie::new(Arc::clone(&memdb));
-            let array_slot = 8 as u8;
-
-            // TLDR:  we know we can access the _second_ item of the array but NOT the first one
-            // it's because in this case, the first value is 0 and it may not exist in the MPT
-            // https://github.com/ethereumjs/merkle-patricia-tree/issues/47#issue-328846240
-            let mut location = [0u8; 32];
-            (U256::from_big_endian(&keccak256(&left_pad32(&[array_slot]))) + U256::one())
-                .to_big_endian(&mut location[..]);
-
-            println!("location  = {}", hex::encode(&location));
-            let res = provider
-                .get_proof(pidgy_address, vec![H256::from_slice(&location)], None)
-                .await?;
-
-            let proof_key_bytes: [u8; 32] = res.storage_proof[0].key.into(); // rpc key == location
-            println!("res.proof key bytes = {}", hex::encode(&proof_key_bytes));
-            assert!(&proof_key_bytes.to_vec() == &location);
-            let mpt_key = keccak256(&proof_key_bytes[..]);
-            let is_valid = tx_trie.verify_proof(
-                res.storage_hash,
-                &mpt_key,
-                res.storage_proof[0]
-                    .proof
-                    .iter()
-                    .map(|b| b.to_vec())
-                    .collect(),
-            );
-            println!("res.value = {}", res.storage_proof[0].value);
-
-            if is_valid.is_err() {
-                bail!("storage proof is invalid: {}", is_valid.unwrap_err());
-            }
-            if is_valid.unwrap().is_none() {
-                bail!("storage proof says the value associated with that key does not exist");
-            }
-        }
-        //let value = ProofQuery::verify_storage_proof(&res)?;
-        //println!("value at slot 8: {}", value);
+        let raw_address = ProofQuery::verify_storage_proof(&res)?;
+        // the value is actually RLP encoded !
+        let decoded_address: Vec<u8> = rlp::decode(&raw_address).unwrap();
+        let leaf_node: Vec<Vec<u8>> = rlp::decode_list(&res.storage_proof[0].proof.last().unwrap());
+        println!("leaf_node[1].len() = {}", leaf_node[1].len());
+        // this is read in the same order
+        let found_address = Address::from_slice(&decoded_address.into_iter().collect::<Vec<u8>>());
+        assert_eq!(found_address, mapping_value);
         Ok(())
     }
 

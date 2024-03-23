@@ -30,10 +30,10 @@ const DEPTH: usize = 3;
 type PublicInputs<'a> = AggregationPublicInputs<'a, GoldilocksField>;
 type StateCircuit = super::StateCircuit<DEPTH, GoldilocksField>;
 
-pub(crate) fn run_state_circuit<'a, const L: usize>(seed: u64) -> Vec<GoldilocksField> {
+pub(crate) fn run_state_circuit<'a>(seed: u64) -> Vec<GoldilocksField> {
     let inputs = StorageInputs::inputs_from_seed(seed);
     let storage_pi = StorageInputs::from_slice(&inputs);
-    let circuit = TestProvenanceCircuit::<L>::from_seed(seed, &storage_pi);
+    let circuit = TestProvenanceCircuit::from_seed(seed, &storage_pi);
     let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit.clone());
     let pi = AggregationPublicInputs::<'_, GoldilocksField>::from(proof.public_inputs.as_slice());
     assert_eq!(pi.block_number(), circuit.block_number);
@@ -65,7 +65,7 @@ pub struct TestProvenanceWires {
 }
 
 #[derive(Debug, Clone)]
-pub struct TestProvenanceCircuit<const L: usize> {
+pub struct TestProvenanceCircuit {
     storage_values: Vec<GoldilocksField>,
     c: StateCircuit,
     block_number: GoldilocksField,
@@ -75,7 +75,7 @@ pub struct TestProvenanceCircuit<const L: usize> {
     length_slot: GoldilocksField,
 }
 
-impl<const L: usize> TestProvenanceCircuit<L> {
+impl TestProvenanceCircuit {
     pub fn from_seed(seed: u64, storage: &StorageInputs<GoldilocksField>) -> Self {
         let rng = &mut StdRng::seed_from_u64(seed);
 
@@ -171,7 +171,7 @@ impl<const L: usize> TestProvenanceCircuit<L> {
     }
 }
 
-impl<const L: usize> UserCircuit<GoldilocksField, 2> for TestProvenanceCircuit<L> {
+impl UserCircuit<GoldilocksField, 2> for TestProvenanceCircuit {
     type Wires = TestProvenanceWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
@@ -198,7 +198,7 @@ impl<const L: usize> UserCircuit<GoldilocksField, 2> for TestProvenanceCircuit<L
 
 #[test]
 fn prove_and_verify_provenance_circuit() {
-    let pi = run_state_circuit::<10>(0xdead);
+    let pi = run_state_circuit(0xdead);
 }
 
 impl<'a, F: RichField> AggregationPublicInputs<'a, F> {

@@ -59,15 +59,15 @@ fn greater_than_eword(
     is_greater_than
 }
 
-pub struct RevelationWires<const L: usize> {
-    raw_keys: [MappingKeyTarget; L],
-    num_entries: Target,
+pub(crate) struct RevelationWires<const L: usize> {
+    pub raw_keys: [MappingKeyTarget; L],
+    pub num_entries: Target,
 }
 
 #[derive(Clone, Debug)]
-pub struct RevelationCircuit<const L: usize> {
-    raw_keys: [[u8; MAPPING_KEY_LEN]; L],
-    num_entries: u8,
+pub(crate) struct RevelationCircuit<const L: usize> {
+    pub(crate) raw_keys: [[u8; MAPPING_KEY_LEN]; L],
+    pub(crate) num_entries: u8,
 }
 impl<const L: usize> RevelationCircuit<L> {
     pub fn build(
