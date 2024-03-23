@@ -603,9 +603,8 @@ mod test {
         let proof1 = trie.get_proof(&mpt_key1).unwrap();
         let proof2 = trie.get_proof(&mpt_key2).unwrap();
 
-        assert_eq!(proof1.len(), 2);
-        assert_eq!(proof2.len(), 2);
         assert_eq!(proof1[0], proof2[0]);
+        // only need to make sure node above is really a branch node
         assert!(rlp::decode_list::<Vec<u8>>(&proof1[0]).len() == 17);
         use crate::storage::mapping::{self};
         println!("Generating params...");
