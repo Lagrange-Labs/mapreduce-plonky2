@@ -327,6 +327,8 @@ where
 
 #[cfg(test)]
 pub(crate) mod test {
+    use std::{fmt::Debug, time};
+
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,

@@ -10,7 +10,7 @@ use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 use super::AggregationPublicInputs;
 
 pub struct FullNodeWires {}
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FullNodeCircuit<const L: usize> {}
 impl<const L: usize> FullNodeCircuit<L> {
     pub fn build(

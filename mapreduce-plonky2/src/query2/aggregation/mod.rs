@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use plonky2::{
     field::{
         extension::{quintic::QuinticExtension, FieldExtension},
@@ -8,16 +9,20 @@ use plonky2::{
     iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
 
 use crate::{
+    array::Targetable,
     query2::AddressTarget,
-    types::CURVE_TARGET_LEN,
+    types::{PackedAddressTarget as PackedSCAddressTarget, CURVE_TARGET_LEN},
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
+
+use super::PackedAddressTarget;
 
 pub mod full_node;
 pub mod partial_node;
@@ -47,8 +52,8 @@ impl Inputs {
         1,
         1,
         NUM_HASH_OUT_ELTS,
-        AddressTarget::LEN,
-        AddressTarget::LEN,
+        PackedSCAddressTarget::LEN,
+        PackedAddressTarget::LEN,
         1,
         1,
         CURVE_TARGET_LEN,
@@ -76,7 +81,7 @@ impl Inputs {
 
 /// On top of the habitual T, this type is parametrized by:
 ///   - L :: the LIMIT argument of the query
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AggregationPublicInputs<'input, T: Clone, const L: usize> {
     pub inputs: &'input [T],
 }
@@ -142,12 +147,24 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         }
     }
 
-    pub(crate) fn smart_contract_address(&self) -> AddressTarget {
-        AddressTarget::from_array(self.smart_contract_address_raw().try_into().unwrap())
+    pub(crate) fn smart_contract_address(&self) -> PackedSCAddressTarget {
+        PackedSCAddressTarget::try_from(
+            self.smart_contract_address_raw()
+                .iter()
+                .map(|&t| U32Target(t))
+                .collect_vec(),
+        )
+        .unwrap()
     }
 
-    pub(crate) fn user_address(&self) -> AddressTarget {
-        AddressTarget::from_array(self.user_address_raw().try_into().unwrap())
+    pub(crate) fn user_address(&self) -> PackedAddressTarget {
+        PackedAddressTarget::try_from(
+            self.user_address_raw()
+                .iter()
+                .map(|&t| U32Target(t))
+                .collect_vec(),
+        )
+        .unwrap()
     }
 
     pub(crate) fn mapping_slot(&self) -> Target {
@@ -167,8 +184,8 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         block_number: Target,
         range: Target,
         root: &HashOutTarget,
-        smc_address: &AddressTarget,
-        user_address: &AddressTarget,
+        smc_address: &PackedSCAddressTarget,
+        user_address: &PackedAddressTarget,
         mapping_slot: Target,
         mapping_slot_length: Target,
         digest: CurveTarget,
@@ -176,8 +193,8 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         b.register_public_input(block_number);
         b.register_public_input(range);
         b.register_public_inputs(&root.elements);
-        b.register_public_inputs(&smc_address.arr);
-        b.register_public_inputs(&user_address.arr);
+        smc_address.register_as_public_input(b);
+        user_address.register_as_public_input(b);
         b.register_public_input(mapping_slot);
         b.register_public_input(mapping_slot_length);
         b.register_curve_public_input(digest);

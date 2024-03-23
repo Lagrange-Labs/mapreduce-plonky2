@@ -14,7 +14,7 @@ use super::AggregationPublicInputs;
 
 pub struct PartialNodeWires {}
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PartialNodeCircuit<const L: usize> {}
 impl<const L: usize> PartialNodeCircuit<L> {
     pub fn build(
