@@ -1,9 +1,15 @@
-use crate::query2::provenance::tests::run_provenance_circuit;
+use std::ops::Add;
+
+use crate::query2::provenance::tests::{run_provenance_circuit, run_provenance_circuit_with_slot};
 use itertools::Itertools;
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
+    field::{
+        extension::{Extendable, Frobenius},
+        goldilocks_field::GoldilocksField,
+        types::Field,
+    },
     hash::{
-        hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         hashing::hash_n_to_hash_no_pad,
         poseidon::PoseidonPermutation,
     },
@@ -16,6 +22,7 @@ use plonky2::{
         config::{GenericConfig, PoseidonGoldilocksConfig},
     },
 };
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 
 use crate::{
     block::public_inputs::PublicInputs as BlockPublicInputs,
@@ -40,30 +47,19 @@ type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 
 #[derive(Debug, Clone)]
-struct FullNodeCircuitValidator<'a, const L: usize> {
-    validated: FullNodeCircuit<L>,
-    children: &'a [AggregationPublicInputs<'a, F, L>; 2],
+struct FullNodeCircuitValidator<const L: usize> {
+    validated: FullNodeCircuit<F, L>,
 }
 
-impl<const L: usize> UserCircuit<GoldilocksField, D> for FullNodeCircuitValidator<'_, L> {
-    type Wires = (FullNodeWires, [Vec<Target>; 2]);
+impl<const L: usize> UserCircuit<GoldilocksField, D> for FullNodeCircuitValidator<L> {
+    type Wires = FullNodeWires;
 
     fn build(c: &mut CircuitBuilder<GoldilocksField, D>) -> Self::Wires {
-        let child_inputs = [
-            c.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len()),
-            c.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len()),
-        ];
-        let children_io = std::array::from_fn(|i| {
-            AggregationPublicInputs::<Target, L>::from(child_inputs[i].as_slice())
-        });
-        let wires = FullNodeCircuit::build(c, children_io);
-        (wires, child_inputs)
+        FullNodeCircuit::<F, L>::build(c)
     }
 
     fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
-        pw.set_target_arr(&wires.1[0], self.children[0].inputs);
-        pw.set_target_arr(&wires.1[1], self.children[1].inputs);
-        self.validated.assign(pw, &wires.0);
+        self.validated.assign(pw, wires);
     }
 }
 
@@ -108,38 +104,18 @@ impl<const L: usize> UserCircuit<F, D> for PartialNodeCircuitValidator<'_, L> {
 }
 
 #[derive(Clone, Debug)]
-struct RevelationCircuitValidator<'a, const L: usize> {
-    validated: RevelationCircuit<L>,
-    db_proof: BlockPublicInputs<'a, F>,
-    root_proof: AggregationPublicInputs<'a, F, L>,
-    values: [EWord; L],
+struct RevelationCircuitValidator<const L: usize> {
+    validated: RevelationCircuit<F, L>,
 }
-impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
-    type Wires = (RevelationWires, Vec<Target>, Vec<Target>, Vec<EWordTarget>);
+impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<L> {
+    type Wires = RevelationWires;
 
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-        let db_proof_io = c.add_virtual_targets(BlockPublicInputs::<Target>::TOTAL_LEN);
-        let db_proof_pi = BlockPublicInputs::<Target>::from(db_proof_io.as_slice());
-
-        let root_proof_io =
-            c.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len());
-        let root_proof_pi = AggregationPublicInputs::<Target, L>::from(root_proof_io.as_slice());
-
-        let values = (0..L)
-            .map(|_| c.add_virtual_target_arr::<EWORD_LEN>())
-            .collect_vec();
-
-        let wires = RevelationCircuit::<L>::build(c, db_proof_pi, root_proof_pi, values.as_slice());
-        (wires, db_proof_io, root_proof_io, values)
+        RevelationCircuit::<F, L>::build(c)
     }
 
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-        pw.set_target_arr(&wires.1, self.db_proof.proof_inputs);
-        pw.set_target_arr(&wires.2, self.root_proof.inputs);
-        for (i, eword) in wires.3.iter().enumerate() {
-            pw.set_target_arr(eword, &self.values[i]);
-        }
-        self.validated.assign(pw, &wires.0);
+        self.validated.assign(pw, wires);
     }
 }
 
@@ -150,20 +126,37 @@ impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
 /// │   ├── LeafCircuit - // TODO: @victor
 /// │   └── LeafCircuit - // TODO: @victor
 /// └── Untouched sub-tree – hash == Poseidon("ernesto")
+#[test]
 fn test_mini_tree() {
+    let EWORD_ZERO: EWord<F> = [0u32; 8]
+        .into_iter()
+        .map(F::from_canonical_u32)
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
     const L: usize = 4;
     // Need integration with leaf proof @Victor
-    let values = [0, 0, 0xdead, 0xbeef];
 
-    let left_leaf_proof_io = run_provenance_circuit(0xdead);
-    let right_leaf_proof_io = run_provenance_circuit(0xbeef);
+    const SLOT_LENGTH: u32 = 9;
+    const MAPPING_SLOT: u32 = 48372;
+    let (left_value, left_leaf_proof_io) =
+        run_provenance_circuit_with_slot::<L>(0xdead, SLOT_LENGTH, MAPPING_SLOT);
+    let (right_value, right_leaf_proof_io) =
+        run_provenance_circuit_with_slot::<L>(0xbeef, SLOT_LENGTH, MAPPING_SLOT);
+    let values = [
+        EWORD_ZERO.clone(),
+        EWORD_ZERO.clone(),
+        left_value,
+        right_value,
+    ];
 
     let left_leaf_pi = AggregationPublicInputs::<'_, F, L>::from(left_leaf_proof_io.as_slice());
     let right_leaf_pi = AggregationPublicInputs::<'_, F, L>::from(right_leaf_proof_io.as_slice());
 
     let middle_proof = run_circuit::<F, D, C, _>(FullNodeCircuitValidator {
-        validated: FullNodeCircuit::<L> {},
-        children: &[left_leaf_pi, right_leaf_pi],
+        validated: FullNodeCircuit::<F, L> {
+            children: [left_leaf_proof_io, right_leaf_proof_io],
+        },
     });
 
     let proved = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
@@ -183,12 +176,46 @@ fn test_mini_tree() {
         child_to_prove_is_left: F::from_bool(false),
     });
 
+    let rng = &mut StdRng::seed_from_u64(0x5eed);
+
+    let root_proof =
+        AggregationPublicInputs::<GoldilocksField, L>::from(top_proof.public_inputs.as_slice());
+
+    let prev_root = std::iter::repeat_with(|| F::from_canonical_u32(25))
+        .take(NUM_HASH_OUT_ELTS)
+        .collect_vec();
+    let new_root = root_proof.root().elements;
+    let first_block = root_proof.block_number();
+    let block_number = F::from_canonical_u8(34);
+    let block_header = [
+        F::from_canonical_u8(11),
+        F::from_canonical_u8(12),
+        F::from_canonical_u8(13),
+        F::from_canonical_u8(14),
+        F::from_canonical_u8(15),
+        F::from_canonical_u8(16),
+        F::from_canonical_u8(17),
+        F::from_canonical_u8(18),
+    ];
+
+    let block_data: [F; BlockPublicInputs::<F>::TOTAL_LEN] = prev_root
+        .into_iter()
+        .chain(new_root.iter().copied())
+        .chain(std::iter::once(first_block))
+        .chain(std::iter::once(block_number))
+        .chain(block_header.into_iter())
+        .collect_vec()
+        .try_into()
+        .unwrap();
+    let db_proof = BlockPublicInputs::<F>::from(block_data.as_slice());
+
     let final_proof = run_circuit::<F, D, C, _>(RevelationCircuitValidator {
-        validated: RevelationCircuit,
-        db_proof: todo!(),
-        root_proof: AggregationPublicInputs::<GoldilocksField, L>::from(
-            top_proof.public_inputs.as_slice(),
-        ),
-        values,
+        validated: RevelationCircuit {
+            db_proof: db_proof.proof_inputs.to_owned(),
+            root_proof: root_proof.inputs.to_owned(),
+            ys: values,
+            min_block_number: root_proof.block_number(),
+            max_block_number: root_proof.block_number().add(root_proof.range()),
+        },
     });
 }

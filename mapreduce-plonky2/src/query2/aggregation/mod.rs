@@ -1,3 +1,5 @@
+use std::fmt::{self, Debug, Display};
+
 use itertools::Itertools;
 use plonky2::{
     field::{
@@ -60,7 +62,13 @@ impl Inputs {
     ];
 
     const fn total_len() -> usize {
-        1 + 1 + NUM_HASH_OUT_ELTS + 2 * AddressTarget::LEN + 1 + CURVE_TARGET_LEN + 1
+        1 + 1
+            + NUM_HASH_OUT_ELTS
+            + PackedSCAddressTarget::LEN
+            + PackedAddressTarget::LEN
+            + 1
+            + 1
+            + CURVE_TARGET_LEN
     }
 
     pub const fn len(&self) -> usize {
@@ -81,9 +89,26 @@ impl Inputs {
 
 /// On top of the habitual T, this type is parametrized by:
 ///   - L :: the LIMIT argument of the query
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AggregationPublicInputs<'input, T: Clone, const L: usize> {
     pub inputs: &'input [T],
+}
+
+impl<'a, T: Clone + Copy + Debug, const L: usize> Debug for AggregationPublicInputs<'a, T, L> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "BlockNumber: {:?}\n", self.block_number_raw())?;
+        write!(f, "Range: {:?}\n", self.range_raw())?;
+        write!(f, "Root: {:?}\n", self.root_raw())?;
+        write!(f, "SC Address: {:?}\n", self.smart_contract_address_raw())?;
+        write!(f, "Owner Address: {:?}\n", self.user_address_raw())?;
+        write!(f, "Mapping slot: {:?}\n", self.mapping_slot_raw())?;
+        write!(
+            f,
+            "Storage slot length: {:?}\n",
+            self.storage_slot_length_raw()
+        )?;
+        write!(f, "Digest: {:?}\n", self.digest_raw())
+    }
 }
 
 impl<'a, T: Clone + Copy, const L: usize> From<&'a [T]> for AggregationPublicInputs<'a, T, L> {
