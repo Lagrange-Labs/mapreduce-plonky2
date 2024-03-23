@@ -486,22 +486,6 @@ mod tests {
         let expected_digest = leaf_digest_for_mapping(&mapping_key, mapping_value.as_bytes());
         let circuit_digest = mpt_pi.accumulator();
         println!("left_pad32(mapping_key) = \t{:?}", left_pad32(&mapping_key));
-        println!(
-            "left_pad32(mapping_value) = \t{:?}",
-            left_pad32(mapping_value.as_bytes())
-        );
-        let low_idx = storage::mapping::PublicInputs::<F>::TOTAL_LEN;
-        let high_idx = low_idx + 32;
-        println!(
-            "public inputs mapping_key = \t{:?}",
-            &mpt_proof.public_inputs[low_idx..high_idx]
-        );
-        let low_idx = high_idx;
-        let high_idx = low_idx + 32;
-        println!(
-            "public inputs mapping_value = \t{:?}",
-            &mpt_proof.public_inputs[low_idx..high_idx]
-        );
 
         assert_eq!(expected_digest.to_weierstrass(), circuit_digest);
 
