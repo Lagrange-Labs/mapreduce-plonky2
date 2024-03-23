@@ -1,7 +1,13 @@
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
-    hash::{hash_types::NUM_HASH_OUT_ELTS, poseidon::PoseidonHash},
-    iop::{target::Target, witness::PartialWitness},
+    hash::{
+        hash_types::{RichField, NUM_HASH_OUT_ELTS},
+        poseidon::PoseidonHash,
+    },
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::circuit_builder::CircuitBuilder,
 };
 
@@ -9,14 +15,26 @@ use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 
 use super::AggregationPublicInputs;
 
-pub struct FullNodeWires {}
+pub struct FullNodeWires {
+    children: [Vec<Target>; 2],
+}
+
 #[derive(Clone, Debug)]
-pub struct FullNodeCircuit<const L: usize> {}
-impl<const L: usize> FullNodeCircuit<L> {
-    pub fn build(
-        b: &mut CircuitBuilder<GoldilocksField, 2>,
-        inputs: [AggregationPublicInputs<Target, L>; 2],
-    ) -> FullNodeWires {
+pub struct FullNodeCircuit<F: RichField, const L: usize> {
+    pub(crate) children: [Vec<F>; 2],
+}
+impl<F: RichField, const L: usize> FullNodeCircuit<F, L> {
+    pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> FullNodeWires {
+        let inputs_io = [
+            b.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len()),
+            b.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len()),
+        ];
+
+        let inputs = [
+            AggregationPublicInputs::<Target, L>::from(inputs_io[0].as_slice()),
+            AggregationPublicInputs::<Target, L>::from(inputs_io[1].as_slice()),
+        ];
+
         let to_hash = Array::<Target, { 2 * NUM_HASH_OUT_ELTS }>::try_from(
             inputs[0]
                 .root()
@@ -62,8 +80,13 @@ impl<const L: usize> FullNodeCircuit<L> {
             digest,
         );
 
-        FullNodeWires {}
+        FullNodeWires {
+            children: inputs_io.to_owned(),
+        }
     }
 
-    pub fn assign(&self, _: &mut PartialWitness<GoldilocksField>, _: &FullNodeWires) {}
+    pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &FullNodeWires) {
+        pw.set_target_arr(&wires.children[0], &self.children[0]);
+        pw.set_target_arr(&wires.children[1], &self.children[1]);
+    }
 }

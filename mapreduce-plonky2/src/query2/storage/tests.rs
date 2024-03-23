@@ -28,7 +28,7 @@ use crate::{
     circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
     group_hashing::{field_to_curve::ToCurvePoint, map_to_curve_point},
-    query2::EWORD_LEN,
+    query2::{EWord, EWORD_LEN},
     storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
     utils::convert_u8_to_u32_slice,
 };
@@ -286,12 +286,21 @@ impl<'a, T: Copy + Default> PublicInputs<'a, T> {
 }
 
 impl<'a> PublicInputs<'a, GoldilocksField> {
-    pub fn inputs_from_seed(seed: u64) -> [F; PublicInputs::<()>::TOTAL_LEN] {
+    /// Given a seed, generate & prove a leaf circuit, returning it along the value it encodes
+    pub fn inputs_from_seed(seed: u64) -> (EWord<F>, [F; PublicInputs::<()>::TOTAL_LEN]) {
         let rng = &mut StdRng::seed_from_u64(seed);
-        let leaf_eword = (0..EWORD_LEN).map(|_| rng.next_u64()).collect_vec();
+        // The EWORD_LEN u32 making an EVM word
+        let leaf_eword = (0..EWORD_LEN).map(|_| rng.next_u32()).collect_vec();
+        // The goldilocks representation of these u32
+        let leaf_eword_gl = leaf_eword
+            .iter()
+            .copied()
+            .map(F::from_canonical_u32)
+            .collect_vec();
+        // The mapping of the lead EVM word onto the digesting curve
+        let digest = map_to_curve_point::<F>(&leaf_eword_gl).to_weierstrass();
 
         let root = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let digest = map_to_curve_point::<F>(&[F::from_canonical_u64(leaf_eword)]).to_weierstrass();
         let digest_fs = digest
             .x
             .0
@@ -310,6 +319,6 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
             &owner,
         );
 
-        values
+        (leaf_eword_gl.try_into().unwrap(), values)
     }
 }

@@ -1,9 +1,10 @@
 use itertools::Itertools;
 use plonky2::{
-    field::goldilocks_field::GoldilocksField,
+    field::{extension::Extendable, goldilocks_field::GoldilocksField},
+    hash::hash_types::RichField,
     iop::{
         target::{BoolTarget, Target},
-        witness::PartialWitness,
+        witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
 };
@@ -12,8 +13,10 @@ use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use crate::{
     block::public_inputs::PublicInputs as BlockPublicInputs,
     group_hashing::CircuitBuilderGroupHashing,
-    query2::{aggregation::AggregationPublicInputs, EWordTarget},
-    utils::{greater_than, greater_than_or_equal_to, less_than_or_equal_to},
+    query2::{aggregation::AggregationPublicInputs, EWord, EWordTarget, EWORD_LEN},
+    utils::{
+        convert_u8_targets_to_u32, greater_than, greater_than_or_equal_to, less_than_or_equal_to,
+    },
 };
 
 use super::RevelationPublicInputs;
@@ -45,8 +48,9 @@ fn greater_than_eword(
             },
             {
                 // /greater_than ∧ /cmp
+                let eq = b.not(neq);
                 let maybe_greater_than = b.or(is_greater_than, gt);
-                let maybe_greater_than = b.and(maybe_greater_than, neq);
+                let maybe_greater_than = b.or(maybe_greater_than, eq);
                 let new_lesser_than = b.not(maybe_greater_than);
                 b.or(is_lesser_than, new_lesser_than)
             },
@@ -56,17 +60,34 @@ fn greater_than_eword(
     is_greater_than
 }
 
-pub struct RevelationWires;
+pub struct RevelationWires {
+    db_proof: Vec<Target>,
+    root_proof: Vec<Target>,
+    ys: Vec<EWordTarget>,
+    min_block_number: Target,
+    max_block_number: Target,
+}
+
 #[derive(Clone, Debug)]
-pub struct RevelationCircuit<const L: usize>;
-impl<const L: usize> RevelationCircuit<L> {
-    pub fn build(
-        b: &mut CircuitBuilder<GoldilocksField, 2>,
-        db_proof: BlockPublicInputs<Target>,
-        root_proof: AggregationPublicInputs<Target, L>,
-        ys: &[EWordTarget],
-    ) -> RevelationWires {
+pub struct RevelationCircuit<F, const L: usize> {
+    pub(crate) db_proof: Vec<F>,
+    pub(crate) root_proof: Vec<F>,
+    pub(crate) ys: [EWord<F>; L],
+    pub(crate) min_block_number: F,
+    pub(crate) max_block_number: F,
+}
+impl<F: RichField, const L: usize> RevelationCircuit<F, L> {
+    pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> RevelationWires {
         let zero = b.zero();
+
+        let db_proof_io = b.add_virtual_targets(BlockPublicInputs::<Target>::TOTAL_LEN);
+        let db_proof = BlockPublicInputs::<Target>::from(db_proof_io.as_slice());
+        let root_proof_io =
+            b.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len());
+        let root_proof = AggregationPublicInputs::<Target, L>::from(root_proof_io.as_slice());
+        let ys = (0..L)
+            .map(|_| b.add_virtual_target_arr::<EWORD_LEN>())
+            .collect_vec();
 
         let min_block_number = b.add_virtual_target();
         let max_block_number = b.add_virtual_target();
@@ -91,7 +112,7 @@ impl<const L: usize> RevelationCircuit<L> {
         greater_than_or_equal_to(b, min_bound, min_block_number, 32);
         less_than_or_equal_to(b, root_proof.block_number(), max_block_number, 32);
 
-        for i in 0..L {
+        for i in 0..L - 1 {
             // 1 if OK, 0 else
             let cmp = greater_than_eword(b, ys[i + 1], ys[i]);
 
@@ -115,12 +136,27 @@ impl<const L: usize> RevelationCircuit<L> {
             &root_proof.smart_contract_address(),
             &root_proof.user_address(),
             root_proof.mapping_slot(),
+            root_proof.mapping_slot_length(),
             &ys,
             db_proof.block_header(),
         );
 
-        RevelationWires {}
+        RevelationWires {
+            db_proof: db_proof_io,
+            root_proof: root_proof_io,
+            ys,
+            min_block_number,
+            max_block_number,
+        }
     }
 
-    pub fn assign(&self, _: &mut PartialWitness<GoldilocksField>, _: &RevelationWires) {}
+    pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &RevelationWires) {
+        pw.set_target_arr(&wires.db_proof, &self.db_proof);
+        pw.set_target_arr(&wires.root_proof, &self.root_proof);
+        for (i, eword) in wires.ys.iter().enumerate() {
+            pw.set_target_arr(eword, self.ys[i].as_slice());
+        }
+        pw.set_target(wires.min_block_number, self.min_block_number);
+        pw.set_target(wires.max_block_number, self.max_block_number);
+    }
 }
