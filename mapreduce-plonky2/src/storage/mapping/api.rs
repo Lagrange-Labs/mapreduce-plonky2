@@ -586,18 +586,20 @@ mod test {
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(memdb.clone());
 
-        let key1 = random_vector(4);
-        let val1 = random_vector(ADDRESS_LEN);
-        let slot1 = StorageSlot::Mapping(key1.clone(), 0);
+        let key1 = [1u8; 4];
+        let val1 = [2u8; ADDRESS_LEN];
+        let slot1 = StorageSlot::Mapping(key1.to_vec(), 0);
         let mpt_key1 = slot1.mpt_key();
 
-        let key2 = random_vector(4);
-        let val2 = random_vector(ADDRESS_LEN);
-        let slot2 = StorageSlot::Mapping(key2.clone(), 0);
+        let key2 = [3u8; 4];
+        let val2 = [4u8; ADDRESS_LEN];
+        let slot2 = StorageSlot::Mapping(key2.to_vec(), 0);
         let mpt_key2 = slot2.mpt_key();
 
-        trie.insert(&mpt_key1, &rlp::encode(&val1)).unwrap();
-        trie.insert(&mpt_key2, &rlp::encode(&val2)).unwrap();
+        trie.insert(&mpt_key1, &rlp::encode(&val1.as_slice()))
+            .unwrap();
+        trie.insert(&mpt_key2, &rlp::encode(&val2.as_slice()))
+            .unwrap();
         trie.root_hash().unwrap();
 
         let proof1 = trie.get_proof(&mpt_key1).unwrap();
@@ -611,7 +613,7 @@ mod test {
         let params = mapping::api::build_circuits_params();
         println!("Proving leaf 1...");
 
-        let leaf_input1 = mapping::CircuitInput::new_leaf(proof1[1].clone(), 0, key1);
+        let leaf_input1 = mapping::CircuitInput::new_leaf(proof1[1].clone(), 0, key1.to_vec());
         let leaf_proof1 = mapping::api::generate_proof(&params, leaf_input1).unwrap();
         {
             let lp = ProofWithVK::deserialize(&leaf_proof1).unwrap();
@@ -622,7 +624,7 @@ mod test {
 
         println!("Proving leaf 2...");
 
-        let leaf_input2 = mapping::CircuitInput::new_leaf(proof2[1].clone(), 0, key2);
+        let leaf_input2 = mapping::CircuitInput::new_leaf(proof2[1].clone(), 0, key2.to_vec());
 
         let leaf_proof2 = mapping::api::generate_proof(&params, leaf_input2).unwrap();
 
