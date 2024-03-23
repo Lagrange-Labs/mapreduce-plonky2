@@ -216,11 +216,11 @@ mod test {
         let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
         let mut random_value = [0u8; 32];
         thread_rng().fill(&mut random_value);
-        trie.insert(&slot.mpt_key(), &random_value).unwrap();
+        trie.insert(&slot.mpt_key_vec(), &random_value).unwrap();
         trie.root_hash().unwrap();
-        let proof = trie.get_proof(&slot.mpt_key()).unwrap();
+        let proof = trie.get_proof(&slot.mpt_key_vec()).unwrap();
         let node = proof.last().unwrap().clone(); // proof from RPC gives leaf as last
-        let mpt_key = slot.mpt_key();
+        let mpt_key = slot.mpt_key_vec();
         let slot = MappingSlot::new(mapping_slot as u8, mapping_key.clone());
         let circuit = LeafCircuit::<80> {
             node: node.clone(),

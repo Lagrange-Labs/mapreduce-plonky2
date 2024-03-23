@@ -18,7 +18,7 @@ pub struct PartialInnerNodeWires {}
 /// This circuit prove the root of the subtree made of:
 ///   - a child whose hash has not changes on the side defined by unproved_is_left
 ///   - another child whose hash has been updated.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PartialInnerNodeCircuit {}
 
 impl PartialInnerNodeCircuit {

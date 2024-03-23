@@ -30,6 +30,7 @@ use crate::{
     group_hashing::{field_to_curve::ToCurvePoint, map_to_curve_point},
     query2::EWORD_LEN,
     storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
+    utils::convert_u8_to_u32_slice,
 };
 
 use super::{
@@ -43,7 +44,7 @@ const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct PartialInnerNodeCircuitValidator<'a> {
     validated: PartialInnerNodeCircuit,
 
@@ -82,7 +83,7 @@ impl<'a> UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuitValidator<'a
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct FullInnerNodeCircuitValidator<'a> {
     validated: FullInnerNodeCircuit,
     children: &'a [PublicInputs<'a, F>; 2],
@@ -125,7 +126,13 @@ fn run_leaf_proof<'data>(k: &[u8], v: &[u8]) -> LeafProofResult {
     let k = left_pad32(k);
     let v = left_pad32(v);
 
-    let owner_gl = v.iter().copied().map(F::from_canonical_u8).collect_vec();
+    let v_u32 = convert_u8_to_u32_slice(&v);
+
+    let owner_gl = v_u32
+        .iter()
+        .copied()
+        .map(F::from_canonical_u32)
+        .collect_vec();
 
     let circuit = LeafCircuit { key: k, value: v };
 
@@ -284,7 +291,7 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
         let leaf_eword = (0..EWORD_LEN).map(|_| rng.next_u64()).collect_vec();
 
         let root = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let digest = map_to_curve_point::<F>(&[F::from_canonical_u64(leaf_value)]).to_weierstrass();
+        let digest = map_to_curve_point::<F>(&[F::from_canonical_u64(leaf_eword)]).to_weierstrass();
         let digest_fs = digest
             .x
             .0
