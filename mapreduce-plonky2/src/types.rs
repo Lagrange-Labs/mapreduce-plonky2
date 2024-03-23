@@ -33,6 +33,7 @@ pub type PackedAddressTarget = Array<U32Target, PACKED_ADDRESS_LEN>;
 
 /// The length of a mapping key in bytes
 pub const MAPPING_KEY_LEN: usize = 32;
+/// Length of a mapping key when packed in u32
 pub const PACKED_MAPPING_KEY_LEN: usize = MAPPING_KEY_LEN / 4;
 /// A value is never more than 32 bytes in EVM
 pub const VALUE_LEN: usize = 32;

@@ -33,4 +33,4 @@ pub const EWORD_LEN: usize = 8;
 // Targets for an EVM word
 type EWordTarget = [Target; EWORD_LEN];
 // 8 Goldilocks encoding an EVM words
-type EWord = [GoldilocksField; EWORD_LEN];
+type EWord<F> = [F; EWORD_LEN];

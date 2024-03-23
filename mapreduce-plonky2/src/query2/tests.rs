@@ -1,14 +1,17 @@
-use std::array::from_fn as create_array;
+use std::{array::from_fn as create_array, ops::Add};
 
 use crate::{
     circuit::test::run_circuit,
-    eth::{left_pad, left_pad32},
-    query2::state::tests::run_state_circuit,
-    types::MAPPING_KEY_LEN,
+    eth::left_pad,
+    query2::state::tests::run_state_circuit_with_slot,
+    types::{PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
 };
 use itertools::Itertools;
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
+    field::{
+        goldilocks_field::GoldilocksField,
+        types::{Field, PrimeField64},
+    },
     hash::{
         hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
         hashing::hash_n_to_hash_no_pad,
@@ -23,6 +26,7 @@ use plonky2::{
         config::{GenericConfig, PoseidonGoldilocksConfig},
     },
 };
+use rand::{rngs::StdRng, SeedableRng};
 
 use crate::{block::public_inputs::PublicInputs as BlockPublicInputs, circuit::UserCircuit};
 
@@ -32,11 +36,8 @@ use super::{
         partial_node::{PartialNodeCircuit, PartialNodeWires},
         AggregationPublicInputs,
     },
-    revelation::{
-        circuit::{RevelationCircuit, RevelationWires},
-        RevelationPublicInputs,
-    },
-    EWord, EWordTarget, EWORD_LEN,
+    revelation::circuit::{RevelationCircuit, RevelationWires},
+    EWordTarget, EWORD_LEN,
 };
 
 const D: usize = 2;
@@ -120,12 +121,7 @@ struct RevelationCircuitValidator<'a, const L: usize> {
     root_proof: AggregationPublicInputs<'a, F>,
 }
 impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
-    type Wires = (
-        RevelationWires<L>,
-        Vec<Target>,
-        Vec<Target>,
-        Vec<EWordTarget>,
-    );
+    type Wires = (RevelationWires<L>, Vec<Target>, Vec<Target>);
 
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
         let db_proof_io = c.add_virtual_targets(BlockPublicInputs::<Target>::TOTAL_LEN);
@@ -134,12 +130,8 @@ impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
         let root_proof_io = c.add_virtual_targets(AggregationPublicInputs::<Target>::total_len());
         let root_proof_pi = AggregationPublicInputs::<Target>::from(root_proof_io.as_slice());
 
-        let values = (0..L)
-            .map(|_| c.add_virtual_target_arr::<EWORD_LEN>())
-            .collect_vec();
-
         let wires = RevelationCircuit::<L>::build(c, db_proof_pi, root_proof_pi);
-        (wires, db_proof_io, root_proof_io, values)
+        (wires, db_proof_io, root_proof_io)
     }
 
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -149,6 +141,8 @@ impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
     }
 }
 
+const EMPTY_NFT_ID: [u8; MAPPING_KEY_LEN] = [0u8; MAPPING_KEY_LEN];
+
 /// Builds & proves the following tree
 ///
 /// Top-level - PartialInnerCircuit
@@ -156,13 +150,19 @@ impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
 /// │   ├── LeafCircuit -
 /// │   └── LeafCircuit -
 /// └── Untouched sub-tree - hash == Poseidon("ernesto")
+#[test]
 fn test_mini_tree() {
     const L: usize = 4;
-    let num_entries = 2;
-    let values: [u32; 4] = [0, 0, 0xdead, 0xbeef];
+    const SLOT_LENGTH: u32 = 9;
+    const MAPPING_SLOT: u32 = 48372;
 
-    let left_leaf_proof_io = run_state_circuit(0xdead);
-    let right_leaf_proof_io = run_state_circuit(0xbeef);
+    let (left_value, left_leaf_proof_io) =
+        run_state_circuit_with_slot(0xdead, SLOT_LENGTH, MAPPING_SLOT);
+    let (right_value, right_leaf_proof_io) =
+        run_state_circuit_with_slot(0xbeef, SLOT_LENGTH, MAPPING_SLOT);
+
+    let num_entries = 2;
+    let values = [left_value, right_value, EMPTY_NFT_ID, EMPTY_NFT_ID];
 
     let left_leaf_pi = AggregationPublicInputs::<'_, F>::from(left_leaf_proof_io.as_slice());
     let right_leaf_pi = AggregationPublicInputs::<'_, F>::from(right_leaf_proof_io.as_slice());
@@ -186,16 +186,60 @@ fn test_mini_tree() {
         sibling_hash: proved.elements.to_vec(),
         child_to_prove_is_left: F::from_bool(false),
     });
-    let revelation_circuit = RevelationCircuit::<L> {
-        raw_keys: create_array(|i| left_pad::<MAPPING_KEY_LEN>(&values[i].to_be_bytes())),
-        num_entries,
-    };
-    let root_pi =
+
+    let root_proof =
         AggregationPublicInputs::<GoldilocksField>::from(top_proof.public_inputs.as_slice());
+
+    let prev_root = std::iter::repeat_with(|| F::from_canonical_u32(25))
+        .take(NUM_HASH_OUT_ELTS)
+        .collect_vec()
+        .try_into()
+        .unwrap();
+    let new_root = root_proof.root().elements;
+
+    // we say we ran the query up to the last block generated in the block db
+    let last_block = root_proof.block_number();
+    // we say the first block number generated is the last block - the range - some constant
+    // i.e. the database have been running for a while before
+    let first_block = root_proof.block_number() - root_proof.range() + F::from_canonical_u8(34);
+    let block_header = [
+        F::from_canonical_u8(11),
+        F::from_canonical_u8(12),
+        F::from_canonical_u8(13),
+        F::from_canonical_u8(14),
+        F::from_canonical_u8(15),
+        F::from_canonical_u8(16),
+        F::from_canonical_u8(17),
+        F::from_canonical_u8(18),
+    ];
+
+    let block_data = BlockPublicInputs::from_parts(
+        &prev_root,
+        &new_root,
+        first_block,
+        last_block,
+        &block_header,
+    );
+    let db_proof = BlockPublicInputs::<F>::from(block_data.as_slice());
+
+    // These are the _query_ min and max range, NOT necessarily the range aggregated
+    // we can choose anything as long as they satisfy the constraints when aggregating
+    // query_min >= min_block during aggregation
+    // query_max <= max_block during aggregation
+    let query_min_block_number =
+        root_proof.block_number() - root_proof.range() - GoldilocksField::ONE;
+    let query_max_block_number = root_proof.block_number() + GoldilocksField::ONE;
+
+    let revelation_circuit = RevelationCircuit::<L> {
+        raw_keys: values,
+        num_entries,
+        query_min_block_number: query_min_block_number.to_canonical_u64() as usize,
+        query_max_block_number: query_max_block_number.to_canonical_u64() as usize,
+    };
 
     let final_proof = run_circuit::<F, D, C, _>(RevelationCircuitValidator {
         validated: revelation_circuit,
-        db_proof: todo!(),
-        root_proof: root_pi,
+        db_proof,
+        root_proof,
     });
 }

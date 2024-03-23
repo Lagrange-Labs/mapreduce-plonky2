@@ -1,5 +1,8 @@
 use plonky2::field::types::Sample;
-use std::{array, ops::Add};
+use std::{
+    array::{self, from_fn},
+    ops::Add,
+};
 
 use itertools::Itertools;
 use plonky2::{
@@ -29,7 +32,7 @@ use crate::{
     circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
     group_hashing::{field_to_curve::ToCurvePoint, map_to_curve_point},
-    query2::EWORD_LEN,
+    query2::{EWord, EWORD_LEN},
     storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
     types::{MAPPING_KEY_LEN, PACKED_VALUE_LEN, VALUE_LEN},
     utils::{convert_u8_to_u32_slice, test::random_vector},
@@ -299,22 +302,25 @@ impl<'a, T: Copy + Default> PublicInputs<'a, T> {
 }
 
 impl<'a> PublicInputs<'a, GoldilocksField> {
+    /// Given a seed, generate & prove a leaf circuit, returning it along the value it encodes
+    /// meaning the mapping key
     pub fn inputs_from_seed(
         seed: u64,
-    ) -> [GoldilocksField; PublicInputs::<GoldilocksField>::TOTAL_LEN] {
+    ) -> (
+        [u8; MAPPING_KEY_LEN],
+        [GoldilocksField; PublicInputs::<GoldilocksField>::TOTAL_LEN],
+    ) {
         let mut pis = [GoldilocksField::ZERO; PublicInputs::<GoldilocksField>::TOTAL_LEN];
         let rng = &mut StdRng::seed_from_u64(seed);
-        let leaf_key = random_vector(MAPPING_KEY_LEN)
-            .into_iter()
-            .map(F::from_canonical_u8)
-            .collect::<Vec<_>>();
+        let leaf_key = random_vector(MAPPING_KEY_LEN);
+        let leaf_key_f :[GoldilocksField; MAPPING_KEY_LEN]= array::from_fn(|i| F::from_canonical_u8(leaf_key[i]));
 
         // leaf value == owner address
         let leaf_value: [GoldilocksField; PACKED_VALUE_LEN] =
             array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
 
         let root = F::rand_vec(NUM_HASH_OUT_ELTS).try_into().unwrap();
-        let digest = map_to_curve_point::<F>(&leaf_key).to_weierstrass();
+        let digest = map_to_curve_point::<F>(&leaf_key_f).to_weierstrass();
         let digest_fs = digest
             .x
             .0
@@ -331,6 +337,6 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
             &leaf_value,
         );
 
-        pis
+        (leaf_key.try_into().unwrap(), pis)
     }
 }

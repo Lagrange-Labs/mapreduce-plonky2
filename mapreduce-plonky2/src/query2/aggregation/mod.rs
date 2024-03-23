@@ -1,3 +1,5 @@
+use std::fmt::{self, Debug, Display};
+
 use itertools::Itertools;
 use plonky2::{
     field::{
@@ -16,14 +18,9 @@ use plonky2_ecgfp5::{
 };
 
 use crate::{
-    types::{
-        PackedAddressTarget as PackedSCAddressTarget, PackedValueTarget, CURVE_TARGET_LEN,
-        PACKED_VALUE_LEN,
-    },
+    types::{PackedAddressTarget, PackedValueTarget, CURVE_TARGET_LEN, PACKED_VALUE_LEN},
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
-
-use super::PackedAddressTarget;
 
 pub mod full_node;
 pub mod partial_node;
@@ -54,7 +51,7 @@ impl Inputs {
         1,
         1,
         NUM_HASH_OUT_ELTS,
-        PackedSCAddressTarget::LEN,
+        PackedAddressTarget::LEN,
         PACKED_VALUE_LEN,
         1,
         1,
@@ -89,9 +86,26 @@ impl Inputs {
 }
 
 /// On top of the habitual T
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AggregationPublicInputs<'input, T: Clone> {
     pub inputs: &'input [T],
+}
+
+impl<'a, T: Clone + Copy + Debug> Debug for AggregationPublicInputs<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "BlockNumber: {:?}\n", self.block_number_raw())?;
+        write!(f, "Range: {:?}\n", self.range_raw())?;
+        write!(f, "Root: {:?}\n", self.root_raw())?;
+        write!(f, "SC Address: {:?}\n", self.smart_contract_address_raw())?;
+        write!(f, "Owner Address: {:?}\n", self.user_address_raw())?;
+        write!(f, "Mapping slot: {:?}\n", self.mapping_slot_raw())?;
+        write!(
+            f,
+            "Storage slot length: {:?}\n",
+            self.storage_slot_length_raw()
+        )?;
+        write!(f, "Digest: {:?}\n", self.digest_raw())
+    }
 }
 
 impl<'a, T: Clone + Copy> From<&'a [T]> for AggregationPublicInputs<'a, T> {
@@ -155,8 +169,8 @@ impl<'a> AggregationPublicInputs<'a, Target> {
         }
     }
 
-    pub(crate) fn smart_contract_address(&self) -> PackedSCAddressTarget {
-        PackedSCAddressTarget::try_from(
+    pub(crate) fn smart_contract_address(&self) -> PackedAddressTarget {
+        PackedAddressTarget::try_from(
             self.smart_contract_address_raw()
                 .iter()
                 .map(|&t| U32Target(t))
@@ -192,7 +206,7 @@ impl<'a> AggregationPublicInputs<'a, Target> {
         block_number: Target,
         range: Target,
         root: &HashOutTarget,
-        smc_address: &PackedSCAddressTarget,
+        smc_address: &PackedAddressTarget,
         user_address: &PackedValueTarget,
         mapping_slot: Target,
         mapping_slot_length: Target,

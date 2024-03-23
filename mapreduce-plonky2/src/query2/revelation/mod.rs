@@ -26,20 +26,33 @@ enum Inputs<const L: usize> {
     SmartContractAddress,
     UserAddress,
     MappingSlot,
+    MappingSlotLength,
     NftIds,
     BlockHeader,
 }
 impl<const L: usize> Inputs<L> {
-    const SIZES: [usize; 10] = [
+    const SIZES: [usize; 11] = [
+        // Block number
         1,
+        // Range
         1,
+        // Root
         NUM_HASH_OUT_ELTS,
+        // Min block number
         1,
+        // Max block number
         1,
+        // Smart contract address
         PackedAddressTarget::LEN,
+        // User address
         PackedAddressTarget::LEN,
-        CURVE_TARGET_LEN,
+        // Mapping Slot
+        1,
+        // Mapping slot length
+        1,
+        // L × NFT ID
         L * 8,
+        // Block Header
         OutputHash::LEN,
     ];
 
@@ -95,15 +108,15 @@ impl<'a, T: Clone + Copy, const L: usize> RevelationPublicInputs<'a, T, L> {
     fn mapping_slot_raw(&self) -> &[T] {
         &self.inputs[Inputs::<L>::MappingSlot.range()]
     }
-
+    fn mapping_slot_length_raw(&self) -> &[T] {
+        &self.inputs[Inputs::<L>::MappingSlot.range()]
+    }
     fn nft_ids_raw(&self) -> &[T] {
         &self.inputs[Inputs::<L>::NftIds.range()]
     }
-
     fn block_header_raw(&self) -> &[T] {
         &self.inputs[Inputs::<L>::BlockHeader.range()]
     }
-
     fn total_len() -> usize {
         Inputs::<L>::total_len()
     }
@@ -119,6 +132,7 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
         query_contract_address: &PackedAddressTarget,
         query_user_address: &PackedAddressTarget,
         query_mapping_slot: Target,
+        mapping_slot_length: Target,
         query_nft_ids: &[U32Target; L],
         // the block hash of the latest block inserted at time of building the circuit
         // i.e. the one who corresponds to the block db proof being verified here.
@@ -131,6 +145,7 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
         query_contract_address.register_as_public_input(b);
         query_user_address.register_as_public_input(b);
         b.register_public_input(query_mapping_slot);
+        b.register_public_input(mapping_slot_length);
         for nft_id in query_nft_ids {
             b.register_public_input(nft_id.0);
         }
@@ -177,13 +192,17 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
         self.mapping_slot_raw()[0]
     }
 
+    fn mapping_slot_length(&self) -> Target {
+        self.mapping_slot_length_raw()[0]
+    }
+
     fn nft_ids(&self) -> &[Target] {
         self.nft_ids_raw()
     }
 
     fn block_header(&self) -> OutputHash {
         OutputHash::from_array(
-            self.block_number_raw()
+            self.block_header_raw()
                 .iter()
                 .map(|x| U32Target(*x))
                 .collect::<Vec<_>>()
@@ -224,6 +243,10 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, GoldilocksField, L> {
 
     fn mapping_slot(&self) -> GoldilocksField {
         self.mapping_slot_raw()[0]
+    }
+
+    fn mapping_slot_length(&self) -> GoldilocksField {
+        self.mapping_slot_length_raw()[0]
     }
 
     fn nft_ids(&self) -> &[GoldilocksField] {

@@ -1,7 +1,13 @@
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
-    hash::{hash_types::NUM_HASH_OUT_ELTS, poseidon::PoseidonHash},
-    iop::{target::Target, witness::PartialWitness},
+    hash::{
+        hash_types::{RichField, NUM_HASH_OUT_ELTS},
+        poseidon::PoseidonHash,
+    },
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::circuit_builder::CircuitBuilder,
 };
 
@@ -10,6 +16,7 @@ use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 use super::AggregationPublicInputs;
 
 pub struct FullNodeWires {}
+
 #[derive(Clone, Debug)]
 pub struct FullNodeCircuit {}
 impl FullNodeCircuit {
@@ -45,15 +52,15 @@ impl FullNodeCircuit {
         );
 
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(to_hash.arr));
-        let new_range_min = b.sub(inputs[0].block_number(), inputs[0].range());
-        let new_range_max = inputs[1].block_number();
-        let new_range = b.sub(new_range_max, new_range_min);
+        let new_range_min_bound = b.sub(inputs[0].block_number(), inputs[0].range());
+        let new_range_max_bound = inputs[1].block_number();
+        let new_range_length = b.sub(new_range_max_bound, new_range_min_bound);
         let digest = b.add_curve_point(&[inputs[0].digest(), inputs[1].digest()]);
 
         AggregationPublicInputs::<Target>::register(
             b,
-            new_range_max,
-            new_range,
+            new_range_max_bound,
+            new_range_length,
             &root,
             &inputs[0].smart_contract_address(),
             &inputs[0].user_address(),
@@ -65,5 +72,5 @@ impl FullNodeCircuit {
         FullNodeWires {}
     }
 
-    pub fn assign(&self, _: &mut PartialWitness<GoldilocksField>, _: &FullNodeWires) {}
+    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &FullNodeWires) {}
 }

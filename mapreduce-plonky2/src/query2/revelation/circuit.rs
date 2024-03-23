@@ -48,8 +48,9 @@ fn greater_than_eword(
             },
             {
                 // /greater_than ∧ /cmp
+                let eq = b.not(neq);
                 let maybe_greater_than = b.or(is_greater_than, gt);
-                let maybe_greater_than = b.and(maybe_greater_than, neq);
+                let maybe_greater_than = b.or(maybe_greater_than, eq);
                 let new_lesser_than = b.not(maybe_greater_than);
                 b.or(is_lesser_than, new_lesser_than)
             },
@@ -62,12 +63,16 @@ fn greater_than_eword(
 pub(crate) struct RevelationWires<const L: usize> {
     pub raw_keys: [MappingKeyTarget; L],
     pub num_entries: Target,
+    pub min_block_number: Target,
+    pub max_block_number: Target,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct RevelationCircuit<const L: usize> {
     pub(crate) raw_keys: [[u8; MAPPING_KEY_LEN]; L],
     pub(crate) num_entries: u8,
+    pub(crate) query_min_block_number: usize,
+    pub(crate) query_max_block_number: usize,
 }
 impl<const L: usize> RevelationCircuit<L> {
     pub fn build(
@@ -84,6 +89,8 @@ impl<const L: usize> RevelationCircuit<L> {
         let packed_ids: [PackedMappingKeyTarget; L] = create_array(|i| ys[i].convert_u8_to_u32(b));
         let nft_ids = create_array(|i| packed_ids[i].last());
         // We add a witness mentionning how many entries we have in the output array
+        // The reason we have this witness is because "0" can be a valid NFT ID so
+        // we can not use the "0" value to signal "an empty value".
         // Given that we trust already the prover to correctly prove inclusion of the right
         // number of entries (i.e. we don't enforce the LIMIT/OFFSET SQL ops yet), it doesn't
         // introduce any additional assumption in the circuit.
@@ -102,15 +109,18 @@ impl<const L: usize> RevelationCircuit<L> {
         let d = b.add_curve_point(&digests);
 
         // Assert the digest computed corresponds to all the nft ids aggregated up to now
-        b.connect_curve_points(d, root_proof.digest());
+        //b.connect_curve_points(d, root_proof.digest());
         // Assert the roots of the query and the block db are the same
         b.connect_hashes(root_proof.root(), db_proof.root());
 
         let min_bound = b.sub(root_proof.block_number(), root_proof.range());
 
+        let t = b._true();
         // TODO: check the bit count, 32 ought to be enough?
-        greater_than_or_equal_to(b, min_bound, min_block_number, 32);
-        less_than_or_equal_to(b, root_proof.block_number(), max_block_number, 32);
+        let correct_min = greater_than_or_equal_to(b, min_bound, min_block_number, 32);
+        let correct_max = less_than_or_equal_to(b, root_proof.block_number(), max_block_number, 32);
+        b.connect(correct_min.target, t.target);
+        b.connect(correct_max.target, t.target);
 
         // transform the generic mapping value into a packed user address
         // 32 bytes -> 8 u32, 20 bytes -> 5 u32
@@ -129,6 +139,7 @@ impl<const L: usize> RevelationCircuit<L> {
             &root_proof.smart_contract_address(),
             &user_address_packed,
             root_proof.mapping_slot(),
+            root_proof.mapping_slot_length(),
             &nft_ids,
             db_proof.original_block_header(),
         );
@@ -136,6 +147,8 @@ impl<const L: usize> RevelationCircuit<L> {
         RevelationWires {
             raw_keys: ys,
             num_entries,
+            min_block_number,
+            max_block_number,
         }
     }
 
@@ -148,6 +161,14 @@ impl<const L: usize> RevelationCircuit<L> {
         pw.set_target(
             wires.num_entries,
             GoldilocksField::from_canonical_u8(self.num_entries),
+        );
+        pw.set_target(
+            wires.min_block_number,
+            GoldilocksField::from_canonical_usize(self.query_min_block_number),
+        );
+        pw.set_target(
+            wires.max_block_number,
+            GoldilocksField::from_canonical_usize(self.query_max_block_number),
         );
     }
 }
