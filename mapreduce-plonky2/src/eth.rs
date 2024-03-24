@@ -3,18 +3,16 @@
 use anyhow::{bail, Ok, Result};
 use eth_trie::{EthTrie, MemoryDB, Node, Trie};
 use ethers::{
-    providers::{Http, JsonRpcClient, Middleware, Provider},
+    providers::{Http, Middleware, Provider},
     types::{
-        spoof::Storage, Address, Block, BlockId, BlockNumber, Bytes, EIP1186ProofResponse,
-        Transaction, TransactionReceipt, H256, U256, U64,
+        Address, Block, BlockId, Bytes, EIP1186ProofResponse, Transaction, TransactionReceipt,
+        H256, U64,
     },
-    utils::hex,
 };
-use plonky2::hash::keccak;
 use rlp::{Encodable, Rlp, RlpStream};
 #[cfg(feature = "ci")]
 use std::env;
-use std::{array::from_fn as create_array, str::FromStr, sync::Arc};
+use std::{array::from_fn as create_array, sync::Arc};
 
 use crate::{mpt_sequential::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
@@ -383,6 +381,8 @@ impl ProofQuery {
 
 #[cfg(test)]
 mod test {
+
+    use std::str::FromStr;
 
     use ethers::types::{BlockNumber, H256, U256};
     use rand::{thread_rng, Rng};
