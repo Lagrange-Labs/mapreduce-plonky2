@@ -288,6 +288,9 @@ mod test {
     #[tokio::test]
     #[serial]
     async fn test_account_inputs_on_mainnet() -> Result<()> {
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_RPC_URL").expect("CI_RPC_URL env var not set");
+        #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
         // TODO: this Mainnet contract address only works with state proof
         let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
