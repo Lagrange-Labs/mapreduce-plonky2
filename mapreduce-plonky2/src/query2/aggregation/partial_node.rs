@@ -15,11 +15,11 @@ use super::AggregationPublicInputs;
 pub struct PartialNodeWires {}
 
 #[derive(Clone, Debug)]
-pub struct PartialNodeCircuit<const L: usize> {}
-impl<const L: usize> PartialNodeCircuit<L> {
+pub struct PartialNodeCircuit {}
+impl PartialNodeCircuit {
     pub fn build(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
-        proved: &AggregationPublicInputs<Target, L>,
+        proved: &AggregationPublicInputs<Target>,
         unproved: HashOutTarget,
         proved_is_right: BoolTarget,
     ) -> PartialNodeWires {
@@ -29,7 +29,7 @@ impl<const L: usize> PartialNodeCircuit<L> {
             proved_is_right,
         );
 
-        AggregationPublicInputs::<Target, L>::register(
+        AggregationPublicInputs::<Target>::register(
             b,
             proved.block_number(),
             proved.range(),

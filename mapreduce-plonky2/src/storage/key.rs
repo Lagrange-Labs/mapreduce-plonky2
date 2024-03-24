@@ -6,7 +6,7 @@ use crate::{
     eth::{left_pad32, StorageSlot},
     keccak::{ByteKeccakWires, InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, PAD_LEN},
-    types::{AddressTarget, ADDRESS_LEN},
+    types::{AddressTarget, ADDRESS_LEN, MAPPING_KEY_LEN},
     utils::keccak256,
 };
 use ethers::types::Address;
@@ -229,8 +229,6 @@ pub struct MappingSlotWires {
     pub(crate) keccak_mpt: KeccakMPTWires,
 }
 
-/// Maximum size of the key for a mapping
-pub const MAPPING_KEY_LEN: usize = 32;
 const MAPPING_INPUT_TOTAL_LEN: usize = 2 * MAPPING_KEY_LEN;
 /// Value but with the padding taken into account.
 const MAPPING_INPUT_PADDED_LEN: usize = PAD_LEN(MAPPING_INPUT_TOTAL_LEN);

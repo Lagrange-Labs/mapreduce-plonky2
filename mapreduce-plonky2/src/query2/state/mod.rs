@@ -30,7 +30,7 @@ pub(crate) mod tests;
 
 /// The witnesses of [ProvenanceCircuit].
 #[derive(Debug, Clone)]
-pub struct ProvenanceWires {
+pub struct StateWires {
     /// Smart contract address (unpacked)
     pub smart_contract_address: PackedSCAddressTarget,
     /// Mapping of the storage slot
@@ -39,7 +39,7 @@ pub struct ProvenanceWires {
     pub length_slot: Target,
     /// Block number
     pub block_number: Target,
-    /// Aggregated range
+    /// Range of the query
     pub range: Target,
     /// The merkle root of the opening.
     pub state_root: HashOutTarget,
@@ -79,8 +79,8 @@ pub struct ProvenanceWires {
 /// - `C` Block leaf hash
 /// - `B_MIN` Minimum block number
 /// - `B_MAX` Maximum block number
-/// - `A` Smart contract address
-/// - `X` User/Owner address
+/// - `A` Smart contract address (packed in u32)
+/// - `X` User/Owner address (packed in u32)
 /// - `M` Mapping slot
 /// - `S` Length of the slot
 /// - `Y` Aggregated storage digest
@@ -91,8 +91,10 @@ pub struct ProvenanceWires {
 /// 2. Open the Merkle path `(P, T)` from `state_leaf` to `Z`
 /// 3. `C := Poseidon(B || H || Z)`
 /// 4. `R == 1`
+///
+/// `DEPTH` is the maximum depth of the state tree in LPN database.
 #[derive(Debug, Clone)]
-pub struct ProvenanceCircuit<const DEPTH: usize, const L: usize, F: RichField> {
+pub struct StateCircuit<const DEPTH: usize, F: RichField> {
     smart_contract_address: PackedSCAddress<F>,
     mapping_slot: F,
     length_slot: F,
@@ -103,7 +105,7 @@ pub struct ProvenanceCircuit<const DEPTH: usize, const L: usize, F: RichField> {
     block_hash: Array<F, PACKED_HASH_LEN>,
 }
 
-impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, L, F> {
+impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
     /// Creates a new instance of the provenance circuit with the provided witness values.
     pub fn new(
         smart_contract_address: PackedSCAddress<F>,
@@ -127,11 +129,12 @@ impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, 
         }
     }
 
-    /// Builds the circuit wires with virtual targets.
+    /// Builds the circuit wires with virtual targets. It takes as argument
+    /// the public inputs of the storage root proof.
     pub fn build(
         cb: &mut CircuitBuilder<GoldilocksField, 2>,
         storage_proof: &StorageInputs<Target>,
-    ) -> ProvenanceWires {
+    ) -> StateWires {
         let x = storage_proof.owner();
         let c = storage_proof.root();
         let digest = storage_proof.digest();
@@ -154,10 +157,11 @@ impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, 
 
         // FIXME the optimized version without the length slot is unimplemented
         // https://www.notion.so/lagrangelabs/Encoding-Specs-ccaa31d1598b4626860e26ac149705c4?pvs=4#fe2b40982352464ba39164cf4b41d301
+        // Currently = H(pack_u32(address) || mapping_slot || length_slot || storageRoot)
         let state_leaf = a
+            .to_targets()
             .arr
-            .iter()
-            .map(|u32_t| u32_t.0)
+            .into_iter()
             .chain(iter::once(m))
             .chain(iter::once(s))
             .chain(c.elements.iter().copied())
@@ -175,14 +179,14 @@ impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, 
         // https://www.notion.so/lagrangelabs/Encoding-Specs-ccaa31d1598b4626860e26ac149705c4?pvs=4#5e8e6f06e2554b0caee4904258cbbca2
         let block_hash = OutputHash::new(cb);
         let block_leaf = iter::once(b)
-            .chain(block_hash.arr.iter().map(|a| a.0))
+            .chain(block_hash.to_targets().arr.into_iter())
             .chain(state_root.elements.iter().copied())
             .collect();
         let block_leaf_hash = cb.hash_n_to_hash_no_pad::<PoseidonHash>(block_leaf);
 
-        AggregationPublicInputs::<_, L>::register(cb, b, r, &block_leaf_hash, &a, &x, m, s, digest);
+        AggregationPublicInputs::register(cb, b, r, &block_leaf_hash, &a, &x, m, s, digest);
 
-        ProvenanceWires {
+        StateWires {
             smart_contract_address: a,
             mapping_slot: m,
             length_slot: s,
@@ -196,7 +200,7 @@ impl<const DEPTH: usize, const L: usize, F: RichField> ProvenanceCircuit<DEPTH, 
     }
 
     /// Assigns the instance witness values to the provided wires.
-    pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &ProvenanceWires) {
+    pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &StateWires) {
         wires
             .smart_contract_address
             .assign(pw, &self.smart_contract_address.arr);

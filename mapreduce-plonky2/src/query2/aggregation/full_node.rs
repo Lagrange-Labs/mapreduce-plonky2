@@ -15,26 +15,15 @@ use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 
 use super::AggregationPublicInputs;
 
-pub struct FullNodeWires {
-    children: [Vec<Target>; 2],
-}
+pub struct FullNodeWires {}
 
 #[derive(Clone, Debug)]
-pub struct FullNodeCircuit<F: RichField, const L: usize> {
-    pub(crate) children: [Vec<F>; 2],
-}
-impl<F: RichField, const L: usize> FullNodeCircuit<F, L> {
-    pub fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> FullNodeWires {
-        let inputs_io = [
-            b.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len()),
-            b.add_virtual_targets(AggregationPublicInputs::<Target, L>::total_len()),
-        ];
-
-        let inputs = [
-            AggregationPublicInputs::<Target, L>::from(inputs_io[0].as_slice()),
-            AggregationPublicInputs::<Target, L>::from(inputs_io[1].as_slice()),
-        ];
-
+pub struct FullNodeCircuit {}
+impl FullNodeCircuit {
+    pub fn build(
+        b: &mut CircuitBuilder<GoldilocksField, 2>,
+        inputs: [AggregationPublicInputs<Target>; 2],
+    ) -> FullNodeWires {
         let to_hash = Array::<Target, { 2 * NUM_HASH_OUT_ELTS }>::try_from(
             inputs[0]
                 .root()
@@ -63,15 +52,15 @@ impl<F: RichField, const L: usize> FullNodeCircuit<F, L> {
         );
 
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(to_hash.arr));
-        let new_range_min = b.sub(inputs[0].block_number(), inputs[0].range());
-        let new_range_max = inputs[1].block_number();
-        let new_range = b.sub(new_range_max, new_range_min);
+        let new_range_min_bound = b.sub(inputs[0].block_number(), inputs[0].range());
+        let new_range_max_bound = inputs[1].block_number();
+        let new_range_length = b.sub(new_range_max_bound, new_range_min_bound);
         let digest = b.add_curve_point(&[inputs[0].digest(), inputs[1].digest()]);
 
-        AggregationPublicInputs::<Target, L>::register(
+        AggregationPublicInputs::<Target>::register(
             b,
-            new_range_max,
-            new_range,
+            new_range_max_bound,
+            new_range_length,
             &root,
             &inputs[0].smart_contract_address(),
             &inputs[0].user_address(),
@@ -80,13 +69,8 @@ impl<F: RichField, const L: usize> FullNodeCircuit<F, L> {
             digest,
         );
 
-        FullNodeWires {
-            children: inputs_io.to_owned(),
-        }
+        FullNodeWires {}
     }
 
-    pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &FullNodeWires) {
-        pw.set_target_arr(&wires.children[0], &self.children[0]);
-        pw.set_target_arr(&wires.children[1], &self.children[1]);
-    }
+    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &FullNodeWires) {}
 }

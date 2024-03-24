@@ -2,6 +2,7 @@
 #![warn(missing_docs)]
 #![feature(generic_const_exprs)]
 #![feature(generic_arg_infer)]
+#![feature(const_for)]
 use anyhow::Result;
 use plonky2::{
     field::extension::Extendable,

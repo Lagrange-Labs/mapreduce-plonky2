@@ -18,13 +18,9 @@ use plonky2_ecgfp5::{
 };
 
 use crate::{
-    array::Targetable,
-    query2::AddressTarget,
-    types::{PackedAddressTarget as PackedSCAddressTarget, CURVE_TARGET_LEN},
+    types::{PackedAddressTarget, PackedValueTarget, CURVE_TARGET_LEN, PACKED_VALUE_LEN},
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
-
-use super::PackedAddressTarget;
 
 pub mod full_node;
 pub mod partial_node;
@@ -38,9 +34,9 @@ pub enum Inputs {
     Range,
     /// C - Merkle hash of the subtree, or poseidon hash of the leaf
     Root,
-    /// A - SMC address
+    /// A - SMC address in compact packed u32
     SmartContractAddress,
-    /// X - onwer's address
+    /// X - onwer's address - treated as generic 32byte value, packed in u32
     UserAddress,
     /// M - mapping slot
     MappingSlot,
@@ -49,26 +45,28 @@ pub enum Inputs {
     /// D - aggregated digest
     Digest,
 }
+const NUM_ELEMENTS: usize = 8;
 impl Inputs {
-    const SIZES: [usize; 8] = [
+    const SIZES: [usize; NUM_ELEMENTS] = [
         1,
         1,
         NUM_HASH_OUT_ELTS,
-        PackedSCAddressTarget::LEN,
         PackedAddressTarget::LEN,
+        PACKED_VALUE_LEN,
         1,
         1,
         CURVE_TARGET_LEN,
     ];
 
     const fn total_len() -> usize {
-        1 + 1
-            + NUM_HASH_OUT_ELTS
-            + PackedSCAddressTarget::LEN
-            + PackedAddressTarget::LEN
-            + 1
-            + 1
-            + CURVE_TARGET_LEN
+        Self::SIZES[0]
+            + Self::SIZES[1]
+            + Self::SIZES[2]
+            + Self::SIZES[3]
+            + Self::SIZES[4]
+            + Self::SIZES[5]
+            + Self::SIZES[6]
+            + Self::SIZES[7]
     }
 
     pub const fn len(&self) -> usize {
@@ -87,14 +85,13 @@ impl Inputs {
     }
 }
 
-/// On top of the habitual T, this type is parametrized by:
-///   - L :: the LIMIT argument of the query
+/// On top of the habitual T
 #[derive(Clone)]
-pub struct AggregationPublicInputs<'input, T: Clone, const L: usize> {
+pub struct AggregationPublicInputs<'input, T: Clone> {
     pub inputs: &'input [T],
 }
 
-impl<'a, T: Clone + Copy + Debug, const L: usize> Debug for AggregationPublicInputs<'a, T, L> {
+impl<'a, T: Clone + Copy + Debug> Debug for AggregationPublicInputs<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "BlockNumber: {:?}\n", self.block_number_raw())?;
         write!(f, "Range: {:?}\n", self.range_raw())?;
@@ -111,14 +108,14 @@ impl<'a, T: Clone + Copy + Debug, const L: usize> Debug for AggregationPublicInp
     }
 }
 
-impl<'a, T: Clone + Copy, const L: usize> From<&'a [T]> for AggregationPublicInputs<'a, T, L> {
+impl<'a, T: Clone + Copy> From<&'a [T]> for AggregationPublicInputs<'a, T> {
     fn from(inputs: &'a [T]) -> Self {
         assert_eq!(inputs.len(), Self::total_len());
         Self { inputs }
     }
 }
 
-impl<'a, T: Clone + Copy, const L: usize> AggregationPublicInputs<'a, T, L> {
+impl<'a, T: Clone + Copy> AggregationPublicInputs<'a, T> {
     fn block_number_raw(&self) -> &[T] {
         &self.inputs[Inputs::BlockNumber.range()]
     }
@@ -157,7 +154,7 @@ impl<'a, T: Clone + Copy, const L: usize> AggregationPublicInputs<'a, T, L> {
     }
 }
 
-impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
+impl<'a> AggregationPublicInputs<'a, Target> {
     pub(crate) fn block_number(&self) -> Target {
         self.block_number_raw()[0]
     }
@@ -172,8 +169,8 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         }
     }
 
-    pub(crate) fn smart_contract_address(&self) -> PackedSCAddressTarget {
-        PackedSCAddressTarget::try_from(
+    pub(crate) fn smart_contract_address(&self) -> PackedAddressTarget {
+        PackedAddressTarget::try_from(
             self.smart_contract_address_raw()
                 .iter()
                 .map(|&t| U32Target(t))
@@ -182,8 +179,8 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         .unwrap()
     }
 
-    pub(crate) fn user_address(&self) -> PackedAddressTarget {
-        PackedAddressTarget::try_from(
+    pub(crate) fn user_address(&self) -> PackedValueTarget {
+        PackedValueTarget::try_from(
             self.user_address_raw()
                 .iter()
                 .map(|&t| U32Target(t))
@@ -209,8 +206,8 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
         block_number: Target,
         range: Target,
         root: &HashOutTarget,
-        smc_address: &PackedSCAddressTarget,
-        user_address: &PackedAddressTarget,
+        smc_address: &PackedAddressTarget,
+        user_address: &PackedValueTarget,
         mapping_slot: Target,
         mapping_slot_length: Target,
         digest: CurveTarget,
@@ -226,7 +223,7 @@ impl<'a, const L: usize> AggregationPublicInputs<'a, Target, L> {
     }
 }
 
-impl<'a, const L: usize> AggregationPublicInputs<'a, GoldilocksField, L> {
+impl<'a> AggregationPublicInputs<'a, GoldilocksField> {
     pub fn block_number(&self) -> GoldilocksField {
         self.block_number_raw()[0]
     }
