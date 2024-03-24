@@ -42,6 +42,7 @@ impl<const L: usize> RevelationCircuit<L> {
         db_proof: BlockPublicInputs<Target>,
         root_proof: AggregationPublicInputs<Target>,
     ) -> RevelationWires<L> {
+        let t = b._true();
         // Create the empty root constant matching the given MAX_DEPTH of the Poseidon storage tree
         let empty_root = HashOutTarget::from_vec(
             empty_merkle_root::<GoldilocksField, 2, MAX_DEPTH>()
@@ -75,6 +76,15 @@ impl<const L: usize> RevelationCircuit<L> {
             let p = b.map_to_curve_point(&packed_ids[i].to_targets().arr);
             let it = b.constant(GoldilocksField::from_canonical_usize(i));
             let should_be_included = less_than(b, it, num_entries, 8);
+            // also check if values are unique, i.e. we expect values in sorted order so we just check
+            // diff is positive.
+            if i > 0 {
+                let previous = nft_ids[i - 1];
+                let curr = nft_ids[i];
+                let ordered = less_than(b, previous.0, curr.0, 32);
+                let should_be_ordered = b.select(should_be_included, ordered.target, t.target);
+                b.connect(should_be_ordered, t.target);
+            }
             digests.push(b.curve_select(should_be_included, p, p0));
         }
         let d = b.add_curve_point(&digests);

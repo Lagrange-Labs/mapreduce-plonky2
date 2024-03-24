@@ -167,9 +167,6 @@ fn test_query2_mini_tree() {
     let (right_value, right_leaf_proof_io) =
         run_state_circuit_with_slot(0xbeef, SLOT_LENGTH, MAPPING_SLOT);
 
-    let num_entries = 2;
-    let values = [left_value, right_value, EMPTY_NFT_ID, EMPTY_NFT_ID];
-
     let left_leaf_pi = AggregationPublicInputs::<'_, F>::from(left_leaf_proof_io.as_slice());
     let right_leaf_pi = AggregationPublicInputs::<'_, F>::from(right_leaf_proof_io.as_slice());
 
@@ -224,6 +221,19 @@ fn test_query2_mini_tree() {
         root_proof.block_number() - root_proof.range() - GoldilocksField::ONE;
     let query_max_block_number = root_proof.block_number() + GoldilocksField::ONE;
 
+    let num_entries = 2;
+    // entries sorted !
+    assert!(
+        convert_u8_to_u32_slice(&right_value)
+            .last()
+            .cloned()
+            .unwrap()
+            < convert_u8_to_u32_slice(&left_value)
+                .last()
+                .cloned()
+                .unwrap()
+    );
+    let values = [right_value, left_value, EMPTY_NFT_ID, EMPTY_NFT_ID];
     let revelation_circuit = RevelationCircuit::<L> {
         raw_keys: values,
         num_entries,
@@ -251,7 +261,8 @@ fn test_query2_mini_tree() {
         .last()
         .cloned()
         .unwrap();
-    let exp_values = [reduced_left_value, reduced_right_value, 0, 0];
+    // ordered values
+    let exp_values = [reduced_right_value, reduced_left_value, 0, 0];
     let exp_values_f = exp_values
         .into_iter()
         .map(F::from_canonical_u32)
@@ -277,4 +288,5 @@ fn test_query2_mini_tree() {
     );
     assert_eq!(pi.mapping_slot(), root_proof.mapping_slot());
     assert_eq!(pi.mapping_slot_length(), root_proof.mapping_slot_length());
+    //
 }
