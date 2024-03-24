@@ -109,7 +109,7 @@ impl<const L: usize> RevelationCircuit<L> {
         let d = b.add_curve_point(&digests);
 
         // Assert the digest computed corresponds to all the nft ids aggregated up to now
-        //b.connect_curve_points(d, root_proof.digest());
+        b.connect_curve_points(d, root_proof.digest());
         // Assert the roots of the query and the block db are the same
         b.connect_hashes(root_proof.root(), db_proof.root());
 

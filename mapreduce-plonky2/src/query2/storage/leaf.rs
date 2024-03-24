@@ -13,7 +13,7 @@ use crate::{
     circuit::UserCircuit,
     group_hashing::CircuitBuilderGroupHashing,
     query2::{storage::public_inputs::PublicInputs, AddressTarget, PackedAddressTarget},
-    types::{MAPPING_KEY_LEN, VALUE_LEN},
+    types::{MappingKeyTarget, MAPPING_KEY_LEN, VALUE_LEN},
     utils::convert_u8_to_u32_slice,
 };
 
@@ -44,7 +44,7 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
     type Wires = InclusionWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
-        let key = Array::<Target, MAPPING_KEY_LEN>::new(b);
+        let key = MappingKeyTarget::new(b);
         let key_u32 = key.convert_u8_to_u32(b);
         let value = Array::<Target, VALUE_LEN>::new(b);
         let value_u32 = value.convert_u8_to_u32(b);

@@ -34,7 +34,7 @@ use crate::{
     group_hashing::{field_to_curve::ToCurvePoint, map_to_curve_point},
     query2::{EWord, EWORD_LEN},
     storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
-    types::{MAPPING_KEY_LEN, PACKED_VALUE_LEN, VALUE_LEN},
+    types::{MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN, PACKED_VALUE_LEN, VALUE_LEN},
     utils::{convert_u8_to_u32_slice, test::random_vector},
 };
 
@@ -312,16 +312,21 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
     ) {
         let mut pis = [GoldilocksField::ZERO; PublicInputs::<GoldilocksField>::TOTAL_LEN];
         let rng = &mut StdRng::seed_from_u64(seed);
-        let leaf_key = random_vector(MAPPING_KEY_LEN);
-        let leaf_key_f: [GoldilocksField; MAPPING_KEY_LEN] =
-            array::from_fn(|i| F::from_canonical_u8(leaf_key[i]));
+        // generate a fake NFT ID within u32 and in big endian encoding
+        let leaf_key = std::iter::repeat(0)
+            .take(MAPPING_KEY_LEN - 4)
+            .chain(rng.next_u32().to_be_bytes().into_iter())
+            .collect::<Vec<_>>();
+        let packed_leaf = convert_u8_to_u32_slice(&leaf_key);
+        let packed_leaf_f: [GoldilocksField; PACKED_MAPPING_KEY_LEN] =
+            array::from_fn(|i| F::from_canonical_u32(packed_leaf[i]));
 
         // leaf value == owner address
         let leaf_value: [GoldilocksField; PACKED_VALUE_LEN] =
             array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
 
         let root = F::rand_vec(NUM_HASH_OUT_ELTS).try_into().unwrap();
-        let digest = map_to_curve_point::<F>(&leaf_key_f).to_weierstrass();
+        let digest = map_to_curve_point::<F>(&packed_leaf_f).to_weierstrass();
         let digest_fs = digest
             .x
             .0
