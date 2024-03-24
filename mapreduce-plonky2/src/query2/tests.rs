@@ -31,13 +31,13 @@ use plonky2::{
 };
 use rand::{rngs::StdRng, SeedableRng};
 
-use crate::{block::public_inputs::PublicInputs as BlockPublicInputs, circuit::UserCircuit};
+use crate::{block::public_inputs::PublicInputs as BlockDBPublicInputs, circuit::UserCircuit};
 
 use super::{
-    aggregation::{
+    block::{
         full_node::{FullNodeCircuit, FullNodeWires},
         partial_node::{PartialNodeCircuit, PartialNodeWires},
-        AggregationPublicInputs,
+        BlockPublicInputs as BlockQueryPublicInputs,
     },
     revelation::circuit::{RevelationCircuit, RevelationWires},
     EWordTarget, EWORD_LEN,
@@ -50,7 +50,7 @@ type F = <C as GenericConfig<D>>::F;
 #[derive(Debug, Clone)]
 struct FullNodeCircuitValidator<'a> {
     validated: FullNodeCircuit,
-    children: &'a [AggregationPublicInputs<'a, F>; 2],
+    children: &'a [BlockQueryPublicInputs<'a, F>; 2],
 }
 
 impl UserCircuit<GoldilocksField, D> for FullNodeCircuitValidator<'_> {
@@ -58,11 +58,11 @@ impl UserCircuit<GoldilocksField, D> for FullNodeCircuitValidator<'_> {
 
     fn build(c: &mut CircuitBuilder<GoldilocksField, D>) -> Self::Wires {
         let child_inputs = [
-            c.add_virtual_targets(AggregationPublicInputs::<Target>::total_len()),
-            c.add_virtual_targets(AggregationPublicInputs::<Target>::total_len()),
+            c.add_virtual_targets(BlockQueryPublicInputs::<Target>::total_len()),
+            c.add_virtual_targets(BlockQueryPublicInputs::<Target>::total_len()),
         ];
         let children_io = std::array::from_fn(|i| {
-            AggregationPublicInputs::<Target>::from(child_inputs[i].as_slice())
+            BlockQueryPublicInputs::<Target>::from(child_inputs[i].as_slice())
         });
         let wires = FullNodeCircuit::build(c, children_io);
         (wires, child_inputs)
@@ -78,7 +78,7 @@ impl UserCircuit<GoldilocksField, D> for FullNodeCircuitValidator<'_> {
 #[derive(Clone, Debug)]
 struct PartialNodeCircuitValidator<'a> {
     validated: PartialNodeCircuit,
-    child_proof: AggregationPublicInputs<'a, F>,
+    child_proof: BlockQueryPublicInputs<'a, F>,
     // the hash of a sibling node in the tree that don't contain any results, i.e.
     // there is no proofs to verify for this children
     sibling_hash: Vec<F>,
@@ -89,9 +89,9 @@ impl UserCircuit<F, D> for PartialNodeCircuitValidator<'_> {
 
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
         let child_to_prove_pi =
-            c.add_virtual_targets(AggregationPublicInputs::<Target>::total_len());
+            c.add_virtual_targets(BlockQueryPublicInputs::<Target>::total_len());
         let child_to_prove_io =
-            AggregationPublicInputs::<Target>::from(child_to_prove_pi.as_slice());
+            BlockQueryPublicInputs::<Target>::from(child_to_prove_pi.as_slice());
         let proven_child_hash_targets = c.add_virtual_targets(NUM_HASH_OUT_ELTS);
         let child_to_prove_position_target = c.add_virtual_target();
         let wires = PartialNodeCircuit::build(
@@ -120,8 +120,8 @@ impl UserCircuit<F, D> for PartialNodeCircuitValidator<'_> {
 #[derive(Clone, Debug)]
 struct RevelationCircuitValidator<'a, const L: usize, const MAX_DEPTH: usize> {
     validated: RevelationCircuit<L>,
-    db_proof: BlockPublicInputs<'a, F>,
-    root_proof: AggregationPublicInputs<'a, F>,
+    db_proof: BlockDBPublicInputs<'a, F>,
+    root_proof: BlockQueryPublicInputs<'a, F>,
 }
 impl<const L: usize, const MAX_DEPTH: usize> UserCircuit<F, D>
     for RevelationCircuitValidator<'_, L, MAX_DEPTH>
@@ -129,11 +129,11 @@ impl<const L: usize, const MAX_DEPTH: usize> UserCircuit<F, D>
     type Wires = (RevelationWires<L>, Vec<Target>, Vec<Target>);
 
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-        let db_proof_io = c.add_virtual_targets(BlockPublicInputs::<Target>::TOTAL_LEN);
-        let db_proof_pi = BlockPublicInputs::<Target>::from(db_proof_io.as_slice());
+        let db_proof_io = c.add_virtual_targets(BlockDBPublicInputs::<Target>::TOTAL_LEN);
+        let db_proof_pi = BlockDBPublicInputs::<Target>::from(db_proof_io.as_slice());
 
-        let root_proof_io = c.add_virtual_targets(AggregationPublicInputs::<Target>::total_len());
-        let root_proof_pi = AggregationPublicInputs::<Target>::from(root_proof_io.as_slice());
+        let root_proof_io = c.add_virtual_targets(BlockQueryPublicInputs::<Target>::total_len());
+        let root_proof_pi = BlockQueryPublicInputs::<Target>::from(root_proof_io.as_slice());
 
         let wires = RevelationCircuit::<L>::build::<MAX_DEPTH>(c, db_proof_pi, root_proof_pi);
         (wires, db_proof_io, root_proof_io)
@@ -167,8 +167,8 @@ fn test_query2_mini_tree() {
     let (right_value, right_leaf_proof_io) =
         run_state_circuit_with_slot(0xbeef, SLOT_LENGTH, MAPPING_SLOT);
 
-    let left_leaf_pi = AggregationPublicInputs::<'_, F>::from(left_leaf_proof_io.as_slice());
-    let right_leaf_pi = AggregationPublicInputs::<'_, F>::from(right_leaf_proof_io.as_slice());
+    let left_leaf_pi = BlockQueryPublicInputs::<'_, F>::from(left_leaf_proof_io.as_slice());
+    let right_leaf_pi = BlockQueryPublicInputs::<'_, F>::from(right_leaf_proof_io.as_slice());
 
     let middle_proof = run_circuit::<F, D, C, _>(FullNodeCircuitValidator {
         validated: FullNodeCircuit {},
@@ -185,13 +185,13 @@ fn test_query2_mini_tree() {
 
     let top_proof = run_circuit::<F, D, C, _>(PartialNodeCircuitValidator {
         validated: PartialNodeCircuit {},
-        child_proof: AggregationPublicInputs::<F>::from(middle_proof.public_inputs.as_slice()),
+        child_proof: BlockQueryPublicInputs::<F>::from(middle_proof.public_inputs.as_slice()),
         sibling_hash: proved.elements.to_vec(),
         child_to_prove_is_left: F::from_bool(false),
     });
 
     let root_proof =
-        AggregationPublicInputs::<GoldilocksField>::from(top_proof.public_inputs.as_slice());
+        BlockQueryPublicInputs::<GoldilocksField>::from(top_proof.public_inputs.as_slice());
 
     let prev_root = empty_merkle_root::<GoldilocksField, 2, MAX_DEPTH>();
     let new_root = root_proof.root().elements;
@@ -204,14 +204,14 @@ fn test_query2_mini_tree() {
     // A rendom value for the block header
     let block_header: [F; PACKED_HASH_LEN] = std::array::from_fn(F::from_canonical_usize);
 
-    let block_data = BlockPublicInputs::from_parts(
+    let block_data = BlockDBPublicInputs::from_parts(
         &prev_root.elements,
         &new_root,
         first_block,
         last_block,
         &block_header,
     );
-    let db_proof = BlockPublicInputs::<F>::from(block_data.as_slice());
+    let db_proof = BlockDBPublicInputs::<F>::from(block_data.as_slice());
 
     // These are the _query_ min and max range, NOT necessarily the range aggregated
     // we can choose anything as long as they satisfy the constraints when aggregating

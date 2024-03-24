@@ -13,9 +13,9 @@ use plonky2::{
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 
 use crate::{
-    block::{empty_merkle_root, public_inputs::PublicInputs as BlockPublicInputs},
+    block::{empty_merkle_root, public_inputs::PublicInputs as BlockDBPublicInputs},
     group_hashing::CircuitBuilderGroupHashing,
-    query2::aggregation::AggregationPublicInputs,
+    query2::block::BlockPublicInputs as BlockQueryPublicInputs,
     types::{MappingKeyTarget, PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
     utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to},
 };
@@ -30,7 +30,7 @@ pub(crate) struct RevelationWires<const L: usize> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct RevelationCircuit<const L: usize> {
+pub struct RevelationCircuit<const L: usize> {
     pub(crate) packed_keys: [[u32; PACKED_MAPPING_KEY_LEN]; L],
     pub(crate) num_entries: u8,
     pub(crate) query_min_block_number: usize,
@@ -39,8 +39,8 @@ pub(crate) struct RevelationCircuit<const L: usize> {
 impl<const L: usize> RevelationCircuit<L> {
     pub fn build<const MAX_DEPTH: usize>(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
-        db_proof: BlockPublicInputs<Target>,
-        root_proof: AggregationPublicInputs<Target>,
+        db_proof: BlockDBPublicInputs<Target>,
+        root_proof: BlockQueryPublicInputs<Target>,
     ) -> RevelationWires<L> {
         let t = b._true();
         // Create the empty root constant matching the given MAX_DEPTH of the Poseidon storage tree

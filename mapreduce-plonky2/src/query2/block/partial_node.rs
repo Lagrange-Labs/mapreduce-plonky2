@@ -10,7 +10,7 @@ use plonky2::{
 
 use crate::poseidon::hash_maybe_swap;
 
-use super::AggregationPublicInputs;
+use super::BlockPublicInputs;
 
 pub struct PartialNodeWires {}
 
@@ -19,7 +19,7 @@ pub struct PartialNodeCircuit {}
 impl PartialNodeCircuit {
     pub fn build(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
-        proved: &AggregationPublicInputs<Target>,
+        proved: &BlockPublicInputs<Target>,
         unproved: HashOutTarget,
         proved_is_right: BoolTarget,
     ) -> PartialNodeWires {
@@ -29,7 +29,7 @@ impl PartialNodeCircuit {
             proved_is_right,
         );
 
-        AggregationPublicInputs::<Target>::register(
+        BlockPublicInputs::<Target>::register(
             b,
             proved.block_number(),
             proved.range(),

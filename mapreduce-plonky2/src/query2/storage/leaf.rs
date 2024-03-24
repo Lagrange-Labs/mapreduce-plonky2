@@ -22,7 +22,7 @@ use crate::{
 
 const PACKED_KEY_SIZE: usize = MAPPING_KEY_LEN / 4;
 
-pub struct InclusionWires {
+pub struct LeafWires {
     pub packed_mapping_key: Array<U32Target, PACKED_MAPPING_KEY_LEN>,
     pub packed_mapping_value: Array<U32Target, PACKED_VALUE_LEN>,
 }
@@ -35,7 +35,7 @@ pub struct LeafCircuit {
 }
 
 impl LeafCircuit {
-    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &InclusionWires) {
+    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &LeafWires) {
         wires.packed_mapping_key.assign_from_data(pw, &self.mapping_key);
         wires
             .packed_mapping_value
@@ -44,7 +44,7 @@ impl LeafCircuit {
 }
 
 impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
-    type Wires = InclusionWires;
+    type Wires = LeafWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
         let key_u32 = PackedMappingKeyTarget::new(b);
@@ -60,7 +60,7 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
         // we expose the value, in compact form to the public inputs, it gets propagated
         // up the computation tree
         PublicInputs::<GoldilocksField>::register(b, &root, &digest, &value_u32);
-        InclusionWires {
+        LeafWires {
             packed_mapping_key: key_u32,
             packed_mapping_value: value_u32,
         }

@@ -1,19 +1,46 @@
+use anyhow::Result;
+use recursion_framework::serialization::{deserialize, serialize};
+use serde::{Deserialize, Serialize};
 use std::array::from_fn as create_array;
 
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::target::Target,
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitData},
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 use crate::{
+    api::{C, D, F},
     keccak::OutputHash,
     types::{PackedAddressTarget, CURVE_TARGET_LEN},
 };
 
+pub use self::circuit::RevelationCircuit;
+
 pub mod circuit;
+#[derive(Serialize, Deserialize)]
+pub struct Parameters {
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    data: CircuitData<F, C, D>,
+    // recursive target verifier etc
+}
+
+impl Parameters {
+    pub fn build() -> Self {
+        todo!()
+    }
+}
+
+pub fn generate_proof(
+    params: &Parameters,
+    mapping_keys: Vec<Vec<u8>>,
+    query_min_block: usize,
+    query_max_block: usize,
+) -> Result<Vec<u8>> {
+    todo!()
+}
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]

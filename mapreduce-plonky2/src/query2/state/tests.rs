@@ -20,15 +20,15 @@ use crate::{
     array::Array,
     circuit::{test::run_circuit, UserCircuit},
     query2::{
-        aggregation::AggregationPublicInputs,
-        storage::public_inputs::PublicInputs as StorageInputs, EWord, PackedSCAddress,
+        block::BlockPublicInputs, storage::public_inputs::PublicInputs as StorageInputs, EWord,
+        PackedSCAddress,
     },
 };
 
 use super::StateWires;
 
 const DEPTH: usize = 3;
-type PublicInputs<'a> = AggregationPublicInputs<'a, GoldilocksField>;
+type PublicInputs<'a> = BlockPublicInputs<'a, GoldilocksField>;
 type StateCircuit = super::StateCircuit<DEPTH, GoldilocksField>;
 
 pub(crate) fn run_state_circuit<'a>(seed: u64) -> ([u8; MAPPING_KEY_LEN], Vec<GoldilocksField>) {
@@ -46,7 +46,7 @@ pub(crate) fn run_state_circuit_with_slot<'a>(
     let circuit =
         TestStateCircuit::from_seed_and_slot(seed, slot_length, mapping_slot, &storage_pi);
     let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit.clone());
-    let pi = AggregationPublicInputs::<'_, GoldilocksField>::from(proof.public_inputs.as_slice());
+    let pi = BlockPublicInputs::<'_, GoldilocksField>::from(proof.public_inputs.as_slice());
     assert_eq!(pi.block_number(), circuit.block_number);
     assert_eq!(pi.range(), GoldilocksField::ONE);
     assert_eq!(pi.root(), circuit.root);
@@ -222,7 +222,7 @@ fn prove_and_verify_state_circuit() {
     let pi = run_state_circuit(0xdead);
 }
 
-impl<'a, F: RichField> AggregationPublicInputs<'a, F> {
+impl<'a, F: RichField> BlockPublicInputs<'a, F> {
     pub fn values_from_seed(seed: u64) -> [F; Self::total_len()] {
         let rng = &mut StdRng::seed_from_u64(seed);
 

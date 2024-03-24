@@ -13,7 +13,7 @@ use plonky2::{
 
 use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 
-use super::AggregationPublicInputs;
+use super::BlockPublicInputs;
 
 pub struct FullNodeWires {}
 
@@ -22,7 +22,7 @@ pub struct FullNodeCircuit {}
 impl FullNodeCircuit {
     pub fn build(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
-        inputs: [AggregationPublicInputs<Target>; 2],
+        inputs: [BlockPublicInputs<Target>; 2],
     ) -> FullNodeWires {
         let to_hash = Array::<Target, { 2 * NUM_HASH_OUT_ELTS }>::try_from(
             inputs[0]
@@ -57,7 +57,7 @@ impl FullNodeCircuit {
         let new_range_length = b.sub(new_range_max_bound, new_range_min_bound);
         let digest = b.add_curve_point(&[inputs[0].digest(), inputs[1].digest()]);
 
-        AggregationPublicInputs::<Target>::register(
+        BlockPublicInputs::<Target>::register(
             b,
             new_range_max_bound,
             new_range_length,
