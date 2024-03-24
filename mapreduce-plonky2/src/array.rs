@@ -75,7 +75,7 @@ impl<T: Default + Clone + Debug, const MAX_LEN: usize> Vector<T, MAX_LEN> {
         }
     }
     pub fn from_vec(d: &[T]) -> Result<Self> {
-        let mut fields = d
+        let fields = d
             .iter()
             .cloned()
             .chain(std::iter::repeat(T::default()))
@@ -119,7 +119,7 @@ where
         let arr = Array::<T, MAX_LEN>::new(b);
         Self { arr, real_len }
     }
-    pub fn assign<F: RichField, V: ToField<F>>(
+    pub(crate) fn assign<F: RichField, V: ToField<F>>(
         &self,
         pw: &mut PartialWitness<F>,
         value: &Vector<V, MAX_LEN>,
@@ -137,6 +137,38 @@ impl<const MAX_LEN: usize> VectorWire<Target, MAX_LEN> {
         b: &mut CircuitBuilder<F, D>,
     ) {
         self.arr.assert_bytes(b)
+    }
+
+    /// Reads the vector up to its real len, and left pad the result up to PAD_LEN.
+    /// For example, if given vector is [77, 66, 0, 0] with real_len = 2
+    /// the output is [0, 0, 77, 66].
+    /// It returns an array because the result does not respect the VectorWire semantic anymore,
+    /// i.e. real_len should be read from the right side. This is still useful as it allows
+    /// for example one to read the integer in big endian format from this array without
+    /// knowing the real length. In general, it allows converting from BE or LE easily without much trouble.
+    /// WARNING : PAD_LEN MUST be greater or equal than the real length of the vector, otherwise,
+    /// the result is not guaranteed to be correct.
+    /// NOTE: The reason this function exists is because when extracting value from MPT leaf node
+    /// we read always 32 bytes, but there is no guarantee that what comes after the data is zero
+    /// padded. This function ensures the data is left padded with zeros so the value extracted
+    /// is still in big endian and correctly left padded.
+    pub fn normalize_left<F: RichField + Extendable<D>, const D: usize, const PAD_LEN: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+    ) -> Array<Target, PAD_LEN> {
+        let zero = b.zero();
+        let pad_t = b.constant(F::from_canonical_usize(PAD_LEN));
+        Array {
+            arr: create_array(|i| {
+                let it = b.constant(F::from_canonical_usize(i));
+                let jt = b.sub(pad_t, it);
+                let is_lt =
+                    less_than_or_equal_to(b, jt, self.real_len, (MAX_LEN.ilog2() + 1) as usize);
+                let idx = b.sub(self.real_len, jt);
+                let val = self.arr.value_at_failover(b, idx);
+                b.select(is_lt, val, zero)
+            }),
+        }
     }
 }
 
@@ -330,12 +362,14 @@ where
     pub fn assign_bytes<F: RichField>(&self, pw: &mut PartialWitness<F>, array: &[u8; SIZE]) {
         self.assign(pw, &create_array(|i| F::from_canonical_u8(array[i])))
     }
-    /// Registers every element as a public input consecutively
-    pub fn register_as_public_input<F: RichField + Extendable<D>, const D: usize>(
+
+    /// Returns the last `TAKE` elements of the array, similar to `skip` on iterators.
+    pub fn take_last<F: RichField + Extendable<D>, const D: usize, const TAKE: usize>(
         &self,
-        b: &mut CircuitBuilder<F, D>,
-    ) {
-        b.register_public_inputs(&self.arr.iter().map(|v| v.to_target()).collect::<Vec<_>>());
+    ) -> Array<T, TAKE> {
+        Array {
+            arr: create_array(|i| self.arr[SIZE - TAKE + i]),
+        }
     }
 
     /// Conditionally select this array if condition is true or the other array
@@ -514,11 +548,18 @@ where
             arr: create_array(|i| self.arr[SIZE - 1 - i]),
         }
     }
-    pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
+    pub fn register_as_public_input<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
     ) {
         b.register_public_inputs(&self.arr.iter().map(|t| t.to_target()).collect::<Vec<_>>());
+    }
+
+    pub fn into_vec(&self, real_len: Target) -> VectorWire<T, SIZE> {
+        VectorWire {
+            arr: self.clone(),
+            real_len,
+        }
     }
 }
 /// Returns the size of the array in 32-bit units, rounded up.
@@ -529,14 +570,14 @@ pub(crate) const fn L32(a: usize) -> usize {
         a / 4
     }
 }
-impl<const SIZE: usize> Array<Target, SIZE>
-where
-    [(); L32(SIZE)]:,
-{
+impl<const SIZE: usize> Array<Target, SIZE> {
     pub fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
-    ) -> Array<U32Target, { L32(SIZE) }> {
+    ) -> Array<U32Target, { L32(SIZE) }>
+    where
+        [(); L32(SIZE)]:,
+    {
         const TWO_POWER_8: usize = 256;
         const TWO_POWER_16: usize = 65536;
         const TWO_POWER_24: usize = 16777216;
@@ -616,6 +657,7 @@ mod test {
     use crate::{
         array::{Array, ToField, Vector, VectorWire, L32},
         circuit::{test::run_circuit, UserCircuit},
+        eth::{left_pad, left_pad32},
         utils::{convert_u8_to_u32_slice, find_index_subvector, test::random_vector},
     };
     const D: usize = 2;
@@ -1055,5 +1097,66 @@ mod test {
             run_circuit::<F, D, C, _>(circuit);
         });
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_normalize_left() {
+        #[derive(Debug, Clone)]
+        struct TestNormalizeLeft<const VLEN: usize, const PAD_LEN: usize> {
+            input: Vector<u8, VLEN>,
+            exp: [u8; PAD_LEN],
+        }
+
+        impl<const VLEN: usize, const PAD_LEN: usize> UserCircuit<F, D>
+            for TestNormalizeLeft<VLEN, PAD_LEN>
+        {
+            type Wires = (VectorWire<Target, VLEN>, Array<Target, PAD_LEN>);
+
+            fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let vec = VectorWire::new(c);
+                let exp_out = Array::<Target, PAD_LEN>::new(c);
+                let comp_out: Array<Target, PAD_LEN> = vec.normalize_left(c);
+                exp_out.enforce_equal(c, &comp_out);
+                (vec, exp_out)
+            }
+
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires.0.assign(pw, &self.input);
+                wires.1.assign_bytes(pw, &self.exp);
+            }
+        }
+
+        {
+            const VLEN: usize = 4;
+            const PAD: usize = 4;
+            let inp = [77, 66, 55];
+            let exp = [00, 77, 66, 55];
+            run_circuit::<F, D, C, _>(TestNormalizeLeft::<VLEN, PAD> {
+                input: Vector::from_vec(&inp.to_vec()).unwrap(),
+                exp,
+            });
+        }
+        {
+            const VLEN: usize = 7;
+            const PAD: usize = 5;
+            let real_len = 4;
+            let real_data = random_vector(real_len);
+            // create a vector where the rest of the buffer is filled with garbage, since
+            // it is not enforced in circuit what is left _after_ the buffer is zero, this prover
+            // does it but it can be anything.
+            let inp = Vector {
+                arr: real_data
+                    .iter()
+                    .copied()
+                    .chain(std::iter::repeat_with(|| thread_rng().gen()))
+                    .take(VLEN)
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+                real_len,
+            };
+            let exp = left_pad::<PAD>(&real_data);
+            run_circuit::<F, D, C, _>(TestNormalizeLeft::<VLEN, PAD> { input: inp, exp });
+        }
     }
 }

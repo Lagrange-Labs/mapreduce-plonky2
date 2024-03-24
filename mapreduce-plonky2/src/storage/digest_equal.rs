@@ -73,7 +73,7 @@ impl<'a> PublicInputs<'a, Target> {
         length_slot: Target,
     ) {
         cb.register_curve_public_input(*digest);
-        mpt_root_hash.register_as_input(cb);
+        mpt_root_hash.register_as_public_input(cb);
         cb.register_public_inputs(&merkle_root_hash.elements);
         cb.register_public_input(mapping_slot);
         cb.register_public_input(length_slot);
@@ -256,24 +256,38 @@ impl TryInto<(ProofWithVK, ProofWithPublicInputs<F, C, D>)> for CircuitInput {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::{
         api::tests::TestDummyCircuit,
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        utils::test::random_vector,
+        eth::{left_pad32, ProofQuery, StorageSlot},
+        mpt_sequential::test::generate_random_storage_mpt,
+        storage::{self, key::MappingSlot},
+        utils::{convert_u8_to_u32_slice, keccak256, test::random_vector},
+    };
+    use eth_trie::Trie;
+    use ethers::{
+        providers::{Http, Provider},
+        types::{spoof::storage, Address},
     };
     use plonky2::{
         field::types::{Field, Sample},
+        hash::keccak,
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder,
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
+    use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use rand::thread_rng;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
+    use serial_test::serial;
+    use std::array;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -422,5 +436,72 @@ mod tests {
         pi[MerklePublicInputs::<F>::D_IDX + 2 * N] = F::from_bool(digest.is_inf);
 
         pi
+    }
+    use anyhow::Result;
+    use storage::lpn::{leaf_digest_for_mapping, leaf_hash_for_mapping};
+    #[tokio::test]
+    #[serial]
+    async fn test_mapping_extraction_equivalence_pudgy() -> Result<()> {
+        // first pinguin holder https://dune.com/queries/2450476/4027653
+        // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
+        // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
+        let mapping_value =
+            Address::from_str("0x188B264AA1456B869C3a92eeeD32117EbB835f47").unwrap();
+        let nft_id: u32 = 1116;
+        let mapping_key = left_pad32(&nft_id.to_be_bytes());
+        let url = "https://eth.llamarpc.com";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // extracting from
+        // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol
+        // assuming it's using ERC731Enumerable that inherits ERC721
+        let mapping_slot = 2;
+        // pudgy pinguins
+        let pudgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_mapping_slot(pudgy_address, mapping_slot, mapping_key.to_vec());
+        let res = query.query_mpt_proof(&provider, None).await?;
+        let raw_address = ProofQuery::verify_storage_proof(&res)?;
+        // the value is actually RLP encoded !
+        let decoded_address: Vec<u8> = rlp::decode(&raw_address).unwrap();
+        // this is read in the same order
+        let found_address = Address::from_slice(&decoded_address.into_iter().collect::<Vec<u8>>());
+        assert_eq!(found_address, mapping_value);
+        let slot = MappingSlot::new(mapping_slot as u8, mapping_key.to_vec());
+
+        let leaf_node = res.storage_proof[0].proof.last().unwrap();
+        let mpt_circuit = storage::mapping::leaf::LeafCircuit::<80> {
+            node: leaf_node.to_vec(),
+            slot,
+        };
+        let mpt_proof = run_circuit::<F, D, C, _>(mpt_circuit);
+        let mpt_pi = storage::mapping::PublicInputs::from(&mpt_proof.public_inputs);
+        // Check hash
+        let computed_hash = mpt_pi.root_hash();
+        assert_eq!(
+            convert_u8_to_u32_slice(&keccak256(leaf_node)),
+            computed_hash
+        );
+        // Check the digest
+        let expected_digest = leaf_digest_for_mapping(&mapping_key, mapping_value.as_bytes());
+        let circuit_digest = mpt_pi.accumulator();
+        println!("left_pad32(mapping_key) = \t{:?}", left_pad32(&mapping_key));
+
+        assert_eq!(expected_digest.to_weierstrass(), circuit_digest);
+
+        let exp_hash = HashOut::from_bytes(&leaf_hash_for_mapping(
+            &mapping_key,
+            mapping_value.as_bytes(),
+        ));
+        // use the _same_ inputs to the lpn leaf circuit
+        let lpn_circuit = storage::lpn::leaf::LeafCircuit {
+            mapping_key,
+            mapping_value: left_pad32(mapping_value.as_bytes()),
+        };
+        let lpn_proof = run_circuit::<F, D, C, _>(lpn_circuit);
+        let lpn_pi = storage::lpn::PublicInputs::from(lpn_proof.public_inputs.as_slice());
+        assert_eq!(expected_digest.to_weierstrass(), lpn_pi.digest());
+        assert_eq!(&exp_hash, &lpn_pi.root_hash());
+        Ok(())
     }
 }

@@ -130,10 +130,16 @@ mod test {
         let (k2, v2) = gen_input("0badf00d", "deedbaaf");
         let params = PublicParameters::build();
         let p1 = params
-            .generate_proof(Input::Leaf(LeafCircuit { key: k1, value: v1 }))
+            .generate_proof(Input::Leaf(LeafCircuit {
+                mapping_key: k1,
+                mapping_value: v1,
+            }))
             .unwrap();
         let p2 = params
-            .generate_proof(Input::Leaf(LeafCircuit { key: k2, value: v2 }))
+            .generate_proof(Input::Leaf(LeafCircuit {
+                mapping_key: k2,
+                mapping_value: v2,
+            }))
             .unwrap();
         let proof = params
             .generate_proof(Input::Node(NodeInputs {

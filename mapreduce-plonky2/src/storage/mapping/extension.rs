@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     array::{Vector, VectorWire},
-    keccak::{InputData, KeccakCircuit, KeccakWires},
+    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
     rlp::decode_fixed_list,
     storage::MAX_EXTENSION_NODE_LEN,
@@ -51,12 +51,12 @@ impl ExtensionNodeCircuit {
         let rlp_headers = decode_fixed_list::<_, _, 2>(b, &node.arr.arr, zero);
         // TODO: refactor these methods - gets too complex when attached with MPTCircuit
         let (new_key, child_hash, valid) =
-            MPTCircuit::<1, MAX_EXTENSION_NODE_LEN>::advance_key_leaf_or_extension::<_, _, 2>(
-                b,
-                &node.arr,
-                &child_mpt_key,
-                &rlp_headers,
-            );
+            MPTCircuit::<1, MAX_EXTENSION_NODE_LEN>::advance_key_leaf_or_extension::<
+                _,
+                _,
+                2,
+                HASH_LEN,
+            >(b, &node.arr, &child_mpt_key, &rlp_headers);
         b.connect(tru.target, valid.target);
         // make sure the extracted hash is the one exposed by the proof
         let packed_child_hash = child_hash.convert_u8_to_u32(b);

@@ -394,9 +394,11 @@ mod test {
 
     use super::*;
     use crate::{
+        api::mapping::leaf::VALUE_LEN,
         eth::StorageSlot,
         mpt_sequential::{bytes_to_nibbles, test::generate_random_storage_mpt},
         storage::key::MappingSlot,
+        types::ADDRESS_LEN,
         utils::test::random_vector,
     };
 
@@ -424,7 +426,7 @@ mod test {
             hex::encode(&mpt1),
             hex::encode(&mpt2)
         );
-        let v = random_vector(32);
+        let v: Vec<u8> = rlp::encode(&random_vector(32)).to_vec();
         trie.insert(&mpt1, &v).unwrap();
         trie.insert(&mpt2, &v).unwrap();
         trie.root_hash().unwrap();
@@ -505,6 +507,7 @@ mod test {
         assert_eq!(p1[p1.len() - 2], p2[p2.len() - 2]);
         let l1_inputs = CircuitInput::new_leaf(p1.last().unwrap().to_vec(), slot, key.clone());
         // generate a leaf then a branch proof with only this leaf
+        println!("[+] Generating leaf proof 1...");
         let leaf1_proof_buff = generate_proof(&params, l1_inputs).unwrap();
         // some testing on the public inputs of the proof
         let leaf1_proof = ProofWithVK::deserialize(&leaf1_proof_buff).unwrap();
@@ -515,6 +518,7 @@ mod test {
         assert_eq!(comp_ptr, F::from_canonical_usize(63));
 
         let branch_node = p1[p1.len() - 2].to_vec();
+        println!("[+] Generating branch proof 1...");
         let branch_inputs = CircuitInput::new_branch(branch_node.clone(), vec![leaf1_proof_buff]);
         let branch1_buff = generate_proof(&params, branch_inputs).unwrap();
         let branch1 = ProofWithVK::deserialize(&branch1_buff).unwrap();
@@ -531,7 +535,7 @@ mod test {
         let mut pub2 = pub1.clone();
         assert_eq!(pub2.len(), NUM_IO);
         pub2[PublicInputs::<F>::KEY_IDX..PublicInputs::<F>::T_IDX].copy_from_slice(
-            &bytes_to_nibbles(&mpt2)
+            &bytes_to_nibbles(mpt2)
                 .into_iter()
                 .map(F::from_canonical_u8)
                 .collect::<Vec<_>>(),
@@ -551,12 +555,14 @@ mod test {
             assert!(k1[..pt1] == k2[..pt2]);
         }
 
+        println!("[+] Generating leaf proof 2...");
         let leaf2_proof = params
             .set
             .generate_input_proofs([pub2.try_into().unwrap()])
             .unwrap();
         let vk = params.set.verifier_data_for_input_proofs::<1>()[0].clone();
         let leaf2_proof_vk = ProofWithVK::from((leaf2_proof[0].clone(), vk));
+        println!("[+] Generating branch proof 2...");
         let branch_inputs = CircuitInput::Branch(BranchInput {
             input: InputNode {
                 node: branch_node.clone(),
@@ -580,33 +586,34 @@ mod test {
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(memdb.clone());
 
-        let key1 = [1; 20].to_vec();
-        let val1 = [2; 32].to_vec();
-        let slot1 = StorageSlot::Mapping(key1.clone(), 0);
+        let key1 = [1u8; 4];
+        let val1 = [2u8; ADDRESS_LEN];
+        let slot1 = StorageSlot::Mapping(key1.to_vec(), 0);
         let mpt_key1 = slot1.mpt_key();
 
-        let key2 = [3; 20].to_vec();
-        let val2 = [4; 32].to_vec();
-        let slot2 = StorageSlot::Mapping(key2.clone(), 0);
+        let key2 = [3u8; 4];
+        let val2 = [4u8; ADDRESS_LEN];
+        let slot2 = StorageSlot::Mapping(key2.to_vec(), 0);
         let mpt_key2 = slot2.mpt_key();
 
-        trie.insert(&mpt_key1, &val1).unwrap();
-        trie.insert(&mpt_key2, &val2).unwrap();
+        trie.insert(&mpt_key1, &rlp::encode(&val1.as_slice()))
+            .unwrap();
+        trie.insert(&mpt_key2, &rlp::encode(&val2.as_slice()))
+            .unwrap();
         trie.root_hash().unwrap();
 
         let proof1 = trie.get_proof(&mpt_key1).unwrap();
         let proof2 = trie.get_proof(&mpt_key2).unwrap();
 
-        assert_eq!(proof1.len(), 2);
-        assert_eq!(proof2.len(), 2);
         assert_eq!(proof1[0], proof2[0]);
+        // only need to make sure node above is really a branch node
         assert!(rlp::decode_list::<Vec<u8>>(&proof1[0]).len() == 17);
         use crate::storage::mapping::{self};
         println!("Generating params...");
         let params = mapping::api::build_circuits_params();
         println!("Proving leaf 1...");
 
-        let leaf_input1 = mapping::CircuitInput::new_leaf(proof1[1].clone(), 0, key1);
+        let leaf_input1 = mapping::CircuitInput::new_leaf(proof1[1].clone(), 0, key1.to_vec());
         let leaf_proof1 = mapping::api::generate_proof(&params, leaf_input1).unwrap();
         {
             let lp = ProofWithVK::deserialize(&leaf_proof1).unwrap();
@@ -617,7 +624,7 @@ mod test {
 
         println!("Proving leaf 2...");
 
-        let leaf_input2 = mapping::CircuitInput::new_leaf(proof2[1].clone(), 0, key2);
+        let leaf_input2 = mapping::CircuitInput::new_leaf(proof2[1].clone(), 0, key2.to_vec());
 
         let leaf_proof2 = mapping::api::generate_proof(&params, leaf_input2).unwrap();
 
