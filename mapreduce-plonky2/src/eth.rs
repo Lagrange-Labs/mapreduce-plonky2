@@ -78,7 +78,7 @@ pub struct BlockData {
 impl BlockData {
     pub async fn fetch<T: Into<BlockId> + Send + Sync>(blockid: T) -> Result<Self> {
         #[cfg(feature = "ci")]
-        let url = env::var("CI_RPC_URL").expect("CI_RPC_URL env var not set");
+        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
         #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
         let provider =
@@ -403,6 +403,9 @@ mod test {
             Address::from_str("0x188B264AA1456B869C3a92eeeD32117EbB835f47").unwrap();
         let nft_id: u32 = 1116;
         let mapping_key = left_pad32(&nft_id.to_be_bytes());
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
+        #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
