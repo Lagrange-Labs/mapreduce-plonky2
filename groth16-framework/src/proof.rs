@@ -1,22 +1,16 @@
-//! Groth16 proof data
+//! Groth16 proof struct
 
-use crate::utils::read_json;
-use anyhow::Result;
-use serde::Deserialize;
-use std::path::Path;
+use serde::{Deserialize, Serialize};
 
 /// Groth16 proof
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Groth16Proof {
-    /// Proof data
+    /// Proofs
     pub proofs: Vec<String>,
     /// Public inputs
     pub inputs: Vec<String>,
-}
-
-impl Groth16Proof {
-    /// Read the Groth16 proof from a file.
-    pub fn from_file<P: AsRef<Path>>(file_path: P) -> Result<Self> {
-        read_json(file_path)
-    }
+    /// Raw proof data
+    pub raw_proof: String,
+    /// Raw public witness data
+    pub raw_public_witness: String,
 }

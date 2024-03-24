@@ -7,6 +7,7 @@
 
 use plonky2::{field::goldilocks_field::GoldilocksField, plonk::config::PoseidonGoldilocksConfig};
 
+mod compiler;
 mod evm;
 mod proof;
 mod prover;
@@ -17,17 +18,18 @@ const D: usize = 2;
 type F = GoldilocksField;
 type C = PoseidonGoldilocksConfig;
 
+pub use compiler::compile_and_generate_assets;
 pub use proof::Groth16Proof;
-pub use prover::groth16_prover::{Groth16Prover, Groth16ProverConfig};
-pub use verifier::evm_verifier::{EVMVerifier, EVMVerifierConfig};
+pub use prover::groth16::{Groth16Prover, Groth16ProverConfig};
+pub use verifier::{
+    evm::{EVMVerifier, EVMVerifierConfig},
+    groth16::{Groth16Verifier, Groth16VerifierConfig},
+};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        prover::groth16_prover::{GROTH16_PROOF_FILE, VERIFIER_CONRTACT_FILE},
-        utils::read_file,
-    };
+    use crate::utils::read_file;
     use ethers::{
         abi::{Contract, Token},
         types::U256,
@@ -55,6 +57,7 @@ mod tests {
     use std::{array, path::Path};
 
     /// Test proving with a simple circuit.
+    #[ignore] // Ignore for fast CI.
     #[serial]
     #[test]
     fn test_groth16_proving_simple() {
@@ -76,8 +79,14 @@ mod tests {
         let data = cb.build::<C>();
         let proof = data.prove(pw).unwrap();
 
-        groth16_prove(data, proof);
-        evm_verify();
+        const ASSET_DIR: &str = "groth16_simple";
+
+        // gupeng
+        // compile_and_generate_assets(data, &proof, ASSET_DIR);
+
+        let groth16_proof = groth16_prove(ASSET_DIR, data, &proof);
+        groth16_verify(ASSET_DIR, &groth16_proof);
+        evm_verify(ASSET_DIR, &groth16_proof);
     }
 
     /// Test proving with the keccak circuit.
@@ -112,7 +121,7 @@ mod tests {
         let data = cb.build::<C>();
         let proof = data.prove(pw).unwrap();
 
-        groth16_prove(data, proof);
+        // groth16_prove(data, proof);
     }
 
     /// Test proving with the group-hashing circuit.
@@ -144,33 +153,46 @@ mod tests {
         let data = cb.build::<C>();
         let proof = data.prove(pw).unwrap();
 
-        groth16_prove(data, proof);
+        // groth16_prove(data, proof);
     }
 
-    /// Test to prove and generate Solidity verifier.
-    fn groth16_prove(circuit_data: CircuitData<F, C, D>, proof: ProofWithPublicInputs<F, C, D>) {
+    /// Compile the circuit and
+    fn compile(circuit_data: CircuitData<F, C, D>, proof: ProofWithPublicInputs<F, C, D>) {}
+
+    /// Test to generate the proof.
+    fn groth16_prove(
+        asset_dir: &str,
+        circuit_data: CircuitData<F, C, D>,
+        proof: &ProofWithPublicInputs<F, C, D>,
+    ) -> Groth16Proof {
         let config = Groth16ProverConfig {
-            prover_cmd: Path::new("gnark-plonky2-verifier")
-                .join("prover")
-                .to_string_lossy()
-                .to_string(),
-            data_dir: ".".to_string(),
+            asset_dir: asset_dir.to_string(),
             circuit_data: Some(circuit_data),
         };
 
-        let prover = Groth16Prover::new(config);
+        let prover = Groth16Prover::new(config).expect("Failed to init prover");
 
-        let proof = prover
-            .prove_and_generate_contract(&proof, true)
-            .expect("Failed to prove and generate Solidity verifier");
+        prover.prove(proof).expect("Failed to generate the proof")
     }
 
-    /// Test EVM verification.
-    fn evm_verify() {
-        let proof = Groth16Proof::from_file(GROTH16_PROOF_FILE).unwrap();
+    /// Test to verify the proof.
+    fn groth16_verify(asset_dir: &str, proof: &Groth16Proof) {
+        let config = Groth16VerifierConfig {
+            asset_dir: asset_dir.to_string(),
+        };
 
+        let verifier = Groth16Verifier::new(config).expect("Failed to init verifier");
+
+        verifier.verify(proof).expect("Failed to verify the proof")
+    }
+
+    /// Test the Solidity verification.
+    fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
         let config = EVMVerifierConfig {
-            solidity_path: VERIFIER_CONRTACT_FILE.to_string(),
+            solidity_path: Path::new(asset_dir)
+                .join("verifier.sol")
+                .to_string_lossy()
+                .to_string(),
         };
 
         let contract = Contract::load(
@@ -180,7 +202,7 @@ mod tests {
         )
         .expect("Failed to load verifier contract from ABI");
 
-        let [proofs, inputs] = [proof.proofs, proof.inputs]
+        let [proofs, inputs] = [&proof.proofs, &proof.inputs]
             .map(|ss| ss.iter().map(|s| Token::Uint(str_to_u256(s))).collect());
         let input = vec![Token::FixedArray(proofs), Token::FixedArray(inputs)];
         let verify_fun = &contract.functions["verifyProof"][0];

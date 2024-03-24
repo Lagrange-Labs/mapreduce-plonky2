@@ -1,1 +1,1 @@
-pub mod groth16_prover;
+pub mod groth16;
