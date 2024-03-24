@@ -313,7 +313,8 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
         let mut pis = [GoldilocksField::ZERO; PublicInputs::<GoldilocksField>::TOTAL_LEN];
         let rng = &mut StdRng::seed_from_u64(seed);
         let leaf_key = random_vector(MAPPING_KEY_LEN);
-        let leaf_key_f :[GoldilocksField; MAPPING_KEY_LEN]= array::from_fn(|i| F::from_canonical_u8(leaf_key[i]));
+        let leaf_key_f: [GoldilocksField; MAPPING_KEY_LEN] =
+            array::from_fn(|i| F::from_canonical_u8(leaf_key[i]));
 
         // leaf value == owner address
         let leaf_value: [GoldilocksField; PACKED_VALUE_LEN] =

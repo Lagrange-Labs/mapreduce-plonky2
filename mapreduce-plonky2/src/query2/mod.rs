@@ -7,8 +7,8 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use crate::{array::Array, types::PACKED_ADDRESS_LEN as PACKED_SC_ADDRESS_LEN};
 
 pub(crate) mod aggregation;
-mod state;
 mod revelation;
+mod state;
 mod storage;
 #[cfg(test)]
 mod tests;
