@@ -161,7 +161,7 @@ impl<X> BlockUtil for Block<X> {
         rlp::encode(&rlp).to_vec()
     }
 }
-pub(crate) struct RLPBlock<'a, X>(pub &'a Block<X>);
+pub struct RLPBlock<'a, X>(pub &'a Block<X>);
 impl<'a, X> rlp::Encodable for RLPBlock<'a, X> {
     fn rlp_append(&self, s: &mut rlp::RlpStream) {
         s.begin_unbounded_list();
