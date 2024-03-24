@@ -395,6 +395,53 @@ mod test {
     use super::*;
 
     #[tokio::test]
+    async fn test_pidgy_pinguin_length_slot() -> Result<()> {
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://eth.llamarpc.com";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // pidgy pinguins address
+        let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_simple_slot(pidgy_address, 8);
+        let res = query.query_mpt_proof(&provider, None).await?;
+        ProofQuery::verify_storage_proof(&res)?;
+        let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
+        let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
+        println!("leaf[1].len() = {}", leaf_list[1].len());
+        assert_eq!(leaf_list.len(), 2);
+        let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
+        // making sure we can simply skip the first byte
+        let sliced = &leaf_list[1][1..];
+        assert_eq!(sliced, leaf_value.as_slice());
+        println!(
+            "length of storage proof: {}",
+            res.storage_proof[0].proof.len()
+        );
+        println!(
+            "max node length: {}",
+            res.storage_proof[0]
+                .proof
+                .iter()
+                .map(|x| x.len())
+                .max()
+                .unwrap()
+        );
+        let mut n = sliced.to_vec();
+        n.resize(4, 0); // what happens in circuit effectively
+        println!("sliced: {:?} - hex {}", sliced, hex::encode(&sliced));
+        let length = convert_u8_to_u32_slice(&n)[0];
+        let length2 =
+            convert_u8_to_u32_slice(&sliced.iter().cloned().rev().collect::<Vec<u8>>())[0];
+        println!("length extracted = {}", length);
+        println!("length 2 extracted = {}", length2);
+        println!("res.storage_proof.value = {}", res.storage_proof[0].value);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_pidgy_pinguin_mapping_slot() -> Result<()> {
         // first pinguin holder https://dune.com/queries/2450476/4027653
         // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
@@ -403,9 +450,6 @@ mod test {
             Address::from_str("0x188B264AA1456B869C3a92eeeD32117EbB835f47").unwrap();
         let nft_id: u32 = 1116;
         let mapping_key = left_pad32(&nft_id.to_be_bytes());
-        #[cfg(feature = "ci")]
-        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
-        #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");

@@ -20,6 +20,8 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use serde::{Deserialize, Serialize};
+
+use super::mapping::leaf::VALUE_LEN;
 /// One input element length to Keccak
 const INPUT_ELEMENT_LEN: usize = 32;
 /// The tuple (pair) length of elements to Keccak
@@ -229,7 +231,8 @@ pub struct MappingSlotWires {
     pub(crate) keccak_mpt: KeccakMPTWires,
 }
 
-const MAPPING_INPUT_TOTAL_LEN: usize = 2 * MAPPING_KEY_LEN;
+/// Size of the input to the digest and hash function
+pub(crate) const MAPPING_INPUT_TOTAL_LEN: usize = MAPPING_KEY_LEN + VALUE_LEN;
 /// Value but with the padding taken into account.
 const MAPPING_INPUT_PADDED_LEN: usize = PAD_LEN(MAPPING_INPUT_TOTAL_LEN);
 impl MappingSlot {

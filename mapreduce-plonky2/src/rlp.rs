@@ -1,4 +1,5 @@
 use crate::array::{Array, VectorWire};
+use crate::mpt_sequential::Circuit;
 use crate::utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
@@ -180,6 +181,16 @@ pub fn data_len<F: RichField + Extendable<D>, const D: usize>(
     }
 
     res
+}
+// We read the RLP header but knowing it is a value that is always <55bytes long
+// we can hardcode the type of RLP header it is and directly get the real number len
+// in this case, the header marker is 0x80 that we can directly take out from first byte
+pub fn short_string_len<F: RichField + Extendable<D>, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    header: &Target,
+) -> Target {
+    let byte_80 = b.constant(F::from_canonical_usize(128));
+    b.sub(*header, byte_80)
 }
 /// It returns the RLP header information starting at data[offset]. The header.offset
 /// is absolute from the 0-index of data (not from the `offset` index)

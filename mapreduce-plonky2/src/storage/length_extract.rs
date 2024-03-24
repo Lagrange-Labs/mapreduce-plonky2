@@ -2,6 +2,7 @@
 
 use super::{
     key::{SimpleSlot, SimpleSlotWires},
+    mapping::leaf::VALUE_LEN,
     MAX_BRANCH_NODE_LEN,
 };
 use crate::{
@@ -49,7 +50,7 @@ impl<'a> PublicInputs<'a, Target> {
     ) where
         F: RichField + Extendable<D>,
     {
-        mpt_root_hash.register_as_input(cb);
+        mpt_root_hash.register_as_public_input(cb);
         cb.register_public_input(storage_slot);
         cb.register_public_input(length_value);
     }
@@ -259,7 +260,7 @@ mod tests {
         mpt_sequential::{
             bytes_to_nibbles,
             test::{verify_storage_proof_from_query, visit_proof},
-            MPTKeyWire,
+            MPTKeyWire, MAX_LEAF_VALUE_LEN,
         },
         rlp::{MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
         utils::{convert_u8_to_u32_slice, keccak256},
@@ -397,7 +398,12 @@ mod tests {
             // small optimization here as we only need to decode two items for a leaf, since we know it's a leaf
             let leaf_headers = decode_fixed_list::<_, _, 2>(cb, &nodes[0].arr.arr, zero);
             let (mut iterative_key, leaf_value, is_leaf) =
-                Circuit::advance_key_leaf_or_extension(cb, &nodes[0].arr, &key, &leaf_headers);
+                Circuit::advance_key_leaf_or_extension::<_, _, _, MAX_LEAF_VALUE_LEN>(
+                    cb,
+                    &nodes[0].arr,
+                    &key,
+                    &leaf_headers,
+                );
             cb.connect(t.target, is_leaf.target);
             let one = cb.one();
             let byte_80 = cb.constant(F::from_canonical_usize(128));

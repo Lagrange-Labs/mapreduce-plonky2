@@ -548,15 +548,6 @@ where
             arr: create_array(|i| self.arr[SIZE - 1 - i]),
         }
     }
-
-    // FIXME: just quick hack to avoid changing all the places in the same PR
-    // should just have register_as_public_input everywhere.
-    pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
-        &self,
-        b: &mut CircuitBuilder<F, D>,
-    ) {
-        self.register_as_public_input(b)
-    }
     pub fn register_as_public_input<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
