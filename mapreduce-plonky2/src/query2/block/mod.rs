@@ -16,14 +16,54 @@ use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
+use recursion_framework::circuit_builder::CircuitWithUniversalVerifier;
+use serde::{Deserialize, Serialize};
 
 use crate::{
+    api::{ProofWithVK, C, D, F},
     types::{PackedAddressTarget, PackedValueTarget, CURVE_TARGET_LEN, PACKED_VALUE_LEN},
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 
+use self::{full_node::FullNodeWires, partial_node::PartialNodeWires};
+
 pub mod full_node;
 pub mod partial_node;
+
+pub enum CircuitInput {
+    /// left and right children proof
+    FullNode((ProofWithVK, ProofWithVK)),
+    PartialNode(ProofWithVK),
+}
+
+impl CircuitInput {
+    fn new_full_node(left_proof: Vec<u8>, right_proof: Vec<u8>) -> Self {
+        Self::FullNode((
+            ProofWithVK::deserialize(&left_proof).unwrap(),
+            ProofWithVK::deserialize(&right_proof).unwrap(),
+        ))
+    }
+
+    fn new_partial_node(child_proof: Vec<u8>) -> Self {
+        Self::PartialNode(ProofWithVK::deserialize(&child_proof).unwrap())
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Parameters {
+    //full_node_circuit: CircuitWithUniversalVerifier<F, C, D, 2, FullNodeWires>,
+    //partial_node_circuit: CircuitWithUniversalVerifier<F, C, D, 1, PartialNodeWires>,
+}
+
+impl Parameters {
+    pub fn build() -> Self {
+        todo!()
+    }
+
+    pub fn generate_proof(&self, input: CircuitInput) -> Vec<u8> {
+        todo!()
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
@@ -87,11 +127,11 @@ impl Inputs {
 
 /// On top of the habitual T
 #[derive(Clone)]
-pub struct AggregationPublicInputs<'input, T: Clone> {
+pub struct BlockPublicInputs<'input, T: Clone> {
     pub inputs: &'input [T],
 }
 
-impl<'a, T: Clone + Copy + Debug> Debug for AggregationPublicInputs<'a, T> {
+impl<'a, T: Clone + Copy + Debug> Debug for BlockPublicInputs<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "BlockNumber: {:?}\n", self.block_number_raw())?;
         write!(f, "Range: {:?}\n", self.range_raw())?;
@@ -108,14 +148,14 @@ impl<'a, T: Clone + Copy + Debug> Debug for AggregationPublicInputs<'a, T> {
     }
 }
 
-impl<'a, T: Clone + Copy> From<&'a [T]> for AggregationPublicInputs<'a, T> {
+impl<'a, T: Clone + Copy> From<&'a [T]> for BlockPublicInputs<'a, T> {
     fn from(inputs: &'a [T]) -> Self {
         assert_eq!(inputs.len(), Self::total_len());
         Self { inputs }
     }
 }
 
-impl<'a, T: Clone + Copy> AggregationPublicInputs<'a, T> {
+impl<'a, T: Clone + Copy> BlockPublicInputs<'a, T> {
     fn block_number_raw(&self) -> &[T] {
         &self.inputs[Inputs::BlockNumber.range()]
     }
@@ -154,7 +194,7 @@ impl<'a, T: Clone + Copy> AggregationPublicInputs<'a, T> {
     }
 }
 
-impl<'a> AggregationPublicInputs<'a, Target> {
+impl<'a> BlockPublicInputs<'a, Target> {
     pub(crate) fn block_number(&self) -> Target {
         self.block_number_raw()[0]
     }
@@ -223,7 +263,7 @@ impl<'a> AggregationPublicInputs<'a, Target> {
     }
 }
 
-impl<'a> AggregationPublicInputs<'a, GoldilocksField> {
+impl<'a> BlockPublicInputs<'a, GoldilocksField> {
     pub fn block_number(&self) -> GoldilocksField {
         self.block_number_raw()[0]
     }

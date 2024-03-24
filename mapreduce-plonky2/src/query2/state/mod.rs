@@ -2,6 +2,7 @@
 
 use std::iter;
 
+use ethers::types::Address;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{
@@ -13,17 +14,20 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitData},
 };
+use recursion_framework::serialization::{deserialize, serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
+    api::{C, D, F},
     array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
     query2::storage::public_inputs::PublicInputs as StorageInputs,
     types::PackedAddressTarget as PackedSCAddressTarget,
 };
 
-use super::{aggregation::AggregationPublicInputs, PackedSCAddress};
+use super::{block::BlockPublicInputs, PackedSCAddress};
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -184,7 +188,7 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
             .collect();
         let block_leaf_hash = cb.hash_n_to_hash_no_pad::<PoseidonHash>(block_leaf);
 
-        AggregationPublicInputs::register(cb, b, r, &block_leaf_hash, &a, &x, m, s, digest);
+        BlockPublicInputs::register(cb, b, r, &block_leaf_hash, &a, &x, m, s, digest);
 
         StateWires {
             smart_contract_address: a,
@@ -239,5 +243,33 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
             .map(|h| h.0)
             .zip(self.block_hash.arr.iter())
             .for_each(|(w, &v)| pw.set_target(w, v));
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Parameters {
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    circuit: CircuitData<F, C, D>,
+}
+
+pub struct CircuitInput {
+    contract_address: Address,
+    mapping_slot: usize,
+    length_slot: usize,
+    state_root: Vec<u8>,
+    siblings: Vec<Vec<u8>>,
+    // 0 for left, 1 for right ?
+    positions: Vec<bool>,
+    // hash of the block header linked to the current block
+    block_hash: Vec<u8>,
+}
+
+impl Parameters {
+    pub fn build(circuit: CircuitData<F, C, D>) -> Self {
+        todo!()
+    }
+
+    pub fn generate_proof(&self, input: CircuitInput) -> Vec<u8> {
+        todo!()
     }
 }
