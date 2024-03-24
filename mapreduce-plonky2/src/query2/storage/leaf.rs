@@ -13,32 +13,30 @@ use crate::{
     circuit::UserCircuit,
     group_hashing::CircuitBuilderGroupHashing,
     query2::{storage::public_inputs::PublicInputs, AddressTarget, PackedAddressTarget},
-    storage::{KEY_SIZE, LEAF_SIZE},
+    types::{MappingKeyTarget, MAPPING_KEY_LEN, VALUE_LEN},
     utils::convert_u8_to_u32_slice,
 };
 
-const PACKED_KEY_SIZE: usize = KEY_SIZE / 4;
+const PACKED_KEY_SIZE: usize = MAPPING_KEY_LEN / 4;
 
 pub struct InclusionWires {
-    pub key: Array<U32Target, PACKED_KEY_SIZE>,
-    pub value: PackedAddressTarget,
+    pub mapping_key: Array<Target, MAPPING_KEY_LEN>,
+    pub mapping_value: Array<Target, VALUE_LEN>,
 }
 
 /// This circuit prove the new root hash of a leaf containing the requested data
 #[derive(Clone, Debug)]
 pub struct LeafCircuit {
-    pub key: [u8; KEY_SIZE],
-    pub value: [u8; AddressTarget::LEN],
+    pub mapping_key: [u8; MAPPING_KEY_LEN],
+    pub mapping_value: [u8; VALUE_LEN],
 }
 
 impl LeafCircuit {
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &InclusionWires) {
-        let key_u32 = convert_u8_to_u32_slice(&self.key);
-        wires.key.assign_from_data(pw, &key_u32.try_into().unwrap());
-        let value_u32 = convert_u8_to_u32_slice(&self.value);
+        wires.mapping_key.assign_from_data(pw, &self.mapping_key);
         wires
-            .value
-            .assign_from_data(pw, &value_u32.try_into().unwrap());
+            .mapping_value
+            .assign_from_data(pw, &self.mapping_value);
     }
 }
 
@@ -46,15 +44,25 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
     type Wires = InclusionWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
-        let key = Array::<U32Target, PACKED_KEY_SIZE>::new(b);
-        let value = PackedAddressTarget::new(b);
-        let kv = key.concat(&value).to_targets();
+        let key = MappingKeyTarget::new(b);
+        let key_u32 = key.convert_u8_to_u32(b);
+        let value = Array::<Target, VALUE_LEN>::new(b);
+        let value_u32 = value.convert_u8_to_u32(b);
+        let kv = key_u32.concat(&value_u32).to_targets();
 
-        let digest = b.map_to_curve_point(&kv.arr);
+        // the digest is done on the key only, in compact form, because our goal is
+        // to reval all the keys at the last step of the computation graph
+        let digest = b.map_to_curve_point(&key_u32.to_targets().arr);
+        // the root is done on both as this is what proves the inclusion in the storage db
         let root = b.hash_n_to_hash_no_pad::<PoseidonHash>(Vec::from(kv.arr));
 
-        PublicInputs::<GoldilocksField>::register(b, &root, &digest, &value);
-        InclusionWires { key, value }
+        // we expose the value, in compact form to the public inputs, it gets propagated
+        // up the computation tree
+        PublicInputs::<GoldilocksField>::register(b, &root, &digest, &value_u32);
+        InclusionWires {
+            mapping_key: key,
+            mapping_value: value,
+        }
     }
 
     fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {

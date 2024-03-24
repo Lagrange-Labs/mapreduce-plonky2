@@ -229,7 +229,7 @@ fn verify_proofs<F: RichField + Extendable<D>, const D: usize>(
 ) {
     // Check the previous block header.
     prev_pi
-        .block_header()
+        .original_block_header()
         .enforce_equal(cb, &new_state_pi.prev_block_header());
 
     let first_block_num = prev_pi.first_block_number();
@@ -422,7 +422,9 @@ impl<const MAX_DEPTH: usize> CircuitLogicWires<F, D, 0> for DummyCircuitWires<MA
             public_inputs.block_number().0,
             inputs.first_block_number - F::ONE,
         );
-        public_inputs.block_header().assign(pw, &inputs.parent_hash);
+        public_inputs
+            .original_block_header()
+            .assign(pw, &inputs.parent_hash);
 
         Ok(())
     }
@@ -662,16 +664,14 @@ mod tests {
         keccak::{HASH_LEN, PACKED_HASH_LEN},
         utils::test::random_vector,
     };
-    use anyhow::Result;
     use plonky2::{
-        field::types::{Field, PrimeField64, Sample},
+        field::types::{Field, Sample},
         hash::{
             hash_types::NUM_HASH_OUT_ELTS, merkle_proofs::verify_merkle_proof,
             merkle_tree::MerkleTree,
         },
         plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
-    use plonky2_crypto::hash::CircuitBuilderHash;
     use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
 
@@ -808,7 +808,7 @@ mod tests {
     }
 
     /// Run the test circuit with a specified new leaf index.
-    fn test_circuit<const MAX_DEPTH: usize>(leaf_index: usize) {
+    fn test_circuit<const MAX_DEPTH: usize>(leaf_index: usize) -> Vec<GoldilocksField> {
         init_logging();
 
         // The new leaf is the first inserted block if leaf index is zero.
@@ -858,6 +858,7 @@ mod tests {
 
         // Verify the outputs.
         assert_eq!(exp_outputs, proof.public_inputs);
+        exp_outputs
     }
 
     /// Generate the all leaves of a Merkle tree, the new leaf (block) is

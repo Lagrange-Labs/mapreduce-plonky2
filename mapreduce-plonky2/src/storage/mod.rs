@@ -19,11 +19,6 @@ pub(crate) const MAX_EXTENSION_NODE_LEN: usize = 69;
 // Number of Goldilocks elements in CurveTarget
 pub(crate) const CURVE_TARGET_SIZE: usize = 11;
 
-// A key is 32B-long
-pub(crate) const KEY_SIZE: usize = 32;
-// A value in a leaf node is 32B wide
-pub(crate) const LEAF_SIZE: usize = 32;
-
 fn iter_curve_target<'a>(t: &'a CurveTarget) -> impl Iterator<Item = &'a Target> {
     t.0 .0
         .iter()
