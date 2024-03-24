@@ -395,6 +395,94 @@ mod test {
     use super::*;
 
     #[tokio::test]
+    async fn test_pidgy_pinguins_length_slot() -> Result<()> {
+        let url = "https://eth.llamarpc.com";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // pidgy pinguins address
+        let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_simple_slot(pidgy_address, 8);
+        let res = query.query_mpt_proof(&provider, None).await?;
+        ProofQuery::verify_storage_proof(&res)?;
+        let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
+        let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
+        println!("leaf[1].len() = {}", leaf_list[1].len());
+        assert_eq!(leaf_list.len(), 2);
+        let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
+        // making sure we can simply skip the first byte
+        let sliced = &leaf_list[1][1..];
+        assert_eq!(sliced, leaf_value.as_slice());
+        println!(
+            "length of storage proof: {}",
+            res.storage_proof[0].proof.len()
+        );
+        println!(
+            "max node length: {}",
+            res.storage_proof[0]
+                .proof
+                .iter()
+                .map(|x| x.len())
+                .max()
+                .unwrap()
+        );
+        let mut n = sliced.to_vec();
+        n.resize(4, 0); // what happens in circuit effectively
+        println!("sliced: {:?} - hex {}", sliced, hex::encode(&sliced));
+        let length = convert_u8_to_u32_slice(&n)[0];
+        let length2 =
+            convert_u8_to_u32_slice(&sliced.iter().cloned().rev().collect::<Vec<u8>>())[0];
+        println!("length extracted = {}", length);
+        println!("length 2 extracted = {}", length2);
+        println!("res.storage_proof.value = {}", res.storage_proof[0].value);
+        // try if it's an array or not.
+        // for storage slot 8 it should be an array so the proof should be valid.
+        // for storage slot 11, it should be a variable so the proof to access the second
+        // item of this variable should be invalid (since the location doesn't exist)
+        {
+            let memdb = Arc::new(MemoryDB::new(true));
+            let tx_trie = EthTrie::new(Arc::clone(&memdb));
+            let array_slot = 8 as u8;
+
+            // TLDR:  we know we can access the _second_ item of the array but NOT the first one
+            // it's because in this case, the first value is 0 and it may not exist in the MPT
+            // https://github.com/ethereumjs/merkle-patricia-tree/issues/47#issue-328846240
+            let mut location = [0u8; 32];
+            (U256::from_big_endian(&keccak256(&left_pad32(&[array_slot]))) + U256::one())
+                .to_big_endian(&mut location[..]);
+
+            println!("location  = {}", hex::encode(&location));
+            let res = provider
+                .get_proof(pidgy_address, vec![H256::from_slice(&location)], None)
+                .await?;
+
+            let proof_key_bytes: [u8; 32] = res.storage_proof[0].key.into(); // rpc key == location
+            println!("res.proof key bytes = {}", hex::encode(&proof_key_bytes));
+            assert!(&proof_key_bytes.to_vec() == &location);
+            let mpt_key = keccak256(&proof_key_bytes[..]);
+            let is_valid = tx_trie.verify_proof(
+                res.storage_hash,
+                &mpt_key,
+                res.storage_proof[0]
+                    .proof
+                    .iter()
+                    .map(|b| b.to_vec())
+                    .collect(),
+            );
+            println!("res.value = {}", res.storage_proof[0].value);
+
+            if is_valid.is_err() {
+                bail!("storage proof is invalid: {}", is_valid.unwrap_err());
+            }
+            if is_valid.unwrap().is_none() {
+                bail!("storage proof says the value associated with that key does not exist");
+            }
+        }
+        //let value = ProofQuery::verify_storage_proof(&res)?;
+        //println!("value at slot 8: {}", value);
+        Ok(())
+    }
+    #[tokio::test]
     async fn test_pidgy_pinguin_mapping_slot() -> Result<()> {
         // first pinguin holder https://dune.com/queries/2450476/4027653
         // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
