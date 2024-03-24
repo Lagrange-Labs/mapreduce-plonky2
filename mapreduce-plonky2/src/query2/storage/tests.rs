@@ -1,3 +1,4 @@
+use ethers::types::Address;
 use plonky2::field::types::Sample;
 use std::{
     array::{self, from_fn},
@@ -322,8 +323,9 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
             array::from_fn(|i| F::from_canonical_u32(packed_leaf[i]));
 
         // leaf value == owner address
+        let user_address = convert_u8_to_u32_slice(&left_pad32(Address::random().as_fixed_bytes()));
         let leaf_value: [GoldilocksField; PACKED_VALUE_LEN] =
-            array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+            array::from_fn(|i| F::from_canonical_u32(user_address[i]));
 
         let root = F::rand_vec(NUM_HASH_OUT_ELTS).try_into().unwrap();
         let digest = map_to_curve_point::<F>(&packed_leaf_f).to_weierstrass();

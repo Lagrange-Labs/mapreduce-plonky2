@@ -3,8 +3,9 @@ use std::{array::from_fn as create_array, ops::Add};
 use crate::{
     circuit::test::run_circuit,
     eth::left_pad,
-    query2::state::tests::run_state_circuit_with_slot,
+    query2::{revelation::RevelationPublicInputs, state::tests::run_state_circuit_with_slot},
     types::{PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
+    utils::convert_u8_to_u32_slice,
 };
 use itertools::Itertools;
 use plonky2::{
@@ -23,7 +24,7 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        config::{GenericConfig, PoseidonGoldilocksConfig},
+        config::{GenericConfig, KeccakGoldilocksConfig, PoseidonGoldilocksConfig},
     },
 };
 use rand::{rngs::StdRng, SeedableRng};
@@ -151,7 +152,7 @@ const EMPTY_NFT_ID: [u8; MAPPING_KEY_LEN] = [0u8; MAPPING_KEY_LEN];
 /// │   └── LeafCircuit -
 /// └── Untouched sub-tree - hash == Poseidon("ernesto")
 #[test]
-fn test_mini_tree() {
+fn test_query2_mini_tree() {
     const L: usize = 4;
     const SLOT_LENGTH: u32 = 9;
     const MAPPING_SLOT: u32 = 48372;
@@ -169,7 +170,7 @@ fn test_mini_tree() {
 
     let middle_proof = run_circuit::<F, D, C, _>(FullNodeCircuitValidator {
         validated: FullNodeCircuit {},
-        children: &[left_leaf_pi, right_leaf_pi],
+        children: &[left_leaf_pi.clone(), right_leaf_pi.clone()],
     });
 
     let proved = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
@@ -240,6 +241,47 @@ fn test_mini_tree() {
     let final_proof = run_circuit::<F, D, C, _>(RevelationCircuitValidator {
         validated: revelation_circuit,
         db_proof,
-        root_proof,
+        root_proof: root_proof.clone(),
     });
+    let pi = RevelationPublicInputs::<_, L> {
+        inputs: final_proof.public_inputs.as_slice(),
+    };
+
+    let padded_address = &left_leaf_pi.user_address();
+    let address = &padded_address[padded_address.len() - 5..];
+    assert_eq!(pi.user_address(), address);
+    let reduced_left_value = convert_u8_to_u32_slice(&left_value)
+        .last()
+        .cloned()
+        .unwrap();
+    let reduced_right_value = convert_u8_to_u32_slice(&right_value)
+        .last()
+        .cloned()
+        .unwrap();
+    let exp_values = [reduced_left_value, reduced_right_value, 0, 0];
+    let exp_values_f = exp_values
+        .into_iter()
+        .map(F::from_canonical_u32)
+        .collect_vec();
+    pi.nft_ids()
+        .iter()
+        .zip(exp_values_f.iter())
+        .for_each(|(a, b)| {
+            assert_eq!(a, b);
+        });
+    pi.block_header()
+        .iter()
+        .zip(block_header.iter())
+        .for_each(|(a, b)| {
+            assert_eq!(a, b);
+        });
+    assert_eq!(pi.min_block_number(), query_min_block_number);
+    assert_eq!(pi.max_block_number(), query_max_block_number);
+    assert_eq!(pi.range(), root_proof.range());
+    assert_eq!(
+        pi.smart_contract_address(),
+        root_proof.smart_contract_address()
+    );
+    assert_eq!(pi.mapping_slot(), root_proof.mapping_slot());
+    assert_eq!(pi.mapping_slot_length(), root_proof.mapping_slot_length());
 }

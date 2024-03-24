@@ -20,7 +20,6 @@ pub mod circuit;
 enum Inputs<const L: usize> {
     BlockNumber,
     Range,
-    Root,
     MinBlockNumber,
     MaxBlockNumber,
     SmartContractAddress,
@@ -31,13 +30,11 @@ enum Inputs<const L: usize> {
     BlockHeader,
 }
 impl<const L: usize> Inputs<L> {
-    const SIZES: [usize; 11] = [
+    const SIZES: [usize; 10] = [
         // Block number
         1,
         // Range
         1,
-        // Root
-        NUM_HASH_OUT_ELTS,
         // Min block number
         1,
         // Max block number
@@ -50,8 +47,8 @@ impl<const L: usize> Inputs<L> {
         1,
         // Mapping slot length
         1,
-        // L × NFT ID
-        L * 8,
+        // L × NFT ID as u32
+        L,
         // Block Header
         OutputHash::LEN,
     ];
@@ -90,9 +87,6 @@ impl<'a, T: Clone + Copy, const L: usize> RevelationPublicInputs<'a, T, L> {
     fn range_raw(&self) -> &[T] {
         &self.inputs[Inputs::<L>::Range.range()]
     }
-    fn root_raw(&self) -> &[T] {
-        &self.inputs[Inputs::<L>::Root.range()]
-    }
     fn min_block_number_raw(&self) -> &[T] {
         &self.inputs[Inputs::<L>::MinBlockNumber.range()]
     }
@@ -109,7 +103,7 @@ impl<'a, T: Clone + Copy, const L: usize> RevelationPublicInputs<'a, T, L> {
         &self.inputs[Inputs::<L>::MappingSlot.range()]
     }
     fn mapping_slot_length_raw(&self) -> &[T] {
-        &self.inputs[Inputs::<L>::MappingSlot.range()]
+        &self.inputs[Inputs::<L>::MappingSlotLength.range()]
     }
     fn nft_ids_raw(&self) -> &[T] {
         &self.inputs[Inputs::<L>::NftIds.range()]
@@ -156,14 +150,8 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, Target, L> {
         self.block_number_raw()[0]
     }
 
-    fn range(&self) -> Target {
+    pub(crate) fn range(&self) -> Target {
         self.range_raw()[0]
-    }
-
-    fn root(&self) -> HashOutTarget {
-        HashOutTarget {
-            elements: self.root_raw().try_into().unwrap(),
-        }
     }
 
     fn min_block_number(&self) -> Target {
@@ -217,43 +205,39 @@ impl<'a, const L: usize> RevelationPublicInputs<'a, GoldilocksField, L> {
         self.block_number_raw()[0]
     }
 
-    fn range(&self) -> GoldilocksField {
+    pub(crate) fn range(&self) -> GoldilocksField {
         self.range_raw()[0]
     }
 
-    fn root(&self) -> HashOut<GoldilocksField> {
-        HashOut::from_vec(self.root_raw().to_owned())
-    }
-
-    fn min_block_number(&self) -> GoldilocksField {
+    pub(crate) fn min_block_number(&self) -> GoldilocksField {
         self.min_block_number_raw()[0]
     }
 
-    fn max_block_number(&self) -> GoldilocksField {
+    pub(crate) fn max_block_number(&self) -> GoldilocksField {
         self.max_block_number_raw()[0]
     }
 
-    fn smart_contract_address(&self) -> &[GoldilocksField] {
+    pub(crate) fn smart_contract_address(&self) -> &[GoldilocksField] {
         self.smart_contract_address_raw()
     }
 
-    fn user_address(&self) -> &[GoldilocksField] {
+    pub(crate) fn user_address(&self) -> &[GoldilocksField] {
         self.user_address_raw()
     }
 
-    fn mapping_slot(&self) -> GoldilocksField {
+    pub(crate) fn mapping_slot(&self) -> GoldilocksField {
         self.mapping_slot_raw()[0]
     }
 
-    fn mapping_slot_length(&self) -> GoldilocksField {
+    pub(crate) fn mapping_slot_length(&self) -> GoldilocksField {
         self.mapping_slot_length_raw()[0]
     }
 
-    fn nft_ids(&self) -> &[GoldilocksField] {
+    pub(crate) fn nft_ids(&self) -> &[GoldilocksField] {
         self.nft_ids_raw()
     }
 
-    fn block_header(&self) -> &[GoldilocksField] {
+    pub(crate) fn block_header(&self) -> &[GoldilocksField] {
         self.block_header_raw()
     }
 }
