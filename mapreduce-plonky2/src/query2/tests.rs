@@ -1,8 +1,10 @@
 use std::{array::from_fn as create_array, ops::Add};
 
 use crate::{
+    block::empty_merkle_root,
     circuit::test::run_circuit,
     eth::left_pad,
+    keccak::PACKED_HASH_LEN,
     query2::{revelation::RevelationPublicInputs, state::tests::run_state_circuit_with_slot},
     types::{PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
     utils::convert_u8_to_u32_slice,
@@ -24,7 +26,7 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        config::{GenericConfig, KeccakGoldilocksConfig, PoseidonGoldilocksConfig},
+        config::{GenericConfig, PoseidonGoldilocksConfig},
     },
 };
 use rand::{rngs::StdRng, SeedableRng};
@@ -116,12 +118,14 @@ impl UserCircuit<F, D> for PartialNodeCircuitValidator<'_> {
 }
 
 #[derive(Clone, Debug)]
-struct RevelationCircuitValidator<'a, const L: usize> {
+struct RevelationCircuitValidator<'a, const L: usize, const MAX_DEPTH: usize> {
     validated: RevelationCircuit<L>,
     db_proof: BlockPublicInputs<'a, F>,
     root_proof: AggregationPublicInputs<'a, F>,
 }
-impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
+impl<const L: usize, const MAX_DEPTH: usize> UserCircuit<F, D>
+    for RevelationCircuitValidator<'_, L, MAX_DEPTH>
+{
     type Wires = (RevelationWires<L>, Vec<Target>, Vec<Target>);
 
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
@@ -131,7 +135,7 @@ impl<const L: usize> UserCircuit<F, D> for RevelationCircuitValidator<'_, L> {
         let root_proof_io = c.add_virtual_targets(AggregationPublicInputs::<Target>::total_len());
         let root_proof_pi = AggregationPublicInputs::<Target>::from(root_proof_io.as_slice());
 
-        let wires = RevelationCircuit::<L>::build(c, db_proof_pi, root_proof_pi);
+        let wires = RevelationCircuit::<L>::build::<MAX_DEPTH>(c, db_proof_pi, root_proof_pi);
         (wires, db_proof_io, root_proof_io)
     }
 
@@ -155,6 +159,7 @@ const EMPTY_NFT_ID: [u8; MAPPING_KEY_LEN] = [0u8; MAPPING_KEY_LEN];
 fn test_query2_mini_tree() {
     const L: usize = 4;
     const SLOT_LENGTH: u32 = 9;
+    const MAX_DEPTH: usize = 12;
     const MAPPING_SLOT: u32 = 48372;
 
     let (left_value, left_leaf_proof_io) =
@@ -191,11 +196,7 @@ fn test_query2_mini_tree() {
     let root_proof =
         AggregationPublicInputs::<GoldilocksField>::from(top_proof.public_inputs.as_slice());
 
-    let prev_root = std::iter::repeat_with(|| F::from_canonical_u32(25))
-        .take(NUM_HASH_OUT_ELTS)
-        .collect_vec()
-        .try_into()
-        .unwrap();
+    let prev_root = empty_merkle_root::<GoldilocksField, 2, MAX_DEPTH>();
     let new_root = root_proof.root().elements;
 
     // we say we ran the query up to the last block generated in the block db
@@ -203,19 +204,11 @@ fn test_query2_mini_tree() {
     // we say the first block number generated is the last block - the range - some constant
     // i.e. the database have been running for a while before
     let first_block = root_proof.block_number() - root_proof.range() + F::from_canonical_u8(34);
-    let block_header = [
-        F::from_canonical_u8(11),
-        F::from_canonical_u8(12),
-        F::from_canonical_u8(13),
-        F::from_canonical_u8(14),
-        F::from_canonical_u8(15),
-        F::from_canonical_u8(16),
-        F::from_canonical_u8(17),
-        F::from_canonical_u8(18),
-    ];
+    // A rendom value for the block header
+    let block_header: [F; PACKED_HASH_LEN] = std::array::from_fn(F::from_canonical_usize);
 
     let block_data = BlockPublicInputs::from_parts(
-        &prev_root,
+        &prev_root.elements,
         &new_root,
         first_block,
         last_block,
@@ -238,7 +231,7 @@ fn test_query2_mini_tree() {
         query_max_block_number: query_max_block_number.to_canonical_u64() as usize,
     };
 
-    let final_proof = run_circuit::<F, D, C, _>(RevelationCircuitValidator {
+    let final_proof = run_circuit::<F, D, C, _>(RevelationCircuitValidator::<L, MAX_DEPTH> {
         validated: revelation_circuit,
         db_proof,
         root_proof: root_proof.clone(),

@@ -637,8 +637,11 @@ impl<const MAX_DEPTH: usize> CircuitInput<MAX_DEPTH> {
     }
 }
 
-fn empty_merkle_root<F: SerializableRichField<D>, const D: usize, const MAX_DEPTH: usize>(
-) -> HashOut<F> {
+pub(crate) fn empty_merkle_root<
+    F: SerializableRichField<D>,
+    const D: usize,
+    const MAX_DEPTH: usize,
+>() -> HashOut<F> {
     (0..MAX_DEPTH).fold(HashOut::<F>::from_partial(&vec![]), |hash, _| {
         PoseidonHash::two_to_one(hash, hash)
     })
