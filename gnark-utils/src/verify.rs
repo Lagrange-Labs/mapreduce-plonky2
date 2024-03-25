@@ -1,8 +1,8 @@
-//! Initialize the verifier and verify proofs.
+//! Initialize the verifier and verify the proofs.
 
-use crate::go;
-use anyhow::{bail, Result};
-use std::ffi::{CStr, CString};
+use crate::{go, utils::handle_c_result};
+use anyhow::Result;
+use std::ffi::CString;
 
 /// Initialize the verifier.
 pub fn init_verifier(asset_dir: &str) -> Result<()> {
@@ -10,16 +10,7 @@ pub fn init_verifier(asset_dir: &str) -> Result<()> {
 
     let result = unsafe { go::InitVerifier(asset_dir.as_ptr()) };
 
-    if result.is_null() {
-        return Ok(());
-    }
-
-    let c_result = unsafe { CStr::from_ptr(result) };
-    let error = c_result.to_str()?.to_string();
-
-    unsafe { go::FreeString(c_result.as_ptr()) };
-
-    bail!(error);
+    handle_c_result(result)
 }
 
 /// Verify the proof.
@@ -28,14 +19,5 @@ pub fn verify(proof: &str) -> Result<()> {
 
     let result = unsafe { go::Verify(proof.as_ptr()) };
 
-    if result.is_null() {
-        return Ok(());
-    }
-
-    let c_error = unsafe { CStr::from_ptr(result) };
-    let error = c_error.to_str()?.to_string();
-
-    unsafe { go::FreeString(c_error.as_ptr()) };
-
-    bail!(error);
+    handle_c_result(result)
 }

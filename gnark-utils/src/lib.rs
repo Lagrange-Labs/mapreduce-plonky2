@@ -1,7 +1,8 @@
-//! Compile Go functions and export to Rust
+//! Build Go functions and export to Rust
 
 mod compile;
 mod prove;
+mod utils;
 mod verify;
 
 pub use compile::compile_and_generate_assets;
@@ -12,8 +13,9 @@ mod go {
     use std::os::raw::c_char;
 
     extern "C" {
-        /// Compile and generate asset files from circuit data to the specified
-        /// dir. The generated files are `r1cs.bin`, `pk.bin` and `vk.bin`.
+        /// Compile and generate the asset files from the circuit data to the
+        /// specified dir. The generated files are `r1cs.bin`, `pk.bin`,
+        /// `vk.bin` and `verifier.sol`.
         pub fn CompileAndGenerateAssets(
             common_circuit_data: *const c_char,
             verifier_only_circuit_data: *const c_char,
@@ -30,13 +32,13 @@ mod go {
         pub fn Prove(
             verifier_only_circuit_data: *const c_char,
             proof_with_public_inputs: *const c_char,
-        ) -> (*const c_char, *const c_char);
+        ) -> *const c_char;
 
         /// Initialize the verifier. The asset dir must include `vk.bin`.
         pub fn InitVerifier(asset_dir: *const c_char) -> *const c_char;
 
-        /// Verify the proof. Return true if it's verified successfully, false
-        /// otherwise.
+        /// Verify the proof. Return null if it's verified successfully,
+        /// otherwise it returns an error string.
         pub fn Verify(proof: *const c_char) -> *const c_char;
 
         /// Free the C String returned from Go to Rust.

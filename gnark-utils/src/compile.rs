@@ -1,8 +1,8 @@
-//! Compile and generate asset files from circuit data.
+//! Compile and generate asset files from the circuit data.
 
-use crate::go;
-use anyhow::{bail, Result};
-use std::ffi::{CStr, CString};
+use crate::{go, utils::handle_c_result};
+use anyhow::Result;
+use std::ffi::CString;
 
 /// Compile the circuit data and generate the asset files of `r1cs.bin`,
 /// `pk.bin`, `vk.bin` and `verifier.sol`.
@@ -30,14 +30,5 @@ pub fn compile_and_generate_assets(
         )
     };
 
-    if result.is_null() {
-        return Ok(());
-    }
-
-    let c_result = unsafe { CStr::from_ptr(result) };
-    let error = c_result.to_str()?.to_string();
-
-    unsafe { go::FreeString(c_result.as_ptr()) };
-
-    bail!(error);
+    handle_c_result(result)
 }

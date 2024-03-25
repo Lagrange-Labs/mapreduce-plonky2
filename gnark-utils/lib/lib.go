@@ -1,3 +1,11 @@
+// This module is implemented by referencing PR [succinctx#353](https://github.com/succinctlabs/succinctx/pull/353).
+// There're some reasons I don't use code of this PR directly:
+// - It's a pending PR, will loss the commit if it's rebased or merged.
+// - It's build with a tool of command line which only operates via files. But
+//   we want to call proving and verifying as functions with string arguments.
+// - We want to use Go as functions not a seprate process (or thread). Since it
+//   could handle concurrent easily for the proving and verifying processes.
+
 package main
 
 /*
@@ -24,35 +32,21 @@ import (
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/logger"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/pkg/errors"
-	"github.com/succinctlabs/gnark-plonky2-verifier/plonk/gates"
 	"github.com/succinctlabs/gnark-plonky2-verifier/types"
-	"github.com/succinctlabs/gnark-plonky2-verifier/variables"
 )
 
-/*
-"io"
-"strings"
-
-"github.com/consensys/gnark/backend/witness"
-"github.com/ethereum/go-ethereum/common/hexutil"
-"github.com/rs/zerolog"
-
-*/
-
+// Global variables for the proving process are only necessary to initialize
+// once by InitProver function.
 var R1CS constraint.ConstraintSystem
 var PK groth16.ProvingKey
+
+// Global variables for the verifying process are only necessary to initialize
+// once by InitVerifier function.
 var VK groth16.VerifyingKey
 
+// Global logger
 var Logger = logger.Logger()
-
-type Groth16Proof struct {
-	Inputs           []string      `json:"inputs"`
-	Proofs           []string      `json:"proofs"`
-	RawProof         hexutil.Bytes `json:"raw_proof"`
-	RawPublicWitness hexutil.Bytes `json:"raw_public_witness"`
-}
 
 //export CompileAndGenerateAssets
 func CompileAndGenerateAssets(
@@ -61,10 +55,19 @@ func CompileAndGenerateAssets(
 	proofWithPublicInputs *C.char,
 	dstAssetDir *C.char,
 ) *C.char {
+	// Explicitly use the bit decomposition range checker could avoid
+	// generating Groth16 Commitments which cause an error in Solidity
+	// verification, could reference:
+	// <https://github.com/Consensys/gnark/issues/860>
+	// <https://github.com/succinctlabs/gnark-plonky2-verifier/blob/c01f530fe1d0107cc20da226cfec541ece9fb882/goldilocks/base.go#L131>
+	// TODO: need to test if the below fixes could work with Groth16 commitments.
+	// <https://github.com/Consensys/gnark/pull/1063>
+	// <https://github.com/Lagrange-Labs/gnark-plonky2-verifier/pull/1>
 	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
 
 	Logger.Info().Msg("starting compiling verifier circuit")
 
+	// Compile the verifier circuit and generate the assets (R1CS, PK and VK).
 	r1cs, pk, vk, err := CompileVerifierCircuit(
 		C.GoString(commonCircuitData),
 		C.GoString(verifierOnlyCircuitData),
@@ -73,6 +76,8 @@ func CompileAndGenerateAssets(
 		return C.CString(fmt.Sprintf("failed to compile verifier circuit: %v", err))
 	}
 
+	// Save the asset files for further proving and verifying processes. These
+	// asset files are only related with the common circuit data.
 	err = SaveVerifierCircuit(C.GoString(dstAssetDir), r1cs, pk, vk)
 	if err != nil {
 		return C.CString(fmt.Sprintf("failed to save verifier circuit: %v", err))
@@ -105,20 +110,21 @@ func InitProver(assetDirStr *C.char) *C.char {
 func Prove(
 	verifierOnlyCircuitData *C.char,
 	proofWithPublicInputs *C.char,
-) (*C.char, *C.char) {
+) *C.char {
 	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
 
-	Logger.Info().Msg("starting prove -- loading verifier circuit and proving key")
-
-	Logger.Info().Msg("generating proof")
+	Logger.Info().Msg("starting prove -- generating proof")
 	proof, err := ProveCircuit(C.GoString(verifierOnlyCircuitData), C.GoString(proofWithPublicInputs))
 	if err != nil {
-		return nil, C.CString(fmt.Sprintf("failed to create proof: %v", err))
+		// TODO: we only log the error here, since no tuple in C and we don't
+		// want to make it complicated.
+		Logger.Info().Msgf("failed to generate proof: %v", err)
+		return nil
 	}
 
 	Logger.Info().Msg("successfully created proof")
 
-	return C.CString(proof), nil
+	return C.CString(proof)
 }
 
 //export InitVerifier
@@ -137,7 +143,8 @@ func InitVerifier(assetDir *C.char) *C.char {
 //export Verify
 func Verify(proofStr *C.char) *C.char {
 	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
-	Logger.Info().Msg("starting verify -- loading verifier key, public witness, and proof")
+
+	Logger.Info().Msg("starting verify")
 
 	var groth16Proof Groth16Proof
 	err := json.Unmarshal([]byte(C.GoString(proofStr)), &groth16Proof)
@@ -180,11 +187,12 @@ func CompileVerifierCircuit(
 	verifierOnlyCircuitDataStr string,
 	proofWithPublicInputsStr string,
 ) (constraint.ConstraintSystem, groth16.ProvingKey, groth16.VerifyingKey, error) {
-	verifierOnlyCircuitData, err := DeserializeVerifierOnlyCircuitData(verifierOnlyCircuitDataStr)
+	// Deserialize the public inputs, verifier data and circuit data.
+	proofWithPis, err := DeserializeProofWithPublicInputs(proofWithPublicInputsStr)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	proofWithPis, err := DeserializeProofWithPublicInputs(proofWithPublicInputsStr)
+	verifierOnlyCircuitData, err := DeserializeVerifierOnlyCircuitData(verifierOnlyCircuitDataStr)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -201,26 +209,30 @@ func CompileVerifierCircuit(
 		OutputHash:        new(frontend.Variable),
 		CommonCircuitData: *commonCircuitData,
 	}
+
+	// Compile the verifier circuit.
 	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "compile verifier circuit")
 	}
 
-	Logger.Info().Msg("Running circuit setup")
+	Logger.Info().Msg("running circuit setup")
 	start := time.Now()
 	pk, vk, err := groth16.Setup(r1cs)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	elapsed := time.Since(start)
-	Logger.Info().Msg("Successfully ran circuit setup in " + elapsed.String())
+	Logger.Info().Msg("successfully ran circuit setup in " + elapsed.String())
 
 	return r1cs, pk, vk, nil
 }
 
 func SaveVerifierCircuit(assetDir string, r1cs constraint.ConstraintSystem, pk groth16.ProvingKey, vk groth16.VerifyingKey) error {
+	// Create the asset dir if not exists.
 	os.MkdirAll(assetDir, 0755)
 
+	// Save the R1CS.
 	r1csFile, err := os.Create(assetDir + "/r1cs.bin")
 	if err != nil {
 		return errors.Wrap(err, "create r1cs file")
@@ -229,6 +241,7 @@ func SaveVerifierCircuit(assetDir string, r1cs constraint.ConstraintSystem, pk g
 	r1csFile.Close()
 	Logger.Info().Msg("Successfully saved circuit constraints to r1cs.bin")
 
+	// Save the PK.
 	Logger.Info().Msg("Saving proving key to pk.bin")
 	pkFile, err := os.Create(assetDir + "/pk.bin")
 	if err != nil {
@@ -238,6 +251,7 @@ func SaveVerifierCircuit(assetDir string, r1cs constraint.ConstraintSystem, pk g
 	pkFile.Close()
 	Logger.Info().Msg("Successfully saved proving key to pk.bin")
 
+	// Save the VK.
 	vkFile, err := os.Create(assetDir + "/vk.bin")
 	if err != nil {
 		return errors.Wrap(err, "create vk file")
@@ -246,7 +260,8 @@ func SaveVerifierCircuit(assetDir string, r1cs constraint.ConstraintSystem, pk g
 	vkFile.Close()
 	Logger.Info().Msg("Successfully saved verifying key to vk.bin")
 
-	err = ExportVerifierSolidity(assetDir, vk)
+	// Save the Solidity verifier contract.
+	err = SaveVerifierSolidity(assetDir, vk)
 	if err != nil {
 		return err
 	}
@@ -254,9 +269,10 @@ func SaveVerifierCircuit(assetDir string, r1cs constraint.ConstraintSystem, pk g
 	return nil
 }
 
-func ExportVerifierSolidity(assetDir string, vk groth16.VerifyingKey) error {
-	// Create a new buffer and export the VerifyingKey into it as a Solidity contract and
-	// convert the buffer content to a string for further manipulation.
+func SaveVerifierSolidity(assetDir string, vk groth16.VerifyingKey) error {
+	// Create a new buffer and export the VerifyingKey into it as a Solidity
+	// contract and convert the buffer content to a string for further
+	// manipulation.
 	buf := new(bytes.Buffer)
 	err := vk.ExportSolidity(buf)
 	if err != nil {
@@ -329,7 +345,7 @@ func ProveCircuit(
 	verifierOnlyCircuitDataStr string,
 	proofWithPublicInputsStr string,
 ) (string, error) {
-	Logger.Info().Msg("Loading verifier only circuit data and proof with public inputs")
+	Logger.Info().Msg("loading verifier only circuit data and proof with public inputs")
 	verifierOnlyCircuitData, err := DeserializeVerifierOnlyCircuitData(verifierOnlyCircuitDataStr)
 	if err != nil {
 		return "", err
@@ -352,16 +368,16 @@ func ProveCircuit(
 		OutputHash:     frontend.Variable(outputHash),
 	}
 
-	Logger.Info().Msg("Generating witness")
+	Logger.Info().Msg("generating witness")
 	start := time.Now()
 	witness, err := frontend.NewWitness(assignment, ecc.BN254.ScalarField())
 	if err != nil {
 		return "", errors.Wrap(err, "generate witness")
 	}
 	elapsed := time.Since(start)
-	Logger.Info().Msg("Successfully generated witness in " + elapsed.String())
+	Logger.Info().Msg("successfully generated witness in " + elapsed.String())
 
-	Logger.Info().Msg("Creating proof")
+	Logger.Info().Msg("creating proof")
 	start = time.Now()
 	proof, err := groth16.Prove(R1CS, PK, witness)
 	if err != nil {
@@ -369,19 +385,17 @@ func ProveCircuit(
 	}
 
 	elapsed = time.Since(start)
-	Logger.Info().Msg("Successfully created proof in " + elapsed.String())
+	Logger.Info().Msg("successfully created proof in " + elapsed.String())
 
 	_proof := proof.(*groth16_bn254.Proof)
-	Logger.Info().Msg("Saving proof to proof.json")
-
 	var buf bytes.Buffer
 	_, err = _proof.WriteRawTo(&buf)
 	proofBytes := buf.Bytes()
-	Logger.Info().Msg("len(proofBytes) =" + strconv.Itoa(len(proofBytes)))
+	Logger.Info().Msg("proof byte length: " + strconv.Itoa(len(proofBytes)))
 
 	const fpSize = 4 * 8
 
-	// Ensure proofBytes contains enough data for the expected operation
+	// Ensure proofBytes contains enough data for the expected operation.
 	expectedLength := fpSize * 8
 	if len(proofBytes) < expectedLength {
 		return "", fmt.Errorf("proofBytes length is %d, expected at least %d", len(proofBytes), expectedLength)
@@ -391,7 +405,7 @@ func ProveCircuit(
 	for i := 0; i < 8; i++ {
 		start := i * fpSize
 		end := (i + 1) * fpSize
-		// Additional check to prevent slice bounds out of range panic
+		// Additional check to prevent slice bounds out of range panic.
 		if end > len(proofBytes) {
 			return "", fmt.Errorf("attempt to slice beyond proofBytes length at segment %d", i)
 		}
@@ -400,15 +414,16 @@ func ProveCircuit(
 
 	publicWitness, _ := witness.Public()
 	rawPublicWitnessBytes, _ := publicWitness.MarshalBinary()
-	publicWitnessBytes := rawPublicWitnessBytes[12:] // We cut off the first 12 bytes because they encode length information
+	// We cut off the first 12 bytes because they encode length information.
+	publicWitnessBytes := rawPublicWitnessBytes[12:]
 
 	inputs := make([]string, 3)
-	// Print out the public witness bytes
+	// Print out the public witness bytes.
 	for i := 0; i < 3; i++ {
 		inputs[i] = "0x" + hex.EncodeToString(publicWitnessBytes[i*fpSize:(i+1)*fpSize])
 	}
 
-	// Write proof with all the public inputs and save to disk.
+	// Format the Groth16 proof.
 	jsonProofWithWitness, err := json.Marshal(Groth16Proof{
 		Inputs:           inputs,
 		Proofs:           proofs,
@@ -442,167 +457,5 @@ func GetInputHashOutputHash(proofWithPis types.ProofWithPublicInputsRaw) (*big.I
 	return inputHash, outputHash
 }
 
-func DeserializeCommonCircuitData(str string) (*types.CommonCircuitData, error) {
-	var raw types.CommonCircuitDataRaw
-	err := json.Unmarshal([]byte(str), &raw)
-	if err != nil {
-		return nil, err
-	}
-
-	var commonCircuitData types.CommonCircuitData
-	commonCircuitData.Config.NumWires = raw.Config.NumWires
-	commonCircuitData.Config.NumRoutedWires = raw.Config.NumRoutedWires
-	commonCircuitData.Config.NumConstants = raw.Config.NumConstants
-	commonCircuitData.Config.UseBaseArithmeticGate = raw.Config.UseBaseArithmeticGate
-	commonCircuitData.Config.SecurityBits = raw.Config.SecurityBits
-	commonCircuitData.Config.NumChallenges = raw.Config.NumChallenges
-	commonCircuitData.Config.ZeroKnowledge = raw.Config.ZeroKnowledge
-	commonCircuitData.Config.MaxQuotientDegreeFactor = raw.Config.MaxQuotientDegreeFactor
-
-	commonCircuitData.Config.FriConfig.RateBits = raw.Config.FriConfig.RateBits
-	commonCircuitData.Config.FriConfig.CapHeight = raw.Config.FriConfig.CapHeight
-	commonCircuitData.Config.FriConfig.ProofOfWorkBits = raw.Config.FriConfig.ProofOfWorkBits
-	commonCircuitData.Config.FriConfig.NumQueryRounds = raw.Config.FriConfig.NumQueryRounds
-
-	commonCircuitData.FriParams.DegreeBits = raw.FriParams.DegreeBits
-	commonCircuitData.DegreeBits = raw.FriParams.DegreeBits
-	commonCircuitData.FriParams.Config.RateBits = raw.FriParams.Config.RateBits
-	commonCircuitData.FriParams.Config.CapHeight = raw.FriParams.Config.CapHeight
-	commonCircuitData.FriParams.Config.ProofOfWorkBits = raw.FriParams.Config.ProofOfWorkBits
-	commonCircuitData.FriParams.Config.NumQueryRounds = raw.FriParams.Config.NumQueryRounds
-	commonCircuitData.FriParams.ReductionArityBits = raw.FriParams.ReductionArityBits
-
-	commonCircuitData.GateIds = raw.Gates
-
-	selectorGroupStart := []uint64{}
-	selectorGroupEnd := []uint64{}
-	for _, group := range raw.SelectorsInfo.Groups {
-		selectorGroupStart = append(selectorGroupStart, group.Start)
-		selectorGroupEnd = append(selectorGroupEnd, group.End)
-	}
-
-	commonCircuitData.SelectorsInfo = *gates.NewSelectorsInfo(
-		raw.SelectorsInfo.SelectorIndices,
-		selectorGroupStart,
-		selectorGroupEnd,
-	)
-
-	commonCircuitData.QuotientDegreeFactor = raw.QuotientDegreeFactor
-	commonCircuitData.NumGateConstraints = raw.NumGateConstraints
-	commonCircuitData.NumConstants = raw.NumConstants
-	commonCircuitData.NumPublicInputs = raw.NumPublicInputs
-	commonCircuitData.KIs = raw.KIs
-	commonCircuitData.NumPartialProducts = raw.NumPartialProducts
-
-	// Don't support circuits that have hiding enabled
-	if raw.FriParams.Hiding {
-		return nil, errors.New("Circuit has hiding enabled, which is not supported")
-	}
-
-	return &commonCircuitData, nil
-}
-
-func DeserializeVerifierOnlyCircuitData(str string) (*variables.VerifierOnlyCircuitData, error) {
-	var raw types.VerifierOnlyCircuitDataRaw
-	err := json.Unmarshal([]byte(str), &raw)
-	if err != nil {
-		return nil, err
-	}
-
-	verifierOnlyCircuitData := variables.DeserializeVerifierOnlyCircuitData(raw)
-	return &verifierOnlyCircuitData, nil
-}
-
-func DeserializeProofWithPublicInputs(str string) (*variables.ProofWithPublicInputs, error) {
-	var raw types.ProofWithPublicInputsRaw
-	err := json.Unmarshal([]byte(str), &raw)
-	if err != nil {
-		return nil, err
-	}
-
-	proofWithPublicInputs := variables.DeserializeProofWithPublicInputs(raw)
-	return &proofWithPublicInputs, nil
-}
-
-/*
-
-func (s *Groth16System) Verify() error {
-}
-
-func (s *Groth16System) Export() error {
-	s.logger.Info().Msg("starting export -- loading verifier key and exporting Verifier solidity")
-
-	vk, err := s.LoadVerifierKey()
-	if err != nil {
-		return errors.Wrap(err, "load verifier key")
-	}
-
-	err = s.ExportVerifierJSON(vk)
-	if err != nil {
-		return errors.Wrap(err, "export Verifier JSON")
-	}
-
-	err = s.ExportVerifierSolidity(vk)
-	if err != nil {
-		return errors.Wrap(err, "export Verifier solidity")
-	}
-
-	s.logger.Info().Msg("successfully exported Verifier solidity")
-
-	return nil
-}
-
-
-
-func (s *Groth16System) LoadProof() (proof groth16.Proof, err error) {
-	proof = groth16.NewProof(ecc.BN254)
-	f, err := os.Open(s.dataPath + "/proof.json")
-	if err != nil {
-		return proof, errors.Wrap(err, "open proof file")
-	}
-	jsonProof, err := io.ReadAll(f)
-	if err != nil {
-		return proof, errors.Wrap(err, "read proof file")
-	}
-	err = json.Unmarshal(jsonProof, proof)
-	if err != nil {
-		return proof, errors.Wrap(err, "read proof file")
-	}
-	f.Close()
-
-	return proof, nil
-}
-
-func (s *Groth16System) LoadPublicWitness() (witness.Witness, error) {
-	publicWitness, err := witness.New(ecc.BN254.ScalarField())
-	if err != nil {
-		return publicWitness, errors.Wrap(err, "create public witness")
-	}
-	f, err := os.Open(s.dataPath + "/public_witness.bin")
-	if err != nil {
-		return publicWitness, errors.Wrap(err, "open public witness file")
-	}
-	_, err = publicWitness.ReadFrom(f)
-	if err != nil {
-		return publicWitness, errors.Wrap(err, "read public witness file")
-	}
-	f.Close()
-
-	return publicWitness, nil
-}
-
-/*
-
-
-
-// gupeng
-type Config struct {
-	NodeUrl  string   `json:"NodeUrl"`
-	BlockNum int      `json:"BlockNum"`
-	Addr     string   `json:"Addr"`
-	Keys     []string `json:"Keys"`
-	Values   []string `json:"Values"`
-}
-*/
-
+// Necessary for go-build
 func main() {}

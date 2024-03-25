@@ -1,3 +1,6 @@
+// Copied from PR [succinctx#353](https://github.com/succinctlabs/succinctx/pull/353)
+// directly with no changes.
+
 package main
 
 import (

@@ -1,6 +1,6 @@
-//! Initialize the prover and generate proofs.
+//! Initialize the prover and generate the proofs.
 
-use crate::go;
+use crate::{go, utils::handle_c_result};
 use anyhow::{bail, Result};
 use std::ffi::{CStr, CString};
 
@@ -10,16 +10,7 @@ pub fn init_prover(asset_dir: &str) -> Result<()> {
 
     let result = unsafe { go::InitProver(asset_dir.as_ptr()) };
 
-    if result.is_null() {
-        return Ok(());
-    }
-
-    let c_result = unsafe { CStr::from_ptr(result) };
-    let error = c_result.to_str()?.to_string();
-
-    unsafe { go::FreeString(c_result.as_ptr()) };
-
-    bail!(error);
+    handle_c_result(result)
 }
 
 /// Generate the proof.
@@ -34,19 +25,14 @@ pub fn prove(verifier_only_circuit_data: &str, proof_with_public_inputs: &str) -
         )
     };
 
-    if result.1.is_null() {
-        let c_proof = unsafe { CStr::from_ptr(result.0) };
-        let proof = c_proof.to_str()?.to_string();
-
-        unsafe { go::FreeString(c_proof.as_ptr()) };
-
-        return Ok(proof);
+    if result.is_null() {
+        bail!("Failed to generate the proof");
     }
 
-    let c_error = unsafe { CStr::from_ptr(result.1) };
-    let error = c_error.to_str()?.to_string();
+    let c_proof = unsafe { CStr::from_ptr(result) };
+    let proof = c_proof.to_str()?.to_string();
 
-    unsafe { go::FreeString(c_error.as_ptr()) };
+    unsafe { go::FreeString(c_proof.as_ptr()) };
 
-    bail!(error);
+    Ok(proof)
 }
