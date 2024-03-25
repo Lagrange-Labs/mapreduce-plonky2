@@ -14,26 +14,23 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitData},
+    plonk::{circuit_builder::{self, CircuitBuilder}, circuit_data::CircuitData},
 };
-use recursion_framework::serialization::{deserialize, serialize};
+use recursion_framework::{circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder}, framework::{RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget}, serialization::{deserialize, serialize}};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    api::{C, D, F},
-    array::Array,
-    keccak::{OutputHash, PACKED_HASH_LEN},
-    query2::storage::public_inputs::PublicInputs as StorageInputs,
-    types::PackedAddressTarget as PackedSCAddressTarget,
+    api::{default_config, ProofWithVK, C, D, F}, array::Array, keccak::{OutputHash, PACKED_HASH_LEN}, query2::storage::public_inputs::PublicInputs as StorageInputs, state, types::PackedAddressTarget as PackedSCAddressTarget
 };
 
-use super::{block::BlockPublicInputs, PackedSCAddress};
+use super::{block::{BlockPublicInputs, BLOCK_CIRCUIT_SET_SIZE}, revelation::circuit, PackedSCAddress};
+use anyhow::Result;
 
 #[cfg(test)]
 pub(crate) mod tests;
 
 /// The witnesses of [ProvenanceCircuit].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateWires {
     /// Smart contract address (unpacked)
     pub smart_contract_address: PackedSCAddressTarget,
@@ -45,10 +42,13 @@ pub struct StateWires {
     pub block_number: Target,
     /// Range of the query
     pub range: Target,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     /// The merkle root of the opening.
     pub state_root: HashOutTarget,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     /// The siblings that opens to `state_root`.
     pub siblings: MerkleProofTarget,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     /// The boolean flags to describe the path. `true` equals right; `false` equals left.
     pub positions: Vec<BoolTarget>,
     /// The block hash as stored in the leaf of the block db.
@@ -247,29 +247,158 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
 }
 
 #[derive(Serialize, Deserialize)]
+pub(crate) struct StateRecursiveWires {
+    state_wires: StateWires,
+    storage_verifier: RecursiveCircuitsVerifierTarget<D>,
+}
+
+const NUM_STORAGE_INPUTS: usize = StorageInputs::<Target>::TOTAL_LEN;
+const NUM_IO: usize = BlockPublicInputs::<Target>::total_len();
+//ToDo: decide if we want it as a const generic parameter
+const DEPTH: usize = 1;
+
+impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
+    type CircuitBuilderParams =  RecursiveCircuitsVerifierGagdet<F, C, D, NUM_STORAGE_INPUTS>;
+
+    type Inputs = StateCircuitInputs;
+
+    const NUM_PUBLIC_INPUTS: usize = NUM_IO;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        let storage_verifier = builder_parameters.verify_proof_in_circuit_set(builder);
+        let storage_pi = StorageInputs::from_slice(
+            storage_verifier.get_public_input_targets::<F, NUM_STORAGE_INPUTS>()
+        );
+        
+        let state_wires = StateCircuit::<DEPTH, F>::build(builder, &storage_pi);
+
+        Self {
+            state_wires,
+            storage_verifier
+        }
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
+        inputs.state_input.assign(pw, &self.state_wires);
+        let (proof, vd) = (&inputs.storage_proof).into();
+        self.storage_verifier.set_target(
+            pw, 
+            &inputs.storage_circuit_set, 
+            proof, vd
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Parameters {
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    circuit: CircuitData<F, C, D>,
+    circuit: CircuitWithUniversalVerifier<F, C, D, 0, StateRecursiveWires>,
+}
+
+pub struct StateCircuitInputs {
+    state_input: StateCircuit<DEPTH, F>,
+    storage_proof: ProofWithVK,
+    storage_circuit_set: RecursiveCircuits<F, C, D>,
+}
+
+impl StateCircuitInputs {
+    pub(crate) fn new(
+        state_input: StateCircuit<DEPTH, F>,
+        storage_proof: ProofWithVK,
+        storage_circuit_set: &RecursiveCircuits<F, C, D>,
+    ) -> Self {
+        Self {
+            state_input,
+            storage_proof,
+            storage_circuit_set: storage_circuit_set.clone(),
+        }
+    }
 }
 
 pub struct CircuitInput {
-    contract_address: Address,
-    mapping_slot: usize,
-    length_slot: usize,
-    state_root: Vec<u8>,
-    siblings: Vec<Vec<u8>>,
-    // 0 for left, 1 for right ?
-    positions: Vec<bool>,
-    // hash of the block header linked to the current block
-    block_hash: Vec<u8>,
+    state_input: StateCircuit<DEPTH, F>,
+    storage_proof: ProofWithVK,
+}
+
+impl CircuitInput {
+    pub fn new(
+            smart_contract_address: PackedSCAddress<F>,
+            mapping_slot: F,
+            length_slot: F,
+            block_number: F,
+            state_root: HashOut<F>,
+            siblings: Vec<HashOut<F>>,
+            positions: Vec<bool>,
+            block_hash: Array<F, PACKED_HASH_LEN>,
+            storage_proof: Vec<u8>) -> Result<Self> {
+        Ok(
+            Self {
+                state_input: StateCircuit::new(
+                    smart_contract_address,
+                    mapping_slot,
+                    length_slot,
+                    block_number,
+                    state_root,
+                    siblings,
+                    positions,
+                    block_hash
+                ),
+                storage_proof: ProofWithVK::deserialize(&storage_proof)?,
+            }
+        )
+    }
 }
 
 impl Parameters {
-    pub fn build(circuit: CircuitData<F, C, D>) -> Self {
-        todo!()
+    pub(crate) fn build(storage_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
+        let verifier_gadget = RecursiveCircuitsVerifierGagdet::new(
+            default_config(),
+            storage_circuit_set
+        );
+        let circuit_builder = CircuitWithUniversalVerifierBuilder::<
+            F,
+            D,
+            NUM_IO,
+        >::new::<C>(
+            default_config(), 
+            BLOCK_CIRCUIT_SET_SIZE,
+        );
+        let circuit = circuit_builder.build_circuit(verifier_gadget);
+
+        Self {
+            circuit
+        }
     }
 
-    pub fn generate_proof(&self, input: CircuitInput) -> Vec<u8> {
-        todo!()
+    pub(crate) fn generate_proof(
+        &self, 
+        block_circuit_set: &RecursiveCircuits<F, C, D>, 
+        input: StateCircuitInputs
+    ) -> Result<Vec<u8>> {
+        let proof = block_circuit_set.generate_proof(
+            &self.circuit, 
+            [], 
+            [], 
+            input
+        )?;
+        ProofWithVK::serialize(
+            &(
+                proof,
+                self.circuit.circuit_data().verifier_only.clone()
+            ).into()
+        )
+    }
+
+    pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {
+        self.circuit.circuit_data()
+    }
+
+    pub(crate) fn verify_proof(&self, proof: &[u8]) -> Result<()> {
+        let proof = ProofWithVK::deserialize(proof)?;
+        let (proof, _) = proof.into();
+        self.circuit.circuit_data().verify(proof)
     }
 }

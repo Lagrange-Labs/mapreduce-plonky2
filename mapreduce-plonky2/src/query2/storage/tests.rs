@@ -290,6 +290,16 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
         [u8; MAPPING_KEY_LEN],
         [GoldilocksField; PublicInputs::<GoldilocksField>::TOTAL_LEN],
     ) {
+        Self::inputs_from_seed_and_owner(seed, Address::random())
+    }
+
+    pub(crate) fn inputs_from_seed_and_owner(
+        seed: u64,
+        owner_addr: Address,
+    ) -> (
+        [u8; MAPPING_KEY_LEN],
+        [GoldilocksField; PublicInputs::<GoldilocksField>::TOTAL_LEN],
+    ) {
         let mut pis = [GoldilocksField::ZERO; PublicInputs::<GoldilocksField>::TOTAL_LEN];
         let rng = &mut StdRng::seed_from_u64(seed);
         // generate a fake NFT ID within u32 and in big endian encoding
@@ -302,7 +312,7 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
             array::from_fn(|i| F::from_canonical_u32(packed_leaf[i]));
 
         // leaf value == owner address
-        let user_address = convert_u8_to_u32_slice(&left_pad32(Address::random().as_fixed_bytes()));
+        let user_address = convert_u8_to_u32_slice(&left_pad32(owner_addr.as_fixed_bytes()));
         let leaf_value: [GoldilocksField; PACKED_VALUE_LEN] =
             array::from_fn(|i| F::from_canonical_u32(user_address[i]));
 

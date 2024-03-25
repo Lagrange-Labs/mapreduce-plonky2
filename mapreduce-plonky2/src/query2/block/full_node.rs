@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::{
@@ -10,11 +11,14 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+use recursion_framework::circuit_builder::{public_input_targets, CircuitLogicWires};
+use serde::{Serialize, Deserialize};
 
 use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 
 use super::BlockPublicInputs;
 
+#[derive(Serialize, Deserialize)]
 pub struct FullNodeWires {}
 
 #[derive(Clone, Debug)]
@@ -38,13 +42,13 @@ impl FullNodeCircuit {
         // X[0] == X[1]
         inputs[0]
             .user_address()
-            .equals(b, &inputs[1].user_address());
+            .enforce_equal(b, &inputs[1].user_address());
         // M[0] == M[1]
         b.connect(inputs[0].mapping_slot(), inputs[1].mapping_slot());
         // A[0] == A[1]
         inputs[0]
             .smart_contract_address()
-            .equals(b, &inputs[1].smart_contract_address());
+            .enforce_equal(b, &inputs[1].smart_contract_address());
         // S[0] == S[1]
         b.connect(
             inputs[0].mapping_slot_length(),
@@ -73,4 +77,33 @@ impl FullNodeCircuit {
     }
 
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &FullNodeWires) {}
+}
+
+
+type F = crate::api::F;
+const D: usize = crate::api::D;
+const NUM_IO: usize = BlockPublicInputs::<Target>::total_len();
+
+impl CircuitLogicWires<F, D, 2> for FullNodeWires {
+    type CircuitBuilderParams = ();
+
+    type Inputs = FullNodeCircuit;
+
+    const NUM_PUBLIC_INPUTS: usize = NUM_IO;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 2],
+        _builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        let children_pi = verified_proofs.into_iter().map(|proof| 
+            BlockPublicInputs::from(Self::public_input_targets(proof))
+        ).collect_vec().try_into().unwrap();
+        FullNodeCircuit::build(builder, children_pi)
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
+        inputs.assign(pw, &self);
+        Ok(())
+    }
 }

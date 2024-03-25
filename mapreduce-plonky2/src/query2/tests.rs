@@ -4,10 +4,11 @@ use crate::{
     block::empty_merkle_root,
     circuit::test::run_circuit,
     keccak::PACKED_HASH_LEN,
-    query2::{revelation::RevelationPublicInputs, state::tests::run_state_circuit_with_slot},
+    query2::{revelation::RevelationPublicInputs, state::tests::run_state_circuit_with_slot_and_addresses},
     types::MAPPING_KEY_LEN,
     utils::convert_u8_to_u32_slice,
 };
+use ethers::types::Address;
 use itertools::Itertools;
 use plonky2::{
     field::{
@@ -76,40 +77,28 @@ impl UserCircuit<GoldilocksField, D> for FullNodeCircuitValidator<'_> {
 struct PartialNodeCircuitValidator<'a> {
     validated: PartialNodeCircuit,
     child_proof: BlockQueryPublicInputs<'a, F>,
-    // the hash of a sibling node in the tree that don't contain any results, i.e.
-    // there is no proofs to verify for this children
-    sibling_hash: Vec<F>,
-    child_to_prove_is_left: F,
 }
 impl UserCircuit<F, D> for PartialNodeCircuitValidator<'_> {
-    type Wires = (PartialNodeWires, Vec<Target>, Vec<Target>, Target);
+    type Wires = (PartialNodeWires, Vec<Target>);
 
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
         let child_to_prove_pi =
             c.add_virtual_targets(BlockQueryPublicInputs::<Target>::total_len());
         let child_to_prove_io =
             BlockQueryPublicInputs::<Target>::from(child_to_prove_pi.as_slice());
-        let proven_child_hash_targets = c.add_virtual_targets(NUM_HASH_OUT_ELTS);
-        let child_to_prove_position_target = c.add_virtual_target();
         let wires = PartialNodeCircuit::build(
             c,
             &child_to_prove_io,
-            HashOutTarget::from_vec(proven_child_hash_targets.clone()),
-            BoolTarget::new_unsafe(child_to_prove_position_target),
         );
 
         (
             wires,
             child_to_prove_pi.try_into().unwrap(),
-            proven_child_hash_targets,
-            child_to_prove_position_target,
         )
     }
 
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
         pw.set_target_arr(&wires.1, self.child_proof.inputs);
-        pw.set_target_arr(&wires.2, &self.sibling_hash);
-        pw.set_target(wires.3, self.child_to_prove_is_left);
         self.validated.assign(pw, &wires.0);
     }
 }
@@ -158,11 +147,13 @@ fn test_query2_mini_tree() {
     const SLOT_LENGTH: u32 = 9;
     const MAX_DEPTH: usize = 12;
     const MAPPING_SLOT: u32 = 48372;
+    let smart_contract_address = Address::random();
+    let user_address = Address::random();
 
     let (left_value, left_leaf_proof_io) =
-        run_state_circuit_with_slot(0xdead, SLOT_LENGTH, MAPPING_SLOT);
+        run_state_circuit_with_slot_and_addresses(0xdead, SLOT_LENGTH, MAPPING_SLOT, smart_contract_address, user_address);
     let (right_value, right_leaf_proof_io) =
-        run_state_circuit_with_slot(0xbeef, SLOT_LENGTH, MAPPING_SLOT);
+        run_state_circuit_with_slot_and_addresses(0xbeef, SLOT_LENGTH, MAPPING_SLOT, smart_contract_address, user_address);
 
     let left_leaf_pi = BlockQueryPublicInputs::<'_, F>::from(left_leaf_proof_io.as_slice());
     let right_leaf_pi = BlockQueryPublicInputs::<'_, F>::from(right_leaf_proof_io.as_slice());
@@ -181,10 +172,11 @@ fn test_query2_mini_tree() {
     );
 
     let top_proof = run_circuit::<F, D, C, _>(PartialNodeCircuitValidator {
-        validated: PartialNodeCircuit {},
+        validated: PartialNodeCircuit::new(
+            proved,
+            false,
+        ),
         child_proof: BlockQueryPublicInputs::<F>::from(middle_proof.public_inputs.as_slice()),
-        sibling_hash: proved.elements.to_vec(),
-        child_to_prove_is_left: F::from_bool(false),
     });
 
     let root_proof =

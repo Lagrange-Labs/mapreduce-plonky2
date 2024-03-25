@@ -9,7 +9,7 @@ use crate::{array::Array, types::PACKED_ADDRESS_LEN as PACKED_SC_ADDRESS_LEN};
 pub mod api;
 pub(crate) mod block;
 mod revelation;
-mod state;
+pub(crate) mod state;
 mod storage;
 
 pub use api::{CircuitInput, Parameters};
