@@ -38,13 +38,11 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     pub fn new_leaf(mapping_key: &[u8], mapping_value: &[u8]) -> Self {
-        let mk = left_pad32(mapping_key);
-        let mk_u32 = convert_u8_to_u32_slice(&mk);
-        let mv = left_pad32(mapping_value);
-        let mv_u32 = convert_u8_to_u32_slice(&mv);
+        let mk = convert_u8_to_u32_slice(&left_pad32(mapping_key));
+        let mv = convert_u8_to_u32_slice(&left_pad32(mapping_value));
         CircuitInput::Leaf(LeafCircuit {
-            mapping_key: mk_u32.try_into().unwrap(),
-            mapping_value: mv_u32.try_into().unwrap(),
+            mapping_key: mk.try_into().unwrap(),
+            mapping_value: mv.try_into().unwrap(),
         })
     }
 

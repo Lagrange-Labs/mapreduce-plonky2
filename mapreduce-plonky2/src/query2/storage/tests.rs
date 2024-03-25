@@ -7,18 +7,14 @@ use std::{
 
 use itertools::Itertools;
 use plonky2::{
-    field::{
-        extension::{quintic::QuinticExtension, Extendable},
-        goldilocks_field::GoldilocksField,
-        types::Field,
-    },
+    field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{
-        hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOut, NUM_HASH_OUT_ELTS},
         hashing::hash_n_to_hash_no_pad,
         poseidon::PoseidonPermutation,
     },
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
@@ -30,13 +26,13 @@ use plonky2::{
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 
 use crate::{
+    api::ProofWithVK,
     circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
-    group_hashing::{field_to_curve::ToCurvePoint, map_to_curve_point},
-    query2::{EWord, EWORD_LEN},
-    storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
-    types::{MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN, PACKED_VALUE_LEN, VALUE_LEN},
-    utils::{convert_u8_to_u32_slice, test::random_vector},
+    group_hashing::map_to_curve_point,
+    storage::lpn::{intermediate_node_hash, leaf_hash_for_mapping},
+    types::{MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN, PACKED_VALUE_LEN},
+    utils::convert_u8_to_u32_slice,
 };
 
 use super::{
@@ -44,6 +40,7 @@ use super::{
     leaf::LeafCircuit,
     partial_inner::{PartialInnerNodeCircuit, PartialInnerNodeWires},
     public_inputs::PublicInputs,
+    CircuitInput, Parameters,
 };
 
 const D: usize = 2;
@@ -329,4 +326,56 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
 
         (leaf_key.try_into().unwrap(), pis)
     }
+}
+
+#[test]
+fn test_api() {
+    let params = Parameters::build();
+    let leaf1 = params
+        .generate_proof(CircuitInput::new_leaf(b"jean", b"michel"))
+        .unwrap();
+    params
+        .partial_node_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&leaf1).unwrap().proof)
+        .unwrap();
+    let leaf2 = params
+        .generate_proof(CircuitInput::new_leaf(b"gustavo", b"ernesto"))
+        .unwrap();
+    params
+        .partial_node_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&leaf2).unwrap().proof)
+        .unwrap();
+
+    let full_inner = params
+        .generate_proof(CircuitInput::new_full_node(leaf1, leaf2))
+        .unwrap();
+    params
+        .partial_node_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&full_inner).unwrap().proof)
+        .unwrap();
+
+    let some_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
+        &b"coucou"
+            .iter()
+            .copied()
+            .map(F::from_canonical_u8)
+            .collect_vec(),
+    )
+    .to_bytes();
+
+    let partial_inner = params
+        .generate_proof(CircuitInput::new_partial_node(
+            full_inner, false, &some_hash,
+        ))
+        .unwrap();
+
+    let p = ProofWithVK::deserialize(&partial_inner).unwrap();
+    params
+        .partial_node_circuit
+        .circuit_data()
+        .verify(p.proof)
+        .unwrap();
 }
