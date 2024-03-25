@@ -233,9 +233,15 @@ fn test_query2_mini_tree() {
                 .cloned()
                 .unwrap()
     );
-    let values = [right_value, left_value, EMPTY_NFT_ID, EMPTY_NFT_ID];
+    let nft_ids = [right_value, left_value, EMPTY_NFT_ID, EMPTY_NFT_ID];
+    let packed_nft_ids = nft_ids
+        .iter()
+        .map(|v| convert_u8_to_u32_slice(v).try_into().unwrap())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
     let revelation_circuit = RevelationCircuit::<L> {
-        raw_keys: values,
+        packed_keys: packed_nft_ids,
         num_entries,
         query_min_block_number: query_min_block_number.to_canonical_u64() as usize,
         query_max_block_number: query_max_block_number.to_canonical_u64() as usize,

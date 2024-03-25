@@ -10,7 +10,7 @@ use crate::{
     api::{ProofWithVK, C, D, F},
     array::Array,
     eth::left_pad32,
-    mpt_sequential::Circuit,
+    mpt_sequential::Circuit, utils::convert_u8_to_u32_slice,
 };
 
 mod full_inner;
@@ -27,10 +27,12 @@ pub enum CircuitInput {
 impl CircuitInput {
     pub fn new_leaf(mapping_key: &[u8], mapping_value: &[u8]) -> Self {
         let mk = left_pad32(mapping_key);
+        let mk_u32 = convert_u8_to_u32_slice(&mk);
         let mv = left_pad32(mapping_value);
+        let mv_u32 = convert_u8_to_u32_slice(&mv);
         CircuitInput::Leaf(leaf::LeafCircuit {
-            mapping_key: mk,
-            mapping_value: mv,
+            mapping_key: mk_u32.try_into().unwrap(),
+            mapping_value: mv_u32.try_into().unwrap(),
         })
     }
 
