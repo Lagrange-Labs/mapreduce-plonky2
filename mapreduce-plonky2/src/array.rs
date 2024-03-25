@@ -561,6 +561,9 @@ where
             real_len,
         }
     }
+    pub fn last(&self) -> T {
+        self.arr[SIZE - 1]
+    }
 }
 /// Returns the size of the array in 32-bit units, rounded up.
 pub(crate) const fn L32(a: usize) -> usize {

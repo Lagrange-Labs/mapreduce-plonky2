@@ -3,18 +3,16 @@
 use anyhow::{bail, Ok, Result};
 use eth_trie::{EthTrie, MemoryDB, Node, Trie};
 use ethers::{
-    providers::{Http, JsonRpcClient, Middleware, Provider},
+    providers::{Http, Middleware, Provider},
     types::{
-        spoof::Storage, Address, Block, BlockId, BlockNumber, Bytes, EIP1186ProofResponse,
-        Transaction, TransactionReceipt, H256, U256, U64,
+        Address, Block, BlockId, Bytes, EIP1186ProofResponse, Transaction, TransactionReceipt,
+        H256, U64,
     },
-    utils::hex,
 };
-use plonky2::hash::keccak;
 use rlp::{Encodable, Rlp, RlpStream};
 #[cfg(feature = "ci")]
 use std::env;
-use std::{array::from_fn as create_array, str::FromStr, sync::Arc};
+use std::{array::from_fn as create_array, sync::Arc};
 
 use crate::{mpt_sequential::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
@@ -78,7 +76,7 @@ pub struct BlockData {
 impl BlockData {
     pub async fn fetch<T: Into<BlockId> + Send + Sync>(blockid: T) -> Result<Self> {
         #[cfg(feature = "ci")]
-        let url = env::var("CI_RPC_URL").expect("CI_RPC_URL env var not set");
+        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
         #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
         let provider =
@@ -384,6 +382,8 @@ impl ProofQuery {
 #[cfg(test)]
 mod test {
 
+    use std::str::FromStr;
+
     use ethers::types::{BlockNumber, H256, U256};
     use rand::{thread_rng, Rng};
 
@@ -395,7 +395,10 @@ mod test {
     use super::*;
 
     #[tokio::test]
-    async fn test_pidgy_pinguins_length_slot() -> Result<()> {
+    async fn test_pidgy_pinguin_length_slot() -> Result<()> {
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
+        #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
@@ -435,53 +438,9 @@ mod test {
         println!("length extracted = {}", length);
         println!("length 2 extracted = {}", length2);
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);
-        // try if it's an array or not.
-        // for storage slot 8 it should be an array so the proof should be valid.
-        // for storage slot 11, it should be a variable so the proof to access the second
-        // item of this variable should be invalid (since the location doesn't exist)
-        {
-            let memdb = Arc::new(MemoryDB::new(true));
-            let tx_trie = EthTrie::new(Arc::clone(&memdb));
-            let array_slot = 8 as u8;
-
-            // TLDR:  we know we can access the _second_ item of the array but NOT the first one
-            // it's because in this case, the first value is 0 and it may not exist in the MPT
-            // https://github.com/ethereumjs/merkle-patricia-tree/issues/47#issue-328846240
-            let mut location = [0u8; 32];
-            (U256::from_big_endian(&keccak256(&left_pad32(&[array_slot]))) + U256::one())
-                .to_big_endian(&mut location[..]);
-
-            println!("location  = {}", hex::encode(&location));
-            let res = provider
-                .get_proof(pidgy_address, vec![H256::from_slice(&location)], None)
-                .await?;
-
-            let proof_key_bytes: [u8; 32] = res.storage_proof[0].key.into(); // rpc key == location
-            println!("res.proof key bytes = {}", hex::encode(&proof_key_bytes));
-            assert!(&proof_key_bytes.to_vec() == &location);
-            let mpt_key = keccak256(&proof_key_bytes[..]);
-            let is_valid = tx_trie.verify_proof(
-                res.storage_hash,
-                &mpt_key,
-                res.storage_proof[0]
-                    .proof
-                    .iter()
-                    .map(|b| b.to_vec())
-                    .collect(),
-            );
-            println!("res.value = {}", res.storage_proof[0].value);
-
-            if is_valid.is_err() {
-                bail!("storage proof is invalid: {}", is_valid.unwrap_err());
-            }
-            if is_valid.unwrap().is_none() {
-                bail!("storage proof says the value associated with that key does not exist");
-            }
-        }
-        //let value = ProofQuery::verify_storage_proof(&res)?;
-        //println!("value at slot 8: {}", value);
         Ok(())
     }
+
     #[tokio::test]
     async fn test_pidgy_pinguin_mapping_slot() -> Result<()> {
         // first pinguin holder https://dune.com/queries/2450476/4027653

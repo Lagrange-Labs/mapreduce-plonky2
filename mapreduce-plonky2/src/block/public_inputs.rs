@@ -1,6 +1,6 @@
 use crate::{keccak::OutputHash, keccak::PACKED_HASH_LEN};
 use plonky2::{
-    field::extension::Extendable,
+    field::{extension::Extendable, goldilocks_field::GoldilocksField},
     hash::hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
     iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
@@ -60,14 +60,14 @@ impl<'a> PublicInputs<'a, Target> {
         U32Target(self.block_number_data())
     }
 
-    /// Return the block header hash.
-    pub fn block_header(&self) -> OutputHash {
+    /// Return the block header hash extracted from the blockchain
+    pub fn original_block_header(&self) -> OutputHash {
         let data = self.block_header_data();
         array::from_fn(|i| U32Target(data[i])).into()
     }
 }
 
-impl<'a, T: Copy> PublicInputs<'a, T> {
+impl<'a, T: Copy + Default> PublicInputs<'a, T> {
     pub(crate) const U0_IDX: usize = 0;
     pub(crate) const UI_IDX: usize = Self::U0_IDX + NUM_HASH_OUT_ELTS;
     pub(crate) const Z1_IDX: usize = Self::UI_IDX + NUM_HASH_OUT_ELTS;
@@ -97,5 +97,24 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     pub fn block_header_data(&self) -> &[T] {
         &self.proof_inputs[Self::H_IDX..]
+    }
+}
+
+impl PublicInputs<'_, GoldilocksField> {
+    #[cfg(test)]
+    pub(crate) fn from_parts(
+        init_root: &[GoldilocksField; NUM_HASH_OUT_ELTS],
+        last_root: &[GoldilocksField; NUM_HASH_OUT_ELTS],
+        init_block_number: GoldilocksField,
+        last_block_number: GoldilocksField,
+        last_block_hash: &[GoldilocksField; PACKED_HASH_LEN],
+    ) -> [GoldilocksField; Self::TOTAL_LEN] {
+        let mut arr = [GoldilocksField::default(); Self::TOTAL_LEN];
+        arr[Self::U0_IDX..Self::UI_IDX].copy_from_slice(init_root);
+        arr[Self::UI_IDX..Self::Z1_IDX].copy_from_slice(last_root);
+        arr[Self::Z1_IDX] = init_block_number;
+        arr[Self::ZI_IDX] = last_block_number;
+        arr[Self::H_IDX..].copy_from_slice(last_block_hash);
+        arr
     }
 }

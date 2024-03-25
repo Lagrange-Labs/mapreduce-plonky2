@@ -1,8 +1,17 @@
-use std::{array, ops::Add};
+use ethers::types::Address;
+use plonky2::field::types::Sample;
+use std::{
+    array::{self, from_fn},
+    ops::Add,
+};
 
 use itertools::Itertools;
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
+    field::{
+        extension::{quintic::QuinticExtension, Extendable},
+        goldilocks_field::GoldilocksField,
+        types::Field,
+    },
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         hashing::hash_n_to_hash_no_pad,
@@ -23,8 +32,11 @@ use rand::{rngs::StdRng, RngCore, SeedableRng};
 use crate::{
     circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
-    group_hashing::map_to_curve_point,
+    group_hashing::{field_to_curve::ToCurvePoint, map_to_curve_point},
+    query2::{EWord, EWORD_LEN},
     storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
+    types::{MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN, PACKED_VALUE_LEN, VALUE_LEN},
+    utils::{convert_u8_to_u32_slice, test::random_vector},
 };
 
 use super::{
@@ -108,7 +120,6 @@ impl<'a> UserCircuit<GoldilocksField, 2> for FullInnerNodeCircuitValidator<'a> {
 
 struct LeafProofResult {
     proof: ProofWithPublicInputs<F, C, D>,
-    kv_gl: Vec<F>,
     owner_gl: Vec<F>,
 }
 impl LeafProofResult {
@@ -118,23 +129,22 @@ impl LeafProofResult {
 }
 
 fn run_leaf_proof<'data>(k: &[u8], v: &[u8]) -> LeafProofResult {
-    let k = left_pad32(k);
-    let v = left_pad32(v);
+    let k_u32 = convert_u8_to_u32_slice(&left_pad32(k));
+    let v_u32 = convert_u8_to_u32_slice(&left_pad32(v));
 
-    let kv_gl = k
+    let owner_gl = v_u32
         .iter()
-        .chain(v.iter())
         .copied()
-        .map(F::from_canonical_u8)
+        .map(F::from_canonical_u32)
         .collect_vec();
 
-    let owner_gl = v.iter().copied().map(F::from_canonical_u8).collect_vec();
-
-    let circuit = LeafCircuit { key: k, value: v };
+    let circuit = LeafCircuit {
+        mapping_key: k_u32.try_into().unwrap(),
+        mapping_value: v_u32.try_into().unwrap(),
+    };
 
     LeafProofResult {
         proof: run_circuit(circuit),
-        kv_gl,
         owner_gl,
     }
 }
@@ -195,16 +205,24 @@ fn test_mini_tree(k: &[u8], v: &[u8]) {
     let middle_ios = PublicInputs::<F>::from(middle_proof.public_inputs.as_slice());
 
     // Check the digest
-    let expected_digest = leaf_digest_for_mapping(k1, v1)
-        .add(leaf_digest_for_mapping(k2, v2))
-        .to_weierstrass();
-    let expected_other_digest = leaf_digest_for_mapping(k2, v2)
-        .add(leaf_digest_for_mapping(k1, v1))
-        .to_weierstrass();
+    let leaf1 = map_to_curve_point(
+        &convert_u8_to_u32_slice(&left_pad32(k1))
+            .into_iter()
+            .map(F::from_canonical_u32)
+            .collect::<Vec<_>>(),
+    );
+    let leaf2 = map_to_curve_point(
+        &convert_u8_to_u32_slice(&left_pad32(k2))
+            .into_iter()
+            .map(F::from_canonical_u32)
+            .collect::<Vec<_>>(),
+    );
+    let exp_node_digest = leaf1.add(leaf2);
+    let exp_other_node_digest = leaf2.add(leaf1);
     let found_digest = middle_ios.digest();
-    assert_eq!(expected_digest, found_digest);
+    assert_eq!(exp_node_digest.to_weierstrass(), found_digest);
     // The digest must commute
-    assert_eq!(expected_other_digest, found_digest);
+    assert_eq!(exp_other_node_digest.to_weierstrass(), found_digest);
 
     // Check the nested root hash
     let expected_hash = HashOut::from_bytes(&intermediate_node_hash(
@@ -282,17 +300,49 @@ impl<'a, T: Copy + Default> PublicInputs<'a, T> {
     }
 }
 
-impl<'a, F: RichField> PublicInputs<'a, F> {
-    pub fn values_from_seed(seed: u64) -> [F; PublicInputs::<()>::TOTAL_LEN] {
+impl<'a> PublicInputs<'a, GoldilocksField> {
+    /// Given a seed, generate & prove a leaf circuit, returning it along the value it encodes
+    /// meaning the mapping key
+    pub fn inputs_from_seed(
+        seed: u64,
+    ) -> (
+        [u8; MAPPING_KEY_LEN],
+        [GoldilocksField; PublicInputs::<GoldilocksField>::TOTAL_LEN],
+    ) {
+        let mut pis = [GoldilocksField::ZERO; PublicInputs::<GoldilocksField>::TOTAL_LEN];
         let rng = &mut StdRng::seed_from_u64(seed);
+        // generate a fake NFT ID within u32 and in big endian encoding
+        let leaf_key = std::iter::repeat(0)
+            .take(MAPPING_KEY_LEN - 4)
+            .chain(rng.next_u32().to_be_bytes().into_iter())
+            .collect::<Vec<_>>();
+        let packed_leaf = convert_u8_to_u32_slice(&leaf_key);
+        let packed_leaf_f: [GoldilocksField; PACKED_MAPPING_KEY_LEN] =
+            array::from_fn(|i| F::from_canonical_u32(packed_leaf[i]));
 
-        let root = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let digest = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
-        let owner = array::from_fn(|_| F::from_canonical_u32(rng.next_u32()));
+        // leaf value == owner address
+        let user_address = convert_u8_to_u32_slice(&left_pad32(Address::random().as_fixed_bytes()));
+        let leaf_value: [GoldilocksField; PACKED_VALUE_LEN] =
+            array::from_fn(|i| F::from_canonical_u32(user_address[i]));
 
-        let mut values = array::from_fn(|_| F::ZERO);
-        Self::parts_into_values(&mut values, &root, &digest, &owner);
+        let root = F::rand_vec(NUM_HASH_OUT_ELTS).try_into().unwrap();
+        let digest = map_to_curve_point::<F>(&packed_leaf_f).to_weierstrass();
+        let digest_fs = digest
+            .x
+            .0
+            .iter()
+            .chain(digest.y.0.iter())
+            .copied()
+            .chain(std::iter::once(GoldilocksField::from_bool(digest.is_inf)))
+            .collect::<Vec<_>>();
 
-        values
+        Self::parts_into_values(
+            &mut pis,
+            &root,
+            digest_fs.as_slice().try_into().unwrap(),
+            &leaf_value,
+        );
+
+        (leaf_key.try_into().unwrap(), pis)
     }
 }

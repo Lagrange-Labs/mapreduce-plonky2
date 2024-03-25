@@ -9,6 +9,7 @@ use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
 use crate::rlp::short_string_len;
 use crate::storage::key::{MappingSlotWires, MAPPING_INPUT_TOTAL_LEN};
 use crate::storage::{MAX_EXTENSION_NODE_LEN, MAX_LEAF_NODE_LEN};
+use crate::types::MAPPING_KEY_LEN;
 use crate::utils::convert_u8_targets_to_u32;
 use crate::{
     array::{Array, Vector, VectorWire},
@@ -22,14 +23,10 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
-use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
-use super::super::key::{MappingSlot, MAPPING_KEY_LEN};
+use super::super::key::MappingSlot;
 use crate::storage::mapping::public_inputs::PublicInputs;
 
 /// This constant represents the maximum size a value can be inside the storage trie.
