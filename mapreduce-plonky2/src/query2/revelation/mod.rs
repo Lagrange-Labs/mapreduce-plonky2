@@ -22,7 +22,6 @@ use plonky2::{
         proof::ProofWithPublicInputs,
     },
 };
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 use crate::{
     api::{default_config, mapping, serialize_proof, ProofWithVK, C, D, F},
@@ -189,3 +188,6 @@ impl<const BLOCK_DB_DEPTH: usize, const L: usize> Parameters<BLOCK_DB_DEPTH, L> 
         self.circuit_data.verifier_data()
     }
 }
+
+#[cfg(test)]
+mod test {}
