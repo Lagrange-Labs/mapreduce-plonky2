@@ -29,7 +29,8 @@ use crate::{
     eth::left_pad32,
     keccak::OutputHash,
     query2::block,
-    types::{PackedAddressTarget, CURVE_TARGET_LEN, MAPPING_KEY_LEN},
+    types::{PackedAddressTarget, CURVE_TARGET_LEN, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
+    utils::convert_u8_to_u32_slice,
     verifier_gadget::VerifierTarget,
 };
 
@@ -86,9 +87,10 @@ impl<const L: usize> RevelationRecursiveInput<L> {
         let keys = create_array(|i| {
             if i < mapping_keys.len() {
                 let padded = left_pad32(&mapping_keys[i]);
-                create_array(|j| padded[j])
+                let packed = convert_u8_to_u32_slice(&padded);
+                create_array(|j| packed[j])
             } else {
-                [0u8; MAPPING_KEY_LEN]
+                [0u32; PACKED_MAPPING_KEY_LEN]
             }
         });
         let num_entries = mapping_keys.len();
@@ -99,7 +101,7 @@ impl<const L: usize> RevelationRecursiveInput<L> {
             L
         );
         let main_inputs = RevelationCircuit {
-            raw_keys: keys,
+            packed_keys: keys,
             num_entries: num_entries as u8,
             query_min_block_number: query_min_block,
             query_max_block_number: query_max_block,

@@ -24,8 +24,8 @@ use crate::{
     api::{default_config, ProofWithVK, C, D, F},
     block::{empty_merkle_root, public_inputs::PublicInputs as BlockDBPublicInputs},
     group_hashing::CircuitBuilderGroupHashing,
-    query2::block::{self, BlockPublicInputs as BlockQueryPublicInputs},
-    types::{MappingKeyTarget, PackedMappingKeyTarget, MAPPING_KEY_LEN},
+    query2::block::BlockPublicInputs as BlockQueryPublicInputs,
+    types::{MappingKeyTarget, PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
     utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to},
     verifier_gadget::VerifierTarget,
 };
@@ -36,7 +36,7 @@ use super::RevelationPublicInputs;
 pub(crate) struct RevelationWires<const L: usize> {
     // poor support of const generics arrays in serde - use that external crate
     #[serde(with = "serde_arrays")]
-    pub raw_keys: [MappingKeyTarget; L],
+    pub raw_keys: [PackedMappingKeyTarget; L],
     pub num_entries: Target,
     pub min_block_number: Target,
     pub max_block_number: Target,
@@ -44,7 +44,7 @@ pub(crate) struct RevelationWires<const L: usize> {
 
 #[derive(Clone, Debug)]
 pub struct RevelationCircuit<const L: usize> {
-    pub(crate) raw_keys: [[u8; MAPPING_KEY_LEN]; L],
+    pub(crate) packed_keys: [[u32; PACKED_MAPPING_KEY_LEN]; L],
     pub(crate) num_entries: u8,
     pub(crate) query_min_block_number: usize,
     pub(crate) query_max_block_number: usize,
@@ -69,8 +69,8 @@ impl<const L: usize> RevelationCircuit<L> {
         // the same value inserted in the digests accross the computation graph
         // we then cast them to the query specific, i.e. NFT ID < 2^32
         // remember values are encoded using big endian and left padded
-        let ys: [MappingKeyTarget; L] = create_array(|_| MappingKeyTarget::new(b));
-        let packed_ids: [PackedMappingKeyTarget; L] = create_array(|i| ys[i].convert_u8_to_u32(b));
+        let packed_ids: [PackedMappingKeyTarget; L] =
+            create_array(|_| PackedMappingKeyTarget::new(b));
         let nft_ids = create_array(|i| packed_ids[i].last());
         // We add a witness mentionning how many entries we have in the output array
         // The reason we have this witness is because "0" can be a valid NFT ID so
@@ -140,7 +140,7 @@ impl<const L: usize> RevelationCircuit<L> {
         );
 
         RevelationWires {
-            raw_keys: ys,
+            raw_keys: packed_ids,
             num_entries,
             min_block_number,
             max_block_number,
@@ -151,8 +151,8 @@ impl<const L: usize> RevelationCircuit<L> {
         wires
             .raw_keys
             .iter()
-            .zip(self.raw_keys.iter())
-            .for_each(|(wire, bytes)| wire.assign_bytes(pw, bytes));
+            .zip(self.packed_keys.iter())
+            .for_each(|(wire, packed)| wire.assign_from_data(pw, packed));
         pw.set_target(
             wires.num_entries,
             GoldilocksField::from_canonical_u8(self.num_entries),
@@ -167,4 +167,3 @@ impl<const L: usize> RevelationCircuit<L> {
         );
     }
 }
-
