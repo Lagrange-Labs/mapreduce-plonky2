@@ -14,16 +14,36 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::{self, CircuitBuilder}, circuit_data::CircuitData},
+    plonk::{
+        circuit_builder::{self, CircuitBuilder},
+        circuit_data::CircuitData,
+    },
 };
-use recursion_framework::{circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder}, framework::{RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget}, serialization::{deserialize, serialize}};
+use recursion_framework::{
+    circuit_builder::{
+        CircuitLogicWires, CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder,
+    },
+    framework::{
+        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+    },
+    serialization::{deserialize, serialize},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    api::{default_config, ProofWithVK, C, D, F}, array::Array, keccak::{OutputHash, PACKED_HASH_LEN}, query2::storage::public_inputs::PublicInputs as StorageInputs, state, types::PackedAddressTarget as PackedSCAddressTarget
+    api::{default_config, ProofWithVK, C, D, F},
+    array::Array,
+    keccak::{OutputHash, PACKED_HASH_LEN},
+    query2::storage::public_inputs::PublicInputs as StorageInputs,
+    state,
+    types::PackedAddressTarget as PackedSCAddressTarget,
 };
 
-use super::{block::{BlockPublicInputs, BLOCK_CIRCUIT_SET_SIZE}, revelation::circuit, PackedSCAddress};
+use super::{
+    block::{BlockPublicInputs, BLOCK_CIRCUIT_SET_SIZE},
+    revelation::circuit,
+    PackedSCAddress,
+};
 use anyhow::Result;
 
 #[cfg(test)]
@@ -258,7 +278,7 @@ const NUM_IO: usize = BlockPublicInputs::<Target>::total_len();
 const DEPTH: usize = 1;
 
 impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
-    type CircuitBuilderParams =  RecursiveCircuitsVerifierGagdet<F, C, D, NUM_STORAGE_INPUTS>;
+    type CircuitBuilderParams = RecursiveCircuitsVerifierGagdet<F, C, D, NUM_STORAGE_INPUTS>;
 
     type Inputs = StateCircuitInputs;
 
@@ -271,25 +291,22 @@ impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
     ) -> Self {
         let storage_verifier = builder_parameters.verify_proof_in_circuit_set(builder);
         let storage_pi = StorageInputs::from_slice(
-            storage_verifier.get_public_input_targets::<F, NUM_STORAGE_INPUTS>()
+            storage_verifier.get_public_input_targets::<F, NUM_STORAGE_INPUTS>(),
         );
-        
+
         let state_wires = StateCircuit::<DEPTH, F>::build(builder, &storage_pi);
 
         Self {
             state_wires,
-            storage_verifier
+            storage_verifier,
         }
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
         inputs.state_input.assign(pw, &self.state_wires);
         let (proof, vd) = (&inputs.storage_proof).into();
-        self.storage_verifier.set_target(
-            pw, 
-            &inputs.storage_circuit_set, 
-            proof, vd
-        )
+        self.storage_verifier
+            .set_target(pw, &inputs.storage_circuit_set, proof, vd)
     }
 }
 
@@ -325,71 +342,52 @@ pub struct CircuitInput {
 
 impl CircuitInput {
     pub fn new(
-            smart_contract_address: PackedSCAddress<F>,
-            mapping_slot: F,
-            length_slot: F,
-            block_number: F,
-            state_root: HashOut<F>,
-            siblings: Vec<HashOut<F>>,
-            positions: Vec<bool>,
-            block_hash: Array<F, PACKED_HASH_LEN>,
-            storage_proof: Vec<u8>) -> Result<Self> {
-        Ok(
-            Self {
-                state_input: StateCircuit::new(
-                    smart_contract_address,
-                    mapping_slot,
-                    length_slot,
-                    block_number,
-                    state_root,
-                    siblings,
-                    positions,
-                    block_hash
-                ),
-                storage_proof: ProofWithVK::deserialize(&storage_proof)?,
-            }
-        )
+        smart_contract_address: PackedSCAddress<F>,
+        mapping_slot: F,
+        length_slot: F,
+        block_number: F,
+        state_root: HashOut<F>,
+        siblings: Vec<HashOut<F>>,
+        positions: Vec<bool>,
+        block_hash: Array<F, PACKED_HASH_LEN>,
+        storage_proof: Vec<u8>,
+    ) -> Result<Self> {
+        Ok(Self {
+            state_input: StateCircuit::new(
+                smart_contract_address,
+                mapping_slot,
+                length_slot,
+                block_number,
+                state_root,
+                siblings,
+                positions,
+                block_hash,
+            ),
+            storage_proof: ProofWithVK::deserialize(&storage_proof)?,
+        })
     }
 }
 
 impl Parameters {
     pub(crate) fn build(storage_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
-        let verifier_gadget = RecursiveCircuitsVerifierGagdet::new(
+        let verifier_gadget =
+            RecursiveCircuitsVerifierGagdet::new(default_config(), storage_circuit_set);
+        let circuit_builder = CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(
             default_config(),
-            storage_circuit_set
-        );
-        let circuit_builder = CircuitWithUniversalVerifierBuilder::<
-            F,
-            D,
-            NUM_IO,
-        >::new::<C>(
-            default_config(), 
             BLOCK_CIRCUIT_SET_SIZE,
         );
         let circuit = circuit_builder.build_circuit(verifier_gadget);
 
-        Self {
-            circuit
-        }
+        Self { circuit }
     }
 
     pub(crate) fn generate_proof(
-        &self, 
-        block_circuit_set: &RecursiveCircuits<F, C, D>, 
-        input: StateCircuitInputs
+        &self,
+        block_circuit_set: &RecursiveCircuits<F, C, D>,
+        input: StateCircuitInputs,
     ) -> Result<Vec<u8>> {
-        let proof = block_circuit_set.generate_proof(
-            &self.circuit, 
-            [], 
-            [], 
-            input
-        )?;
-        ProofWithVK::serialize(
-            &(
-                proof,
-                self.circuit.circuit_data().verifier_only.clone()
-            ).into()
-        )
+        let proof = block_circuit_set.generate_proof(&self.circuit, [], [], input)?;
+        ProofWithVK::serialize(&(proof, self.circuit.circuit_data().verifier_only.clone()).into())
     }
 
     pub(crate) fn circuit_data(&self) -> &CircuitData<F, C, D> {

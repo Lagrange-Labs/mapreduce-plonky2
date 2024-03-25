@@ -4,7 +4,9 @@ use crate::{
     block::empty_merkle_root,
     circuit::test::run_circuit,
     keccak::PACKED_HASH_LEN,
-    query2::{revelation::RevelationPublicInputs, state::tests::run_state_circuit_with_slot_and_addresses},
+    query2::{
+        revelation::RevelationPublicInputs, state::tests::run_state_circuit_with_slot_and_addresses,
+    },
     types::MAPPING_KEY_LEN,
     utils::convert_u8_to_u32_slice,
 };
@@ -86,15 +88,9 @@ impl UserCircuit<F, D> for PartialNodeCircuitValidator<'_> {
             c.add_virtual_targets(BlockQueryPublicInputs::<Target>::total_len());
         let child_to_prove_io =
             BlockQueryPublicInputs::<Target>::from(child_to_prove_pi.as_slice());
-        let wires = PartialNodeCircuit::build(
-            c,
-            &child_to_prove_io,
-        );
+        let wires = PartialNodeCircuit::build(c, &child_to_prove_io);
 
-        (
-            wires,
-            child_to_prove_pi.try_into().unwrap(),
-        )
+        (wires, child_to_prove_pi.try_into().unwrap())
     }
 
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -150,10 +146,20 @@ fn test_query2_mini_tree() {
     let smart_contract_address = Address::random();
     let user_address = Address::random();
 
-    let (left_value, left_leaf_proof_io) =
-        run_state_circuit_with_slot_and_addresses(0xdead, SLOT_LENGTH, MAPPING_SLOT, smart_contract_address, user_address);
-    let (right_value, right_leaf_proof_io) =
-        run_state_circuit_with_slot_and_addresses(0xbeef, SLOT_LENGTH, MAPPING_SLOT, smart_contract_address, user_address);
+    let (left_value, left_leaf_proof_io) = run_state_circuit_with_slot_and_addresses(
+        0xdead,
+        SLOT_LENGTH,
+        MAPPING_SLOT,
+        smart_contract_address,
+        user_address,
+    );
+    let (right_value, right_leaf_proof_io) = run_state_circuit_with_slot_and_addresses(
+        0xbeef,
+        SLOT_LENGTH,
+        MAPPING_SLOT,
+        smart_contract_address,
+        user_address,
+    );
 
     let left_leaf_pi = BlockQueryPublicInputs::<'_, F>::from(left_leaf_proof_io.as_slice());
     let right_leaf_pi = BlockQueryPublicInputs::<'_, F>::from(right_leaf_proof_io.as_slice());
@@ -172,10 +178,7 @@ fn test_query2_mini_tree() {
     );
 
     let top_proof = run_circuit::<F, D, C, _>(PartialNodeCircuitValidator {
-        validated: PartialNodeCircuit::new(
-            proved,
-            false,
-        ),
+        validated: PartialNodeCircuit::new(proved, false),
         child_proof: BlockQueryPublicInputs::<F>::from(middle_proof.public_inputs.as_slice()),
     });
 

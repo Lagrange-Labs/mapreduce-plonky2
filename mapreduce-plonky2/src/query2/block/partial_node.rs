@@ -7,8 +7,11 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use recursion_framework::{circuit_builder::CircuitLogicWires, serialization::{deserialize, serialize}};
-use serde::{Serialize, Deserialize};
+use recursion_framework::{
+    circuit_builder::CircuitLogicWires,
+    serialization::{deserialize, serialize},
+};
+use serde::{Deserialize, Serialize};
 
 use crate::{api::ProofWithVK, poseidon::hash_maybe_swap};
 
@@ -18,7 +21,7 @@ pub struct PartialNodeWires {
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     unproved: HashOutTarget,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    proved_is_right: BoolTarget
+    proved_is_right: BoolTarget,
 }
 
 #[derive(Clone, Debug)]
@@ -63,7 +66,7 @@ impl PartialNodeCircuit {
 
         PartialNodeWires {
             unproved,
-            proved_is_right
+            proved_is_right,
         }
     }
 
@@ -72,7 +75,6 @@ impl PartialNodeCircuit {
         pw.set_bool_target(wires.proved_is_right, self.sibling_is_left);
     }
 }
-
 
 type F = crate::api::F;
 const D: usize = crate::api::D;
@@ -90,9 +92,7 @@ impl CircuitLogicWires<F, D, 1> for PartialNodeWires {
         verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 1],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let children_pi = BlockPublicInputs::from(Self::public_input_targets(
-            &verified_proofs[0]
-        ));
+        let children_pi = BlockPublicInputs::from(Self::public_input_targets(&verified_proofs[0]));
         PartialNodeCircuit::build(builder, &children_pi)
     }
 
@@ -116,19 +116,8 @@ impl PartialNodeCircuitInputs {
     }
 }
 
-impl Into<
-    (
-        PartialNodeCircuit,
-        ProofWithVK
-    )
-> for PartialNodeCircuitInputs {
-    fn into(self) -> (
-        PartialNodeCircuit,
-        ProofWithVK
-    ) {
-        (
-            self.inputs,
-            self.child_proof
-        )
+impl Into<(PartialNodeCircuit, ProofWithVK)> for PartialNodeCircuitInputs {
+    fn into(self) -> (PartialNodeCircuit, ProofWithVK) {
+        (self.inputs, self.child_proof)
     }
 }

@@ -12,7 +12,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use recursion_framework::circuit_builder::{public_input_targets, CircuitLogicWires};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 
@@ -79,7 +79,6 @@ impl FullNodeCircuit {
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &FullNodeWires) {}
 }
 
-
 type F = crate::api::F;
 const D: usize = crate::api::D;
 const NUM_IO: usize = BlockPublicInputs::<Target>::total_len();
@@ -96,9 +95,12 @@ impl CircuitLogicWires<F, D, 2> for FullNodeWires {
         verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 2],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let children_pi = verified_proofs.into_iter().map(|proof| 
-            BlockPublicInputs::from(Self::public_input_targets(proof))
-        ).collect_vec().try_into().unwrap();
+        let children_pi = verified_proofs
+            .into_iter()
+            .map(|proof| BlockPublicInputs::from(Self::public_input_targets(proof)))
+            .collect_vec()
+            .try_into()
+            .unwrap();
         FullNodeCircuit::build(builder, children_pi)
     }
 
