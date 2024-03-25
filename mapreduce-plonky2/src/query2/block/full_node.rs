@@ -10,14 +10,11 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use recursion_framework::circuit_builder::CircuitLogicWires;
-use serde::{Deserialize, Serialize};
 
 use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
 
 use super::BlockPublicInputs;
 
-#[derive(Serialize, Deserialize)]
 pub struct FullNodeWires {}
 
 #[derive(Clone, Debug)]
@@ -75,33 +72,5 @@ impl FullNodeCircuit {
         FullNodeWires {}
     }
 
-    pub fn assign(&self, _pw: &mut PartialWitness<GoldilocksField>, _wires: &FullNodeWires) {}
-}
-
-impl CircuitLogicWires<GoldilocksField, 2, 2> for FullNodeWires {
-    type CircuitBuilderParams = ();
-
-    type Inputs = FullNodeCircuit;
-
-    const NUM_PUBLIC_INPUTS: usize = BlockPublicInputs::<GoldilocksField>::total_len();
-
-    fn circuit_logic(
-        builder: &mut CircuitBuilder<GoldilocksField, 2>,
-        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; 2],
-        _builder_parameters: Self::CircuitBuilderParams,
-    ) -> Self {
-        let inputs = std::array::from_fn(|i| {
-            BlockPublicInputs::from(Self::public_input_targets(verified_proofs[i]))
-        });
-        FullNodeCircuit::build(builder, inputs)
-    }
-
-    fn assign_input(
-        &self,
-        inputs: Self::Inputs,
-        pw: &mut PartialWitness<GoldilocksField>,
-    ) -> anyhow::Result<()> {
-        inputs.assign(pw, self);
-        Ok(())
-    }
+    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &FullNodeWires) {}
 }
