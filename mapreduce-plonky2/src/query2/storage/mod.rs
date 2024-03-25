@@ -2,7 +2,10 @@
 //! https://www.notion.so/lagrangelabs/Cryptographic-Documentation-85adb821f18647b2a3dc65efbe144981?pvs=4#fa3f5d23a7724d0699a04f72bbec2a16
 
 use anyhow::Result;
-use plonky2::{field::goldilocks_field::GoldilocksField, hash::hash_types::HashOut};
+use plonky2::{
+    field::goldilocks_field::GoldilocksField, hash::hash_types::HashOut,
+    plonk::config::GenericHashOut,
+};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
@@ -48,8 +51,9 @@ impl CircuitInput {
     pub fn new_partial_node(
         child_proof: Vec<u8>,
         proved_is_right: bool,
-        unproved_hash: HashOut<GoldilocksField>,
+        unproved_hash: &[u8],
     ) -> Self {
+        let unproved_hash = HashOut::from_bytes(unproved_hash);
         let proof = ProofWithVK::deserialize(&child_proof).expect("unable to deserialize proof");
         CircuitInput::PartialInner(
             PartialInnerNodeCircuit {
