@@ -3,10 +3,9 @@ use std::{array::from_fn as create_array, ops::Add};
 use crate::{
     block::empty_merkle_root,
     circuit::test::run_circuit,
-    eth::left_pad,
     keccak::PACKED_HASH_LEN,
     query2::{revelation::RevelationPublicInputs, state::tests::run_state_circuit_with_slot},
-    types::{PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
+    types::MAPPING_KEY_LEN,
     utils::convert_u8_to_u32_slice,
 };
 use itertools::Itertools;
@@ -29,7 +28,6 @@ use plonky2::{
         config::{GenericConfig, PoseidonGoldilocksConfig},
     },
 };
-use rand::{rngs::StdRng, SeedableRng};
 
 use crate::{block::public_inputs::PublicInputs as BlockDBPublicInputs, circuit::UserCircuit};
 
@@ -40,7 +38,6 @@ use super::{
         BlockPublicInputs as BlockQueryPublicInputs,
     },
     revelation::circuit::{RevelationCircuit, RevelationWires},
-    EWordTarget, EWORD_LEN,
 };
 
 const D: usize = 2;

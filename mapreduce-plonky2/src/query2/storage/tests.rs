@@ -1,24 +1,20 @@
 use ethers::types::Address;
 use plonky2::field::types::Sample;
 use std::{
-    array::{self, from_fn},
+    array::{self},
     ops::Add,
 };
 
 use itertools::Itertools;
 use plonky2::{
-    field::{
-        extension::{quintic::QuinticExtension, Extendable},
-        goldilocks_field::GoldilocksField,
-        types::Field,
-    },
+    field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{
-        hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOut, NUM_HASH_OUT_ELTS},
         hashing::hash_n_to_hash_no_pad,
         poseidon::PoseidonPermutation,
     },
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
@@ -30,13 +26,13 @@ use plonky2::{
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 
 use crate::{
+    api::ProofWithVK,
     circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
-    group_hashing::{field_to_curve::ToCurvePoint, map_to_curve_point},
-    query2::{EWord, EWORD_LEN},
-    storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
-    types::{MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN, PACKED_VALUE_LEN, VALUE_LEN},
-    utils::{convert_u8_to_u32_slice, test::random_vector},
+    group_hashing::map_to_curve_point,
+    storage::lpn::{intermediate_node_hash, leaf_hash_for_mapping},
+    types::{MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN, PACKED_VALUE_LEN},
+    utils::convert_u8_to_u32_slice,
 };
 
 use super::{
@@ -44,6 +40,7 @@ use super::{
     leaf::LeafCircuit,
     partial_inner::{PartialInnerNodeCircuit, PartialInnerNodeWires},
     public_inputs::PublicInputs,
+    CircuitInput, Parameters,
 };
 
 const D: usize = 2;
@@ -53,39 +50,22 @@ type F = <C as GenericConfig<D>>::F;
 #[derive(Clone, Debug)]
 struct PartialInnerNodeCircuitValidator<'a> {
     validated: PartialInnerNodeCircuit,
-
     proved_child: &'a PublicInputs<'a, F>,
-    unproved_hash: Vec<F>,
-    proved_is_left: F,
 }
 impl<'a> UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuitValidator<'a> {
-    type Wires = (PartialInnerNodeWires, Vec<Target>, Vec<Target>, Target);
+    type Wires = (PartialInnerNodeWires, Vec<Target>);
 
     fn build(c: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
         let leaf_child_pi = c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
         let leaf_child_io = PublicInputs::from(leaf_child_pi.as_slice());
-        let inner_child_hash_targets = c.add_virtual_targets(NUM_HASH_OUT_ELTS);
-        let inner_child_position_target = c.add_virtual_target();
 
-        let wires = PartialInnerNodeCircuit::build(
-            c,
-            &leaf_child_io,
-            HashOutTarget::from_vec(inner_child_hash_targets.clone()),
-            BoolTarget::new_unsafe(inner_child_position_target),
-        );
-        (
-            wires,
-            leaf_child_pi.try_into().unwrap(),
-            inner_child_hash_targets,
-            inner_child_position_target,
-        )
+        let wires = PartialInnerNodeCircuit::build(c, &leaf_child_io);
+        (wires, leaf_child_pi.try_into().unwrap())
     }
 
     fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
-        pw.set_target_arr(&wires.1, self.proved_child.inputs);
-        pw.set_target_arr(&wires.2, &self.unproved_hash);
-        pw.set_target(wires.3, self.proved_is_left);
         self.validated.assign(pw, &wires.0);
+        pw.set_target_arr(&wires.1, self.proved_child.inputs);
     }
 }
 
@@ -245,10 +225,11 @@ fn test_mini_tree(k: &[u8], v: &[u8]) {
     );
 
     let top = PartialInnerNodeCircuitValidator {
-        validated: PartialInnerNodeCircuit {},
+        validated: PartialInnerNodeCircuit {
+            proved_is_right: true,
+            unproved_hash: some_hash,
+        },
         proved_child: &middle_ios,
-        unproved_hash: some_hash.to_vec(),
-        proved_is_left: F::from_bool(true),
     };
     let top_proof = run_circuit::<F, D, C, _>(top);
     let top_ios = PublicInputs::<F>::from(top_proof.public_inputs.as_slice());
@@ -345,4 +326,82 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
 
         (leaf_key.try_into().unwrap(), pis)
     }
+}
+
+#[test]
+#[should_panic]
+fn test_proven_side() {
+    let some_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
+        &b"coucou"
+            .iter()
+            .copied()
+            .map(F::from_canonical_u8)
+            .collect_vec(),
+    )
+    .to_bytes();
+
+    let params = Parameters::build();
+
+    let leaf1 = params
+        .generate_proof(CircuitInput::new_leaf(b"jean", b"michel"))
+        .unwrap();
+    params
+        .leaf_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&leaf1).unwrap().proof)
+        .unwrap();
+
+    // Putting the proven node on the wrong side shall fail
+    let _ = params
+        .generate_proof(CircuitInput::new_partial_node(&leaf1, &some_hash, true))
+        .is_err();
+}
+
+#[test]
+fn test_api() {
+    let some_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
+        &b"coucou"
+            .iter()
+            .copied()
+            .map(F::from_canonical_u8)
+            .collect_vec(),
+    )
+    .to_bytes();
+
+    let params = Parameters::build();
+
+    let leaf1 = params
+        .generate_proof(CircuitInput::new_leaf(b"jean", b"michel"))
+        .unwrap();
+    params
+        .leaf_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&leaf1).unwrap().proof)
+        .unwrap();
+    let leaf2 = params
+        .generate_proof(CircuitInput::new_leaf(b"juan", b"michel"))
+        .unwrap();
+    params
+        .leaf_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&leaf1).unwrap().proof)
+        .unwrap();
+
+    let partial_inner = params
+        .generate_proof(CircuitInput::new_partial_node(&leaf1, &some_hash, false))
+        .unwrap();
+    params
+        .partial_node_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&partial_inner).unwrap().proof)
+        .unwrap();
+
+    let full_inner = params
+        .generate_proof(CircuitInput::new_full_node(&leaf2, &partial_inner))
+        .unwrap();
+    params
+        .full_node_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&full_inner).unwrap().proof)
+        .unwrap();
 }
