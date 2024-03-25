@@ -36,7 +36,9 @@ pub struct LeafCircuit {
 
 impl LeafCircuit {
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &InclusionWires) {
-        wires.packed_mapping_key.assign_from_data(pw, &self.mapping_key);
+        wires
+            .packed_mapping_key
+            .assign_from_data(pw, &self.mapping_key);
         wires
             .packed_mapping_value
             .assign_from_data(pw, &self.mapping_value);
