@@ -1,6 +1,6 @@
 pub mod api;
 mod inner_node;
-mod leaf;
+pub(crate) mod leaf;
 mod public_inputs;
 
 pub use api::{Input, NodeInputs, PublicParameters};

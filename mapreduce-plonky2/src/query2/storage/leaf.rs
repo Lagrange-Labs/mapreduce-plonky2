@@ -11,10 +11,9 @@ use crate::{
     array::Array,
     circuit::UserCircuit,
     group_hashing::CircuitBuilderGroupHashing,
+    query2::{storage::public_inputs::PublicInputs, AddressTarget},
     storage::{KEY_SIZE, LEAF_SIZE},
 };
-
-use super::{public_inputs::PublicInputs, AddressTarget};
 
 pub struct InclusionWires {
     pub key: Array<Target, KEY_SIZE>,
@@ -22,7 +21,7 @@ pub struct InclusionWires {
 }
 
 /// This circuit prove the new root hash of a leaf containing the requested data
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LeafCircuit {
     pub key: [u8; KEY_SIZE],
     pub value: [u8; AddressTarget::LEN],

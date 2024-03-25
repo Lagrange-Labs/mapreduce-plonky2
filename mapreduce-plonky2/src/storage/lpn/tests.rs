@@ -30,7 +30,7 @@ const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct NodeCircuitValidator<'a> {
     validated: NodeCircuit,
     children: &'a [PublicInputs<'a, F>; 2],
@@ -87,8 +87,8 @@ impl LeafProofResult {
 
 fn run_leaf_proof(k: &[u8], v: &[u8]) -> LeafProofResult {
     let circuit = LeafCircuit {
-        key: left_pad32(k),
-        value: left_pad32(v),
+        mapping_key: left_pad32(k),
+        mapping_value: left_pad32(v),
     };
 
     let proof = run_circuit::<F, D, C, _>(circuit);

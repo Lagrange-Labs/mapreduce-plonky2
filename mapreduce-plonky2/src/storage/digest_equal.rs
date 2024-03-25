@@ -45,7 +45,6 @@ use std::array;
 /// `D` Digest of all the values processed
 /// `C1` MPT root of blockchain storage trie
 /// `C2` Merkle root of LPN’s storage database (merkle tree)
-/// `A` Address of smart contract
 /// `M` Storage slot of the mapping
 /// `S` Storage slot of the variable holding the length
 #[derive(Clone, Debug)]
@@ -54,20 +53,11 @@ pub struct PublicInputs<'a, T: Clone> {
 }
 
 impl<'a, F: RichField> PublicInputs<'a, F> {
-    /// Get the contract address (A).
-    pub fn contract_address_value(&self) -> H160 {
-        // The contract address is packed as [u32; 5] in public inputs. This
-        // code converts it to [u8; 20] as H160.
-        let bytes = convert_u32_fields_to_u8_vec(self.contract_address_data());
-
-        H160(bytes.try_into().unwrap())
-    }
-
     /// Get the hash value of storage MPT root (C1).
     pub fn mpt_root_value(&self) -> H256 {
         // The root hash is packed as [u32; 8] in public inputs. This code
         // converts it to [u8; 32] as H256.
-        let bytes = convert_u32_fields_to_u8_vec(&self.mpt_root_data());
+        let bytes = convert_u32_fields_to_u8_vec(self.mpt_root_data());
 
         H256(bytes.try_into().unwrap())
     }
@@ -79,14 +69,12 @@ impl<'a> PublicInputs<'a, Target> {
         digest: &CurveTarget,
         mpt_root_hash: &OutputHash,
         merkle_root_hash: &HashOutTarget,
-        contract_address: &PackedAddressTarget,
         mapping_slot: Target,
         length_slot: Target,
     ) {
         cb.register_curve_public_input(*digest);
-        mpt_root_hash.register_as_input(cb);
+        mpt_root_hash.register_as_public_input(cb);
         cb.register_public_inputs(&merkle_root_hash.elements);
-        contract_address.register_as_input(cb);
         cb.register_public_input(mapping_slot);
         cb.register_public_input(length_slot);
     }
@@ -94,13 +82,6 @@ impl<'a> PublicInputs<'a, Target> {
     /// Return the curve point target of digest defined over the public inputs.
     pub fn digest(&self) -> CurveTarget {
         convert_point_to_curve_target(self.digest_data())
-    }
-
-    pub fn contract_address(&self) -> PackedAddressTarget {
-        let data = self.contract_address_data();
-        Array {
-            arr: array::from_fn(|i| U32Target(data[i])),
-        }
     }
 
     pub fn mpt_root(&self) -> OutputHash {
@@ -119,8 +100,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     pub(crate) const D_IDX: usize = 0;
     pub(crate) const C1_IDX: usize = Self::D_IDX + 2 * N + 1; // 2*N+1 for curve target
     pub(crate) const C2_IDX: usize = Self::C1_IDX + PACKED_HASH_LEN;
-    pub(crate) const A_IDX: usize = Self::C2_IDX + NUM_HASH_OUT_ELTS;
-    pub(crate) const M_IDX: usize = Self::A_IDX + PACKED_ADDRESS_LEN;
+    pub(crate) const M_IDX: usize = Self::C2_IDX + NUM_HASH_OUT_ELTS;
     pub(crate) const S_IDX: usize = Self::M_IDX + 1;
     pub(crate) const TOTAL_LEN: usize = Self::S_IDX + 1;
 
@@ -138,11 +118,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     pub fn merkle_root_data(&self) -> &[T] {
-        &self.proof_inputs[Self::C2_IDX..Self::A_IDX]
-    }
-
-    pub fn contract_address_data(&self) -> &[T] {
-        &self.proof_inputs[Self::A_IDX..Self::M_IDX]
+        &self.proof_inputs[Self::C2_IDX..Self::M_IDX]
     }
 
     pub fn mapping_slot(&self) -> T {
@@ -179,7 +155,6 @@ impl DigestEqualCircuit {
             &mpt_digest,
             &mpt_pi.root_hash(),
             &merkle_pi.root_hash(),
-            &mpt_pi.contract_address(),
             mpt_pi.mapping_slot(),
             mpt_pi.length_slot(),
         );
@@ -281,24 +256,37 @@ impl TryInto<(ProofWithVK, ProofWithPublicInputs<F, C, D>)> for CircuitInput {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::{
         api::tests::TestDummyCircuit,
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        utils::test::random_vector,
+        eth::{left_pad32, ProofQuery, StorageSlot},
+        mpt_sequential::test::generate_random_storage_mpt,
+        storage::{self, key::MappingSlot},
+        utils::{convert_u8_to_u32_slice, keccak256, test::random_vector},
+    };
+    use eth_trie::Trie;
+    use ethers::{
+        providers::{Http, Provider},
+        types::{spoof::storage, Address},
     };
     use plonky2::{
         field::types::{Field, Sample},
+        hash::keccak,
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder,
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
+    use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
-    use rand::{thread_rng, Rng};
+    use rand::thread_rng;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
+    use serial_test::serial;
     use std::array;
 
     const D: usize = 2;
@@ -349,7 +337,6 @@ mod tests {
         let exp_digest = (digest.x.0, digest.y.0, F::from_bool(digest.is_inf));
         let exp_mpt_root = mpt_pi_wrapper.root_hash_data();
         let exp_merkle_root = merkle_pi_wrapper.root_raw();
-        let exp_contract_address = mpt_pi_wrapper.contract_address_data();
         let exp_mapping_slot = mpt_pi_wrapper.mapping_slot();
         let exp_length_slot = mpt_pi_wrapper.length_slot();
 
@@ -364,7 +351,6 @@ mod tests {
         assert_eq!(pi.digest_data(), exp_digest);
         assert_eq!(pi.mpt_root_data(), exp_mpt_root);
         assert_eq!(pi.merkle_root_data(), exp_merkle_root);
-        assert_eq!(pi.contract_address_data(), exp_contract_address);
         assert_eq!(pi.mapping_slot(), exp_mapping_slot);
         assert_eq!(pi.length_slot(), exp_length_slot);
     }
@@ -450,5 +436,72 @@ mod tests {
         pi[MerklePublicInputs::<F>::D_IDX + 2 * N] = F::from_bool(digest.is_inf);
 
         pi
+    }
+    use anyhow::Result;
+    use storage::lpn::{leaf_digest_for_mapping, leaf_hash_for_mapping};
+    #[tokio::test]
+    #[serial]
+    async fn test_mapping_extraction_equivalence_pudgy() -> Result<()> {
+        // first pinguin holder https://dune.com/queries/2450476/4027653
+        // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
+        // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
+        let mapping_value =
+            Address::from_str("0x188B264AA1456B869C3a92eeeD32117EbB835f47").unwrap();
+        let nft_id: u32 = 1116;
+        let mapping_key = left_pad32(&nft_id.to_be_bytes());
+        let url = "https://eth.llamarpc.com";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // extracting from
+        // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol
+        // assuming it's using ERC731Enumerable that inherits ERC721
+        let mapping_slot = 2;
+        // pudgy pinguins
+        let pudgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_mapping_slot(pudgy_address, mapping_slot, mapping_key.to_vec());
+        let res = query.query_mpt_proof(&provider, None).await?;
+        let raw_address = ProofQuery::verify_storage_proof(&res)?;
+        // the value is actually RLP encoded !
+        let decoded_address: Vec<u8> = rlp::decode(&raw_address).unwrap();
+        // this is read in the same order
+        let found_address = Address::from_slice(&decoded_address.into_iter().collect::<Vec<u8>>());
+        assert_eq!(found_address, mapping_value);
+        let slot = MappingSlot::new(mapping_slot as u8, mapping_key.to_vec());
+
+        let leaf_node = res.storage_proof[0].proof.last().unwrap();
+        let mpt_circuit = storage::mapping::leaf::LeafCircuit::<80> {
+            node: leaf_node.to_vec(),
+            slot,
+        };
+        let mpt_proof = run_circuit::<F, D, C, _>(mpt_circuit);
+        let mpt_pi = storage::mapping::PublicInputs::from(&mpt_proof.public_inputs);
+        // Check hash
+        let computed_hash = mpt_pi.root_hash();
+        assert_eq!(
+            convert_u8_to_u32_slice(&keccak256(leaf_node)),
+            computed_hash
+        );
+        // Check the digest
+        let expected_digest = leaf_digest_for_mapping(&mapping_key, mapping_value.as_bytes());
+        let circuit_digest = mpt_pi.accumulator();
+        println!("left_pad32(mapping_key) = \t{:?}", left_pad32(&mapping_key));
+
+        assert_eq!(expected_digest.to_weierstrass(), circuit_digest);
+
+        let exp_hash = HashOut::from_bytes(&leaf_hash_for_mapping(
+            &mapping_key,
+            mapping_value.as_bytes(),
+        ));
+        // use the _same_ inputs to the lpn leaf circuit
+        let lpn_circuit = storage::lpn::leaf::LeafCircuit {
+            mapping_key,
+            mapping_value: left_pad32(mapping_value.as_bytes()),
+        };
+        let lpn_proof = run_circuit::<F, D, C, _>(lpn_circuit);
+        let lpn_pi = storage::lpn::PublicInputs::from(lpn_proof.public_inputs.as_slice());
+        assert_eq!(expected_digest.to_weierstrass(), lpn_pi.digest());
+        assert_eq!(&exp_hash, &lpn_pi.root_hash());
+        Ok(())
     }
 }

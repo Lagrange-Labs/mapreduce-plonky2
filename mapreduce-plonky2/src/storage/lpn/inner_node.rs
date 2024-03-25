@@ -14,7 +14,7 @@ use super::PublicInputs;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NodeWires {}
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NodeCircuit {}
 
 impl NodeCircuit {

@@ -130,10 +130,9 @@ impl<'a, F: RichField> StateInputs<'a, F> {
 #[derive(Clone)]
 struct TestLeafWires {
     block_linking: Vec<Target>,
-    root: HashOutTarget,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TestLeafCircuit {
     block_linking_values: Vec<GoldilocksField>,
     c: LeafCircuit,
@@ -149,11 +148,10 @@ impl UserCircuit<GoldilocksField, 2> for TestLeafCircuit {
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
         let targets = b.add_virtual_targets(BlockLinkingInputs::<()>::TOTAL_LEN);
         let block_linking = BlockLinkingInputs::from_slice(&targets);
-        let root = LeafCircuit::build(b, &block_linking);
+        LeafCircuit::build(b, &block_linking);
 
         TestLeafWires {
             block_linking: targets.clone(),
-            root,
         }
     }
 

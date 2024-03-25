@@ -1,10 +1,15 @@
 //! Module handling the recursive proving of mapping entries specically
 //! inside a storage trie.
 
+use std::array::from_fn as create_array;
+
+use crate::array::L32;
 use crate::circuit::UserCircuit;
 use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
-use crate::storage::key::MappingSlotWires;
+use crate::rlp::short_string_len;
+use crate::storage::key::{MappingSlotWires, MAPPING_INPUT_TOTAL_LEN};
 use crate::storage::{MAX_EXTENSION_NODE_LEN, MAX_LEAF_NODE_LEN};
+use crate::utils::convert_u8_targets_to_u32;
 use crate::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
@@ -27,13 +32,18 @@ use serde::{Deserialize, Serialize};
 use super::super::key::{MappingSlot, MAPPING_KEY_LEN};
 use crate::storage::mapping::public_inputs::PublicInputs;
 
+/// This constant represents the maximum size a value can be inside the storage trie.
+/// It is different than the `MAX_LEAF_VALUE_LEN` constant because it represents the
+/// value **not** RLP encoded,i.e. without the 1-byte RLP header.
+pub(crate) const VALUE_LEN: usize = 32;
+
 /// Circuit implementing the circuit to prove the correct derivation of the
 /// MPT key from a mapping key and mapping slot. It also do the usual recursive
 /// MPT proof verification logic.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafCircuit<const NODE_LEN: usize> {
-    pub(super) node: Vec<u8>,
-    pub(super) slot: MappingSlot,
+    pub(crate) node: Vec<u8>,
+    pub(crate) slot: MappingSlot,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -44,7 +54,7 @@ where
     node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     mapping_slot: MappingSlotWires,
-    value: Array<Target, MAX_LEAF_VALUE_LEN>,
+    value: Array<Target, VALUE_LEN>,
 }
 impl<const N: usize> LeafWires<N>
 where
@@ -79,18 +89,34 @@ where
         // Then advance the key and extract the value
         // only decode two headers in the case of leaf
         let rlp_headers = decode_fixed_list::<_, _, 2>(b, &node.arr.arr, zero);
-        let (new_key, value, is_valid) = MPTCircuit::<1, NODE_LEN>::advance_key_leaf_or_extension(
-            b,
-            &node.arr,
-            &mapping_slot_wires.keccak_mpt.mpt_key,
-            &rlp_headers,
-        );
+        let (new_key, encoded_value, is_valid) =
+            MPTCircuit::<1, NODE_LEN>::advance_key_leaf_or_extension::<_, _, _, MAX_LEAF_VALUE_LEN>(
+                b,
+                &node.arr,
+                &mapping_slot_wires.keccak_mpt.mpt_key,
+                &rlp_headers,
+            );
         b.connect(tru.target, is_valid.target);
+        // Read the length of the relevant data (RLP header - 0x80)
+        let data_len = short_string_len(b, &encoded_value[0]);
+        // Create vector of only the relevant data - skipping the RLP header
+        // + stick with the same encoding of the data but pad_left32.
+        let big_endian_left_padded = encoded_value
+            .take_last::<GoldilocksField, 2, VALUE_LEN>()
+            .into_vec(data_len)
+            .normalize_left::<_, _, VALUE_LEN>(b);
         // Then creates the initial accumulator from the (mapping_key, value)
-        let mut inputs = [b.zero(); HASH_LEN * 2];
-        inputs[0..HASH_LEN].copy_from_slice(&mapping_slot_wires.mapping_key.arr);
-        inputs[HASH_LEN..2 * HASH_LEN].copy_from_slice(&value.arr);
-        let leaf_accumulator = b.map_to_curve_point(&inputs);
+        let mut inputs = [b.zero(); MAPPING_INPUT_TOTAL_LEN];
+        inputs[0..MAPPING_KEY_LEN].copy_from_slice(&mapping_slot_wires.mapping_key.arr);
+        inputs[MAPPING_KEY_LEN..MAPPING_KEY_LEN + VALUE_LEN]
+            .copy_from_slice(&big_endian_left_padded.arr);
+        // couldn't make it work with array API because of const generic issue...
+        //let packed = Array { arr: inputs }.convert_u8_to_u32(b);
+        let packed = convert_u8_targets_to_u32(b, &inputs)
+            .into_iter()
+            .map(|x| x.0)
+            .collect::<Vec<_>>();
+        let leaf_accumulator = b.map_to_curve_point(&packed);
 
         // and register the public inputs
         let n = b.one(); // only one leaf seen in that leaf !
@@ -102,11 +128,13 @@ where
             &root.output_array,
             &leaf_accumulator,
         );
+        //mapping_slot_wires.mapping_key.register_as_public_input(b);
+        //big_endian_left_padded.register_as_public_input(b);
         LeafWires {
             node,
             root,
             mapping_slot: mapping_slot_wires,
-            value,
+            value: big_endian_left_padded,
         }
     }
 
@@ -157,7 +185,9 @@ mod test {
     use crate::circuit::test::run_circuit;
     use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
+    use crate::storage::lpn::leaf_digest_for_mapping;
     use crate::utils::keccak256;
+    use crate::utils::test::random_vector;
     use eth_trie::{Nibbles, Trie};
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
@@ -165,7 +195,7 @@ mod test {
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use rand::{thread_rng, Rng};
 
-    use super::{LeafCircuit, LeafWires, PublicInputs};
+    use super::{LeafCircuit, LeafWires, PublicInputs, VALUE_LEN};
     use crate::array::Array;
     use crate::circuit::UserCircuit;
     use crate::eth::{left_pad32, StorageSlot};
@@ -189,14 +219,15 @@ mod test {
         [(); PAD_LEN(NODE_LEN)]:,
     {
         // normal wires + expected extracted value
-        type Wires = (LeafWires<NODE_LEN>, Array<Target, MAX_LEAF_VALUE_LEN>);
+        type Wires = (LeafWires<NODE_LEN>, Array<Target, VALUE_LEN>);
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let exp_value = Array::<Target, MAX_LEAF_VALUE_LEN>::new(b);
+            let exp_value = Array::<Target, VALUE_LEN>::new(b);
             let leaf_wires = LeafCircuit::<NODE_LEN>::build(b);
-            let eq = leaf_wires.value.equals(b, &exp_value);
-            let tt = b._true();
-            b.connect(tt.target, eq.target);
+            leaf_wires.value.enforce_equal(b, &exp_value);
+            //let eq = leaf_wires.value.equals(b, &exp_value);
+            //let tt = b._true();
+            //b.connect(tt.target, eq.target);
             (leaf_wires, exp_value)
         }
 
@@ -213,14 +244,15 @@ mod test {
         let mapping_key = hex::decode("1234").unwrap();
         let mapping_slot = 2;
         let slot = StorageSlot::Mapping(mapping_key.clone(), mapping_slot);
-        let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
-        let mut random_value = [0u8; 32];
-        thread_rng().fill(&mut random_value);
-        trie.insert(&slot.mpt_key(), &random_value).unwrap();
+        let (mut trie, _) = generate_random_storage_mpt::<3, VALUE_LEN>();
+        // generating a fake uint256 value
+        let random_value = random_vector(VALUE_LEN);
+        let encoded_value: Vec<u8> = rlp::encode(&random_value).to_vec();
+        trie.insert(&slot.mpt_key(), &encoded_value).unwrap();
         trie.root_hash().unwrap();
-        let proof = trie.get_proof(&slot.mpt_key()).unwrap();
+        let proof = trie.get_proof(&slot.mpt_key_vec()).unwrap();
         let node = proof.last().unwrap().clone(); // proof from RPC gives leaf as last
-        let mpt_key = slot.mpt_key();
+        let mpt_key = slot.mpt_key_vec();
         let slot = MappingSlot::new(mapping_slot as u8, mapping_key.clone());
         let circuit = LeafCircuit::<80> {
             node: node.clone(),
@@ -228,20 +260,15 @@ mod test {
         };
         let test = TestLeafCircuit {
             c: circuit,
-            exp_value: random_value.to_vec(),
+            exp_value: random_value.clone(),
         };
         let proof = run_circuit::<F, D, C, _>(test);
         let pi = PublicInputs::<F>::from(&proof.public_inputs);
         {
             // expected accumulator Acc((mappping_key,value))
-            let inputs_field = left_pad32(&mapping_key)
-                .into_iter()
-                .chain(left_pad32(&random_value))
-                .map(F::from_canonical_u8)
-                .collect::<Vec<_>>();
-            let exp_accumulator = map_to_curve_point(&inputs_field).to_weierstrass();
-            let found_accumulator = pi.accumulator();
-            assert_eq!(exp_accumulator, found_accumulator);
+            let exp_digest = leaf_digest_for_mapping(&mapping_key, &random_value).to_weierstrass();
+            let found_digest = pi.accumulator();
+            assert_eq!(exp_digest, found_digest);
         }
         {
             // expected MPT hash
@@ -274,6 +301,19 @@ mod test {
             let n = pi.n();
             let exp_n = F::ONE;
             assert_eq!(n, exp_n);
+        }
+    }
+
+    impl<const NODE_LEN: usize> UserCircuit<F, D> for LeafCircuit<NODE_LEN>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+    {
+        type Wires = LeafWires<NODE_LEN>;
+        fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            LeafCircuit::build(b)
+        }
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.assign(pw, wires);
         }
     }
 }

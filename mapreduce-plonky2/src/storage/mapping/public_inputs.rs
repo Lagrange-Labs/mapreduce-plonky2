@@ -52,7 +52,7 @@ impl<'a> PublicInputs<'a, Target> {
         key.register_as_input(b);
         b.register_public_input(slot);
         b.register_public_input(n);
-        c.register_as_input(b);
+        c.register_as_public_input(b);
     }
     /// Returns the MPT key defined over the public inputs
     pub fn mpt_key(&self) -> MPTKeyWire {

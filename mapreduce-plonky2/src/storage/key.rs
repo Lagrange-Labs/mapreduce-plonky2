@@ -3,7 +3,7 @@
 
 use crate::{
     array::{Array, Vector, VectorWire},
-    eth::left_pad32,
+    eth::{left_pad32, StorageSlot},
     keccak::{ByteKeccakWires, InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, PAD_LEN},
     types::{AddressTarget, ADDRESS_LEN},
@@ -20,6 +20,8 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use serde::{Deserialize, Serialize};
+
+use super::mapping::leaf::VALUE_LEN;
 /// One input element length to Keccak
 const INPUT_ELEMENT_LEN: usize = 32;
 /// The tuple (pair) length of elements to Keccak
@@ -108,43 +110,47 @@ impl KeccakMPT {
 /// Circuit gadget that proves the correct derivation of a MPT key from a simple
 /// storage slot.
 /// Deriving a MPT key from simple slot is done like:
-/// 1. location = keccak(left_pad32(contract_address), left_pad32(slot))
+/// 1. location = left_pad32(slot)
 /// 2. mpt_key = keccak(location)
 /// WARNING: Currently takes the assumption that the storage slot number fits
 /// inside a single byte.
 #[derive(Clone, Debug)]
-pub struct SimpleSlot {
-    /// Simple storage slot
-    slot: u8,
-    /// Contract address
-    contract_address: Address,
-}
+pub struct SimpleSlot(pub(super) StorageSlot);
 
 impl SimpleSlot {
-    pub fn new(slot: u8, contract_address: Address) -> Self {
-        Self {
-            slot,
-            contract_address,
+    pub fn new(slot: u8) -> Self {
+        Self(StorageSlot::Simple(slot as usize))
+    }
+}
+
+impl From<StorageSlot> for SimpleSlot {
+    /// NOTE it can panic - TODO refactor whole slot API to have a single enum
+    /// that can deal with both types (and more complex later on)
+    fn from(value: StorageSlot) -> Self {
+        match value {
+            StorageSlot::Simple(slot) if slot <= u8::MAX as usize => SimpleSlot::new(slot as u8),
+            _ => panic!("Unvalid use of SimpleSlot"),
         }
     }
 }
 
 /// Wires associated with the MPT key derivation logic of simple storage slot
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SimpleSlotWires {
     /// Simple storage slot which is assumed to fit in a single byte
     pub(crate) slot: Target,
-    /// Contract address used to calculate the "location"
-    pub(crate) contract_address: AddressTarget,
-    /// Wires associated with the MPT key
-    pub(crate) keccak_mpt: KeccakMPTWires,
+    /// Wires associated computing the keccak for the MPT key
+    pub(crate) keccak_mpt: KeccakWires<{ PAD_LEN(INPUT_ELEMENT_LEN) }>,
+    /// The MPT key derived in circuit from the storage slot, in NIBBLES
+    /// TODO: It doesn't need to be assigned, but is used in the higher level circuits
+    pub(crate) mpt_key: MPTKeyWire,
 }
 
 // TODO: refactor to extract common functions with MappingSlot.
 impl SimpleSlot {
     /// Derive the MPT key in circuit according to simple storage slot.
     /// Remember the rules to get the MPT key is as follow:
-    /// * location = keccak256(pad32(contract_address), pad32(slot))
+    /// * location = pad32(slot)
     /// * mpt_key = keccak256(location)
     /// Note the simple slot wire and the contract address wires are NOT range
     /// checked, because they are expected to be given by the verifier.
@@ -154,55 +160,41 @@ impl SimpleSlot {
         b: &mut CircuitBuilder<F, D>,
     ) -> SimpleSlotWires {
         let slot = b.add_virtual_target();
-        let contract_address = AddressTarget::new(b);
 
-        // keccak(left_pad32(contract_address), left_pad32(slot))
+        // keccak(left_pad32(slot))
         let mut arr = [b.zero(); INPUT_PADDED_LEN];
-        arr[INPUT_ELEMENT_LEN - ADDRESS_LEN..INPUT_ELEMENT_LEN]
-            .copy_from_slice(&contract_address.arr);
-        arr[INPUT_TUPLE_LEN - 1] = slot;
+        arr[INPUT_ELEMENT_LEN - 1] = slot;
         let inputs = VectorWire::<Target, INPUT_PADDED_LEN> {
-            real_len: b.constant(F::from_canonical_usize(INPUT_TUPLE_LEN)),
+            real_len: b.constant(F::from_canonical_usize(INPUT_ELEMENT_LEN)),
             arr: Array { arr },
         };
         // Build for keccak MPT.
-        let keccak_mpt = KeccakMPT::build(b, inputs);
+        let keccak_mpt = KeccakCircuit::<INPUT_PADDED_LEN>::hash_vector(b, &inputs);
+        // MPT KEY is expressed in nibbles
+        let mpt_key = MPTKeyWire::init_from_u32_targets(b, &keccak_mpt.output_array);
 
         SimpleSlotWires {
             slot,
-            contract_address,
             keccak_mpt,
+            mpt_key,
         }
     }
 
     pub fn assign<F: RichField>(&self, pw: &mut PartialWitness<F>, wires: &SimpleSlotWires) {
-        pw.set_target(wires.slot, F::from_canonical_u8(self.slot));
-        wires
-            .contract_address
-            .assign_bytes(pw, &self.contract_address.0);
-
-        let inputs = self.inputs();
-        let location = keccak256(&inputs);
-        KeccakMPT::assign(pw, &wires.keccak_mpt, inputs, location);
-    }
-
-    pub fn mpt_key(&self) -> [u8; HASH_LEN] {
-        // location = keccak(inputs)
-        let location = keccak256(&self.inputs());
-
-        // mpt_key = keccak(location)
-        keccak256(&location).try_into().unwrap()
-    }
-
-    fn inputs(&self) -> Vec<u8> {
-        // pad32(contract_address) || pad32(slot)
-        let padded_contract_address = left_pad32(&self.contract_address.0);
-        let padded_slot = left_pad32(&[self.slot]);
-
-        padded_contract_address
-            .into_iter()
-            .chain(padded_slot)
-            .collect()
+        match self.0 {
+            StorageSlot::Simple(slot) => {
+                // safe downcasting because it's assumed to be u8 in constructor
+                pw.set_target(wires.slot, F::from_canonical_u8(slot as u8))
+            }
+            _ => panic!("Invalid storage slot type"), // should not happen using constructor
+        }
+        let input = self.0.location().as_fixed_bytes().to_vec();
+        KeccakCircuit::assign(
+            pw,
+            &wires.keccak_mpt,
+            // unwrap safe because input always fixed 32 bytes
+            &InputData::Assigned(&Vector::from_vec(&input).unwrap()),
+        );
     }
 }
 
@@ -241,7 +233,8 @@ pub struct MappingSlotWires {
 
 /// Maximum size of the key for a mapping
 pub const MAPPING_KEY_LEN: usize = 32;
-const MAPPING_INPUT_TOTAL_LEN: usize = 2 * MAPPING_KEY_LEN;
+/// Size of the input to the digest and hash function
+pub(crate) const MAPPING_INPUT_TOTAL_LEN: usize = MAPPING_KEY_LEN + VALUE_LEN;
 /// Value but with the padding taken into account.
 const MAPPING_INPUT_PADDED_LEN: usize = PAD_LEN(MAPPING_INPUT_TOTAL_LEN);
 impl MappingSlot {
@@ -299,7 +292,6 @@ impl MappingSlot {
 
 #[cfg(test)]
 mod test {
-    use std::array::from_fn as create_array;
 
     use plonky2::{
         field::extension::Extendable,
@@ -322,7 +314,7 @@ mod test {
         utils::{convert_u8_slice_to_u32_fields, keccak256},
     };
 
-    use super::{MappingSlot, MappingSlotWires};
+    use super::{MappingSlot, MappingSlotWires, SimpleSlot, SimpleSlotWires};
 
     #[derive(Clone, Debug)]
     struct TestMappingSlot {
@@ -406,7 +398,7 @@ mod test {
         let mapping_key = hex::decode("1234").unwrap();
         let mapping_slot = 2;
         let slot = StorageSlot::Mapping(mapping_key.clone(), mapping_slot);
-        let mpt_key = slot.mpt_key();
+        let mpt_key = slot.mpt_key_vec();
         let circuit = TestMappingSlot {
             m: MappingSlot {
                 mapping_key,
@@ -415,6 +407,35 @@ mod test {
             exp_mpt_key_nibbles: bytes_to_nibbles(&mpt_key),
             exp_keccak_location: slot.location().as_bytes().to_vec(),
         };
+        run_circuit::<F, D, C, _>(circuit);
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestSimpleSlot {
+        slot: u8,
+    }
+
+    impl UserCircuit<F, D> for TestSimpleSlot {
+        type Wires = (SimpleSlotWires, Array<Target, MAX_KEY_NIBBLE_LEN>);
+
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let wires = SimpleSlot::build(c);
+            let exp_key = Array::new(c);
+            wires.mpt_key.key.enforce_equal(c, &exp_key);
+            (wires, exp_key)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            let eth_slot = StorageSlot::Simple(self.slot as usize);
+            let circuit = SimpleSlot::new(self.slot);
+            circuit.assign(pw, &wires.0);
+            wires.1.assign_bytes(pw, &eth_slot.mpt_nibbles());
+        }
+    }
+
+    #[test]
+    fn test_simple_slot() {
+        let circuit = TestSimpleSlot { slot: 8 };
         run_circuit::<F, D, C, _>(circuit);
     }
 }
