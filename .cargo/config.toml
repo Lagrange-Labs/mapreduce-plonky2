@@ -1,2 +1,3 @@
+# Compile Go code of gnark-utils on Mac.
 [target.'cfg(target_os="macos")']
 rustflags = ["-C", "link-args=-framework CoreFoundation -framework Security"]

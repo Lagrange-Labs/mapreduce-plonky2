@@ -1,4 +1,5 @@
 //! Test contract deployment and call
+//! Copied and modified from [snark-verifier](https://github.com/privacy-scaling-explorations/snark-verifier).
 
 use revm::{
     primitives::{CreateScheme, ExecutionResult, Output, TransactTo, TxEnv},

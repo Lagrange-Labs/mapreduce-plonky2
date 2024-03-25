@@ -1,4 +1,4 @@
-//! The verifier used to test Groth16 proof verification on EVM
+//! The verifier used to test the Solidity verification.
 
 use crate::{
     evm::{executor::deploy_and_call, utils::compile_solidity},
@@ -22,7 +22,7 @@ pub struct EVMVerifier {
 
 impl EVMVerifier {
     pub fn new(config: EVMVerifierConfig) -> Result<Self> {
-        // Read Solidity code from the file.
+        // Read the Solidity code from file.
         let solidity_code = read_file(config.solidity_path)?;
 
         // Compile the Solidity code.

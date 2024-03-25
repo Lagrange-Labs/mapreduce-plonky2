@@ -1986,6 +1986,7 @@ dependencies = [
  "plonky2_ecgfp5",
  "plonky2x",
  "rand",
+ "recursion_framework",
  "revm",
  "rlp",
  "serde",

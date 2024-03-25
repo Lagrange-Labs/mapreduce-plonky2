@@ -39,7 +39,10 @@ jobs:
     name: Test Suite
     runs-on: lg-prover-32CPU
     steps:
-      - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
+      - run: |
+        sudo add-apt-repository ppa:ethereum/ethereum
+        sudo apt-get update
+        sudo apt-get install -yq pkg-config libssl-dev solc
       - name: Checkout sources
         uses: actions/checkout@v2
       - uses: actions/setup-go@v3

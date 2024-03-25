@@ -1,4 +1,4 @@
-//! The verifier used to check the Groth16 proof
+//! The verifier used to verify the Groth16 proof.
 
 use crate::proof::Groth16Proof;
 use anyhow::Result;
@@ -20,7 +20,8 @@ impl Groth16Verifier {
         Ok(Self)
     }
 
-    /// Verify the proof. Return Ok if it's verified successfully.
+    /// Verify the proof. Return Ok if it's verified successfully, otherwise
+    /// it returns an error.
     pub fn verify(&self, proof: &Groth16Proof) -> Result<()> {
         let proof = serde_json::to_string(proof)?;
 

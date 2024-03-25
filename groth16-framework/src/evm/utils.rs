@@ -1,4 +1,5 @@
 //! EVM utility functions
+//! Copied and modified from [snark-verifier](https://github.com/privacy-scaling-explorations/snark-verifier).
 
 use std::{
     io::{ErrorKind, Write},

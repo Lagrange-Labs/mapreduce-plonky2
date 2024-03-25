@@ -24,4 +24,5 @@ ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features 
 mapreduce-plonky2 = { path = "../mapreduce-plonky2" }
 plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
 rand = "0.8"
+recursion_framework = { path = "../recursion-framework" }
 serial_test = "3.0"
