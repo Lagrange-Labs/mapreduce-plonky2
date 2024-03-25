@@ -330,33 +330,6 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
 
 #[test]
 fn test_api() {
-    let params = Parameters::build();
-    let leaf1 = params
-        .generate_proof(CircuitInput::new_leaf(b"jean", b"michel"))
-        .unwrap();
-    params
-        .partial_node_circuit
-        .circuit_data()
-        .verify(ProofWithVK::deserialize(&leaf1).unwrap().proof)
-        .unwrap();
-    let leaf2 = params
-        .generate_proof(CircuitInput::new_leaf(b"gustavo", b"ernesto"))
-        .unwrap();
-    params
-        .partial_node_circuit
-        .circuit_data()
-        .verify(ProofWithVK::deserialize(&leaf2).unwrap().proof)
-        .unwrap();
-
-    let full_inner = params
-        .generate_proof(CircuitInput::new_full_node(leaf1, leaf2))
-        .unwrap();
-    params
-        .partial_node_circuit
-        .circuit_data()
-        .verify(ProofWithVK::deserialize(&full_inner).unwrap().proof)
-        .unwrap();
-
     let some_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
         &b"coucou"
             .iter()
@@ -366,16 +339,40 @@ fn test_api() {
     )
     .to_bytes();
 
-    let partial_inner = params
-        .generate_proof(CircuitInput::new_partial_node(
-            full_inner, false, &some_hash,
-        ))
+    let params = Parameters::build();
+
+    let leaf1 = params
+        .generate_proof(CircuitInput::new_leaf(b"jean", b"michel"))
+        .unwrap();
+    params
+        .leaf_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&leaf1).unwrap().proof)
+        .unwrap();
+    let leaf2 = params
+        .generate_proof(CircuitInput::new_leaf(b"gustavo", b"michel"))
+        .unwrap();
+    params
+        .leaf_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&leaf2).unwrap().proof)
         .unwrap();
 
-    let p = ProofWithVK::deserialize(&partial_inner).unwrap();
+    let partial_inner = params
+        .generate_proof(CircuitInput::new_partial_node(leaf1, false, &some_hash))
+        .unwrap();
     params
         .partial_node_circuit
         .circuit_data()
-        .verify(p.proof)
+        .verify(ProofWithVK::deserialize(&partial_inner).unwrap().proof)
+        .unwrap();
+
+    let full_inner = params
+        .generate_proof(CircuitInput::new_full_node(leaf2, partial_inner))
+        .unwrap();
+    params
+        .full_node_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&full_inner).unwrap().proof)
         .unwrap();
 }
