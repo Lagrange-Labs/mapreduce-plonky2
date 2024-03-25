@@ -31,7 +31,6 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - run: git submodule update --init --recursive
       - uses: actions-rs/cargo@v1
         with:
           command: check
@@ -62,7 +61,6 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - run: git submodule update --init --recursive
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:

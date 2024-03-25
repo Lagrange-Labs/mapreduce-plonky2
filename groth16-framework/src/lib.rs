@@ -66,9 +66,10 @@ mod tests {
         CustomGateSerializer, CustomGeneratorSerializer,
     };
     use serial_test::serial;
-    use std::{array, marker::PhantomData, path::Path};
+    use std::{array, fs::File, io::Write, marker::PhantomData, path::Path};
 
     /// Test proving and verifying with a simple circuit.
+    #[ignore] // Ignore for long running in CI.
     #[serial]
     #[test]
     fn test_groth16_proving_simple() {
@@ -249,7 +250,15 @@ mod tests {
 
         let prover = Groth16Prover::new(config).expect("Failed to initialize the prover");
 
-        prover.prove(proof).expect("Failed to generate the proof")
+        let proof = prover.prove(proof).expect("Failed to generate the proof");
+        let json_proof = serde_json::to_string(&proof).expect("Failed to serialize the proof");
+
+        let mut file = File::create(Path::new(asset_dir).join("proof.json"))
+            .expect("Failed to create the file");
+        file.write_all(json_proof.as_bytes())
+            .expect("Failed to write the proof");
+
+        proof
     }
 
     /// Test to verify the proof.

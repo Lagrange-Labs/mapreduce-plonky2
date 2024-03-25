@@ -24,7 +24,7 @@ fn main() {
         }
     }
 
-    // Files the lib depends on that should recompile the lib.
+    // Files of the lib depends on that should recompile the lib.
     println!("cargo:rerun-if-changed=go.mod");
     let dep_files = glob::glob("./lib/*.go").unwrap().filter_map(|v| v.ok());
     for file in dep_files {
