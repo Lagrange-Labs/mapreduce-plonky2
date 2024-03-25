@@ -3,26 +3,39 @@ use std::array::from_fn as create_array;
 use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::hash_types::HashOutTarget,
+    fri::verifier,
+    hash::{hash_types::HashOutTarget, poseidon::PoseidonHash},
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::VerifierCircuitData, config::Hasher},
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use recursion_framework::{
+    circuit_builder::{public_input_targets, CircuitLogicWires},
+    framework::{
+        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+    },
+};
+use serde::{Deserialize, Serialize};
 
 use crate::{
+    api::{default_config, ProofWithVK, C, D, F},
     block::{empty_merkle_root, public_inputs::PublicInputs as BlockDBPublicInputs},
     group_hashing::CircuitBuilderGroupHashing,
-    query2::block::BlockPublicInputs as BlockQueryPublicInputs,
+    query2::block::{self, BlockPublicInputs as BlockQueryPublicInputs},
     types::{MappingKeyTarget, PackedMappingKeyTarget, MAPPING_KEY_LEN},
     utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to},
+    verifier_gadget::VerifierTarget,
 };
 
 use super::RevelationPublicInputs;
 
+#[derive(Serialize, Deserialize)]
 pub(crate) struct RevelationWires<const L: usize> {
+    // poor support of const generics arrays in serde - use that external crate
+    #[serde(with = "serde_arrays")]
     pub raw_keys: [MappingKeyTarget; L],
     pub num_entries: Target,
     pub min_block_number: Target,
@@ -154,3 +167,4 @@ impl<const L: usize> RevelationCircuit<L> {
         );
     }
 }
+

@@ -6,6 +6,7 @@
 //!   deletion and modification.
 
 pub mod public_inputs;
+pub use public_inputs::PublicInputs;
 
 use crate::{
     api::{default_config, ProofWithVK},
@@ -38,7 +39,6 @@ use plonky2::{
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
-use public_inputs::PublicInputs;
 use recursion_framework::{
     circuit_builder::{
         CircuitLogicWires, CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder,
