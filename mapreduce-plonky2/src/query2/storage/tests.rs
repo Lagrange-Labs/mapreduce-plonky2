@@ -329,6 +329,35 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
 }
 
 #[test]
+#[should_panic]
+fn test_proven_side() {
+    let some_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
+        &b"coucou"
+            .iter()
+            .copied()
+            .map(F::from_canonical_u8)
+            .collect_vec(),
+    )
+    .to_bytes();
+
+    let params = Parameters::build();
+
+    let leaf1 = params
+        .generate_proof(CircuitInput::new_leaf(b"jean", b"michel"))
+        .unwrap();
+    params
+        .leaf_circuit
+        .circuit_data()
+        .verify(ProofWithVK::deserialize(&leaf1).unwrap().proof)
+        .unwrap();
+
+    // Putting the proven node on the wrong side shall fail
+    let _ = params
+        .generate_proof(CircuitInput::new_partial_node(&leaf1, &some_hash, true))
+        .is_err();
+}
+
+#[test]
 fn test_api() {
     let some_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
         &b"coucou"
@@ -350,16 +379,16 @@ fn test_api() {
         .verify(ProofWithVK::deserialize(&leaf1).unwrap().proof)
         .unwrap();
     let leaf2 = params
-        .generate_proof(CircuitInput::new_leaf(b"gustavo", b"michel"))
+        .generate_proof(CircuitInput::new_leaf(b"juan", b"michel"))
         .unwrap();
     params
         .leaf_circuit
         .circuit_data()
-        .verify(ProofWithVK::deserialize(&leaf2).unwrap().proof)
+        .verify(ProofWithVK::deserialize(&leaf1).unwrap().proof)
         .unwrap();
 
     let partial_inner = params
-        .generate_proof(CircuitInput::new_partial_node(leaf1, false, &some_hash))
+        .generate_proof(CircuitInput::new_partial_node(&leaf1, &some_hash, false))
         .unwrap();
     params
         .partial_node_circuit
@@ -368,7 +397,7 @@ fn test_api() {
         .unwrap();
 
     let full_inner = params
-        .generate_proof(CircuitInput::new_full_node(leaf2, partial_inner))
+        .generate_proof(CircuitInput::new_full_node(&leaf2, &partial_inner))
         .unwrap();
     params
         .full_node_circuit

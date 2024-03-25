@@ -46,13 +46,11 @@ impl CircuitInput {
         })
     }
 
-    pub fn new_partial_node(
-        child_proof: Vec<u8>,
-        proved_is_right: bool,
-        unproved_hash: &[u8],
-    ) -> Self {
-        let unproved_hash = HashOut::from_bytes(unproved_hash);
-        let proof = ProofWithVK::deserialize(&child_proof).expect("unable to deserialize proof");
+    pub fn new_partial_node(left: &[u8], right: &[u8], proved_is_right: bool) -> Self {
+        let proof = ProofWithVK::deserialize(if proved_is_right { right } else { left })
+            .expect("unable to deserialize proof");
+        let unproved_hash = HashOut::from_bytes(if proved_is_right { left } else { right });
+
         CircuitInput::PartialInner(
             PartialInnerNodeCircuit {
                 proved_is_right,
@@ -62,7 +60,7 @@ impl CircuitInput {
         )
     }
 
-    pub fn new_full_node(left_proof: Vec<u8>, right_proof: Vec<u8>) -> Self {
+    pub fn new_full_node(left_proof: &[u8], right_proof: &[u8]) -> Self {
         let left = ProofWithVK::deserialize(&left_proof).expect("unable to deserialize proof");
         let right = ProofWithVK::deserialize(&right_proof).expect("unable to deserialize proof");
         CircuitInput::FullInner((left, right))
