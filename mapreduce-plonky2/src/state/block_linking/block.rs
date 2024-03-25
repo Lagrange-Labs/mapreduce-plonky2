@@ -269,6 +269,9 @@ mod test {
 
     #[tokio::test]
     async fn test_block_header_decoding_on_mainnet() -> Result<()> {
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
+        #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
 
         test_block_header_decoding::<SEPOLIA_NUMBER_LEN>(url).await

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::mapping::leaf::VALUE_LEN, array::Array, circuit::UserCircuit,
-    group_hashing::CircuitBuilderGroupHashing, storage::key::MAPPING_KEY_LEN,
+    group_hashing::CircuitBuilderGroupHashing, types::MAPPING_KEY_LEN,
 };
 
 use super::{PublicInputs, KEY_SIZE, LEAF_SIZE};
