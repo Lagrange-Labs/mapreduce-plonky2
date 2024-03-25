@@ -13,29 +13,32 @@ use crate::{
     circuit::UserCircuit,
     group_hashing::CircuitBuilderGroupHashing,
     query2::{storage::public_inputs::PublicInputs, AddressTarget, PackedAddressTarget},
-    types::{MappingKeyTarget, MAPPING_KEY_LEN, VALUE_LEN},
+    types::{
+        MappingKeyTarget, PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN,
+        PACKED_VALUE_LEN, VALUE_LEN,
+    },
     utils::convert_u8_to_u32_slice,
 };
 
 const PACKED_KEY_SIZE: usize = MAPPING_KEY_LEN / 4;
 
 pub struct InclusionWires {
-    pub mapping_key: Array<Target, MAPPING_KEY_LEN>,
-    pub mapping_value: Array<Target, VALUE_LEN>,
+    pub packed_mapping_key: Array<U32Target, PACKED_MAPPING_KEY_LEN>,
+    pub packed_mapping_value: Array<U32Target, PACKED_VALUE_LEN>,
 }
 
 /// This circuit prove the new root hash of a leaf containing the requested data
 #[derive(Clone, Debug)]
 pub struct LeafCircuit {
-    pub mapping_key: [u8; MAPPING_KEY_LEN],
-    pub mapping_value: [u8; VALUE_LEN],
+    pub mapping_key: [u32; PACKED_MAPPING_KEY_LEN],
+    pub mapping_value: [u32; PACKED_VALUE_LEN],
 }
 
 impl LeafCircuit {
     pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &InclusionWires) {
-        wires.mapping_key.assign_from_data(pw, &self.mapping_key);
+        wires.packed_mapping_key.assign_from_data(pw, &self.mapping_key);
         wires
-            .mapping_value
+            .packed_mapping_value
             .assign_from_data(pw, &self.mapping_value);
     }
 }
@@ -44,10 +47,8 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
     type Wires = InclusionWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
-        let key = MappingKeyTarget::new(b);
-        let key_u32 = key.convert_u8_to_u32(b);
-        let value = Array::<Target, VALUE_LEN>::new(b);
-        let value_u32 = value.convert_u8_to_u32(b);
+        let key_u32 = PackedMappingKeyTarget::new(b);
+        let value_u32 = Array::<U32Target, PACKED_VALUE_LEN>::new(b);
         let kv = key_u32.concat(&value_u32).to_targets();
 
         // the digest is done on the key only, in compact form, because our goal is
@@ -60,8 +61,8 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
         // up the computation tree
         PublicInputs::<GoldilocksField>::register(b, &root, &digest, &value_u32);
         InclusionWires {
-            mapping_key: key,
-            mapping_value: value,
+            packed_mapping_key: key_u32,
+            packed_mapping_value: value_u32,
         }
     }
 

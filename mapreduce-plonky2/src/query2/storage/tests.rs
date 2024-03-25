@@ -129,10 +129,8 @@ impl LeafProofResult {
 }
 
 fn run_leaf_proof<'data>(k: &[u8], v: &[u8]) -> LeafProofResult {
-    let k = left_pad32(k);
-    let v = left_pad32(v);
-
-    let v_u32 = convert_u8_to_u32_slice(&v);
+    let k_u32 = convert_u8_to_u32_slice(&left_pad32(k));
+    let v_u32 = convert_u8_to_u32_slice(&left_pad32(v));
 
     let owner_gl = v_u32
         .iter()
@@ -141,8 +139,8 @@ fn run_leaf_proof<'data>(k: &[u8], v: &[u8]) -> LeafProofResult {
         .collect_vec();
 
     let circuit = LeafCircuit {
-        mapping_key: k,
-        mapping_value: v,
+        mapping_key: k_u32.try_into().unwrap(),
+        mapping_value: v_u32.try_into().unwrap(),
     };
 
     LeafProofResult {
