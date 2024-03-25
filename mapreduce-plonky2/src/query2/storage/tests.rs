@@ -1,7 +1,7 @@
 use ethers::types::Address;
 use plonky2::field::types::Sample;
 use std::{
-    array::{self, from_fn},
+    array::{self},
     ops::Add,
 };
 
@@ -53,39 +53,22 @@ type F = <C as GenericConfig<D>>::F;
 #[derive(Clone, Debug)]
 struct PartialInnerNodeCircuitValidator<'a> {
     validated: PartialInnerNodeCircuit,
-
     proved_child: &'a PublicInputs<'a, F>,
-    unproved_hash: Vec<F>,
-    proved_is_left: F,
 }
 impl<'a> UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuitValidator<'a> {
-    type Wires = (PartialInnerNodeWires, Vec<Target>, Vec<Target>, Target);
+    type Wires = (PartialInnerNodeWires, Vec<Target>);
 
     fn build(c: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
         let leaf_child_pi = c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
         let leaf_child_io = PublicInputs::from(leaf_child_pi.as_slice());
-        let inner_child_hash_targets = c.add_virtual_targets(NUM_HASH_OUT_ELTS);
-        let inner_child_position_target = c.add_virtual_target();
 
-        let wires = PartialInnerNodeCircuit::build(
-            c,
-            &leaf_child_io,
-            HashOutTarget::from_vec(inner_child_hash_targets.clone()),
-            BoolTarget::new_unsafe(inner_child_position_target),
-        );
-        (
-            wires,
-            leaf_child_pi.try_into().unwrap(),
-            inner_child_hash_targets,
-            inner_child_position_target,
-        )
+        let wires = PartialInnerNodeCircuit::build(c, &leaf_child_io);
+        (wires, leaf_child_pi.try_into().unwrap())
     }
 
     fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
-        pw.set_target_arr(&wires.1, self.proved_child.inputs);
-        pw.set_target_arr(&wires.2, &self.unproved_hash);
-        pw.set_target(wires.3, self.proved_is_left);
         self.validated.assign(pw, &wires.0);
+        pw.set_target_arr(&wires.1, self.proved_child.inputs);
     }
 }
 
@@ -245,10 +228,11 @@ fn test_mini_tree(k: &[u8], v: &[u8]) {
     );
 
     let top = PartialInnerNodeCircuitValidator {
-        validated: PartialInnerNodeCircuit {},
+        validated: PartialInnerNodeCircuit {
+            proved_is_right: true,
+            unproved_hash: some_hash,
+        },
         proved_child: &middle_ios,
-        unproved_hash: some_hash.to_vec(),
-        proved_is_left: F::from_bool(true),
     };
     let top_proof = run_circuit::<F, D, C, _>(top);
     let top_ios = PublicInputs::<F>::from(top_proof.public_inputs.as_slice());
