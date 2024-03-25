@@ -107,7 +107,6 @@ impl<const L: usize> RevelationCircuit<L> {
         // Assert the roots of the query and the block db are the same
         b.connect_hashes(root_proof.root(), db_proof.root());
         b.connect_hashes(db_proof.init_root(), empty_root);
-        b.connect_curve_points(d, root_proof.digest());
         let min_bound = b.sub(root_proof.block_number(), root_proof.range());
 
         let t = b._true();

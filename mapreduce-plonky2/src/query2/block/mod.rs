@@ -263,7 +263,34 @@ impl<'a> BlockPublicInputs<'a, Target> {
     }
 }
 
+#[cfg(test)]
+use crate::types::PACKED_ADDRESS_LEN;
+
 impl<'a> BlockPublicInputs<'a, GoldilocksField> {
+    #[cfg(test)]
+    pub fn from_parts(
+        block_number: GoldilocksField,
+        range: GoldilocksField,
+        root: HashOut<GoldilocksField>,
+        smart_contract_address: &[GoldilocksField; PACKED_ADDRESS_LEN],
+        user_address: &[GoldilocksField; PACKED_VALUE_LEN],
+        mapping_slot: GoldilocksField,
+        storage_slot_length: GoldilocksField,
+        digest: WeierstrassPoint,
+    ) -> [GoldilocksField; Self::total_len()] {
+        let mut inputs = vec![];
+        inputs.push(block_number);
+        inputs.push(range);
+        inputs.extend_from_slice(&root.elements);
+        inputs.extend_from_slice(smart_contract_address.as_slice());
+        inputs.extend_from_slice(user_address.as_slice());
+        inputs.push(mapping_slot);
+        inputs.push(storage_slot_length);
+        inputs.extend_from_slice(&digest.x.0);
+        inputs.extend_from_slice(&digest.y.0);
+        inputs.push(GoldilocksField::from_bool(digest.is_inf));
+        inputs.try_into().unwrap()
+    }
     pub fn block_number(&self) -> GoldilocksField {
         self.block_number_raw()[0]
     }
