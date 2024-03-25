@@ -10,7 +10,8 @@ use crate::{
     api::{ProofWithVK, C, D, F},
     array::Array,
     eth::left_pad32,
-    mpt_sequential::Circuit, utils::convert_u8_to_u32_slice,
+    mpt_sequential::Circuit,
+    utils::convert_u8_to_u32_slice,
 };
 
 mod full_inner;
