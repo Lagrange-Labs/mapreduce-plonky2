@@ -21,12 +21,15 @@ pub use crate::storage::{
     length_extract::{self},
     lpn as lpn_storage, mapping,
 };
+
+pub use crate::state::{
+    self,
+    lpn::{self as lpn_state},
+};
+
 use crate::{
     block::Inputs,
-    state::{
-        block_linking,
-        lpn::{self as lpn_state, api::ProofInputs},
-    },
+    state::{block_linking, lpn::api::ProofInputs},
 };
 
 use self::storage::{digest_equal, length_match};
