@@ -1,6 +1,5 @@
-use crate::{
-    query2::state::CircuitInputsInternal, types::MAPPING_KEY_LEN, utils::convert_u8_to_u32_slice,
-};
+use crate::utils::{Packer, ToFields};
+use crate::{query2::state::CircuitInputsInternal, types::MAPPING_KEY_LEN};
 use std::{array, iter, ops::Add, process::Output};
 
 use ethers::types::Address;
@@ -136,13 +135,9 @@ impl<const DEPTH: usize> TestStateCircuit<DEPTH> {
     ) -> Self {
         let rng = &mut StdRng::seed_from_u64(seed);
 
-        let mut smart_contract_address = PackedSCAddress::try_from(
-            convert_u8_to_u32_slice(smart_contract_address.as_fixed_bytes())
-                .into_iter()
-                .map(|val| F::from_canonical_u32(val))
-                .collect_vec(),
-        )
-        .unwrap();
+        let mut smart_contract_address =
+            PackedSCAddress::try_from(smart_contract_address.as_bytes().pack().to_fields())
+                .unwrap();
 
         let mapping_slot = GoldilocksField::from_canonical_u32(mapping_slot);
         let length_slot = GoldilocksField::from_canonical_u32(length_slot);

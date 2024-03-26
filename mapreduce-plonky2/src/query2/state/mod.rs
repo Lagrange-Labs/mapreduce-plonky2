@@ -1,5 +1,4 @@
 //! LPN State & Block DB provenance
-
 use std::iter;
 
 use ethers::types::Address;
@@ -38,8 +37,8 @@ use crate::{
     keccak::{OutputHash, PACKED_HASH_LEN},
     query2::storage::public_inputs::PublicInputs as StorageInputs,
     state,
-    types::PackedAddressTarget as PackedSCAddressTarget,
-    utils::convert_u8_to_u32_slice,
+    types::{HashOutput, PackedAddressTarget as PackedSCAddressTarget},
+    utils::{convert_u8_to_u32_slice, Packer, ToFields},
 };
 
 use super::{
@@ -361,33 +360,24 @@ impl CircuitInput {
         mapping_slot: u32,
         length_slot: u32,
         block_number: u32,
-        state_root: &[u8],
-        siblings: &[Vec<u8>; DEPTH],
+        state_root: HashOutput,
+        siblings: &[HashOutput; DEPTH],
         positions: &[bool; DEPTH],
-        block_hash: &[u8],
+        block_hash: HashOutput,
         storage_proof: Vec<u8>,
     ) -> Result<Self> {
-        let smart_contract_address = PackedSCAddress::try_from(
-            convert_u8_to_u32_slice(smart_contract_address.as_bytes())
-                .into_iter()
-                .map(|val| F::from_canonical_u32(val))
-                .collect_vec(),
-        )?;
+        let smart_contract_address =
+            PackedSCAddress::try_from(smart_contract_address.as_bytes().pack().to_fields())?;
         let mapping_slot = F::from_canonical_u32(mapping_slot);
         let length_slot = F::from_canonical_u32(length_slot);
         let block_number = F::from_canonical_u32(block_number);
-        let state_root = HashOut::from_bytes(state_root);
+        let state_root = HashOut::from_bytes(state_root.as_slice());
         let siblings = siblings
             .into_iter()
             .map(|hash| HashOut::from_bytes(hash.as_slice()))
             .collect_vec();
         let positions = positions.to_vec();
-        let block_hash = Array::<F, PACKED_HASH_LEN>::try_from(
-            convert_u8_to_u32_slice(block_hash)
-                .into_iter()
-                .map(|val| F::from_canonical_u32(val))
-                .collect_vec(),
-        )?;
+        let block_hash = Array::<F, PACKED_HASH_LEN>::try_from(block_hash.pack().to_fields())?;
         Ok(Self {
             state_input: StateCircuit::new(
                 smart_contract_address,

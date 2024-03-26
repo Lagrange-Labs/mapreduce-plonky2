@@ -9,7 +9,7 @@ use plonky2::{
     },
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::target::Target,
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{
@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::{default_config, ProofWithVK, C, D, F},
-    types::{PackedAddressTarget, PackedValueTarget, CURVE_TARGET_LEN, PACKED_VALUE_LEN},
+    types::{
+        HashOutput, PackedAddressTarget, PackedValueTarget, CURVE_TARGET_LEN, PACKED_VALUE_LEN,
+    },
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 
@@ -55,12 +57,12 @@ impl CircuitInput {
 
     fn new_partial_node(
         child_proof: Vec<u8>,
-        sibling_hash: HashOut<F>,
+        sibling_hash: HashOutput,
         sibling_is_left: bool,
     ) -> Result<Self> {
         Ok(Self::PartialNode(PartialNodeCircuitInputs::new(
             ProofWithVK::deserialize(&child_proof)?,
-            sibling_hash,
+            HashOut::<F>::from_bytes(sibling_hash.as_slice()),
             sibling_is_left,
         )))
     }
@@ -444,6 +446,8 @@ mod tests {
     use ethers::types::Address;
     use itertools::Itertools;
     use plonky2::field::types::Field;
+    use plonky2::hash::hash_types::HashOut;
+    use plonky2::plonk::config::GenericHashOut;
     use plonky2::{
         hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
         iop::target::Target,
@@ -524,7 +528,12 @@ mod tests {
 
         let partial_node_proof = block_circuit_params
             .generate_proof(
-                super::CircuitInput::new_partial_node(full_node_proof, sibling_hash, true).unwrap(),
+                super::CircuitInput::new_partial_node(
+                    full_node_proof,
+                    sibling_hash.to_bytes().try_into().unwrap(),
+                    true,
+                )
+                .unwrap(),
             )
             .unwrap();
 
