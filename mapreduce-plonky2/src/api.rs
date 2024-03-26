@@ -69,13 +69,30 @@ pub struct PublicParameters<const MAX_DEPTH: usize> {
     block_db: block::Parameters<MAX_DEPTH>,
 }
 
-impl<const MAX_DEPTH: usize> PublicParameters<MAX_DEPTH> {
+#[derive(Serialize, Deserialize)]
+/// This data structure contains some information about the block DB circuit that needs
+/// to be exchanged with public parameters for query circuits
+pub struct BlockDBCircuitInfo<const MAX_DEPTH: usize> {
+    circuit_set: RecursiveCircuits<F, C, D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    verifier_data: VerifierOnlyCircuitData<C, D>,
+}
+
+impl<const MAX_DEPTH: usize> BlockDBCircuitInfo<MAX_DEPTH> {
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
+        Ok(bincode::serialize(self)?)
+    }
+
+    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self> {
+        Ok(bincode::deserialize(bytes)?)
+    }
+
     pub(crate) fn get_block_db_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
-        self.block_db.get_block_db_circuit_set()
+        &self.circuit_set
     }
 
     pub(crate) fn get_block_db_vk(&self) -> &VerifierOnlyCircuitData<C, D> {
-        self.block_db.get_block_db_vk()
+        &self.verifier_data
     }
 }
 
@@ -187,6 +204,17 @@ pub fn generate_proof<const MAX_DEPTH: usize>(
             params.block_db.generate_proof(proof_input)
         }
     }
+}
+/// Get the information about the block DB circuit that needs to be exchanged with
+/// set of parameters for query circuits
+pub fn block_db_circuit_info<const MAX_DEPTH: usize>(
+    params: &PublicParameters<MAX_DEPTH>,
+) -> Result<Vec<u8>> {
+    let block_db_info = BlockDBCircuitInfo::<MAX_DEPTH> {
+        circuit_set: params.block_db.get_block_db_circuit_set().clone(),
+        verifier_data: params.block_db.get_block_db_vk().clone(),
+    };
+    block_db_info.serialize()
 }
 
 /// ProofWithVK is a generic struct holding a child proof and its associated verification key.
