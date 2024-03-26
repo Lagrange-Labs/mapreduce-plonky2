@@ -146,11 +146,9 @@ macro_rules! impl_branch_circuits {
         pub struct [< $struct_name GenericNodeLen>]<const NODE_LEN: usize>
         where
             [(); PAD_LEN(NODE_LEN)]:,
-            [(); PAD_LEN(NODE_LEN/2)]:,
         {
             $(
                 [< b $i >]: CircuitWithUniversalVerifier<F, C, D, $i, BranchWires<NODE_LEN>>,
-                [< b $i _over_2 >]: CircuitWithUniversalVerifier<F, C, D, $i, BranchWires<{NODE_LEN/2}>>,
             )+
         }
         #[doc = stringify!($struct_name)]
@@ -165,9 +163,6 @@ macro_rules! impl_branch_circuits {
                     $(
                         // generate one circuit with full node len
                         [< b $i >]:  builder.build_circuit::<C, $i, BranchWires<MAX_BRANCH_NODE_LEN>>(()),
-                        // generate one circuit with half node len
-                        [< b $i _over_2>]:  builder.build_circuit::<C, $i, BranchWires<{MAX_BRANCH_NODE_LEN/2}>>(()),
-
                     )+
                 }
             }
@@ -176,7 +171,6 @@ macro_rules! impl_branch_circuits {
                 let mut arr = Vec::new();
                 $(
                     arr.push(self.[< b $i >].circuit_data().verifier_only.circuit_digest);
-                    arr.push(self.[< b $i _over_2 >].circuit_data().verifier_only.circuit_digest);
                 )+
                 arr
             }
@@ -236,9 +230,8 @@ macro_rules! impl_branch_circuits {
                         (proof.clone(), vk)
                     })
                     .unzip();
-                let min_range = MAX_BRANCH_NODE_LEN / 2;
                  match child_proofs.len() {
-                     $($i if branch_node.node.len() > min_range => {
+                     $($i => {
                          set.generate_proof(
                              &self.[< b $i >],
                              proofs.try_into().unwrap(),
@@ -248,12 +241,13 @@ macro_rules! impl_branch_circuits {
                                  common_prefix,
                                  expected_pointer: pointer,
                                  mapping_slot,
+                                 nb_proofs: $i,
                              }
                          ).map(|p| (p, self.[< b $i >].get_verifier_data().clone()).into())
                      },
-                         $i if branch_node.node.len() <= min_range => {
+                         $i if $i - 1 == child_proofs.len() => {
                          set.generate_proof(
-                             &self.[< b $i _over_2 >],
+                             &self.[< b $i>],
                              proofs.try_into().unwrap(),
                              create_array(|i| vks[i]),
                              BranchCircuit {
@@ -261,8 +255,9 @@ macro_rules! impl_branch_circuits {
                                  common_prefix,
                                  expected_pointer: pointer,
                                  mapping_slot,
+                                 nb_proofs: $i-1,
                              }
-                         ).map(|p| (p, self.[< b $i _over_2>].get_verifier_data().clone()).into())
+                         ).map(|p| (p, self.[< b $i>].get_verifier_data().clone()).into())
                      }
                  )+
                      _ => bail!("invalid child proof len"),
@@ -273,25 +268,7 @@ macro_rules! impl_branch_circuits {
     }
 }
 
-impl_branch_circuits!(
-    BranchCircuits,
-    1,
-    2,
-    3,
-    4,
-    5,
-    6,
-    7,
-    8,
-    9,
-    10,
-    11,
-    12,
-    13,
-    14,
-    15,
-    16
-);
+impl_branch_circuits!(BranchCircuits, 1, 2, 4, 6, 8, 10, 12, 14, 16);
 #[cfg(test)]
 impl_branch_circuits!(TestBranchCircuits, 1, 2);
 
@@ -394,7 +371,6 @@ mod test {
 
     use super::*;
     use crate::{
-        api::mapping::leaf::VALUE_LEN,
         eth::StorageSlot,
         mpt_sequential::{bytes_to_nibbles, test::generate_random_storage_mpt},
         storage::key::MappingSlot,
@@ -522,11 +498,7 @@ mod test {
         let branch_inputs = CircuitInput::new_branch(branch_node.clone(), vec![leaf1_proof_buff]);
         let branch1_buff = generate_proof(&params, branch_inputs).unwrap();
         let branch1 = ProofWithVK::deserialize(&branch1_buff).unwrap();
-        let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
-            params.branchs.b1_over_2.get_verifier_data().clone()
-        } else {
-            params.branchs.b1.get_verifier_data().clone()
-        };
+        let exp_vk = params.branchs.b1.get_verifier_data().clone();
         assert_eq!(branch1.verifier_data(), &exp_vk);
 
         // generate  a branch proof with two leafs inputs now but using the testing framework
@@ -573,11 +545,7 @@ mod test {
             ],
         });
         let branch2 = params.generate_proof(branch_inputs).unwrap();
-        let exp_vk = if branch_node.len() < MAX_BRANCH_NODE_LEN / 2 {
-            params.branchs.b2_over_2.get_verifier_data().clone()
-        } else {
-            params.branchs.b2.get_verifier_data().clone()
-        };
+        let exp_vk = params.branchs.b2.get_verifier_data().clone();
         assert_eq!(branch2.verifier_data(), &exp_vk);
     }
 

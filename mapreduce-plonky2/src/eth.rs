@@ -382,9 +382,10 @@ impl ProofQuery {
 #[cfg(test)]
 mod test {
 
-    use std::str::FromStr;
+    use std::{str::FromStr, sync::Arc};
 
     use ethers::types::{BlockNumber, H256, U256};
+    use hashbrown::HashMap;
     use rand::{thread_rng, Rng};
 
     use crate::{
@@ -438,6 +439,20 @@ mod test {
         println!("length extracted = {}", length);
         println!("length 2 extracted = {}", length2);
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);
+        let analyze = |proof: Vec<Bytes>| {
+            proof.iter().fold(HashMap::new(), |mut acc, p| {
+                let b: Vec<Vec<u8>> = rlp::decode_list(p);
+                if b.len() == 17 {
+                    let n = acc.entry(p.len()).or_insert(0);
+                    *n += 1;
+                }
+                acc
+            })
+        };
+        let storage_sizes = analyze(res.storage_proof[0].proof.clone());
+        let state_sizes = analyze(res.account_proof.clone());
+        println!("storage_sizes = {:?}", storage_sizes);
+        println!("state_sizes = {:?}", state_sizes);
         Ok(())
     }
 

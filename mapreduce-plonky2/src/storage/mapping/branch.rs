@@ -30,6 +30,7 @@ pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDRENS: usize> {
     pub(super) common_prefix: Vec<u8>,
     pub(super) expected_pointer: usize,
     pub(super) mapping_slot: usize,
+    pub(super) nb_proofs: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -44,6 +45,8 @@ where
     common_prefix: MPTKeyWire,
     keccak: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     mapping_slot: Target,
+    // We dont need to verify all the proofs all the time
+    nb_actual_proofs: Target,
 }
 
 impl<const NODE_LEN: usize, const N_CHILDREN: usize> BranchCircuit<NODE_LEN, N_CHILDREN>
@@ -66,6 +69,8 @@ where
         // mapping slot will be exposed as public input. Need to make sure all
         // children proofs are valid with respect to the same mapping slot.
         let mapping_slot = b.add_virtual_target();
+        // how many proofs should we verify in that circuits
+        let nb_proofs = b.add_virtual_target();
 
         let zero = b.zero();
         let tru = b._true();
@@ -127,6 +132,7 @@ where
             common_prefix,
             keccak: root,
             mapping_slot,
+            nb_actual_proofs: nb_proofs,
         }
     }
     fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &BranchWires<NODE_LEN>) {
@@ -145,6 +151,10 @@ where
         pw.set_target(
             wires.mapping_slot,
             GoldilocksField::from_canonical_usize(self.mapping_slot),
+        );
+        pw.set_target(
+            wires.nb_actual_proofs,
+            GoldilocksField::from_canonical_usize(self.nb_proofs),
         );
     }
 }
@@ -296,13 +306,7 @@ mod test {
         println!("ptr1: {}, ptr2: {}", ptr1, ptr2);
         assert_eq!(ptr1, ptr2);
         let slot = 10;
-        let branch_circuit = BranchCircuit::<NODE_LEN, N_CHILDREN> {
-            node: node.clone(),
-            // any of the two keys will do since we only care about the common prefix
-            common_prefix: bytes_to_nibbles(&key1),
-            expected_pointer: ptr1,
-            mapping_slot: slot,
-        };
+
         // create the public inputs
         let compute_pi = |key: &[u8], leaf: &[u8], value: &[u8]| {
             let c = convert_u8_to_u32_slice(&keccak256(leaf));
@@ -320,6 +324,14 @@ mod test {
         let pi1 = compute_pi(&key1, leaf1, &value1);
         let pi2 = compute_pi(&key2, leaf2, &value2);
         assert_eq!(pi1.len(), PublicInputs::<F>::TOTAL_LEN);
+        let branch_circuit = BranchCircuit::<NODE_LEN, N_CHILDREN> {
+            node: node.clone(),
+            // any of the two keys will do since we only care about the common prefix
+            common_prefix: bytes_to_nibbles(&key1),
+            expected_pointer: ptr1,
+            mapping_slot: slot,
+            nb_proofs: 2,
+        };
         let circuit = TestBranchCircuit {
             c: branch_circuit,
             inputs: [PublicInputs::from(&pi1), PublicInputs::from(&pi2)],
