@@ -45,7 +45,7 @@ impl Groth16Prover {
         // Generate the wrapped proof.
         let wrapped_output = self.wrapper.prove(proof)?;
 
-        // Note this verifier data is from the wrapped proof. However the wrapped proof hardcodes the 
+        // Note this verifier data is from the wrapped proof. However the wrapped proof hardcodes the
         // specific mapreduce-plonky2 proof verification key in its circuit, so indirectly, verifier knows the
         // Groth16 proof is for the correct mapreduce-plonky2 proof.
         // This hardcoding is done here https://github.com/Lagrange-Labs/succinctx/blob/main/plonky2x/core/src/backend/wrapper/wrap.rs#L100
