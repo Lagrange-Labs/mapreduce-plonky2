@@ -3202,7 +3202,7 @@ source = "git+https://github.com/Lagrange-Labs/plonky2#b1e3e4af7f5b482fe1edf321b
 [[package]]
 name = "plonky2x"
 version = "0.1.0"
-source = "git+https://github.com/Lagrange-Labs/succinctx#3b135e3b84b795362aaf3e3682875030376fb4fb"
+source = "git+https://github.com/Lagrange-Labs/succinctx#aa59c966a140a9ecd7835d3fc88e2e5ba140f69a"
 dependencies = [
  "anyhow",
  "array-macro",
@@ -3243,7 +3243,7 @@ dependencies = [
 [[package]]
 name = "plonky2x-derive"
 version = "0.1.0"
-source = "git+https://github.com/Lagrange-Labs/succinctx#3b135e3b84b795362aaf3e3682875030376fb4fb"
+source = "git+https://github.com/Lagrange-Labs/succinctx#aa59c966a140a9ecd7835d3fc88e2e5ba140f69a"
 dependencies = [
  "proc-macro2",
  "quote",
