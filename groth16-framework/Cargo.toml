@@ -11,7 +11,7 @@ gnark-utils = { path = "../gnark-utils" }
 hex = "0.4"
 log = "0.4"
 plonky2 = { version = "0.1.4" }
-plonky2x = { git = "https://github.com/Lagrange-Labs/succinctx", branch = "lagrange" }
+plonky2x = { git = "https://github.com/Lagrange-Labs/succinctx" }
 recursion_framework = { path = "../recursion-framework" }
 revm = { version = "3.5", default-features = false }
 rlp = "0.5"
