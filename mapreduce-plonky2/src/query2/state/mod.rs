@@ -3,6 +3,7 @@
 use std::iter;
 
 use ethers::types::Address;
+use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{
@@ -17,6 +18,7 @@ use plonky2::{
     plonk::{
         circuit_builder::{self, CircuitBuilder},
         circuit_data::CircuitData,
+        config::GenericHashOut,
     },
 };
 use recursion_framework::{
@@ -37,6 +39,7 @@ use crate::{
     query2::storage::public_inputs::PublicInputs as StorageInputs,
     state,
     types::PackedAddressTarget as PackedSCAddressTarget,
+    utils::convert_u8_to_u32_slice,
 };
 
 use super::{
@@ -275,7 +278,7 @@ pub(crate) struct StateRecursiveWires {
 const NUM_STORAGE_INPUTS: usize = StorageInputs::<Target>::TOTAL_LEN;
 const NUM_IO: usize = BlockPublicInputs::<Target>::total_len();
 //ToDo: decide if we want it as a const generic parameter
-const DEPTH: usize = 1;
+const DEPTH: usize = 0;
 
 impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
     type CircuitBuilderParams = RecursiveCircuitsVerifierGagdet<F, C, D, NUM_STORAGE_INPUTS>;
@@ -314,7 +317,8 @@ impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
 pub struct Parameters {
     circuit: CircuitWithUniversalVerifier<F, C, D, 0, StateRecursiveWires>,
 }
-
+/// Inputs employed to be provided to the `Parameters` API in order to generate a proof
+/// for the state circuit
 pub struct StateCircuitInputs {
     state_input: StateCircuit<DEPTH, F>,
     storage_proof: ProofWithVK,
@@ -334,7 +338,8 @@ impl StateCircuitInputs {
         }
     }
 }
-
+/// Inputs to be provided to the publicly exposed API in order to generate a proof for the
+/// state circuit
 pub struct CircuitInput {
     state_input: StateCircuit<DEPTH, F>,
     storage_proof: ProofWithVK,
@@ -342,16 +347,37 @@ pub struct CircuitInput {
 
 impl CircuitInput {
     pub fn new(
-        smart_contract_address: PackedSCAddress<F>,
-        mapping_slot: F,
-        length_slot: F,
-        block_number: F,
-        state_root: HashOut<F>,
-        siblings: Vec<HashOut<F>>,
-        positions: Vec<bool>,
-        block_hash: Array<F, PACKED_HASH_LEN>,
+        smart_contract_address: Address,
+        mapping_slot: u32,
+        length_slot: u32,
+        block_number: u32,
+        state_root: &[u8],
+        siblings: &[Vec<u8>; DEPTH],
+        positions: &[bool; DEPTH],
+        block_hash: &[u8],
         storage_proof: Vec<u8>,
     ) -> Result<Self> {
+        let smart_contract_address = PackedSCAddress::try_from(
+            convert_u8_to_u32_slice(smart_contract_address.as_bytes())
+                .into_iter()
+                .map(|val| F::from_canonical_u32(val))
+                .collect_vec(),
+        )?;
+        let mapping_slot = F::from_canonical_u32(mapping_slot);
+        let length_slot = F::from_canonical_u32(length_slot);
+        let block_number = F::from_canonical_u32(block_number);
+        let state_root = HashOut::from_bytes(state_root);
+        let siblings = siblings
+            .into_iter()
+            .map(|hash| HashOut::from_bytes(hash.as_slice()))
+            .collect_vec();
+        let positions = positions.to_vec();
+        let block_hash = Array::<F, PACKED_HASH_LEN>::try_from(
+            convert_u8_to_u32_slice(block_hash)
+                .into_iter()
+                .map(|val| F::from_canonical_u32(val))
+                .collect_vec(),
+        )?;
         Ok(Self {
             state_input: StateCircuit::new(
                 smart_contract_address,
