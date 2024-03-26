@@ -13,7 +13,8 @@ use std::{
     path::Path,
 };
 
-/// The filename of the cached circuit data
+/// The filename of the cached circuit data. This is the circuit data of the final wrapped proof.
+/// The actual mapreduce-plonky2 proof being verified has already been hardcoded in the wrapped proof.
 pub const CIRCUIT_DATA_FILENAME: &str = "circuit.bin";
 
 /// Read the data from a file.
