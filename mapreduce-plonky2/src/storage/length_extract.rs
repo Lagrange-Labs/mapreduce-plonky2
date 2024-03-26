@@ -159,8 +159,8 @@ where
             .leaf
             .extract_array::<F, _, 4>(cb, offset)
             .into_vec(value_len)
-            .normalize_left::<_, _, 4>(cb)
-            .reverse()
+            .normalize_left::<_, _, 4>(cb) // left_pad::<4>()
+            .reverse() // big endian to little endian
             .convert_u8_to_u32(cb);
 
         let reduced_value = value[0];
@@ -257,6 +257,7 @@ mod tests {
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::{
+            left_pad,
             test::{get_mainnet_url, get_sepolia_url},
             ProofQuery, StorageSlot,
         },
@@ -506,28 +507,6 @@ mod tests {
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         assert_eq!(leaf_list.len(), 2);
-        let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
-        // making sure we can simply skip the first byte - imitate circuit
-        let sliced = &leaf_list[1][1..];
-        assert_eq!(sliced, leaf_value.as_slice());
-        // extracting len from RLP header - imitate circuit
-        let len_slice = rlp::Rlp::new(&leaf_list[1])
-            .payload_info()
-            .unwrap()
-            .value_len;
-        // check that subbing 0x80 works
-        let rlp_len_slice = leaf_list[1][0] - 128;
-        assert_eq!(rlp_len_slice as usize, len_slice);
-        let le_value: [u8; 4] = create_array(|i| {
-            if i < len_slice {
-                leaf_list[1][len_slice - i]
-            } else {
-                0
-            }
-        });
-        let comp_value = convert_u8_to_u32_slice(&le_value)[0];
-        assert_eq!(comp_value, exp_len); // from contract
-        println!("correct conversion ! ");
         let nodes = res.storage_proof[0]
             .proof
             .iter()
@@ -535,6 +514,22 @@ mod tests {
             .map(|x| x.to_vec())
             .collect::<Vec<_>>();
         visit_proof(&nodes);
+
+        // implement the circuit logic:
+        let first_byte = leaf_list[1][0];
+        let slice = if first_byte < 0x80 {
+            println!("taking full byte");
+            &leaf_list[1][..]
+        } else {
+            println!("skipping full byte");
+            &leaf_list[1][1..]
+        }
+        .to_vec();
+        let slice = left_pad::<4>(&slice); // what happens in circuit effectively
+                                           // we have to reverse since encoding is big endian on EVM and our function is little endian based
+        let length = convert_u8_to_u32_slice(&slice.into_iter().rev().collect::<Vec<u8>>())[0];
+        assert_eq!(length, exp_len);
+
         // extractd from test_pidgy_pinguins_slot
         const DEPTH: usize = 5;
         const NODE_LEN: usize = 532;
@@ -555,7 +550,7 @@ mod tests {
         //// Verify the public inputs.
         let pi = PublicInputs::<F>::from(&proof.public_inputs);
         assert_eq!(pi.storage_slot(), F::from_canonical_u8(slot));
-        assert_eq!(pi.length_value(), F::from_canonical_u32(comp_value));
+        assert_eq!(pi.length_value(), F::from_canonical_u32(length));
         let packed_root = convert_u8_to_u32_slice(res.storage_hash.as_bytes())
             .into_iter()
             .map(F::from_canonical_u32)
