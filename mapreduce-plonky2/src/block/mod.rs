@@ -35,6 +35,7 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
+        circuit_data::VerifierOnlyCircuitData,
         config::{GenericHashOut, Hasher},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
@@ -547,6 +548,10 @@ where
 
     pub(crate) fn get_block_db_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
         &self.set
+    }
+
+    pub(crate) fn get_block_db_vk(&self) -> &VerifierOnlyCircuitData<C, D> {
+        &self.ivc_circuit.circuit_data().verifier_only
     }
 }
 

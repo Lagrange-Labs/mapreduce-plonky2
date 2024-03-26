@@ -306,8 +306,8 @@ impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
-        inputs.state_input.assign(pw, &self.state_wires);
-        let (proof, vd) = (&inputs.storage_proof).into();
+        inputs.api_inputs.state_input.assign(pw, &self.state_wires);
+        let (proof, vd) = (&inputs.api_inputs.storage_proof).into();
         self.storage_verifier
             .set_target(pw, &inputs.storage_circuit_set, proof, vd)
     }
@@ -319,8 +319,7 @@ pub struct Parameters {
 }
 /// Set of inputs necessary to generate a proof for the state circuit
 pub struct CircuitInputsInternal {
-    state_input: StateCircuit<DEPTH, F>,
-    storage_proof: ProofWithVK,
+    api_inputs: CircuitInput,
     storage_circuit_set: RecursiveCircuits<F, C, D>,
 }
 
@@ -331,8 +330,20 @@ impl CircuitInputsInternal {
         storage_circuit_set: &RecursiveCircuits<F, C, D>,
     ) -> Self {
         Self {
-            state_input,
-            storage_proof,
+            api_inputs: CircuitInput {
+                state_input,
+                storage_proof,
+            },
+            storage_circuit_set: storage_circuit_set.clone(),
+        }
+    }
+
+    pub(crate) fn from_circuit_input(
+        input: CircuitInput,
+        storage_circuit_set: &RecursiveCircuits<F, C, D>,
+    ) -> Self {
+        Self {
+            api_inputs: input,
             storage_circuit_set: storage_circuit_set.clone(),
         }
     }

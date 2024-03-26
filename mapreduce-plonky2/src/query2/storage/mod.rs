@@ -141,6 +141,10 @@ impl Parameters {
         }
         .serialize()
     }
+
+    pub(crate) fn get_storage_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.set
+    }
 }
 
 #[cfg(test)]

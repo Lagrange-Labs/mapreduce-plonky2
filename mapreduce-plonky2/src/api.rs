@@ -1,18 +1,12 @@
 use anyhow::Result;
-use ethers::core::k256::elliptic_curve::rand_core::le;
-use plonky2::{
-    iop::witness::{PartialWitness, WitnessWrite},
-    plonk::{
-        circuit_builder::CircuitBuilder,
-        circuit_data::{
-            CircuitConfig, VerifierCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData,
-        },
-        config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig},
-        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
-    },
+use plonky2::plonk::{
+    circuit_data::{CircuitConfig, VerifierOnlyCircuitData},
+    config::{GenericConfig, PoseidonGoldilocksConfig},
+    proof::ProofWithPublicInputs,
 };
-use recursion_framework::serialization::{
-    circuit_data_serialization::SerializableRichField, deserialize, serialize,
+use recursion_framework::{
+    framework::RecursiveCircuits,
+    serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize},
 };
 use serde::{Deserialize, Serialize};
 
@@ -73,6 +67,16 @@ pub struct PublicParameters<const MAX_DEPTH: usize> {
     block_linking: block_linking::PublicParameters,
     lpn_state: lpn_state::api::Parameters,
     block_db: block::Parameters<MAX_DEPTH>,
+}
+
+impl<const MAX_DEPTH: usize> PublicParameters<MAX_DEPTH> {
+    pub(crate) fn get_block_db_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        self.block_db.get_block_db_circuit_set()
+    }
+
+    pub(crate) fn get_block_db_vk(&self) -> &VerifierOnlyCircuitData<C, D> {
+        self.block_db.get_block_db_vk()
+    }
 }
 
 /// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits

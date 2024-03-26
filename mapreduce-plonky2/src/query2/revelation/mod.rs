@@ -7,7 +7,7 @@ use recursion_framework::{
     serialization::{deserialize, serialize},
 };
 use serde::{Deserialize, Serialize};
-use std::array::from_fn as create_array;
+use std::{array::from_fn as create_array, collections::BTreeMap};
 
 use plonky2::{
     hash::{
@@ -90,9 +90,18 @@ impl<const L: usize> RevelationRecursiveInput<L> {
         query2_block_proof: Vec<u8>,
         block_db_proof: Vec<u8>,
     ) -> Result<RevelationRecursiveInput<L>> {
+        // sort mapping keys depending on the last limb, as it is the only limb currently considered
+        // in the circuit
+        let sorted_keys = mapping_keys
+            .iter()
+            .map(|key| {
+                let packed = left_pad32(key).pack();
+                (*packed.last().unwrap(), packed)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut sorted_keys_iter = sorted_keys.into_iter();
         let keys = create_array(|i| {
-            if i < mapping_keys.len() {
-                let packed = left_pad32(&mapping_keys[i]).pack();
+            if let Some((_, packed)) = sorted_keys_iter.next() {
                 create_array(|j| packed[j])
             } else {
                 [0u32; PACKED_MAPPING_KEY_LEN]

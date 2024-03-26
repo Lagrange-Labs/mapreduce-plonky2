@@ -12,7 +12,7 @@ mod revelation;
 pub(crate) mod state;
 mod storage;
 
-pub use api::{CircuitInput, Parameters};
+pub use api::{CircuitInput, PublicParameters};
 #[cfg(test)]
 mod tests;
 
