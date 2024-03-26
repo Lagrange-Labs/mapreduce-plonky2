@@ -18,7 +18,7 @@ use crate::{
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
-    utils::convert_u8_targets_to_u32,
+    utils::{convert_u8_targets_to_u32, less_than},
 };
 
 use super::public_inputs::PublicInputs;
@@ -87,7 +87,9 @@ where
         let headers = decode_fixed_list::<_, _, MAX_ITEMS_IN_LIST>(b, &node.arr.arr, zero);
         let ffalse = b._false();
         let mut seen_nibbles = vec![];
-        for proof_inputs in inputs {
+        for (i, proof_inputs) in inputs.iter().enumerate() {
+            let it = b.constant(GoldilocksField::from_canonical_usize(i));
+            let should_process = less_than(b, it, nb_proofs, 4);
             let child_accumulator = proof_inputs.accumulator();
             accumulator = b.curve_add(accumulator, child_accumulator);
             // add the number of leaves this proof has processed
@@ -96,11 +98,13 @@ where
             let (_, hash, is_valid, nibble) =
                 MPTCircuit::<1, NODE_LEN>::advance_key_branch(b, &node.arr, &child_key, &headers);
             // we always enforce it's a branch node, i.e. that it has 17 entries
-            b.connect(is_valid.target, tru.target);
+            let should_be_valid = b.select(should_process, is_valid.target, tru.target);
+            b.connect(should_be_valid, tru.target);
             // make sure we don't process twice the same proof for same nibble
             seen_nibbles.iter().for_each(|sn| {
                 let is_equal = b.is_equal(*sn, nibble);
-                b.connect(is_equal.target, ffalse.target);
+                let should_be_equal = b.select(should_process, is_equal.target, tru.target);
+                b.connect(should_be_equal, ffalse.target);
             });
             seen_nibbles.push(nibble);
             // we check the hash is the one exposed by the proof
@@ -110,14 +114,19 @@ where
             };
             let child_hash = proof_inputs.root_hash();
             let hash_equals = packed_hash.equals(b, &child_hash);
-            b.connect(hash_equals.target, tru.target);
+            let should_be_equal = b.select(should_process, hash_equals.target, tru.target);
+            b.connect(should_be_equal, tru.target);
             // we now check that the MPT key at this point is equal to the one given
             // by the prover. Reason why it is secure is because this circuit only cares
             // that _all_ keys share the _same_ prefix, so if they're all equal
             // to `common_prefix`, they're all equal.
-            common_prefix.enforce_prefix_equal(b, &child_key);
+            let is_equal = common_prefix.is_prefix_equal(b, &child_key);
+            let should_be_equal = b.select(should_process, is_equal.target, tru.target);
+            b.connect(should_be_equal, tru.target);
             // We also check proof is valid for the _same_ mapping slot
-            b.connect(mapping_slot, proof_inputs.mapping_slot());
+            let is_equal = b.is_equal(mapping_slot, proof_inputs.mapping_slot());
+            let should_be_equal = b.select(should_process, is_equal.target, tru.target);
+            b.connect(should_be_equal, tru.target);
         }
         let one = b.one();
         // We've compared the pointers _before_ advancing the key for each leaf

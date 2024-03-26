@@ -231,7 +231,7 @@ macro_rules! impl_branch_circuits {
                     })
                     .unzip();
                  match child_proofs.len() {
-                     $($i => {
+                     $(_ if $i == child_proofs.len() => {
                          set.generate_proof(
                              &self.[< b $i >],
                              proofs.try_into().unwrap(),
@@ -245,7 +245,7 @@ macro_rules! impl_branch_circuits {
                              }
                          ).map(|p| (p, self.[< b $i >].get_verifier_data().clone()).into())
                      },
-                         $i if $i - 1 == child_proofs.len() => {
+                        _ if $i-1 == child_proofs.len()  => {
                          set.generate_proof(
                              &self.[< b $i>],
                              proofs.try_into().unwrap(),

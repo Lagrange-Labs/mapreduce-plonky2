@@ -460,6 +460,18 @@ impl MPTKeyWire {
         b.connect(self.pointer, other.pointer);
         self.key.enforce_slice_equals(b, &other.key, self.pointer);
     }
+    /// Similar to `enforce_prefix_equal` but returns a boolean target instead
+    /// of enforcing the equality.
+    pub fn is_prefix_equal<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        other: &Self,
+    ) -> BoolTarget {
+        let ptr_equal = b.is_equal(self.pointer, other.pointer);
+        let key_equal = self.key.is_slice_equals(b, &other.key, self.pointer);
+        b.and(ptr_equal, key_equal)
+    }
+
     /// Register the key and pointer as public inputs.
     pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
         &self,
