@@ -1,5 +1,5 @@
 use crate::{
-    query2::state::StateCircuitInputs, types::MAPPING_KEY_LEN, utils::convert_u8_to_u32_slice,
+    query2::state::CircuitInputsInternal, types::MAPPING_KEY_LEN, utils::convert_u8_to_u32_slice,
 };
 use std::{array, iter, ops::Add, process::Output};
 
@@ -282,7 +282,7 @@ pub(crate) fn generate_inputs_for_state_circuit(
     mapping_slot: Option<u32>,
     smart_contract_address: Option<Address>,
     user_address: Option<Address>,
-) -> StateCircuitInputs {
+) -> CircuitInputsInternal {
     let rng = &mut StdRng::seed_from_u64(seed);
     let length_slot = if let Some(slot) = length_slot {
         slot
@@ -324,7 +324,7 @@ pub(crate) fn generate_inputs_for_state_circuit(
     )
     .c;
 
-    StateCircuitInputs::new(
+    CircuitInputsInternal::new(
         state_circuit,
         storage_proof,
         testing_framework.get_recursive_circuit_set(),

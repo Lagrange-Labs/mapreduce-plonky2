@@ -283,7 +283,7 @@ const DEPTH: usize = 0;
 impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
     type CircuitBuilderParams = RecursiveCircuitsVerifierGagdet<F, C, D, NUM_STORAGE_INPUTS>;
 
-    type Inputs = StateCircuitInputs;
+    type Inputs = CircuitInputsInternal;
 
     const NUM_PUBLIC_INPUTS: usize = NUM_IO;
 
@@ -317,15 +317,14 @@ impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
 pub struct Parameters {
     circuit: CircuitWithUniversalVerifier<F, C, D, 0, StateRecursiveWires>,
 }
-/// Inputs employed to be provided to the `Parameters` API in order to generate a proof
-/// for the state circuit
-pub struct StateCircuitInputs {
+/// Set of inputs necessary to generate a proof for the state circuit
+pub struct CircuitInputsInternal {
     state_input: StateCircuit<DEPTH, F>,
     storage_proof: ProofWithVK,
     storage_circuit_set: RecursiveCircuits<F, C, D>,
 }
 
-impl StateCircuitInputs {
+impl CircuitInputsInternal {
     pub(crate) fn new(
         state_input: StateCircuit<DEPTH, F>,
         storage_proof: ProofWithVK,
@@ -338,7 +337,7 @@ impl StateCircuitInputs {
         }
     }
 }
-/// Inputs to be provided to the publicly exposed API in order to generate a proof for the
+/// Inputs to be provided to the publicly exposed query API in order to generate a proof for the
 /// state circuit
 pub struct CircuitInput {
     state_input: StateCircuit<DEPTH, F>,
@@ -410,7 +409,7 @@ impl Parameters {
     pub(crate) fn generate_proof(
         &self,
         block_circuit_set: &RecursiveCircuits<F, C, D>,
-        input: StateCircuitInputs,
+        input: CircuitInputsInternal,
     ) -> Result<Vec<u8>> {
         let proof = block_circuit_set.generate_proof(&self.circuit, [], [], input)?;
         ProofWithVK::serialize(&(proof, self.circuit.circuit_data().verifier_only.clone()).into())
