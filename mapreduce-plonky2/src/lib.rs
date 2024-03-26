@@ -20,7 +20,7 @@ pub mod eth;
 
 pub mod api;
 pub mod array;
-mod block;
+pub mod block;
 pub(crate) mod circuit;
 pub mod group_hashing;
 mod hash;
