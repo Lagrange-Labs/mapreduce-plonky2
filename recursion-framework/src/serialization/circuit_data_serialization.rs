@@ -105,12 +105,13 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> F
     }
 }
 
-impl<F: RichField + Extendable<D>, C: GenericConfig<D, F=F>, const D:usize> ToBytes for VerifierCircuitData<F,C,D> {
+impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> ToBytes
+    for VerifierCircuitData<F, C, D>
+{
     fn to_bytes(&self) -> Vec<u8> {
         self.to_bytes(&CustomGateSerializer)
             .expect("Writing to a byte-vector cannot fail.")
     }
-
 }
 
 impl<F: SerializableRichField<D>, C: GenericConfig<D, F = F> + 'static, const D: usize> ToBytes
