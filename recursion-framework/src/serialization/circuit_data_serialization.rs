@@ -152,7 +152,7 @@ impl<const D: usize, T: RichField + Extendable<D> + Extendable<5> + InverseOrZer
 }
 /// Serializer for the set of generators employed in our map-reduce circuits
 pub struct CustomGeneratorSerializer<C: GenericConfig<D>, const D: usize> {
-    _phantom: PhantomData<C>,
+    pub _phantom: PhantomData<C>,
 }
 
 impl<F, C, const D: usize> WitnessGeneratorSerializer<F, D> for CustomGeneratorSerializer<C, D>

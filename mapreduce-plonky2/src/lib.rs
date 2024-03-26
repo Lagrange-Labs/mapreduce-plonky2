@@ -19,14 +19,14 @@ mod benches;
 pub mod eth;
 
 pub mod api;
-mod array;
+pub mod array;
 pub mod block;
 pub(crate) mod circuit;
-mod group_hashing;
+pub mod group_hashing;
 mod hash;
-mod keccak;
+pub mod keccak;
 mod merkle_tree;
-mod mpt_sequential;
+pub mod mpt_sequential;
 mod poseidon;
 pub mod query2;
 mod rlp;

@@ -36,7 +36,7 @@ pub const MAX_LEAF_VALUE_LEN: usize = 33;
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
 #[allow(non_snake_case)]
-pub(crate) const fn PAD_LEN(d: usize) -> usize {
+pub const fn PAD_LEN(d: usize) -> usize {
     compute_size_with_padding(d)
 }
 /// Circuit that simoply proves the inclusion of a value inside a MPT tree.
