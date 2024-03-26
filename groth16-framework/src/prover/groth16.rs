@@ -59,7 +59,8 @@ impl Groth16Prover {
     }
 }
 
-/// Read the circuit data from file `circuit.bin` in the asset dir.
+/// Read the circuit data from file `circuit.bin` in the asset dir. This is
+/// the circuit data of the final wrapped proof.
 fn load_circuit_data(asset_dir: &str) -> Result<CircuitData<F, C, D>> {
     // Read from file.
     let file_path = Path::new(asset_dir).join(CIRCUIT_DATA_FILENAME);
