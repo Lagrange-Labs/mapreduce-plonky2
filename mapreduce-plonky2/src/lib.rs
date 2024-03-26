@@ -3,6 +3,7 @@
 #![feature(generic_const_exprs)]
 #![feature(generic_arg_infer)]
 #![feature(const_for)]
+#![feature(generic_const_items)]
 use anyhow::Result;
 use plonky2::{
     field::extension::Extendable,
