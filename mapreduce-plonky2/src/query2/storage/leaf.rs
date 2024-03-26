@@ -1,27 +1,24 @@
 // Contain the mechanisms required to prove the inclusion of a Key, Value pair in the storage database.
 
 use plonky2::{
-    field::goldilocks_field::GoldilocksField,
-    hash::poseidon::PoseidonHash,
-    iop::{target::Target, witness::PartialWitness},
-    plonk::circuit_builder::CircuitBuilder,
+    field::goldilocks_field::GoldilocksField, hash::poseidon::PoseidonHash,
+    iop::witness::PartialWitness, plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     array::Array,
     circuit::UserCircuit,
     group_hashing::CircuitBuilderGroupHashing,
-    query2::{storage::public_inputs::PublicInputs, AddressTarget, PackedAddressTarget},
-    types::{
-        MappingKeyTarget, PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN,
-        PACKED_VALUE_LEN, VALUE_LEN,
-    },
-    utils::convert_u8_to_u32_slice,
+    query2::storage::public_inputs::PublicInputs,
+    types::{PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN, PACKED_VALUE_LEN},
 };
 
 const PACKED_KEY_SIZE: usize = MAPPING_KEY_LEN / 4;
 
+#[derive(Serialize, Deserialize)]
 pub struct LeafWires {
     pub packed_mapping_key: Array<U32Target, PACKED_MAPPING_KEY_LEN>,
     pub packed_mapping_value: Array<U32Target, PACKED_VALUE_LEN>,
@@ -70,5 +67,29 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
 
     fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
         self.assign(pw, wires);
+    }
+}
+
+impl CircuitLogicWires<GoldilocksField, 2, 0> for LeafWires {
+    type CircuitBuilderParams = ();
+    type Inputs = LeafCircuit;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GoldilocksField>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<GoldilocksField, 2>,
+        _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; 0],
+        _builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        LeafCircuit::build(builder)
+    }
+
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut PartialWitness<GoldilocksField>,
+    ) -> anyhow::Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
     }
 }
