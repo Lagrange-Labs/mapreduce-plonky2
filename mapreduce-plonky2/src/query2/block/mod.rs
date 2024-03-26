@@ -16,52 +16,154 @@ use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
-use recursion_framework::circuit_builder::CircuitWithUniversalVerifier;
+use recursion_framework::{
+    circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
+    framework::RecursiveCircuits,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    api::{ProofWithVK, C, D, F},
+    api::{default_config, ProofWithVK, C, D, F},
     types::{PackedAddressTarget, PackedValueTarget, CURVE_TARGET_LEN, PACKED_VALUE_LEN},
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 
-use self::{full_node::FullNodeWires, partial_node::PartialNodeWires};
+use self::{
+    full_node::{FullNodeCircuit, FullNodeWires},
+    partial_node::{PartialNodeCircuitInputs, PartialNodeWires},
+};
+
+use anyhow::Result;
 
 pub mod full_node;
 pub mod partial_node;
 
+pub(crate) const BLOCK_CIRCUIT_SET_SIZE: usize = 3;
 pub enum CircuitInput {
     /// left and right children proof
     FullNode((ProofWithVK, ProofWithVK)),
-    PartialNode(ProofWithVK),
+    PartialNode(PartialNodeCircuitInputs),
 }
 
 impl CircuitInput {
-    fn new_full_node(left_proof: Vec<u8>, right_proof: Vec<u8>) -> Self {
-        Self::FullNode((
-            ProofWithVK::deserialize(&left_proof).unwrap(),
-            ProofWithVK::deserialize(&right_proof).unwrap(),
-        ))
+    fn new_full_node(left_proof: Vec<u8>, right_proof: Vec<u8>) -> Result<Self> {
+        Ok(Self::FullNode((
+            ProofWithVK::deserialize(&left_proof)?,
+            ProofWithVK::deserialize(&right_proof)?,
+        )))
     }
 
-    fn new_partial_node(child_proof: Vec<u8>) -> Self {
-        Self::PartialNode(ProofWithVK::deserialize(&child_proof).unwrap())
+    fn new_partial_node(
+        child_proof: Vec<u8>,
+        sibling_hash: HashOut<F>,
+        sibling_is_left: bool,
+    ) -> Result<Self> {
+        Ok(Self::PartialNode(PartialNodeCircuitInputs::new(
+            ProofWithVK::deserialize(&child_proof)?,
+            sibling_hash,
+            sibling_is_left,
+        )))
     }
 }
+
+const NUM_IO: usize = BlockPublicInputs::<Target>::total_len();
 
 #[derive(Serialize, Deserialize)]
 pub struct Parameters {
-    //full_node_circuit: CircuitWithUniversalVerifier<F, C, D, 2, FullNodeWires>,
-    //partial_node_circuit: CircuitWithUniversalVerifier<F, C, D, 1, PartialNodeWires>,
+    full_node_circuit: CircuitWithUniversalVerifier<F, C, D, 2, FullNodeWires>,
+    partial_node_circuit: CircuitWithUniversalVerifier<F, C, D, 1, PartialNodeWires>,
+    circuit_set: RecursiveCircuits<F, C, D>,
 }
 
 impl Parameters {
-    pub fn build() -> Self {
-        todo!()
+    pub fn build(state_circuit_params: &super::state::Parameters) -> Self {
+        let circuit_builder = CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(
+            default_config(),
+            BLOCK_CIRCUIT_SET_SIZE,
+        );
+        let full_node_circuit = circuit_builder.build_circuit(());
+        let partial_node_circuit = circuit_builder.build_circuit(());
+
+        let circuit_digests = vec![
+            state_circuit_params
+                .circuit_data()
+                .verifier_only
+                .circuit_digest,
+            full_node_circuit
+                .circuit_data()
+                .verifier_only
+                .circuit_digest,
+            partial_node_circuit
+                .circuit_data()
+                .verifier_only
+                .circuit_digest,
+        ];
+
+        let circuit_set = RecursiveCircuits::new_from_circuit_digests(circuit_digests);
+
+        Self {
+            full_node_circuit,
+            partial_node_circuit,
+            circuit_set,
+        }
     }
 
-    pub fn generate_proof(&self, input: CircuitInput) -> Vec<u8> {
-        todo!()
+    pub fn generate_proof(&self, input: CircuitInput) -> Result<Vec<u8>> {
+        match input {
+            CircuitInput::FullNode((left_proof, right_proof)) => {
+                let (left_proof, left_vd) = left_proof.into();
+                let (right_proof, right_vd) = right_proof.into();
+                let proof = self.circuit_set.generate_proof(
+                    &self.full_node_circuit,
+                    [left_proof, right_proof],
+                    [&left_vd, &right_vd],
+                    FullNodeCircuit {},
+                )?;
+                ProofWithVK::from((
+                    proof,
+                    self.full_node_circuit.circuit_data().verifier_only.clone(),
+                ))
+            }
+            CircuitInput::PartialNode(input) => {
+                let (inputs, child_proof) = input.into();
+                let (proof, vd) = child_proof.into();
+                let proof = self.circuit_set.generate_proof(
+                    &self.partial_node_circuit,
+                    [proof],
+                    [&vd],
+                    inputs,
+                )?;
+                ProofWithVK::from((
+                    proof,
+                    self.partial_node_circuit
+                        .circuit_data()
+                        .verifier_only
+                        .clone(),
+                ))
+            }
+        }
+        .serialize()
+    }
+
+    pub(crate) fn verify_proof(&self, proof: &[u8]) -> Result<()> {
+        let proof = ProofWithVK::deserialize(proof)?;
+        let (proof, vd) = proof.into();
+        let circuit_data = match () {
+            () if vd == self.full_node_circuit.circuit_data().verifier_only => {
+                Ok(self.full_node_circuit.circuit_data())
+            }
+            () if vd == self.partial_node_circuit.circuit_data().verifier_only => {
+                Ok(self.partial_node_circuit.circuit_data())
+            }
+            () => Err(anyhow::Error::msg(
+                "No circuit found for provided verifier data",
+            )),
+        }?;
+        circuit_data.verify(proof)
+    }
+
+    pub(crate) fn get_block_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.circuit_set
     }
 }
 
@@ -307,5 +409,100 @@ impl<'a> BlockPublicInputs<'a, GoldilocksField> {
 
     pub(crate) fn mapping_slot_length(&self) -> GoldilocksField {
         self.storage_slot_length_raw()[0]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ethers::types::Address;
+    use itertools::Itertools;
+    use plonky2::field::types::Field;
+    use plonky2::{
+        hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
+        iop::target::Target,
+    };
+    use recursion_framework::framework_testing::TestingRecursiveCircuits;
+    use serial_test::serial;
+
+    use crate::query2::{
+        state::{tests::generate_inputs_for_state_circuit, Parameters as StateParams},
+        storage::public_inputs::PublicInputs as StorageInputs,
+    };
+
+    type F = crate::api::F;
+    type C = crate::api::C;
+    const D: usize = crate::api::D;
+
+    #[test]
+    #[serial]
+    fn test_block_circuit_api() {
+        const NUM_STORAGE_INPUTS: usize = StorageInputs::<Target>::TOTAL_LEN;
+        const LENGTH_SLOT: u32 = 42;
+        const MAPPING_SLOT: u32 = 24;
+        let smart_contract_address = Address::random();
+        let user_address = Address::random();
+        let testing_framework = TestingRecursiveCircuits::<F, C, D, NUM_STORAGE_INPUTS>::default();
+        let state_circuit_params =
+            StateParams::build(testing_framework.get_recursive_circuit_set());
+
+        let block_circuit_params = super::Parameters::build(&state_circuit_params);
+
+        let left_leaf_io = generate_inputs_for_state_circuit(
+            &state_circuit_params,
+            &testing_framework,
+            0xdead,
+            Some(LENGTH_SLOT),
+            Some(MAPPING_SLOT),
+            Some(smart_contract_address),
+            Some(user_address),
+        );
+
+        let right_leaf_io = generate_inputs_for_state_circuit(
+            &state_circuit_params,
+            &testing_framework,
+            0xbeef,
+            Some(LENGTH_SLOT),
+            Some(MAPPING_SLOT),
+            Some(smart_contract_address),
+            Some(user_address),
+        );
+
+        let left_leaf_proof = state_circuit_params
+            .generate_proof(&block_circuit_params.get_block_circuit_set(), left_leaf_io)
+            .unwrap();
+
+        let right_leaf_proof = state_circuit_params
+            .generate_proof(&block_circuit_params.get_block_circuit_set(), right_leaf_io)
+            .unwrap();
+
+        println!("leaf proofs built");
+
+        let full_node_proof = block_circuit_params
+            .generate_proof(
+                super::CircuitInput::new_full_node(left_leaf_proof, right_leaf_proof).unwrap(),
+            )
+            .unwrap();
+
+        block_circuit_params.verify_proof(&full_node_proof).unwrap();
+
+        println!("full node proof built");
+
+        let sibling_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(
+            &b"ernesto"
+                .iter()
+                .copied()
+                .map(F::from_canonical_u8)
+                .collect_vec(),
+        );
+
+        let partial_node_proof = block_circuit_params
+            .generate_proof(
+                super::CircuitInput::new_partial_node(full_node_proof, sibling_hash, true).unwrap(),
+            )
+            .unwrap();
+
+        block_circuit_params
+            .verify_proof(&partial_node_proof)
+            .unwrap();
     }
 }
