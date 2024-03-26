@@ -12,17 +12,15 @@ pub enum CircuitInput<const L: usize> {
     Revelation(revelation::RevelationCircuit<L>),
 }
 
-const MAX_BLOCK_DEPTH: usize = 0;
-
 #[derive(Serialize, Deserialize)]
-pub struct Parameters<const L: usize> {
+pub struct Parameters<const BLOCK_DB_DEPTH: usize, const L: usize> {
     storage: storage::Parameters,
     state: state::Parameters,
     block: block::Parameters,
-    revelation: revelation::Parameters<MAX_BLOCK_DEPTH, L>,
+    revelation: revelation::Parameters<BLOCK_DB_DEPTH, L>,
 }
 
-impl<const L: usize> Parameters<L> {
+impl<const BLOCK_DB_DEPTH: usize, const L: usize> Parameters<BLOCK_DB_DEPTH, L> {
     pub fn build() -> Self {
         todo!()
     }
