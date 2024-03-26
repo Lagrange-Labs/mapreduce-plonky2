@@ -3,6 +3,7 @@
 #![feature(generic_const_exprs)]
 #![feature(generic_arg_infer)]
 #![feature(const_for)]
+#![feature(iter_map_windows)]
 use anyhow::Result;
 use plonky2::{
     field::extension::Extendable,
@@ -24,6 +25,7 @@ mod block;
 pub(crate) mod circuit;
 mod group_hashing;
 mod hash;
+mod integration;
 mod keccak;
 mod merkle_tree;
 mod mpt_sequential;
