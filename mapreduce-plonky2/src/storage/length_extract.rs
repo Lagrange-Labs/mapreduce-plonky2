@@ -155,17 +155,13 @@ where
         let value_len_80 = cb.sub(mpt_output.leaf.arr[0], byte_80);
         let value_len = cb.select(is_single_byte, prefix, value_len_80);
         let offset = cb.select(is_single_byte, zero, one);
-        let value = Array::<Target, 4> {
-            arr: create_array(|i| {
-                let it = cb.constant(F::from_canonical_usize(i));
-                let it_offset = cb.add(it, offset);
-                mpt_output.leaf.value_at_failover(cb, it_offset)
-            }),
-        }
-        .into_vec(value_len)
-        .normalize_left::<_, _, 4>(cb)
-        .reverse()
-        .convert_u8_to_u32(cb);
+        let value = mpt_output
+            .leaf
+            .extract_array::<F, _, 4>(cb, offset)
+            .into_vec(value_len)
+            .normalize_left::<_, _, 4>(cb)
+            .reverse()
+            .convert_u8_to_u32(cb);
 
         let reduced_value = value[0];
 
