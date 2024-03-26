@@ -380,7 +380,7 @@ impl ProofQuery {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
 
     use std::{str::FromStr, sync::Arc};
 
@@ -392,6 +392,22 @@ mod test {
         mpt_sequential::test::verify_storage_proof_from_query,
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
+
+    pub fn get_sepolia_url() -> String {
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+        url.to_string()
+    }
+
+    pub fn get_mainnet_url() -> String {
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://eth.llamarpc.com";
+        url.to_string()
+    }
 
     use super::*;
     #[tokio::test]
@@ -412,34 +428,23 @@ mod test {
         println!("tree response = {:?}", tree_res);
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
-        println!("leaf[1].len() = {}", leaf_list[1].len());
         assert_eq!(leaf_list.len(), 2);
-        let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
-        // making sure we can simply skip the first byte
-        let sliced = &leaf_list[1][1..];
-        assert_eq!(sliced, leaf_value.as_slice());
-        println!(
-            "length of storage proof: {}",
-            res.storage_proof[0].proof.len()
-        );
-        println!(
-            "max node length: {}",
-            res.storage_proof[0]
-                .proof
-                .iter()
-                .map(|x| x.len())
-                .max()
-                .unwrap()
-        );
-        let mut n = sliced.to_vec();
-        n.resize(4, 0); // what happens in circuit effectively
-        println!("sliced: {:?} - hex {}", sliced, hex::encode(&sliced));
-        let length = convert_u8_to_u32_slice(&n)[0];
-        let length2 =
-            convert_u8_to_u32_slice(&sliced.iter().cloned().rev().collect::<Vec<u8>>())[0];
+        // implement the circuit logic:
+        let first_byte = leaf_list[1][0];
+        let slice = if first_byte < 0x80 {
+            println!("taking full byte");
+            &leaf_list[1][..]
+        } else {
+            println!("skipping full byte");
+            &leaf_list[1][1..]
+        }
+        .to_vec();
+        let slice = left_pad::<4>(&slice); // what happens in circuit effectively
+                                           // we have to reverse since encoding is big endian on EVM and our function is little endian based
+        let length = convert_u8_to_u32_slice(&slice.into_iter().rev().collect::<Vec<u8>>())[0];
         println!("length extracted = {}", length);
-        println!("length 2 extracted = {}", length2);
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);
+        assert_eq!(length, 2);
         Ok(())
     }
 

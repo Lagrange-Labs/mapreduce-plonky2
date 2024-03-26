@@ -259,7 +259,10 @@ mod tests {
         array::{Array, Vector, VectorWire},
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        eth::{ProofQuery, StorageSlot},
+        eth::{
+            test::{get_mainnet_url, get_sepolia_url},
+            ProofQuery, StorageSlot,
+        },
         keccak::{InputData, KeccakCircuit, KeccakWires},
         mpt_sequential::{
             bytes_to_nibbles,
@@ -459,16 +462,47 @@ mod tests {
         }
     }
 
+    struct LengthTestData {
+        url: String,
+        contract: Address,
+        len_slot: u8,
+        exp_len: u32,
+    }
+
     #[tokio::test]
     #[serial]
-    async fn test_length_extract_pidgy_contract() -> Result<()> {
-        let url = "https://eth.llamarpc.com";
+    async fn test_length_extract_custom_erc721_sepolia() -> Result<()> {
+        let test_data = LengthTestData {
+            url: get_sepolia_url(),
+            contract: Address::from_str("0x363971ee2b96f360ec9d04b5809afd15c77b1af1")?,
+            len_slot: 8,
+            exp_len: 2,
+        };
+        test_length_extract(test_data).await
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_length_extract_pudgy_main() -> Result<()> {
+        let test_data = LengthTestData {
+            url: get_mainnet_url(),
+            contract: Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?,
+            len_slot: 8,
+            exp_len: 8888,
+        };
+        test_length_extract(test_data).await
+    }
+
+    async fn test_length_extract(t: LengthTestData) -> Result<()> {
+        let url = t.url;
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
-        let slot: u8 = 8;
+        let slot: u8 = t.len_slot;
+        let exp_len = t.exp_len;
         // pidgy pinguins
-        let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        //let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let pidgy_address = t.contract;
         let query = ProofQuery::new_simple_slot(pidgy_address, slot as usize);
         let res = query.query_mpt_proof(&provider, None).await?;
         ProofQuery::verify_storage_proof(&res)?;
@@ -495,7 +529,7 @@ mod tests {
             }
         });
         let comp_value = convert_u8_to_u32_slice(&le_value)[0];
-        assert_eq!(comp_value, 8888); // from contract
+        assert_eq!(comp_value, exp_len); // from contract
         println!("correct conversion ! ");
         let nodes = res.storage_proof[0]
             .proof
