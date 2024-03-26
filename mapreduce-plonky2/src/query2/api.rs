@@ -1,7 +1,7 @@
-use plonky2::field::goldilocks_field::GoldilocksField;
+use plonky2::plonk::circuit_data::CircuitData;
 use serde::{Deserialize, Serialize};
 
-use crate::api::{BlockDBCircuitInfo, PublicParameters as PreprocessingParameters};
+use crate::api::{BlockDBCircuitInfo, C, D, F};
 
 use super::{
     block, revelation,
@@ -68,5 +68,9 @@ impl<const BLOCK_DB_DEPTH: usize, const L: usize> PublicParameters<BLOCK_DB_DEPT
             CircuitInput::Block(input) => self.block.generate_proof(input),
             CircuitInput::Revelation(input) => self.revelation.generate_proof(input),
         }
+    }
+    /// Return the circuit data of final revelation proof.
+    pub fn final_proof_circuit_data(&self) -> &CircuitData<F, C, D> {
+        self.revelation.circuit_data()
     }
 }

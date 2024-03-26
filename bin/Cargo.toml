@@ -1,0 +1,21 @@
+[package]
+name = "bins"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+clap = "4.5"
+env_logger = "0.11"
+ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features = false, features = ["rustls"], branch = "get-proof-0x" }
+groth16_framework = { path = "../groth16-framework" }
+itertools = "0.12"
+log = "0.4"
+mapreduce-plonky2 = { path = "../mapreduce-plonky2" }
+plonky2 = { version = "0.1.4" }
+rand = "0.8"
+recursion_framework = { path = "../recursion-framework" }
+
+[[bin]]
+name = "groth16_generate_assets"
+path = "src/groth16/generate_assets.rs"

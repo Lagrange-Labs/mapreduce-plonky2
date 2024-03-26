@@ -7,7 +7,7 @@ mod compiler;
 mod evm;
 mod proof;
 mod prover;
-mod utils;
+pub mod utils;
 mod verifier;
 
 const D: usize = 2;

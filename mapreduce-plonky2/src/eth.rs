@@ -234,11 +234,11 @@ pub(crate) fn compute_key_length(path: &[Node]) -> usize {
     key_len
 }
 
-pub(crate) fn left_pad32(slice: &[u8]) -> [u8; 32] {
+pub fn left_pad32(slice: &[u8]) -> [u8; 32] {
     left_pad::<32>(slice)
 }
 
-pub(crate) fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
+pub fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     match slice.len() {
         a if a > N => panic!(
             "left_pad{} must not be called with higher slice len than {} (given{})",

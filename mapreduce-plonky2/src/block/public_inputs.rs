@@ -101,8 +101,7 @@ impl<'a, T: Copy + Default> PublicInputs<'a, T> {
 }
 
 impl PublicInputs<'_, GoldilocksField> {
-    #[cfg(test)]
-    pub(crate) fn from_parts(
+    pub fn from_parts(
         init_root: &[GoldilocksField; NUM_HASH_OUT_ELTS],
         last_root: &[GoldilocksField; NUM_HASH_OUT_ELTS],
         init_block_number: GoldilocksField,

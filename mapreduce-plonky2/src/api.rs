@@ -219,14 +219,14 @@ pub fn block_db_circuit_info<const MAX_DEPTH: usize>(
 
 /// ProofWithVK is a generic struct holding a child proof and its associated verification key.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub(crate) struct ProofWithVK {
-    pub(crate) proof: ProofWithPublicInputs<F, C, D>,
+pub struct ProofWithVK {
+    pub proof: ProofWithPublicInputs<F, C, D>,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    pub(crate) vk: VerifierOnlyCircuitData<C, D>,
+    pub vk: VerifierOnlyCircuitData<C, D>,
 }
 
 impl ProofWithVK {
-    pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
+    pub fn serialize(&self) -> Result<Vec<u8>> {
         let buff = bincode::serialize(&self)?;
         Ok(buff)
     }
@@ -261,17 +261,13 @@ impl
     }
 }
 
-pub(crate) fn serialize_proof<
-    F: SerializableRichField<D>,
-    C: GenericConfig<D, F = F>,
-    const D: usize,
->(
+pub fn serialize_proof<F: SerializableRichField<D>, C: GenericConfig<D, F = F>, const D: usize>(
     proof: &ProofWithPublicInputs<F, C, D>,
 ) -> Result<Vec<u8>> {
     Ok(bincode::serialize(&proof)?)
 }
 
-pub(crate) fn deserialize_proof<
+pub fn deserialize_proof<
     F: SerializableRichField<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,

@@ -68,7 +68,7 @@ impl CircuitInput {
     }
 }
 
-const NUM_IO: usize = BlockPublicInputs::<Target>::total_len();
+pub const NUM_IO: usize = BlockPublicInputs::<Target>::total_len();
 
 #[derive(Serialize, Deserialize)]
 pub struct Parameters {
@@ -367,11 +367,9 @@ impl<'a> BlockPublicInputs<'a, Target> {
     }
 }
 
-#[cfg(test)]
 use crate::types::PACKED_ADDRESS_LEN;
 
 impl<'a> BlockPublicInputs<'a, GoldilocksField> {
-    #[cfg(test)]
     pub fn from_parts(
         block_number: GoldilocksField,
         range: GoldilocksField,

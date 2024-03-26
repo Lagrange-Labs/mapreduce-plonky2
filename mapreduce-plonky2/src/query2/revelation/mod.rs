@@ -209,6 +209,9 @@ impl<const BLOCK_DB_DEPTH: usize, const L: usize> Parameters<BLOCK_DB_DEPTH, L> 
         let proof = self.generate_proof_internal(inputs)?;
         serialize_proof(&proof)
     }
+    pub fn circuit_data(&self) -> &CircuitData<F, C, D> {
+        &self.circuit_data
+    }
     pub fn verifier_data(&self) -> VerifierCircuitData<F, C, D> {
         self.circuit_data.verifier_data()
     }

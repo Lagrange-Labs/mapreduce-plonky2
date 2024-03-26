@@ -34,7 +34,7 @@ mod rlp;
 pub mod state;
 pub mod storage;
 pub mod types;
-mod utils;
+pub mod utils;
 mod verifier_gadget;
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.
