@@ -270,7 +270,7 @@ macro_rules! impl_branch_circuits {
 
 impl_branch_circuits!(BranchCircuits, 1, 2, 4, 6, 8, 10, 12, 14, 16);
 #[cfg(test)]
-impl_branch_circuits!(TestBranchCircuits, 1, 2);
+impl_branch_circuits!(TestBranchCircuits, 1, 3);
 
 impl PublicParameters {
     /// Generates the circuit parameters for the MPT circuits.
@@ -545,7 +545,7 @@ mod test {
             ],
         });
         let branch2 = params.generate_proof(branch_inputs).unwrap();
-        let exp_vk = params.branchs.b2.get_verifier_data().clone();
+        let exp_vk = params.branchs.b3.get_verifier_data().clone();
         assert_eq!(branch2.verifier_data(), &exp_vk);
     }
 
