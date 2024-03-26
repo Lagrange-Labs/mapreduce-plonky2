@@ -153,7 +153,7 @@ where
         let byte_80 = cb.constant(F::from_canonical_usize(128));
         let is_single_byte = less_than(cb, prefix, byte_80, 8);
         let value_len_80 = cb.sub(mpt_output.leaf.arr[0], byte_80);
-        let value_len = cb.select(is_single_byte, prefix, value_len_80);
+        let value_len = cb.select(is_single_byte, one, value_len_80);
         let offset = cb.select(is_single_byte, zero, one);
         let value = mpt_output
             .leaf
@@ -518,10 +518,10 @@ mod tests {
         // implement the circuit logic:
         let first_byte = leaf_list[1][0];
         let slice = if first_byte < 0x80 {
-            println!("taking full byte");
+            println!("[+] RLP small value: taking first byte");
             &leaf_list[1][..]
         } else {
-            println!("skipping full byte");
+            println!("[+] RLP long value: skipping first byte");
             &leaf_list[1][1..]
         }
         .to_vec();

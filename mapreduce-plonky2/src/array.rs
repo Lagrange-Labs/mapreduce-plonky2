@@ -1141,6 +1141,16 @@ mod test {
             });
         }
         {
+            const VLEN: usize = 5;
+            const PAD: usize = 4;
+            let inp = [33];
+            let exp = [00, 00, 00, 33];
+            run_circuit::<F, D, C, _>(TestNormalizeLeft::<VLEN, PAD> {
+                input: Vector::from_vec(&inp.to_vec()).unwrap(),
+                exp,
+            });
+        }
+        {
             const VLEN: usize = 7;
             const PAD: usize = 5;
             let real_len = 4;
