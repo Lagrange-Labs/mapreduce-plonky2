@@ -382,9 +382,10 @@ impl ProofQuery {
 #[cfg(test)]
 mod test {
 
-    use std::str::FromStr;
+    use std::{str::FromStr, sync::Arc};
 
     use ethers::types::{BlockNumber, H256, U256};
+    use hashbrown::HashMap;
     use rand::{thread_rng, Rng};
 
     use crate::{
@@ -393,21 +394,22 @@ mod test {
     };
 
     use super::*;
-
     #[tokio::test]
-    async fn test_pidgy_pinguin_length_slot() -> Result<()> {
+    async fn test_sepolia_slot() -> Result<()> {
         #[cfg(feature = "ci")]
-        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
+        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
-        let url = "https://eth.llamarpc.com";
+        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
-
-        // pidgy pinguins address
-        let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
-        let query = ProofQuery::new_simple_slot(pidgy_address, 8);
+        let pidgy_address = Address::from_str("0x363971ee2b96f360ec9d04b5809afd15c77b1af1")?;
+        let length_slot = 8;
+        let query = ProofQuery::new_simple_slot(pidgy_address, length_slot);
         let res = query.query_mpt_proof(&provider, None).await?;
-        ProofQuery::verify_storage_proof(&res)?;
+        let tree_res = ProofQuery::verify_storage_proof(&res)?;
+        println!("official response: {}", res.storage_proof[0].value);
+        println!("tree response = {:?}", tree_res);
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         println!("leaf[1].len() = {}", leaf_list[1].len());
@@ -438,6 +440,69 @@ mod test {
         println!("length extracted = {}", length);
         println!("length 2 extracted = {}", length2);
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_pidgy_pinguin_length_slot() -> Result<()> {
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://eth.llamarpc.com";
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // pidgy pinguins address
+        let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_simple_slot(pidgy_address, 8);
+        let res = query.query_mpt_proof(&provider, None).await?;
+        let tree_res = ProofQuery::verify_storage_proof(&res)?;
+        println!("official response: {}", res.storage_proof[0].value);
+        println!("tree response = {:?}", tree_res);
+        let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
+        let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
+        println!("leaf[1].len() = {}", leaf_list[1].len());
+        assert_eq!(leaf_list.len(), 2);
+        let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
+        // making sure we can simply skip the first byte
+        let sliced = &leaf_list[1][1..];
+        assert_eq!(sliced, leaf_value.as_slice());
+        println!(
+            "length of storage proof: {}",
+            res.storage_proof[0].proof.len()
+        );
+        println!(
+            "max node length: {}",
+            res.storage_proof[0]
+                .proof
+                .iter()
+                .map(|x| x.len())
+                .max()
+                .unwrap()
+        );
+        let mut n = sliced.to_vec();
+        n.resize(4, 0); // what happens in circuit effectively
+        println!("sliced: {:?} - hex {}", sliced, hex::encode(&sliced));
+        let length = convert_u8_to_u32_slice(&n)[0];
+        let length2 =
+            convert_u8_to_u32_slice(&sliced.iter().cloned().rev().collect::<Vec<u8>>())[0];
+        println!("length extracted = {}", length);
+        println!("length 2 extracted = {}", length2);
+        println!("res.storage_proof.value = {}", res.storage_proof[0].value);
+        let analyze = |proof: Vec<Bytes>| {
+            proof.iter().fold(HashMap::new(), |mut acc, p| {
+                let b: Vec<Vec<u8>> = rlp::decode_list(p);
+                if b.len() == 17 {
+                    let n = acc.entry(p.len()).or_insert(0);
+                    *n += 1;
+                }
+                acc
+            })
+        };
+        let storage_sizes = analyze(res.storage_proof[0].proof.clone());
+        let state_sizes = analyze(res.account_proof.clone());
+        println!("storage_sizes = {:?}", storage_sizes);
+        println!("state_sizes = {:?}", state_sizes);
         Ok(())
     }
 

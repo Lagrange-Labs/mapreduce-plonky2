@@ -142,18 +142,22 @@ where
         mpt_input.nodes.iter().for_each(|n| n.assert_bytes(cb));
 
         // NOTE: The length value shouldn't exceed 4-bytes (U32).
-        // We read the RLP header but knowing it is a value that is always <55bytes long
+        // We read the RLP header, there are basically two cases:
+        // * if the length is a single byte less than 0x80 there is no RLP header
+        // * otherwise by assumption, there is a one byte fixed RLP header (assume len <55bytes long)
         // we can hardcode the type of RLP header it is and directly get the real number len
         // in this case, the header marker is 0x80 that we can directly take out from first byte
+        let prefix = mpt_output.leaf.arr[0];
         let byte_80 = cb.constant(F::from_canonical_usize(128));
-        // value_len_it
-        let value_len = cb.sub(mpt_output.leaf.arr[0], byte_80);
+        let is_single_byte = less_than(cb, prefix, byte_80, 8);
+        let is_prefixed = cb.not(is_single_byte);
+        let value_len_80 = cb.sub(mpt_output.leaf.arr[0], byte_80);
+        let value_len = cb.select(is_single_byte, prefix, value_len_80);
         // end_iterator is used to reverse the array which is of a dynamic length
-        // Normally one should do the following to access element with index
-        // let end_iterator = cb.sub(value_len, one);
-        // but in our case, since the first byte is the RLP header, we have to do +1
-        // so we just keep the same value
-        let mut end_iterator = value_len;
+        // we have to do this so we offset according to the type of RLP header
+        // value_len + one * is_prefixed
+        let offset = cb.mul(one, is_prefixed.target);
+        let mut end_iterator = cb.add(value_len, offset);
         // Then we need to convert from big endian to little endian only on this len
         let extract_len: [Target; 4] = create_array(|i| {
             let it = cb.constant(F::from_canonical_usize(i));
