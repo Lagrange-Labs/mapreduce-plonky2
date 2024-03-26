@@ -172,6 +172,7 @@ impl<const MAX_LEN: usize> VectorWire<Target, MAX_LEN> {
     }
 }
 
+
 /// Fixed size array in circuit of any type (Target or U32Target for example!)
 /// of N elements.
 #[derive(Clone, Debug, Serialize, Deserialize)]

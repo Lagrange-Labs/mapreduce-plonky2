@@ -7,6 +7,7 @@ use super::{
 };
 use crate::{
     api::{default_config, serialize_proof},
+    array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
@@ -23,6 +24,7 @@ use plonky2::{
         circuit_builder::CircuitBuilder,
         circuit_data::CircuitData,
         config::{AlgebraicHasher, GenericConfig},
+        plonk_common::reduce_with_powers_circuit,
     },
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
@@ -150,26 +152,25 @@ where
         let prefix = mpt_output.leaf.arr[0];
         let byte_80 = cb.constant(F::from_canonical_usize(128));
         let is_single_byte = less_than(cb, prefix, byte_80, 8);
-        let is_prefixed = cb.not(is_single_byte);
         let value_len_80 = cb.sub(mpt_output.leaf.arr[0], byte_80);
         let value_len = cb.select(is_single_byte, prefix, value_len_80);
-        // end_iterator is used to reverse the array which is of a dynamic length
-        // we have to do this so we offset according to the type of RLP header
-        // value_len + one * is_prefixed
-        let offset = cb.mul(one, is_prefixed.target);
-        let mut end_iterator = cb.add(value_len, offset);
-        // Then we need to convert from big endian to little endian only on this len
-        let extract_len: [Target; 4] = create_array(|i| {
-            let it = cb.constant(F::from_canonical_usize(i));
-            let in_value = less_than(cb, it, value_len, 3); // log2(4) = 2, putting upper bound
-            let rev_value = mpt_output.leaf.value_at_failover(cb, end_iterator);
-            end_iterator = cb.sub(end_iterator, one);
-            cb.select(in_value, rev_value, zero)
-        });
-        let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
+        let offset = cb.select(is_single_byte, zero, one);
+        let value = Array::<Target, 4> {
+            arr: create_array(|i| {
+                let it = cb.constant(F::from_canonical_usize(i));
+                let it_offset = cb.add(it, offset);
+                mpt_output.leaf.value_at_failover(cb, it_offset)
+            }),
+        }
+        .into_vec(value_len)
+        .normalize_left::<_, _, 4>(cb)
+        .reverse()
+        .convert_u8_to_u32(cb);
+
+        let reduced_value = value[0];
 
         // Register the public inputs.
-        PublicInputs::register(cb, &mpt_output.root, slot.slot, length_value);
+        PublicInputs::register(cb, &mpt_output.root, slot.slot, reduced_value.0);
 
         LengthExtractWires {
             slot,
