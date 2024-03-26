@@ -53,8 +53,16 @@ func CompileAndGenerateAssets(
 	commonCircuitData *C.char,
 	verifierOnlyCircuitData *C.char,
 	proofWithPublicInputs *C.char,
-	dstAssetDir *C.char,
+	dstAssetDirStr *C.char,
 ) *C.char {
+	dstAssetDir := C.GoString(dstAssetDirStr)
+
+	// Check if the asset dir exists.
+	_, err := os.Stat(dstAssetDir)
+	if err != nil {
+		return C.CString(fmt.Sprintf("destination asset dir doesn't exist: %v", err))
+	}
+
 	// Explicitly use the bit decomposition range checker could avoid
 	// generating Groth16 Commitments which cause an error in Solidity
 	// verification, could reference:
@@ -78,7 +86,7 @@ func CompileAndGenerateAssets(
 
 	// Save the asset files for further proving and verifying processes. These
 	// asset files are only related with the common circuit data.
-	err = SaveVerifierCircuit(C.GoString(dstAssetDir), r1cs, pk, vk)
+	err = SaveVerifierCircuit(dstAssetDir, r1cs, pk, vk)
 	if err != nil {
 		return C.CString(fmt.Sprintf("failed to save verifier circuit: %v", err))
 	}
