@@ -1,22 +1,22 @@
 //! The prover used to generate the Groth16 proof.
 
-use crate::{proof::Groth16Proof, C, D, F};
+use crate::{
+    proof::Groth16Proof,
+    utils::{deserialize_circuit_data, read_file, CIRCUIT_DATA_FILENAME},
+    C, D, F,
+};
 use anyhow::Result;
-use plonky2::{plonk::circuit_data::CircuitData, plonk::proof::ProofWithPublicInputs};
+use plonky2::plonk::{circuit_data::CircuitData, proof::ProofWithPublicInputs};
 use plonky2x::backend::{
     circuit::{DefaultParameters, Groth16WrapperParameters},
     wrapper::wrap::WrappedCircuit,
 };
+use std::path::Path;
 
 /// Groth16 prover configuration
 #[derive(Debug)]
 pub struct Groth16ProverConfig {
     pub asset_dir: String,
-    // Circuit data could be read from the bytes, but only the caller knows
-    // gate_serializer and generator_serializer.
-    // <https://docs.rs/plonky2/0.1.4/plonky2/plonk/circuit_data/struct.CircuitData.html#method.from_bytes>
-    // It should be read from a file when initializing this configuration.
-    pub circuit_data: Option<CircuitData<F, C, D>>,
 }
 
 /// Groth16 prover
@@ -27,12 +27,14 @@ pub struct Groth16Prover {
 }
 
 impl Groth16Prover {
-    pub fn new(mut config: Groth16ProverConfig) -> Result<Self> {
+    pub fn new(config: Groth16ProverConfig) -> Result<Self> {
         // Initialize the Go prover.
         gnark_utils::init_prover(&config.asset_dir)?;
 
+        // Read the circuit data from asset dir.
+        let circuit_data = load_circuit_data(&config.asset_dir)?;
+
         // Build the wrapped circuit.
-        let circuit_data = config.circuit_data.take().expect("Must have circuit-data");
         let wrapper = WrappedCircuit::build_from_raw_circuit(circuit_data);
 
         Ok(Self { wrapper })
@@ -51,4 +53,14 @@ impl Groth16Prover {
 
         Ok(serde_json::from_str(&groth16_proof)?)
     }
+}
+
+/// Read the circuit data from file `circuit.bin` in the asset dir.
+fn load_circuit_data(asset_dir: &str) -> Result<CircuitData<F, C, D>> {
+    // Read from file.
+    let file_path = Path::new(asset_dir).join(CIRCUIT_DATA_FILENAME);
+    let bytes = read_file(file_path)?;
+
+    // Deserialize the circuit data.
+    deserialize_circuit_data(&bytes)
 }

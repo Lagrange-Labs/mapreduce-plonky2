@@ -12,6 +12,7 @@ hex = "0.4"
 log = "0.4"
 plonky2 = { version = "0.1.4" }
 plonky2x = { git = "https://github.com/Lagrange-Labs/succinctx", branch = "lagrange" }
+recursion_framework = { path = "../recursion-framework" }
 revm = { version = "3.5", default-features = false }
 rlp = "0.5"
 serde = "1.0"
@@ -24,5 +25,4 @@ ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features 
 mapreduce-plonky2 = { path = "../mapreduce-plonky2" }
 plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
 rand = "0.8"
-recursion_framework = { path = "../recursion-framework" }
 serial_test = "3.0"

@@ -14,9 +14,9 @@ const D: usize = 2;
 type F = GoldilocksField;
 type C = PoseidonGoldilocksConfig;
 
-// The function is used to generate the asset files of `r1cs.bin`, `pk.bin`,
-// `vk.bin` and `verifier.sol`. It's only necessary to be called for
-// re-generating these asset files when the circuit code changes.
+// The function is used to generate the asset files of `circuit.bin`,
+// `r1cs.bin`, `pk.bin`, `vk.bin` and `verifier.sol`. It's only necessary to be
+// called for re-generating these asset files when the circuit code changes.
 pub use compiler::compile_and_generate_assets;
 
 // The exported Groth16 proof struct
@@ -24,7 +24,8 @@ pub use proof::Groth16Proof;
 
 // The Groth16 prover is used to generate the proof which could be verified
 // both off-chain and on-chain.
-// The asset dir must include `r1cs.bin` and `pk.bin` when creating the prover.
+// The asset dir must include `circuit.bin`, `r1cs.bin` and `pk.bin` when
+// creating the prover.
 pub use prover::groth16::{Groth16Prover, Groth16ProverConfig};
 
 pub use verifier::{
@@ -38,7 +39,7 @@ pub use verifier::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::read_file;
+    use crate::utils::{read_file, write_file};
     use ethers::{
         abi::{Contract, Token},
         types::U256,
@@ -91,23 +92,13 @@ mod tests {
         let circuit_data = cb.build::<C>();
         let proof = circuit_data.prove(pw).unwrap();
 
-        // Serialize the circuit data for reuse.
-        let circuit_bytes = circuit_data
-            .to_bytes(
-                &CustomGateSerializer,
-                &CustomGeneratorSerializer::<C, D> {
-                    _phantom: PhantomData::default(),
-                },
-            )
-            .expect("Failed to serialize the circuit data");
-
         const ASSET_DIR: &str = "groth16_simple";
 
         // Generate the asset files.
         compile_and_generate_assets(circuit_data, &proof, ASSET_DIR);
 
         // Generate the Groth16 proof.
-        let groth16_proof = groth16_prove(ASSET_DIR, &circuit_bytes, &proof);
+        let groth16_proof = groth16_prove(ASSET_DIR, &proof);
 
         // Verify the proof off-chain.
         groth16_verify(ASSET_DIR, &groth16_proof);
@@ -148,23 +139,13 @@ mod tests {
         let circuit_data = cb.build::<C>();
         let proof = circuit_data.prove(pw).unwrap();
 
-        // Serialize the circuit data for reuse.
-        let circuit_bytes = circuit_data
-            .to_bytes(
-                &CustomGateSerializer,
-                &CustomGeneratorSerializer::<C, D> {
-                    _phantom: PhantomData::default(),
-                },
-            )
-            .expect("Failed to serialize the circuit data");
-
         const ASSET_DIR: &str = "groth16_keccak";
 
         // Generate the asset files.
         compile_and_generate_assets(circuit_data, &proof, ASSET_DIR);
 
         // Generate the Groth16 proof.
-        let groth16_proof = groth16_prove(ASSET_DIR, &circuit_bytes, &proof);
+        let groth16_proof = groth16_prove(ASSET_DIR, &proof);
 
         // Verify the proof off-chain.
         groth16_verify(ASSET_DIR, &groth16_proof);
@@ -202,23 +183,13 @@ mod tests {
         let circuit_data = cb.build::<C>();
         let proof = circuit_data.prove(pw).unwrap();
 
-        // Serialize the circuit data for reuse.
-        let circuit_bytes = circuit_data
-            .to_bytes(
-                &CustomGateSerializer,
-                &CustomGeneratorSerializer::<C, D> {
-                    _phantom: PhantomData::default(),
-                },
-            )
-            .expect("Failed to serialize the circuit data");
-
         const ASSET_DIR: &str = "groth16_group_hashing";
 
         // Generate the asset files.
         compile_and_generate_assets(circuit_data, &proof, ASSET_DIR);
 
         // Generate the Groth16 proof.
-        let groth16_proof = groth16_prove(ASSET_DIR, &circuit_bytes, &proof);
+        let groth16_proof = groth16_prove(ASSET_DIR, &proof);
 
         // Verify the proof off-chain.
         groth16_verify(ASSET_DIR, &groth16_proof);
@@ -228,35 +199,20 @@ mod tests {
     }
 
     /// Test to generate the proof.
-    fn groth16_prove(
-        asset_dir: &str,
-        circuit_bytes: &[u8],
-        proof: &ProofWithPublicInputs<F, C, D>,
-    ) -> Groth16Proof {
-        // Deserialize the circuit data.
-        let circuit_data = CircuitData::from_bytes(
-            circuit_bytes,
-            &CustomGateSerializer,
-            &CustomGeneratorSerializer::<C, D> {
-                _phantom: PhantomData::default(),
-            },
-        )
-        .expect("Failed to deserialize the circuit data");
-
+    fn groth16_prove(asset_dir: &str, proof: &ProofWithPublicInputs<F, C, D>) -> Groth16Proof {
         let config = Groth16ProverConfig {
             asset_dir: asset_dir.to_string(),
-            circuit_data: Some(circuit_data),
         };
 
         let prover = Groth16Prover::new(config).expect("Failed to initialize the prover");
 
         let proof = prover.prove(proof).expect("Failed to generate the proof");
         let json_proof = serde_json::to_string(&proof).expect("Failed to serialize the proof");
-
-        let mut file = File::create(Path::new(asset_dir).join("proof.json"))
-            .expect("Failed to create the file");
-        file.write_all(json_proof.as_bytes())
-            .expect("Failed to write the proof");
+        write_file(
+            Path::new(asset_dir).join("proof.json"),
+            json_proof.as_bytes(),
+        )
+        .expect("Failed to write the proof");
 
         proof
     }
