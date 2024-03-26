@@ -130,7 +130,21 @@ impl<F, const MAX_DEPTH: usize> BlockTreeCircuit<F, MAX_DEPTH>
 where
     F: RichField,
 {
-    pub fn new(leaf_index: usize, root: HashOut<F>, path: MerkleProof<F, PoseidonHash>) -> Self {
+    pub fn new(leaf_index: usize, root: HashOutput, siblings: Vec<HashOutput>) -> Self {
+        let root = HashOut::from_bytes(&root);
+        let siblings = siblings
+            .into_iter()
+            .map(|s| HashOut::from_bytes(&s))
+            .collect();
+        let mp = MerkleProof { siblings };
+        Self::new_from(leaf_index, root, mp)
+    }
+
+    pub fn new_from(
+        leaf_index: usize,
+        root: HashOut<F>,
+        path: MerkleProof<F, PoseidonHash>,
+    ) -> Self {
         Self {
             leaf_index,
             root,
@@ -756,7 +770,7 @@ mod tests {
         let (root, path, new_leaf_proof) =
             gen_input(leaf_index, leaves.clone(), prev_pi.as_slice());
         let inputs = Inputs::First(BlockTreeInputs {
-            block_tree: BlockTreeCircuit::new(leaf_index, root, path),
+            block_tree: BlockTreeCircuit::new_from(leaf_index, root, path),
             new_leaf_proof,
             state_circuit_set: testing_framework.get_recursive_circuit_set().clone(),
         });
@@ -774,7 +788,7 @@ mod tests {
 
         let inputs = Inputs::Subsequent(BlockTreeCircuitInputs {
             base_inputs: BlockTreeInputs {
-                block_tree: BlockTreeCircuit::new(leaf_index, root, path),
+                block_tree: BlockTreeCircuit::new_from(leaf_index, root, path),
                 new_leaf_proof,
                 state_circuit_set: testing_framework.get_recursive_circuit_set().clone(),
             },
@@ -855,7 +869,7 @@ mod tests {
             is_first,
             prev_pi,
             new_leaf_pi,
-            c: BlockTreeCircuit::new(leaf_index, new_root, path),
+            c: BlockTreeCircuit::new_from(leaf_index, new_root, path),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
 
