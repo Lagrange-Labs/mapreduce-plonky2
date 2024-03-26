@@ -7,7 +7,7 @@ use recursion_framework::serialization::circuit_data_serialization::{
     CustomGateSerializer, CustomGeneratorSerializer,
 };
 use std::{
-    fs::File,
+    fs::{create_dir_all, File},
     io::{Read, Write},
     marker::PhantomData,
     path::Path,
@@ -27,6 +27,12 @@ pub fn read_file<P: AsRef<Path>>(file_path: P) -> Result<Vec<u8>> {
 
 /// Write the data to a file.
 pub fn write_file<P: AsRef<Path>>(file_path: P, data: &[u8]) -> Result<()> {
+    // Try to create the parent dir if not exists.
+    if let Some(parent_dir) = file_path.as_ref().parent() {
+        create_dir_all(parent_dir)?;
+    }
+
+    // Write the file.
     let mut fd = File::create(file_path)?;
     fd.write_all(data)?;
 

@@ -95,7 +95,8 @@ mod tests {
         const ASSET_DIR: &str = "groth16_simple";
 
         // Generate the asset files.
-        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR);
+        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR)
+            .expect("Failed to generate the asset files");
 
         // Generate the Groth16 proof.
         let groth16_proof = groth16_prove(ASSET_DIR, &proof);
@@ -142,7 +143,8 @@ mod tests {
         const ASSET_DIR: &str = "groth16_keccak";
 
         // Generate the asset files.
-        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR);
+        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR)
+            .expect("Failed to generate the asset files");
 
         // Generate the Groth16 proof.
         let groth16_proof = groth16_prove(ASSET_DIR, &proof);
@@ -186,7 +188,8 @@ mod tests {
         const ASSET_DIR: &str = "groth16_group_hashing";
 
         // Generate the asset files.
-        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR);
+        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR)
+            .expect("Failed to generate the asset files");
 
         // Generate the Groth16 proof.
         let groth16_proof = groth16_prove(ASSET_DIR, &proof);
