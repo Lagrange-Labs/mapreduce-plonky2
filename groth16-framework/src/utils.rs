@@ -8,7 +8,7 @@ use recursion_framework::serialization::circuit_data_serialization::{
     CustomGateSerializer, CustomGeneratorSerializer,
 };
 use std::{
-    fs::{create_dir_all, File},
+    fs::{create_dir_all, metadata, File},
     io::{Read, Write},
     marker::PhantomData,
     path::Path,
@@ -29,6 +29,11 @@ pub fn hex_to_u256(s: &str) -> Result<U256> {
     let u = U256::from_str_radix(s, 16)?;
 
     Ok(u)
+}
+
+/// Check if the file path exists.
+pub fn file_exists<P: AsRef<Path>>(file_path: P) -> bool {
+    metadata(file_path).is_ok()
 }
 
 /// Read the data from a file.

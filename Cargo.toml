@@ -4,6 +4,7 @@ members = [
     "recursion-framework",
     "groth16-framework",
     "gnark-utils",
+    "bin",
 ]
 resolver = "2"
 

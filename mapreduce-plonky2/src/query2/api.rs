@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::api::BlockDBCircuitInfo;
+use crate::api::{BlockDBCircuitInfo, C, D, F};
 
 use super::{
     block, revelation,
@@ -9,6 +9,7 @@ use super::{
 };
 
 use anyhow::Result;
+use plonky2::plonk::circuit_data::CircuitData;
 
 /// L is the number of elements we allow to expose in the result
 pub enum CircuitInput<const L: usize> {
@@ -67,5 +68,9 @@ impl<const BLOCK_DB_DEPTH: usize, const L: usize> PublicParameters<BLOCK_DB_DEPT
             CircuitInput::Block(input) => self.block.generate_proof(input),
             CircuitInput::Revelation(input) => self.revelation.generate_proof(input),
         }
+    }
+    /// Return the circuit data of final revelation proof.
+    pub fn final_proof_circuit_data(&self) -> &CircuitData<F, C, D> {
+        self.revelation.circuit_data()
     }
 }
