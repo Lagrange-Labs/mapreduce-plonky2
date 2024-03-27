@@ -36,7 +36,6 @@ use crate::{
     query2::block,
     types::{PackedAddressTarget, CURVE_TARGET_LEN, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
     utils::{convert_u8_to_u32_slice, Packer},
-    verifier_gadget::VerifierTarget,
 };
 
 pub use self::circuit::RevelationCircuit;

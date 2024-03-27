@@ -1,8 +1,11 @@
 use anyhow::Result;
 use plonky2::plonk::{
-    circuit_data::{CircuitConfig, VerifierOnlyCircuitData},
-    config::{GenericConfig, PoseidonGoldilocksConfig},
-    proof::ProofWithPublicInputs,
+    circuit_builder::CircuitBuilder,
+    circuit_data::{
+        CircuitConfig, VerifierCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData,
+    },
+    config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig},
+    proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
 };
 use recursion_framework::{
     framework::RecursiveCircuits,
@@ -321,7 +324,10 @@ where
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use plonky2::{field::types::Field, iop::target::Target};
+    use plonky2::{
+        field::types::Field,
+        iop::{target::Target, witness::WitnessWrite},
+    };
 
     use super::*;
     use anyhow::Result;
