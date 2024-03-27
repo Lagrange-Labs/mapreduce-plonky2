@@ -1,8 +1,7 @@
 //! The prover used to generate the Groth16 proof.
 
 use crate::{
-    proof::Groth16Proof,
-    utils::{deserialize_circuit_data, read_file, write_file, CIRCUIT_DATA_FILENAME},
+    utils::{deserialize_circuit_data, read_file, CIRCUIT_DATA_FILENAME},
     C, D, F,
 };
 use anyhow::Result;
@@ -35,10 +34,8 @@ impl Groth16Prover {
         Ok(Self { wrapper })
     }
 
-    /// Generate the proof.
-    /// This function saves the groth16 proof of JSON format to a file and
-    /// creates the missing dirs if the parameter `proof_file_path` is not None.
-    pub fn prove(&self, proof: &[u8], proof_file_path: Option<&str>) -> Result<Groth16Proof> {
+    /// Generate the proof. Return the bytes of serialized JSON Groth16 proof.
+    pub fn prove(&self, proof: &[u8]) -> Result<Vec<u8>> {
         // Deserialize the proof.
         let proof = deserialize_proof(proof)?;
 
@@ -55,14 +52,7 @@ impl Groth16Prover {
         // Generate the Groth16 proof.
         let groth16_proof = gnark_utils::prove(&verifier_data, &proof)?;
 
-        // Save the groth16 proof of JSON format to a file if the parameter
-        // `proof_file_path` is not None.
-        if let Some(proof_file_path) = proof_file_path {
-            // It also creates the missing dirs.
-            write_file(proof_file_path, groth16_proof.as_bytes())?;
-        }
-
-        Ok(serde_json::from_str(&groth16_proof)?)
+        Ok(groth16_proof.as_bytes().to_vec())
     }
 }
 

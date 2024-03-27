@@ -50,7 +50,7 @@
 //!    // Get the normal proof of mapreduce-plonky2.
 //!    let normal_proof = parameters.generate_proof();
 //!
-//!    // Generate the Groth proof.
+// Generate the proof. Return the bytes of serialized JSON Groth16 proof.
 //!    let groth16_proof = groth16_prover.prove(normal_proof);
 //!    ```
 //!
@@ -281,7 +281,8 @@ mod tests {
             .prove(proof, Some(&proof_file_path.to_string_lossy()))
             .expect("Failed to generate the proof");
 
-        proof
+        serde_json::from_str(&String::from_utf8_lossy(&groth16_proof))
+            .expect("Failed to deserialize the Groth16 proof")
     }
 
     /// Test to verify the proof.
