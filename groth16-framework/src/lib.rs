@@ -277,11 +277,9 @@ mod tests {
         let prover = Groth16Prover::new(asset_dir).expect("Failed to initialize the prover");
 
         let proof_file_path = Path::new(asset_dir).join("proof.json");
-        let proof = prover
-            .prove(proof, Some(&proof_file_path.to_string_lossy()))
-            .expect("Failed to generate the proof");
+        let proof = prover.prove(proof).expect("Failed to generate the proof");
 
-        serde_json::from_str(&String::from_utf8_lossy(&groth16_proof))
+        serde_json::from_str(&String::from_utf8_lossy(&proof))
             .expect("Failed to deserialize the Groth16 proof")
     }
 
