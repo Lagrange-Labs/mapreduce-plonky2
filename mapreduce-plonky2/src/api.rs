@@ -349,6 +349,8 @@ pub(crate) mod tests {
         }};
     }
 
+    pub(crate) use check_panic;
+
     #[test]
     fn test_verify_proof_with_fixed_circuit() {
         const NUM_IO: usize = 4;
