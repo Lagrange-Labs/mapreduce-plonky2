@@ -370,6 +370,7 @@ impl PublicParameters {
 
 #[cfg(test)]
 mod test {
+    use core::num;
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -391,37 +392,46 @@ mod test {
     struct TestData {
         trie: EthTrie<MemoryDB>,
         key: Vec<u8>,
-        mpt_key1: Vec<u8>,
-        mpt_key2: Vec<u8>,
+        mpt_keys: Vec<Vec<u8>>,
     }
 
-    fn generate_storage_trie_and_keys(slot: usize) -> TestData {
+    fn generate_storage_trie_and_keys(slot: usize, num_children: usize) -> TestData {
         let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
-        // insert two keys that share the same prefix
+        // insert `num_children` keys that share the same prefix
         let key = random_vector(20); // like address
-        let mpt1 = StorageSlot::Mapping(key.clone(), slot).mpt_key_vec();
-        let mut mpt2 = mpt1.clone();
-        let last_byte = mpt2[mpt1.len() - 1];
+        let mut mpt = StorageSlot::Mapping(key.clone(), slot).mpt_key_vec();
+        let mpt_len = mpt.len();
+        let last_byte = mpt[mpt_len - 1];
         let first_nibble = last_byte & 0xF0;
+        let second_nibble = last_byte & 0x0F;
+        println!(
+            "key: {}, last: {}, first: {}, second: {}",
+            hex::encode(&mpt),
+            last_byte,
+            first_nibble,
+            second_nibble
+        );
+        let mut mpt_keys = Vec::new();
         // only change the last nibble
-        while mpt2 == mpt1 {
-            mpt2[mpt1.len() - 1] = first_nibble + (thread_rng().gen::<u8>() & 0x0F);
+        for i in 0..num_children {
+            mpt[mpt_len - 1] = first_nibble + ((second_nibble + i as u8) & 0x0F);
+            mpt_keys.push(mpt.clone());
         }
         println!(
             "key1: {:?}, key2: {:?}",
-            hex::encode(&mpt1),
-            hex::encode(&mpt2)
+            hex::encode(&mpt_keys[0]),
+            hex::encode(&mpt_keys[1])
         );
         let v: Vec<u8> = rlp::encode(&random_vector(32)).to_vec();
-        trie.insert(&mpt1, &v).unwrap();
-        trie.insert(&mpt2, &v).unwrap();
+        mpt_keys
+            .iter()
+            .for_each(|mpt| trie.insert(&mpt, &v).unwrap());
         trie.root_hash().unwrap();
 
         TestData {
             trie,
             key,
-            mpt_key1: mpt1,
-            mpt_key2: mpt2,
+            mpt_keys,
         }
     }
 
@@ -436,8 +446,8 @@ mod test {
         assert!(decoded_params == params);
 
         let slot = 3;
-        let mut test_data = generate_storage_trie_and_keys(slot);
-        let p1 = test_data.trie.get_proof(&test_data.mpt_key1).unwrap();
+        let mut test_data = generate_storage_trie_and_keys(slot, 2);
+        let p1 = test_data.trie.get_proof(&test_data.mpt_keys[0]).unwrap();
         let l1 = CircuitInput::Leaf(LeafCircuit {
             node: p1.last().unwrap().to_vec(),
             slot: MappingSlot::new(slot as u8, test_data.key.clone()),
@@ -481,11 +491,12 @@ mod test {
     fn test_branch_logic() {
         let params = PublicParameters::build();
         let slot = 0;
-        let mut test_data = generate_storage_trie_and_keys(slot);
+        let num_children = 6;
+        let mut test_data = generate_storage_trie_and_keys(slot, num_children);
         let trie = &mut test_data.trie;
         let key = &test_data.key;
-        let mpt1 = &test_data.mpt_key1;
-        let mpt2 = &test_data.mpt_key2;
+        let mpt1 = test_data.mpt_keys[0].as_slice();
+        let mpt2 = test_data.mpt_keys[1].as_slice();
         let p1 = trie.get_proof(&mpt1).unwrap();
         let p2 = trie.get_proof(&mpt2).unwrap();
         // they should share the same branch node
@@ -511,39 +522,43 @@ mod test {
         let exp_vk = params.branchs.b1.get_verifier_data().clone();
         assert_eq!(branch1.verifier_data(), &exp_vk);
 
+        let gen_fake_proof = |mpt| {
+            let mut pub2 = pub1.clone();
+            assert_eq!(pub2.len(), NUM_IO);
+            pub2[PublicInputs::<F>::KEY_IDX..PublicInputs::<F>::T_IDX].copy_from_slice(
+                &bytes_to_nibbles(mpt)
+                    .into_iter()
+                    .map(F::from_canonical_u8)
+                    .collect::<Vec<_>>(),
+            );
+            assert_eq!(pub2.len(), pub1.len());
+
+            let pi2 = PublicInputs::from(&pub2);
+            {
+                let (k1, p1) = pi1.mpt_key_info();
+                let (k2, p2) = pi2.mpt_key_info();
+                let (pt1, pt2) = (
+                    p1.to_canonical_u64() as usize,
+                    p2.to_canonical_u64() as usize,
+                );
+                assert!(pt1 < k1.len() && pt2 < k2.len());
+                assert!(p1 == p2);
+                assert!(k1[..pt1] == k2[..pt2]);
+            }
+            let fake_proof = params
+                .set
+                .generate_input_proofs([pub2.clone().try_into().unwrap()])
+                .unwrap();
+            let vk = params.set.verifier_data_for_input_proofs::<1>()[0].clone();
+            ProofWithVK::from((fake_proof[0].clone(), vk))
+        };
+
         // generate  a branch proof with two leafs inputs now but using the testing framework
         // we simulate another leaf at the right key, so we just modify the nibble at the pointer
         // generate fake dummy proofs but with expected public inputs
-        let mut pub2 = pub1.clone();
-        assert_eq!(pub2.len(), NUM_IO);
-        pub2[PublicInputs::<F>::KEY_IDX..PublicInputs::<F>::T_IDX].copy_from_slice(
-            &bytes_to_nibbles(mpt2)
-                .into_iter()
-                .map(F::from_canonical_u8)
-                .collect::<Vec<_>>(),
-        );
-        assert_eq!(pub2.len(), pub1.len());
-
-        let pi2 = PublicInputs::from(&pub2);
-        {
-            let (k1, p1) = pi1.mpt_key_info();
-            let (k2, p2) = pi2.mpt_key_info();
-            let (pt1, pt2) = (
-                p1.to_canonical_u64() as usize,
-                p2.to_canonical_u64() as usize,
-            );
-            assert!(pt1 < k1.len() && pt2 < k2.len());
-            assert!(p1 == p2);
-            assert!(k1[..pt1] == k2[..pt2]);
-        }
-
         println!("[+] Generating leaf proof 2...");
-        let leaf2_proof = params
-            .set
-            .generate_input_proofs([pub2.clone().try_into().unwrap()])
-            .unwrap();
-        let vk = params.set.verifier_data_for_input_proofs::<1>()[0].clone();
-        let leaf2_proof_vk = ProofWithVK::from((leaf2_proof[0].clone(), vk));
+        let leaf2_proof_vk = gen_fake_proof(mpt2);
+
         println!("[+] Generating branch proof 2...");
         let branch_inputs = CircuitInput::Branch(BranchInput {
             input: InputNode {
@@ -558,16 +573,15 @@ mod test {
         let exp_vk = params.branchs.b4.get_verifier_data().clone();
         assert_eq!(branch2.verifier_data(), &exp_vk);
         // check validity of public input of `branch2` proof
-        {
-            let value1: Vec<u8> =
-                rlp::decode(&trie.get(&test_data.mpt_key1).unwrap().unwrap()).unwrap();
+        let check_public_input = |num_children, proof: &ProofWithVK| {
+            let value1: Vec<u8> = rlp::decode(&trie.get(mpt1).unwrap().unwrap()).unwrap();
             let p1_acc = leaf_digest_for_mapping(&test_data.key, &value1);
             //let value2: Vec<u8> = rlp::decode(&trie.get(&test_data.mpt_key2).unwrap().unwrap()).unwrap();
             //let p2_acc = leaf_digest_for_mapping(&test_data.key, &value2);
-            let exp_accumulator = p1_acc + p1_acc;
-            let branch_pub = PublicInputs::from(&branch2.proof().public_inputs[..NUM_IO]);
+            let exp_accumulator = (0..num_children).fold(Point::NEUTRAL, |acc, _| acc + p1_acc);
+            let branch_pub = PublicInputs::from(&proof.proof().public_inputs[..NUM_IO]);
             assert_eq!(exp_accumulator.to_weierstrass(), branch_pub.accumulator());
-            assert_eq!(F::from_canonical_u8(2), branch_pub.n());
+            assert_eq!(F::from_canonical_usize(num_children), branch_pub.n());
             let (k1, p1) = pi1.mpt_key_info();
             let (kb, pb) = branch_pub.mpt_key_info();
             let p1 = p1.to_canonical_u64() as usize;
@@ -575,7 +589,29 @@ mod test {
             assert_eq!(p1 - 1, pb);
             assert_eq!(k1[..pb], kb[..pb]);
             assert_eq!(pi1.mapping_slot(), branch_pub.mapping_slot());
+        };
+        check_public_input(2, &branch2);
+        // generate num_children-2 fake proofs to tesr branch circuit with num_children proofs
+        let mut serialized_child_proofs = vec![
+            bincode::serialize(&leaf1_proof).unwrap(),
+            bincode::serialize(&leaf2_proof_vk).unwrap(),
+        ];
+        for i in 2..num_children {
+            serialized_child_proofs.push(
+                bincode::serialize(&gen_fake_proof(test_data.mpt_keys[i].as_slice())).unwrap(),
+            )
         }
+        println!("[+] Generating branch proof {}...", num_children);
+        let branch_inputs = CircuitInput::Branch(BranchInput {
+            input: InputNode {
+                node: branch_node.clone(),
+            },
+            serialized_child_proofs,
+        });
+        let branch_proof = params.generate_proof(branch_inputs).unwrap();
+        let exp_vk = params.branchs.b9.get_verifier_data().clone();
+        assert_eq!(branch_proof.verifier_data(), &exp_vk);
+        check_public_input(num_children, &branch_proof);
     }
 
     #[test]
