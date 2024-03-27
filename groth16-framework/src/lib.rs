@@ -1,5 +1,70 @@
 //! This framework includes a Groth16 prover and verifier for off-chain proving
 //! and verifying, and an EVM verifier for testing Solidity verification.
+//!
+//! The Groth16 proving process has 3 main steps:
+//!
+//! 1. Generate the asset files.
+//!
+//!    The asset files are `circuit.bin`, `r1cs.bin`, `pk.bin`, `vk.bin` and
+//!    `verifier.sol`. User could call the `compile_and_generate_assets`
+//!    function to generate these files as below.
+//!
+//!    ```
+//!    use groth16_framework::clone_circuit_data;
+//!    use groth16_framework::compile_and_generate_assets;
+//!
+//!    // Get the normal proof and deserialize to ProofWithPublicInputs.
+//!    let normal_proof = parameters.generate_proof();
+//!    let normal_proof = deserialize_proof(normal_proof);
+//!
+//!    // Get the reference of circuit data and clone it by the
+//!    // `clone_circuit_data` function.
+//!    let circuit_data = parameters.final_proof_circuit_data();
+//!    let circuit_data = clone_circuit_data(circuit_data);
+//!
+//!    // Generate the asset files into the specified asset dir. This function
+//!    // creates the asset dir if not exist.
+//!    compile_and_generate_assets(circuit_data, &normal_proof, asset_dir);
+//!    ```
+//!
+//!    After that, the asset files should be generated in the specified dir.
+//!
+//! 2. Initialize the Groth16 prover
+//!
+//!    We must download the above asset files to the dir before initializing the
+//!    Groth16 prover. After initialization, this prover could be reused to
+//!    generate the Groth16 proofs. It's initialized as below.
+//!
+//!    ```
+//!    use groth16_framework::Groth16Prover;
+//!
+//!    let groth16_prover = Groth16Prover::new(Groth16ProverConfig { asset_dir });
+//!    ```
+//!
+//! 3. Prove the normal proofs of mapreduce-plonky2
+//!
+//!    This proving step could be called for mulitple times to generate the
+//!    Groth16 proofs. It's called as below.
+//!
+//!    ```
+//!    // Get the normal proof and deserialize to ProofWithPublicInputs.
+//!    let normal_proof = parameters.generate_proof();
+//!    let normal_proof = deserialize_proof(normal_proof);
+//!
+//!    let groth16_prover = groth16_prover.prove(normal_proof);
+//!    ```
+//!
+//! The Groth16 verifying process is similar as the above proving steps. It
+//! could called as below.
+//!
+//!    ```
+//!    use groth16_framework::Groth16Verifier;
+//!
+//!    let groth16_verifier = Groth16Verifier::new(Groth16VerifierConfig { asset_dir });
+//!
+//!    groth16_verifier.verify(groth16_proof1);
+//!    groth16_verifier.verify(groth16_proof2);
+//!    ```
 
 use plonky2::{field::goldilocks_field::GoldilocksField, plonk::config::PoseidonGoldilocksConfig};
 

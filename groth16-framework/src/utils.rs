@@ -70,3 +70,8 @@ pub fn deserialize_circuit_data(bytes: &[u8]) -> Result<CircuitData<F, C, D>> {
     )
     .map_err(|err| anyhow!("Failed to deserialize circuit data: {err:?}"))
 }
+
+/// Serialize reference of circuit data, then deserialize to implement clone.
+pub fn clone_circuit_data(circuit_data: &CircuitData<F, C, D>) -> Result<CircuitData<F, C, D>> {
+    deserialize_circuit_data(&serialize_circuit_data(circuit_data)?)
+}
