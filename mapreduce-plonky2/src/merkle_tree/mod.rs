@@ -2,6 +2,7 @@
 
 mod backup;
 mod merkle_tree;
+mod state_tree;
 
 pub use backup::DigestArityCircuit;
 pub use merkle_tree::{MerkleLeafValue, MerkleNode, MerkleTree};
