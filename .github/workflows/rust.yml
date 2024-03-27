@@ -10,7 +10,7 @@ name: Check, Test, and Format
 jobs:
   check:
     name: Check
-    runs-on: lg-prover-32CPU
+    runs-on: self-hosted
     steps:
       - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
       - uses: actions/checkout@v2
