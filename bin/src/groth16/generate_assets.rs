@@ -14,8 +14,9 @@ use mapreduce_plonky2::{
     group_hashing,
     keccak::PACKED_HASH_LEN,
     query2::{
-        block::BlockPublicInputs, revelation::{Parameters, RevelationRecursiveInput}, CircuitInput,
-        PublicParameters,
+        block::BlockPublicInputs,
+        revelation::{Parameters, RevelationRecursiveInput},
+        CircuitInput, PublicParameters,
     },
     types::MAPPING_KEY_LEN,
     utils::{Packer, ToFields},
@@ -74,7 +75,8 @@ fn main() {
     let (inputs, q2_params) = generate_test_inputs();
 
     // Get the final circuit data of query2 parameters.
-    let circuit_data = q2_params.final_proof_circuit_data();
+    // let circuit_data = q2_params.final_proof_circuit_data();
+    let circuit_data = q2_params.circuit_data();
     let circuit_data = clone_circuit_data(circuit_data)
         .unwrap_or_else(|err| panic!("Failed to clone the circuit data: {}", err));
 
@@ -117,7 +119,8 @@ fn build_query2_parameters(circuit_info_file_path: &str) -> PublicParameters<BLO
 }
 
 /// Generate the test inputs.
-fn generate_test_inputs() -> (CircuitInput<L>, Parameters::<BLOCK_DB_DEPTH, L>)  {
+// fn generate_test_inputs() -> (CircuitInput<L>, Parameters::<BLOCK_DB_DEPTH, L>)  {
+fn generate_test_inputs() -> (RevelationRecursiveInput<L>, Parameters<BLOCK_DB_DEPTH, L>) {
     // Generate a fake query2/block circuit set
     let query2_testing_framework =
         TestingRecursiveCircuits::<F, C, D, QUERY2_BLOCK_NUM_IO>::default();
@@ -227,7 +230,8 @@ fn generate_test_inputs() -> (CircuitInput<L>, Parameters::<BLOCK_DB_DEPTH, L>) 
     )
     .unwrap_or_else(|err| panic!("Failed to create RevelationRecursiveInput: {}", err));
 
-    CircuitInput::Revelation(revelation_input)
+    return (revelation_input, params);
+    // CircuitInput::Revelation(revelation_input)
 }
 
 /// Read the data from a file.
