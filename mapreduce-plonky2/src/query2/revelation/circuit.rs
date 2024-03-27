@@ -27,7 +27,6 @@ use crate::{
     query2::block::BlockPublicInputs as BlockQueryPublicInputs,
     types::{MappingKeyTarget, PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
     utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to},
-    verifier_gadget::VerifierTarget,
 };
 
 use super::RevelationPublicInputs;

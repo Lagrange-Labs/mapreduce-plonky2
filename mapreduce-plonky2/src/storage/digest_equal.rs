@@ -7,7 +7,9 @@ use super::{
     length_match::PublicInputs as MPTPublicInputs, lpn::PublicInputs as MerklePublicInputs,
 };
 use crate::{
-    api::{default_config, deserialize_proof, serialize_proof, ProofWithVK},
+    api::{
+        default_config, deserialize_proof, serialize_proof, verify_proof_fixed_circuit, ProofWithVK,
+    },
     array::Array,
     group_hashing::{CircuitBuilderGroupHashing, N},
     keccak::{OutputHash, PACKED_HASH_LEN},
@@ -15,18 +17,20 @@ use crate::{
     utils::{
         convert_point_to_curve_target, convert_slice_to_curve_point, convert_u32_fields_to_u8_vec,
     },
-    verifier_gadget::VerifierTarget,
 };
 use anyhow::Result;
 use ethers::types::{H160, H256};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
-    iop::{target::Target, witness::PartialWitness},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitData, VerifierCircuitData},
-        proof::ProofWithPublicInputs,
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
@@ -170,7 +174,8 @@ pub(crate) struct Parameters {
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     data: CircuitData<F, C, D>,
     lpn_wires: RecursiveCircuitsVerifierTarget<D>,
-    mpt_wires: VerifierTarget<D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    mpt_proof: ProofWithPublicInputsTarget<D>,
 }
 
 impl Parameters {
@@ -181,13 +186,13 @@ impl Parameters {
     ) -> Self {
         const LPN_PUBLIC_INPUTS: usize = MerklePublicInputs::<Target>::TOTAL_LEN;
         let mut cb = CircuitBuilder::<F, D>::new(default_config());
-        let mpt_wires = VerifierTarget::verify_proof(&mut cb, mpt_circuit_vd);
+        let mpt_proof = verify_proof_fixed_circuit(&mut cb, mpt_circuit_vd);
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, LPN_PUBLIC_INPUTS>::new(
             default_config(),
             lpn_circuit_set,
         );
         let lpn_wires = verifier_gadget.verify_proof_in_circuit_set(&mut cb);
-        let mpt_pi = mpt_wires.get_proof().public_inputs.as_slice();
+        let mpt_pi = mpt_proof.public_inputs.as_slice();
         let lpn_pi = lpn_wires.get_public_input_targets::<F, LPN_PUBLIC_INPUTS>();
         DigestEqualCircuit::build(&mut cb, mpt_pi, lpn_pi);
 
@@ -196,7 +201,7 @@ impl Parameters {
         Self {
             data,
             lpn_wires,
-            mpt_wires,
+            mpt_proof,
         }
     }
     /// Generate proof for digest equal circuit employiing the circuit parameters found in  `self`
@@ -205,15 +210,14 @@ impl Parameters {
         &self,
         lpn_circuit_set: &RecursiveCircuits<F, C, D>,
         lpn_proof: &ProofWithVK,
-        mpt_proof: &ProofWithVK,
+        mpt_proof: &ProofWithPublicInputs<F, C, D>,
     ) -> Result<Vec<u8>> {
         let mut pw = PartialWitness::<F>::new();
         let (lpn_proof, lpn_vd) = lpn_proof.into();
         self.lpn_wires
             .set_target(&mut pw, lpn_circuit_set, lpn_proof, lpn_vd)
             .unwrap();
-        let (mpt_proof, mpt_vd) = mpt_proof.into();
-        self.mpt_wires.set_target(&mut pw, mpt_proof, mpt_vd);
+        pw.set_proof_with_pis_target(&self.mpt_proof, mpt_proof);
         let proof = self.data.prove(pw)?;
         serialize_proof(&proof)
     }
@@ -384,11 +388,6 @@ mod tests {
         let lpn_proof = (
             lpn_proof,
             testing_framework.verifier_data_for_input_proofs::<1>()[0].clone(),
-        )
-            .into();
-        let mpt_proof = (
-            mpt_proof,
-            mpt_dummy_circuit.circuit_data().verifier_only.clone(),
         )
             .into();
         // generate digest equal circuit proof

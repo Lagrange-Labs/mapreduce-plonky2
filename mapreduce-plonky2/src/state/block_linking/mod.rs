@@ -6,10 +6,9 @@ mod block;
 mod public_inputs;
 
 use crate::{
-    api::{default_config, deserialize_proof, serialize_proof, ProofWithVK},
+    api::{default_config, deserialize_proof, serialize_proof, verify_proof_fixed_circuit},
     mpt_sequential::PAD_LEN,
     storage::PublicInputs as StorageInputs,
-    verifier_gadget::VerifierTarget,
 };
 use account::{Account, AccountInputsWires};
 use anyhow::Result;
@@ -18,11 +17,14 @@ use ethers::types::H160;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
-    iop::{target::Target, witness::PartialWitness},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierOnlyCircuitData},
-        proof::ProofWithPublicInputs,
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
 
@@ -163,7 +165,8 @@ where
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     data: CircuitData<F, C, D>,
     wires: BlockLinkingWires<DEPTH, NODE_LEN, BLOCK_LEN>,
-    storage_circuit_wires: VerifierTarget<D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    storage_circuit_proof: ProofWithPublicInputsTarget<D>,
 }
 
 pub(crate) type PublicParameters = Parameters<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN>;
@@ -178,29 +181,24 @@ impl PublicParameters {
     pub(crate) fn build(storage_circuit_vk: &VerifierCircuitData<F, C, D>) -> Self {
         let config = default_config();
         let mut cb = CircuitBuilder::<F, D>::new(config);
-        let storage_circuit_wires = VerifierTarget::verify_proof(&mut cb, storage_circuit_vk);
-        let storage_pi = storage_circuit_wires.get_proof().public_inputs.as_slice();
+        let storage_circuit_proof = verify_proof_fixed_circuit(&mut cb, storage_circuit_vk);
+        let storage_pi = storage_circuit_proof.public_inputs.as_slice();
         let wires = BlockLinkingCircuitInputs::build(&mut cb, storage_pi);
         let data = cb.build::<C>();
 
         Self {
             data,
             wires,
-            storage_circuit_wires,
+            storage_circuit_proof,
         }
     }
 
     /// Generate proof for digest equal circuit employiing the circuit parameters found in  `self`
     /// and the necessary inputs values
-    pub(crate) fn generate_proof(
-        &self,
-        inputs: &CircuitInput,
-        vk: &VerifierOnlyCircuitData<C, D>,
-    ) -> Result<Vec<u8>> {
+    pub(crate) fn generate_proof(&self, inputs: &CircuitInput) -> Result<Vec<u8>> {
         let mut pw = PartialWitness::<F>::new();
         inputs.circuit_inputs.assign::<F, D>(&mut pw, &self.wires)?;
-        self.storage_circuit_wires
-            .set_target(&mut pw, &inputs.storage_proof, vk);
+        pw.set_proof_with_pis_target(&self.storage_circuit_proof, &inputs.storage_proof);
         let proof = self.data.prove(pw)?;
         serialize_proof(&proof)
     }
@@ -424,9 +422,7 @@ mod tests {
             storage_proof,
             circuit_inputs: inputs,
         };
-        let proof = params
-            .generate_proof(&inputs, &test_storage_circuit.circuit_data().verifier_only)
-            .unwrap();
+        let proof = params.generate_proof(&inputs).unwrap();
 
         params
             .data
