@@ -209,13 +209,10 @@ mod tests {
 
         let prover = Groth16Prover::new(config).expect("Failed to initialize the prover");
 
-        let proof = prover.prove(proof).expect("Failed to generate the proof");
-        let json_proof = serde_json::to_string(&proof).expect("Failed to serialize the proof");
-        write_file(
-            Path::new(asset_dir).join("proof.json"),
-            json_proof.as_bytes(),
-        )
-        .expect("Failed to write the proof");
+        let proof_file_path = Path::new(asset_dir).join("proof.json");
+        let proof = prover
+            .prove(proof, Some(&proof_file_path.to_string_lossy()))
+            .expect("Failed to generate the proof");
 
         proof
     }
