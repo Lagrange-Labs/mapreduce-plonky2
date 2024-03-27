@@ -6,18 +6,13 @@ use crate::{
     C, D, F,
 };
 use anyhow::Result;
-use plonky2::plonk::{circuit_data::CircuitData, proof::ProofWithPublicInputs};
+use mapreduce_plonky2::api::deserialize_proof;
+use plonky2::plonk::circuit_data::CircuitData;
 use plonky2x::backend::{
     circuit::{DefaultParameters, Groth16WrapperParameters},
     wrapper::wrap::WrappedCircuit,
 };
 use std::path::Path;
-
-/// Groth16 prover configuration
-#[derive(Debug)]
-pub struct Groth16ProverConfig {
-    pub asset_dir: String,
-}
 
 /// Groth16 prover
 #[derive(Debug)]
@@ -27,12 +22,12 @@ pub struct Groth16Prover {
 }
 
 impl Groth16Prover {
-    pub fn new(config: Groth16ProverConfig) -> Result<Self> {
+    pub fn new(asset_dir: &str) -> Result<Self> {
         // Initialize the Go prover.
-        gnark_utils::init_prover(&config.asset_dir)?;
+        gnark_utils::init_prover(asset_dir)?;
 
         // Read the circuit data from asset dir.
-        let circuit_data = load_circuit_data(&config.asset_dir)?;
+        let circuit_data = load_circuit_data(asset_dir)?;
 
         // Build the wrapped circuit.
         let wrapper = WrappedCircuit::build_from_raw_circuit(circuit_data);
@@ -43,13 +38,12 @@ impl Groth16Prover {
     /// Generate the proof.
     /// This function saves the groth16 proof of JSON format to a file and
     /// creates the missing dirs if the parameter `proof_file_path` is not None.
-    pub fn prove(
-        &self,
-        proof: &ProofWithPublicInputs<F, C, D>,
-        proof_file_path: Option<&str>,
-    ) -> Result<Groth16Proof> {
+    pub fn prove(&self, proof: &[u8], proof_file_path: Option<&str>) -> Result<Groth16Proof> {
+        // Deserialize the proof.
+        let proof = deserialize_proof(proof)?;
+
         // Generate the wrapped proof.
-        let wrapped_output = self.wrapper.prove(proof)?;
+        let wrapped_output = self.wrapper.prove(&proof)?;
 
         // Note this verifier data is from the wrapped proof. However the wrapped proof hardcodes the
         // specific mapreduce-plonky2 proof verification key in its circuit, so indirectly, verifier knows the

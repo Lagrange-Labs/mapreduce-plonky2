@@ -13,9 +13,8 @@
 //!    use groth16_framework::clone_circuit_data;
 //!    use groth16_framework::compile_and_generate_assets;
 //!
-//!    // Get the normal proof and deserialize to ProofWithPublicInputs.
+//!    // Get the normal proof of mapreduce-plonky2.
 //!    let normal_proof = parameters.generate_proof();
-//!    let normal_proof = deserialize_proof(normal_proof);
 //!
 //!    // Get the reference of circuit data and clone it by the
 //!    // `clone_circuit_data` function.
@@ -38,7 +37,8 @@
 //!    ```
 //!    use groth16_framework::Groth16Prover;
 //!
-//!    let groth16_prover = Groth16Prover::new(Groth16ProverConfig { asset_dir });
+//!    // Create the Groth16 prover.
+//!    let groth16_prover = Groth16Prover::new(asset_dir);
 //!    ```
 //!
 //! 3. Prove the normal proofs of mapreduce-plonky2
@@ -47,11 +47,11 @@
 //!    Groth16 proofs. It's called as below.
 //!
 //!    ```
-//!    // Get the normal proof and deserialize to ProofWithPublicInputs.
+//!    // Get the normal proof of mapreduce-plonky2.
 //!    let normal_proof = parameters.generate_proof();
-//!    let normal_proof = deserialize_proof(normal_proof);
 //!
-//!    let groth16_prover = groth16_prover.prove(normal_proof);
+//!    // Generate the Groth proof.
+//!    let groth16_proof = groth16_prover.prove(normal_proof);
 //!    ```
 //!
 //! The Groth16 verifying process is similar as the above proving steps. It
@@ -60,8 +60,10 @@
 //!    ```
 //!    use groth16_framework::Groth16Verifier;
 //!
-//!    let groth16_verifier = Groth16Verifier::new(Groth16VerifierConfig { asset_dir });
+//!    // Create the Groth16 verifier.
+//!    let groth16_verifier = Groth16Verifier::new(asset_dir);
 //!
+//!    // Verify the Groth16 proofs.
 //!    groth16_verifier.verify(groth16_proof1);
 //!    groth16_verifier.verify(groth16_proof2);
 //!    ```
@@ -91,14 +93,14 @@ pub use proof::Groth16Proof;
 // both off-chain and on-chain.
 // The asset dir must include `circuit.bin`, `r1cs.bin` and `pk.bin` when
 // creating the prover.
-pub use prover::groth16::{Groth16Prover, Groth16ProverConfig};
+pub use prover::groth16::Groth16Prover;
 
 pub use verifier::{
     // The EVM verifier is used for testing Solidity verification on-chain.
-    evm::{EVMVerifier, EVMVerifierConfig},
+    evm::EVMVerifier,
     // The Groth16 verifier is used to verify the proof off-chain.
     // The asset dir must include `vk.bin` when creating the verifier.
-    groth16::{Groth16Verifier, Groth16VerifierConfig},
+    groth16::Groth16Verifier,
 };
 
 #[cfg(test)]
@@ -110,6 +112,7 @@ mod tests {
         types::U256,
     };
     use mapreduce_plonky2::{
+        api::serialize_proof,
         array::{Array, Vector, VectorWire},
         group_hashing::CircuitBuilderGroupHashing,
         keccak::{InputData, KeccakCircuit},
@@ -156,6 +159,7 @@ mod tests {
 
         let circuit_data = cb.build::<C>();
         let proof = circuit_data.prove(pw).unwrap();
+        let proof = serialize_proof(&proof).unwrap();
 
         const ASSET_DIR: &str = "groth16_simple";
 
@@ -204,6 +208,7 @@ mod tests {
 
         let circuit_data = cb.build::<C>();
         let proof = circuit_data.prove(pw).unwrap();
+        let proof = serialize_proof(&proof).unwrap();
 
         const ASSET_DIR: &str = "groth16_keccak";
 
@@ -249,6 +254,7 @@ mod tests {
 
         let circuit_data = cb.build::<C>();
         let proof = circuit_data.prove(pw).unwrap();
+        let proof = serialize_proof(&proof).unwrap();
 
         const ASSET_DIR: &str = "groth16_group_hashing";
 
@@ -267,12 +273,8 @@ mod tests {
     }
 
     /// Test to generate the proof.
-    fn groth16_prove(asset_dir: &str, proof: &ProofWithPublicInputs<F, C, D>) -> Groth16Proof {
-        let config = Groth16ProverConfig {
-            asset_dir: asset_dir.to_string(),
-        };
-
-        let prover = Groth16Prover::new(config).expect("Failed to initialize the prover");
+    fn groth16_prove(asset_dir: &str, proof: &[u8]) -> Groth16Proof {
+        let prover = Groth16Prover::new(asset_dir).expect("Failed to initialize the prover");
 
         let proof_file_path = Path::new(asset_dir).join("proof.json");
         let proof = prover
@@ -284,23 +286,17 @@ mod tests {
 
     /// Test to verify the proof.
     fn groth16_verify(asset_dir: &str, proof: &Groth16Proof) {
-        let config = Groth16VerifierConfig {
-            asset_dir: asset_dir.to_string(),
-        };
-
-        let verifier = Groth16Verifier::new(config).expect("Failed to initialize the verifier");
+        let verifier = Groth16Verifier::new(asset_dir).expect("Failed to initialize the verifier");
 
         verifier.verify(proof).expect("Failed to verify the proof")
     }
 
     /// Test the Solidity verification.
     fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
-        let config = EVMVerifierConfig {
-            solidity_path: Path::new(asset_dir)
-                .join("verifier.sol")
-                .to_string_lossy()
-                .to_string(),
-        };
+        let solidity_file_path = Path::new(asset_dir)
+            .join("verifier.sol")
+            .to_string_lossy()
+            .to_string();
 
         let contract = Contract::load(
             utils::read_file(Path::new("test_data").join("verifier.abi"))
@@ -317,7 +313,8 @@ mod tests {
             .encode_input(&input)
             .expect("Failed to encode the inputs of Solidity contract function verifyProof");
 
-        let verifier = EVMVerifier::new(config).expect("Failed to initialize the EVM verifier");
+        let verifier =
+            EVMVerifier::new(&solidity_file_path).expect("Failed to initialize the EVM verifier");
 
         let verified = verifier.verify(calldata);
         assert!(verified);

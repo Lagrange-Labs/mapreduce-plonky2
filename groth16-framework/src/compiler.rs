@@ -7,7 +7,8 @@ use crate::{
     C, D, F,
 };
 use anyhow::Result;
-use plonky2::{plonk::circuit_data::CircuitData, plonk::proof::ProofWithPublicInputs};
+use mapreduce_plonky2::api::deserialize_proof;
+use plonky2::plonk::circuit_data::CircuitData;
 use plonky2x::backend::{
     circuit::{DefaultParameters, Groth16WrapperParameters},
     wrapper::wrap::WrappedCircuit,
@@ -19,9 +20,12 @@ use std::path::Path;
 /// This function returns the full file path of the Solidity verifier contract.
 pub fn compile_and_generate_assets(
     circuit_data: CircuitData<F, C, D>,
-    proof: &ProofWithPublicInputs<F, C, D>,
+    proof: &[u8],
     dst_asset_dir: &str,
 ) -> Result<String> {
+    // Deserialize the proof.
+    let proof = deserialize_proof(proof)?;
+
     // Save the circuit data to file `circuit.bin` in the asset dir. It could be
     // reused in proving.
     save_circuit_data(&circuit_data, dst_asset_dir)?;
@@ -33,7 +37,7 @@ pub fn compile_and_generate_assets(
         );
 
     // Generate the wrapped proof.
-    let wrapped_output = wrapper.prove(proof)?;
+    let wrapped_output = wrapper.prove(&proof)?;
 
     // Serialize the circuit data, verifier data and public inputs to JSON.
     let common_data = serde_json::to_string(&wrapped_output.common_data)?;
