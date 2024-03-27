@@ -238,19 +238,22 @@ macro_rules! impl_branch_circuits {
                              }
                          ).map(|p| (p, self.[< b $i >].get_verifier_data().clone()).into())
                      },
-                        _ if $i-1 == child_proofs.len()  => {
-                            proofs.push(proofs.first().unwrap().clone());
+                        _ if $i > child_proofs.len()  => {
+                            let num_real_proofs = child_proofs.len();
+                            for _ in 0..($i - num_real_proofs) {
+                                proofs.push(proofs.first().unwrap().clone());
+                            } 
                             println!("Generating proof with {} proofs over branch circuit {}", proofs.len(), $i);
                          set.generate_proof(
                              &self.[< b $i>],
                              proofs.try_into().unwrap(),
-                             create_array(|i| if i < $i - 1 { vks[i] } else { vks[0] }),
+                             create_array(|i| if i < num_real_proofs { vks[i] } else { vks[0] }),
                              BranchCircuit {
                                  node: branch_node.node,
                                  common_prefix,
                                  expected_pointer: pointer,
                                  mapping_slot,
-                                 nb_proofs: $i-1,
+                                 nb_proofs: num_real_proofs,
                              }
                          ).map(|p| (p, self.[< b $i>].get_verifier_data().clone()).into())
                      }
@@ -263,15 +266,15 @@ macro_rules! impl_branch_circuits {
     }
 }
 
-impl_branch_circuits!(BranchCircuits, 1, 2, 4, 6, 8, 10, 12, 14, 16);
+impl_branch_circuits!(BranchCircuits, 2, 9, 16);
 #[cfg(test)]
-impl_branch_circuits!(TestBranchCircuits, 1, 3);
+impl_branch_circuits!(TestBranchCircuits, 1, 4, 9);
 
 /// number of circuits in the set
 #[cfg(not(test))]
 const MAPPING_CIRCUIT_SET_SIZE: usize = 11; // 9 branch circuits + 1 ext + 1 leaf
 #[cfg(test)]
-const MAPPING_CIRCUIT_SET_SIZE: usize = 4; // 2 branch + 1 ext + 1 leaf
+const MAPPING_CIRCUIT_SET_SIZE: usize = 5; // 2 branch + 1 ext + 1 leaf
 
 impl PublicParameters {
     /// Generates the circuit parameters for the MPT circuits.
@@ -548,7 +551,7 @@ mod test {
             ],
         });
         let branch2 = params.generate_proof(branch_inputs).unwrap();
-        let exp_vk = params.branchs.b3.get_verifier_data().clone();
+        let exp_vk = params.branchs.b4.get_verifier_data().clone();
         assert_eq!(branch2.verifier_data(), &exp_vk);
         // check validity of public input of `branch2` proof
         {
