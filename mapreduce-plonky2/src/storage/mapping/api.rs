@@ -367,16 +367,13 @@ mod test {
 
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
+    use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
     use serial_test::serial;
 
     use super::*;
     use crate::{
-        eth::StorageSlot,
-        mpt_sequential::{bytes_to_nibbles, test::generate_random_storage_mpt},
-        storage::key::MappingSlot,
-        types::ADDRESS_LEN,
-        utils::test::random_vector,
+        api::lpn_storage::leaf_digest_for_mapping, eth::StorageSlot, mpt_sequential::{bytes_to_nibbles, test::generate_random_storage_mpt}, storage::key::MappingSlot, types::ADDRESS_LEN, utils::test::random_vector
     };
 
     struct TestData {
@@ -531,7 +528,7 @@ mod test {
         println!("[+] Generating leaf proof 2...");
         let leaf2_proof = params
             .set
-            .generate_input_proofs([pub2.try_into().unwrap()])
+            .generate_input_proofs([pub2.clone().try_into().unwrap()])
             .unwrap();
         let vk = params.set.verifier_data_for_input_proofs::<1>()[0].clone();
         let leaf2_proof_vk = ProofWithVK::from((leaf2_proof[0].clone(), vk));
@@ -548,6 +545,24 @@ mod test {
         let branch2 = params.generate_proof(branch_inputs).unwrap();
         let exp_vk = params.branchs.b3.get_verifier_data().clone();
         assert_eq!(branch2.verifier_data(), &exp_vk);
+        // check validity of public input of `branch2` proof
+        {
+            let value1: Vec<u8> = rlp::decode(&trie.get(&test_data.mpt_key1).unwrap().unwrap()).unwrap();
+            let p1_acc = leaf_digest_for_mapping(&test_data.key, &value1);
+            //let value2: Vec<u8> = rlp::decode(&trie.get(&test_data.mpt_key2).unwrap().unwrap()).unwrap();
+            //let p2_acc = leaf_digest_for_mapping(&test_data.key, &value2);
+            let exp_accumulator = p1_acc + p1_acc;
+            let branch_pub = PublicInputs::from(&branch2.proof().public_inputs[..NUM_IO]);
+            assert_eq!(exp_accumulator.to_weierstrass(), branch_pub.accumulator());
+            assert_eq!(F::from_canonical_u8(2), branch_pub.n());
+            let (k1, p1) = pi1.mpt_key_info();
+            let (kb, pb) = branch_pub.mpt_key_info();
+            let p1 = p1.to_canonical_u64() as usize;
+            let pb = pb.to_canonical_u64() as usize;
+            assert_eq!(p1-1, pb);
+            assert_eq!(k1[..pb], kb[..pb]);
+            assert_eq!(pi1.mapping_slot(), branch_pub.mapping_slot());
+        }
     }
 
     #[test]
