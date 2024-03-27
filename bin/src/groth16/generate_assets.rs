@@ -14,7 +14,7 @@ use mapreduce_plonky2::{
     group_hashing,
     keccak::PACKED_HASH_LEN,
     query2::{
-        block::BlockPublicInputs, revelation::RevelationRecursiveInput, CircuitInput,
+        block::BlockPublicInputs, revelation::{Parameters, RevelationRecursiveInput}, CircuitInput,
         PublicParameters,
     },
     types::MAPPING_KEY_LEN,
@@ -66,16 +66,17 @@ fn main() {
     let args = Args::parse();
 
     // Build the query2 parameters from the file.
-    let q2_params = build_query2_parameters(&args.query2);
+    // gupeng
+    // let q2_params = build_query2_parameters(&args.query2);
+
+    // Generate the test inputs. It's used in the generation, but should not be
+    // related with the generated assets.
+    let (inputs, q2_params) = generate_test_inputs();
 
     // Get the final circuit data of query2 parameters.
     let circuit_data = q2_params.final_proof_circuit_data();
     let circuit_data = clone_circuit_data(circuit_data)
         .unwrap_or_else(|err| panic!("Failed to clone the circuit data: {}", err));
-
-    // Generate the test inputs. It's used in the generation, but should not be
-    // related with the generated assets.
-    let inputs = generate_test_inputs();
 
     // Generate the query2 proof.
     let proof = q2_params
@@ -116,14 +117,24 @@ fn build_query2_parameters(circuit_info_file_path: &str) -> PublicParameters<BLO
 }
 
 /// Generate the test inputs.
-fn generate_test_inputs() -> CircuitInput<L> {
+fn generate_test_inputs() -> (CircuitInput<L>, Parameters::<BLOCK_DB_DEPTH, L>)  {
     // Generate a fake query2/block circuit set
     let query2_testing_framework =
         TestingRecursiveCircuits::<F, C, D, QUERY2_BLOCK_NUM_IO>::default();
+    let query2_block_circuit_set = query2_testing_framework.get_recursive_circuit_set();
 
     // Generate a fake block/ verification key
     let block_db_testing_framework =
         TestingRecursiveCircuits::<F, C, D, BLOCK_DB_NUM_IO>::default();
+    let block_db_circuit_set = block_db_testing_framework.get_recursive_circuit_set();
+    let block_db_vk = block_db_testing_framework.verifier_data_for_input_proofs::<1>()[0];
+
+    let params = Parameters::<BLOCK_DB_DEPTH, L>::build(
+        query2_block_circuit_set,
+        block_db_circuit_set,
+        block_db_vk,
+    );
+
     // Generate a fake block db proof
     let init_root = empty_merkle_root::<GoldilocksField, 2, BLOCK_DB_DEPTH>();
     let last_root = HashOut {
