@@ -313,11 +313,7 @@ where
     C::Hasher: AlgebraicHasher<F>,
 {
     let proof = cb.add_virtual_proof_with_pis(&verifier_data.common);
-    let vd = VerifierCircuitTarget {
-        constants_sigmas_cap: cb
-            .constant_merkle_cap(&verifier_data.verifier_only.constants_sigmas_cap),
-        circuit_digest: cb.constant_hash(verifier_data.verifier_only.circuit_digest),
-    };
+    let vd = cb.constant_verifier_data(&verifier_data.verifier_only);
     cb.verify_proof::<C>(&proof, &vd, &verifier_data.common);
     proof
 }
