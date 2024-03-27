@@ -1,7 +1,7 @@
-use plonky2::field::goldilocks_field::GoldilocksField;
+
 use serde::{Deserialize, Serialize};
 
-use crate::api::{BlockDBCircuitInfo, PublicParameters as PreprocessingParameters};
+use crate::api::{BlockDBCircuitInfo};
 
 use super::{
     block, revelation,

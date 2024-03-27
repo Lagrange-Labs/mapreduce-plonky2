@@ -14,10 +14,7 @@ use plonky2_ecgfp5::{
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
 
-use crate::{
-    storage::CURVE_TARGET_SIZE,
-    utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
-};
+use crate::utils::{convert_point_to_curve_target, convert_slice_to_curve_point};
 
 /// Stores the public input used to prove the inclusion of a value in a *binary* merkle tree.
 ///
@@ -77,8 +74,7 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// The root hash of the current subtree
     pub fn root_hash(&self) -> HashOutTarget {
-        HashOutTarget::try_from(std::array::from_fn(|i| self.inputs[Self::ROOT_OFFSET + i]))
-            .unwrap()
+        HashOutTarget::from(std::array::from_fn(|i| self.inputs[Self::ROOT_OFFSET + i]))
     }
 }
 

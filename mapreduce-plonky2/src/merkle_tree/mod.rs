@@ -3,7 +3,9 @@
 mod backup;
 mod merkle_tree;
 
+#[cfg(test)]
 pub use backup::DigestArityCircuit;
+#[cfg(test)]
 pub use merkle_tree::{MerkleLeafValue, MerkleNode, MerkleTree};
 
 /// The trait of digest tree circuit

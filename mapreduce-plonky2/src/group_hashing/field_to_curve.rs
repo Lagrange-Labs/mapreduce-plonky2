@@ -74,11 +74,7 @@ mod tests {
     use crate::group_hashing::CircuitBuilderGroupHashing;
     use anyhow::Result;
     use plonky2::{
-        field::{
-            extension::{quintic::QuinticExtension, FieldExtension},
-            goldilocks_field::GoldilocksField,
-            types::{Field, Sample},
-        },
+        field::{extension::quintic::QuinticExtension, types::Field},
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder,
@@ -86,12 +82,8 @@ mod tests {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
-    use plonky2_ecgfp5::{
-        curve::curve::WeierstrassPoint,
-        gadgets::{base_field::PartialWitnessQuinticExt, curve::PartialWitnessCurve},
-    };
-    use rand::{thread_rng, Rng};
-    use std::array;
+    use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
+    use rand::Rng;
 
     const ARITY: usize = 1;
     const D: usize = 2;

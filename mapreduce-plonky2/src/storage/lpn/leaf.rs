@@ -1,5 +1,5 @@
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
+    field::{goldilocks_field::GoldilocksField},
     hash::poseidon::PoseidonHash,
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
@@ -12,7 +12,7 @@ use crate::{
     group_hashing::CircuitBuilderGroupHashing, types::MAPPING_KEY_LEN,
 };
 
-use super::{PublicInputs, KEY_SIZE, LEAF_SIZE};
+use super::{PublicInputs};
 
 /// Circuit that handles the proving of the leaf of the storage database for a mapping variable
 #[derive(Clone, Debug)]

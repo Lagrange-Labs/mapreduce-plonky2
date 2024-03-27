@@ -1,17 +1,11 @@
 use itertools::Itertools;
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
-    hash::{
-        hash_types::{RichField, NUM_HASH_OUT_ELTS},
-        poseidon::PoseidonHash,
-    },
-    iop::{
-        target::Target,
-        witness::{PartialWitness, WitnessWrite},
-    },
+    hash::{hash_types::NUM_HASH_OUT_ELTS, poseidon::PoseidonHash},
+    iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
-use recursion_framework::circuit_builder::{public_input_targets, CircuitLogicWires};
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::{array::Array, group_hashing::CircuitBuilderGroupHashing};
@@ -76,7 +70,7 @@ impl FullNodeCircuit {
         FullNodeWires {}
     }
 
-    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &FullNodeWires) {}
+    pub fn assign(&self, _pw: &mut PartialWitness<GoldilocksField>, _wires: &FullNodeWires) {}
 }
 
 type F = crate::api::F;
@@ -105,7 +99,7 @@ impl CircuitLogicWires<F, D, 2> for FullNodeWires {
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
-        inputs.assign(pw, &self);
+        inputs.assign(pw, self);
         Ok(())
     }
 }

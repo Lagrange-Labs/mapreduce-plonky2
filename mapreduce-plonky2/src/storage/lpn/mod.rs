@@ -26,10 +26,6 @@ use crate::{
 const LEAF_SIZE: usize = 32;
 /// Size of the input value we insert in a leaf node. Note the key is compacted in u32 slice before hashing.
 const KEY_SIZE: usize = 32;
-/// Size of the leaf in bytes when compacted in a u32 slice
-const PACKED_LEAF_SIZE: usize = 8;
-/// Size of the key in bytes when compacted in a u32 slice
-const PACKED_KEY_SIZE: usize = 8;
 
 /// Returns the hash of the leaf node in the storage database for a mapping variable
 /// given a mapping key and its associated value. The key and value must be both

@@ -6,14 +6,13 @@ use plonky2::{
         goldilocks_field::GoldilocksField,
         types::Field,
     },
-    iop::target::{BoolTarget, Target},
+    iop::target::{Target},
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
     gadgets::{
-        base_field::QuinticExtensionTarget,
         curve::{CircuitBuilderEcGFp5, CurveTarget},
     },
 };
@@ -81,7 +80,7 @@ impl<'a> PublicInputs<'a, GoldilocksField> {
     pub fn accumulator(&self) -> WeierstrassPoint {
         // TODO: put that in ecgfp5 crate publicly
         pub(crate) type GFp5 = QuinticExtension<GoldilocksField>;
-        let ptr = Self::D_IDX;
+        let _ptr = Self::D_IDX;
         let (x, y, is_inf) = self.accumulator_info();
         WeierstrassPoint {
             x: GFp5::from_basefield_array(create_array::<GoldilocksField, 5, _>(|i| x[i])),

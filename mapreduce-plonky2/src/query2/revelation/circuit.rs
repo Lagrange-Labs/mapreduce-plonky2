@@ -3,29 +3,22 @@ use std::array::from_fn as create_array;
 use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
-    fri::verifier,
-    hash::{hash_types::HashOutTarget, poseidon::PoseidonHash},
+    hash::{hash_types::HashOutTarget},
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::VerifierCircuitData, config::Hasher},
+    plonk::{circuit_builder::CircuitBuilder},
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
-use recursion_framework::{
-    circuit_builder::{public_input_targets, CircuitLogicWires},
-    framework::{
-        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
-    },
-};
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    api::{default_config, ProofWithVK, C, D, F},
     block::{empty_merkle_root, public_inputs::PublicInputs as BlockDBPublicInputs},
     group_hashing::CircuitBuilderGroupHashing,
     query2::block::BlockPublicInputs as BlockQueryPublicInputs,
-    types::{MappingKeyTarget, PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
+    types::{PackedMappingKeyTarget, PACKED_MAPPING_KEY_LEN},
     utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to},
 };
 

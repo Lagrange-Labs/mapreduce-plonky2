@@ -51,7 +51,7 @@ pub fn serialize_circuit_data(circuit_data: &CircuitData<F, C, D>) -> Result<Vec
         .to_bytes(
             &CustomGateSerializer,
             &CustomGeneratorSerializer::<C, D> {
-                _phantom: PhantomData::default(),
+                _phantom: PhantomData,
             },
         )
         .map_err(|err| anyhow!("Failed to serialize circuit data: {err:?}"))
@@ -65,7 +65,7 @@ pub fn deserialize_circuit_data(bytes: &[u8]) -> Result<CircuitData<F, C, D>> {
         bytes,
         &CustomGateSerializer,
         &CustomGeneratorSerializer::<C, D> {
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         },
     )
     .map_err(|err| anyhow!("Failed to deserialize circuit data: {err:?}"))

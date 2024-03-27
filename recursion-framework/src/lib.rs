@@ -1,4 +1,4 @@
-#![warn(missing_docs)]
+// #![warn(missing_docs)]
 #![feature(generic_const_exprs)]
 
 //! This crate provides a framework to build circuits that needs to recursively verify proofs
@@ -15,7 +15,7 @@
 //! The data structures provided by this framework will automatically handle most of the details necessary to make
 //! the circuits verifiable by the universal verifier, so that the user should mostly have to specify the additional
 //! logic to be enforced in the circuit besides verifying proofs.
-//! For an example of how to use the framework, take a look at the integration tests, located in `tests/integration.rs`  
+//! For an example of how to use the framework, take a look at the integration tests, located in `tests/integration.rs`
 
 /// This module contains data structures useful to instantiate circuits that either employ the universal verifier
 /// or whose proofs needs to be verified by a circuit employing the universal verifier

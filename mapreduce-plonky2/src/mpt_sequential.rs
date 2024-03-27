@@ -2,10 +2,10 @@ use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     rlp::{
-        decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, RlpList,
-        MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN,
+        decode_compact_encoding, decode_fixed_list, RlpHeader, RlpList, MAX_ITEMS_IN_LIST,
+        MAX_KEY_NIBBLE_LEN,
     },
-    utils::{convert_u8_targets_to_u32, find_index_subvector, keccak256, less_than},
+    utils::{convert_u8_targets_to_u32, find_index_subvector, keccak256},
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
@@ -527,29 +527,16 @@ pub(crate) fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
     }
     nibbles
 }
-pub(crate) fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
-    let mut padded = nibbles.to_vec();
-    if padded.len() % 2 == 1 {
-        padded.insert(0, 0);
-    }
-    let mut bytes = Vec::new();
-    for i in 0..nibbles.len() / 2 {
-        bytes.push((nibbles[i * 2] << 4) | (nibbles[i * 2 + 1] & 0x0F));
-    }
-    bytes
-}
 
 #[cfg(test)]
 pub mod test {
     use std::array::from_fn as create_array;
-    use std::env;
     use std::str::FromStr;
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use ethers::providers::{Http, Provider};
     use ethers::types::{Address, EIP1186ProofResponse};
-    use itertools::Itertools;
     use plonky2::field::types::Field;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
@@ -569,20 +556,15 @@ pub mod test {
     use rand::{thread_rng, Rng, RngCore};
 
     use crate::api::mapping::leaf::VALUE_LEN;
-    use crate::array::Vector;
     use crate::benches::init_logging;
     use crate::eth::ProofQuery;
-    use crate::keccak::{InputData, KeccakCircuit, HASH_LEN, PACKED_HASH_LEN};
-    use crate::mpt_sequential::{bytes_to_nibbles, nibbles_to_bytes, NB_ITEMS_LEAF};
-    use crate::rlp::{
-        decode_compact_encoding, decode_fixed_list, decode_header, MAX_ITEMS_IN_LIST,
-        MAX_KEY_NIBBLE_LEN,
-    };
-    use crate::utils::{convert_u8_targets_to_u32, less_than, IntTargetWriter};
+    use crate::keccak::{HASH_LEN, PACKED_HASH_LEN};
+    use crate::mpt_sequential::{bytes_to_nibbles, NB_ITEMS_LEAF};
+    use crate::rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN};
+    use crate::utils::convert_u8_targets_to_u32;
     use crate::{
-        array::{Array, VectorWire},
+        array::Array,
         circuit::{test::run_circuit, UserCircuit},
-        keccak::OutputHash,
         mpt_sequential::MPTKeyWire,
         utils::{find_index_subvector, keccak256},
     };
@@ -591,6 +573,18 @@ pub mod test {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
+
+    pub(crate) fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
+        let mut padded = nibbles.to_vec();
+        if padded.len() % 2 == 1 {
+            padded.insert(0, 0);
+        }
+        let mut bytes = Vec::new();
+        for i in 0..nibbles.len() / 2 {
+            bytes.push((nibbles[i * 2] << 4) | (nibbles[i * 2 + 1] & 0x0F));
+        }
+        bytes
+    }
 
     #[derive(Clone, Debug)]
     struct TestCircuit<const DEPTH: usize, const NODE_LEN: usize> {
@@ -879,9 +873,8 @@ pub mod test {
     #[test]
     fn mpt_comprehension() {
         const DEPTH: usize = 4;
-        const NODE_LEN: usize = 80;
         const VALUE_LEN: usize = 32;
-        let (mut trie, mut key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
+        let (mut trie, key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
         let mut proof = trie.get_proof(&key).unwrap();
         proof.reverse();
         let key_nibbles = bytes_to_nibbles(&key);
@@ -1045,7 +1038,7 @@ pub mod test {
         // make sure the node is a branch node
         assert_eq!(node_list.len(), 17);
         // first see the leaf to determine the partial key length
-        let mut leaf_node: Vec<u8> = proof[0].clone();
+        let leaf_node = proof[0].clone();
         // RLP ( RLP (compact(partial_key_in_nibble)), RLP(value))
         let leaf_tuple: Vec<Vec<u8>> = rlp::decode_list(&leaf_node);
         assert_eq!(leaf_tuple.len(), 2);
@@ -1112,7 +1105,7 @@ pub mod test {
         const DEPTH: usize = 4;
         const NODE_LEN: usize = 80;
         const VALUE_LEN: usize = 32;
-        let (mut trie, mut key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
+        let (mut trie, key) = generate_random_storage_mpt::<DEPTH, VALUE_LEN>();
         let mut proof = trie.get_proof(&key).unwrap();
         proof.reverse();
         // try with a leaf MPT encoded node first

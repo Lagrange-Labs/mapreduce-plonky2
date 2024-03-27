@@ -208,7 +208,7 @@ fn build_branch<F, const D: usize>(
 where
     F: RichField + Extendable<D>,
 {
-    build_standard_poseidon(b, &inputs, child_input_len)
+    build_standard_poseidon(b, inputs, child_input_len)
 }
 
 /// Build the standard Poseidon hash, pass into the inputs and real length
@@ -287,7 +287,7 @@ mod tests {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
-    use rand::{thread_rng, Rng};
+    use rand::Rng;
 
     const ARITY: usize = 16;
     const D: usize = 2;
