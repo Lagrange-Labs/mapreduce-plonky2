@@ -6,13 +6,6 @@ use crate::{
 };
 use anyhow::Result;
 
-/// EVM verifier configuration
-#[derive(Debug)]
-pub struct EVMVerifierConfig {
-    /// The file path of Solidity verifier contract
-    pub solidity_path: String,
-}
-
 /// EVM verifier
 #[derive(Debug)]
 pub struct EVMVerifier {
@@ -21,9 +14,9 @@ pub struct EVMVerifier {
 }
 
 impl EVMVerifier {
-    pub fn new(config: EVMVerifierConfig) -> Result<Self> {
+    pub fn new(solidity_file_path: &str) -> Result<Self> {
         // Read the Solidity code from file.
-        let solidity_code = read_file(config.solidity_path)?;
+        let solidity_code = read_file(solidity_file_path)?;
 
         // Compile the Solidity code.
         let deployment_code = compile_solidity(&solidity_code);

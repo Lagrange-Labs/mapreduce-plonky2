@@ -248,17 +248,13 @@ impl
     }
 }
 
-pub(crate) fn serialize_proof<
-    F: SerializableRichField<D>,
-    C: GenericConfig<D, F = F>,
-    const D: usize,
->(
+pub fn serialize_proof<F: SerializableRichField<D>, C: GenericConfig<D, F = F>, const D: usize>(
     proof: &ProofWithPublicInputs<F, C, D>,
 ) -> Result<Vec<u8>> {
     Ok(bincode::serialize(&proof)?)
 }
 
-pub(crate) fn deserialize_proof<
+pub fn deserialize_proof<
     F: SerializableRichField<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,

@@ -3,19 +3,13 @@
 use crate::proof::Groth16Proof;
 use anyhow::Result;
 
-/// Groth16 verifier configuration
-#[derive(Debug)]
-pub struct Groth16VerifierConfig {
-    pub asset_dir: String,
-}
-
 /// Groth16 verifier
 #[derive(Debug)]
 pub struct Groth16Verifier;
 
 impl Groth16Verifier {
-    pub fn new(config: Groth16VerifierConfig) -> Result<Self> {
-        gnark_utils::init_verifier(&config.asset_dir)?;
+    pub fn new(asset_dir: &str) -> Result<Self> {
+        gnark_utils::init_verifier(asset_dir)?;
 
         Ok(Self)
     }
