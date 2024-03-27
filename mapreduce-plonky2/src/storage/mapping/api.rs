@@ -373,7 +373,12 @@ mod test {
 
     use super::*;
     use crate::{
-        api::lpn_storage::leaf_digest_for_mapping, eth::StorageSlot, mpt_sequential::{bytes_to_nibbles, test::generate_random_storage_mpt}, storage::key::MappingSlot, types::ADDRESS_LEN, utils::test::random_vector
+        api::lpn_storage::leaf_digest_for_mapping,
+        eth::StorageSlot,
+        mpt_sequential::{bytes_to_nibbles, test::generate_random_storage_mpt},
+        storage::key::MappingSlot,
+        types::ADDRESS_LEN,
+        utils::test::random_vector,
     };
 
     struct TestData {
@@ -547,7 +552,8 @@ mod test {
         assert_eq!(branch2.verifier_data(), &exp_vk);
         // check validity of public input of `branch2` proof
         {
-            let value1: Vec<u8> = rlp::decode(&trie.get(&test_data.mpt_key1).unwrap().unwrap()).unwrap();
+            let value1: Vec<u8> =
+                rlp::decode(&trie.get(&test_data.mpt_key1).unwrap().unwrap()).unwrap();
             let p1_acc = leaf_digest_for_mapping(&test_data.key, &value1);
             //let value2: Vec<u8> = rlp::decode(&trie.get(&test_data.mpt_key2).unwrap().unwrap()).unwrap();
             //let p2_acc = leaf_digest_for_mapping(&test_data.key, &value2);
@@ -559,7 +565,7 @@ mod test {
             let (kb, pb) = branch_pub.mpt_key_info();
             let p1 = p1.to_canonical_u64() as usize;
             let pb = pb.to_canonical_u64() as usize;
-            assert_eq!(p1-1, pb);
+            assert_eq!(p1 - 1, pb);
             assert_eq!(k1[..pb], kb[..pb]);
             assert_eq!(pi1.mapping_slot(), branch_pub.mapping_slot());
         }
