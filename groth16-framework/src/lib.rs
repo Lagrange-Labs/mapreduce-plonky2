@@ -50,7 +50,7 @@
 //!    // Get the normal proof of mapreduce-plonky2.
 //!    let normal_proof = parameters.generate_proof();
 //!
-// Generate the proof. Return the bytes of serialized JSON Groth16 proof.
+//!    // Generate the proof. Return the bytes of serialized JSON Groth16 proof.
 //!    let groth16_proof = groth16_prover.prove(normal_proof);
 //!    ```
 //!
