@@ -39,13 +39,6 @@ const D: usize = 2;
 type C = PoseidonGoldilocksConfig;
 type F = <C as GenericConfig<D>>::F;
 
-/// number of circuits in the set
-/// 1 leaf, 1 ext, 16 branches * 2 because we split the node len in half
-#[cfg(not(test))]
-const MAPPING_CIRCUIT_SET_SIZE: usize = 34;
-#[cfg(test)]
-const MAPPING_CIRCUIT_SET_SIZE: usize = 6; // 1leaf, 1ext, 2 branches * 2
-
 #[derive(Serialize, Deserialize)]
 /// CircuitType is a wrapper around the different specialized circuits that can be used to prove a MPT node recursively
 /// NOTE: Right now these circuits are specialized to prove inclusion of a single mapping slot.
@@ -222,7 +215,7 @@ macro_rules! impl_branch_circuits {
                     .map(|nib| nib.to_canonical_u64() as u8)
                     .collect::<Vec<_>>();
                 let pointer = ptr.to_canonical_u64() as usize;
-                let (proofs, vks): (Vec<_>, Vec<_>) = child_proofs
+                let (mut proofs, vks): (Vec<_>, Vec<_>) = child_proofs
                     .iter()
                     // TODO: didn't find a way to get rid of the useless clone - it's either on the vk or on the proof
                     .map(|p| {
@@ -246,10 +239,12 @@ macro_rules! impl_branch_circuits {
                          ).map(|p| (p, self.[< b $i >].get_verifier_data().clone()).into())
                      },
                         _ if $i-1 == child_proofs.len()  => {
+                            proofs.push(proofs.first().unwrap().clone());
+                            println!("Generating proof with {} proofs over branch circuit {}", proofs.len(), $i);
                          set.generate_proof(
                              &self.[< b $i>],
                              proofs.try_into().unwrap(),
-                             create_array(|i| vks[i]),
+                             create_array(|i| if i < $i - 1 { vks[i] } else { vks[0] }),
                              BranchCircuit {
                                  node: branch_node.node,
                                  common_prefix,
@@ -271,6 +266,12 @@ macro_rules! impl_branch_circuits {
 impl_branch_circuits!(BranchCircuits, 1, 2, 4, 6, 8, 10, 12, 14, 16);
 #[cfg(test)]
 impl_branch_circuits!(TestBranchCircuits, 1, 3);
+
+/// number of circuits in the set
+#[cfg(not(test))]
+const MAPPING_CIRCUIT_SET_SIZE: usize = 11; // 9 branch circuits + 1 ext + 1 leaf
+#[cfg(test)]
+const MAPPING_CIRCUIT_SET_SIZE: usize = 4; // 2 branch + 1 ext + 1 leaf
 
 impl PublicParameters {
     /// Generates the circuit parameters for the MPT circuits.
