@@ -239,10 +239,14 @@ macro_rules! impl_branch_circuits {
                          ).map(|p| (p, self.[< b $i >].get_verifier_data().clone()).into())
                      },
                         _ if $i > child_proofs.len()  => {
+                            // this should match for number of real proofs between the previous $i passed to
+                            // the macro and current $i, since `match` greedily matches arms
                             let num_real_proofs = child_proofs.len();
+                            // we pad the number of proofs to $i by repeating the
+                            // first proof
                             for _ in 0..($i - num_real_proofs) {
                                 proofs.push(proofs.first().unwrap().clone());
-                            } 
+                            }
                             println!("Generating proof with {} proofs over branch circuit {}", proofs.len(), $i);
                          set.generate_proof(
                              &self.[< b $i>],
