@@ -16,10 +16,8 @@ use plonky2_ecgfp5::{
 };
 
 use crate::{
-    array::Array,
-    query2::{AddressTarget, PackedAddressTarget},
     storage::CURVE_TARGET_SIZE,
-    types::{PackedValueTarget, CURVE_TARGET_LEN, PACKED_VALUE_LEN},
+    types::{PackedValueTarget, PACKED_VALUE_LEN},
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 
