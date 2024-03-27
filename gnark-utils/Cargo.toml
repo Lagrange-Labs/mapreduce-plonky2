@@ -1,0 +1,11 @@
+[package]
+name = "gnark-utils"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+glob = "0.3"
+gobuild = "0.1.0-alpha.1"
+
+[dependencies]
+anyhow = "1.0"

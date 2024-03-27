@@ -18,6 +18,7 @@ mod utils;
 /// Extension degree of EcGFp5 curve
 pub(crate) const N: usize = 5;
 
+pub use curve_add::add_curve_point;
 /// Field-to-curve and curve point addition functions
 pub use field_to_curve::map_to_curve_point;
 

@@ -27,6 +27,7 @@ hashbrown = "0.14.3"
 log = "0.4.14"
 env_logger = "0.9.0"
 paste = "1.0.14"
+serde_arrays = "0.1.0"
 
 [dev-dependencies]
 anyhow = "1.0.75"

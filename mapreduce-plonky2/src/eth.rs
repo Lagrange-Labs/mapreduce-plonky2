@@ -380,7 +380,7 @@ impl ProofQuery {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
 
     use std::{str::FromStr, sync::Arc};
 
@@ -393,7 +393,60 @@ mod test {
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
 
+    pub fn get_sepolia_url() -> String {
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+        url.to_string()
+    }
+
+    pub fn get_mainnet_url() -> String {
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://eth.llamarpc.com";
+        url.to_string()
+    }
+
     use super::*;
+    #[tokio::test]
+    async fn test_sepolia_slot() -> Result<()> {
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+        let pidgy_address = Address::from_str("0x363971ee2b96f360ec9d04b5809afd15c77b1af1")?;
+        let length_slot = 8;
+        let query = ProofQuery::new_simple_slot(pidgy_address, length_slot);
+        let res = query.query_mpt_proof(&provider, None).await?;
+        let tree_res = ProofQuery::verify_storage_proof(&res)?;
+        println!("official response: {}", res.storage_proof[0].value);
+        println!("tree response = {:?}", tree_res);
+        let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
+        let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
+        assert_eq!(leaf_list.len(), 2);
+        // implement the circuit logic:
+        let first_byte = leaf_list[1][0];
+        let slice = if first_byte < 0x80 {
+            println!("taking full byte");
+            &leaf_list[1][..]
+        } else {
+            println!("skipping full byte");
+            &leaf_list[1][1..]
+        }
+        .to_vec();
+        let slice = left_pad::<4>(&slice); // what happens in circuit effectively
+                                           // we have to reverse since encoding is big endian on EVM and our function is little endian based
+        let length = convert_u8_to_u32_slice(&slice.into_iter().rev().collect::<Vec<u8>>())[0];
+        println!("length extracted = {}", length);
+        println!("res.storage_proof.value = {}", res.storage_proof[0].value);
+        assert_eq!(length, 2);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_pidgy_pinguin_length_slot() -> Result<()> {
@@ -408,7 +461,9 @@ mod test {
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_simple_slot(pidgy_address, 8);
         let res = query.query_mpt_proof(&provider, None).await?;
-        ProofQuery::verify_storage_proof(&res)?;
+        let tree_res = ProofQuery::verify_storage_proof(&res)?;
+        println!("official response: {}", res.storage_proof[0].value);
+        println!("tree response = {:?}", tree_res);
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         println!("leaf[1].len() = {}", leaf_list[1].len());

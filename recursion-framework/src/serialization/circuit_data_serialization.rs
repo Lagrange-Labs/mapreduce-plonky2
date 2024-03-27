@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::{
     field::extension::Extendable,
     gadgets::{
@@ -96,6 +97,23 @@ impl<C: GenericConfig<D>, const D: usize> FromBytes for VerifierOnlyCircuitData<
     }
 }
 
+impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> FromBytes
+    for VerifierCircuitData<F, C, D>
+{
+    fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
+        Ok(Self::from_bytes(bytes.to_vec(), &CustomGateSerializer)?)
+    }
+}
+
+impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> ToBytes
+    for VerifierCircuitData<F, C, D>
+{
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_bytes(&CustomGateSerializer)
+            .expect("Writing to a byte-vector cannot fail.")
+    }
+}
+
 impl<F: SerializableRichField<D>, C: GenericConfig<D, F = F> + 'static, const D: usize> ToBytes
     for CircuitData<F, C, D>
 where
@@ -152,7 +170,7 @@ impl<const D: usize, T: RichField + Extendable<D> + Extendable<5> + InverseOrZer
 }
 /// Serializer for the set of generators employed in our map-reduce circuits
 pub struct CustomGeneratorSerializer<C: GenericConfig<D>, const D: usize> {
-    _phantom: PhantomData<C>,
+    pub _phantom: PhantomData<C>,
 }
 
 impl<F, C, const D: usize> WitnessGeneratorSerializer<F, D> for CustomGeneratorSerializer<C, D>

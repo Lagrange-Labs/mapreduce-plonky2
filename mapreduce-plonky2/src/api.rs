@@ -1,18 +1,12 @@
 use anyhow::Result;
-use ethers::core::k256::elliptic_curve::rand_core::le;
-use plonky2::{
-    iop::witness::{PartialWitness, WitnessWrite},
-    plonk::{
-        circuit_builder::CircuitBuilder,
-        circuit_data::{
-            CircuitConfig, VerifierCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData,
-        },
-        config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig},
-        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
-    },
+use plonky2::plonk::{
+    circuit_data::{CircuitConfig, VerifierOnlyCircuitData},
+    config::{GenericConfig, PoseidonGoldilocksConfig},
+    proof::ProofWithPublicInputs,
 };
-use recursion_framework::serialization::{
-    circuit_data_serialization::SerializableRichField, deserialize, serialize,
+use recursion_framework::{
+    framework::RecursiveCircuits,
+    serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize},
 };
 use serde::{Deserialize, Serialize};
 
@@ -73,6 +67,33 @@ pub struct PublicParameters<const MAX_DEPTH: usize> {
     block_linking: block_linking::PublicParameters,
     lpn_state: lpn_state::api::Parameters,
     block_db: block::Parameters<MAX_DEPTH>,
+}
+
+#[derive(Serialize, Deserialize)]
+/// This data structure contains some information about the block DB circuit that needs
+/// to be exchanged with public parameters for query circuits
+pub struct BlockDBCircuitInfo<const MAX_DEPTH: usize> {
+    circuit_set: RecursiveCircuits<F, C, D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    verifier_data: VerifierOnlyCircuitData<C, D>,
+}
+
+impl<const MAX_DEPTH: usize> BlockDBCircuitInfo<MAX_DEPTH> {
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
+        Ok(bincode::serialize(self)?)
+    }
+
+    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self> {
+        Ok(bincode::deserialize(bytes)?)
+    }
+
+    pub(crate) fn get_block_db_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.circuit_set
+    }
+
+    pub(crate) fn get_block_db_vk(&self) -> &VerifierOnlyCircuitData<C, D> {
+        &self.verifier_data
+    }
 }
 
 /// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits
@@ -183,6 +204,17 @@ pub fn generate_proof<const MAX_DEPTH: usize>(
             params.block_db.generate_proof(proof_input)
         }
     }
+}
+/// Get the information about the block DB circuit that needs to be exchanged with
+/// set of parameters for query circuits
+pub fn block_db_circuit_info<const MAX_DEPTH: usize>(
+    params: &PublicParameters<MAX_DEPTH>,
+) -> Result<Vec<u8>> {
+    let block_db_info = BlockDBCircuitInfo::<MAX_DEPTH> {
+        circuit_set: params.block_db.get_block_db_circuit_set().clone(),
+        verifier_data: params.block_db.get_block_db_vk().clone(),
+    };
+    block_db_info.serialize()
 }
 
 /// ProofWithVK is a generic struct holding a child proof and its associated verification key.

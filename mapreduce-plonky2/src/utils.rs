@@ -8,6 +8,7 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher};
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
 use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
 use sha3::Digest;
 use sha3::Keccak256;
@@ -261,6 +262,79 @@ pub fn hash_two_to_one<F: RichField, H: Hasher<F>>(
     H::two_to_one(left, right).to_bytes().try_into().unwrap()
 }
 
+// TODO move that to a vec/array specific module?
+pub trait ToFields {
+    fn to_fields<F: RichField>(&self) -> Vec<F>;
+}
+
+impl ToFields for &[u8] {
+    fn to_fields<F: RichField>(&self) -> Vec<F> {
+        self.iter().map(|x| F::from_canonical_u8(*x)).collect()
+    }
+}
+impl ToFields for &[u32] {
+    fn to_fields<F: RichField>(&self) -> Vec<F> {
+        self.iter().map(|x| F::from_canonical_u32(*x)).collect()
+    }
+}
+pub trait Fieldable {
+    fn to_field<F: RichField>(&self) -> F;
+}
+
+impl Fieldable for u8 {
+    fn to_field<F: RichField>(&self) -> F {
+        F::from_canonical_u8(*self)
+    }
+}
+impl<T: Fieldable> ToFields for Vec<T> {
+    fn to_fields<F: RichField>(&self) -> Vec<F> {
+        self.iter().map(|x| x.to_field()).collect()
+    }
+}
+
+impl<const N: usize, T: Fieldable> ToFields for [T; N] {
+    fn to_fields<F: RichField>(&self) -> Vec<F> {
+        self.iter().map(|x| x.to_field()).collect()
+    }
+}
+
+impl Fieldable for u32 {
+    fn to_field<F: RichField>(&self) -> F {
+        F::from_canonical_u32(*self)
+    }
+}
+
+pub trait Packer {
+    type T;
+    fn pack(&self) -> Vec<Self::T>;
+}
+
+impl Packer for &[u8] {
+    type T = u32;
+    fn pack(&self) -> Vec<u32> {
+        convert_u8_to_u32_slice(self)
+    }
+}
+
+impl Packer for Vec<u8> {
+    type T = u32;
+    fn pack(&self) -> Vec<u32> {
+        convert_u8_to_u32_slice(self)
+    }
+}
+
+impl<const N: usize> Packer for &[u8; N] {
+    type T = u32;
+    fn pack(&self) -> Vec<u32> {
+        convert_u8_to_u32_slice(self.as_slice())
+    }
+}
+impl<const N: usize> Packer for [u8; N] {
+    type T = u32;
+    fn pack(&self) -> Vec<u32> {
+        convert_u8_to_u32_slice(self.as_slice())
+    }
+}
 #[cfg(test)]
 pub(crate) mod test {
     use crate::utils::{
@@ -268,8 +342,10 @@ pub(crate) mod test {
         less_than_or_equal_to, num_to_bits,
     };
     use anyhow::Result;
+    use ethers::types::Address;
     use itertools::Itertools;
     use plonky2::field::extension::Extendable;
+    use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::field::types::Field;
     use plonky2::hash::hash_types::RichField;
     use plonky2::iop::target::Target;
@@ -279,7 +355,12 @@ pub(crate) mod test {
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use rand::{thread_rng, Rng, RngCore};
 
-    use super::read_le_u32;
+    #[test]
+    fn test_pack() {
+        let addr = Address::random();
+        let packed_addr: Vec<GoldilocksField> = addr.as_fixed_bytes().pack().to_fields();
+    }
+    use super::{read_le_u32, Packer, ToFields};
     pub(crate) fn random_vector<T>(size: usize) -> Vec<T>
     where
         rand::distributions::Standard: rand::distributions::Distribution<T>,

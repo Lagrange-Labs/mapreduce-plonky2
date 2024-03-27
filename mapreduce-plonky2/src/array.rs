@@ -9,7 +9,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use recursion_framework::serialization::{deserialize_long_array, serialize_long_array};
+use recursion_framework::serialization::{deserialize_long_array, serialize_long_array, FromBytes};
 use serde::{Deserialize, Serialize};
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
@@ -629,30 +629,6 @@ impl<const SIZE: usize> Array<Target, SIZE> {
     }
 }
 
-//impl<const SIZE:usize> Array<Target,SIZE> {
-//    /// extracts a variable length array from this array. The MAX_SUB_SIZE is
-//     /// the maximum number of target elements will be extracted into the vector.
-//    /// The real_len is used for the VectorWire returned to operate correcctly.
-//    /// The difference with extract_array is that extract_array always assume the
-//    /// returned array contains data up to the end of the array, which is useful
-//    /// when one knows the exact length of data one needs to extract.
-//    pub fn extract_vector<
-//        F: RichField + Extendable<D>,
-//        const D: usize,
-//        const MAX_SUB_SIZE: usize,
-//    >(
-//        &self,
-//        b: &mut CircuitBuilder<F, D>,
-//        at: Target,
-//        real_len: Target,
-//    ) -> VectorWire<MAX_SUB_SIZE> {
-//        VectorWire {
-//            arr: self.extract_array::<F, D, MAX_SUB_SIZE>(b, at),
-//            real_len,
-//        }
-//    }
-//}
-
 /// Maximum size of the array where we can call b.random_access() from native
 /// Plonky2 API
 const RANDOM_ACCESS_SIZE: usize = 64;
@@ -1153,6 +1129,16 @@ mod test {
             const PAD: usize = 4;
             let inp = [77, 66, 55];
             let exp = [00, 77, 66, 55];
+            run_circuit::<F, D, C, _>(TestNormalizeLeft::<VLEN, PAD> {
+                input: Vector::from_vec(&inp.to_vec()).unwrap(),
+                exp,
+            });
+        }
+        {
+            const VLEN: usize = 5;
+            const PAD: usize = 4;
+            let inp = [33];
+            let exp = [00, 00, 00, 33];
             run_circuit::<F, D, C, _>(TestNormalizeLeft::<VLEN, PAD> {
                 input: Vector::from_vec(&inp.to_vec()).unwrap(),
                 exp,

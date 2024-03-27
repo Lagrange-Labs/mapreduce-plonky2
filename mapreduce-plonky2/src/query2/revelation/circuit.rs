@@ -3,26 +3,39 @@ use std::array::from_fn as create_array;
 use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::hash_types::HashOutTarget,
+    fri::verifier,
+    hash::{hash_types::HashOutTarget, poseidon::PoseidonHash},
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::VerifierCircuitData, config::Hasher},
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use recursion_framework::{
+    circuit_builder::{public_input_targets, CircuitLogicWires},
+    framework::{
+        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+    },
+};
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    block::{empty_merkle_root, public_inputs::PublicInputs as BlockPublicInputs},
+    api::{default_config, ProofWithVK, C, D, F},
+    block::{empty_merkle_root, public_inputs::PublicInputs as BlockDBPublicInputs},
     group_hashing::CircuitBuilderGroupHashing,
-    query2::aggregation::AggregationPublicInputs,
+    query2::block::BlockPublicInputs as BlockQueryPublicInputs,
     types::{MappingKeyTarget, PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
     utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to},
+    verifier_gadget::VerifierTarget,
 };
 
 use super::RevelationPublicInputs;
 
+#[derive(Serialize, Deserialize)]
 pub(crate) struct RevelationWires<const L: usize> {
+    // poor support of const generics arrays in serde - use that external crate
+    #[serde(with = "serde_arrays")]
     pub raw_keys: [PackedMappingKeyTarget; L],
     pub num_entries: Target,
     pub min_block_number: Target,
@@ -30,7 +43,7 @@ pub(crate) struct RevelationWires<const L: usize> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct RevelationCircuit<const L: usize> {
+pub struct RevelationCircuit<const L: usize> {
     pub(crate) packed_keys: [[u32; PACKED_MAPPING_KEY_LEN]; L],
     pub(crate) num_entries: u8,
     pub(crate) query_min_block_number: usize,
@@ -39,8 +52,8 @@ pub(crate) struct RevelationCircuit<const L: usize> {
 impl<const L: usize> RevelationCircuit<L> {
     pub fn build<const MAX_DEPTH: usize>(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
-        db_proof: BlockPublicInputs<Target>,
-        root_proof: AggregationPublicInputs<Target>,
+        db_proof: BlockDBPublicInputs<Target>,
+        root_proof: BlockQueryPublicInputs<Target>,
     ) -> RevelationWires<L> {
         let t = b._true();
         // Create the empty root constant matching the given MAX_DEPTH of the Poseidon storage tree
@@ -94,7 +107,6 @@ impl<const L: usize> RevelationCircuit<L> {
         // Assert the roots of the query and the block db are the same
         b.connect_hashes(root_proof.root(), db_proof.root());
         b.connect_hashes(db_proof.init_root(), empty_root);
-        b.connect_curve_points(d, root_proof.digest());
         let min_bound = b.sub(root_proof.block_number(), root_proof.range());
 
         let t = b._true();
