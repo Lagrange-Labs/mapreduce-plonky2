@@ -7,6 +7,7 @@ use super::{
 };
 use crate::{
     api::{default_config, serialize_proof},
+    array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
@@ -23,6 +24,7 @@ use plonky2::{
         circuit_builder::CircuitBuilder,
         circuit_data::CircuitData,
         config::{AlgebraicHasher, GenericConfig},
+        plonk_common::reduce_with_powers_circuit,
     },
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
@@ -142,30 +144,29 @@ where
         mpt_input.nodes.iter().for_each(|n| n.assert_bytes(cb));
 
         // NOTE: The length value shouldn't exceed 4-bytes (U32).
-        // We read the RLP header but knowing it is a value that is always <55bytes long
+        // We read the RLP header, there are basically two cases:
+        // * if the length is a single byte less than 0x80 there is no RLP header
+        // * otherwise by assumption, there is a one byte fixed RLP header (assume len <55bytes long)
         // we can hardcode the type of RLP header it is and directly get the real number len
         // in this case, the header marker is 0x80 that we can directly take out from first byte
+        let prefix = mpt_output.leaf.arr[0];
         let byte_80 = cb.constant(F::from_canonical_usize(128));
-        // value_len_it
-        let value_len = cb.sub(mpt_output.leaf.arr[0], byte_80);
-        // end_iterator is used to reverse the array which is of a dynamic length
-        // Normally one should do the following to access element with index
-        // let end_iterator = cb.sub(value_len, one);
-        // but in our case, since the first byte is the RLP header, we have to do +1
-        // so we just keep the same value
-        let mut end_iterator = value_len;
-        // Then we need to convert from big endian to little endian only on this len
-        let extract_len: [Target; 4] = create_array(|i| {
-            let it = cb.constant(F::from_canonical_usize(i));
-            let in_value = less_than(cb, it, value_len, 3); // log2(4) = 2, putting upper bound
-            let rev_value = mpt_output.leaf.value_at_failover(cb, end_iterator);
-            end_iterator = cb.sub(end_iterator, one);
-            cb.select(in_value, rev_value, zero)
-        });
-        let length_value = convert_u8_targets_to_u32(cb, &extract_len)[0].0;
+        let is_single_byte = less_than(cb, prefix, byte_80, 8);
+        let value_len_80 = cb.sub(mpt_output.leaf.arr[0], byte_80);
+        let value_len = cb.select(is_single_byte, one, value_len_80);
+        let offset = cb.select(is_single_byte, zero, one);
+        let value = mpt_output
+            .leaf
+            .extract_array::<F, _, 4>(cb, offset)
+            .into_vec(value_len)
+            .normalize_left::<_, _, 4>(cb) // left_pad::<4>()
+            .reverse() // big endian to little endian
+            .convert_u8_to_u32(cb);
+
+        let reduced_value = value[0];
 
         // Register the public inputs.
-        PublicInputs::register(cb, &mpt_output.root, slot.slot, length_value);
+        PublicInputs::register(cb, &mpt_output.root, slot.slot, reduced_value.0);
 
         LengthExtractWires {
             slot,
@@ -255,7 +256,11 @@ mod tests {
         array::{Array, Vector, VectorWire},
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        eth::{ProofQuery, StorageSlot},
+        eth::{
+            left_pad,
+            test::{get_mainnet_url, get_sepolia_url},
+            ProofQuery, StorageSlot,
+        },
         keccak::{InputData, KeccakCircuit, KeccakWires},
         mpt_sequential::{
             bytes_to_nibbles,
@@ -455,44 +460,53 @@ mod tests {
         }
     }
 
+    struct LengthTestData {
+        url: String,
+        contract: Address,
+        len_slot: u8,
+        exp_len: u32,
+    }
+
     #[tokio::test]
     #[serial]
-    async fn test_length_extract_pidgy_contract() -> Result<()> {
-        let url = "https://eth.llamarpc.com";
+    async fn test_length_extract_custom_erc721_sepolia() -> Result<()> {
+        let test_data = LengthTestData {
+            url: get_sepolia_url(),
+            contract: Address::from_str("0x363971ee2b96f360ec9d04b5809afd15c77b1af1")?,
+            len_slot: 8,
+            exp_len: 2,
+        };
+        test_length_extract(test_data).await
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_length_extract_pudgy_main() -> Result<()> {
+        let test_data = LengthTestData {
+            url: get_mainnet_url(),
+            contract: Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?,
+            len_slot: 8,
+            exp_len: 8888,
+        };
+        test_length_extract(test_data).await
+    }
+
+    async fn test_length_extract(t: LengthTestData) -> Result<()> {
+        let url = t.url;
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
-        let slot: u8 = 8;
+        let slot: u8 = t.len_slot;
+        let exp_len = t.exp_len;
         // pidgy pinguins
-        let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        //let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let pidgy_address = t.contract;
         let query = ProofQuery::new_simple_slot(pidgy_address, slot as usize);
         let res = query.query_mpt_proof(&provider, None).await?;
         ProofQuery::verify_storage_proof(&res)?;
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         assert_eq!(leaf_list.len(), 2);
-        let leaf_value: Vec<u8> = rlp::decode(&leaf_list[1]).unwrap();
-        // making sure we can simply skip the first byte - imitate circuit
-        let sliced = &leaf_list[1][1..];
-        assert_eq!(sliced, leaf_value.as_slice());
-        // extracting len from RLP header - imitate circuit
-        let len_slice = rlp::Rlp::new(&leaf_list[1])
-            .payload_info()
-            .unwrap()
-            .value_len;
-        // check that subbing 0x80 works
-        let rlp_len_slice = leaf_list[1][0] - 128;
-        assert_eq!(rlp_len_slice as usize, len_slice);
-        let le_value: [u8; 4] = create_array(|i| {
-            if i < len_slice {
-                leaf_list[1][len_slice - i]
-            } else {
-                0
-            }
-        });
-        let comp_value = convert_u8_to_u32_slice(&le_value)[0];
-        assert_eq!(comp_value, 8888); // from contract
-        println!("correct conversion ! ");
         let nodes = res.storage_proof[0]
             .proof
             .iter()
@@ -500,6 +514,22 @@ mod tests {
             .map(|x| x.to_vec())
             .collect::<Vec<_>>();
         visit_proof(&nodes);
+
+        // implement the circuit logic:
+        let first_byte = leaf_list[1][0];
+        let slice = if first_byte < 0x80 {
+            println!("[+] RLP small value: taking first byte");
+            &leaf_list[1][..]
+        } else {
+            println!("[+] RLP long value: skipping first byte");
+            &leaf_list[1][1..]
+        }
+        .to_vec();
+        let slice = left_pad::<4>(&slice); // what happens in circuit effectively
+                                           // we have to reverse since encoding is big endian on EVM and our function is little endian based
+        let length = convert_u8_to_u32_slice(&slice.into_iter().rev().collect::<Vec<u8>>())[0];
+        assert_eq!(length, exp_len);
+
         // extractd from test_pidgy_pinguins_slot
         const DEPTH: usize = 5;
         const NODE_LEN: usize = 532;
@@ -520,7 +550,7 @@ mod tests {
         //// Verify the public inputs.
         let pi = PublicInputs::<F>::from(&proof.public_inputs);
         assert_eq!(pi.storage_slot(), F::from_canonical_u8(slot));
-        assert_eq!(pi.length_value(), F::from_canonical_u32(comp_value));
+        assert_eq!(pi.length_value(), F::from_canonical_u32(length));
         let packed_root = convert_u8_to_u32_slice(res.storage_hash.as_bytes())
             .into_iter()
             .map(F::from_canonical_u32)
