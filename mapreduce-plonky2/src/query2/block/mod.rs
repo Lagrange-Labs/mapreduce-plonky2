@@ -48,14 +48,14 @@ pub enum CircuitInput {
 }
 
 impl CircuitInput {
-    fn new_full_node(left_proof: Vec<u8>, right_proof: Vec<u8>) -> Result<Self> {
+    pub fn new_full_node(left_proof: Vec<u8>, right_proof: Vec<u8>) -> Result<Self> {
         Ok(Self::FullNode((
             ProofWithVK::deserialize(&left_proof)?,
             ProofWithVK::deserialize(&right_proof)?,
         )))
     }
 
-    fn new_partial_node(
+    pub fn new_partial_node(
         child_proof: Vec<u8>,
         sibling_hash: HashOutput,
         sibling_is_left: bool,
