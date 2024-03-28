@@ -95,7 +95,7 @@ fn load_circuit_data(asset_dir: &str) -> Result<CircuitData<F, C, D>> {
 /// - groth16_proof.proofs: 8 * U256 = 256 bytes
 /// - groth16_proof.inputs: 3 * U256 = 96 bytes
 /// - plonky2_proof.public_inputs: the little-endian bytes of public inputs exported by user
-pub(crate) fn combine_proofs(
+pub fn combine_proofs(
     groth16_proof: Groth16Proof,
     plonky2_proof: ProofWithPublicInputs<F, C, D>,
 ) -> Result<Vec<u8>> {
@@ -108,17 +108,22 @@ pub(crate) fn combine_proofs(
         .collect::<Result<Vec<_>>>()?;
 
     // Get the all U64s.
-    let groth16_u64s = groth16_u256s.iter().flat_map(|u| u.0);
-    let plonky2_pi_u64s = plonky2_proof
-        .public_inputs
-        .iter()
-        .map(|f| f.to_canonical_u64());
+    // let groth16_u64s = groth16_u256s.iter().flat_map(|u| u.0);
+    let groth16_bytes = groth16_u256s.iter().flat_map(|u| {
+        let mut bytes = [0u8; 32];
+        u.to_little_endian(&mut bytes);
+        println!("gupeng - groth16 - u256 = {u:?}, bytes = {bytes:?}");
+        bytes
+    });
+    let plonky2_pi_bytes = plonky2_proof.public_inputs.iter().flat_map(|f| {
+        let b = f.to_canonical_u64().to_le_bytes();
+        println!("gupeng - pi - bytes = {b:?}");
+
+        b
+    });
 
     // Convert the U64s to bytes.
-    let bytes = groth16_u64s
-        .chain(plonky2_pi_u64s)
-        .flat_map(|u| u.to_le_bytes())
-        .collect();
+    let bytes = groth16_bytes.chain(plonky2_pi_bytes).collect();
 
     Ok(bytes)
 }

@@ -70,13 +70,14 @@ use plonky2::{field::goldilocks_field::GoldilocksField, plonk::config::PoseidonG
 mod compiler;
 mod evm;
 mod proof;
-mod prover;
-mod utils;
+pub mod prover;
+pub mod test_utils;
+pub mod utils;
 mod verifier;
 
-const D: usize = 2;
-type F = GoldilocksField;
-type C = PoseidonGoldilocksConfig;
+pub const D: usize = 2;
+pub type F = GoldilocksField;
+pub type C = PoseidonGoldilocksConfig;
 
 // The function is used to generate the asset files of `circuit.bin`,
 // `r1cs.bin`, `pk.bin`, `vk.bin` and `verifier.sol`. It's only necessary to be
@@ -99,8 +100,6 @@ pub use verifier::{
     // The asset dir must include `vk.bin` when creating the verifier.
     groth16::Groth16Verifier,
 };
-
-pub use utils::clone_circuit_data;
 
 #[cfg(test)]
 mod tests {
@@ -126,7 +125,10 @@ mod tests {
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
-        plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
+        plonk::{
+            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig,
+            proof::ProofWithPublicInputs,
+        },
     };
     use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
     use rand::{thread_rng, Rng};
@@ -167,6 +169,8 @@ mod tests {
 
         // Generate the Groth16 proof.
         let groth16_proof = groth16_prove(ASSET_DIR, &proof);
+
+        panic!("gupeng - 1111");
 
         // Verify the proof off-chain.
         groth16_verify(ASSET_DIR, &groth16_proof);
@@ -351,6 +355,8 @@ mod tests {
 
     #[test]
     fn test_solidity_verify() {
+        env_logger::init();
+
         let asset_dir = "groth16_simple";
         let solidity_file_path = Path::new(asset_dir)
             .join("verifier.sol")
@@ -364,7 +370,29 @@ mod tests {
         )
         .expect("Failed to load the Solidity verifier contract from ABI");
 
+        let groth16_proof = print_groth16_proof(asset_dir);
+        print_bytes(asset_dir);
+        /*
+                let [proofs, inputs] = [&groth16_proof.proofs, &groth16_proof.inputs].map(|ss| {
+                    ss.iter()
+                        .map(|s| Token::Uint(hex_to_u256(s).unwrap()))
+                        .collect()
+                });
+                let input = vec![Token::FixedArray(proofs), Token::FixedArray(inputs)];
+                let verify_fun = &contract.functions["verifyProof"][0];
+                let calldata = verify_fun
+                    .encode_input(&input)
+                    .expect("Failed to encode the inputs of Solidity contract function verifyProof");
+
+                let verifier =
+                    EVMVerifier::new(&solidity_file_path).expect("Failed to initialize the EVM verifier");
+
+                let verified = verifier.verify(calldata);
+                assert!(verified);
+        */
+
         let bytes = utils::read_file(Path::new(asset_dir).join("full_proof.bin")).unwrap();
+        println!("gupeng len(bytes) = {}", bytes.len());
         let bytes = bytes.into_iter().map(|b| Token::Uint(b.into())).collect();
         let results = vec![Token::Array(bytes)];
         let verify_fun = &contract.functions["respond"][0];
@@ -377,5 +405,34 @@ mod tests {
 
         let verified = verifier.verify(calldata);
         assert!(verified);
+    }
+
+    fn print_groth16_proof(asset_dir: &str) -> Groth16Proof {
+        let groth16_proof: Groth16Proof = serde_json::from_str(
+            std::str::from_utf8(
+                &utils::read_file(Path::new(asset_dir).join("groth16_proof.json")).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        for proof in &groth16_proof.proofs {
+            let u = hex_to_u256(&proof).unwrap();
+            println!("gupeng - proof = {u:?}");
+        }
+
+        groth16_proof
+    }
+
+    fn print_bytes(asset_dir: &str) {
+        use ethers::types::U256;
+
+        let bytes = utils::read_file(Path::new(asset_dir).join("full_proof.bin")).unwrap();
+        let u = ethers::types::U256::from_little_endian(&bytes[..32]);
+        let mut u2 = U256::zero();
+        for i in 0..32 {
+            u2 |= U256::from(bytes[i]) << (8 * i);
+        }
+        println!("gupeng - bytes = {u:?} - {u2:?}");
     }
 }
