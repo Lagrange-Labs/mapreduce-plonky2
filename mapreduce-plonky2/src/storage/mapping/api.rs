@@ -236,7 +236,8 @@ macro_rules! impl_branch_circuits {
                          ).map(|p| (p, self.[< b $i >].get_verifier_data().clone()).into())
                      },
                         _ if $i > child_proofs.len()  => {
-                            // this should match for number of real proofs between the previous $i passed to
+type C = crate::api::C;
+                           // this should match for number of real proofs between the previous $i passed to
                             // the macro and current $i, since `match` greedily matches arms
                             let num_real_proofs = child_proofs.len();
                             // we pad the number of proofs to $i by repeating the
@@ -366,14 +367,11 @@ impl PublicParameters {
 
 #[cfg(test)]
 mod test {
-    use core::num;
-    use std::sync::Arc;
-
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
     use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{thread_rng, Rng};
     use serial_test::serial;
+    use std::sync::Arc;
 
     use super::*;
     use crate::{
