@@ -1,9 +1,6 @@
 use plonky2::{
-    iop::{target::Target, witness::PartialWitness},
-    plonk::{
-        circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData},
-        proof::ProofWithPublicInputs,
-    },
+    iop::target::Target,
+    plonk::{circuit_data::VerifierCircuitData, proof::ProofWithPublicInputs},
 };
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -98,18 +95,14 @@ impl Parameters {
 
 /// Intermediate struct handling the deserialization of the CircuitInput enum
 pub(crate) enum ProofInputs {
-    Leaf(ProofWithVK),
+    Leaf(ProofWithPublicInputs<F, C, D>),
     Node((ProofWithVK, ProofWithVK)),
 }
 
 impl ProofInputs {
-    pub(crate) fn from_leaf_input(
-        block_linking_proof: Vec<u8>,
-        block_linking_vd: &VerifierOnlyCircuitData<C, D>,
-    ) -> Result<Self> {
+    pub(crate) fn from_leaf_input(block_linking_proof: Vec<u8>) -> Result<Self> {
         let proof = deserialize_proof(&block_linking_proof)?;
-        let proof_with_vk = (proof, block_linking_vd.clone()).into();
-        Ok(ProofInputs::Leaf(proof_with_vk))
+        Ok(ProofInputs::Leaf(proof))
     }
 
     pub(crate) fn from_node_input(left_proof: &[u8], right_proof: &[u8]) -> Result<Self> {
@@ -158,11 +151,6 @@ mod tests {
         public_inputs: [F; NUM_PUBLIC_INPUTS],
     ) -> Result<Vec<u8>> {
         let block_linking_proof = dummy_circuit.generate_proof(public_inputs).unwrap();
-        let block_linking_proof = (
-            block_linking_proof,
-            dummy_circuit.circuit_data().verifier_only.clone(),
-        )
-            .into();
         circuit_params.generate_proof(ProofInputs::Leaf(block_linking_proof))
     }
 

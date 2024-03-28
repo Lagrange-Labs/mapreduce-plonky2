@@ -17,6 +17,9 @@ use std::{
 /// The actual mapreduce-plonky2 proof being verified has already been hardcoded in the wrapped proof.
 pub const CIRCUIT_DATA_FILENAME: &str = "circuit.bin";
 
+/// The filename of the exported Solidity verifier contract.
+pub const SOLIDITY_VERIFIER_FILENAME: &str = "verifier.sol";
+
 /// Read the data from a file.
 pub fn read_file<P: AsRef<Path>>(file_path: P) -> Result<Vec<u8>> {
     let mut data = vec![];
@@ -66,4 +69,9 @@ pub fn deserialize_circuit_data(bytes: &[u8]) -> Result<CircuitData<F, C, D>> {
         },
     )
     .map_err(|err| anyhow!("Failed to deserialize circuit data: {err:?}"))
+}
+
+/// Serialize reference of circuit data, then deserialize to implement clone.
+pub fn clone_circuit_data(circuit_data: &CircuitData<F, C, D>) -> Result<CircuitData<F, C, D>> {
+    deserialize_circuit_data(&serialize_circuit_data(circuit_data)?)
 }
