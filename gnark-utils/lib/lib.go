@@ -52,7 +52,6 @@ var Logger = logger.Logger()
 func CompileAndGenerateAssets(
 	commonCircuitData *C.char,
 	verifierOnlyCircuitData *C.char,
-	proofWithPublicInputs *C.char,
 	dstAssetDirStr *C.char,
 ) *C.char {
 	dstAssetDir := C.GoString(dstAssetDirStr)
@@ -78,8 +77,7 @@ func CompileAndGenerateAssets(
 	// Compile the verifier circuit and generate the assets (R1CS, PK and VK).
 	r1cs, pk, vk, err := CompileVerifierCircuit(
 		C.GoString(commonCircuitData),
-		C.GoString(verifierOnlyCircuitData),
-		C.GoString(proofWithPublicInputs))
+		C.GoString(verifierOnlyCircuitData),)
 	if err != nil {
 		return C.CString(fmt.Sprintf("failed to compile verifier circuit: %v", err))
 	}
@@ -193,13 +191,7 @@ func FreeString(str *C.char) {
 func CompileVerifierCircuit(
 	commonCircuitDataStr string,
 	verifierOnlyCircuitDataStr string,
-	proofWithPublicInputsStr string,
 ) (constraint.ConstraintSystem, groth16.ProvingKey, groth16.VerifyingKey, error) {
-	// Deserialize the public inputs, verifier data and circuit data.
-	proofWithPis, err := DeserializeProofWithPublicInputs(proofWithPublicInputsStr)
-	if err != nil {
-		return nil, nil, nil, err
-	}
 	verifierOnlyCircuitData, err := DeserializeVerifierOnlyCircuitData(verifierOnlyCircuitDataStr)
 	if err != nil {
 		return nil, nil, nil, err
@@ -208,9 +200,11 @@ func CompileVerifierCircuit(
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	proofWithPis := NewProofWithPublicInputs(commonCircuitData)
+	
 
 	circuit := VerifierCircuit{
-		ProofWithPis:      *proofWithPis,
+		ProofWithPis:      proofWithPis,
 		VerifierData:      *verifierOnlyCircuitData,
 		VerifierDigest:    new(frontend.Variable),
 		InputHash:         new(frontend.Variable),

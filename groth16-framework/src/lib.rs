@@ -164,7 +164,7 @@ mod tests {
         const ASSET_DIR: &str = "groth16_simple";
 
         // Generate the asset files.
-        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR)
+        compile_and_generate_assets(circuit_data, ASSET_DIR)
             .expect("Failed to generate the asset files");
 
         // Generate the Groth16 proof.
@@ -213,7 +213,7 @@ mod tests {
         const ASSET_DIR: &str = "groth16_keccak";
 
         // Generate the asset files.
-        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR)
+        compile_and_generate_assets(circuit_data, ASSET_DIR)
             .expect("Failed to generate the asset files");
 
         // Generate the Groth16 proof.
@@ -259,7 +259,7 @@ mod tests {
         const ASSET_DIR: &str = "groth16_group_hashing";
 
         // Generate the asset files.
-        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR)
+        compile_and_generate_assets(circuit_data, ASSET_DIR)
             .expect("Failed to generate the asset files");
 
         // Generate the Groth16 proof.
@@ -276,7 +276,6 @@ mod tests {
     fn groth16_prove(asset_dir: &str, proof: &[u8]) -> Groth16Proof {
         let prover = Groth16Prover::new(asset_dir).expect("Failed to initialize the prover");
 
-        let proof_file_path = Path::new(asset_dir).join("proof.json");
         let proof = prover.prove(proof).expect("Failed to generate the proof");
 
         serde_json::from_str(&String::from_utf8_lossy(&proof))

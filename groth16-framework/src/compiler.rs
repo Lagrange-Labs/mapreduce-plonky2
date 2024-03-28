@@ -20,12 +20,8 @@ use std::path::Path;
 /// This function returns the full file path of the Solidity verifier contract.
 pub fn compile_and_generate_assets(
     circuit_data: CircuitData<F, C, D>,
-    proof: &[u8],
     dst_asset_dir: &str,
 ) -> Result<String> {
-    // Deserialize the proof.
-    let proof = deserialize_proof(proof)?;
-
     // Save the circuit data to file `circuit.bin` in the asset dir. It could be
     // reused in proving.
     save_circuit_data(&circuit_data, dst_asset_dir)?;
@@ -36,16 +32,12 @@ pub fn compile_and_generate_assets(
             circuit_data,
         );
 
-    // Generate the wrapped proof.
-    let wrapped_output = wrapper.prove(&proof)?;
-
     // Serialize the circuit data, verifier data and public inputs to JSON.
-    let common_data = serde_json::to_string(&wrapped_output.common_data)?;
-    let verifier_data = serde_json::to_string(&wrapped_output.verifier_data)?;
-    let proof = serde_json::to_string(&wrapped_output.proof)?;
+    let common_data = serde_json::to_string(&wrapper.wrapper_circuit.data.common)?;
+    let verifier_data = serde_json::to_string(&wrapper.wrapper_circuit.data.verifier_only)?;
 
     // Generate these asset files by gnark-utils.
-    gnark_utils::compile_and_generate_assets(&common_data, &verifier_data, &proof, dst_asset_dir)?;
+    gnark_utils::compile_and_generate_assets(&common_data, &verifier_data, dst_asset_dir)?;
 
     // Generate the full file path of the Solidity verifier contract.
     let verifier_contract_file_path = Path::new(dst_asset_dir)
