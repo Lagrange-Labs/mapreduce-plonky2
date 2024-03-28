@@ -1,9 +1,7 @@
 //! Custom types
 
 use crate::array::Array;
-use plonky2::{
-    iop::target::Target,
-};
+use plonky2::iop::target::Target;
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 /// Length of an U64

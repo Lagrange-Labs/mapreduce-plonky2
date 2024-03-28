@@ -1,7 +1,6 @@
-
 use serde::{Deserialize, Serialize};
 
-use crate::api::{BlockDBCircuitInfo};
+use crate::api::BlockDBCircuitInfo;
 
 use super::{
     block, revelation,

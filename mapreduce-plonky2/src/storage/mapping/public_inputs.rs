@@ -6,15 +6,13 @@ use plonky2::{
         goldilocks_field::GoldilocksField,
         types::Field,
     },
-    iop::target::{Target},
+    iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
-    gadgets::{
-        curve::{CircuitBuilderEcGFp5, CurveTarget},
-    },
+    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
 
 use crate::{

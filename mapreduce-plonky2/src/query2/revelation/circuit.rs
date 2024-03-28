@@ -3,12 +3,12 @@ use std::array::from_fn as create_array;
 use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::{hash_types::HashOutTarget},
+    hash::hash_types::HashOutTarget,
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder},
+    plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 

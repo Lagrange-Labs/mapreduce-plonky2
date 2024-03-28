@@ -1,7 +1,7 @@
 //! Mechanism for partially-recomputed inner node, i.e. only one child proof needs to be recomputed
 
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField},
+    field::goldilocks_field::GoldilocksField,
     hash::hash_types::{HashOut, HashOutTarget},
     iop::{
         target::{BoolTarget, Target},

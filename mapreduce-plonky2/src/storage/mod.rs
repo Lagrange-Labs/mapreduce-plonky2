@@ -5,9 +5,6 @@ pub mod length_match;
 pub mod lpn;
 pub mod mapping;
 
-
-
-
 pub use digest_equal::PublicInputs;
 
 pub(crate) const MAX_BRANCH_NODE_LEN: usize = 532;
