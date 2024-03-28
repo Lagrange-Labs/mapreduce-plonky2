@@ -479,6 +479,25 @@ where
             b.connect(res, tru.target);
         }
     }
+    /// Similar to `enforce_slice_equal` but returns a boolean result instead of enforcing it
+    pub fn is_slice_equals<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        other: &Self,
+        slice_len: Target,
+    ) -> BoolTarget {
+        let tru = b._true();
+        let mut end_result = b._true();
+        for (i, (our, other)) in self.arr.iter().zip(other.arr.iter()).enumerate() {
+            let it = b.constant(F::from_canonical_usize(i));
+            // TODO: fixed to 6 becaues max nibble len = 64 - TO CHANGE
+            let before_end = less_than(b, it, slice_len, 6);
+            let eq = b.is_equal(our.to_target(), other.to_target());
+            let res = b.select(before_end, eq.target, tru.target);
+            end_result = b.and(tru, BoolTarget::new_unsafe(res));
+        }
+        end_result
+    }
 
     /// Returns self[at..at+SUB_SIZE].
     /// Cost is O(SIZE * SIZE) due to SIZE calls to value_at()
