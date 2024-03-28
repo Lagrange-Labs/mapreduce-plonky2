@@ -105,20 +105,23 @@ pub use utils::clone_circuit_data;
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::{
+        prover::groth16::combine_proofs,
+        utils::{hex_to_u256, read_file, write_file},
+    };
     use ethers::{
         abi::{Contract, Token},
         types::U256,
     };
     use mapreduce_plonky2::{
-        api::serialize_proof,
+        api::{deserialize_proof, serialize_proof},
         array::{Array, Vector, VectorWire},
         group_hashing::CircuitBuilderGroupHashing,
         keccak::{InputData, KeccakCircuit},
         mpt_sequential::PAD_LEN,
     };
     use plonky2::{
-        field::types::Field,
+        field::types::{Field, PrimeField64},
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
@@ -132,11 +135,13 @@ mod tests {
     use std::{array, path::Path};
 
     /// Test proving and verifying with a simple circuit.
-    #[ignore] // Ignore for long running in CI.
+    // #[ignore] // Ignore for long running in CI.
     #[serial]
     #[test]
     fn test_groth16_proving_simple() {
         env_logger::init();
+
+        const ASSET_DIR: &str = "groth16_simple";
 
         let config = CircuitConfig::standard_recursion_config();
         let mut cb = CircuitBuilder::<F, D>::new(config);
@@ -153,9 +158,8 @@ mod tests {
 
         let circuit_data = cb.build::<C>();
         let proof = circuit_data.prove(pw).unwrap();
+        write_plonky2_proof_pis(ASSET_DIR, &proof);
         let proof = serialize_proof(&proof).unwrap();
-
-        const ASSET_DIR: &str = "groth16_simple";
 
         // Generate the asset files.
         compile_and_generate_assets(circuit_data, ASSET_DIR)
@@ -267,12 +271,30 @@ mod tests {
     }
 
     /// Test to generate the proof.
-    fn groth16_prove(asset_dir: &str, proof: &[u8]) -> Groth16Proof {
+    fn groth16_prove(asset_dir: &str, plonky2_proof: &[u8]) -> Groth16Proof {
+        // Initialize the Groth16 prover.
         let prover = Groth16Prover::new(asset_dir).expect("Failed to initialize the prover");
-        let proof = prover.prove(proof).expect("Failed to generate the proof");
 
-        serde_json::from_str(&String::from_utf8_lossy(&proof))
-            .expect("Failed to deserialize the Groth16 proof")
+        // Construct the file paths to save the Groth16 and full proofs.
+        let groth16_proof_path = Path::new(asset_dir).join("groth16_proof.json");
+        let full_proof_path = Path::new(asset_dir).join("full_proof.bin");
+
+        // Generate the Groth16 proof.
+        let plonky2_proof = deserialize_proof(plonky2_proof).unwrap();
+        let groth16_proof = prover
+            .generate_groth16_proof(&plonky2_proof)
+            .expect("Failed to generate the proof");
+        write_file(
+            groth16_proof_path,
+            serde_json::to_string(&groth16_proof).unwrap().as_bytes(),
+        )
+        .unwrap();
+
+        // Generate the full proof.
+        let full_proof = combine_proofs(groth16_proof.clone(), plonky2_proof).unwrap();
+        write_file(full_proof_path, &full_proof).unwrap();
+
+        groth16_proof
     }
 
     /// Test to verify the proof.
@@ -296,8 +318,11 @@ mod tests {
         )
         .expect("Failed to load the Solidity verifier contract from ABI");
 
-        let [proofs, inputs] = [&proof.proofs, &proof.inputs]
-            .map(|ss| ss.iter().map(|s| Token::Uint(str_to_u256(s))).collect());
+        let [proofs, inputs] = [&proof.proofs, &proof.inputs].map(|ss| {
+            ss.iter()
+                .map(|s| Token::Uint(hex_to_u256(s).unwrap()))
+                .collect()
+        });
         let input = vec![Token::FixedArray(proofs), Token::FixedArray(inputs)];
         let verify_fun = &contract.functions["verifyProof"][0];
         let calldata = verify_fun
@@ -311,9 +336,46 @@ mod tests {
         assert!(verified);
     }
 
-    /// Convert a string to U256.
-    fn str_to_u256(s: &str) -> U256 {
-        let s = s.strip_prefix("0x").unwrap();
-        U256::from_str_radix(s, 16).unwrap()
+    /// Convert the plonky2 proof public inputs to bytes and write to a file.
+    fn write_plonky2_proof_pis(dir: &str, proof: &ProofWithPublicInputs<F, C, D>) {
+        let file_path = Path::new(dir).join("plonky2_proof_pis.bin");
+
+        let bytes: Vec<_> = proof
+            .public_inputs
+            .iter()
+            .flat_map(|f| f.to_canonical_u64().to_le_bytes())
+            .collect();
+
+        write_file(file_path, &bytes).unwrap();
+    }
+
+    #[test]
+    fn test_solidity_verify() {
+        let asset_dir = "groth16_simple";
+        let solidity_file_path = Path::new(asset_dir)
+            .join("verifier.sol")
+            .to_string_lossy()
+            .to_string();
+
+        let contract = Contract::load(
+            utils::read_file(Path::new(asset_dir).join("verifier.abi"))
+                .unwrap()
+                .as_slice(),
+        )
+        .expect("Failed to load the Solidity verifier contract from ABI");
+
+        let bytes = utils::read_file(Path::new(asset_dir).join("full_proof.bin")).unwrap();
+        let bytes = bytes.into_iter().map(|b| Token::Uint(b.into())).collect();
+        let results = vec![Token::Array(bytes)];
+        let verify_fun = &contract.functions["respond"][0];
+        let calldata = verify_fun
+            .encode_input(&results)
+            .expect("Failed to encode the inputs of Solidity contract function respond");
+
+        let verifier =
+            EVMVerifier::new(&solidity_file_path).expect("Failed to initialize the EVM verifier");
+
+        let verified = verifier.verify(calldata);
+        assert!(verified);
     }
 }

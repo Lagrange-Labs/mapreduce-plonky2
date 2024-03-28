@@ -1,12 +1,16 @@
 //! The prover used to generate the Groth16 proof.
 
 use crate::{
-    utils::{deserialize_circuit_data, read_file, CIRCUIT_DATA_FILENAME},
+    proof::Groth16Proof,
+    utils::{deserialize_circuit_data, hex_to_u256, read_file, CIRCUIT_DATA_FILENAME},
     C, D, F,
 };
 use anyhow::Result;
 use mapreduce_plonky2::api::deserialize_proof;
-use plonky2::plonk::circuit_data::CircuitData;
+use plonky2::{
+    field::types::PrimeField64,
+    plonk::{circuit_data::CircuitData, proof::ProofWithPublicInputs},
+};
 use plonky2x::backend::{
     circuit::{DefaultParameters, Groth16WrapperParameters},
     wrapper::wrap::WrappedCircuit,
@@ -34,13 +38,30 @@ impl Groth16Prover {
         Ok(Self { wrapper })
     }
 
-    /// Generate the proof. Return the bytes of serialized JSON Groth16 proof.
-    pub fn prove(&self, proof: &[u8]) -> Result<Vec<u8>> {
-        // Deserialize the proof.
-        let proof = deserialize_proof(proof)?;
+    /// Generate the Groth16 proof from the plonky2 proof. It returns the
+    /// little-endian bytes as:
+    /// `groth16_proof.proofs + groth16_proof.inputs + plonky2_proof.public_inputs`.
+    /// In the combined bytes, each part has number as:
+    /// - groth16_proof.proofs: 8 * U256 = 256 bytes
+    /// - groth16_proof.inputs: 3 * U256 = 96 bytes
+    /// - plonky2_proof.public_inputs: the little-endian bytes of public inputs exported by user
+    pub fn prove(&self, plonky2_proof: &[u8]) -> Result<Vec<u8>> {
+        // Deserialize the plonky2 proof.
+        let plonky2_proof = deserialize_proof(plonky2_proof)?;
 
+        // Generate the groth16 proof.
+        let groth16_proof = self.generate_groth16_proof(&plonky2_proof)?;
+
+        // Combine the two proofs and return expected bytes.
+        combine_proofs(groth16_proof, plonky2_proof)
+    }
+
+    pub(crate) fn generate_groth16_proof(
+        &self,
+        plonky2_proof: &ProofWithPublicInputs<F, C, D>,
+    ) -> Result<Groth16Proof> {
         // Generate the wrapped proof.
-        let wrapped_output = self.wrapper.prove(&proof)?;
+        let wrapped_output = self.wrapper.prove(plonky2_proof)?;
 
         // Note this verifier data is from the wrapped proof. However the wrapped proof hardcodes the
         // specific mapreduce-plonky2 proof verification key in its circuit, so indirectly, verifier knows the
@@ -50,9 +71,10 @@ impl Groth16Prover {
         let proof = serde_json::to_string(&wrapped_output.proof)?;
 
         // Generate the Groth16 proof.
-        let groth16_proof = gnark_utils::prove(&verifier_data, &proof)?;
+        let groth16_proof_str = gnark_utils::prove(&verifier_data, &proof)?;
+        let groth16_proof = serde_json::from_str(&groth16_proof_str)?;
 
-        Ok(groth16_proof.as_bytes().to_vec())
+        Ok(groth16_proof)
     }
 }
 
@@ -65,4 +87,38 @@ fn load_circuit_data(asset_dir: &str) -> Result<CircuitData<F, C, D>> {
 
     // Deserialize the circuit data.
     deserialize_circuit_data(&bytes)
+}
+
+/// Combine the Groth16 proof and the plonky2 proof to little-endian bytes as:
+/// `groth16_proof.proofs + groth16_proof.inputs + plonky2_proof.public_inputs`.
+/// In the combined bytes, each part has number as:
+/// - groth16_proof.proofs: 8 * U256 = 256 bytes
+/// - groth16_proof.inputs: 3 * U256 = 96 bytes
+/// - plonky2_proof.public_inputs: the little-endian bytes of public inputs exported by user
+pub(crate) fn combine_proofs(
+    groth16_proof: Groth16Proof,
+    plonky2_proof: ProofWithPublicInputs<F, C, D>,
+) -> Result<Vec<u8>> {
+    // Join the proofs and inputs of groth16 proof, and convert to U256s.
+    let groth16_u256s = groth16_proof
+        .proofs
+        .into_iter()
+        .chain(groth16_proof.inputs)
+        .map(|s| hex_to_u256(&s))
+        .collect::<Result<Vec<_>>>()?;
+
+    // Get the all U64s.
+    let groth16_u64s = groth16_u256s.iter().flat_map(|u| u.0);
+    let plonky2_pi_u64s = plonky2_proof
+        .public_inputs
+        .iter()
+        .map(|f| f.to_canonical_u64());
+
+    // Convert the U64s to bytes.
+    let bytes = groth16_u64s
+        .chain(plonky2_pi_u64s)
+        .flat_map(|u| u.to_le_bytes())
+        .collect();
+
+    Ok(bytes)
 }

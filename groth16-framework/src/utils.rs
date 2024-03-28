@@ -2,6 +2,7 @@
 
 use crate::{C, D, F};
 use anyhow::{anyhow, Result};
+use ethers::types::U256;
 use plonky2::plonk::circuit_data::CircuitData;
 use recursion_framework::serialization::circuit_data_serialization::{
     CustomGateSerializer, CustomGeneratorSerializer,
@@ -19,6 +20,16 @@ pub const CIRCUIT_DATA_FILENAME: &str = "circuit.bin";
 
 /// The filename of the exported Solidity verifier contract.
 pub const SOLIDITY_VERIFIER_FILENAME: &str = "verifier.sol";
+
+/// Convert a string with `0x` prefix to an U256.
+pub fn hex_to_u256(s: &str) -> Result<U256> {
+    let s = s
+        .strip_prefix("0x")
+        .ok_or(anyhow!("The hex string must have `0x` prefix: {s}"))?;
+    let u = U256::from_str_radix(s, 16)?;
+
+    Ok(u)
+}
 
 /// Read the data from a file.
 pub fn read_file<P: AsRef<Path>>(file_path: P) -> Result<Vec<u8>> {
