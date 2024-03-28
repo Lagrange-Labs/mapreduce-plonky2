@@ -245,7 +245,10 @@ mod tests {
         api::tests::TestDummyCircuit,
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        eth::{ProofQuery, RLPBlock},
+        eth::{
+            test::{get_mainnet_url, get_sepolia_url},
+            ProofQuery, RLPBlock,
+        },
         keccak::{OutputHash, HASH_LEN},
         utils::{convert_u8_slice_to_u32_fields, convert_u8_to_u32_slice, keccak256},
     };
@@ -433,10 +436,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_block_linking_circuit_on_sepolia() -> Result<()> {
-        #[cfg(feature = "ci")]
-        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
-        #[cfg(not(feature = "ci"))]
-        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+        let url = get_sepolia_url();
 
         let contract_address = "0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E";
 
@@ -447,7 +447,7 @@ mod tests {
         const VALUE_LEN: usize = 50;
 
         test_with_rpc::<DEPTH, NODE_LEN, BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
-            url,
+            &url,
             contract_address,
         )
         .await
@@ -457,7 +457,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_block_linking_circuit_on_mainnet() -> Result<()> {
-        let url = "https://eth.llamarpc.com";
+        let url = get_mainnet_url();
         // TODO: this Mainnet contract address only works with state proof
         //let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
 
@@ -468,7 +468,7 @@ mod tests {
         const VALUE_LEN: usize = 50;
 
         test_with_rpc::<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
-            url,
+            &url,
             contract_address,
         )
         .await

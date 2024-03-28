@@ -222,7 +222,10 @@ mod test {
     use crate::{
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        eth::ProofQuery,
+        eth::{
+            test::{get_mainnet_url, get_sepolia_url},
+            BlockData, ProofQuery,
+        },
         mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
         state::block_linking::block::SEPOLIA_NUMBER_LEN,
         storage::PublicInputs as StorageInputs,
@@ -265,10 +268,7 @@ mod test {
     #[tokio::test]
     #[serial]
     async fn test_account_inputs_on_sepolia() -> Result<()> {
-        #[cfg(feature = "ci")]
-        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
-        #[cfg(not(feature = "ci"))]
-        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+        let url = &get_sepolia_url();
 
         let contract_address = "0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E";
 
@@ -284,10 +284,7 @@ mod test {
     #[tokio::test]
     #[serial]
     async fn test_account_inputs_on_mainnet() -> Result<()> {
-        #[cfg(feature = "ci")]
-        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
-        #[cfg(not(feature = "ci"))]
-        let url = "https://eth.llamarpc.com";
+        let url = get_mainnet_url();
         // TODO: this Mainnet contract address only works with state proof
         let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
 
@@ -296,8 +293,11 @@ mod test {
         const NODE_LEN: usize = 532;
         const BLOCK_LEN: usize = 620;
 
-        test_account_inputs::<DEPTH, NODE_LEN, BLOCK_LEN, SEPOLIA_NUMBER_LEN>(url, contract_address)
-            .await
+        test_account_inputs::<DEPTH, NODE_LEN, BLOCK_LEN, SEPOLIA_NUMBER_LEN>(
+            &url,
+            contract_address,
+        )
+        .await
     }
 
     async fn test_account_inputs<
