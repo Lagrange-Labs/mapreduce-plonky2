@@ -9,7 +9,7 @@
 //!    `verifier.sol`. User could call the `compile_and_generate_assets`
 //!    function to generate these files as below.
 //!
-//!    ```
+//!    ``
 //!    use groth16_framework::clone_circuit_data;
 //!    use groth16_framework::compile_and_generate_assets;
 //!
@@ -24,7 +24,7 @@
 //!    // Generate the asset files into the specified asset dir. This function
 //!    // creates the asset dir if not exist.
 //!    compile_and_generate_assets(circuit_data, &normal_proof, asset_dir);
-//!    ```
+//!    ``
 //!
 //!    After that, the asset files should be generated in the specified dir.
 //!
@@ -34,30 +34,30 @@
 //!    Groth16 prover. After initialization, this prover could be reused to
 //!    generate the Groth16 proofs. It's initialized as below.
 //!
-//!    ```
+//!    ``
 //!    use groth16_framework::Groth16Prover;
 //!
 //!    // Create the Groth16 prover.
 //!    let groth16_prover = Groth16Prover::new(asset_dir);
-//!    ```
+//!    ``
 //!
 //! 3. Prove the normal proofs of mapreduce-plonky2
 //!
 //!    This proving step could be called for mulitple times to generate the
 //!    Groth16 proofs. It's called as below.
 //!
-//!    ```
+//!    ``
 //!    // Get the normal proof of mapreduce-plonky2.
 //!    let normal_proof = parameters.generate_proof();
 //!
 //!    // Generate the proof. Return the bytes of serialized JSON Groth16 proof.
 //!    let groth16_proof = groth16_prover.prove(normal_proof);
-//!    ```
+//!    ``
 //!
 //! The Groth16 verifying process is similar as the above proving steps. It
 //! could called as below.
 //!
-//!    ```
+//!    ``
 //!    use groth16_framework::Groth16Verifier;
 //!
 //!    // Create the Groth16 verifier.
@@ -66,7 +66,7 @@
 //!    // Verify the Groth16 proofs.
 //!    groth16_verifier.verify(groth16_proof1);
 //!    groth16_verifier.verify(groth16_proof2);
-//!    ```
+//!    ``
 
 use plonky2::{field::goldilocks_field::GoldilocksField, plonk::config::PoseidonGoldilocksConfig};
 
