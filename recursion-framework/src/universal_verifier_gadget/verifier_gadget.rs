@@ -117,7 +117,7 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
         [(); C::Hasher::HASH_SIZE]:,
     {
         let proof = builder.add_virtual_proof_with_pis(&self.rec_data);
-        builder.verify_proof::<C>(&proof, &verifier_data, &self.rec_data);
+        builder.verify_proof::<C>(&proof, verifier_data, &self.rec_data);
         proof
     }
 
@@ -534,7 +534,7 @@ mod tests {
             &wrapped_proof,
             &base_circuit.get_circuit_data().verifier_only,
             array::from_fn(|_| F::rand())
-        ), "universal verifier didn't fail when verifying a proof for a circuit not belonging to circuit set 
+        ), "universal verifier didn't fail when verifying a proof for a circuit not belonging to circuit set
                 with a verifier data of a circuit belonging to circuit set");
 
         // employ a different circuit set including `base_circuit_variant` instead of `base_circuit
@@ -589,7 +589,7 @@ mod tests {
 
             check_panic!(
                 || universal_verifier_circuit.circuit_data.prove(pw),
-                "universal verifier didn't fail when providing a valid proof of memberhsip for a verifier data 
+                "universal verifier didn't fail when providing a valid proof of memberhsip for a verifier data
                 different from the one being employed to recursively verify the proof"
             );
         }

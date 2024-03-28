@@ -226,7 +226,7 @@ impl<const N: usize> KeccakCircuit<N> {
         data: &InputData<u8, N>,
     ) {
         if let InputData::NonAssigned(vector) = data {
-            wires.input_array.assign(pw, &vector);
+            wires.input_array.assign(pw, vector);
         }
         let diff = compute_padding_size(data.real_len());
         pw.set_target(wires.diff, F::from_canonical_usize(diff));
@@ -291,10 +291,6 @@ mod test {
         },
     };
     use rand::{thread_rng, Rng};
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     impl<F, const D: usize, const N: usize> UserCircuit<F, D> for KeccakCircuit<N>
     where
@@ -369,7 +365,7 @@ mod test {
                 let exp_u32 = self
                     .exp
                     .chunks(4)
-                    .map(|c| F::from_canonical_u32(read_le_u32(&mut c.clone())))
+                    .map(|mut c| F::from_canonical_u32(read_le_u32(&mut c)))
                     .collect::<Vec<_>>();
 
                 wires.output_array.assign(pw, &exp_u32.try_into().unwrap());

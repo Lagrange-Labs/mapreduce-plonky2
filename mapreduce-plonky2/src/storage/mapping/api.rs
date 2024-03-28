@@ -16,21 +16,18 @@ use anyhow::bail;
 use anyhow::Result;
 use log::debug;
 use paste::paste;
-use plonky2::field::types::Field;
 use plonky2::field::types::PrimeField64;
 use plonky2::hash::hash_types::HashOut;
-use plonky2::plonk::circuit_data::CircuitConfig;
-use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-use plonky2::plonk::proof::ProofWithPublicInputs;
 use recursion_framework::circuit_builder::CircuitWithUniversalVerifier;
 use recursion_framework::circuit_builder::CircuitWithUniversalVerifierBuilder;
 use recursion_framework::framework::RecursiveCircuitInfo;
 use recursion_framework::framework::RecursiveCircuits;
-use recursion_framework::framework_testing::new_universal_circuit_builder_for_testing;
-use recursion_framework::framework_testing::TestingRecursiveCircuits;
-use recursion_framework::serialization::deserialize;
-use recursion_framework::serialization::serialize;
+
+#[cfg(test)]
+use recursion_framework::framework_testing::{
+    new_universal_circuit_builder_for_testing, TestingRecursiveCircuits,
+};
 use serde::Deserialize;
 use serde::Serialize;
 use std::array::from_fn as create_array;
@@ -239,7 +236,8 @@ macro_rules! impl_branch_circuits {
                          ).map(|p| (p, self.[< b $i >].get_verifier_data().clone()).into())
                      },
                         _ if $i > child_proofs.len()  => {
-                            // this should match for number of real proofs between the previous $i passed to
+type C = crate::api::C;
+                           // this should match for number of real proofs between the previous $i passed to
                             // the macro and current $i, since `match` greedily matches arms
                             let num_real_proofs = child_proofs.len();
                             // we pad the number of proofs to $i by repeating the
@@ -352,8 +350,7 @@ impl PublicParameters {
             }
             CircuitInput::Branch(branch) => {
                 let child_proofs = branch.get_child_proofs()?;
-                self.branchs
-                    .generate_proof(&set, branch.input, child_proofs)
+                self.branchs.generate_proof(set, branch.input, child_proofs)
             }
         }
     }
@@ -370,14 +367,11 @@ impl PublicParameters {
 
 #[cfg(test)]
 mod test {
-    use core::num;
-    use std::sync::Arc;
-
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
     use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{thread_rng, Rng};
     use serial_test::serial;
+    use std::sync::Arc;
 
     use super::*;
     use crate::{

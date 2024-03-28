@@ -1,8 +1,8 @@
 //! Mechanism for partially-recomputed inner node, i.e. only one child proof needs to be recomputed
 
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
+    field::goldilocks_field::GoldilocksField,
+    hash::hash_types::{HashOut, HashOutTarget},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -72,7 +72,7 @@ impl CircuitLogicWires<GoldilocksField, 2, 1> for PartialInnerNodeWires {
     fn circuit_logic(
         builder: &mut CircuitBuilder<GoldilocksField, 2>,
         verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; 1],
-        builder_parameters: Self::CircuitBuilderParams,
+        _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         let inputs = PublicInputs::from_slice(Self::public_input_targets(verified_proofs[0]));
         PartialInnerNodeCircuit::build(builder, &inputs)

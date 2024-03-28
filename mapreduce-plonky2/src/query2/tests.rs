@@ -1,5 +1,3 @@
-use std::{array::from_fn as create_array, ops::Add};
-
 use crate::{
     block::empty_merkle_root,
     circuit::test::run_circuit,
@@ -17,13 +15,9 @@ use plonky2::{
         goldilocks_field::GoldilocksField,
         types::{Field, PrimeField64},
     },
-    hash::{
-        hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
-        hashing::hash_n_to_hash_no_pad,
-        poseidon::PoseidonPermutation,
-    },
+    hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{

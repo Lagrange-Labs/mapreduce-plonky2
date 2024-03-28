@@ -1,6 +1,5 @@
 //! Block-linking circuit implemention used to prove the pre-computed state root
 //! proof is linked to the specific block header.
-
 mod account;
 mod block;
 mod public_inputs;
@@ -23,7 +22,7 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierOnlyCircuitData},
+        circuit_data::{CircuitData, VerifierCircuitData},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -465,10 +464,7 @@ mod tests {
         // pidgy pinguins
         let contract_address = "0xBd3531dA5CF5857e7CfAA92426877b022e612cf8";
 
-        // Written as constants from the result.
-        const DEPTH: usize = 9;
-        const NODE_LEN: usize = 532;
-        const BLOCK_LEN: usize = 620;
+        // Written as constant from the result.
         const VALUE_LEN: usize = 50;
 
         test_with_rpc::<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(

@@ -2,16 +2,14 @@
 //! corresponds to the length value extracted from the storage trie.
 
 use super::{
-    length_extract::{self, PublicInputs as LengthPublicInputs},
+    length_extract::PublicInputs as LengthPublicInputs,
     mapping::PublicInputs as MappingPublicInputs,
 };
 use crate::{
     api::{
         default_config, deserialize_proof, serialize_proof, verify_proof_fixed_circuit, ProofWithVK,
     },
-    circuit::UserCircuit,
     keccak::{OutputHash, PACKED_HASH_LEN},
-    types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 use anyhow::Result;
@@ -23,11 +21,7 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{
-            CircuitConfig, CircuitData, VerifierCircuitData, VerifierCircuitTarget,
-            VerifierOnlyCircuitData,
-        },
-        config::{AlgebraicHasher, GenericConfig, Hasher},
+        circuit_data::{CircuitData, VerifierCircuitData},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -37,7 +31,7 @@ use recursion_framework::{
     framework::{
         RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
     },
-    serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize},
+    serialization::{deserialize, serialize},
 };
 use serde::{Deserialize, Serialize};
 use std::array;
@@ -192,7 +186,7 @@ impl Parameters {
         let mut pw = PartialWitness::<F>::new();
         let (proof, vd) = mapping_proof.into();
         self.mapping_proof_wires
-            .set_target(&mut pw, mapping_circuit_set, &proof, &vd)?;
+            .set_target(&mut pw, mapping_circuit_set, proof, vd)?;
         pw.set_proof_with_pis_target(&self.length_proof, length_proof);
         let proof = self.data.prove(pw)?;
         serialize_proof(&proof)
@@ -234,14 +228,9 @@ impl TryInto<(ProofWithVK, ProofWithPublicInputs<F, C, D>)> for CircuitInput {
 
 #[cfg(test)]
 mod tests {
-    use self::length_extract::PublicParameters;
-
     use super::*;
     use crate::{
-        api::{
-            mapping::{api::NUM_IO, build_circuits_params},
-            tests::TestDummyCircuit,
-        },
+        api::{mapping::api::NUM_IO, tests::TestDummyCircuit},
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         utils::test::random_vector,

@@ -13,10 +13,8 @@ use crate::{
     circuit::UserCircuit,
     group_hashing::CircuitBuilderGroupHashing,
     query2::storage::public_inputs::PublicInputs,
-    types::{PackedMappingKeyTarget, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN, PACKED_VALUE_LEN},
+    types::{PackedMappingKeyTarget, PACKED_MAPPING_KEY_LEN, PACKED_VALUE_LEN},
 };
-
-const PACKED_KEY_SIZE: usize = MAPPING_KEY_LEN / 4;
 
 #[derive(Serialize, Deserialize)]
 pub struct LeafWires {

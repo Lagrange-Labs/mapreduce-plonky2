@@ -3,18 +3,13 @@
 
 use std::iter;
 
-use ethers::types::{spoof::storage, Address};
 use plonky2::{
-    field::{extension::Extendable, goldilocks_field::GoldilocksField, types::Field},
-    hash::{
-        hash_types::{HashOut, HashOutTarget, RichField},
-        poseidon::PoseidonHash,
-    },
+    field::extension::Extendable,
+    hash::{hash_types::RichField, poseidon::PoseidonHash},
     iop::{target::Target, witness::WitnessWrite},
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::VerifierCircuitData,
-        config::{GenericHashOut, Hasher},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -25,7 +20,7 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    api::{verify_proof_fixed_circuit, ProofWithVK},
+    api::verify_proof_fixed_circuit,
     state::{lpn::StateInputs, BlockLinkingInputs},
 };
 

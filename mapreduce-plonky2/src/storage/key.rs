@@ -6,10 +6,9 @@ use crate::{
     eth::{left_pad32, StorageSlot},
     keccak::{ByteKeccakWires, InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, PAD_LEN},
-    types::{AddressTarget, ADDRESS_LEN, MAPPING_KEY_LEN},
+    types::MAPPING_KEY_LEN,
     utils::keccak256,
 };
-use ethers::types::Address;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,

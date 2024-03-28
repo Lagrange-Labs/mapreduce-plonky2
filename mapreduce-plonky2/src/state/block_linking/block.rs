@@ -184,10 +184,7 @@ impl<const MIN_NUMBER_LEN: usize> BlockHeader<MIN_NUMBER_LEN> {
 #[cfg(test)]
 mod test {
     use anyhow::Result;
-    use ethers::{
-        providers::{Http, Middleware, Provider},
-        types::{BlockNumber, U64},
-    };
+    use ethers::providers::{Http, Middleware, Provider};
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -202,8 +199,8 @@ mod test {
     use crate::{
         array::Array,
         circuit::{test::run_circuit, UserCircuit},
-        eth::{BlockData, BlockUtil},
-        keccak::{OutputByteHash, HASH_LEN},
+        eth::BlockUtil,
+        keccak::HASH_LEN,
         mpt_sequential::PAD_LEN,
         state::block_linking::block::{HEADER_RLP_PARENT_HASH_OFFSET, SEPOLIA_NUMBER_LEN},
         utils::{convert_u8_to_u32_slice, find_index_subvector},
@@ -236,7 +233,6 @@ mod test {
         fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>) -> Self::Wires {
             let w = BlockHeader::<NL>::build(c);
             let n = c.add_virtual_u32_target();
-            let number_offset = c.constant(F::from_canonical_usize(HEADER_RLP_NUMBER_OFFSET));
             c.connect(w.number.0, n.0);
             let exp_state_root = Array::<Target, HASH_LEN>::new(c);
             let extracted_state_root = w.header_rlp.arr.arr
