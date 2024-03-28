@@ -444,7 +444,7 @@ pub(crate) mod test {
         let length = convert_u8_to_u32_slice(&slice.into_iter().rev().collect::<Vec<u8>>())[0];
         println!("length extracted = {}", length);
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);
-        assert_eq!(length, 2);
+        assert_eq!(length, 2); // custom value that may change if we update contract!
         Ok(())
     }
 
