@@ -1,5 +1,5 @@
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
+    field::goldilocks_field::GoldilocksField,
     hash::{hash_types::NUM_HASH_OUT_ELTS, poseidon::PoseidonHash},
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
@@ -57,7 +57,7 @@ impl CircuitLogicWires<GoldilocksField, 2, 2> for NodeWires {
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         let inputs = [
-            PublicInputs::from(Self::public_input_targets(&verified_proofs[0])),
+            PublicInputs::from(Self::public_input_targets(verified_proofs[0])),
             PublicInputs::from(Self::public_input_targets(verified_proofs[1])),
         ];
         NodeCircuit::build(builder, inputs)

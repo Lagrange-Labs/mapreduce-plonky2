@@ -1,9 +1,7 @@
 use anyhow::Result;
 use plonky2::plonk::{
     circuit_builder::CircuitBuilder,
-    circuit_data::{
-        CircuitConfig, VerifierCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData,
-    },
+    circuit_data::{CircuitConfig, VerifierCircuitData, VerifierOnlyCircuitData},
     config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig},
     proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
 };
@@ -48,7 +46,7 @@ pub enum CircuitInput<const MAX_DEPTH: usize> {
     Storage(lpn_storage::Input),
     /// Input for circuit binding the proofs for `Mapping` and `LengthExtract` circuits
     LengthMatch(length_match::CircuitInput),
-    // Input for circuit binding the proofs for `LengthMatch` and `Storage` circuits
+    /// Input for circuit binding the proofs for `LengthMatch` and `Storage` circuits
     DigestEqual(digest_equal::CircuitInput),
     /// Input for circuit linking the constructed storage DB to a specific block of the
     /// mainchain
@@ -206,7 +204,7 @@ pub fn block_db_circuit_info<const MAX_DEPTH: usize>(
 
 /// ProofWithVK is a generic struct holding a child proof and its associated verification key.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub(crate) struct ProofWithVK {
+pub struct ProofWithVK {
     pub(crate) proof: ProofWithPublicInputs<F, C, D>,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub(crate) vk: VerifierOnlyCircuitData<C, D>,
@@ -264,35 +262,25 @@ pub fn deserialize_proof<
     Ok(bincode::deserialize(bytes)?)
 }
 
-impl
-    Into<(
+impl From<ProofWithVK>
+    for (
         ProofWithPublicInputs<F, C, D>,
         VerifierOnlyCircuitData<C, D>,
-    )> for ProofWithVK
+    )
 {
-    fn into(
-        self,
-    ) -> (
-        ProofWithPublicInputs<F, C, D>,
-        VerifierOnlyCircuitData<C, D>,
-    ) {
-        (self.proof, self.vk)
+    fn from(val: ProofWithVK) -> Self {
+        (val.proof, val.vk)
     }
 }
 
-impl<'a>
-    Into<(
+impl<'a> From<&'a ProofWithVK>
+    for (
         &'a ProofWithPublicInputs<F, C, D>,
         &'a VerifierOnlyCircuitData<C, D>,
-    )> for &'a ProofWithVK
+    )
 {
-    fn into(
-        self,
-    ) -> (
-        &'a ProofWithPublicInputs<F, C, D>,
-        &'a VerifierOnlyCircuitData<C, D>,
-    ) {
-        (self.proof(), self.verifier_data())
+    fn from(val: &'a ProofWithVK) -> Self {
+        (val.proof(), val.verifier_data())
     }
 }
 

@@ -7,7 +7,6 @@ use crate::{
     C, D, F,
 };
 use anyhow::Result;
-use mapreduce_plonky2::api::deserialize_proof;
 use plonky2::plonk::circuit_data::CircuitData;
 use plonky2x::backend::{
     circuit::{DefaultParameters, Groth16WrapperParameters},

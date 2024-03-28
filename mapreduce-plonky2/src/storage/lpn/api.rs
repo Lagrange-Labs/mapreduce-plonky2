@@ -1,8 +1,5 @@
 use anyhow::Result;
-use plonky2::plonk::{
-    circuit_data::CircuitConfig,
-    config::{GenericConfig, PoseidonGoldilocksConfig},
-};
+
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{RecursiveCircuitInfo, RecursiveCircuits},

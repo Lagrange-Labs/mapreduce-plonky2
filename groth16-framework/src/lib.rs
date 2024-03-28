@@ -100,10 +100,12 @@ pub use verifier::{
     groth16::Groth16Verifier,
 };
 
+pub use utils::clone_circuit_data;
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::{read_file, write_file};
+
     use ethers::{
         abi::{Contract, Token},
         types::U256,
@@ -121,18 +123,13 @@ mod tests {
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
-        plonk::{
-            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig,
-            circuit_data::CircuitData, proof::ProofWithPublicInputs,
-        },
+        plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
     };
     use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
     use rand::{thread_rng, Rng};
-    use recursion_framework::serialization::circuit_data_serialization::{
-        CustomGateSerializer, CustomGeneratorSerializer,
-    };
+
     use serial_test::serial;
-    use std::{array, fs::File, io::Write, marker::PhantomData, path::Path};
+    use std::{array, path::Path};
 
     /// Test proving and verifying with a simple circuit.
     #[ignore] // Ignore for long running in CI.
@@ -272,7 +269,6 @@ mod tests {
     /// Test to generate the proof.
     fn groth16_prove(asset_dir: &str, proof: &[u8]) -> Groth16Proof {
         let prover = Groth16Prover::new(asset_dir).expect("Failed to initialize the prover");
-
         let proof = prover.prove(proof).expect("Failed to generate the proof");
 
         serde_json::from_str(&String::from_utf8_lossy(&proof))
