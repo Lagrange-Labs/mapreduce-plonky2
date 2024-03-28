@@ -7,10 +7,10 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use crate::{array::Array, types::PACKED_ADDRESS_LEN as PACKED_SC_ADDRESS_LEN};
 
 pub mod api;
-pub(crate) mod block;
-mod revelation;
-pub(crate) mod state;
-mod storage;
+pub mod block;
+pub mod revelation;
+pub mod state;
+pub mod storage;
 
 pub use api::{CircuitInput, PublicParameters};
 #[cfg(test)]
