@@ -35,7 +35,6 @@ pub mod state;
 pub mod storage;
 pub mod types;
 mod utils;
-mod verifier_gadget;
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.
 /// TODO: This is a temporary tuple. We need to save the verification key separately.

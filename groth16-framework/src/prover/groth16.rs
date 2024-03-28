@@ -1,23 +1,17 @@
 //! The prover used to generate the Groth16 proof.
 
 use crate::{
-    proof::Groth16Proof,
     utils::{deserialize_circuit_data, read_file, CIRCUIT_DATA_FILENAME},
     C, D, F,
 };
 use anyhow::Result;
-use plonky2::plonk::{circuit_data::CircuitData, proof::ProofWithPublicInputs};
+use mapreduce_plonky2::api::deserialize_proof;
+use plonky2::plonk::circuit_data::CircuitData;
 use plonky2x::backend::{
     circuit::{DefaultParameters, Groth16WrapperParameters},
     wrapper::wrap::WrappedCircuit,
 };
 use std::path::Path;
-
-/// Groth16 prover configuration
-#[derive(Debug)]
-pub struct Groth16ProverConfig {
-    pub asset_dir: String,
-}
 
 /// Groth16 prover
 #[derive(Debug)]
@@ -27,12 +21,12 @@ pub struct Groth16Prover {
 }
 
 impl Groth16Prover {
-    pub fn new(config: Groth16ProverConfig) -> Result<Self> {
+    pub fn new(asset_dir: &str) -> Result<Self> {
         // Initialize the Go prover.
-        gnark_utils::init_prover(&config.asset_dir)?;
+        gnark_utils::init_prover(asset_dir)?;
 
         // Read the circuit data from asset dir.
-        let circuit_data = load_circuit_data(&config.asset_dir)?;
+        let circuit_data = load_circuit_data(asset_dir)?;
 
         // Build the wrapped circuit.
         let wrapper = WrappedCircuit::build_from_raw_circuit(circuit_data);
@@ -40,10 +34,13 @@ impl Groth16Prover {
         Ok(Self { wrapper })
     }
 
-    /// Generate the proof.
-    pub fn prove(&self, proof: &ProofWithPublicInputs<F, C, D>) -> Result<Groth16Proof> {
+    /// Generate the proof. Return the bytes of serialized JSON Groth16 proof.
+    pub fn prove(&self, proof: &[u8]) -> Result<Vec<u8>> {
+        // Deserialize the proof.
+        let proof = deserialize_proof(proof)?;
+
         // Generate the wrapped proof.
-        let wrapped_output = self.wrapper.prove(proof)?;
+        let wrapped_output = self.wrapper.prove(&proof)?;
 
         // Note this verifier data is from the wrapped proof. However the wrapped proof hardcodes the
         // specific mapreduce-plonky2 proof verification key in its circuit, so indirectly, verifier knows the
@@ -55,7 +52,7 @@ impl Groth16Prover {
         // Generate the Groth16 proof.
         let groth16_proof = gnark_utils::prove(&verifier_data, &proof)?;
 
-        Ok(serde_json::from_str(&groth16_proof)?)
+        Ok(groth16_proof.as_bytes().to_vec())
     }
 }
 

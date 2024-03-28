@@ -14,7 +14,6 @@ use crate::{
     state::{self, StateInputs},
     types::HashOutput,
     utils::{convert_u8_to_u32_slice, hash_two_to_one, IntTargetWriter},
-    verifier_gadget,
 };
 use anyhow::Result;
 use plonky2::{
