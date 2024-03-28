@@ -11,13 +11,12 @@ pub fn compile_and_generate_assets(
     verifier_only_circuit_data: &str,
     dst_asset_dir: &str,
 ) -> Result<()> {
-    let [common_circuit_data, verifier_only_circuit_data, dst_asset_dir] =
-        [
-            common_circuit_data,
-            verifier_only_circuit_data,
-            dst_asset_dir,
-        ]
-        .map(CString::new);
+    let [common_circuit_data, verifier_only_circuit_data, dst_asset_dir] = [
+        common_circuit_data,
+        verifier_only_circuit_data,
+        dst_asset_dir,
+    ]
+    .map(CString::new);
 
     let result = unsafe {
         go::CompileAndGenerateAssets(
