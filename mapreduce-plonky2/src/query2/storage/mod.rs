@@ -61,8 +61,8 @@ impl CircuitInput {
     }
 
     pub fn new_full_node(left_proof: &[u8], right_proof: &[u8]) -> Self {
-        let left = ProofWithVK::deserialize(&left_proof).expect("unable to deserialize proof");
-        let right = ProofWithVK::deserialize(&right_proof).expect("unable to deserialize proof");
+        let left = ProofWithVK::deserialize(left_proof).expect("unable to deserialize proof");
+        let right = ProofWithVK::deserialize(right_proof).expect("unable to deserialize proof");
         CircuitInput::FullInner((left, right))
     }
 }

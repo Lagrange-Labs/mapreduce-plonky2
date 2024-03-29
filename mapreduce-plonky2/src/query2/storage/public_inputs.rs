@@ -103,8 +103,7 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// The root hash of the current subtree
     pub fn root(&self) -> HashOutTarget {
-        HashOutTarget::try_from(std::array::from_fn(|i| self.inputs[Self::ROOT_OFFSET + i]))
-            .unwrap()
+        HashOutTarget::from(std::array::from_fn(|i| self.inputs[Self::ROOT_OFFSET + i]))
     }
 
     /// The owner address

@@ -1,20 +1,16 @@
 //! Module handling the recursive proving of mapping entries specically
 //! inside a storage trie.
 
-use std::array::from_fn as create_array;
-
-use crate::array::L32;
-use crate::circuit::UserCircuit;
 use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
 use crate::rlp::short_string_len;
 use crate::storage::key::{MappingSlotWires, MAPPING_INPUT_TOTAL_LEN};
-use crate::storage::{MAX_EXTENSION_NODE_LEN, MAX_LEAF_NODE_LEN};
+use crate::storage::MAX_LEAF_NODE_LEN;
 use crate::types::MAPPING_KEY_LEN;
 use crate::utils::convert_u8_targets_to_u32;
 use crate::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
-    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
+    keccak::{InputData, KeccakCircuit, KeccakWires},
     mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
     rlp::decode_fixed_list,
 };
@@ -160,8 +156,8 @@ impl CircuitLogicWires<GoldilocksField, 2, 0> for StorageLeafWire {
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<GoldilocksField, 2>,
-        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; 0],
-        builder_parameters: Self::CircuitBuilderParams,
+        _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; 0],
+        _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         LeafCircuit::build(builder)
     }
@@ -177,8 +173,6 @@ impl CircuitLogicWires<GoldilocksField, 2, 0> for StorageLeafWire {
 }
 #[cfg(test)]
 mod test {
-    use std::array::from_fn as create_array;
-
     use crate::circuit::test::run_circuit;
     use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
@@ -190,14 +184,12 @@ mod test {
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use rand::{thread_rng, Rng};
 
     use super::{LeafCircuit, LeafWires, PublicInputs, VALUE_LEN};
     use crate::array::Array;
     use crate::circuit::UserCircuit;
-    use crate::eth::{left_pad32, StorageSlot};
-    use crate::group_hashing::map_to_curve_point;
-    use crate::mpt_sequential::{bytes_to_nibbles, MAX_LEAF_VALUE_LEN};
+    use crate::eth::StorageSlot;
+    use crate::mpt_sequential::bytes_to_nibbles;
     use crate::storage::key::MappingSlot;
     use crate::utils::convert_u8_to_u32_slice;
     use plonky2::field::types::Field;

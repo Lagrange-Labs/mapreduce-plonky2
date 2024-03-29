@@ -9,7 +9,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use recursion_framework::serialization::{deserialize_long_array, serialize_long_array, FromBytes};
+use recursion_framework::serialization::{deserialize_long_array, serialize_long_array};
 use serde::{Deserialize, Serialize};
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
@@ -345,7 +345,7 @@ where
     }
     /// Assigns each value in the given array to the respective wire in `self`. Each value is first
     /// converted to a field element.
-    pub fn assign_from_data<V: ToField<F>, F: RichField>(
+    pub(crate) fn assign_from_data<V: ToField<F>, F: RichField>(
         &self,
         pw: &mut PartialWitness<F>,
         array: &[V; SIZE],
@@ -479,6 +479,25 @@ where
             b.connect(res, tru.target);
         }
     }
+    /// Similar to `enforce_slice_equal` but returns a boolean result instead of enforcing it
+    pub fn is_slice_equals<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        other: &Self,
+        slice_len: Target,
+    ) -> BoolTarget {
+        let tru = b._true();
+        let mut end_result = b._true();
+        for (i, (our, other)) in self.arr.iter().zip(other.arr.iter()).enumerate() {
+            let it = b.constant(F::from_canonical_usize(i));
+            // TODO: fixed to 6 becaues max nibble len = 64 - TO CHANGE
+            let before_end = less_than(b, it, slice_len, 6);
+            let eq = b.is_equal(our.to_target(), other.to_target());
+            let res = b.select(before_end, eq.target, tru.target);
+            end_result = b.and(tru, BoolTarget::new_unsafe(res));
+        }
+        end_result
+    }
 
     /// Returns self[at..at+SUB_SIZE].
     /// Cost is O(SIZE * SIZE) due to SIZE calls to value_at()
@@ -566,6 +585,7 @@ where
     }
 }
 /// Returns the size of the array in 32-bit units, rounded up.
+#[allow(non_snake_case)]
 pub(crate) const fn L32(a: usize) -> usize {
     if a % 4 != 0 {
         a / 4 + 1
@@ -574,7 +594,7 @@ pub(crate) const fn L32(a: usize) -> usize {
     }
 }
 impl<const SIZE: usize> Array<Target, SIZE> {
-    pub fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
+    pub(crate) fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
     ) -> Array<U32Target, { L32(SIZE) }>
@@ -636,7 +656,7 @@ mod test {
     use crate::{
         array::{Array, ToField, Vector, VectorWire, L32},
         circuit::{test::run_circuit, UserCircuit},
-        eth::{left_pad, left_pad32},
+        eth::left_pad,
         utils::{convert_u8_to_u32_slice, find_index_subvector, test::random_vector},
     };
     const D: usize = 2;

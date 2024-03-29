@@ -147,7 +147,7 @@ pub(crate) fn check_circuit_digest_target<
     let cap_targets = merkle_cap_to_targets(&verifier_data.constants_sigmas_cap);
     // we assume the circuit was generated without a domain generator
     let domain_separator_target = builder
-        .constant_hash(C::Hasher::hash_pad(&vec![]))
+        .constant_hash(C::Hasher::hash_pad(&[]))
         .elements
         .to_vec();
     let degree_target = vec![builder.constant(F::from_canonical_usize(degree_bits))];

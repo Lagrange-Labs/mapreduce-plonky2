@@ -10,16 +10,14 @@ use crate::{
     api::{
         default_config, deserialize_proof, serialize_proof, verify_proof_fixed_circuit, ProofWithVK,
     },
-    array::Array,
     group_hashing::{CircuitBuilderGroupHashing, N},
     keccak::{OutputHash, PACKED_HASH_LEN},
-    types::{PackedAddressTarget, PACKED_ADDRESS_LEN},
     utils::{
         convert_point_to_curve_target, convert_slice_to_curve_point, convert_u32_fields_to_u8_vec,
     },
 };
 use anyhow::Result;
-use ethers::types::{H160, H256};
+use ethers::types::H256;
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
@@ -267,19 +265,16 @@ mod tests {
         api::tests::TestDummyCircuit,
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        eth::{left_pad32, ProofQuery, StorageSlot},
-        mpt_sequential::test::generate_random_storage_mpt,
+        eth::{left_pad32, ProofQuery},
         storage::{self, key::MappingSlot},
         utils::{convert_u8_to_u32_slice, keccak256, test::random_vector},
     };
-    use eth_trie::Trie;
     use ethers::{
         providers::{Http, Provider},
-        types::{spoof::storage, Address},
+        types::Address,
     };
     use plonky2::{
         field::types::{Field, Sample},
-        hash::keccak,
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder,
@@ -291,7 +286,6 @@ mod tests {
     use rand::thread_rng;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use serial_test::serial;
-    use std::array;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;

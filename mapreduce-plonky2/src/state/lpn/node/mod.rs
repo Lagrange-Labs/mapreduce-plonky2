@@ -1,7 +1,5 @@
 //! Merkle tree recursive proof for the intermediate node.
 
-use std::iter;
-
 use plonky2::{
     field::extension::Extendable,
     hash::{hash_types::RichField, poseidon::PoseidonHash},
@@ -125,7 +123,6 @@ impl NodeCircuit {
 pub(crate) struct NodeCircuitWires;
 
 type F = crate::api::F;
-type C = crate::api::C;
 const D: usize = crate::api::D;
 
 impl CircuitLogicWires<F, D, 2> for NodeCircuitWires {
@@ -138,7 +135,7 @@ impl CircuitLogicWires<F, D, 2> for NodeCircuitWires {
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
         verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 2],
-        builder_parameters: Self::CircuitBuilderParams,
+        _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         let left_sibling = StateInputs::from_slice(Self::public_input_targets(verified_proofs[0]));
         let right_sibling = StateInputs::from_slice(Self::public_input_targets(verified_proofs[1]));

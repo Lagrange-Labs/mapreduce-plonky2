@@ -116,13 +116,11 @@ mod tests {
         },
     };
     use plonky2_ecgfp5::{
-        curve::curve::WeierstrassPoint,
-        gadgets::{base_field::PartialWitnessQuinticExt, curve::PartialWitnessCurve},
+        curve::curve::WeierstrassPoint, gadgets::base_field::PartialWitnessQuinticExt,
     };
-    use rand::{thread_rng, Rng};
+    use rand::thread_rng;
     use std::array;
 
-    const ARITY: usize = 16;
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;

@@ -305,7 +305,7 @@ fn bench_keccak_repeated() {
                     bench_simple_circuit::<F, D, C, _>(
                         name,
                         RepeatedKeccak::<BYTES,$a> {
-                            circuits: create_array(|i| circuit.clone()),
+                            circuits: create_array(|_| circuit.clone()),
                         },
                     )
                     }));
