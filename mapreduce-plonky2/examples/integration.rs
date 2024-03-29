@@ -20,6 +20,7 @@ use std::io::Write;
 use std::{env, fs::File, str::FromStr};
 use storage::length_extract::ArrayLengthExtractCircuit;
 
+use clap::Parser;
 use mapreduce_plonky2::{
     eth::{left_pad32, StorageSlot},
     utils::keccak256,
@@ -29,11 +30,19 @@ const PARAM_FILE: &str = "mapreduce_test.params";
 const BLOCK_DEPTH: usize = 2;
 const MAX_STORAGE_DEPTH: usize = 5;
 
+#[derive(Parser)]
+struct CliParams {
+    /// set to true if you want to load the params from the file
+    /// otherwise it generates them by default
+    load: Option<bool>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     enable_logging();
+    let args = CliParams::parse();
     println!("Hello, world!");
-    let ctx = Context::build().await?;
+    let ctx = Context::build(args).await?;
     Ok(())
 }
 
@@ -72,8 +81,8 @@ struct Context {
 }
 
 impl Context {
-    async fn build() -> Result<Self> {
-        let params = load_or_generate_params::<BLOCK_DEPTH>(false)?;
+    async fn build(c: CliParams) -> Result<Self> {
+        let params = load_or_generate_params::<BLOCK_DEPTH>(c.load.unwrap_or(false))?;
         let url = get_mainnet_url();
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");

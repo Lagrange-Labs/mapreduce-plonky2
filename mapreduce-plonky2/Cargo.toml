@@ -43,6 +43,7 @@ env_logger = { version = "0.9.0", default-features = false }
 log = { version = "0.4.14", default-features = false }
 rand = "0.8.5"
 serial_test = "3.0.0"
+clap = { version  = "4.5.4", features = ["derive"] }
 
 [features]
 ci = []
