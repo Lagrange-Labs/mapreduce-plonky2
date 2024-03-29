@@ -84,11 +84,15 @@ fn enable_logging() {
 }
 
 fn load_or_generate_params<const BD: usize>(load: bool) -> Result<api::PublicParameters<BD>> {
-    let mut file = File::create(PARAM_FILE)?;
-    if load {
+    let file_exists = std::path::Path::new(PARAM_FILE).exists();
+    if file_exists && load {
+        log::info!("File exists, loading parameters");
+        let mut file = File::open(PARAM_FILE)?;
         let params = bincode::deserialize_from(&mut file)?;
         Ok(params)
     } else {
+        log::info!("Building parameters (file exists {})", file_exists);
+        let mut file = File::create(PARAM_FILE)?;
         let params = crate::api::build_circuits_params::<BD>();
         bincode::serialize_into(&mut file, &params)?;
         Ok(params)
@@ -186,6 +190,14 @@ impl Context {
     fn mapping_keys_vec(&self) -> Vec<Vec<u8>> {
         self.mapping_keys.iter().map(|k| k.to_vec()).collect()
     }
+}
+
+struct StorageProver<'a> {
+    ctx: &'a Context,
+}
+
+impl<'a> StorageProver<'a> {
+    fn build_storage_proofs
 }
 
 async fn full_flow_pudgy(ctx: Context) -> Result<()> {

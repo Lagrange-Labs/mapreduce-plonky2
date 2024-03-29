@@ -52,3 +52,6 @@ ci = []
 
 [[example]]         
 name = "integration"    
+
+[profile.release]
+opt-level = 3
