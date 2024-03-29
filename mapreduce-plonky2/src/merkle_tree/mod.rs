@@ -19,3 +19,5 @@ pub trait DigestTreeCircuit<O> {
     /// Create a circuit instance for a branch of Merkle tree.
     fn new_branch(children: Vec<O>) -> Self;
 }
+
+pub use state_tree::StateTreeWires;

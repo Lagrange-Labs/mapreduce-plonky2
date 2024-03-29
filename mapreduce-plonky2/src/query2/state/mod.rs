@@ -6,7 +6,7 @@ use itertools::Itertools;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{
-        hash_types::{HashOut, HashOutTarget, RichField},
+        hash_types::{HashOut, RichField},
         merkle_proofs::MerkleProofTarget,
         poseidon::PoseidonHash,
     },
@@ -31,6 +31,7 @@ use crate::{
     api::{default_config, ProofWithVK, C, D, F},
     array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
+    merkle_tree::StateTreeWires,
     query2::storage::public_inputs::PublicInputs as StorageInputs,
     types::{HashOutput, PackedAddressTarget as PackedSCAddressTarget},
     utils::{Packer, ToFields},
@@ -47,7 +48,7 @@ pub(crate) mod tests;
 
 /// The witnesses of [ProvenanceCircuit].
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateWires {
+pub struct StateWires<const MAX_DEPTH: usize> {
     /// Smart contract address (unpacked)
     pub smart_contract_address: PackedSCAddressTarget,
     /// Mapping of the storage slot
@@ -59,16 +60,15 @@ pub struct StateWires {
     /// Range of the query
     pub range: Target,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    /// The merkle root of the opening.
-    pub state_root: HashOutTarget,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    /// The siblings that opens to `state_root`.
+    /// The siblings that opens to the state tree.
     pub siblings: MerkleProofTarget,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     /// The boolean flags to describe the path. `true` equals right; `false` equals left.
     pub positions: Vec<BoolTarget>,
     /// The block hash as stored in the leaf of the block db.
     pub block_hash: OutputHash,
+    /// The merkle root of the opening.
+    pub state_tree: StateTreeWires<MAX_DEPTH>,
 }
 
 /// The provenance db circuit
@@ -112,27 +112,27 @@ pub struct StateWires {
 /// 3. `C := Poseidon(B || H || Z)`
 /// 4. `R == 1`
 ///
-/// `DEPTH` is the maximum depth of the state tree in LPN database.
+/// `MAX_DEPTH` is the maximum depth of the state tree in LPN database.
 #[derive(Debug, Clone)]
-pub struct StateCircuit<const DEPTH: usize, F: RichField> {
+pub struct StateCircuit<const MAX_DEPTH: usize, F: RichField> {
     smart_contract_address: PackedSCAddress<F>,
     mapping_slot: F,
     length_slot: F,
     block_number: F,
-    state_root: HashOut<F>,
+    depth: F,
     siblings: Vec<HashOut<F>>,
     positions: Vec<bool>,
     block_hash: Array<F, PACKED_HASH_LEN>,
 }
 
-impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
+impl<const MAX_DEPTH: usize, F: RichField> StateCircuit<MAX_DEPTH, F> {
     /// Creates a new instance of the provenance circuit with the provided witness values.
     pub fn new(
         smart_contract_address: PackedSCAddress<F>,
         mapping_slot: F,
         length_slot: F,
         block_number: F,
-        state_root: HashOut<F>,
+        depth: F,
         siblings: Vec<HashOut<F>>,
         positions: Vec<bool>,
         block_hash: Array<F, PACKED_HASH_LEN>,
@@ -142,7 +142,7 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
             mapping_slot,
             length_slot,
             block_number,
-            state_root,
+            depth,
             siblings,
             positions,
             block_hash,
@@ -154,7 +154,7 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
     pub fn build(
         cb: &mut CircuitBuilder<GoldilocksField, 2>,
         storage_proof: &StorageInputs<Target>,
-    ) -> StateWires {
+    ) -> StateWires<MAX_DEPTH> {
         let x = storage_proof.owner();
         let c = storage_proof.root();
         let digest = storage_proof.digest();
@@ -165,7 +165,7 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
         let b = cb.add_virtual_target();
         let r = cb.constant(GoldilocksField::ONE);
 
-        let (siblings, positions): (Vec<_>, Vec<_>) = (0..DEPTH)
+        let (siblings, positions): (Vec<_>, Vec<_>) = (0..MAX_DEPTH)
             .map(|_| {
                 let pos = cb.add_virtual_bool_target_safe();
                 let sibling = cb.add_virtual_hash();
@@ -178,7 +178,7 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
         // FIXME the optimized version without the length slot is unimplemented
         // https://www.notion.so/lagrangelabs/Encoding-Specs-ccaa31d1598b4626860e26ac149705c4?pvs=4#fe2b40982352464ba39164cf4b41d301
         // Currently = H(pack_u32(address) || mapping_slot || length_slot || storageRoot)
-        let state_leaf = a
+        let state_leaf: Vec<_> = a
             .to_targets()
             .arr
             .into_iter()
@@ -187,20 +187,14 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
             .chain(c.elements.iter().copied())
             .collect();
 
-        let state_root = cb.add_virtual_hash();
-        cb.verify_merkle_proof::<PoseidonHash>(
-            state_leaf,
-            positions.as_slice(),
-            state_root,
-            &siblings,
-        );
+        let state_tree = StateTreeWires::build(cb, state_leaf.as_slice(), &siblings, &positions);
 
         // FIXME optimized version unimplemented
         // https://www.notion.so/lagrangelabs/Encoding-Specs-ccaa31d1598b4626860e26ac149705c4?pvs=4#5e8e6f06e2554b0caee4904258cbbca2
         let block_hash = OutputHash::new(cb);
         let block_leaf = iter::once(b)
             .chain(block_hash.to_targets().arr)
-            .chain(state_root.elements.iter().copied())
+            .chain(state_tree.root.elements.iter().copied())
             .collect();
         let block_leaf_hash = cb.hash_n_to_hash_no_pad::<PoseidonHash>(block_leaf);
 
@@ -212,15 +206,17 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
             length_slot: s,
             block_number: b,
             range: r,
-            state_root,
             siblings,
             positions,
             block_hash,
+            state_tree,
         }
     }
 
     /// Assigns the instance witness values to the provided wires.
-    pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &StateWires) {
+    pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &StateWires<MAX_DEPTH>) {
+        wires.state_tree.assign(pw, self.depth);
+
         wires
             .smart_contract_address
             .assign(pw, &self.smart_contract_address.arr);
@@ -228,13 +224,6 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
         pw.set_target(wires.mapping_slot, self.mapping_slot);
         pw.set_target(wires.length_slot, self.length_slot);
         pw.set_target(wires.block_number, self.block_number);
-
-        wires
-            .state_root
-            .elements
-            .iter()
-            .zip(self.state_root.elements.iter())
-            .for_each(|(&w, &v)| pw.set_target(w, v));
 
         wires
             .siblings
@@ -262,17 +251,17 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct StateRecursiveWires {
-    state_wires: StateWires,
+pub(crate) struct StateRecursiveWires<const MAX_DEPTH: usize> {
+    state_wires: StateWires<MAX_DEPTH>,
     storage_verifier: RecursiveCircuitsVerifierTarget<D>,
 }
 
 const NUM_STORAGE_INPUTS: usize = StorageInputs::<Target>::TOTAL_LEN;
 const NUM_IO: usize = BlockPublicInputs::<Target>::total_len();
 //ToDo: decide if we want it as a const generic parameter
-const DEPTH: usize = 0;
+const MAX_DEPTH: usize = 0;
 
-impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
+impl CircuitLogicWires<F, D, 0> for StateRecursiveWires<MAX_DEPTH> {
     type CircuitBuilderParams = RecursiveCircuitsVerifierGagdet<F, C, D, NUM_STORAGE_INPUTS>;
 
     type Inputs = CircuitInputsInternal;
@@ -289,7 +278,7 @@ impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
             storage_verifier.get_public_input_targets::<F, NUM_STORAGE_INPUTS>(),
         );
 
-        let state_wires = StateCircuit::<DEPTH, F>::build(builder, &storage_pi);
+        let state_wires = StateCircuit::<MAX_DEPTH, F>::build(builder, &storage_pi);
 
         Self {
             state_wires,
@@ -307,7 +296,7 @@ impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
 
 #[derive(Serialize, Deserialize)]
 pub struct Parameters {
-    circuit: CircuitWithUniversalVerifier<F, C, D, 0, StateRecursiveWires>,
+    circuit: CircuitWithUniversalVerifier<F, C, D, 0, StateRecursiveWires<MAX_DEPTH>>,
 }
 /// Set of inputs necessary to generate a proof for the state circuit
 pub struct CircuitInputsInternal {
@@ -317,7 +306,7 @@ pub struct CircuitInputsInternal {
 
 impl CircuitInputsInternal {
     pub(crate) fn new(
-        state_input: StateCircuit<DEPTH, F>,
+        state_input: StateCircuit<MAX_DEPTH, F>,
         storage_proof: ProofWithVK,
         storage_circuit_set: &RecursiveCircuits<F, C, D>,
     ) -> Self {
@@ -343,7 +332,7 @@ impl CircuitInputsInternal {
 /// Inputs to be provided to the publicly exposed query API in order to generate a proof for the
 /// state circuit
 pub struct CircuitInput {
-    state_input: StateCircuit<DEPTH, F>,
+    state_input: StateCircuit<MAX_DEPTH, F>,
     storage_proof: ProofWithVK,
 }
 
@@ -353,9 +342,9 @@ impl CircuitInput {
         mapping_slot: u32,
         length_slot: u32,
         block_number: u32,
-        state_root: HashOutput,
-        siblings: &[HashOutput; DEPTH],
-        positions: &[bool; DEPTH],
+        depth: u32,
+        siblings: &[HashOutput; MAX_DEPTH],
+        positions: &[bool; MAX_DEPTH],
         block_hash: HashOutput,
         storage_proof: Vec<u8>,
     ) -> Result<Self> {
@@ -364,7 +353,7 @@ impl CircuitInput {
         let mapping_slot = F::from_canonical_u32(mapping_slot);
         let length_slot = F::from_canonical_u32(length_slot);
         let block_number = F::from_canonical_u32(block_number);
-        let state_root = HashOut::from_bytes(state_root.as_slice());
+        let depth = F::from_canonical_u32(depth);
         let siblings = siblings
             .iter()
             .map(|hash| HashOut::from_bytes(hash.as_slice()))
@@ -377,7 +366,7 @@ impl CircuitInput {
                 mapping_slot,
                 length_slot,
                 block_number,
-                state_root,
+                depth,
                 siblings,
                 positions,
                 block_hash,

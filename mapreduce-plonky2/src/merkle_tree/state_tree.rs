@@ -1,13 +1,9 @@
 //! A state tree Merkle opening with internal variable depth.
 
 use plonky2::{
-    field::{
-        extension::Extendable,
-        goldilocks_field::GoldilocksField,
-        types::{Field, PrimeField64},
-    },
+    field::extension::Extendable,
     hash::{
-        hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         merkle_proofs::MerkleProofTarget,
         poseidon::PoseidonHash,
     },
@@ -17,6 +13,8 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+use recursion_framework::serialization::{deserialize, serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::poseidon::hash_maybe_swap;
 
@@ -26,12 +24,14 @@ use crate::poseidon::hash_maybe_swap;
 /// thereby ensuring the integrity and immutability of the circuit structure. Internal flags named
 /// [is_value] will be activated upon reaching the target depth for each node, allowing the root
 /// value to be replicated accurately while still processing subsequent permutations.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateTreeWires<const MAX_DEPTH: usize> {
     /// A set of flags that will be `true` for the corresponding depth that should compute the
     /// Merkle root as a hash permutation. If `false`, the circuit will repeat the previous hash.
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub is_value: Vec<BoolTarget>,
     /// The Merkle root at the variable depth.
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub root: HashOutTarget,
     /// The proven root depth.
     pub depth: Target,
@@ -45,12 +45,15 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
     /// ignored.
     /// - `positions` will be bits path up to [MAX_DEPTH]; the remainder items will be ignored.
     /// - `depth` will be the variable depth to be proven.
-    pub fn build(
-        cb: &mut CircuitBuilder<GoldilocksField, 2>,
+    pub fn build<F, const D: usize>(
+        cb: &mut CircuitBuilder<F, D>,
         leaf_data: &[Target],
         siblings: &MerkleProofTarget,
         positions: &[BoolTarget],
-    ) -> Self {
+    ) -> Self
+    where
+        F: RichField + Extendable<D>,
+    {
         assert_eq!(
             siblings.siblings.len(),
             MAX_DEPTH,
@@ -62,7 +65,6 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
             "the positions length must be padded to the max depth"
         );
 
-        let root = cb.add_virtual_hash();
         let depth = cb.add_virtual_target();
         let mut positions = positions.to_vec();
         let is_value: Vec<_> = (0..MAX_DEPTH)
@@ -86,9 +88,6 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
         cb.connect(acc, depth);
 
         let mut root = cb.hash_n_to_hash_no_pad::<PoseidonHash>(leaf_data.to_vec());
-        let mut left = root;
-        let mut right = root;
-        let mut preimage = vec![cb.zero(); 2 * NUM_HASH_OUT_ELTS];
 
         for d in 0..MAX_DEPTH {
             // always hash up to depth to preserve the same circuit structure, regardless of the
@@ -117,16 +116,19 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
     /// Assigns the provided data as witness.
     ///
     /// - `depth` will be the variable depth to be proven. Will not be assigned to a target.
-    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, depth: GoldilocksField) {
+    pub fn assign<F>(&self, pw: &mut PartialWitness<F>, depth: F)
+    where
+        F: RichField,
+    {
         pw.set_target(self.depth, depth);
         let depth_value = depth.to_canonical_u64() as usize;
 
         for i in 0..depth_value {
-            pw.set_target(self.is_value[i].target, GoldilocksField::ONE);
+            pw.set_target(self.is_value[i].target, F::ONE);
         }
 
         for i in depth_value..MAX_DEPTH {
-            pw.set_target(self.is_value[i].target, GoldilocksField::ZERO);
+            pw.set_target(self.is_value[i].target, F::ZERO);
         }
     }
 }
