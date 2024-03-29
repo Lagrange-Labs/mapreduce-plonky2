@@ -35,7 +35,7 @@ use std::array::{self};
 /// `S` storage slot of the variable holding the length
 /// `V` Integer value stored at key `S` (can be given by prover)
 #[derive(Clone, Debug)]
-pub(crate) struct PublicInputs<'a, T: Clone> {
+pub struct PublicInputs<'a, T: Clone> {
     pub(crate) proof_inputs: &'a [T],
 }
 
