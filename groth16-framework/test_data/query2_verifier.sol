@@ -554,6 +554,9 @@ contract Verifier {
     // The byte offset of the NFT IDS located in the plonky2 public inputs.
     uint256 constant NFT_IDS_OFFSET_IN_PI = 16;
 
+    // Top 3 bits mask
+    uint256 constant TOP_THREE_BIT_MASK = ~(uint256(7) << 253);
+
     // This respond function does the followings:
     // 1. Convert the `data` argument to the Groth16 proofs (8 uint256),
     //    inputs (3 uint256) and the plonky2 public inputs (PI_TOTAL_LEN uint64).
@@ -593,8 +596,7 @@ contract Verifier {
         }
         bytes32 pis_hash_bytes = sha256(pis);
         uint256 pis_hash = uint256(pis_hash_bytes);
-        uint256 mask = ~(uint256(7) << 253); // Top 3 bits mask
-        pis_hash = pis_hash & mask;
+        pis_hash = pis_hash & TOP_THREE_BIT_MASK;
 
         // 4. Require the sha256 hash equals to the last Groth16 input.
         require(pis_hash == inputs[2], "The plonky2 public inputs hash must be equal to the last of the Groth16 inputs");
