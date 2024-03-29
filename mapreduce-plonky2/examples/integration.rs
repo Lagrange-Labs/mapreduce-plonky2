@@ -196,9 +196,7 @@ struct StorageProver<'a> {
     ctx: &'a Context,
 }
 
-impl<'a> StorageProver<'a> {
-    fn build_storage_proofs
-}
+impl<'a> StorageProver<'a> {}
 
 async fn full_flow_pudgy(ctx: Context) -> Result<()> {
     let mpt_proofs = ctx.mapping_proofs().await?;
