@@ -72,6 +72,7 @@ async fn main() -> Result<()> {
     let args = CliParams::parse();
     println!("Hello, world!");
     let ctx = Context::build(args).await?;
+    full_flow_pudgy(ctx).await?;
     Ok(())
 }
 
@@ -216,7 +217,6 @@ struct StorageProver<'a> {
 impl<'a> StorageProver<'a> {
     async fn build_storage_proofs(
         ctx: &'a Context,
-        values: &[LPNValue],
         mpt_proofs: &EIP1186ProofResponse,
     ) -> Result<Self> {
         // create list of all MPT storage node related to the mappping to prove
@@ -254,7 +254,6 @@ impl<'a> StorageProver<'a> {
                     acc
                 });
         // start proving the leaf hashes and continuously prove parents nodes until we reach the root
-        use std::collections::VecDeque;
         let mut nodes_to_prove = VecDeque::from(leaf_hashes.clone());
         let root_hash = keccak256(&mpt_proofs.storage_proof[0].proof[0]);
         let mut root_proof = None;
@@ -320,26 +319,14 @@ impl<'a> StorageProver<'a> {
 }
 
 async fn full_flow_pudgy(ctx: Context) -> Result<()> {
+    log::info!("Fetching mapping mpt proofs");
     let mpt_proofs = ctx.mapping_proofs().await?;
     ProofQuery::verify_storage_proof(&mpt_proofs)?;
+    log::info!("Fetching length mpt proofs");
     let length_mpt_proofs = ctx.length_extract_proof().await?;
     ProofQuery::verify_storage_proof(&length_mpt_proofs)?;
-    // create a list of all the mapping keys/values pair we want to transform in our database
-    let values = mpt_proofs
-        .storage_proof
-        .iter()
-        .map(|p| {
-            let list: Vec<Vec<u8>> = rlp::decode_list(&p.proof.last().cloned().unwrap());
-            let mut mapping_key = Vec::new();
-            p.key.to_big_endian(&mut mapping_key[..]);
-            let value: Vec<u8> = rlp::decode(&list[1]).unwrap();
-            LPNValue {
-                mapping_key,
-                mapping_value: value,
-            }
-        })
-        .collect::<Vec<_>>();
-    let storage_prover = StorageProver::build_storage_proofs(&ctx, &values, &mpt_proofs).await?;
+    log::info!("building storage proofs");
+    let storage_prover = StorageProver::build_storage_proofs(&ctx, &mpt_proofs).await?;
     // we want to extract the length of the mapping
     let length_extract_input =
         ArrayLengthExtractCircuit::<MAX_STORAGE_DEPTH, MAX_BRANCH_NODE_LEN>::new(
