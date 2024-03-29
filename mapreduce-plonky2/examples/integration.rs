@@ -33,6 +33,7 @@ use mapreduce_plonky2::{
 use plonky2::hash::hash_types::HashOut;
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher, PoseidonGoldilocksConfig};
+use serde::{Deserialize, Serialize};
 use serde_json::map;
 use std::{collections::VecDeque, env, fs::File, str::FromStr};
 use std::{io::Write, panic};
@@ -84,7 +85,13 @@ fn enable_logging() {
     }
 }
 
-fn load_or_generate_params<const BD: usize>(load: bool) -> Result<api::PublicParameters<BD>> {
+fn load_or_generate_params<F, T: Serialize + for<'a> Deserialize<'a>>(
+    load: bool,
+    factory: F,
+) -> Result<T>
+where
+    F: FnOnce() -> T,
+{
     let file_exists = std::path::Path::new(PARAM_FILE).exists();
     if file_exists && load {
         log::info!("File exists, loading parameters");
@@ -94,7 +101,7 @@ fn load_or_generate_params<const BD: usize>(load: bool) -> Result<api::PublicPar
     } else {
         log::info!("Building parameters (file exists {})", file_exists);
         let mut file = File::create(PARAM_FILE)?;
-        let params = crate::api::build_circuits_params::<BD>();
+        let params = factory();
         bincode::serialize_into(&mut file, &params)?;
         Ok(params)
     }
@@ -112,13 +119,21 @@ struct Context {
     mapping_keys: Vec<[u8; 32]>,
 }
 
+fn build_params() -> api::PublicParameters<MAX_BLOCK_DEPTH> {
+    crate::api::build_circuits_params::<MAX_BLOCK_DEPTH>()
+}
+
+fn build_fake() -> Vec<u8> {
+    vec![1, 2, 3, 4]
+}
+
 impl Context {
     async fn build(c: CliParams) -> Result<Self> {
         log::info!(
             "Fetching/Generating parameters (load={})",
             c.load.unwrap_or(false)
         );
-        let params = load_or_generate_params::<MAX_BLOCK_DEPTH>(c.load.unwrap_or(false))?;
+        let params = load_or_generate_params(c.load.unwrap_or(false), build_params)?;
         let url = get_mainnet_url();
         log::info!("Using JSON RPC url {}", url);
         let provider =
@@ -391,11 +406,11 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
     )?;
 
     // then we can finally build the state database
-    let (lpn_leaf, lpn_db_root, frontier) = build_first_block_root(&ctx, lpn_state_root);
+    let (_, lpn_db_root, frontier) = build_first_block_root(&ctx, lpn_state_root);
     let lpn_block_input = mapreduce_plonky2::block::BlockTreeCircuit::new(0, lpn_db_root, frontier);
     let inputs = mapreduce_plonky2::block::CircuitInput::input_for_first_block(
         lpn_block_input,
-        lpn_leaf.to_vec(),
+        state_leaf_proof.to_vec(),
     );
     let lpn_block_proof = api::generate_proof(&ctx.params, api::CircuitInput::BlockDB(inputs))?;
     Ok(())
