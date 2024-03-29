@@ -138,8 +138,10 @@ mod tests {
     use std::array;
 
     use plonky2::{
-        field::goldilocks_field::GoldilocksField,
-        hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
+        field::{goldilocks_field::GoldilocksField, types::Field},
+        hash::{
+            hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation,
+        },
         plonk::config::PoseidonGoldilocksConfig,
     };
     use rand::{rngs::StdRng, RngCore, SeedableRng};
