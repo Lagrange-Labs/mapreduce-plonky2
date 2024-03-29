@@ -31,6 +31,25 @@
   {
     "inputs": [
       {
+        "internalType": "uint8[]",
+        "name": "data",
+        "type": "uint8[]"
+      }
+    ],
+    "name": "respond",
+    "outputs": [
+      {
+        "internalType": "uint32[]",
+        "name": "",
+        "type": "uint32[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256[4]",
         "name": "compressedProof",
         "type": "uint256[4]"

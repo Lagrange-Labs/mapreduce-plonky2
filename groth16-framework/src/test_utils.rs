@@ -10,8 +10,34 @@ use mapreduce_plonky2::api::deserialize_proof;
 use plonky2::{field::types::PrimeField64, plonk::proof::ProofWithPublicInputs};
 use std::path::Path;
 
+/// Convert the plonky2 proof public inputs to bytes and save to a file
+/// `plonky2_proof_pis.bin` in the specified dir.
+pub fn save_plonky2_proof_pis(dir: &str, proof: &ProofWithPublicInputs<F, C, D>) {
+    let file_path = Path::new(dir).join("plonky2_proof_pis.bin");
+
+    let bytes: Vec<_> = proof
+        .public_inputs
+        .iter()
+        .flat_map(|f| f.to_canonical_u64().to_le_bytes())
+        .collect();
+
+    write_file(file_path, &bytes).unwrap();
+}
+
+/// Test Groth16 proving, verification and Solidity verification.
+pub fn test_groth16_proving_and_verification(asset_dir: &str, plonky2_proof: &[u8]) {
+    // Generate the Groth16 proof.
+    let groth16_proof = groth16_prove(asset_dir, &plonky2_proof);
+
+    // Verify the proof off-chain.
+    groth16_verify(asset_dir, &groth16_proof);
+
+    // Verify the proof on-chain.
+    evm_verify(asset_dir, &groth16_proof);
+}
+
 /// Test to generate the proof.
-pub fn groth16_prove(asset_dir: &str, plonky2_proof: &[u8]) -> Groth16Proof {
+fn groth16_prove(asset_dir: &str, plonky2_proof: &[u8]) -> Groth16Proof {
     // Initialize the Groth16 prover.
     let prover = Groth16Prover::new(asset_dir).expect("Failed to initialize the prover");
 
@@ -38,14 +64,14 @@ pub fn groth16_prove(asset_dir: &str, plonky2_proof: &[u8]) -> Groth16Proof {
 }
 
 /// Test to verify the proof.
-pub fn groth16_verify(asset_dir: &str, proof: &Groth16Proof) {
+fn groth16_verify(asset_dir: &str, proof: &Groth16Proof) {
     let verifier = Groth16Verifier::new(asset_dir).expect("Failed to initialize the verifier");
 
     verifier.verify(proof).expect("Failed to verify the proof")
 }
 
 /// Test the Solidity verification.
-pub fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
+fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
     let solidity_file_path = Path::new(asset_dir)
         .join("verifier.sol")
         .to_string_lossy()
@@ -74,17 +100,4 @@ pub fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
 
     let verified = verifier.verify(calldata);
     assert!(verified);
-}
-
-/// Convert the plonky2 proof public inputs to bytes and write to a file.
-pub fn write_plonky2_proof_pis(dir: &str, proof: &ProofWithPublicInputs<F, C, D>) {
-    let file_path = Path::new(dir).join("plonky2_proof_pis.bin");
-
-    let bytes: Vec<_> = proof
-        .public_inputs
-        .iter()
-        .flat_map(|f| f.to_canonical_u64().to_le_bytes())
-        .collect();
-
-    write_file(file_path, &bytes).unwrap();
 }
