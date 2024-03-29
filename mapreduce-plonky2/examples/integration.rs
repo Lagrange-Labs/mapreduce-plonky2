@@ -104,6 +104,7 @@ where
         log::info!("Building parameters (file exists {})", file_exists);
         let mut file = File::create(PARAM_FILE)?;
         let params = factory();
+        log::info!("Serializing the parameters");
         params.serialize(&mut Serializer::new(&mut file))?;
         Ok(params)
     }
@@ -419,12 +420,14 @@ fn build_first_block_root(
     );
     let leaf_count = 1 << MAX_BLOCK_DEPTH;
     let leaves = std::iter::once(first_leaf.to_vec())
-        .chain(std::iter::repeat(vec![]))
-        .take(leaf_count - 1)
+        .chain(std::iter::repeat(vec![]).take(leaf_count - 1))
         .collect::<Vec<_>>();
     let root = merkle_root_bytes(leaves);
-    let frontiers = (0..MAX_BLOCK_DEPTH)
+    // we dont include the root in the merkle proof
+    let frontiers = (0..MAX_BLOCK_DEPTH - 1)
         .map(|i| {
+            // we create the empty node at each depth since the first leaf always
+            // has empty siblings
             (0..i).fold(HashOut::<F>::from_partial(&[]), |hash, _| {
                 PoseidonHash::two_to_one(hash, hash)
             })
@@ -455,7 +458,7 @@ fn build_storage_proofs(
         .collect::<Result<Vec<_>>>()?;
     let mut nodes = VecDeque::from(leaves_proof.clone());
     let mut new_nodes = VecDeque::new();
-    while true {
+    loop {
         while nodes.len() != 1 {
             let left = nodes.pop_front().unwrap();
             let right = nodes.pop_front().unwrap();
