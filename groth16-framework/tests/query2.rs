@@ -167,12 +167,10 @@ fn plonky2_build_and_prove(asset_dir: &str) -> (CircuitData<F, C, D>, Vec<u8>) {
         .generate_input_proofs([pis])
         .unwrap();
     let query2_block_vd = query2_testing_framework.verifier_data_for_input_proofs::<1>();
-    let q2_proof_buff = ProofWithVK {
-        proof: query2_block_proof[0].clone(),
-        vk: query2_block_vd[0].clone(),
-    }
-    .serialize()
-    .unwrap();
+    let q2_proof_buff =
+        ProofWithVK::from((query2_block_proof[0].clone(), query2_block_vd[0].clone()))
+            .serialize()
+            .unwrap();
     let block_db_buff = serialize_proof(block_db_proof).unwrap();
 
     // Create the revelation input.

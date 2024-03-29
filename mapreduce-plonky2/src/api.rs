@@ -205,9 +205,9 @@ pub fn block_db_circuit_info<const MAX_DEPTH: usize>(
 /// ProofWithVK is a generic struct holding a child proof and its associated verification key.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ProofWithVK {
-    pub proof: ProofWithPublicInputs<F, C, D>,
+    pub(crate) proof: ProofWithPublicInputs<F, C, D>,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    pub vk: VerifierOnlyCircuitData<C, D>,
+    pub(crate) vk: VerifierOnlyCircuitData<C, D>,
 }
 
 impl ProofWithVK {
