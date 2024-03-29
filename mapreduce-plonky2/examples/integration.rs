@@ -33,6 +33,7 @@ use mapreduce_plonky2::{
 use plonky2::hash::hash_types::HashOut;
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher, PoseidonGoldilocksConfig};
+use rmp_serde::Serializer;
 use serde::{Deserialize, Serialize};
 use serde_json::map;
 use std::{collections::VecDeque, env, fs::File, str::FromStr};
@@ -97,13 +98,13 @@ where
     if file_exists && load {
         log::info!("File exists, loading parameters");
         let mut file = File::open(PARAM_FILE)?;
-        let params = bincode::deserialize_from(&mut file)?;
+        let params = rmp_serde::from_read(&mut file)?;
         Ok(params)
     } else {
         log::info!("Building parameters (file exists {})", file_exists);
         let mut file = File::create(PARAM_FILE)?;
         let params = factory();
-        bincode::serialize_into(&mut file, &params)?;
+        params.serialize(&mut Serializer::new(&mut file))?;
         Ok(params)
     }
 }
