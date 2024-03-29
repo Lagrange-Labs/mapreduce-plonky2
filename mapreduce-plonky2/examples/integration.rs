@@ -36,6 +36,7 @@ const MAX_STORAGE_DEPTH: usize = 5;
 struct CliParams {
     /// set to true if you want to load the params from the file
     /// otherwise it generates them by default
+    #[arg(short, long)]
     load: Option<bool>,
 }
 
