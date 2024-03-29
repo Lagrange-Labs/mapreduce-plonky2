@@ -1,7 +1,11 @@
 //! A state tree Merkle opening with internal variable depth.
 
 use plonky2::{
-    field::{extension::Extendable, types::Field},
+    field::{
+        extension::Extendable,
+        goldilocks_field::GoldilocksField,
+        types::{Field, PrimeField64},
+    },
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         merkle_proofs::MerkleProofTarget,
@@ -13,6 +17,8 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+
+use crate::poseidon::hash_maybe_swap;
 
 /// A Merkle proof wire structure enabling verification of leaf data up to variable depth.
 ///
@@ -39,15 +45,12 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
     /// ignored.
     /// - `positions` will be bits path up to [MAX_DEPTH]; the remainder items will be ignored.
     /// - `depth` will be the variable depth to be proven.
-    pub fn build<F, const D: usize>(
-        cb: &mut CircuitBuilder<F, D>,
+    pub fn build(
+        cb: &mut CircuitBuilder<GoldilocksField, 2>,
         leaf_data: &[Target],
         siblings: &MerkleProofTarget,
         positions: &[BoolTarget],
-    ) -> Self
-    where
-        F: RichField + Extendable<D>,
-    {
+    ) -> Self {
         assert_eq!(
             siblings.siblings.len(),
             MAX_DEPTH,
@@ -88,25 +91,13 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
         let mut preimage = vec![cb.zero(); 2 * NUM_HASH_OUT_ELTS];
 
         for d in 0..MAX_DEPTH {
-            for i in 0..NUM_HASH_OUT_ELTS {
-                left.elements[i] = cb.select(
-                    positions[d],
-                    siblings.siblings[d].elements[i],
-                    root.elements[i],
-                );
-                right.elements[i] = cb.select(
-                    positions[d],
-                    root.elements[i],
-                    siblings.siblings[d].elements[i],
-                );
-            }
-
-            preimage[..NUM_HASH_OUT_ELTS].copy_from_slice(&left.elements);
-            preimage[NUM_HASH_OUT_ELTS..].copy_from_slice(&right.elements);
-
             // always hash up to depth to preserve the same circuit structure, regardless of the
             // chosen depth
-            let value = cb.hash_n_to_hash_no_pad::<PoseidonHash>(preimage.clone());
+            let value = hash_maybe_swap(
+                cb,
+                &[root.elements, siblings.siblings[d].elements],
+                positions[d],
+            );
 
             // pick either the hashed value or the current root as the next depth, depending on the
             // `is_value` flag that is responsible to define the depths that should be computed as
@@ -126,19 +117,16 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
     /// Assigns the provided data as witness.
     ///
     /// - `depth` will be the variable depth to be proven. Will not be assigned to a target.
-    pub fn assign<F>(&self, pw: &mut PartialWitness<F>, depth: F)
-    where
-        F: RichField,
-    {
+    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, depth: GoldilocksField) {
         pw.set_target(self.depth, depth);
         let depth_value = depth.to_canonical_u64() as usize;
 
         for i in 0..depth_value {
-            pw.set_target(self.is_value[i].target, F::ONE);
+            pw.set_target(self.is_value[i].target, GoldilocksField::ONE);
         }
 
         for i in depth_value..MAX_DEPTH {
-            pw.set_target(self.is_value[i].target, F::ZERO);
+            pw.set_target(self.is_value[i].target, GoldilocksField::ZERO);
         }
     }
 }
