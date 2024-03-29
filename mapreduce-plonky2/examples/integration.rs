@@ -13,12 +13,18 @@ use ethers::{
 use hashbrown::HashMap;
 use log::{log_enabled, Level, LevelFilter};
 use mapreduce_plonky2::{
-    api,
+    api::{self, CircuitInput},
     eth::{get_mainnet_url, ProofQuery},
-    storage::{self, key::SimpleSlot, length_match, MAX_BRANCH_NODE_LEN},
+    storage::{
+        self,
+        key::SimpleSlot,
+        length_match,
+        lpn::{self, leaf_hash_for_mapping, LeafCircuit, NodeInputs},
+        mapping, MAX_BRANCH_NODE_LEN,
+    },
     types::HashOutput,
 };
-use std::{env, fs::File, str::FromStr};
+use std::{collections::VecDeque, env, fs::File, str::FromStr};
 use std::{io::Write, panic};
 use storage::length_extract::ArrayLengthExtractCircuit;
 
@@ -156,6 +162,17 @@ impl Context {
             .await?;
         Ok(res)
     }
+
+    fn mapping_values(&self) -> Vec<Vec<u8>> {
+        // same owner for all the nft ids
+        std::iter::repeat(left_pad32(&self.owner.to_fixed_bytes()).to_vec())
+            .take(self.mapping_keys.len())
+            .collect()
+    }
+
+    fn mapping_keys_vec(&self) -> Vec<Vec<u8>> {
+        self.mapping_keys.iter().map(|k| k.to_vec()).collect()
+    }
 }
 
 async fn full_flow_pudgy(ctx: Context) -> Result<()> {
@@ -267,6 +284,7 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
         }
     }
     assert!(root_proof.is_some());
+    let root_proof = root_proof.unwrap();
     // we want to extract the length of the mapping
     let length_extract_input =
         ArrayLengthExtractCircuit::<MAX_STORAGE_DEPTH, MAX_BRANCH_NODE_LEN>::new(
@@ -285,20 +303,97 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
     )?;
     log::info!("Generating length_match proof");
     // now we want to do the length equality check
-    let length_match_input = length_match::CircuitInput::new(root_proof.unwrap(), length_proof);
+    let length_match_input = length_match::CircuitInput::new(root_proof.clone(), length_proof);
     let length_match_proof = crate::api::generate_proof(
         &ctx.params,
         crate::api::CircuitInput::LengthMatch(length_match_input),
     )?;
 
     // now we need to build the tree of the LPN storage DB
-
+    let db_root = build_storage_db(ctx.mapping_keys_vec(), ctx.mapping_values());
+    let db_root_proof = build_storage_proofs(&ctx, ctx.mapping_keys_vec(), ctx.mapping_values())?;
+    // create the proof of equivalence
+    let inputs = api::CircuitInput::DigestEqual(storage::digest_equal::CircuitInput::new(
+        db_root_proof,
+        root_proof.clone(),
+    ));
+    let digest_equivalence_proof = api::generate_proof(&ctx.params, inputs)?;
     Ok(())
 }
 
-//fn build_storage_db(mapping_keys: Vec<Vec<u8>>, mapping_values: Vec<Vec<u8>>) -> HashOutput {
-//
-//}
+fn build_digest_equivalence(c: &Context) {}
+
+fn build_storage_proofs(
+    ctx: &Context,
+    mapping_keys: Vec<Vec<u8>>,
+    mapping_values: Vec<Vec<u8>>,
+) -> Result<Vec<u8>> {
+    let leaves_proof = mapping_keys
+        .iter()
+        .zip(mapping_values.iter())
+        .map(|(k, v)| {
+            storage::lpn::api::Input::Leaf(LeafCircuit {
+                mapping_key: left_pad32(k),
+                mapping_value: left_pad32(v),
+            })
+        })
+        .map(|input| {
+            let proof = crate::api::generate_proof(&ctx.params, CircuitInput::Storage(input));
+            proof
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut nodes = VecDeque::from(leaves_proof.clone());
+    let mut new_nodes = VecDeque::new();
+    while true {
+        while nodes.len() != 1 {
+            let left = nodes.pop_front().unwrap();
+            let right = nodes.pop_front().unwrap();
+            let input = storage::lpn::api::Input::Node(NodeInputs::new(left, right));
+            let proof = crate::api::generate_proof(&ctx.params, CircuitInput::Storage(input))?;
+            nodes.push_back(proof);
+        }
+        if nodes.len() == 1 {
+            new_nodes.push_back(nodes.pop_back().unwrap());
+        }
+        nodes = new_nodes.clone();
+        new_nodes.clear();
+        if nodes.len() == 1 {
+            break;
+        }
+    }
+    Ok(nodes.pop_front().unwrap())
+}
+fn build_storage_db(mapping_keys: Vec<Vec<u8>>, mapping_values: Vec<Vec<u8>>) -> HashOutput {
+    assert_eq!(mapping_keys.len(), mapping_values.len());
+    let leaves = mapping_keys
+        .iter()
+        .zip(mapping_values.iter())
+        .map(|(k, v)| leaf_hash_for_mapping(k, v))
+        .collect::<Vec<_>>();
+    let mut nodes = VecDeque::from(leaves.clone());
+    // l1,l2,l3 ==>
+    //    - l1,l2 => l12,l3
+    //    - l12,l3 => root
+
+    let mut new_nodes = VecDeque::new();
+    while true {
+        while nodes.len() > 1 {
+            let left = nodes.pop_front().unwrap();
+            let right = nodes.pop_front().unwrap();
+            let parent = storage::lpn::intermediate_node_hash(&left, &right);
+            new_nodes.push_back(parent);
+        }
+        if nodes.len() == 1 {
+            new_nodes.push_back(nodes.pop_back().unwrap());
+        }
+        nodes = new_nodes.clone();
+        new_nodes.clear();
+        if nodes.len() == 1 {
+            break;
+        }
+    }
+    nodes.pop_front().unwrap()
+}
 
 #[derive(Debug, Clone)]
 struct NodeToProve {

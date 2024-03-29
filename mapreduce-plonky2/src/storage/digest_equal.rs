@@ -46,7 +46,7 @@ use std::array;
 /// proof generated in this module. They all share the same structure.
 /// `D` Digest of all the values processed
 /// `C1` MPT root of blockchain storage trie
-/// `C2` Merkle root of LPN’s storage database (merkle tree)
+/// `C2` Merkle root of LPN's storage database (merkle tree)
 /// `M` Storage slot of the mapping
 /// `S` Storage slot of the variable holding the length
 #[derive(Clone, Debug)]
