@@ -21,7 +21,6 @@ use plonky2::{
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField},
         merkle_proofs::{MerkleProof, MerkleProofTarget},
-        merkle_tree::MerkleTree,
         poseidon::PoseidonHash,
     },
     iop::{
@@ -670,17 +669,9 @@ pub(crate) fn empty_merkle_root<
     })
 }
 
-/// Generate the Merkle root from leaves.
-fn merkle_root<F: SerializableRichField<D>, const D: usize>(leaves: Vec<Vec<F>>) -> HashOut<F> {
-    // Construct the Merkle tree.
-    let tree = MerkleTree::<_, PoseidonHash>::new(leaves, 0);
-    assert_eq!(tree.cap.0.len(), 1, "Merkle tree must have one root");
-
-    tree.cap.0[0]
-}
-
 #[cfg(test)]
 mod tests {
+    use std::fs;
 
     use super::*;
     use crate::{
@@ -699,7 +690,9 @@ mod tests {
         plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
     use rand::{thread_rng, Rng};
-    use recursion_framework::framework_testing::TestingRecursiveCircuits;
+    use recursion_framework::framework_testing::{
+        new_universal_circuit_builder_for_testing, TestingRecursiveCircuits,
+    };
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -887,6 +880,14 @@ mod tests {
         exp_outputs
     }
 
+    /// Generate the Merkle root from leaves.
+    fn merkle_root<F: SerializableRichField<D>, const D: usize>(leaves: Vec<Vec<F>>) -> HashOut<F> {
+        // Construct the Merkle tree.
+        let tree = MerkleTree::<_, PoseidonHash>::new(leaves, 0);
+        assert_eq!(tree.cap.0.len(), 1, "Merkle tree must have one root");
+
+        tree.cap.0[0]
+    }
     /// Generate the all leaves of a Merkle tree, the new leaf (block) is
     /// specified at the given index.
     fn generate_all_leaves<const MAX_DEPTH: usize>(
@@ -1078,5 +1079,164 @@ mod tests {
                 pw.set_hash_target(wires.1, self.expected);
             }
         }
+    }
+
+    #[ignore]
+    #[test]
+    fn debug_subsequent_blocks_proof_generation() {
+        const DEPTH: usize = 21;
+        /*
+            INPUT VALUES: change the following values with the input values that need to be debugged
+        */
+        let merkle_path: Vec<HashOutput> = vec![
+            [
+                232, 100, 218, 187, 253, 223, 210, 224, 176, 5, 206, 112, 119, 243, 86, 214, 210,
+                200, 143, 246, 240, 211, 231, 163, 201, 203, 182, 234, 31, 15, 80, 136,
+            ],
+            [
+                89, 179, 176, 108, 120, 169, 24, 60, 195, 70, 162, 100, 51, 94, 5, 196, 244, 8,
+                136, 180, 10, 219, 83, 121, 202, 68, 17, 58, 243, 3, 22, 199,
+            ],
+            [
+                204, 79, 241, 170, 209, 74, 26, 182, 207, 178, 1, 153, 27, 88, 133, 141, 242, 10,
+                163, 98, 215, 154, 143, 222, 3, 229, 138, 50, 65, 252, 150, 33,
+            ],
+            [
+                90, 224, 92, 41, 247, 10, 224, 97, 100, 222, 162, 157, 197, 124, 36, 154, 95, 192,
+                86, 233, 191, 148, 251, 70, 66, 165, 60, 199, 12, 58, 112, 103,
+            ],
+            [
+                68, 38, 70, 6, 26, 146, 84, 81, 71, 9, 44, 46, 13, 179, 193, 140, 39, 77, 133, 191,
+                243, 124, 125, 22, 64, 160, 136, 175, 160, 234, 34, 245,
+            ],
+            [
+                174, 97, 91, 209, 200, 181, 230, 233, 57, 212, 151, 189, 52, 155, 172, 134, 151, 1,
+                89, 252, 240, 35, 126, 183, 114, 102, 111, 104, 151, 53, 5, 208,
+            ],
+            [
+                74, 97, 73, 93, 26, 95, 34, 37, 3, 143, 238, 142, 100, 42, 29, 90, 16, 251, 125,
+                196, 65, 247, 168, 221, 195, 48, 13, 8, 96, 18, 86, 73,
+            ],
+            [
+                227, 85, 8, 226, 62, 237, 121, 233, 249, 193, 196, 70, 198, 66, 154, 60, 177, 164,
+                58, 168, 110, 218, 201, 22, 245, 121, 11, 139, 252, 228, 104, 183,
+            ],
+            [
+                22, 41, 253, 12, 114, 215, 111, 254, 90, 122, 10, 219, 243, 207, 114, 141, 39, 169,
+                249, 149, 81, 212, 27, 211, 179, 137, 41, 74, 18, 103, 211, 43,
+            ],
+            [
+                78, 241, 201, 87, 33, 68, 162, 60, 158, 132, 175, 53, 44, 192, 78, 149, 151, 145,
+                157, 238, 51, 198, 240, 44, 69, 244, 31, 121, 53, 218, 241, 252,
+            ],
+            [
+                195, 64, 17, 123, 63, 182, 247, 204, 83, 234, 163, 228, 177, 25, 233, 145, 247,
+                141, 51, 29, 245, 113, 124, 112, 65, 42, 175, 0, 70, 143, 126, 194,
+            ],
+            [
+                195, 211, 181, 10, 173, 186, 110, 141, 227, 152, 80, 240, 182, 170, 27, 13, 76,
+                212, 217, 176, 118, 172, 197, 225, 117, 54, 200, 59, 91, 199, 139, 33,
+            ],
+            [
+                33, 157, 131, 142, 22, 137, 37, 237, 22, 128, 113, 238, 111, 132, 1, 251, 226, 4,
+                88, 33, 76, 158, 227, 142, 76, 111, 210, 233, 105, 140, 97, 97,
+            ],
+            [
+                127, 143, 55, 216, 33, 248, 111, 41, 105, 198, 161, 199, 174, 215, 117, 201, 248,
+                244, 136, 69, 250, 177, 65, 8, 197, 93, 207, 153, 7, 162, 118, 236,
+            ],
+            [
+                44, 84, 123, 204, 146, 163, 104, 1, 26, 28, 140, 27, 98, 103, 120, 31, 129, 128,
+                136, 107, 251, 80, 70, 251, 30, 55, 123, 16, 18, 93, 93, 245,
+            ],
+            [
+                216, 236, 179, 196, 96, 83, 60, 231, 13, 143, 15, 22, 167, 247, 227, 100, 140, 247,
+                141, 55, 60, 100, 69, 205, 233, 222, 148, 43, 104, 144, 152, 108,
+            ],
+            [
+                230, 205, 247, 148, 174, 240, 149, 171, 228, 207, 0, 162, 46, 137, 85, 181, 196,
+                109, 125, 24, 49, 249, 184, 87, 107, 2, 55, 233, 57, 82, 28, 158,
+            ],
+            [
+                203, 240, 221, 182, 0, 173, 135, 85, 80, 194, 48, 69, 225, 73, 153, 39, 117, 119,
+                70, 121, 44, 226, 248, 2, 16, 22, 158, 31, 224, 91, 164, 10,
+            ],
+            [
+                59, 79, 22, 38, 144, 205, 8, 209, 168, 16, 120, 247, 160, 64, 133, 56, 130, 86,
+                144, 235, 90, 90, 243, 158, 149, 7, 41, 221, 43, 221, 227, 210,
+            ],
+            [
+                161, 0, 128, 20, 161, 149, 125, 112, 241, 211, 155, 185, 231, 162, 79, 144, 239,
+                109, 225, 242, 97, 213, 148, 174, 50, 37, 206, 9, 184, 224, 168, 51,
+            ],
+            [
+                31, 184, 93, 190, 170, 107, 146, 67, 87, 83, 95, 200, 187, 76, 24, 87, 5, 166, 218,
+                142, 145, 10, 61, 113, 251, 111, 202, 59, 121, 81, 159, 124,
+            ],
+            [
+                64, 20, 49, 108, 138, 114, 239, 215, 165, 138, 9, 104, 162, 176, 39, 116, 231, 24,
+                108, 111, 144, 191, 62, 244, 143, 211, 140, 239, 245, 40, 142, 162,
+            ],
+        ];
+        let leaf_index = 1;
+        const LEAF_PROOF_FILENAME: &str = "../../5520714_state_proof";
+        const PREVIOUS_PROOF_FILE_NAME: &str = "../../5520713_block";
+
+        // compute inputs for the Block DB IVC circuit
+        let root = merkle_path.last().unwrap();
+
+        let siblings = merkle_path[..DEPTH].to_vec();
+        let tree_circuit = BlockTreeCircuit::<F, DEPTH>::new(leaf_index, *root, siblings);
+
+        // read proofs from files and extract public inputs
+        let new_leaf_proof = fs::read(LEAF_PROOF_FILENAME).unwrap();
+        let leaf_proof = ProofWithVK::deserialize(&new_leaf_proof).unwrap();
+        let state_pubs = crate::state::lpn::api::Parameters::public_inputs(leaf_proof.proof());
+
+        let previous_proof = fs::read(PREVIOUS_PROOF_FILE_NAME).unwrap();
+        let prev_proof = ProofWithVK::deserialize(&previous_proof).unwrap();
+        type IvcCircuit =
+            CircuitWithUniversalVerifier<F, C, D, 1, BlockTreeRecursiveWires<DEPTH, D>>;
+        let prev_pubs = IvcCircuit::public_inputs(prev_proof.proof());
+
+        // generate a dummy circuit set for state DB proofs
+        let state_circuit = TestingRecursiveCircuits::<F, C, D, NUM_STATE_PUBLIC_INPUTS>::default();
+        // generate a circuit set with the block DB IVC circuit and a dummy circuit employing
+        // `TestingRecursiveCircuits` framework; in this way, we don't need to generate an actual proof for the
+        // previous block
+        let config = default_config();
+        let circuit_builder =
+            new_universal_circuit_builder_for_testing::<F, C, D, NUM_IVC_PUBLIC_INPUTS>(config, 1);
+
+        let ivc_circuit: IvcCircuit =
+            circuit_builder.build_circuit(state_circuit.get_recursive_circuit_set().clone());
+
+        let test_circuit = TestingRecursiveCircuits::<F, C, D, NUM_IVC_PUBLIC_INPUTS>::new(
+            &circuit_builder,
+            vec![prepare_recursive_circuit_for_circuit_set(&ivc_circuit)],
+        );
+
+        let leaf_proof = state_circuit
+            .generate_input_proofs([state_pubs.try_into().unwrap()])
+            .unwrap()[0]
+            .clone();
+
+        let inputs = BlockTreeInputs {
+            block_tree: tree_circuit,
+            new_leaf_proof: (
+                leaf_proof,
+                state_circuit.verifier_data_for_input_proofs::<1>()[0].clone(),
+            )
+                .into(),
+            state_circuit_set: state_circuit.get_recursive_circuit_set().clone(),
+        };
+
+        test_circuit
+            .generate_proof_from_public_inputs(
+                &ivc_circuit,
+                [prev_pubs.try_into().unwrap()],
+                inputs,
+            )
+            .unwrap();
     }
 }
