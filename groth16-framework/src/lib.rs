@@ -13,9 +13,6 @@
 //!    use groth16_framework::clone_circuit_data;
 //!    use groth16_framework::compile_and_generate_assets;
 //!
-//!    // Get the normal proof of mapreduce-plonky2.
-//!    let normal_proof = parameters.generate_proof();
-//!
 //!    // Get the reference of circuit data and clone it by the
 //!    // `clone_circuit_data` function.
 //!    let circuit_data = parameters.final_proof_circuit_data();
@@ -23,7 +20,7 @@
 //!
 //!    // Generate the asset files into the specified asset dir. This function
 //!    // creates the asset dir if not exist.
-//!    compile_and_generate_assets(circuit_data, &normal_proof, asset_dir);
+//!    compile_and_generate_assets(circuit_data, asset_dir);
 //!    ``
 //!
 //!    After that, the asset files should be generated in the specified dir.
@@ -103,6 +100,8 @@ pub use verifier::{
     groth16::Groth16Verifier,
 };
 
+pub use utils::clone_circuit_data;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,7 +158,7 @@ mod tests {
         const ASSET_DIR: &str = "groth16_simple";
 
         // Generate the asset files.
-        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR)
+        compile_and_generate_assets(circuit_data, ASSET_DIR)
             .expect("Failed to generate the asset files");
 
         // Generate the Groth16 proof.
@@ -208,7 +207,7 @@ mod tests {
         const ASSET_DIR: &str = "groth16_keccak";
 
         // Generate the asset files.
-        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR)
+        compile_and_generate_assets(circuit_data, ASSET_DIR)
             .expect("Failed to generate the asset files");
 
         // Generate the Groth16 proof.
@@ -254,7 +253,7 @@ mod tests {
         const ASSET_DIR: &str = "groth16_group_hashing";
 
         // Generate the asset files.
-        compile_and_generate_assets(circuit_data, &proof, ASSET_DIR)
+        compile_and_generate_assets(circuit_data, ASSET_DIR)
             .expect("Failed to generate the asset files");
 
         // Generate the Groth16 proof.
