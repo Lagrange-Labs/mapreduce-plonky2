@@ -82,8 +82,13 @@ struct Context {
 
 impl Context {
     async fn build(c: CliParams) -> Result<Self> {
+        log::info!(
+            "Fetching/Generating parameters (load={})",
+            c.load.unwrap_or(false)
+        );
         let params = load_or_generate_params::<BLOCK_DEPTH>(c.load.unwrap_or(false))?;
         let url = get_mainnet_url();
+        log::info!("Using JSON RPC url {}", url);
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
@@ -113,6 +118,7 @@ impl Context {
     }
 
     async fn mapping_proofs(&self) -> Result<EIP1186ProofResponse> {
+        log::info!("Fetching mapping mpt proofs from JSON RPC");
         let storage_slots = self
             .mapping_keys
             .iter()
@@ -131,6 +137,7 @@ impl Context {
     }
 
     async fn length_extract_proof(&self) -> Result<EIP1186ProofResponse> {
+        log::info!("Fetching length extract proof from JSON RPC");
         let query = SimpleSlot::new(self.length_slot);
         let block = self.provider.get_block_number().await.unwrap();
         let block = BlockId::Number(BlockNumber::Number(block));
@@ -198,7 +205,7 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
             });
     // start proving the leaf hashes and continuously prove parents nodes until we reach the root
     use std::collections::VecDeque;
-    let mut nodes_to_prove = VecDeque::from(leaf_hashes);
+    let mut nodes_to_prove = VecDeque::from(leaf_hashes.clone());
     let root_hash = keccak256(&mpt_proofs.storage_proof[0].proof[0]);
     let mut root_proof = None;
     while nodes_to_prove.len() > 0 {
@@ -206,16 +213,28 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
         let node = node_set.get(&node_hash).unwrap();
         let node_buff = node.node.clone();
         let circuit_input = match node.node_type {
-            NodeType::Leaf(mapping_key) => storage::mapping::api::CircuitInput::new_leaf(
-                node_buff,
-                ctx.mapping_slot as usize,
-                mapping_key.to_vec(),
-            ),
-            NodeType::Extension => storage::mapping::CircuitInput::new_extension(
-                node_buff,
-                node.children_proofs[0].clone(),
-            ),
+            NodeType::Leaf(mapping_key) => {
+                log::info!(
+                    "Proving leaf hash {}/{}: {}",
+                    leaf_hashes.len() - nodes_to_prove.len(),
+                    leaf_hashes.len(),
+                    hex::encode(&node_hash)
+                );
+                storage::mapping::api::CircuitInput::new_leaf(
+                    node_buff,
+                    ctx.mapping_slot as usize,
+                    mapping_key.to_vec(),
+                )
+            }
+            NodeType::Extension => {
+                log::info!("Proving extension hash: {}", hex::encode(&node_hash));
+                storage::mapping::CircuitInput::new_extension(
+                    node_buff,
+                    node.children_proofs[0].clone(),
+                )
+            }
             NodeType::Branch => {
+                log::info!("Proving branch node hash: {}", hex::encode(&node_hash));
                 storage::mapping::CircuitInput::new_branch(node_buff, node.children_proofs.clone())
             }
         };
@@ -231,6 +250,10 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
         }
         parent.add_child_proof(proof);
         if parent.is_ready_to_be_proven() {
+            log::info!(
+                "Parent node pushed to proving queue, hash: {}",
+                hex::encode(parent.hash())
+            );
             nodes_to_prove.push_back(parent.hash());
         }
     }
@@ -246,10 +269,12 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
                 .map(|b| b.to_vec())
                 .collect::<Vec<_>>(),
         );
+    log::info!("Generating length_extract proof");
     let length_proof = crate::api::generate_proof(
         &ctx.params,
         crate::api::CircuitInput::LengthExtract(length_extract_input),
     )?;
+    log::info!("Generating length_match proof");
     // now we want to do the length equality check
     let length_match_input = length_match::CircuitInput::new(root_proof.unwrap(), length_proof);
     let length_match_proof = crate::api::generate_proof(
