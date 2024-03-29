@@ -1,4 +1,3 @@
-
 // SPDX-License-Identifier: MIT
 
 pragma solidity ^0.8.0;
@@ -544,61 +543,83 @@ contract Verifier {
         }
     }
 
+    // Set the number of the NFT IDs. Each ID is an uint32.
+    uint256 constant L = 5;
+
+    // The total length of the plonky2 public inputs. Each input value is
+    // serialized as an uint64. It's related with both the full proof
+    // serialization and the wrapped circuit code.
+    uint256 constant PI_TOTAL_LEN = L + 24;
+
+    // The byte offset of the NFT IDS located in the plonky2 public inputs.
+    uint256 constant NFT_IDS_OFFSET_IN_PI = 16;
+
+    // This respond function does the followings:
+    // 1. Convert the `data` argument to the Groth16 proofs (8 uint256),
+    //    inputs (3 uint256) and the plonky2 public inputs (PI_TOTAL_LEN uint64).
+    // 2. Call the `verifyProof` function with the Groth16 proofs and inputs. It
+    //    will be reverted if failed.
+    // 3. Calculate sha256 of the plonky2 public inputs to a hash value, set the
+    //    top 3 bits of this hash to 0.
+    // 4. Require this hash equals to the last Groth16 input (groth16_inputs[2]).
+    // 5. Get and return `L` NFT IDs (uint32) from the plonky2 public inputs.
     function respond(uint8[] memory data) public view returns (uint32[] memory) {
+        // 1. Convert the `data` argument to the Groth16 proofs and inputs.
         uint256[8] memory proofs;
         uint256[3] memory inputs;
-
-        for (uint256 i = 0; i < 8; i++) {
+        for (uint32 i = 0; i < 8; ++i) {
             uint8[32] memory chunk;
-            for (uint256 j = 0; j < 32; j++) {
+            for (uint32 j = 0; j < 32; ++j) {
                 chunk[j] = data[i * 32 + j];
             }
             proofs[i] = convertToUint256(chunk);
         }
-        for (uint256 ii = 8; ii < 11; ii++) {
+        for (uint32 i = 0; i < 3; ++i) {
             uint8[32] memory chunkk;
-            for (uint256 jj = 0; jj < 32; jj++) {
-                chunkk[jj] = data[ii * 32 + jj];
+            for (uint32 j = 0; j < 32; ++j) {
+                chunkk[j] = data[(i + 8) * 32 + j];
             }
-            inputs[ii - 8] = convertToUint256(chunkk);
+            inputs[i] = convertToUint256(chunkk);
         }
 
+        // 2. Call the `verifyProof` function.
         this.verifyProof(proofs, inputs);
 
-        // TODO
-        bytes memory pis = new bytes(29 * 8);
-        for (uint256 z = 0; z < 29 * 8; z++) {
-            pis[z] = bytes1(data[352 + z]);
+        // 3. Calculate sha256, and set the top 3 bits of the hash value to 0.
+        bytes memory pis = new bytes(PI_TOTAL_LEN * 8); // uint64 = 8 * uint8
+        for (uint32 i = 0; i < PI_TOTAL_LEN * 8; ++i) {
+            // 352 = (groth16_proof_number (8) + groth16_input_number (3)) * 32
+            pis[i] = bytes1(data[352 + i]);
         }
         bytes32 pis_hash_bytes = sha256(pis);
         uint256 pis_hash = uint256(pis_hash_bytes);
-        uint256 mask = ~(uint256(7) << 253);
-        uint256 pis_hash_new = pis_hash & mask;
-        require(pis_hash_new == inputs[2], "ginputs[2] are not equal");
+        uint256 mask = ~(uint256(7) << 253); // Top 3 bits mask
+        pis_hash = pis_hash & mask;
 
-        uint32[] memory nft_ids = new uint32[](5);
-        for (uint256 y = 0; y < 5; y++) {
-            uint8[4] memory chun;
-            for (uint256 yy = 0; yy < 4; yy++) {
-                chun[yy] = uint8(pis[16 * 8 + y * 8 + yy]);
+        // 4. Require the sha256 hash equals to the last Groth16 input.
+        require(pis_hash == inputs[2], "The plonky2 public inputs hash must be equal to the last of the Groth16 inputs");
+
+        // 5. Get and return `L` NFT IDs (uint32) from the plonky2 public inputs.
+        uint32[] memory nft_ids = new uint32[](L);
+        for (uint32 i = 0; i < L; ++i) {
+            uint8[4] memory chunk; // uint32
+            for (uint32 j = 0; j < 4; ++j) {
+                chunk[j] = uint8(pis[(NFT_IDS_OFFSET_IN_PI + i) * 8 + j]);
             }
-            nft_ids[y] = convertToUint32(chun);
+            nft_ids[i] = convertToUint32(chunk);
         }
 
         return nft_ids;
     }
-    function convertToUint32(uint8[4] memory data) internal pure returns (uint32) {
-        uint32 result = 0;
-        for (uint32 i = 0; i < 4; i++) {
+
+    function convertToUint32(uint8[4] memory data) internal pure returns (uint32 result) {
+        for (uint32 i = 0; i < 4; ++i) {
             result |= uint32(data[i]) << (8 * i);
         }
-        return result;
     }
-    function convertToUint256(uint8[32] memory data) internal pure returns (uint256) {
-        uint256 result = 0;
-        for (uint256 i = 0; i < 32; i++) {
+    function convertToUint256(uint8[32] memory data) internal pure returns (uint256 result) {
+        for (uint32 i = 0; i < 32; ++i) {
             result |= uint256(data[i]) << (8 * i);
         }
-        return result;
     }
 }

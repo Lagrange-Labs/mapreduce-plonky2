@@ -99,7 +99,7 @@ pub fn combine_proofs(
     groth16_proof: Groth16Proof,
     plonky2_proof: ProofWithPublicInputs<F, C, D>,
 ) -> Result<Vec<u8>> {
-    // Join the proofs and inputs of groth16 proof, and convert to U256s.
+    // Connect the proofs and inputs of the Groth16 proof, and convert to U256s.
     let groth16_u256s = groth16_proof
         .proofs
         .into_iter()
@@ -107,22 +107,21 @@ pub fn combine_proofs(
         .map(|s| hex_to_u256(&s))
         .collect::<Result<Vec<_>>>()?;
 
-    // Get the all U64s.
-    // let groth16_u64s = groth16_u256s.iter().flat_map(|u| u.0);
+    // Convert the Groth16 U256s to bytes.
     let groth16_bytes = groth16_u256s.iter().flat_map(|u| {
         let mut bytes = [0u8; 32];
         u.to_little_endian(&mut bytes);
-        println!("gupeng - groth16 - u256 = {u:?}, bytes = {bytes:?}");
+
         bytes
     });
-    let plonky2_pi_bytes = plonky2_proof.public_inputs.iter().flat_map(|f| {
-        let b = f.to_canonical_u64().to_le_bytes();
-        println!("gupeng - pi - bytes = {b:?}");
 
-        b
-    });
+    // Convert the plonky2 public inputs to bytes.
+    let plonky2_pi_bytes = plonky2_proof
+        .public_inputs
+        .iter()
+        .flat_map(|f| f.to_canonical_u64().to_le_bytes());
 
-    // Convert the U64s to bytes.
+    // Connect the Groth16 bytes with the plonky2 public inputs bytes.
     let bytes = groth16_bytes.chain(plonky2_pi_bytes).collect();
 
     Ok(bytes)
