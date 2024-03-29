@@ -105,20 +105,32 @@ pub(crate) fn default_config() -> CircuitConfig {
 /// Instantiate the circuits employed for the pre-processing stage of LPN, returning their
 /// corresponding parameters
 pub fn build_circuits_params<const MAX_DEPTH: usize>() -> PublicParameters<MAX_DEPTH> {
+    log::info!("Building the mapping circuit parameters");
     let mapping = mapping::build_circuits_params();
+    log::info!("Building the length extract circuit parameters");
     let length_extract = length_extract::PublicParameters::build();
+    log::info!("Building the length match circuit parameters");
     let length_match = length_match::Parameters::build(
         mapping.get_mapping_circuit_set(),
         &length_extract.circuit_data().verifier_data(),
     );
+    log::info!("Building the lpn storage circuit parameters");
     let lpn_storage = lpn_storage::PublicParameters::build();
+
+    log::info!("Building the digest equal circuit parameters");
     let digest_equal = digest_equal::Parameters::build(
         lpn_storage.get_lpn_circuit_set(),
         &length_match.circuit_data().verifier_data(),
     );
+
+    log::info!("Building the block linking circuit parameters");
     let block_linking =
         block_linking::PublicParameters::build(&digest_equal.circuit_data().verifier_data());
+
+    log::info!("Building the lpn state circuit parameters");
     let lpn_state = lpn_state::api::Parameters::build(block_linking.circuit_data().verifier_data());
+
+    log::info!("Building the block db circuit parameters");
     let block_db = block::Parameters::build(lpn_state.get_lpn_state_circuit_set());
     PublicParameters {
         mapping,

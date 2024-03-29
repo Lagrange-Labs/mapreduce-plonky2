@@ -58,6 +58,7 @@ struct CliParams {
     load: Option<bool>,
 }
 
+/// NOTE: might require tweaking /etc/security/limits file if STACK error appears
 #[tokio::main]
 async fn main() -> Result<()> {
     pretty_env_logger::init_timed();
@@ -194,14 +195,119 @@ impl Context {
 
 struct StorageProver<'a> {
     ctx: &'a Context,
+    mpt_root_proof: Vec<u8>,
 }
 
-impl<'a> StorageProver<'a> {}
+impl<'a> StorageProver<'a> {
+    async fn build_storage_proofs(
+        ctx: &'a Context,
+        values: &[LPNValue],
+        mpt_proofs: &EIP1186ProofResponse,
+    ) -> Result<Self> {
+        // create list of all MPT storage node related to the mappping to prove
+        // key is hash of the nodes, value is the struct
+        let mut leaf_hashes = Vec::new();
+        let mut node_set =
+            mpt_proofs
+                .storage_proof
+                .iter()
+                .enumerate()
+                .fold(HashMap::new(), |mut acc, (i, p)| {
+                    leaf_hashes.push(keccak256(&p.proof.last().cloned().unwrap()));
+                    let _ = p.proof.iter().rev().map_windows(|[child, parent]| {
+                        let parent_hash = keccak256(parent);
+                        let node_type = {
+                            let list: Vec<Vec<u8>> = rlp::decode_list(child);
+                            match list.len() {
+                                17 => NodeType::Branch,
+                                2 => {
+                                    let nib = Nibbles::from_compact(&list[0]);
+                                    if nib.is_leaf() {
+                                        NodeType::Leaf(ctx.mapping_keys[i])
+                                    } else {
+                                        NodeType::Extension
+                                    }
+                                }
+                                _ => panic!("unexpected node type"),
+                            }
+                        };
+                        let ntp = NodeToProve::new(child.to_vec(), parent_hash.clone(), node_type);
+                        let entry = acc.entry(ntp.hash()).or_insert(ntp);
+                        entry.increase_child_count();
+                        assert_eq!(entry.parent_hash, parent_hash);
+                    });
+                    acc
+                });
+        // start proving the leaf hashes and continuously prove parents nodes until we reach the root
+        use std::collections::VecDeque;
+        let mut nodes_to_prove = VecDeque::from(leaf_hashes.clone());
+        let root_hash = keccak256(&mpt_proofs.storage_proof[0].proof[0]);
+        let mut root_proof = None;
+        while nodes_to_prove.len() > 0 {
+            let node_hash = nodes_to_prove.pop_front().unwrap();
+            let node = node_set.get(&node_hash).unwrap();
+            let node_buff = node.node.clone();
+            let circuit_input = match node.node_type {
+                NodeType::Leaf(mapping_key) => {
+                    log::info!(
+                        "Proving leaf hash {}/{}: {}",
+                        leaf_hashes.len() - nodes_to_prove.len(),
+                        leaf_hashes.len(),
+                        hex::encode(&node_hash)
+                    );
+                    storage::mapping::api::CircuitInput::new_leaf(
+                        node_buff,
+                        ctx.mapping_slot as usize,
+                        mapping_key.to_vec(),
+                    )
+                }
+                NodeType::Extension => {
+                    log::info!("Proving extension hash: {}", hex::encode(&node_hash));
+                    storage::mapping::CircuitInput::new_extension(
+                        node_buff,
+                        node.children_proofs[0].clone(),
+                    )
+                }
+                NodeType::Branch => {
+                    log::info!("Proving branch node hash: {}", hex::encode(&node_hash));
+                    storage::mapping::CircuitInput::new_branch(
+                        node_buff,
+                        node.children_proofs.clone(),
+                    )
+                }
+            };
+            let proof = crate::api::generate_proof(
+                &ctx.params,
+                crate::api::CircuitInput::Mapping(circuit_input),
+            )?;
+            let parent_hash = node.parent_hash.clone();
+            let parent = node_set.get_mut(&parent_hash).unwrap();
+            if parent_hash == root_hash {
+                root_proof = Some(proof);
+                break;
+            }
+            parent.add_child_proof(proof);
+            if parent.is_ready_to_be_proven() {
+                log::info!(
+                    "Parent node pushed to proving queue, hash: {}",
+                    hex::encode(parent.hash())
+                );
+                nodes_to_prove.push_back(parent.hash());
+            }
+        }
+        assert!(root_proof.is_some());
+        let root_proof = root_proof.unwrap();
+        Ok(Self {
+            ctx,
+            mpt_root_proof: root_proof,
+        })
+    }
+}
 
 async fn full_flow_pudgy(ctx: Context) -> Result<()> {
     let mpt_proofs = ctx.mapping_proofs().await?;
-    let length_mpt_proofs = ctx.length_extract_proof().await?;
     ProofQuery::verify_storage_proof(&mpt_proofs)?;
+    let length_mpt_proofs = ctx.length_extract_proof().await?;
     ProofQuery::verify_storage_proof(&length_mpt_proofs)?;
     // create a list of all the mapping keys/values pair we want to transform in our database
     let values = mpt_proofs
@@ -218,96 +324,7 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
             }
         })
         .collect::<Vec<_>>();
-    // create list of all MPT storage node related to the mappping to prove
-    // key is hash of the nodes, value is the struct
-    let mut leaf_hashes = Vec::new();
-    let mut node_set =
-        mpt_proofs
-            .storage_proof
-            .iter()
-            .enumerate()
-            .fold(HashMap::new(), |mut acc, (i, p)| {
-                leaf_hashes.push(keccak256(&p.proof.last().cloned().unwrap()));
-                let _ = p.proof.iter().rev().map_windows(|[child, parent]| {
-                    let parent_hash = keccak256(parent);
-                    let node_type = {
-                        let list: Vec<Vec<u8>> = rlp::decode_list(child);
-                        match list.len() {
-                            17 => NodeType::Branch,
-                            2 => {
-                                let nib = Nibbles::from_compact(&list[0]);
-                                if nib.is_leaf() {
-                                    NodeType::Leaf(ctx.mapping_keys[i])
-                                } else {
-                                    NodeType::Extension
-                                }
-                            }
-                            _ => panic!("unexpected node type"),
-                        }
-                    };
-                    let ntp = NodeToProve::new(child.to_vec(), parent_hash.clone(), node_type);
-                    let entry = acc.entry(ntp.hash()).or_insert(ntp);
-                    entry.increase_child_count();
-                    assert_eq!(entry.parent_hash, parent_hash);
-                });
-                acc
-            });
-    // start proving the leaf hashes and continuously prove parents nodes until we reach the root
-    use std::collections::VecDeque;
-    let mut nodes_to_prove = VecDeque::from(leaf_hashes.clone());
-    let root_hash = keccak256(&mpt_proofs.storage_proof[0].proof[0]);
-    let mut root_proof = None;
-    while nodes_to_prove.len() > 0 {
-        let node_hash = nodes_to_prove.pop_front().unwrap();
-        let node = node_set.get(&node_hash).unwrap();
-        let node_buff = node.node.clone();
-        let circuit_input = match node.node_type {
-            NodeType::Leaf(mapping_key) => {
-                log::info!(
-                    "Proving leaf hash {}/{}: {}",
-                    leaf_hashes.len() - nodes_to_prove.len(),
-                    leaf_hashes.len(),
-                    hex::encode(&node_hash)
-                );
-                storage::mapping::api::CircuitInput::new_leaf(
-                    node_buff,
-                    ctx.mapping_slot as usize,
-                    mapping_key.to_vec(),
-                )
-            }
-            NodeType::Extension => {
-                log::info!("Proving extension hash: {}", hex::encode(&node_hash));
-                storage::mapping::CircuitInput::new_extension(
-                    node_buff,
-                    node.children_proofs[0].clone(),
-                )
-            }
-            NodeType::Branch => {
-                log::info!("Proving branch node hash: {}", hex::encode(&node_hash));
-                storage::mapping::CircuitInput::new_branch(node_buff, node.children_proofs.clone())
-            }
-        };
-        let proof = crate::api::generate_proof(
-            &ctx.params,
-            crate::api::CircuitInput::Mapping(circuit_input),
-        )?;
-        let parent_hash = node.parent_hash.clone();
-        let parent = node_set.get_mut(&parent_hash).unwrap();
-        if parent_hash == root_hash {
-            root_proof = Some(proof);
-            break;
-        }
-        parent.add_child_proof(proof);
-        if parent.is_ready_to_be_proven() {
-            log::info!(
-                "Parent node pushed to proving queue, hash: {}",
-                hex::encode(parent.hash())
-            );
-            nodes_to_prove.push_back(parent.hash());
-        }
-    }
-    assert!(root_proof.is_some());
-    let root_proof = root_proof.unwrap();
+    let storage_prover = StorageProver::build_storage_proofs(&ctx, &values, &mpt_proofs).await?;
     // we want to extract the length of the mapping
     let length_extract_input =
         ArrayLengthExtractCircuit::<MAX_STORAGE_DEPTH, MAX_BRANCH_NODE_LEN>::new(
@@ -326,7 +343,8 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
     )?;
     log::info!("Generating length_match proof");
     // now we want to do the length equality check
-    let length_match_input = length_match::CircuitInput::new(root_proof.clone(), length_proof);
+    let length_match_input =
+        length_match::CircuitInput::new(storage_prover.mpt_root_proof.clone(), length_proof);
     let length_match_proof = crate::api::generate_proof(
         &ctx.params,
         crate::api::CircuitInput::LengthMatch(length_match_input),
@@ -339,7 +357,7 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
     // create the proof of equivalence
     let inputs = api::CircuitInput::DigestEqual(storage::digest_equal::CircuitInput::new(
         lpn_storage_root_proof,
-        root_proof.clone(),
+        length_match_proof,
     ));
     let digest_equivalence_proof = api::generate_proof(&ctx.params, inputs)?;
     // now create the block linking proof
