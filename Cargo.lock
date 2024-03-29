@@ -258,9 +258,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "backtrace"
-version = "0.3.69"
+version = "0.3.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2089b7e3f35b9dd2d0ed921ead4f6d318c27680d4a5bd167b3ee120edb105837"
+checksum = "26b05800d2e817c8b3b4b54abd461726265fa9789ae34330622f2db9ee696f9d"
 dependencies = [
  "addr2line",
  "cc",
@@ -2537,6 +2537,7 @@ name = "mapreduce-plonky2"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "backtrace",
  "bincode",
  "clap",
  "csv",
@@ -2551,6 +2552,7 @@ dependencies = [
  "plonky2",
  "plonky2_crypto",
  "plonky2_ecgfp5",
+ "pretty_env_logger",
  "rand",
  "recursion_framework",
  "rlp",
@@ -3269,6 +3271,16 @@ name = "precomputed-hash"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
+
+[[package]]
+name = "pretty_env_logger"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "865724d4dbe39d9f3dd3b52b88d859d66bcb2d6a0acfd5ea68a65fb66d4bdc1c"
+dependencies = [
+ "env_logger 0.10.2",
+ "log",
+]
 
 [[package]]
 name = "prettyplease"

@@ -4,6 +4,7 @@
 #![feature(const_for)]
 #![feature(generic_const_items)]
 use anyhow::Result;
+use backtrace::Backtrace;
 use eth_trie::Nibbles;
 use ethers::{
     providers::{Http, Middleware, Provider},
@@ -15,9 +16,10 @@ use mapreduce_plonky2::{
     api,
     eth::{get_mainnet_url, ProofQuery},
     storage::{self, key::SimpleSlot, length_match, MAX_BRANCH_NODE_LEN},
+    types::HashOutput,
 };
-use std::io::Write;
 use std::{env, fs::File, str::FromStr};
+use std::{io::Write, panic};
 use storage::length_extract::ArrayLengthExtractCircuit;
 
 use clap::Parser;
@@ -39,7 +41,13 @@ struct CliParams {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    enable_logging();
+    pretty_env_logger::init_timed();
+
+    panic::set_hook(Box::new(|panic_info| {
+        let backtrace = Backtrace::new();
+        log::error!("Panic occurred: {:?}", panic_info);
+        log::error!("Backtrace: {:?}", backtrace);
+    }));
     let args = CliParams::parse();
     println!("Hello, world!");
     let ctx = Context::build(args).await?;
@@ -281,8 +289,15 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
         &ctx.params,
         crate::api::CircuitInput::LengthMatch(length_match_input),
     )?;
+
+    // now we need to build the tree of the LPN storage DB
+
     Ok(())
 }
+
+//fn build_storage_db(mapping_keys: Vec<Vec<u8>>, mapping_values: Vec<Vec<u8>>) -> HashOutput {
+//
+//}
 
 #[derive(Debug, Clone)]
 struct NodeToProve {
