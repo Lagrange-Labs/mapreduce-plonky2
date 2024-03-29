@@ -6,15 +6,21 @@
 use anyhow::Result;
 use backtrace::Backtrace;
 use eth_trie::Nibbles;
+use ethers::types::TxHash;
 use ethers::{
     providers::{Http, Middleware, Provider},
-    types::{Address, BlockId, BlockNumber, EIP1186ProofResponse, U64},
+    types::{Address, Block, BlockId, BlockNumber, EIP1186ProofResponse, H256, U64},
 };
 use hashbrown::HashMap;
 use log::{log_enabled, Level, LevelFilter};
+use mapreduce_plonky2::block::{
+    block_leaf_hash, empty_merkle_root, merkle_root, merkle_root_bytes,
+};
+use mapreduce_plonky2::eth::BlockUtil;
+use mapreduce_plonky2::state::{self, block_linking};
 use mapreduce_plonky2::{
     api::{self, CircuitInput},
-    eth::{get_mainnet_url, ProofQuery},
+    eth::{get_mainnet_url, ProofQuery, RLPBlock},
     storage::{
         self,
         key::SimpleSlot,
@@ -24,6 +30,10 @@ use mapreduce_plonky2::{
     },
     types::HashOutput,
 };
+use plonky2::hash::hash_types::HashOut;
+use plonky2::hash::poseidon::PoseidonHash;
+use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher, PoseidonGoldilocksConfig};
+use serde_json::map;
 use std::{collections::VecDeque, env, fs::File, str::FromStr};
 use std::{io::Write, panic};
 use storage::length_extract::ArrayLengthExtractCircuit;
@@ -35,7 +45,9 @@ use mapreduce_plonky2::{
 };
 
 const PARAM_FILE: &str = "mapreduce_test.params";
-const BLOCK_DEPTH: usize = 2;
+// depth of the lpn block database
+const MAX_BLOCK_DEPTH: usize = 2;
+// max depth of storage MPT trie we support for extracting the length
 const MAX_STORAGE_DEPTH: usize = 5;
 
 #[derive(Parser)]
@@ -84,14 +96,14 @@ fn load_or_generate_params<const BD: usize>(load: bool) -> Result<api::PublicPar
 }
 
 struct Context {
-    params: api::PublicParameters<BLOCK_DEPTH>,
+    params: api::PublicParameters<MAX_BLOCK_DEPTH>,
     provider: Provider<Http>,
     mapping_slot: u8,
     length_slot: u8,
     contract: Address,
     owner: Address,
     nft_ids: Vec<u32>,
-    block: U64,
+    block: Block<TxHash>,
     mapping_keys: Vec<[u8; 32]>,
 }
 
@@ -101,7 +113,7 @@ impl Context {
             "Fetching/Generating parameters (load={})",
             c.load.unwrap_or(false)
         );
-        let params = load_or_generate_params::<BLOCK_DEPTH>(c.load.unwrap_or(false))?;
+        let params = load_or_generate_params::<MAX_BLOCK_DEPTH>(c.load.unwrap_or(false))?;
         let url = get_mainnet_url();
         log::info!("Using JSON RPC url {}", url);
         let provider =
@@ -114,7 +126,8 @@ impl Context {
         // info extracted from explorer https://sepolia.etherscan.io/address/0x363971EE2b96f360Ec9D04b5809aFD15c77B1af1
         let owner = Address::from_str("0x48211415Fc3e48b1aC5389fdDD4c1755783F6199").unwrap();
         let nft_ids: Vec<u32> = vec![0, 1];
-        let block = provider.get_block_number().await.unwrap();
+        let block_number = provider.get_block_number().await.unwrap();
+        let block = provider.get_block(block_number).await?.unwrap();
         let mapping_keys = nft_ids
             .iter()
             .map(|id| left_pad32(&id.to_be_bytes().to_vec()))
@@ -143,7 +156,7 @@ impl Context {
             .iter()
             .map(|s| s.location())
             .collect::<Vec<_>>();
-        let block = BlockId::Number(BlockNumber::Number(self.block));
+        let block = BlockId::Number(BlockNumber::Number(self.block.number.unwrap()));
         let res = self
             .provider
             .get_proof(self.contract, locations, Some(block))
@@ -310,18 +323,85 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
     )?;
 
     // now we need to build the tree of the LPN storage DB
-    let db_root = build_storage_db(ctx.mapping_keys_vec(), ctx.mapping_values());
-    let db_root_proof = build_storage_proofs(&ctx, ctx.mapping_keys_vec(), ctx.mapping_values())?;
+    let lpn_storage_root = build_storage_db(ctx.mapping_keys_vec(), ctx.mapping_values());
+    let lpn_storage_root_proof =
+        build_storage_proofs(&ctx, ctx.mapping_keys_vec(), ctx.mapping_values())?;
     // create the proof of equivalence
     let inputs = api::CircuitInput::DigestEqual(storage::digest_equal::CircuitInput::new(
-        db_root_proof,
+        lpn_storage_root_proof,
         root_proof.clone(),
     ));
     let digest_equivalence_proof = api::generate_proof(&ctx.params, inputs)?;
+    // now create the block linking proof
+    let block_linking_inputs = mapreduce_plonky2::state::block_linking::CircuitInput::new(
+        digest_equivalence_proof,
+        ctx.block.rlp(),
+        mpt_proofs
+            .account_proof
+            .iter()
+            .map(|p| p.to_vec())
+            .rev()
+            .collect::<Vec<_>>(),
+        ctx.contract,
+    );
+    let block_linking_proof = api::generate_proof(
+        &ctx.params,
+        api::CircuitInput::BlockLinking(block_linking_inputs),
+    )?;
+    // now we need to create the LPN state tree
+    // in v0, only one contract supported so it's easy
+    let state_leaf = state::lpn::state_leaf_hash(
+        ctx.contract,
+        ctx.mapping_slot,
+        ctx.length_slot,
+        lpn_storage_root,
+    );
+    let lpn_state_root = state_leaf.clone();
+    let state_leaf_proof = api::generate_proof(
+        &ctx.params,
+        api::CircuitInput::State(state::lpn::api::CircuitInput::new_leaf(block_linking_proof)),
+    )?;
+
+    // then we can finally build the state database
+    let (lpn_leaf, lpn_db_root, frontier) = build_first_block_root(&ctx, lpn_state_root);
+    let lpn_block_input = mapreduce_plonky2::block::BlockTreeCircuit::new(0, lpn_db_root, frontier);
+    let inputs = mapreduce_plonky2::block::CircuitInput::input_for_first_block(
+        lpn_block_input,
+        lpn_leaf.to_vec(),
+    );
+    let lpn_block_proof = api::generate_proof(&ctx.params, api::CircuitInput::BlockDB(inputs))?;
     Ok(())
 }
 
-fn build_digest_equivalence(c: &Context) {}
+pub const D: usize = 2;
+pub type C = PoseidonGoldilocksConfig;
+pub type F = <C as GenericConfig<D>>::F;
+
+fn build_first_block_root(
+    ctx: &Context,
+    state_root: HashOutput,
+) -> (HashOutput, HashOutput, Vec<HashOutput>) {
+    let first_leaf = block_leaf_hash(
+        ctx.block.number.unwrap().as_u32(),
+        &keccak256(&ctx.block.rlp()).try_into().unwrap(),
+        &state_root,
+    );
+    let leaf_count = 1 << MAX_BLOCK_DEPTH;
+    let leaves = std::iter::once(first_leaf.to_vec())
+        .chain(std::iter::repeat(vec![]))
+        .take(leaf_count - 1)
+        .collect::<Vec<_>>();
+    let root = merkle_root_bytes(leaves);
+    let frontiers = (0..MAX_BLOCK_DEPTH)
+        .map(|i| {
+            (0..i).fold(HashOut::<F>::from_partial(&[]), |hash, _| {
+                PoseidonHash::two_to_one(hash, hash)
+            })
+        })
+        .map(|h| h.to_bytes().try_into().unwrap())
+        .collect::<Vec<HashOutput>>();
+    (first_leaf, root, frontiers)
+}
 
 fn build_storage_proofs(
     ctx: &Context,

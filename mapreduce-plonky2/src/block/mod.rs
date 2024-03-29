@@ -10,6 +10,7 @@ pub use public_inputs::PublicInputs;
 
 use crate::{
     api::{default_config, ProofWithVK},
+    eth::left_pad32,
     keccak::PACKED_HASH_LEN,
     state::{self, StateInputs},
     types::HashOutput,
@@ -660,23 +661,27 @@ impl<const MAX_DEPTH: usize> CircuitInput<MAX_DEPTH> {
     }
 }
 
-pub(crate) fn empty_merkle_root<
-    F: SerializableRichField<D>,
-    const D: usize,
-    const MAX_DEPTH: usize,
->() -> HashOut<F> {
+pub fn empty_merkle_root<F: SerializableRichField<D>, const D: usize, const MAX_DEPTH: usize>(
+) -> HashOut<F> {
     (0..MAX_DEPTH).fold(HashOut::<F>::from_partial(&[]), |hash, _| {
         PoseidonHash::two_to_one(hash, hash)
     })
 }
 
 /// Generate the Merkle root from leaves.
-fn merkle_root<F: SerializableRichField<D>, const D: usize>(leaves: Vec<Vec<F>>) -> HashOut<F> {
+pub fn merkle_root<F: SerializableRichField<D>, const D: usize>(leaves: Vec<Vec<F>>) -> HashOut<F> {
     // Construct the Merkle tree.
     let tree = MerkleTree::<_, PoseidonHash>::new(leaves, 0);
     assert_eq!(tree.cap.0.len(), 1, "Merkle tree must have one root");
 
     tree.cap.0[0]
+}
+pub fn merkle_root_bytes(leaves: Vec<Vec<u8>>) -> HashOutput {
+    let leaves = leaves
+        .into_iter()
+        .map(|l| HashOut::from_bytes(&left_pad32(&l)).elements.to_vec())
+        .collect();
+    merkle_root::<F, D>(leaves).to_bytes().try_into().unwrap()
 }
 
 #[cfg(test)]

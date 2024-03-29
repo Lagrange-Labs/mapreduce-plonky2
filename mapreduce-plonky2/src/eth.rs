@@ -146,7 +146,7 @@ impl BlockData {
     }
 }
 
-pub(crate) trait BlockUtil {
+pub trait BlockUtil {
     fn block_hash(&self) -> Vec<u8> {
         keccak256(&self.rlp())
     }
