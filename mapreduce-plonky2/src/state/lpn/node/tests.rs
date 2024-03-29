@@ -1,7 +1,7 @@
 //! Tests module for the intermediate node circuit
 
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
+    field::goldilocks_field::GoldilocksField,
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
     iop::{
         target::Target,
@@ -97,6 +97,7 @@ struct TestNodeWires {
 struct TestNodeCircuit {
     left: Vec<GoldilocksField>,
     right: Vec<GoldilocksField>,
+    // TODO: should not this be tested?
     c: NodeCircuit,
 }
 

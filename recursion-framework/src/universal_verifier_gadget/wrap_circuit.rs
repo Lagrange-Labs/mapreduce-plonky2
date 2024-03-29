@@ -93,7 +93,7 @@ where
             }
 
             for pi_t in pt.public_inputs.iter() {
-                builder.register_public_input(pi_t.clone())
+                builder.register_public_input(*pi_t)
             }
 
             let data = builder.build::<C>();

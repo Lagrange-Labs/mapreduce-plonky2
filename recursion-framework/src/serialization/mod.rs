@@ -44,7 +44,7 @@ pub fn serialize<T: ToBytes, S: Serializer>(input: &T, serializer: S) -> Result<
 /// Can be employed to derive `Deserialize` if `T` does not implement `Deserialize` with the `deserialize_with` annotation
 pub fn deserialize<'a, T: FromBytes, D: Deserializer<'a>>(deserializer: D) -> Result<T, D::Error> {
     let bytes = Vec::<u8>::deserialize(deserializer)?;
-    Ok(T::from_bytes(&bytes).map_err(SerializationError::to_de_error)?)
+    T::from_bytes(&bytes).map_err(SerializationError::to_de_error)
 }
 
 /// `serialize_array` allows to serialize an array with `N` elements of type `T: ToBytes` employing a serde serializer;
@@ -62,11 +62,9 @@ pub fn serialize_array<T: ToBytes, S: Serializer, const N: usize>(
 pub fn deserialize_array<'a, T: FromBytes, D: Deserializer<'a>, const N: usize>(
     deserializer: D,
 ) -> Result<[T; N], D::Error> {
-    deserialize_vec(deserializer)?.try_into().map_err(|_| {
-        D::Error::custom(format!(
-            "failed to deserialize array: wrong number of items found"
-        ))
-    })
+    deserialize_vec(deserializer)?
+        .try_into()
+        .map_err(|_| D::Error::custom("failed to deserialize array: wrong number of items found"))
 }
 
 /// `serialize_long_array` overcomes a limitation of serde that cannot derive `Serialize` for arrays
@@ -87,17 +85,13 @@ pub fn deserialize_long_array<'a, T: Deserialize<'a>, D: Deserializer<'a>, const
 ) -> Result<[T; N], D::Error> {
     Vec::<T>::deserialize(deserializer)?
         .try_into()
-        .map_err(|_| {
-            D::Error::custom(format!(
-                "failed to deserialize array: wrong number of items found"
-            ))
-        })
+        .map_err(|_| D::Error::custom("failed to deserialize array: wrong number of items found"))
 }
 
 /// `serialize_vec` allows to serialize a vector with elements of type `T: ToBytes` employing a serde serializer;
 /// Can be employed to derive `Serialize` if `T` does not implement `Serialize` with the `serialize_with` annotation
 pub fn serialize_vec<T: ToBytes, S: Serializer>(
-    input: &Vec<T>,
+    input: &[T],
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     let byte_vec = input.iter().map(|inp| inp.to_bytes()).collect::<Vec<_>>();

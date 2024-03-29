@@ -10,7 +10,7 @@ use crate::{
         OutputWires as MPTOutputWires, PAD_LEN,
     },
     storage::PublicInputs as StorageInputs,
-    types::{AddressTarget, PackedAddressTarget, ADDRESS_LEN},
+    types::{AddressTarget, ADDRESS_LEN},
     utils::{find_index_subvector, keccak256, less_than},
 };
 use anyhow::Result;
@@ -98,7 +98,7 @@ where
         F: RichField + Extendable<D>,
     {
         let contract_address = Array::new(cb);
-        let storage_pi = StorageInputs::from(storage_pi);
+        let _storage_pi = StorageInputs::from(storage_pi);
 
         let storage_root_offset = cb.add_virtual_target();
 
@@ -204,14 +204,10 @@ mod test {
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use ethers::{
         providers::{Http, Middleware, Provider},
-        types::{Address, BlockId, BlockNumber, H160, H256, U64},
+        types::{Address, BlockId, BlockNumber, H256},
     };
     use plonky2::{
-        field::{
-            extension::Extendable,
-            types::{Field, Sample},
-        },
-        hash::hash_types::RichField,
+        field::types::Field,
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
@@ -226,7 +222,7 @@ mod test {
     use crate::{
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        eth::{BlockData, ProofQuery},
+        eth::ProofQuery,
         mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
         state::block_linking::block::SEPOLIA_NUMBER_LEN,
         storage::PublicInputs as StorageInputs,
@@ -328,7 +324,7 @@ mod test {
         let block_number = provider.get_block_number().await?;
         // Simple storage test
         let query = ProofQuery::new_simple_slot(contract_address, 0);
-        let block = provider
+        let _ = provider
             .get_block_with_txs(BlockId::Number(BlockNumber::Number(block_number)))
             .await?
             .expect("should have been a block");

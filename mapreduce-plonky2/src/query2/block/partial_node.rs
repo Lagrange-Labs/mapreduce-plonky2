@@ -1,6 +1,6 @@
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
-    hash::hash_types::{HashOut, HashOutTarget, RichField},
+    hash::hash_types::{HashOut, HashOutTarget},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -92,12 +92,12 @@ impl CircuitLogicWires<F, D, 1> for PartialNodeWires {
         verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 1],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let children_pi = BlockPublicInputs::from(Self::public_input_targets(&verified_proofs[0]));
+        let children_pi = BlockPublicInputs::from(Self::public_input_targets(verified_proofs[0]));
         PartialNodeCircuit::build(builder, &children_pi)
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
-        inputs.assign(pw, &self);
+        inputs.assign(pw, self);
         Ok(())
     }
 }
@@ -108,7 +108,11 @@ pub struct PartialNodeCircuitInputs {
 }
 
 impl PartialNodeCircuitInputs {
-    pub fn new(child_proof: ProofWithVK, sibling_hash: HashOut<F>, sibling_is_left: bool) -> Self {
+    pub(crate) fn new(
+        child_proof: ProofWithVK,
+        sibling_hash: HashOut<F>,
+        sibling_is_left: bool,
+    ) -> Self {
         Self {
             inputs: PartialNodeCircuit::new(sibling_hash, sibling_is_left),
             child_proof,
@@ -116,8 +120,8 @@ impl PartialNodeCircuitInputs {
     }
 }
 
-impl Into<(PartialNodeCircuit, ProofWithVK)> for PartialNodeCircuitInputs {
-    fn into(self) -> (PartialNodeCircuit, ProofWithVK) {
-        (self.inputs, self.child_proof)
+impl From<PartialNodeCircuitInputs> for (PartialNodeCircuit, ProofWithVK) {
+    fn from(val: PartialNodeCircuitInputs) -> Self {
+        (val.inputs, val.child_proof)
     }
 }

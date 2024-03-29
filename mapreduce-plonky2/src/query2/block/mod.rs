@@ -1,4 +1,4 @@
-use std::fmt::{self, Debug, Display};
+use std::fmt::{self, Debug};
 
 use itertools::Itertools;
 use plonky2::{
@@ -237,18 +237,18 @@ pub struct BlockPublicInputs<'input, T: Clone> {
 
 impl<'a, T: Clone + Copy + Debug> Debug for BlockPublicInputs<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BlockNumber: {:?}\n", self.block_number_raw())?;
-        write!(f, "Range: {:?}\n", self.range_raw())?;
-        write!(f, "Root: {:?}\n", self.root_raw())?;
-        write!(f, "SC Address: {:?}\n", self.smart_contract_address_raw())?;
-        write!(f, "Owner Address: {:?}\n", self.user_address_raw())?;
-        write!(f, "Mapping slot: {:?}\n", self.mapping_slot_raw())?;
-        write!(
+        writeln!(f, "BlockNumber: {:?}", self.block_number_raw())?;
+        writeln!(f, "Range: {:?}", self.range_raw())?;
+        writeln!(f, "Root: {:?}", self.root_raw())?;
+        writeln!(f, "SC Address: {:?}", self.smart_contract_address_raw())?;
+        writeln!(f, "Owner Address: {:?}", self.user_address_raw())?;
+        writeln!(f, "Mapping slot: {:?}", self.mapping_slot_raw())?;
+        writeln!(
             f,
-            "Storage slot length: {:?}\n",
+            "Storage slot length: {:?}",
             self.storage_slot_length_raw()
         )?;
-        write!(f, "Digest: {:?}\n", self.digest_raw())
+        writeln!(f, "Digest: {:?}", self.digest_raw())
     }
 }
 
@@ -446,7 +446,6 @@ mod tests {
     use ethers::types::Address;
     use itertools::Itertools;
     use plonky2::field::types::Field;
-    use plonky2::hash::hash_types::HashOut;
     use plonky2::plonk::config::GenericHashOut;
     use plonky2::{
         hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
@@ -479,7 +478,6 @@ mod tests {
         let block_circuit_params = super::Parameters::build(&state_circuit_params);
 
         let left_leaf_io = generate_inputs_for_state_circuit(
-            &state_circuit_params,
             &testing_framework,
             0xdead,
             Some(LENGTH_SLOT),
@@ -489,7 +487,6 @@ mod tests {
         );
 
         let right_leaf_io = generate_inputs_for_state_circuit(
-            &state_circuit_params,
             &testing_framework,
             0xbeef,
             Some(LENGTH_SLOT),

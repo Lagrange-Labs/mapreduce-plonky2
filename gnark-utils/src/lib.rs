@@ -19,7 +19,6 @@ mod go {
         pub fn CompileAndGenerateAssets(
             common_circuit_data: *const c_char,
             verifier_only_circuit_data: *const c_char,
-            proof_with_public_inputs: *const c_char,
             dst_asset_dir: *const c_char,
         ) -> *const c_char;
 

@@ -1,6 +1,5 @@
 use anyhow::Result;
 use recursion_framework::{
-    circuit_builder::public_input_targets,
     framework::{
         RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
     },
@@ -10,10 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::{array::from_fn as create_array, collections::BTreeMap};
 
 use plonky2::{
-    hash::{
-        hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
-        poseidon::PoseidonHash,
-    },
+    hash::poseidon::PoseidonHash,
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
@@ -27,15 +23,14 @@ use plonky2::{
 };
 
 use crate::{
-    api::{default_config, deserialize_proof, mapping, serialize_proof, ProofWithVK, C, D, F},
+    api::{default_config, deserialize_proof, serialize_proof, ProofWithVK, C, D, F},
     block::{
         Parameters as BlockDbParameters, PublicInputs as BlockDbPublicInputs, NUM_IVC_PUBLIC_INPUTS,
     },
     eth::left_pad32,
-    keccak::OutputHash,
     query2::block,
-    types::{PackedAddressTarget, CURVE_TARGET_LEN, MAPPING_KEY_LEN, PACKED_MAPPING_KEY_LEN},
-    utils::{convert_u8_to_u32_slice, Packer},
+    types::PACKED_MAPPING_KEY_LEN,
+    utils::Packer,
 };
 
 pub use self::circuit::RevelationCircuit;
@@ -99,7 +94,7 @@ impl<const L: usize> RevelationRecursiveInput<L> {
             })
             .collect::<BTreeMap<_, _>>();
         let mut sorted_keys_iter = sorted_keys.into_iter();
-        let keys = create_array(|i| {
+        let keys = create_array(|_i| {
             if let Some((_, packed)) = sorted_keys_iter.next() {
                 create_array(|j| packed[j])
             } else {
@@ -125,10 +120,6 @@ impl<const L: usize> RevelationRecursiveInput<L> {
             block_db_proof: deserialize_proof(&block_db_proof)?,
         })
     }
-}
-
-pub const fn NUM_QUERY2_IO<const L: usize>() -> usize {
-    RevelationPublicInputs::<(), L>::total_len()
 }
 
 const QUERY2_BLOCK_NUM_IO: usize = block::BlockPublicInputs::<Target>::total_len();
@@ -228,7 +219,7 @@ mod test {
         keccak::PACKED_HASH_LEN,
         query2::revelation::{RevelationRecursiveInput, QUERY2_BLOCK_NUM_IO},
         types::MAPPING_KEY_LEN,
-        utils::{Fieldable, Packer, ToFields},
+        utils::{Packer, ToFields},
     };
     use anyhow::Result;
     use ethers::types::Address;
@@ -239,7 +230,6 @@ mod test {
             types::{Field, PrimeField64, Sample},
         },
         hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
-        iop::target::Target,
     };
     use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
@@ -248,7 +238,7 @@ mod test {
     use super::*;
 
     use crate::{
-        api::{tests::TestDummyCircuit, C, D, F},
+        api::{C, D, F},
         eth::left_pad32,
         group_hashing,
         query2::block::BlockPublicInputs,

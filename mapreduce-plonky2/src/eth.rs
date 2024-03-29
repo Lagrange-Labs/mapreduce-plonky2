@@ -1,7 +1,7 @@
 //! Module containing several structure definitions for Ethereum related operations
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
 use anyhow::{bail, Ok, Result};
-use eth_trie::{EthTrie, MemoryDB, Node, Trie};
+use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethers::{
     providers::{Http, Middleware, Provider},
     types::{
@@ -216,23 +216,6 @@ pub fn extract_child_hashes(rlp_data: &[u8]) -> Vec<Vec<u8>> {
     }
     hashes
 }
-/// Computes the length of the radix, of the "key" to lookup in the MPT trie, from
-/// the path of nodes given.
-/// TODO: transform that to only use the raw encoded bytes, instead of the nodes. Would
-/// allow us to remove the need to give the proofs as nodes.
-pub(crate) fn compute_key_length(path: &[Node]) -> usize {
-    let mut key_len = 0;
-    for node in path {
-        match node {
-            Node::Branch(_) => key_len += 1,
-            Node::Extension(e) => key_len += e.read().unwrap().prefix.len(),
-            Node::Leaf(l) => key_len += l.key.len(),
-            Node::Hash(_) => panic!("what is a hash node!?"),
-            Node::Empty => panic!("should not be an empty node in the path"),
-        }
-    }
-    key_len
-}
 
 pub(crate) fn left_pad32(slice: &[u8]) -> [u8; 32] {
     left_pad::<32>(slice)
@@ -382,16 +365,13 @@ impl ProofQuery {
 #[cfg(test)]
 pub(crate) mod test {
 
-    use std::{str::FromStr, sync::Arc};
+    use std::str::FromStr;
 
-    use ethers::types::{BlockNumber, H256, U256};
+    use ethers::types::H256;
     use hashbrown::HashMap;
     use rand::{thread_rng, Rng};
 
-    use crate::{
-        mpt_sequential::test::verify_storage_proof_from_query,
-        utils::{convert_u8_to_u32_slice, find_index_subvector},
-    };
+    use crate::utils::{convert_u8_to_u32_slice, find_index_subvector};
 
     pub fn get_sepolia_url() -> String {
         #[cfg(feature = "ci")]

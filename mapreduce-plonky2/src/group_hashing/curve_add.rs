@@ -45,8 +45,7 @@ mod tests {
     use anyhow::Result;
     use plonky2::{
         field::{
-            extension::{quintic::QuinticExtension, FieldExtension},
-            goldilocks_field::GoldilocksField,
+            extension::quintic::QuinticExtension,
             types::{Field, Sample},
         },
         iop::witness::PartialWitness,
@@ -57,11 +56,10 @@ mod tests {
         },
     };
     use plonky2_ecgfp5::{
-        curve::curve::WeierstrassPoint,
-        gadgets::{base_field::PartialWitnessQuinticExt, curve::PartialWitnessCurve},
+        curve::curve::{Point, WeierstrassPoint},
+        gadgets::curve::PartialWitnessCurve,
     };
-    use rand::{thread_rng, Rng};
-    use std::array;
+    use rand::thread_rng;
 
     const ARITY: usize = 4;
     const D: usize = 2;
