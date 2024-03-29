@@ -345,7 +345,7 @@ where
     }
     /// Assigns each value in the given array to the respective wire in `self`. Each value is first
     /// converted to a field element.
-    pub fn assign_from_data<V: ToField<F>, F: RichField>(
+    pub(crate) fn assign_from_data<V: ToField<F>, F: RichField>(
         &self,
         pw: &mut PartialWitness<F>,
         array: &[V; SIZE],
@@ -479,6 +479,25 @@ where
             b.connect(res, tru.target);
         }
     }
+    /// Similar to `enforce_slice_equal` but returns a boolean result instead of enforcing it
+    pub fn is_slice_equals<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        other: &Self,
+        slice_len: Target,
+    ) -> BoolTarget {
+        let tru = b._true();
+        let mut end_result = b._true();
+        for (i, (our, other)) in self.arr.iter().zip(other.arr.iter()).enumerate() {
+            let it = b.constant(F::from_canonical_usize(i));
+            // TODO: fixed to 6 becaues max nibble len = 64 - TO CHANGE
+            let before_end = less_than(b, it, slice_len, 6);
+            let eq = b.is_equal(our.to_target(), other.to_target());
+            let res = b.select(before_end, eq.target, tru.target);
+            end_result = b.and(tru, BoolTarget::new_unsafe(res));
+        }
+        end_result
+    }
 
     /// Returns self[at..at+SUB_SIZE].
     /// Cost is O(SIZE * SIZE) due to SIZE calls to value_at()
@@ -566,6 +585,7 @@ where
     }
 }
 /// Returns the size of the array in 32-bit units, rounded up.
+#[allow(non_snake_case)]
 pub(crate) const fn L32(a: usize) -> usize {
     if a % 4 != 0 {
         a / 4 + 1
@@ -574,7 +594,7 @@ pub(crate) const fn L32(a: usize) -> usize {
     }
 }
 impl<const SIZE: usize> Array<Target, SIZE> {
-    pub fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
+    pub(crate) fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
     ) -> Array<U32Target, { L32(SIZE) }>
@@ -610,30 +630,6 @@ impl<const SIZE: usize> Array<Target, SIZE> {
     }
 }
 
-//impl<const SIZE:usize> Array<Target,SIZE> {
-//    /// extracts a variable length array from this array. The MAX_SUB_SIZE is
-//     /// the maximum number of target elements will be extracted into the vector.
-//    /// The real_len is used for the VectorWire returned to operate correcctly.
-//    /// The difference with extract_array is that extract_array always assume the
-//    /// returned array contains data up to the end of the array, which is useful
-//    /// when one knows the exact length of data one needs to extract.
-//    pub fn extract_vector<
-//        F: RichField + Extendable<D>,
-//        const D: usize,
-//        const MAX_SUB_SIZE: usize,
-//    >(
-//        &self,
-//        b: &mut CircuitBuilder<F, D>,
-//        at: Target,
-//        real_len: Target,
-//    ) -> VectorWire<MAX_SUB_SIZE> {
-//        VectorWire {
-//            arr: self.extract_array::<F, D, MAX_SUB_SIZE>(b, at),
-//            real_len,
-//        }
-//    }
-//}
-
 /// Maximum size of the array where we can call b.random_access() from native
 /// Plonky2 API
 const RANDOM_ACCESS_SIZE: usize = 64;
@@ -660,7 +656,7 @@ mod test {
     use crate::{
         array::{Array, ToField, Vector, VectorWire, L32},
         circuit::{test::run_circuit, UserCircuit},
-        eth::{left_pad, left_pad32},
+        eth::left_pad,
         utils::{convert_u8_to_u32_slice, find_index_subvector, test::random_vector},
     };
     const D: usize = 2;
@@ -1134,6 +1130,16 @@ mod test {
             const PAD: usize = 4;
             let inp = [77, 66, 55];
             let exp = [00, 77, 66, 55];
+            run_circuit::<F, D, C, _>(TestNormalizeLeft::<VLEN, PAD> {
+                input: Vector::from_vec(&inp.to_vec()).unwrap(),
+                exp,
+            });
+        }
+        {
+            const VLEN: usize = 5;
+            const PAD: usize = 4;
+            let inp = [33];
+            let exp = [00, 00, 00, 33];
             run_circuit::<F, D, C, _>(TestNormalizeLeft::<VLEN, PAD> {
                 input: Vector::from_vec(&inp.to_vec()).unwrap(),
                 exp,

@@ -279,7 +279,8 @@ mod test {
             c: ExtensionNodeCircuit { node: node.clone() },
             inputs: PublicInputs::from(&inv_arr),
         };
-        let res = panic::catch_unwind(|| {
+        // TODO: why is this not checked?
+        let _res = panic::catch_unwind(|| {
             run_circuit::<F, 2, C, _>(circuit);
         });
         //assert!(res.is_err());

@@ -6,10 +6,10 @@ use crate::{
     eth::{left_pad32, StorageSlot},
     keccak::{ByteKeccakWires, InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, PAD_LEN},
-    types::{AddressTarget, ADDRESS_LEN, MAPPING_KEY_LEN},
+    types::MAPPING_KEY_LEN,
     utils::keccak256,
 };
-use ethers::types::Address;
+use ethers::types::H256;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -120,6 +120,9 @@ pub struct SimpleSlot(pub(super) StorageSlot);
 impl SimpleSlot {
     pub fn new(slot: u8) -> Self {
         Self(StorageSlot::Simple(slot as usize))
+    }
+    pub fn location(&self) -> H256 {
+        self.0.location()
     }
 }
 

@@ -1,13 +1,14 @@
 use anyhow::Result;
 use itertools::Itertools;
 use plonky2::field::extension::Extendable;
-use plonky2::hash::hash_types::{HashOut, RichField};
+use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher};
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+
 use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
 use sha3::Digest;
 use sha3::Keccak256;
@@ -52,7 +53,7 @@ pub(crate) fn find_index_subvector(v: &[u8], sub: &[u8]) -> Option<usize> {
 
 /// Compute the keccak256 hash of the given data.
 /// NOTE: probably should have two modules for circuit related stuff and non-circuit related stuff
-pub(crate) fn keccak256(data: &[u8]) -> Vec<u8> {
+pub fn keccak256(data: &[u8]) -> Vec<u8> {
     let mut hasher = Keccak256::new();
     hasher.update(data);
     hasher.finalize().to_vec()
@@ -64,7 +65,6 @@ pub(crate) fn convert_u8_slice_to_u32_fields<F: RichField>(values: &[u8]) -> Vec
 
     values
         .chunks(4)
-        .into_iter()
         .map(|mut chunk| {
             let u32_num = read_le_u32(&mut chunk);
             F::from_canonical_u32(u32_num)
@@ -143,19 +143,6 @@ pub fn num_to_bits<F: RichField + Extendable<D>, const D: usize>(
 ) -> Vec<BoolTarget> {
     builder.range_check(x, n);
     builder.split_le(x, n)
-}
-
-pub fn bits_to_num<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-    bits: &[BoolTarget],
-) -> Target {
-    let mut res = builder.zero();
-    let mut e2 = builder.one();
-    for bit in bits {
-        res = builder.mul_add(e2, bit.target, res);
-        e2 = builder.add(e2, e2);
-    }
-    res
 }
 
 /// Returns true if a < b in the first n bits. False otherwise.
@@ -261,61 +248,123 @@ pub fn hash_two_to_one<F: RichField, H: Hasher<F>>(
     H::two_to_one(left, right).to_bytes().try_into().unwrap()
 }
 
+// TODO move that to a vec/array specific module?
+pub trait ToFields {
+    fn to_fields<F: RichField>(&self) -> Vec<F>;
+}
+
+impl ToFields for &[u8] {
+    fn to_fields<F: RichField>(&self) -> Vec<F> {
+        self.iter().map(|x| F::from_canonical_u8(*x)).collect()
+    }
+}
+impl ToFields for &[u32] {
+    fn to_fields<F: RichField>(&self) -> Vec<F> {
+        self.iter().map(|x| F::from_canonical_u32(*x)).collect()
+    }
+}
+pub trait Fieldable {
+    fn to_field<F: RichField>(&self) -> F;
+}
+
+impl Fieldable for u8 {
+    fn to_field<F: RichField>(&self) -> F {
+        F::from_canonical_u8(*self)
+    }
+}
+impl<T: Fieldable> ToFields for Vec<T> {
+    fn to_fields<F: RichField>(&self) -> Vec<F> {
+        self.iter().map(|x| x.to_field()).collect()
+    }
+}
+
+impl<const N: usize, T: Fieldable> ToFields for [T; N] {
+    fn to_fields<F: RichField>(&self) -> Vec<F> {
+        self.iter().map(|x| x.to_field()).collect()
+    }
+}
+
+impl Fieldable for u32 {
+    fn to_field<F: RichField>(&self) -> F {
+        F::from_canonical_u32(*self)
+    }
+}
+
+pub trait Packer {
+    type T;
+    fn pack(&self) -> Vec<Self::T>;
+}
+
+impl Packer for &[u8] {
+    type T = u32;
+    fn pack(&self) -> Vec<u32> {
+        convert_u8_to_u32_slice(self)
+    }
+}
+
+impl Packer for Vec<u8> {
+    type T = u32;
+    fn pack(&self) -> Vec<u32> {
+        convert_u8_to_u32_slice(self)
+    }
+}
+
+impl<const N: usize> Packer for &[u8; N] {
+    type T = u32;
+    fn pack(&self) -> Vec<u32> {
+        convert_u8_to_u32_slice(self.as_slice())
+    }
+}
+impl<const N: usize> Packer for [u8; N] {
+    type T = u32;
+    fn pack(&self) -> Vec<u32> {
+        convert_u8_to_u32_slice(self.as_slice())
+    }
+}
 #[cfg(test)]
 pub(crate) mod test {
+    use super::{Packer, ToFields};
     use crate::utils::{
-        bits_to_num, convert_u8_to_u32_slice, greater_than, greater_than_or_equal_to, less_than,
+        convert_u8_to_u32_slice, greater_than, greater_than_or_equal_to, less_than,
         less_than_or_equal_to, num_to_bits,
     };
     use anyhow::Result;
-    use itertools::Itertools;
+    use ethers::types::Address;
     use plonky2::field::extension::Extendable;
+    use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::field::types::Field;
     use plonky2::hash::hash_types::RichField;
-    use plonky2::iop::target::Target;
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+    use plonky2::iop::target::{BoolTarget, Target};
+    use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use rand::{thread_rng, Rng, RngCore};
 
-    use super::read_le_u32;
+    pub fn bits_to_num<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        bits: &[BoolTarget],
+    ) -> Target {
+        let mut res = builder.zero();
+        let mut e2 = builder.one();
+        for bit in bits {
+            res = builder.mul_add(e2, bit.target, res);
+            e2 = builder.add(e2, e2);
+        }
+        res
+    }
+
+    #[test]
+    fn test_pack() {
+        let addr = Address::random();
+        let _: Vec<GoldilocksField> = addr.as_fixed_bytes().pack().to_fields();
+    }
+
     pub(crate) fn random_vector<T>(size: usize) -> Vec<T>
     where
         rand::distributions::Standard: rand::distributions::Distribution<T>,
     {
         (0..size).map(|_| thread_rng().gen::<T>()).collect()
-    }
-    pub(crate) fn hash_output_to_field<F: RichField>(expected: &[u8]) -> Vec<F> {
-        let iter_u32 = expected.iter().chunks(4);
-        iter_u32
-            .into_iter()
-            .map(|chunk| {
-                let chunk_buff = chunk.copied().collect::<Vec<u8>>();
-                let u32_num = read_le_u32(&mut chunk_buff.as_slice());
-                F::from_canonical_u32(u32_num)
-            })
-            .collect::<Vec<_>>()
-    }
-
-    pub(crate) fn connect<F: RichField + Extendable<D>, const D: usize, I: Into<u32>>(
-        b: &mut CircuitBuilder<F, D>,
-        pw: &mut PartialWitness<F>,
-        a: Target,
-        v: I,
-    ) {
-        let t = b.add_virtual_target();
-        pw.set_target(t, F::from_canonical_u32(v.into()));
-        b.connect(a, t);
-    }
-
-    pub(crate) fn data_to_constant_targets<F: RichField + Extendable<D>, const D: usize>(
-        b: &mut CircuitBuilder<F, D>,
-        d: &[u8],
-    ) -> Vec<Target> {
-        d.iter()
-            .map(|x| b.constant(F::from_canonical_u8(*x)))
-            .collect()
     }
 
     #[test]

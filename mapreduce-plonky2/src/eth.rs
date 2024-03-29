@@ -1,7 +1,7 @@
 //! Module containing several structure definitions for Ethereum related operations
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
 use anyhow::{bail, Ok, Result};
-use eth_trie::{EthTrie, MemoryDB, Node, Trie};
+use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethers::{
     providers::{Http, Middleware, Provider},
     types::{
@@ -216,29 +216,12 @@ pub fn extract_child_hashes(rlp_data: &[u8]) -> Vec<Vec<u8>> {
     }
     hashes
 }
-/// Computes the length of the radix, of the "key" to lookup in the MPT trie, from
-/// the path of nodes given.
-/// TODO: transform that to only use the raw encoded bytes, instead of the nodes. Would
-/// allow us to remove the need to give the proofs as nodes.
-pub(crate) fn compute_key_length(path: &[Node]) -> usize {
-    let mut key_len = 0;
-    for node in path {
-        match node {
-            Node::Branch(_) => key_len += 1,
-            Node::Extension(e) => key_len += e.read().unwrap().prefix.len(),
-            Node::Leaf(l) => key_len += l.key.len(),
-            Node::Hash(_) => panic!("what is a hash node!?"),
-            Node::Empty => panic!("should not be an empty node in the path"),
-        }
-    }
-    key_len
-}
 
-pub(crate) fn left_pad32(slice: &[u8]) -> [u8; 32] {
+pub fn left_pad32(slice: &[u8]) -> [u8; 32] {
     left_pad::<32>(slice)
 }
 
-pub(crate) fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
+pub fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     match slice.len() {
         a if a > N => panic!(
             "left_pad{} must not be called with higher slice len than {} (given{})",
@@ -255,13 +238,13 @@ pub(crate) fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     }
 }
 
-pub(crate) struct ProofQuery {
+pub struct ProofQuery {
     pub(crate) contract: Address,
     pub(crate) slot: StorageSlot,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum StorageSlot {
+pub enum StorageSlot {
     /// simple storage slot like a uin256 etc that fits in 32bytes
     /// Argument is the slot location in the contract
     Simple(usize),
@@ -379,20 +362,70 @@ impl ProofQuery {
     }
 }
 
+pub fn get_sepolia_url() -> String {
+    #[cfg(feature = "ci")]
+    let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
+    #[cfg(not(feature = "ci"))]
+    let url = "https://ethereum-sepolia-rpc.publicnode.com";
+    url.to_string()
+}
+
+pub fn get_mainnet_url() -> String {
+    #[cfg(feature = "ci")]
+    let url = env::var("CI_ETH").expect("CI_ETH env var not set");
+    #[cfg(not(feature = "ci"))]
+    let url = "https://eth.llamarpc.com";
+    url.to_string()
+}
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
 
     use std::str::FromStr;
 
-    use ethers::types::{BlockNumber, H256, U256};
+    use ethers::types::H256;
+    use hashbrown::HashMap;
     use rand::{thread_rng, Rng};
 
-    use crate::{
-        mpt_sequential::test::verify_storage_proof_from_query,
-        utils::{convert_u8_to_u32_slice, find_index_subvector},
-    };
+    use crate::utils::{convert_u8_to_u32_slice, find_index_subvector};
 
     use super::*;
+    #[tokio::test]
+    async fn test_sepolia_slot() -> Result<()> {
+        #[cfg(feature = "ci")]
+        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
+        #[cfg(not(feature = "ci"))]
+        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+        let pidgy_address = Address::from_str("0x363971ee2b96f360ec9d04b5809afd15c77b1af1")?;
+        let length_slot = 8;
+        let query = ProofQuery::new_simple_slot(pidgy_address, length_slot);
+        let res = query.query_mpt_proof(&provider, None).await?;
+        let tree_res = ProofQuery::verify_storage_proof(&res)?;
+        println!("official response: {}", res.storage_proof[0].value);
+        println!("tree response = {:?}", tree_res);
+        let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
+        let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
+        assert_eq!(leaf_list.len(), 2);
+        // implement the circuit logic:
+        let first_byte = leaf_list[1][0];
+        let slice = if first_byte < 0x80 {
+            println!("taking full byte");
+            &leaf_list[1][..]
+        } else {
+            println!("skipping full byte");
+            &leaf_list[1][1..]
+        }
+        .to_vec();
+        let slice = left_pad::<4>(&slice); // what happens in circuit effectively
+                                           // we have to reverse since encoding is big endian on EVM and our function is little endian based
+        let length = convert_u8_to_u32_slice(&slice.into_iter().rev().collect::<Vec<u8>>())[0];
+        println!("length extracted = {}", length);
+        println!("res.storage_proof.value = {}", res.storage_proof[0].value);
+        assert_eq!(length, 2); // custom value that may change if we update contract!
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_pidgy_pinguin_length_slot() -> Result<()> {
@@ -407,7 +440,9 @@ mod test {
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_simple_slot(pidgy_address, 8);
         let res = query.query_mpt_proof(&provider, None).await?;
-        ProofQuery::verify_storage_proof(&res)?;
+        let tree_res = ProofQuery::verify_storage_proof(&res)?;
+        println!("official response: {}", res.storage_proof[0].value);
+        println!("tree response = {:?}", tree_res);
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         println!("leaf[1].len() = {}", leaf_list[1].len());
@@ -438,6 +473,20 @@ mod test {
         println!("length extracted = {}", length);
         println!("length 2 extracted = {}", length2);
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);
+        let analyze = |proof: Vec<Bytes>| {
+            proof.iter().fold(HashMap::new(), |mut acc, p| {
+                let b: Vec<Vec<u8>> = rlp::decode_list(p);
+                if b.len() == 17 {
+                    let n = acc.entry(p.len()).or_insert(0);
+                    *n += 1;
+                }
+                acc
+            })
+        };
+        let storage_sizes = analyze(res.storage_proof[0].proof.clone());
+        let state_sizes = analyze(res.account_proof.clone());
+        println!("storage_sizes = {:?}", storage_sizes);
+        println!("state_sizes = {:?}", state_sizes);
         Ok(())
     }
 

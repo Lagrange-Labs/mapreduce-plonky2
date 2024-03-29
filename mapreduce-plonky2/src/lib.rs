@@ -1,9 +1,9 @@
 //! Plonky2 documentation
-#![warn(missing_docs)]
+// #![warn(missing_docs)]
 #![feature(generic_const_exprs)]
 #![feature(generic_arg_infer)]
 #![feature(const_for)]
-#![feature(iter_map_windows)]
+#![feature(generic_const_items)]
 use anyhow::Result;
 use plonky2::{
     field::extension::Extendable,
@@ -20,23 +20,22 @@ mod benches;
 pub mod eth;
 
 pub mod api;
-mod array;
-mod block;
+pub mod array;
+pub mod block;
 pub(crate) mod circuit;
-mod group_hashing;
+pub mod group_hashing;
 mod hash;
-mod integration;
-mod keccak;
+pub mod keccak;
 mod merkle_tree;
-mod mpt_sequential;
+pub mod mpt_sequential;
 mod poseidon;
 pub mod query2;
 mod rlp;
 pub mod state;
 pub mod storage;
 pub mod types;
-mod utils;
-mod verifier_gadget;
+pub mod utils;
+
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.
 /// TODO: This is a temporary tuple. We need to save the verification key separately.
