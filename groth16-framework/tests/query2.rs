@@ -136,6 +136,9 @@ fn plonky2_build_and_prove(asset_dir: &str) -> (CircuitData<F, C, D>, Vec<u8>) {
         .iter()
         .map(|x| x.pack().to_fields())
         .collect::<Vec<_>>();
+
+    log::info!("NFT IDs to set before proving: {packed_field_mks:?}");
+
     let digests = packed_field_mks
         .iter()
         .map(|i| group_hashing::map_to_curve_point(i))
@@ -210,6 +213,8 @@ fn verify_solidity_respond_fun(asset_dir: &str) {
 
     // Read the combined bytes of the full proof.
     let proof_bytes = read_file(Path::new(asset_dir).join("full_proof.bin")).unwrap();
+    log_nft_ids(&proof_bytes);
+
     let proof_bytes = proof_bytes
         .into_iter()
         .map(|b| Token::Uint(b.into()))
@@ -226,4 +231,41 @@ fn verify_solidity_respond_fun(asset_dir: &str) {
 
     let verified = verifier.verify(calldata);
     assert!(verified);
+}
+
+/// Log output the NFT IDs from the plonky2 public inputs.
+fn log_nft_ids(data: &[u8]) {
+    // The total length of the plonky2 public inputs. Each input value is
+    // serialized as an uint64. It's related with both the full proof
+    // serialization and the wrapped circuit code.
+    const PI_TOTAL_LEN: usize = L + 24;
+
+    // The byte offset of the NFT IDS located in the plonky2 public inputs.
+    const NFT_IDS_OFFSET_IN_PI: usize = 16;
+
+    // Same code with the Solidity `respond` function for testing.
+    let mut pis = [0_u8; PI_TOTAL_LEN * 8];
+    for i in 0..PI_TOTAL_LEN * 8 {
+        pis[i] = data[352 + i];
+    }
+
+    let mut nft_ids = [0_u32; L];
+    for i in 0..L {
+        let mut chunk = [0_u8; 4];
+        for j in 0..4 {
+            chunk[j] = pis[(NFT_IDS_OFFSET_IN_PI + i) * 8 + j];
+        }
+        nft_ids[i] = convert_to_uint32(chunk);
+    }
+
+    log::info!("NFT IDs retrieved from the public inputs: {nft_ids:?}");
+}
+
+/// Convert 4 bytes to an U32. Same code with Solidity for testing.
+fn convert_to_uint32(data: [u8; 4]) -> u32 {
+    let mut result = 0_u32;
+    for i in 0..4 {
+        result |= (data[i] << (8 * i)) as u32;
+    }
+    return result;
 }
