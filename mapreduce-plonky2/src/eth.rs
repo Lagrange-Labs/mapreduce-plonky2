@@ -384,10 +384,48 @@ pub(crate) mod test {
 
     use ethers::types::H256;
     use hashbrown::HashMap;
+    use plonky2::field::goldilocks_field::GoldilocksField;
     use rand::{thread_rng, Rng};
 
-    use crate::utils::{convert_u8_to_u32_slice, find_index_subvector};
+    use crate::utils::{convert_u8_to_u32_slice, find_index_subvector, Packer, ToFields};
 
+    #[tokio::test]
+    async fn test_block_links() -> Result<()> {
+        let url = get_sepolia_url();
+        let block_number1 = 5586403;
+        let block_number2 = block_number1 + 1;
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+        type F = GoldilocksField;
+
+        let block1 = provider.get_block(block_number1).await?.unwrap();
+        let block2 = provider.get_block(block_number2).await?.unwrap();
+        let block1_hash = keccak256(&block1.rlp());
+        let block2_hash = keccak256(&block2.rlp());
+        let block2_parent_hash = block2.parent_hash.as_bytes();
+        println!(
+            "block {} . prev_hash = {:?}",
+            block_number1,
+            block1.parent_hash.as_bytes().pack().to_fields::<F>()
+        );
+        println!(
+            "block {} hash = {:?}",
+            block_number1,
+            block1_hash.pack().to_fields::<F>()
+        );
+        println!(
+            "block {} .parent_hash = {:?}",
+            block_number1,
+            block2.parent_hash.as_bytes().pack().to_fields::<F>()
+        );
+        println!(
+            "block {} hash = {:?}",
+            block_number2,
+            block2_hash.pack().to_fields::<F>()
+        );
+        assert_eq!(block1_hash, block2_parent_hash);
+        Ok(())
+    }
     use super::*;
     #[tokio::test]
     async fn test_sepolia_slot() -> Result<()> {
