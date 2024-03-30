@@ -404,6 +404,12 @@ pub(crate) mod test {
         let block2_hash = keccak256(&block2.rlp());
         let block2_parent_hash = block2.parent_hash.as_bytes();
         println!(
+            "block {} computed hash {} vs given hash {}",
+            block_number1,
+            hex::encode(&block1_hash),
+            hex::encode(block1.hash.unwrap().as_bytes())
+        );
+        println!(
             "block {} . prev_hash = {:?}",
             block_number1,
             block1.parent_hash.as_bytes().pack().to_fields::<F>()
