@@ -415,7 +415,7 @@ pub(crate) mod test {
         );
         println!(
             "block {} .parent_hash = {:?}",
-            block_number1,
+            block_number2,
             block2.parent_hash.as_bytes().pack().to_fields::<F>()
         );
         println!(
