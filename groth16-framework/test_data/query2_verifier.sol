@@ -649,18 +649,33 @@ contract Verifier {
     // Parse the plonky2 public inputs. and calculate the hash. Then asset this hash value must be
     function verifyQuery(uint8[] calldata data, Query calldata query) internal pure {
         uint32 min_block_number = convertToU32(data, PI_MIN_BLOCK_NUM_OFFSET);
-        uint32 max_block_number = convertToU32(data, PI_MAX_BLOCK_NUM_OFFSET);
-        address contract_address = convertToAddress(data, PI_CONTRACT_ADDR_OFFSET);
-        address user_address = convertToAddress(data, PI_USER_ADDR_OFFSET);
-        uint256 block_hash = convertToHash(data, PI_BLOCK_HASH_OFFSET);
-
         require(
-            min_block_number == query.min_block_number &&
-                max_block_number == query.max_block_number &&
-                contract_address == query.contract_address &&
-                user_address == query.user_address &&
-                block_hash == query.block_hash,
-            "The parsed Query from plonky2 public inputs must be equal to the expected query."
+            min_block_number == query.min_block_number,
+            "The parsed min block number must be equal to the expected one in query."
+        );
+
+        uint32 max_block_number = convertToU32(data, PI_MAX_BLOCK_NUM_OFFSET);
+        require(
+            max_block_number == query.max_block_number,
+            "The parsed max block number must be equal to the expected one in query."
+        );
+
+        address contract_address = convertToAddress(data, PI_CONTRACT_ADDR_OFFSET);
+        require(
+            contract_address == query.contract_address,
+            "The parsed contract address must be equal to the expected one in query."
+        );
+
+        address user_address = convertToAddress(data, PI_USER_ADDR_OFFSET);
+        require(
+            user_address == query.user_address,
+            "The parsed user address must be equal to the expected one in query."
+        );
+
+        uint256 block_hash = convertToHash(data, PI_BLOCK_HASH_OFFSET);
+        require(
+            block_hash == query.block_hash,
+            "The parsed block hash must be equal to the expected one in query."
         );
     }
 
