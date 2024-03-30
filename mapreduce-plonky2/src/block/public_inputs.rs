@@ -96,7 +96,7 @@ impl<'a, T: Copy + Default> PublicInputs<'a, T> {
     }
 
     pub fn block_header_data(&self) -> &[T] {
-        &self.proof_inputs[Self::H_IDX..]
+        &self.proof_inputs[Self::H_IDX..Self::H_IDX + PACKED_HASH_LEN]
     }
 }
 

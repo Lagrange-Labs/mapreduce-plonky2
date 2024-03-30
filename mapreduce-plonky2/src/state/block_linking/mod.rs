@@ -247,7 +247,9 @@ mod tests {
         circuit::{test::run_circuit, UserCircuit},
         eth::{ProofQuery, RLPBlock},
         keccak::{OutputHash, HASH_LEN},
-        utils::{convert_u8_slice_to_u32_fields, convert_u8_to_u32_slice, keccak256},
+        utils::{
+            convert_u8_slice_to_u32_fields, convert_u8_to_u32_slice, keccak256, Packer, ToFields,
+        },
     };
     use anyhow::Result;
     use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -544,6 +546,10 @@ mod tests {
             F::from_canonical_u32(block.number.unwrap().as_u32()),
             *computed_bn
         );
+
+        let comp_prev = pi.prev_block_hash();
+        let exp_prev = block.parent_hash.to_fixed_bytes().pack().to_fields();
+        assert_eq!(comp_prev, exp_prev);
 
         Ok(())
     }
