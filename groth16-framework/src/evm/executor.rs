@@ -48,6 +48,7 @@ pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u6
     };
 
     let result = evm.transact_commit().unwrap();
+    log::info!("EVM result: {result:?}");
     match result {
         ExecutionResult::Success { gas_used, .. } => Ok(gas_used),
         ExecutionResult::Revert { gas_used, output } => Err(format!(

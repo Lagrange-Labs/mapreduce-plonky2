@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use ethers::abi::{Contract, Token};
-use ethers::types::Address;
+use ethers::types::{Address, U256};
 use groth16_framework::{
     compile_and_generate_assets,
     test_utils::{save_plonky2_proof_pis, test_groth16_proving_and_verification},
@@ -39,11 +39,33 @@ use plonky2::{
 use rand::{thread_rng, Rng};
 use recursion_framework::framework_testing::TestingRecursiveCircuits;
 use serial_test::serial;
-use std::{iter::once, path::Path};
+use std::{iter::once, path::Path, str::FromStr};
 
 /// Set the number of NFT IDs and block DB depth.
 const L: usize = 5;
 const BLOCK_DB_DEPTH: usize = 2;
+
+/// The query struct used to check with the plonky2 public inputs in Solidity.
+struct Query {
+    contract_address: Address,
+    user_address: Address,
+    min_block_number: u32,
+    max_block_number: u32,
+    block_hash: U256,
+}
+
+impl Query {
+    /// Create the test Query data.
+    fn new_test() -> Self {
+        Self {
+            contract_address: Address::repeat_byte(1),
+            user_address: Address::repeat_byte(2),
+            min_block_number: 100,
+            max_block_number: 1000,
+            block_hash: U256::MAX,
+        }
+    }
+}
 
 /// Test proving for the query2 circuit.
 #[ignore] // Ignore for long running time in CI.
@@ -54,8 +76,11 @@ fn test_groth16_proving_for_query2() {
 
     const ASSET_DIR: &str = "groth16_query2";
 
+    // Create the test Query data.
+    let query = Query::new_test();
+
     // Build for the query2 circuit and generate the plonky2 proof.
-    let (circuit_data, proof) = plonky2_build_and_prove(ASSET_DIR);
+    let (circuit_data, proof) = plonky2_build_and_prove(ASSET_DIR, &query);
 
     // Generate the Groth16 asset files.
     compile_and_generate_assets(circuit_data, ASSET_DIR)
@@ -66,11 +91,11 @@ fn test_groth16_proving_for_query2() {
 
     // Verify with the Solidity function `respond`.
     // The editing Solidity code is saved in `test_data/query2_verifier.sol`.
-    verify_solidity_respond_fun(ASSET_DIR);
+    verify_solidity_respond_fun(ASSET_DIR, &query);
 }
 
 /// Build for the plonky2 circuit and generate the proof.
-fn plonky2_build_and_prove(asset_dir: &str) -> (CircuitData<F, C, D>, Vec<u8>) {
+fn plonky2_build_and_prove(asset_dir: &str, query: &Query) -> (CircuitData<F, C, D>, Vec<u8>) {
     // Generate a fake query2/block circuit set.
     let query2_testing_framework =
         TestingRecursiveCircuits::<F, C, D, QUERY2_BLOCK_NUM_IO>::default();
@@ -94,17 +119,23 @@ fn plonky2_build_and_prove(asset_dir: &str) -> (CircuitData<F, C, D>, Vec<u8>) {
     let last_root = HashOut {
         elements: F::rand_vec(NUM_HASH_OUT_ELTS).try_into().unwrap(),
     };
-    let init_block_number = F::from_canonical_u32(thread_rng().gen::<u32>());
-    let db_range = 555;
-    let last_block_number = init_block_number + F::from_canonical_usize(db_range);
-    let last_block_hash = F::rand_vec(PACKED_HASH_LEN);
+    let init_block_number = F::ONE;
+    let last_block_number = F::from_canonical_u32(query.max_block_number + 1);
+    let last_block_hash = query
+        .block_hash
+        .0
+        .iter()
+        .flat_map(|u| [*u as u32, (u >> 32) as u32].map(F::from_canonical_u32))
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
 
     let block_db_inputs: [F; BLOCK_DB_NUM_IO] = BlockDbPublicInputs::from_parts(
         &init_root.elements,
         &last_root.elements,
         init_block_number,
         last_block_number,
-        &last_block_hash.try_into().unwrap(),
+        &last_block_hash,
     )
     .into_iter()
     .chain(once(F::ONE))
@@ -119,19 +150,17 @@ fn plonky2_build_and_prove(asset_dir: &str) -> (CircuitData<F, C, D>, Vec<u8>) {
 
     // Generate a fake query2/block proof, taking some inputs from the block db
     // block range asked is just one block less than latest block in db.
-    let query_max_number = block_db_pi.block_number_data() - F::ONE;
-    let query_range = F::from_canonical_usize(10);
-    let query_min_number = query_max_number - query_range;
+    let query_max_number = F::from_canonical_u32(query.max_block_number);
+    let query_min_number = F::from_canonical_u32(query.min_block_number);
+    let query_range = query_max_number - query_min_number;
     let query_root = HashOut {
         elements: block_db_pi.root_data().try_into().unwrap(),
     };
-    let smc_address = Address::random();
-    let user_address = Address::random();
+    let smc_address = query.contract_address;
+    let user_address = query.user_address;
     let mapping_slot = F::rand();
     let length_slot = F::rand();
-    let mapping_keys = (0..L)
-        .map(|_| left_pad::<MAPPING_KEY_LEN>(&[thread_rng().gen::<u8>()]))
-        .collect::<Vec<_>>();
+    let mapping_keys = test_mapping_keys();
     let packed_field_mks = mapping_keys
         .iter()
         .map(|x| x.pack().to_fields())
@@ -195,8 +224,15 @@ fn plonky2_build_and_prove(asset_dir: &str) -> (CircuitData<F, C, D>, Vec<u8>) {
     (circuit_data, proof)
 }
 
+/// Generate the test mapping keys.
+fn test_mapping_keys() -> Vec<[u8; MAPPING_KEY_LEN]> {
+    (0..L)
+        .map(|i| left_pad::<MAPPING_KEY_LEN>(&[i as u8]))
+        .collect()
+}
+
 /// Verify the Solidity `respond` function.
-fn verify_solidity_respond_fun(asset_dir: &str) {
+fn verify_solidity_respond_fun(asset_dir: &str, query: &Query) {
     let solidity_file_path = Path::new("test_data")
         .join("query2_verifier.sol")
         .to_string_lossy()
@@ -213,14 +249,25 @@ fn verify_solidity_respond_fun(asset_dir: &str) {
     let proof_bytes = read_file(Path::new(asset_dir).join("full_proof.bin")).unwrap();
     log_nft_ids(&proof_bytes);
 
-    let proof_bytes = proof_bytes
-        .into_iter()
-        .map(|b| Token::Uint(b.into()))
-        .collect();
+    let proof_bytes = Token::Array(
+        proof_bytes
+            .into_iter()
+            .map(|b| Token::Uint(b.into()))
+            .collect(),
+    );
 
-    let args = vec![Token::Array(proof_bytes)];
-    let verify_fun = &contract.functions["respond"][0];
-    let calldata = verify_fun
+    let query = Token::Tuple(vec![
+        Token::Address(query.contract_address),
+        Token::Address(query.user_address),
+        Token::Uint(query.min_block_number.into()),
+        Token::Uint(query.max_block_number.into()),
+        Token::Uint(query.block_hash),
+    ]);
+
+    // Build the ABI encoded data.
+    let args = vec![proof_bytes, query];
+    let fun = &contract.functions["respond"][0];
+    let calldata = fun
         .encode_input(&args)
         .expect("Failed to encode the inputs of Solidity respond function");
 
