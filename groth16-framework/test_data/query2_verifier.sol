@@ -543,6 +543,8 @@ contract Verifier {
         }
     }
 
+    bytes32 constant CIRCUIT_DIGEST = 0x1ef3e0e4525d9634361ccfbbaab5825505dadaae75dfc5278ba0ab9824dabfc0;
+
     // byteLen(uint160) / 4
     uint32 constant PACKED_ADDRESS_LEN = 5;
 
@@ -625,6 +627,10 @@ contract Verifier {
             inputs[i] = convertToU256(data, (i + 8) * 32);
         }
 
+        // Require the sha256 hash equals to the last Groth16 input.
+        require(inputs[0] == uint256(CIRCUIT_DIGEST), "The first Groth16 input must be equal to the circuit digest");
+
+        // Do Groth16 verification.
         this.verifyProof(proofs, inputs);
     }
 
