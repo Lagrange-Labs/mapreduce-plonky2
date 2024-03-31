@@ -97,15 +97,15 @@ where
     let file_exists = std::path::Path::new(PARAM_FILE).exists();
     if file_exists && load {
         log::info!("File exists, loading parameters");
-        let mut file = File::open(PARAM_FILE)?;
-        let params = rmp_serde::from_read(&mut file)?;
+        let file = File::open(PARAM_FILE)?;
+        let params = bincode::deserialize_from(&file)?;
         Ok(params)
     } else {
         log::info!("Building parameters (file exists {})", file_exists);
-        let mut file = File::create(PARAM_FILE)?;
+        let file = File::create(PARAM_FILE)?;
         let params = factory();
         log::info!("Serializing the parameters");
-        params.serialize(&mut Serializer::new(&mut file))?;
+        bincode::serialize_into(file, &params)?;
         Ok(params)
     }
 }

@@ -12,7 +12,7 @@ use ethers::{
 use rlp::{Encodable, Rlp, RlpStream};
 #[cfg(feature = "ci")]
 use std::env;
-use std::{array::from_fn as create_array, sync::Arc};
+use std::{array::from_fn as create_array, env, sync::Arc};
 
 use crate::{mpt_sequential::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
@@ -374,8 +374,9 @@ pub fn get_mainnet_url() -> String {
     #[cfg(feature = "ci")]
     let url = env::var("CI_ETH").expect("CI_ETH env var not set");
     #[cfg(not(feature = "ci"))]
-    let url = "https://eth.llamarpc.com";
-    url.to_string()
+    env::var("CI_ETH")
+        .or(Ok("https://eth.llamarpc.com".to_string()))
+        .unwrap()
 }
 #[cfg(test)]
 pub(crate) mod test {
@@ -384,11 +385,52 @@ pub(crate) mod test {
 
     use ethers::types::H256;
     use hashbrown::HashMap;
-    use plonky2::field::goldilocks_field::GoldilocksField;
+    use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
     use rand::{thread_rng, Rng};
 
     use crate::utils::{convert_u8_to_u32_slice, find_index_subvector, Packer, ToFields};
 
+    #[tokio::test]
+    async fn test_andrus_code() -> Result<()> {
+        let url = get_sepolia_url();
+        let eth_client =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+        type F = GoldilocksField;
+        let block = eth_client
+            .get_block_with_txs(5586403)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
+        let block_hash_5586403 = keccak256(&header_rlp);
+
+        let fields = convert_u8_to_u32_slice(&block_hash_5586403)
+            .iter()
+            .map(|b| F::from_canonical_u32(*b))
+            .collect::<Vec<_>>();
+        println!("Block 5586403 hash FIELDS: {:?}", fields);
+        println!("Block 5586403 hash: {:?}", block.hash);
+        println!();
+
+        let block = eth_client
+            .get_block_with_txs(5586404)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let block_5586404_parent_hash = convert_u8_to_u32_slice(&block.parent_hash.as_bytes())
+            .iter()
+            .map(|b| F::from_canonical_u32(*b))
+            .collect::<Vec<_>>();
+        println!(
+            "Block 5586404 parent hash FIELDS: {:?}",
+            block_5586404_parent_hash
+        );
+        println!("Block 5586404 parent hash: {:?}", block.parent_hash);
+        println!();
+        Ok(())
+    }
     #[tokio::test]
     async fn test_block_links() -> Result<()> {
         let url = get_sepolia_url();
