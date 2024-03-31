@@ -10,8 +10,6 @@ use ethers::{
     },
 };
 use rlp::{Encodable, Rlp, RlpStream};
-#[cfg(feature = "ci")]
-use std::env;
 use std::{array::from_fn as create_array, env, sync::Arc};
 
 use crate::{mpt_sequential::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
@@ -374,9 +372,11 @@ pub fn get_mainnet_url() -> String {
     #[cfg(feature = "ci")]
     let url = env::var("CI_ETH").expect("CI_ETH env var not set");
     #[cfg(not(feature = "ci"))]
-    env::var("CI_ETH")
+    let url = env::var("CI_ETH")
         .or(Ok("https://eth.llamarpc.com".to_string()))
-        .unwrap()
+        .unwrap();
+
+    url
 }
 #[cfg(test)]
 pub(crate) mod test {
