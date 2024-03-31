@@ -28,7 +28,7 @@ use self::{
 mod full_inner;
 mod leaf;
 mod partial_inner;
-pub(crate) mod public_inputs;
+pub mod public_inputs;
 
 pub enum CircuitInput {
     Leaf(LeafCircuit),

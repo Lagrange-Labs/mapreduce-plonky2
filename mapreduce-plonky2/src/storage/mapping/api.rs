@@ -274,9 +274,9 @@ impl_branch_circuits!(TestBranchCircuits, 1, 4, 9);
 
 /// number of circuits in the set
 #[cfg(not(test))]
-const MAPPING_CIRCUIT_SET_SIZE: usize = 11; // 9 branch circuits + 1 ext + 1 leaf
+const MAPPING_CIRCUIT_SET_SIZE: usize = 3 + 2; // 3 branch circuits + 1 ext + 1 leaf
 #[cfg(test)]
-const MAPPING_CIRCUIT_SET_SIZE: usize = 5; // 2 branch + 1 ext + 1 leaf
+const MAPPING_CIRCUIT_SET_SIZE: usize = 3 + 2; // 3 branch + 1 ext + 1 leaf
 
 impl PublicParameters {
     /// Generates the circuit parameters for the MPT circuits.
@@ -309,6 +309,7 @@ impl PublicParameters {
             ext_circuit.get_verifier_data().circuit_digest,
         ];
         circuits_set.extend(branch_circuits.circuit_set());
+        assert_eq!(circuits_set.len(), MAPPING_CIRCUIT_SET_SIZE);
 
         PublicParameters {
             leaf_circuit,
