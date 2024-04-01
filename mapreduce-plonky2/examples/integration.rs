@@ -230,11 +230,20 @@ impl<'a> StorageProver<'a> {
                 .iter()
                 .enumerate()
                 .fold(HashMap::new(), |mut acc, (i, p)| {
-                    leaf_hashes.push(keccak256(&p.proof.last().cloned().unwrap()));
-                    let _ = p.proof.iter().rev().map_windows(|[child, parent]| {
-                        let parent_hash = keccak256(parent);
+                    let leaf_hash = keccak256(&p.proof.last().cloned().unwrap());
+                    let mpt_nodes = p.proof.iter().rev().cloned().collect::<Vec<_>>();
+                    log::info!(
+                        "Leaf hash {}, mpt length = {}",
+                        hex::encode(&leaf_hash),
+                        mpt_nodes.len()
+                    );
+                    leaf_hashes.push(leaf_hash.clone());
+                    for parent_i in 1..mpt_nodes.len() {
+                        let parent = mpt_nodes[parent_i].to_vec();
+                        let child = mpt_nodes[parent_i - 1].to_vec();
+                        let parent_hash = keccak256(&parent);
                         let node_type = {
-                            let list: Vec<Vec<u8>> = rlp::decode_list(child);
+                            let list: Vec<Vec<u8>> = rlp::decode_list(&child);
                             match list.len() {
                                 17 => NodeType::Branch,
                                 2 => {
@@ -252,7 +261,12 @@ impl<'a> StorageProver<'a> {
                         let entry = acc.entry(ntp.hash()).or_insert(ntp);
                         entry.increase_child_count();
                         assert_eq!(entry.parent_hash, parent_hash);
-                    });
+                    }
+                    log::debug!(
+                        "Leaf {} -> added {} nodes to node_set",
+                        hex::encode(&leaf_hash),
+                        acc.len()
+                    );
                     acc
                 });
         println!(
