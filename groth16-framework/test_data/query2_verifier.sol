@@ -593,7 +593,7 @@ contract Verifier {
         uint256 blockHash;
     }
 
-    // This respond function does the followings:
+    // This processQuery function does the followings:
     // 1. Parse the Groth16 proofs (8 uint256) and inputs (3 uint256) from the `data` argument, and
     //    call `verifyProof` function for Groth16 verification.
     // 2. Parse the plonky2 public inputs from the `data` argument.
@@ -602,7 +602,7 @@ contract Verifier {
     // 4. Parse a Query instance from the plonky2 public inputs, and asset it must be equal to the
     //    expected `query` argument.
     // 5. Parse and return `L` NFT IDs (uint32) from the plonky2 public inputs.
-    function respond(bytes32[] calldata data, Query calldata query) public view returns (uint32[] memory) {
+    function processQuery(bytes32[] calldata data, Query memory query) public view returns (uint32[] memory) {
         // 1. Do Groth16 verification.
         uint256[3] memory groth16_inputs = verifyGroth16Proof(data);
 
@@ -672,7 +672,7 @@ contract Verifier {
     }
 
     // Verify the plonky2 inputs with the expected Query instance.
-    function verifyQuery(bytes memory pis, Query calldata query) internal pure {
+    function verifyQuery(bytes memory pis, Query memory query) internal pure {
         uint32 min_block_number = convertToU32(pis, PI_MIN_BLOCK_NUM_OFFSET);
         require(
             min_block_number == query.minBlockNumber,

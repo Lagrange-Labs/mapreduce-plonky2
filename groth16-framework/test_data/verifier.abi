@@ -39,27 +39,27 @@
         "components": [
           {
             "internalType": "address",
-            "name": "contract_address",
+            "name": "contractAddress",
             "type": "address"
           },
           {
             "internalType": "address",
-            "name": "user_address",
+            "name": "userAddress",
             "type": "address"
           },
           {
             "internalType": "uint32",
-            "name": "min_block_number",
+            "name": "minBlockNumber",
             "type": "uint32"
           },
           {
             "internalType": "uint32",
-            "name": "max_block_number",
+            "name": "maxBlockNumber",
             "type": "uint32"
           },
           {
             "internalType": "uint256",
-            "name": "block_hash",
+            "name": "blockHash",
             "type": "uint256"
           }
         ],
@@ -68,7 +68,7 @@
         "type": "tuple"
       }
     ],
-    "name": "respond",
+    "name": "processQuery",
     "outputs": [
       {
         "internalType": "uint32[]",

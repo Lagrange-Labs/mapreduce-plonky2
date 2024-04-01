@@ -267,7 +267,7 @@ fn verify_solidity_respond_fun(asset_dir: &str, query: &Query) {
 
     // Build the ABI encoded data.
     let args = vec![data, query];
-    let fun = &contract.functions["respond"][0];
+    let fun = &contract.functions["processQuery"][0];
     let calldata = fun
         .encode_input(&args)
         .expect("Failed to encode the inputs of Solidity respond function");
