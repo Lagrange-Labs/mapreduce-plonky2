@@ -315,13 +315,18 @@ impl<'a> StorageProver<'a> {
                 }
                 NodeType::Extension => {
                     log::info!("Proving extension hash: {}", hex::encode(&node_hash));
+                    assert_eq!(node.children_proofs.len(), 1);
                     storage::mapping::CircuitInput::new_extension(
                         node_buff,
                         node.children_proofs[0].clone(),
                     )
                 }
                 NodeType::Branch => {
-                    log::info!("Proving branch node hash: {}", hex::encode(&node_hash));
+                    log::info!(
+                        "Proving branch node w/ {} children,  hash: {}",
+                        node.children_proofs.len(),
+                        hex::encode(&node_hash)
+                    );
                     storage::mapping::CircuitInput::new_branch(
                         node_buff,
                         node.children_proofs.clone(),
