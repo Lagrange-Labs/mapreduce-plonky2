@@ -11,7 +11,7 @@ use ethers::{
     providers::{Http, Middleware, Provider},
     types::{Address, Block, BlockId, BlockNumber, EIP1186ProofResponse, H256, U64},
 };
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use log::{log_enabled, Level, LevelFilter};
 use mapreduce_plonky2::block::{
     block_leaf_hash, empty_merkle_root, merkle_root, merkle_root_bytes,
@@ -278,7 +278,7 @@ impl<'a> StorageProver<'a> {
                     };
                     let ntp = NodeToProve::new(node.to_vec(), node_type, parent_hash.clone());
                     let entry = acc.entry(ntp.hash()).or_insert(ntp);
-                    entry.increase_child_count();
+                    entry.increase_child_count(node_hash);
                     assert_eq!(entry.parent_hash, parent_hash);
                 }
                 acc
@@ -574,7 +574,7 @@ fn build_storage_db(mapping_keys: Vec<Vec<u8>>, mapping_values: Vec<Vec<u8>>) ->
 struct NodeToProve {
     node: Vec<u8>,
     parent_hash: Option<Vec<u8>>,
-    exp_children: usize,
+    exp_children_hashes: HashSet<Vec<u8>>,
     children_proofs: Vec<Vec<u8>>,
     node_type: NodeType,
 }
@@ -593,7 +593,7 @@ impl NodeToProve {
             node_type,
             node,
             parent_hash,
-            exp_children: 0,
+            exp_children_hashes: HashSet::new(),
             children_proofs: Vec::new(),
         }
     }
@@ -602,13 +602,13 @@ impl NodeToProve {
     }
 
     fn is_ready_to_be_proven(&self) -> bool {
-        self.children_proofs.len() == self.exp_children
+        self.children_proofs.len() == self.exp_children_hashes.len()
     }
     fn hash(&self) -> Vec<u8> {
         keccak256(&self.node)
     }
-    fn increase_child_count(&mut self) {
-        self.exp_children += 1;
+    fn increase_child_count(&mut self, child_hash: Vec<u8>) {
+        self.exp_children_hashes.insert(child_hash);
     }
 }
 
