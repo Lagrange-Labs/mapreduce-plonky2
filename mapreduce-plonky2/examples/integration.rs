@@ -239,6 +239,7 @@ impl<'a> StorageProver<'a> {
                     );
                     leaf_hashes.push(leaf_hash.clone());
                     for (i, node) in mpt_nodes.iter().enumerate() {
+                        let node_hash = keccak256(node);
                         let parent_hash = match i {
                             // we we're at the end, i.e. the root, there is no parent
                             a if a == mpt_nodes.len() - 1 => None,
@@ -246,14 +247,33 @@ impl<'a> StorageProver<'a> {
                             _ => Some(keccak256(&mpt_nodes[i + 1])),
                         };
                         let node_type = {
-                            let list: Vec<Vec<u8>> = rlp::decode_list(&node);
+                            let list: Vec<Vec<u8>> = rlp::decode_list(node);
                             match list.len() {
-                                17 => NodeType::Branch,
+                                17 => {
+                                    log::debug!(
+                                        "pos: {} - type: branch - hash {}",
+                                        i,
+                                        hex::encode(&node_hash)
+                                    );
+                                    NodeType::Branch
+                                }
                                 2 => {
                                     let nib = Nibbles::from_compact(&list[0]);
                                     if nib.is_leaf() {
+                                        log::debug!(
+                                            "pos: {} - type: leaf - hash {}",
+                                            i,
+                                            hex::encode(&node_hash)
+                                        );
+
                                         NodeType::Leaf(ctx.mapping_keys[i])
                                     } else {
+                                        log::debug!(
+                                            "pos: {} - type: ext - hash {}",
+                                            i,
+                                            hex::encode(&node_hash)
+                                        );
+
                                         NodeType::Extension
                                     }
                                 }
@@ -265,11 +285,6 @@ impl<'a> StorageProver<'a> {
                         entry.increase_child_count();
                         assert_eq!(entry.parent_hash, parent_hash);
                     }
-                    log::debug!(
-                        "Leaf {} -> added {} nodes to node_set",
-                        hex::encode(&leaf_hash),
-                        acc.len()
-                    );
                     acc
                 });
         println!(
