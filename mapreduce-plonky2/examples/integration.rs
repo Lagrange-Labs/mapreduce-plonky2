@@ -36,6 +36,7 @@ use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher, PoseidonGold
 use rmp_serde::Serializer;
 use serde::{Deserialize, Serialize};
 use serde_json::map;
+use std::io::{BufReader, BufWriter};
 use std::{collections::VecDeque, env, fs::File, str::FromStr};
 use std::{io::Write, panic};
 use storage::length_extract::ArrayLengthExtractCircuit;
@@ -72,8 +73,9 @@ async fn main() -> Result<()> {
     }));
     let args = CliParams::parse();
     println!("Hello, world!");
-    let ctx = Context::build(args).await?;
-    full_flow_pudgy(ctx).await?;
+    load_or_generate_params(true, build_fake)?;
+    //let ctx = Context::build(args).await?;
+    //full_flow_pudgy(ctx).await?;
     Ok(())
 }
 
@@ -86,7 +88,7 @@ fn enable_logging() {
         log::set_max_level(LevelFilter::Debug);
     }
 }
-
+const BUF_SIZE: usize = 1024 * 64 * 4;
 fn load_or_generate_params<F, T: Serialize + for<'a> Deserialize<'a>>(
     load: bool,
     factory: F,
@@ -98,14 +100,16 @@ where
     if file_exists && load {
         log::info!("File exists, loading parameters");
         let file = File::open(PARAM_FILE)?;
-        let params = bincode::deserialize_from(&file)?;
+        let buffered = BufReader::with_capacity(BUF_SIZE, file);
+        let params = bincode::deserialize_from(buffered)?;
         Ok(params)
     } else {
         log::info!("Building parameters (file exists {})", file_exists);
         let file = File::create(PARAM_FILE)?;
+        let buffered = BufWriter::with_capacity(BUF_SIZE, file);
         let params = factory();
         log::info!("Serializing the parameters");
-        bincode::serialize_into(file, &params)?;
+        bincode::serialize_into(buffered, &params)?;
         Ok(params)
     }
 }
