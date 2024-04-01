@@ -255,11 +255,16 @@ impl<'a> StorageProver<'a> {
                     });
                     acc
                 });
+        println!(
+            "Processed {} MPT nodes, including {} leaves, looking on proving now...",
+            node_set.len(),
+            leaf_hashes.len()
+        );
         // start proving the leaf hashes and continuously prove parents nodes until we reach the root
         let mut nodes_to_prove = VecDeque::from(leaf_hashes.clone());
         let root_hash = keccak256(&mpt_proofs.storage_proof[0].proof[0]);
         let mut root_proof = None;
-        while nodes_to_prove.len() > 0 {
+        while !nodes_to_prove.is_empty() {
             let node_hash = nodes_to_prove.pop_front().unwrap();
             let node = node_set.get(&node_hash).unwrap();
             let node_buff = node.node.clone();
