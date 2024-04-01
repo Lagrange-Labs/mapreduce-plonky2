@@ -31,9 +31,9 @@
   {
     "inputs": [
       {
-        "internalType": "uint8[]",
+        "internalType": "bytes32[]",
         "name": "data",
-        "type": "uint8[]"
+        "type": "bytes32[]"
       },
       {
         "components": [

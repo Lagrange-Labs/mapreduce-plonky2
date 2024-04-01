@@ -249,10 +249,11 @@ fn verify_solidity_respond_fun(asset_dir: &str, query: &Query) {
     let proof_bytes = read_file(Path::new(asset_dir).join("full_proof.bin")).unwrap();
     log_nft_ids(&proof_bytes);
 
-    let proof_bytes = Token::Array(
+    // Encode to a bytes32 array.
+    let data = Token::Array(
         proof_bytes
-            .into_iter()
-            .map(|b| Token::Uint(b.into()))
+            .chunks(32)
+            .map(|b| Token::FixedBytes(b.to_vec()))
             .collect(),
     );
 
@@ -265,7 +266,7 @@ fn verify_solidity_respond_fun(asset_dir: &str, query: &Query) {
     ]);
 
     // Build the ABI encoded data.
-    let args = vec![proof_bytes, query];
+    let args = vec![data, query];
     let fun = &contract.functions["respond"][0];
     let calldata = fun
         .encode_input(&args)
