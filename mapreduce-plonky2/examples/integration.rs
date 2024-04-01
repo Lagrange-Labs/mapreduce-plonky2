@@ -16,7 +16,7 @@ use log::{log_enabled, Level, LevelFilter};
 use mapreduce_plonky2::block::{
     block_leaf_hash, empty_merkle_root, merkle_root, merkle_root_bytes,
 };
-use mapreduce_plonky2::eth::BlockUtil;
+use mapreduce_plonky2::eth::{get_sepolia_url, BlockUtil};
 use mapreduce_plonky2::state::{self, block_linking};
 use mapreduce_plonky2::{
     api::{self, CircuitInput},
@@ -104,17 +104,16 @@ where
         Ok(params)
     } else {
         log::info!("Building parameters (file exists {})", file_exists);
-        let file = File::create(PARAM_FILE)?;
-        let buffered = BufWriter::with_capacity(BUF_SIZE, file);
         let params = factory();
         log::info!("Serializing the parameters");
+        let file = File::create(PARAM_FILE)?;
+        let buffered = BufWriter::with_capacity(BUF_SIZE, file);
         bincode::serialize_into(buffered, &params)?;
         Ok(params)
     }
 }
 
 struct Context {
-    params: api::PublicParameters<MAX_BLOCK_DEPTH>,
     provider: Provider<Http>,
     mapping_slot: u8,
     length_slot: u8,
@@ -123,6 +122,7 @@ struct Context {
     nft_ids: Vec<u32>,
     block: Block<TxHash>,
     mapping_keys: Vec<[u8; 32]>,
+    cli: CliParams,
 }
 
 fn build_params() -> api::PublicParameters<MAX_BLOCK_DEPTH> {
@@ -135,9 +135,7 @@ fn build_fake() -> Vec<u8> {
 
 impl Context {
     async fn build(c: CliParams) -> Result<Self> {
-        log::info!("Fetching/Generating parameters (load={})", c.load,);
-        let params = load_or_generate_params(c.load, build_params)?;
-        let url = get_mainnet_url();
+        let url = get_sepolia_url();
         log::info!("Using JSON RPC url {}", url);
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
@@ -153,10 +151,11 @@ impl Context {
         let block = provider.get_block(block_number).await?.unwrap();
         let mapping_keys = nft_ids
             .iter()
-            .map(|id| left_pad32(&id.to_be_bytes().to_vec()))
+            .map(|id| left_pad32(&id.to_be_bytes()))
             .collect::<Vec<_>>();
+
         Ok(Self {
-            params,
+            cli: c,
             provider,
             mapping_slot,
             length_slot,
@@ -219,6 +218,7 @@ struct StorageProver<'a> {
 impl<'a> StorageProver<'a> {
     async fn build_storage_proofs(
         ctx: &'a Context,
+        params: &api::PublicParameters<MAX_BLOCK_DEPTH>,
         mpt_proofs: &EIP1186ProofResponse,
     ) -> Result<Self> {
         // create list of all MPT storage node related to the mappping to prove
@@ -293,7 +293,7 @@ impl<'a> StorageProver<'a> {
                 }
             };
             let proof = crate::api::generate_proof(
-                &ctx.params,
+                &params,
                 crate::api::CircuitInput::Mapping(circuit_input),
             )?;
             let parent_hash = node.parent_hash.clone();
@@ -327,8 +327,11 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
     log::info!("Fetching length mpt proofs");
     let length_mpt_proofs = ctx.length_extract_proof().await?;
     ProofQuery::verify_storage_proof(&length_mpt_proofs)?;
+
+    log::info!("Fetching/Generating parameters (load={})", ctx.cli.load,);
+    let params = load_or_generate_params(ctx.cli.load, build_params)?;
     log::info!("building storage proofs");
-    let storage_prover = StorageProver::build_storage_proofs(&ctx, &mpt_proofs).await?;
+    let storage_prover = StorageProver::build_storage_proofs(&ctx, &params, &mpt_proofs).await?;
     // we want to extract the length of the mapping
     let length_extract_input =
         ArrayLengthExtractCircuit::<MAX_STORAGE_DEPTH, MAX_BRANCH_NODE_LEN>::new(
@@ -342,7 +345,7 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
         );
     log::info!("Generating length_extract proof");
     let length_proof = crate::api::generate_proof(
-        &ctx.params,
+        &params,
         crate::api::CircuitInput::LengthExtract(length_extract_input),
     )?;
     log::info!("Generating length_match proof");
@@ -350,20 +353,20 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
     let length_match_input =
         length_match::CircuitInput::new(storage_prover.mpt_root_proof.clone(), length_proof);
     let length_match_proof = crate::api::generate_proof(
-        &ctx.params,
+        &params,
         crate::api::CircuitInput::LengthMatch(length_match_input),
     )?;
 
     // now we need to build the tree of the LPN storage DB
     let lpn_storage_root = build_storage_db(ctx.mapping_keys_vec(), ctx.mapping_values());
     let lpn_storage_root_proof =
-        build_storage_proofs(&ctx, ctx.mapping_keys_vec(), ctx.mapping_values())?;
+        build_storage_proofs(&params, ctx.mapping_keys_vec(), ctx.mapping_values())?;
     // create the proof of equivalence
     let inputs = api::CircuitInput::DigestEqual(storage::digest_equal::CircuitInput::new(
         lpn_storage_root_proof,
         length_match_proof,
     ));
-    let digest_equivalence_proof = api::generate_proof(&ctx.params, inputs)?;
+    let digest_equivalence_proof = api::generate_proof(&params, inputs)?;
     // now create the block linking proof
     let block_linking_inputs = mapreduce_plonky2::state::block_linking::CircuitInput::new(
         digest_equivalence_proof,
@@ -377,7 +380,7 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
         ctx.contract,
     );
     let block_linking_proof = api::generate_proof(
-        &ctx.params,
+        &params,
         api::CircuitInput::BlockLinking(block_linking_inputs),
     )?;
     // now we need to create the LPN state tree
@@ -390,7 +393,7 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
     );
     let lpn_state_root = state_leaf.clone();
     let state_leaf_proof = api::generate_proof(
-        &ctx.params,
+        &params,
         api::CircuitInput::State(state::lpn::api::CircuitInput::new_leaf(block_linking_proof)),
     )?;
 
@@ -401,7 +404,7 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
         lpn_block_input,
         state_leaf_proof.to_vec(),
     );
-    let lpn_block_proof = api::generate_proof(&ctx.params, api::CircuitInput::BlockDB(inputs))?;
+    let lpn_block_proof = api::generate_proof(&params, api::CircuitInput::BlockDB(inputs))?;
     Ok(())
 }
 
@@ -438,7 +441,7 @@ fn build_first_block_root(
 }
 
 fn build_storage_proofs(
-    ctx: &Context,
+    params: &api::PublicParameters<MAX_BLOCK_DEPTH>,
     mapping_keys: Vec<Vec<u8>>,
     mapping_values: Vec<Vec<u8>>,
 ) -> Result<Vec<u8>> {
@@ -452,7 +455,7 @@ fn build_storage_proofs(
             })
         })
         .map(|input| {
-            let proof = crate::api::generate_proof(&ctx.params, CircuitInput::Storage(input));
+            let proof = crate::api::generate_proof(&params, CircuitInput::Storage(input));
             proof
         })
         .collect::<Result<Vec<_>>>()?;
@@ -463,7 +466,7 @@ fn build_storage_proofs(
             let left = nodes.pop_front().unwrap();
             let right = nodes.pop_front().unwrap();
             let input = storage::lpn::api::Input::Node(NodeInputs::new(left, right));
-            let proof = crate::api::generate_proof(&ctx.params, CircuitInput::Storage(input))?;
+            let proof = crate::api::generate_proof(&params, CircuitInput::Storage(input))?;
             nodes.push_back(proof);
         }
         if nodes.len() == 1 {

@@ -364,7 +364,8 @@ pub fn get_sepolia_url() -> String {
     #[cfg(feature = "ci")]
     let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
     #[cfg(not(feature = "ci"))]
-    let url = "https://ethereum-sepolia-rpc.publicnode.com";
+    let url =
+        env::var("CI_SEPOLIA").unwrap_or("https://ethereum-sepolia-rpc.publicnode.com".to_string());
     url.to_string()
 }
 
@@ -419,7 +420,7 @@ pub(crate) mod test {
             .unwrap()
             .unwrap();
 
-        let block_5586404_parent_hash = convert_u8_to_u32_slice(&block.parent_hash.as_bytes())
+        let block_5586404_parent_hash = convert_u8_to_u32_slice(block.parent_hash.as_bytes())
             .iter()
             .map(|b| F::from_canonical_u32(*b))
             .collect::<Vec<_>>();
