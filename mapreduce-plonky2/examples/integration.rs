@@ -65,7 +65,6 @@ struct CliParams {
 #[tokio::main]
 async fn main() -> Result<()> {
     pretty_env_logger::init_timed();
-
     panic::set_hook(Box::new(|panic_info| {
         let backtrace = Backtrace::new();
         log::error!("Panic occurred: {:?}", panic_info);
@@ -287,7 +286,7 @@ impl<'a> StorageProver<'a> {
                     }
                     acc
                 });
-        println!(
+        log::info!(
             "Processed {} MPT nodes, including {} leaves, looking on proving now...",
             node_set.len(),
             leaf_hashes.len()
@@ -329,10 +328,16 @@ impl<'a> StorageProver<'a> {
                     )
                 }
             };
+            let now = std::time::Instant::now();
             let proof = crate::api::generate_proof(
                 params,
                 crate::api::CircuitInput::Mapping(circuit_input),
             )?;
+            log::debug!(
+                "proof generated for node in {}ms - hash {}",
+                now.elapsed().as_millis(),
+                hex::encode(&node_hash)
+            );
             let parent_hash = node.parent_hash.clone();
             match parent_hash {
                 Some(phash) => {
@@ -340,9 +345,13 @@ impl<'a> StorageProver<'a> {
                     let parent = node_set.get_mut(&phash).unwrap();
                     // mark the child as done, and look if we can start proving the parent now
                     parent.add_child_proof(proof);
+                    log::debug!(
+                        "proof added to child list of parent node {}",
+                        hex::encode(phash)
+                    );
                     if parent.is_ready_to_be_proven() {
                         log::info!(
-                            "Parent node pushed to proving queue, hash: {}",
+                            "Parent node pushed to proving queue - hash: {}",
                             hex::encode(parent.hash())
                         );
                         nodes_to_prove.push_back(parent.hash());
