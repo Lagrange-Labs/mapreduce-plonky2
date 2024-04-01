@@ -586,11 +586,11 @@ contract Verifier {
 
     // The query struct used to check with the public inputs.
     struct Query {
-        address contract_address;
-        address user_address;
-        uint32 min_block_number;
-        uint32 max_block_number;
-        uint256 block_hash;
+        address contractAddress;
+        address userAddress;
+        uint32 minBlockNumber;
+        uint32 maxBlockNumber;
+        uint256 blockHash;
     }
 
     // This respond function does the followings:
@@ -675,31 +675,31 @@ contract Verifier {
     function verifyQuery(bytes memory pis, Query calldata query) internal pure {
         uint32 min_block_number = convertToU32(pis, PI_MIN_BLOCK_NUM_OFFSET);
         require(
-            min_block_number == query.min_block_number,
+            min_block_number == query.minBlockNumber,
             "The parsed min block number must be equal to the expected one in query."
         );
 
         uint32 max_block_number = convertToU32(pis, PI_MAX_BLOCK_NUM_OFFSET);
         require(
-            max_block_number == query.max_block_number,
+            max_block_number == query.maxBlockNumber,
             "The parsed max block number must be equal to the expected one in query."
         );
 
         address contract_address = convertToAddress(pis, PI_CONTRACT_ADDR_OFFSET);
         require(
-            contract_address == query.contract_address,
+            contract_address == query.contractAddress,
             "The parsed contract address must be equal to the expected one in query."
         );
 
         address user_address = convertToAddress(pis, PI_USER_ADDR_OFFSET);
         require(
-            user_address == query.user_address,
+            user_address == query.userAddress,
             "The parsed user address must be equal to the expected one in query."
         );
 
         uint256 block_hash = convertToHash(pis, PI_BLOCK_HASH_OFFSET);
         require(
-            block_hash == query.block_hash,
+            block_hash == query.blockHash,
             "The parsed block hash must be equal to the expected one in query."
         );
     }
