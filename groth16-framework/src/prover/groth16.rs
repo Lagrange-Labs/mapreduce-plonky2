@@ -1,11 +1,13 @@
 //! The prover used to generate the Groth16 proof.
 
 use crate::{
+    debug::get_debug_output_dir,
     proof::Groth16Proof,
-    utils::{deserialize_circuit_data, hex_to_u256, read_file, CIRCUIT_DATA_FILENAME},
+    utils::{deserialize_circuit_data, hex_to_u256, read_file, write_file, CIRCUIT_DATA_FILENAME},
     C, D, F,
 };
 use anyhow::Result;
+use chrono::Utc;
 use mapreduce_plonky2::api::deserialize_proof;
 use plonky2::{
     field::types::PrimeField64,
@@ -46,14 +48,13 @@ impl Groth16Prover {
     /// - groth16_proof.inputs: 3 * U256 = 96 bytes
     /// - plonky2_proof.public_inputs: the little-endian bytes of public inputs exported by user
     pub fn prove(&self, plonky2_proof: &[u8]) -> Result<Vec<u8>> {
-        // Deserialize the plonky2 proof.
-        let plonky2_proof = deserialize_proof(plonky2_proof)?;
+        // Generate the Groth16 proof.
+        let groth16_proof = self.prove_impl(plonky2_proof);
 
-        // Generate the groth16 proof.
-        let groth16_proof = self.generate_groth16_proof(&plonky2_proof)?;
+        // Check if needs to save the proofs for debugging.
+        might_save_proofs(plonky2_proof, &groth16_proof);
 
-        // Combine the two proofs and return expected bytes.
-        combine_proofs(groth16_proof, plonky2_proof)
+        groth16_proof
     }
 
     pub(crate) fn generate_groth16_proof(
@@ -75,6 +76,18 @@ impl Groth16Prover {
         let groth16_proof = serde_json::from_str(&groth16_proof_str)?;
 
         Ok(groth16_proof)
+    }
+
+    /// The detailed implementation to generate the Groth16 proof
+    fn prove_impl(&self, plonky2_proof: &[u8]) -> Result<Vec<u8>> {
+        // Deserialize the plonky2 proof.
+        let plonky2_proof = deserialize_proof(plonky2_proof)?;
+
+        // Generate the groth16 proof.
+        let groth16_proof = self.generate_groth16_proof(&plonky2_proof)?;
+
+        // Combine the two proofs and return expected bytes.
+        combine_proofs(groth16_proof, plonky2_proof)
     }
 }
 
@@ -125,4 +138,25 @@ pub fn combine_proofs(
     let bytes = groth16_bytes.chain(plonky2_pi_bytes).collect();
 
     Ok(bytes)
+}
+
+/// Try to save the plonky2 proof and the Groth16 proof if debugging.
+fn might_save_proofs(plonky2_proof: &[u8], groth16_proof: &Result<Vec<u8>>) {
+    if let Some(output_dir) = get_debug_output_dir(groth16_proof) {
+        let filename = Utc::now().format("%Y-%m-%d_%H-%M-%S");
+
+        // Save the plonky2 proof.
+        let path = Path::new(&output_dir).join(format!("{filename}_plonky2.proof"));
+        if let Err(err) = write_file(&path, plonky2_proof) {
+            log::error!("Failed to save the plonky2 proof to `{path:?}`: {err}");
+        }
+
+        if let Ok(groth16_proof) = groth16_proof {
+            // Save the Groth16 proof.
+            let path = Path::new(&output_dir).join(format!("{filename}_groth16.proof"));
+            if let Err(err) = write_file(&path, groth16_proof) {
+                log::error!("Failed to save the Groth16 proof to '{path:?}': {err}");
+            }
+        }
+    }
 }
