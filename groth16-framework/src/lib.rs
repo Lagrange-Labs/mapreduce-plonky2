@@ -68,6 +68,7 @@
 use plonky2::{field::goldilocks_field::GoldilocksField, plonk::config::PoseidonGoldilocksConfig};
 
 mod compiler;
+mod debug;
 mod evm;
 mod proof;
 pub mod prover;

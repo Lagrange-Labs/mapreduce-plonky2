@@ -472,8 +472,10 @@ checksum = "8eaf5903dcbc0a39312feb77df2ff4c76387d591b9fc7b04a238dcf8bb62639a"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-targets 0.52.4",
 ]
 
@@ -1975,6 +1977,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "chrono",
  "env_logger 0.11.3",
  "ethereum-types",
  "ethers 2.0.13",
@@ -1993,7 +1996,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "sha3",
 ]
 
 [[package]]
