@@ -53,7 +53,7 @@ pub(crate) fn find_index_subvector(v: &[u8], sub: &[u8]) -> Option<usize> {
 
 /// Compute the keccak256 hash of the given data.
 /// NOTE: probably should have two modules for circuit related stuff and non-circuit related stuff
-pub(crate) fn keccak256(data: &[u8]) -> Vec<u8> {
+pub fn keccak256(data: &[u8]) -> Vec<u8> {
     let mut hasher = Keccak256::new();
     hasher.update(data);
     hasher.finalize().to_vec()
