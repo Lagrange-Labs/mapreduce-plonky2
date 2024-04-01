@@ -58,7 +58,7 @@ struct CliParams {
     /// set to true if you want to load the params from the file
     /// otherwise it generates them by default
     #[arg(short, long)]
-    load: Option<bool>,
+    load: bool,
 }
 
 /// NOTE: might require tweaking /etc/security/limits file if STACK error appears
@@ -73,9 +73,8 @@ async fn main() -> Result<()> {
     }));
     let args = CliParams::parse();
     println!("Hello, world!");
-    load_or_generate_params(true, build_fake)?;
-    //let ctx = Context::build(args).await?;
-    //full_flow_pudgy(ctx).await?;
+    let ctx = Context::build(args).await?;
+    full_flow_pudgy(ctx).await?;
     Ok(())
 }
 
@@ -136,11 +135,8 @@ fn build_fake() -> Vec<u8> {
 
 impl Context {
     async fn build(c: CliParams) -> Result<Self> {
-        log::info!(
-            "Fetching/Generating parameters (load={})",
-            c.load.unwrap_or(false)
-        );
-        let params = load_or_generate_params(c.load.unwrap_or(false), build_params)?;
+        log::info!("Fetching/Generating parameters (load={})", c.load,);
+        let params = load_or_generate_params(c.load, build_params)?;
         let url = get_mainnet_url();
         log::info!("Using JSON RPC url {}", url);
         let provider =
