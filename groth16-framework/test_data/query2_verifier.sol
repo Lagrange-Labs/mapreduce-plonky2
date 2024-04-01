@@ -620,8 +620,9 @@ contract Verifier {
     }
 
     // Parse the Groth16 proofs and inputs, and do verification. It returns the Groth16 inputs.
-    function verifyGroth16Proof(bytes32[] calldata data) internal view returns (uint256[3] memory inputs) {
+    function verifyGroth16Proof(bytes32[] calldata data) internal view returns (uint256[3] memory) {
         uint256[8] memory proofs;
+        uint256[3] memory inputs;
 
         for (uint32 i = 0; i < 8; ++i) {
             proofs[i] = convertToU256(data[i]);
@@ -635,6 +636,8 @@ contract Verifier {
 
         // Do Groth16 verification.
         this.verifyProof(proofs, inputs);
+
+        return inputs;
     }
 
     // Parse the plonky2 public inputs.
