@@ -238,12 +238,15 @@ impl<'a> StorageProver<'a> {
                         mpt_nodes.len()
                     );
                     leaf_hashes.push(leaf_hash.clone());
-                    for parent_i in 1..mpt_nodes.len() {
-                        let parent = mpt_nodes[parent_i].to_vec();
-                        let child = mpt_nodes[parent_i - 1].to_vec();
-                        let parent_hash = keccak256(&parent);
+                    for (i, node) in mpt_nodes.iter().enumerate() {
+                        let parent_hash = match i {
+                            // we we're at the end, i.e. the root, there is no parent
+                            a if a == mpt_nodes.len() - 1 => None,
+                            // otherwise, just compute the parent hash
+                            _ => Some(keccak256(&mpt_nodes[i + 1])),
+                        };
                         let node_type = {
-                            let list: Vec<Vec<u8>> = rlp::decode_list(&child);
+                            let list: Vec<Vec<u8>> = rlp::decode_list(&node);
                             match list.len() {
                                 17 => NodeType::Branch,
                                 2 => {
@@ -257,7 +260,7 @@ impl<'a> StorageProver<'a> {
                                 _ => panic!("unexpected node type"),
                             }
                         };
-                        let ntp = NodeToProve::new(child.to_vec(), parent_hash.clone(), node_type);
+                        let ntp = NodeToProve::new(node.to_vec(), node_type, parent_hash.clone());
                         let entry = acc.entry(ntp.hash()).or_insert(ntp);
                         entry.increase_child_count();
                         assert_eq!(entry.parent_hash, parent_hash);
@@ -312,22 +315,31 @@ impl<'a> StorageProver<'a> {
                 }
             };
             let proof = crate::api::generate_proof(
-                &params,
+                params,
                 crate::api::CircuitInput::Mapping(circuit_input),
             )?;
             let parent_hash = node.parent_hash.clone();
-            let parent = node_set.get_mut(&parent_hash).unwrap();
-            if parent_hash == root_hash {
-                root_proof = Some(proof);
-                break;
-            }
-            parent.add_child_proof(proof);
-            if parent.is_ready_to_be_proven() {
-                log::info!(
-                    "Parent node pushed to proving queue, hash: {}",
-                    hex::encode(parent.hash())
-                );
-                nodes_to_prove.push_back(parent.hash());
+            match parent_hash {
+                Some(phash) => {
+                    // get the entry for the parent
+                    let parent = node_set.get_mut(&phash).unwrap();
+                    // mark the child as done, and look if we can start proving the parent now
+                    parent.add_child_proof(proof);
+                    if parent.is_ready_to_be_proven() {
+                        log::info!(
+                            "Parent node pushed to proving queue, hash: {}",
+                            hex::encode(parent.hash())
+                        );
+                        nodes_to_prove.push_back(parent.hash());
+                    }
+                }
+                // no parents mean we've processed the root!
+                None => {
+                    // just checking we get to the root
+                    assert_eq!(node.hash(), root_hash);
+                    root_proof = Some(proof);
+                    break;
+                }
             }
         }
         assert!(root_proof.is_some());
@@ -534,7 +546,7 @@ fn build_storage_db(mapping_keys: Vec<Vec<u8>>, mapping_values: Vec<Vec<u8>>) ->
 #[derive(Debug, Clone)]
 struct NodeToProve {
     node: Vec<u8>,
-    parent_hash: Vec<u8>,
+    parent_hash: Option<Vec<u8>>,
     exp_children: usize,
     children_proofs: Vec<Vec<u8>>,
     node_type: NodeType,
@@ -549,7 +561,7 @@ enum NodeType {
 }
 
 impl NodeToProve {
-    fn new(node: Vec<u8>, parent_hash: Vec<u8>, node_type: NodeType) -> Self {
+    fn new(node: Vec<u8>, node_type: NodeType, parent_hash: Option<Vec<u8>>) -> Self {
         Self {
             node_type,
             node,
