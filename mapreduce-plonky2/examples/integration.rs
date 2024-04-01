@@ -223,69 +223,67 @@ impl<'a> StorageProver<'a> {
         // create list of all MPT storage node related to the mappping to prove
         // key is hash of the nodes, value is the struct
         let mut leaf_hashes = Vec::new();
-        let mut node_set =
-            mpt_proofs
-                .storage_proof
-                .iter()
-                .enumerate()
-                .fold(HashMap::new(), |mut acc, (i, p)| {
-                    let leaf_hash = keccak256(&p.proof.last().cloned().unwrap());
-                    let mpt_nodes = p.proof.iter().rev().cloned().collect::<Vec<_>>();
-                    log::info!(
-                        "Leaf hash {}, mpt length = {}",
-                        hex::encode(&leaf_hash),
-                        mpt_nodes.len()
-                    );
-                    leaf_hashes.push(leaf_hash.clone());
-                    for (i, node) in mpt_nodes.iter().enumerate() {
-                        let node_hash = keccak256(node);
-                        let parent_hash = match i {
-                            // we we're at the end, i.e. the root, there is no parent
-                            a if a == mpt_nodes.len() - 1 => None,
-                            // otherwise, just compute the parent hash
-                            _ => Some(keccak256(&mpt_nodes[i + 1])),
-                        };
-                        let node_type = {
-                            let list: Vec<Vec<u8>> = rlp::decode_list(node);
-                            match list.len() {
-                                17 => {
+        let mut node_set = mpt_proofs.storage_proof.iter().enumerate().fold(
+            HashMap::new(),
+            |mut acc, (leaf_index, p)| {
+                let leaf_hash = keccak256(&p.proof.last().cloned().unwrap());
+                let mpt_nodes = p.proof.iter().rev().cloned().collect::<Vec<_>>();
+                log::info!(
+                    "Leaf hash {}, mpt length = {}",
+                    hex::encode(&leaf_hash),
+                    mpt_nodes.len()
+                );
+                leaf_hashes.push(leaf_hash.clone());
+                for (i, node) in mpt_nodes.iter().enumerate() {
+                    let node_hash = keccak256(node);
+                    let parent_hash = match i {
+                        // we we're at the end, i.e. the root, there is no parent
+                        a if a == mpt_nodes.len() - 1 => None,
+                        // otherwise, just compute the parent hash
+                        _ => Some(keccak256(&mpt_nodes[i + 1])),
+                    };
+                    let node_type = {
+                        let list: Vec<Vec<u8>> = rlp::decode_list(node);
+                        match list.len() {
+                            17 => {
+                                log::debug!(
+                                    "pos: {} - type: branch - hash {}",
+                                    i,
+                                    hex::encode(&node_hash)
+                                );
+                                NodeType::Branch
+                            }
+                            2 => {
+                                let nib = Nibbles::from_compact(&list[0]);
+                                if nib.is_leaf() {
                                     log::debug!(
-                                        "pos: {} - type: branch - hash {}",
+                                        "pos: {} - type: leaf - hash {}",
                                         i,
                                         hex::encode(&node_hash)
                                     );
-                                    NodeType::Branch
-                                }
-                                2 => {
-                                    let nib = Nibbles::from_compact(&list[0]);
-                                    if nib.is_leaf() {
-                                        log::debug!(
-                                            "pos: {} - type: leaf - hash {}",
-                                            i,
-                                            hex::encode(&node_hash)
-                                        );
 
-                                        NodeType::Leaf(ctx.mapping_keys[i])
-                                    } else {
-                                        log::debug!(
-                                            "pos: {} - type: ext - hash {}",
-                                            i,
-                                            hex::encode(&node_hash)
-                                        );
+                                    NodeType::Leaf(ctx.mapping_keys[leaf_index])
+                                } else {
+                                    log::debug!(
+                                        "pos: {} - type: ext - hash {}",
+                                        i,
+                                        hex::encode(&node_hash)
+                                    );
 
-                                        NodeType::Extension
-                                    }
+                                    NodeType::Extension
                                 }
-                                _ => panic!("unexpected node type"),
                             }
-                        };
-                        let ntp = NodeToProve::new(node.to_vec(), node_type, parent_hash.clone());
-                        let entry = acc.entry(ntp.hash()).or_insert(ntp);
-                        entry.increase_child_count();
-                        assert_eq!(entry.parent_hash, parent_hash);
-                    }
-                    acc
-                });
+                            _ => panic!("unexpected node type"),
+                        }
+                    };
+                    let ntp = NodeToProve::new(node.to_vec(), node_type, parent_hash.clone());
+                    let entry = acc.entry(ntp.hash()).or_insert(ntp);
+                    entry.increase_child_count();
+                    assert_eq!(entry.parent_hash, parent_hash);
+                }
+                acc
+            },
+        );
         log::info!(
             "Processed {} MPT nodes, including {} leaves, looking on proving now...",
             node_set.len(),
