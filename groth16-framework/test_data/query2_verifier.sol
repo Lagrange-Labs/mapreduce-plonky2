@@ -718,17 +718,23 @@ contract Verifier {
     }
 
     // Convert a bytes32 to an uint256.
-    function convertToU256(bytes32 b) internal pure returns (uint256 result) {
+    function convertToU256(bytes32 b) internal pure returns (uint256) {
+        uint256 result;
         for (uint32 i = 0; i < 32; i++) {
             result |= uint256(uint8(b[i])) << (8 * i);
         }
+
+        return result;
     }
 
     // Convert to an uint32 from a memory offset.
-    function convertToU32(bytes memory data, uint32 offset) internal pure returns (uint32 result) {
+    function convertToU32(bytes memory data, uint32 offset) internal pure returns (uint32) {
+        uint32 result;
         for (uint32 i = 0; i < 4; ++i) {
             result |= uint32(uint8(data[i + offset])) << (8 * i);
         }
+
+        return result;
     }
 
     // Convert to an address from a memory offset.
@@ -742,9 +748,12 @@ contract Verifier {
     }
 
     // Convert to a hash from a memory offset.
-    function convertToHash(bytes memory pis, uint32 offset) internal pure returns (uint256 result) {
+    function convertToHash(bytes memory pis, uint32 offset) internal pure returns (uint256) {
+        uint256 result;
         for (uint32 i = 0; i < PACKED_HASH_LEN; ++i) {
             result |= uint256(convertToU32(pis, offset + i * 8)) << (32 * i);
         }
+
+        return result;
     }
 }
