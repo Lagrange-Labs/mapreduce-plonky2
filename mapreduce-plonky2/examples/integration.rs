@@ -402,11 +402,18 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
                 .collect::<Vec<_>>(),
         );
     log::info!("Generating length_extract proof");
+    let now = std::time::Instant::now();
     let length_proof = crate::api::generate_proof(
         &params,
         crate::api::CircuitInput::LengthExtract(length_extract_input),
     )?;
+
+    log::debug!(
+        "Generating length_extract proof in {}ms",
+        now.elapsed().as_millis()
+    );
     log::info!("Generating length_match proof");
+    let now = std::time::Instant::now();
     // now we want to do the length equality check
     let length_match_input =
         length_match::CircuitInput::new(storage_prover.mpt_root_proof.clone(), length_proof);
@@ -414,6 +421,10 @@ async fn full_flow_pudgy(ctx: Context) -> Result<()> {
         &params,
         crate::api::CircuitInput::LengthMatch(length_match_input),
     )?;
+    log::debug!(
+        "Length match proof generated in {}ms",
+        now.elapsed().as_millis()
+    );
 
     // now we need to build the tree of the LPN storage DB
     let lpn_storage_root = build_storage_db(ctx.mapping_keys_vec(), ctx.mapping_values());
