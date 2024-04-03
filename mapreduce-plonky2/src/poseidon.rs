@@ -1,7 +1,7 @@
 use plonky2::{
-    field::goldilocks_field::GoldilocksField,
+    field::{extension::Extendable, goldilocks_field::GoldilocksField},
     hash::{
-        hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         hashing::PlonkyPermutation,
         poseidon::PoseidonHash,
     },
@@ -13,11 +13,14 @@ type H = PoseidonHash;
 type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
 
 /// Hash the concatenation of the two provided 4-wide inputs, swapping them if specified.
-pub(crate) fn hash_maybe_swap(
-    b: &mut CircuitBuilder<GoldilocksField, 2>,
+pub(crate) fn hash_maybe_swap<F, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
     inputs: &[[Target; NUM_HASH_OUT_ELTS]; 2],
     do_swap: BoolTarget,
-) -> HashOutTarget {
+) -> HashOutTarget
+where
+    F: RichField + Extendable<D>,
+{
     let zero = b.zero();
 
     let inputs = inputs
