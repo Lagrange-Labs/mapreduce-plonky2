@@ -14,7 +14,7 @@ impl<const D: usize> ToBytes for ProofWithPublicInputsTarget<D> {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         buffer
-            .write_target_proof_with_public_inputs(&self)
+            .write_target_proof_with_public_inputs(self)
             .expect("Writing to a byte-vector cannot fail.");
         buffer
     }
@@ -31,7 +31,7 @@ impl ToBytes for VerifierCircuitTarget {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         buffer
-            .write_target_verifier_circuit(&self)
+            .write_target_verifier_circuit(self)
             .expect("Writing to a byte-vector cannot fail.");
         buffer
     }
@@ -48,7 +48,7 @@ impl ToBytes for MerkleProofTarget {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         buffer
-            .write_target_merkle_proof(&self)
+            .write_target_merkle_proof(self)
             .expect("Writing to a byte-vector cannot fail.");
         buffer
     }
@@ -65,7 +65,7 @@ impl ToBytes for MerkleCapTarget {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         buffer
-            .write_target_merkle_cap(&self)
+            .write_target_merkle_cap(self)
             .expect("Writing to a byte-vector cannot fail.");
         buffer
     }

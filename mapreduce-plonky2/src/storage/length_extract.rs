@@ -1,18 +1,15 @@
 //! This circuit is used to verify the length value extracted from storage trie.
-
 use super::{
     key::{SimpleSlot, SimpleSlotWires},
-    mapping::leaf::VALUE_LEN,
     MAX_BRANCH_NODE_LEN,
 };
 use crate::{
     api::{default_config, serialize_proof},
-    array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
     },
-    utils::{convert_u8_targets_to_u32, less_than},
+    utils::less_than,
 };
 use anyhow::Result;
 use ethers::types::H160;
@@ -24,14 +21,13 @@ use plonky2::{
         circuit_builder::CircuitBuilder,
         circuit_data::CircuitData,
         config::{AlgebraicHasher, GenericConfig},
-        plonk_common::reduce_with_powers_circuit,
     },
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use recursion_framework::serialization::circuit_data_serialization::SerializableRichField;
 use recursion_framework::serialization::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
-use std::array::{self, from_fn as create_array};
+use std::array::{self};
 
 /// This is a wrapper around an array of targets set as public inputs of any
 /// proof generated in this module. They all share the same structure.
@@ -39,7 +35,7 @@ use std::array::{self, from_fn as create_array};
 /// `S` storage slot of the variable holding the length
 /// `V` Integer value stored at key `S` (can be given by prover)
 #[derive(Clone, Debug)]
-pub(crate) struct PublicInputs<'a, T: Clone> {
+pub struct PublicInputs<'a, T: Clone> {
     pub(crate) proof_inputs: &'a [T],
 }
 
@@ -118,7 +114,7 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
 {
-    pub fn new(slot: u8, contract_address: H160, nodes: Vec<Vec<u8>>) -> Self {
+    pub fn new(slot: u8, _contract_address: H160, nodes: Vec<Vec<u8>>) -> Self {
         let slot = SimpleSlot::new(slot);
         let mpt_circuit = MPTCircuit::new(slot.0.mpt_key(), nodes);
 
@@ -126,7 +122,7 @@ where
     }
 
     /// Build for circuit.
-    pub fn build<F, const D: usize>(
+    pub(crate) fn build<F, const D: usize>(
         cb: &mut CircuitBuilder<F, D>,
     ) -> LengthExtractWires<DEPTH, NODE_LEN>
     where
@@ -176,7 +172,7 @@ where
     }
 
     /// Assign the wires.
-    pub fn assign<F, const D: usize>(
+    pub(crate) fn assign<F, const D: usize>(
         &self,
         pw: &mut PartialWitness<F>,
         wires: &LengthExtractWires<DEPTH, NODE_LEN>,
@@ -261,27 +257,21 @@ mod tests {
             test::{get_mainnet_url, get_sepolia_url},
             ProofQuery, StorageSlot,
         },
-        keccak::{InputData, KeccakCircuit, KeccakWires},
-        mpt_sequential::{
-            bytes_to_nibbles,
-            test::{verify_storage_proof_from_query, visit_proof},
-            MPTKeyWire, MAX_LEAF_VALUE_LEN,
-        },
-        rlp::{MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
-        utils::{convert_u8_to_u32_slice, keccak256},
+        mpt_sequential::{test::visit_proof, MAX_LEAF_VALUE_LEN},
+        utils::{convert_u8_targets_to_u32, convert_u8_to_u32_slice, keccak256},
     };
-    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use eth_trie::{EthTrie, MemoryDB, Trie};
     use ethers::{
         providers::{Http, Provider},
         types::{Address, H160},
     };
     use plonky2::{
         field::types::Field,
-        iop::witness::{PartialWitness, WitnessWrite},
+        iop::witness::PartialWitness,
         plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
     use rand::{thread_rng, Rng};
-    use std::{convert, str::FromStr, sync::Arc};
+    use std::{str::FromStr, sync::Arc};
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -344,11 +334,6 @@ mod tests {
                 .into_iter()
                 .map(F::from_canonical_u32)
                 .collect();
-        let exp_contract_address: Vec<_> = convert_u8_to_u32_slice(&test_data.contract_address.0)
-            .into_iter()
-            .map(F::from_canonical_u32)
-            .collect();
-
         let test_circuit = LengthTestCircuit::<DEPTH, NODE_LEN> {
             base: ArrayLengthExtractCircuit::new(
                 test_data.slot,
@@ -399,10 +384,10 @@ mod tests {
             let key = slot.mpt_key.clone();
             // nodes should be ordered from leaf to root and padded at the end
             let nodes: [VectorWire<Target, _>; DEPTH] =
-                create_array(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(cb));
+                array::from_fn(|_| VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(cb));
             // small optimization here as we only need to decode two items for a leaf, since we know it's a leaf
             let leaf_headers = decode_fixed_list::<_, _, 2>(cb, &nodes[0].arr.arr, zero);
-            let (mut iterative_key, leaf_value, is_leaf) =
+            let (_iterative_key, leaf_value, is_leaf) =
                 Circuit::advance_key_leaf_or_extension::<_, _, _, MAX_LEAF_VALUE_LEN>(
                     cb,
                     &nodes[0].arr,
@@ -416,10 +401,10 @@ mod tests {
             let mut end_iterator = cb.sub(value_len, one);
 
             let value_arr = Array::<Target, 4> {
-                arr: create_array(|i| leaf_value.arr[i + 1]),
+                arr: array::from_fn(|i| leaf_value.arr[i + 1]),
             };
             // Then we need to convert from big endian to little endian only on this len
-            let extract_len: [Target; 4] = create_array(|i| {
+            let extract_len: [Target; 4] = array::from_fn(|i| {
                 let it = cb.constant(F::from_canonical_usize(i));
                 let in_value = less_than(cb, it, value_len, 4); // log2(4bytes) = 2, putting upper bound
                 let rev_value = value_arr.value_at_failover(cb, end_iterator);
@@ -437,8 +422,7 @@ mod tests {
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             let slot = SimpleSlot::new(self.slot);
             slot.assign(pw, &wires.slot);
-            let mpt_circuit =
-                MPTCircuit::<DEPTH, NODE_LEN>::new(slot.0.mpt_key(), self.nodes.clone());
+            let _ = MPTCircuit::<DEPTH, NODE_LEN>::new(slot.0.mpt_key(), self.nodes.clone());
             let pad_len = DEPTH
                 .checked_sub(self.nodes.len())
                 .ok_or(anyhow!(
@@ -454,7 +438,7 @@ mod tests {
                 .chain((0..pad_len).map(|_| Ok(Vector::<u8, { PAD_LEN(NODE_LEN) }>::empty())))
                 .collect::<Result<Vec<_>>>()
                 .unwrap();
-            for (i, (wire, node)) in wires.nodes.iter().zip(padded_nodes.iter()).enumerate() {
+            for (wire, node) in wires.nodes.iter().zip(padded_nodes.iter()) {
                 wire.assign(pw, node);
             }
         }

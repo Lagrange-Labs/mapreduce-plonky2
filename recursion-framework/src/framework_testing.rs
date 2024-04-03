@@ -188,7 +188,7 @@ where
 
     /// Generate `NUM_VERIFIERS` proofs having the provided `public_inputs' values as public inputs;
     /// these proofs can be recursively verified by any recursive circuit included in the set of circuits
-    /// bounded to `self`  
+    /// bounded to `self`
     pub fn generate_input_proofs<const NUM_VERIFIERS: usize>(
         &self,
         public_inputs: [[F; NUM_PUBLIC_INPUTS]; NUM_VERIFIERS],
@@ -230,7 +230,7 @@ where
     ) -> Result<ProofWithPublicInputs<F, C, D>> {
         self.recursive_circuits.generate_proof(
             circuit,
-            input_proofs.try_into().unwrap(),
+            input_proofs,
             self.verifier_data_for_input_proofs(),
             custom_inputs,
         )

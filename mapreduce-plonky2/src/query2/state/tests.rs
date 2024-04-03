@@ -1,43 +1,33 @@
 use crate::utils::{Packer, ToFields};
 use crate::{query2::state::CircuitInputsInternal, types::MAPPING_KEY_LEN};
-use std::{array, iter, ops::Add, process::Output};
+use std::iter;
 
 use ethers::types::Address;
-use itertools::Itertools;
-use plonky2::field::types::Sample;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::{
-        hash_types::{HashOut, RichField, NUM_HASH_OUT_ELTS},
-        hashing::hash_n_to_hash_no_pad,
-        poseidon::PoseidonPermutation,
-    },
+    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{circuit_builder::CircuitBuilder, config::PoseidonGoldilocksConfig},
 };
-use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
-use recursion_framework::{
-    framework::RecursiveCircuits, framework_testing::TestingRecursiveCircuits,
-};
+use rand::{rngs::StdRng, RngCore, SeedableRng};
+use recursion_framework::framework_testing::TestingRecursiveCircuits;
 use serial_test::serial;
 
 use crate::{
     array::Array,
     circuit::{test::run_circuit, UserCircuit},
     query2::{
-        block::BlockPublicInputs, storage::public_inputs::PublicInputs as StorageInputs, EWord,
+        block::BlockPublicInputs, storage::public_inputs::PublicInputs as StorageInputs,
         PackedSCAddress,
     },
 };
 
 use super::StateWires;
-use anyhow::Result;
 
 const DEPTH: usize = 3;
-type PublicInputs<'a> = BlockPublicInputs<'a, GoldilocksField>;
 type StateCircuit<const DEPTH: usize> = super::StateCircuit<DEPTH, GoldilocksField>;
 
 fn random_address(rng: &mut StdRng) -> Address {
@@ -115,17 +105,6 @@ pub struct TestStateCircuit<const DEPTH: usize> {
 }
 
 impl<const DEPTH: usize> TestStateCircuit<DEPTH> {
-    pub fn new_from_seed(seed: u64, storage: &StorageInputs<GoldilocksField>) -> Self {
-        let rng = &mut StdRng::seed_from_u64(seed);
-        Self::new_from_slot_and_addr(
-            seed,
-            rng.next_u32(),
-            rng.next_u32(),
-            random_address(rng),
-            storage,
-        )
-    }
-
     pub fn new_from_slot_and_addr(
         seed: u64,
         length_slot: u32,
@@ -135,7 +114,7 @@ impl<const DEPTH: usize> TestStateCircuit<DEPTH> {
     ) -> Self {
         let rng = &mut StdRng::seed_from_u64(seed);
 
-        let mut smart_contract_address =
+        let smart_contract_address =
             PackedSCAddress::try_from(smart_contract_address.as_bytes().pack().to_fields())
                 .unwrap();
 
@@ -252,15 +231,7 @@ impl<const DEPTH: usize> UserCircuit<GoldilocksField, 2> for TestStateCircuit<DE
 
 #[test]
 fn prove_and_verify_state_circuit() {
-    let pi = run_state_circuit(0xdead);
-}
-
-impl<'a, F: RichField> BlockPublicInputs<'a, F> {
-    pub fn values_from_seed(seed: u64) -> [F; Self::total_len()] {
-        let rng = &mut StdRng::seed_from_u64(seed);
-
-        array::from_fn(|_| F::from_canonical_u32(rng.next_u32()))
-    }
+    let _ = run_state_circuit(0xdead);
 }
 
 type F = crate::api::F;
@@ -270,7 +241,6 @@ type StateParameters = super::Parameters;
 const NUM_STORAGE_INPUTS: usize = StorageInputs::<Target>::TOTAL_LEN;
 
 pub(crate) fn generate_inputs_for_state_circuit(
-    params: &StateParameters,
     testing_framework: &TestingRecursiveCircuits<F, C, D, NUM_STORAGE_INPUTS>,
     seed: u64,
     length_slot: Option<u32>,
@@ -333,8 +303,7 @@ fn test_state_circuit_parameters() {
 
     let params = StateParameters::build(testing_framework.get_recursive_circuit_set());
 
-    let inputs =
-        generate_inputs_for_state_circuit(&params, &testing_framework, 42, None, None, None, None);
+    let inputs = generate_inputs_for_state_circuit(&testing_framework, 42, None, None, None, None);
 
     let proof = params
         .generate_proof(testing_framework.get_recursive_circuit_set(), inputs)

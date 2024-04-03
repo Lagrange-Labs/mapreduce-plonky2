@@ -45,7 +45,7 @@ impl FullInnerNodeCircuit {
         FullInnerNodeWires {}
     }
 
-    pub fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &FullInnerNodeWires) {}
+    pub fn assign(&self, _pw: &mut PartialWitness<GoldilocksField>, _wires: &FullInnerNodeWires) {}
 }
 
 impl CircuitLogicWires<GoldilocksField, 2, 2> for FullInnerNodeWires {

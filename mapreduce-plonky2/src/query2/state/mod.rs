@@ -14,11 +14,7 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{
-        circuit_builder::{self, CircuitBuilder},
-        circuit_data::CircuitData,
-        config::GenericHashOut,
-    },
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitData, config::GenericHashOut},
 };
 use recursion_framework::{
     circuit_builder::{
@@ -36,14 +32,12 @@ use crate::{
     array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
     query2::storage::public_inputs::PublicInputs as StorageInputs,
-    state,
     types::{HashOutput, PackedAddressTarget as PackedSCAddressTarget},
-    utils::{convert_u8_to_u32_slice, Packer, ToFields},
+    utils::{Packer, ToFields},
 };
 
 use super::{
     block::{BlockPublicInputs, BLOCK_CIRCUIT_SET_SIZE},
-    revelation::circuit,
     PackedSCAddress,
 };
 use anyhow::Result;
@@ -205,7 +199,7 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
         // https://www.notion.so/lagrangelabs/Encoding-Specs-ccaa31d1598b4626860e26ac149705c4?pvs=4#5e8e6f06e2554b0caee4904258cbbca2
         let block_hash = OutputHash::new(cb);
         let block_leaf = iter::once(b)
-            .chain(block_hash.to_targets().arr.into_iter())
+            .chain(block_hash.to_targets().arr)
             .chain(state_root.elements.iter().copied())
             .collect();
         let block_leaf_hash = cb.hash_n_to_hash_no_pad::<PoseidonHash>(block_leaf);
@@ -246,9 +240,8 @@ impl<const DEPTH: usize, F: RichField> StateCircuit<DEPTH, F> {
             .siblings
             .siblings
             .iter()
-            .map(|s| s.elements.iter())
-            .flatten()
-            .zip(self.siblings.iter().map(|s| s.elements.iter()).flatten())
+            .flat_map(|s| s.elements.iter())
+            .zip(self.siblings.iter().flat_map(|s| s.elements.iter()))
             .for_each(|(&w, &v)| pw.set_target(w, v));
 
         wires
@@ -288,7 +281,7 @@ impl CircuitLogicWires<F, D, 0> for StateRecursiveWires {
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
-        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
+        _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         let storage_verifier = builder_parameters.verify_proof_in_circuit_set(builder);
@@ -373,7 +366,7 @@ impl CircuitInput {
         let block_number = F::from_canonical_u32(block_number);
         let state_root = HashOut::from_bytes(state_root.as_slice());
         let siblings = siblings
-            .into_iter()
+            .iter()
             .map(|hash| HashOut::from_bytes(hash.as_slice()))
             .collect_vec();
         let positions = positions.to_vec();

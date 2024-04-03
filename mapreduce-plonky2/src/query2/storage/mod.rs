@@ -28,7 +28,7 @@ use self::{
 mod full_inner;
 mod leaf;
 mod partial_inner;
-pub(crate) mod public_inputs;
+pub mod public_inputs;
 
 pub enum CircuitInput {
     Leaf(LeafCircuit),
@@ -61,8 +61,8 @@ impl CircuitInput {
     }
 
     pub fn new_full_node(left_proof: &[u8], right_proof: &[u8]) -> Self {
-        let left = ProofWithVK::deserialize(&left_proof).expect("unable to deserialize proof");
-        let right = ProofWithVK::deserialize(&right_proof).expect("unable to deserialize proof");
+        let left = ProofWithVK::deserialize(left_proof).expect("unable to deserialize proof");
+        let right = ProofWithVK::deserialize(right_proof).expect("unable to deserialize proof");
         CircuitInput::FullInner((left, right))
     }
 }

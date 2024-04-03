@@ -20,6 +20,7 @@ use plonky2_crypto::{
 
 use crate::utils::{convert_u8_targets_to_u32, less_than, read_le_u32};
 
+// TODO: is this used?
 pub(crate) fn hash_to_fields<F: RichField>(expected: &[u8]) -> Vec<F> {
     let iter_u32 = expected.iter().chunks(4);
     iter_u32
@@ -32,6 +33,7 @@ pub(crate) fn hash_to_fields<F: RichField>(expected: &[u8]) -> Vec<F> {
         .collect::<Vec<_>>()
 }
 
+// TODO: is this used?
 pub(crate) fn hash_array<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     pw: &mut PartialWitness<F>,

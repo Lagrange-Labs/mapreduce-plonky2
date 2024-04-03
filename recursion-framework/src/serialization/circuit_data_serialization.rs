@@ -71,7 +71,7 @@ impl<F: RichField, H: Hasher<F>> ToBytes for MerkleTree<F, H> {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         buffer
-            .write_merkle_tree(&self)
+            .write_merkle_tree(self)
             .expect("Writing to a byte-vector cannot fail.");
         buffer
     }
@@ -121,7 +121,7 @@ where
 {
     fn to_bytes(&self) -> Vec<u8> {
         let generator_serializer = CustomGeneratorSerializer::<C, D> {
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         };
         self.to_bytes(&CustomGateSerializer, &generator_serializer)
             .expect("Writing to a byte-vector cannot fail.")
@@ -135,7 +135,7 @@ where
 {
     fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
         let generator_serializer = CustomGeneratorSerializer::<C, D> {
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         };
         Ok(CircuitData::<F, C, D>::from_bytes(
             bytes,

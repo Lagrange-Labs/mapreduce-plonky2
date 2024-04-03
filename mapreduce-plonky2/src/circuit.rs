@@ -327,7 +327,7 @@ where
 
 #[cfg(test)]
 pub(crate) mod test {
-    use std::{fmt::Debug, time};
+    use std::fmt::Debug;
 
     use plonky2::{
         field::extension::Extendable,
@@ -342,14 +342,6 @@ pub(crate) mod test {
     use crate::utils::verify_proof_tuple;
 
     use super::UserCircuit;
-
-    pub(crate) struct BenchResult {
-        pub gate_count: usize,
-        pub building: u64,
-        pub proving: u64,
-        pub lde: usize,
-        pub verifying: u64,
-    }
 
     /// Proves and verifies the provided circuit instance.
     pub(crate) fn run_circuit<

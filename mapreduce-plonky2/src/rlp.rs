@@ -1,6 +1,6 @@
 use crate::array::{Array, VectorWire};
-use crate::mpt_sequential::Circuit;
-use crate::utils::{greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits};
+
+use crate::utils::{greater_than_or_equal_to, less_than, num_to_bits};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
@@ -55,13 +55,6 @@ impl<const N: usize> RlpList<N> {
             offset,
             data_type: dtype,
         }
-    }
-    pub fn select_offset<F: RichField + Extendable<D>, const D: usize>(
-        &self,
-        b: &mut CircuitBuilder<F, D>,
-        at: Target,
-    ) -> Target {
-        self.offset.value_at(b, at)
     }
 }
 pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, const N: usize>(
@@ -322,32 +315,6 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
     }
 }
 
-/// Returns an array of length `M` from the array `arr` starting at index `offset`
-pub fn extract_array<F: RichField + Extendable<D>, const D: usize, const M: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    arr: &[Target],
-    offset: Target,
-) -> [Target; M] {
-    let mut out: [Target; M] = [arr[0]; M];
-
-    let m = b.constant(F::from_canonical_usize(M));
-    let upper_bound = b.add(offset, m);
-    for (i, out_val) in out.iter_mut().enumerate().take(M) {
-        let i_target = b.constant(F::from_canonical_usize(i));
-        let i_plus_n_target = b.add(offset, i_target);
-
-        // nikko: ((i + offset) <= n + M)
-        let lt = less_than_or_equal_to(b, i_plus_n_target, upper_bound, 63);
-        // ((i+n) <= n+M) * (i+n)
-        let j = b.mul(lt.target, i_plus_n_target);
-
-        // out_val = arr[((i+n)<=n+M) * (i+n)]
-        *out_val = quin_selector(b, arr, j);
-    }
-
-    out
-}
-
 /// Returns an element of the array at index n
 /// TODO: replace with random_access from plonky2 and compare constraints
 pub fn quin_selector<F: RichField + Extendable<D>, const D: usize>(
@@ -378,29 +345,55 @@ fn calculate_total<F: RichField + Extendable<D>, const D: usize>(
 
 #[cfg(test)]
 mod tests {
-
-    use core::num;
     use std::array::from_fn as create_array;
 
     use anyhow::Result;
 
     use eth_trie::{Nibbles, Trie};
+    use plonky2::field::extension::Extendable;
     use plonky2::field::types::Field;
-    use plonky2::iop::target::{BoolTarget, Target};
+    use plonky2::hash::hash_types::RichField;
+    use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::array::{Array, Vector, VectorWire};
-    use crate::keccak::HASH_LEN;
-    use crate::mpt_sequential::bytes_to_nibbles;
+    use crate::array::Array;
     use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::{
-        decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, RlpList,
-        MAX_ENC_KEY_LEN, MAX_LEN_BYTES,
+        decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, MAX_ENC_KEY_LEN,
+        MAX_LEN_BYTES,
     };
-    use crate::utils::{keccak256, IntTargetWriter};
+    use crate::utils::{keccak256, less_than_or_equal_to, IntTargetWriter};
+
+    use super::quin_selector;
+
+    /// Returns an array of length `M` from the array `arr` starting at index `offset`
+    pub fn extract_array<F: RichField + Extendable<D>, const D: usize, const M: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        arr: &[Target],
+        offset: Target,
+    ) -> [Target; M] {
+        let mut out: [Target; M] = [arr[0]; M];
+
+        let m = b.constant(F::from_canonical_usize(M));
+        let upper_bound = b.add(offset, m);
+        for (i, out_val) in out.iter_mut().enumerate().take(M) {
+            let i_target = b.constant(F::from_canonical_usize(i));
+            let i_plus_n_target = b.add(offset, i_target);
+
+            // nikko: ((i + offset) <= n + M)
+            let lt = less_than_or_equal_to(b, i_plus_n_target, upper_bound, 63);
+            // ((i+n) <= n+M) * (i+n)
+            let j = b.mul(lt.target, i_plus_n_target);
+
+            // out_val = arr[((i+n)<=n+M) * (i+n)]
+            *out_val = quin_selector(b, arr, j);
+        }
+
+        out
+    }
 
     fn visit_branch_node(node: &[u8]) -> Vec<(usize, usize)> {
         println!("[+] Visiting branch node of {} bytes", node.len());
@@ -709,8 +702,7 @@ mod tests {
             data_type: builder.constant(F::from_canonical_usize(1)),
         };
 
-        let res_dot_drop =
-            super::extract_array::<F, D, { MAX_LEN_BYTES + 1 }>(&mut builder, &data3, zero);
+        let res_dot_drop = extract_array::<F, D, { MAX_LEN_BYTES + 1 }>(&mut builder, &data3, zero);
         let res_rlp_header3 = super::decode_header(&mut builder, &res_dot_drop, zero);
 
         // builder.connect(rlp_header.len, res_rlp_header.len);

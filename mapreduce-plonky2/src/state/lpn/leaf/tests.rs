@@ -4,14 +4,9 @@ use std::array;
 
 use ethers::types::Address;
 use plonky2::{
-    field::{
-        goldilocks_field::GoldilocksField,
-        types::{Field, PrimeField64},
-    },
+    field::{goldilocks_field::GoldilocksField, types::PrimeField64},
     hash::{
-        hash_types::RichField,
-        hash_types::{HashOut, HashOutTarget},
-        hashing::hash_n_to_hash_no_pad,
+        hash_types::HashOut, hash_types::RichField, hashing::hash_n_to_hash_no_pad,
         poseidon::PoseidonPermutation,
     },
     iop::{
@@ -135,6 +130,7 @@ struct TestLeafWires {
 #[derive(Clone, Debug)]
 struct TestLeafCircuit {
     block_linking_values: Vec<GoldilocksField>,
+    // TODO: should not this be tested?
     c: LeafCircuit,
 }
 
