@@ -50,3 +50,98 @@ where
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use plonky2::{
+        field::types::Field,
+        hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
+        iop::witness::{PartialWitness, WitnessWrite},
+        plonk::config::PoseidonGoldilocksConfig,
+    };
+
+    use crate::circuit::{test::run_circuit, UserCircuit};
+
+    use super::*;
+
+    #[test]
+    fn hash_maybe_swap_is_equivalent_to_hash_n_false() {
+        let a = [GoldilocksField::ZERO; NUM_HASH_OUT_ELTS];
+        let b = [GoldilocksField::ONE; NUM_HASH_OUT_ELTS];
+
+        let preimage: Vec<_> = a.iter().chain(b.iter()).copied().collect();
+        let h = hash_n_to_hash_no_pad::<GoldilocksField, PoseidonPermutation<GoldilocksField>>(
+            preimage.as_slice(),
+        );
+
+        let circuit = TestHashSwapCircuit {
+            a,
+            b,
+            do_swap: false,
+        };
+        let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit);
+
+        assert_eq!(&h.elements[..], proof.public_inputs.as_slice());
+    }
+
+    #[test]
+    fn hash_maybe_swap_is_equivalent_to_hash_n_true() {
+        let a = [GoldilocksField::ZERO; NUM_HASH_OUT_ELTS];
+        let b = [GoldilocksField::ONE; NUM_HASH_OUT_ELTS];
+
+        let preimage: Vec<_> = a.iter().chain(b.iter()).copied().collect();
+        let h = hash_n_to_hash_no_pad::<GoldilocksField, PoseidonPermutation<GoldilocksField>>(
+            preimage.as_slice(),
+        );
+
+        let circuit = TestHashSwapCircuit {
+            a: b,
+            b: a,
+            do_swap: true,
+        };
+        let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit);
+
+        assert_eq!(&h.elements[..], proof.public_inputs.as_slice());
+    }
+
+    #[derive(Clone)]
+    struct TestHashSwapWires {
+        pub a: HashOutTarget,
+        pub b: HashOutTarget,
+        pub do_swap: BoolTarget,
+    }
+
+    #[derive(Debug, Clone)]
+    struct TestHashSwapCircuit {
+        pub a: [GoldilocksField; NUM_HASH_OUT_ELTS],
+        pub b: [GoldilocksField; NUM_HASH_OUT_ELTS],
+        pub do_swap: bool,
+    }
+
+    impl UserCircuit<GoldilocksField, 2> for TestHashSwapCircuit {
+        type Wires = TestHashSwapWires;
+
+        fn build(cb: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
+            let a = cb.add_virtual_hash();
+            let b = cb.add_virtual_hash();
+            let do_swap = cb.add_virtual_bool_target_safe();
+            let h = hash_maybe_swap(cb, &[a.elements, b.elements], do_swap);
+
+            cb.register_public_inputs(&h.elements);
+
+            TestHashSwapWires { a, b, do_swap }
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
+            pw.set_target(
+                wires.do_swap.target,
+                GoldilocksField::from_bool(self.do_swap),
+            );
+
+            for i in 0..NUM_HASH_OUT_ELTS {
+                pw.set_target(wires.a.elements[i], self.a[i]);
+                pw.set_target(wires.b.elements[i], self.b[i]);
+            }
+        }
+    }
+}
