@@ -68,7 +68,7 @@
             "type": "uint256"
           }
         ],
-        "internalType": "struct Verifier.Query",
+        "internalType": "struct Query2.Query",
         "name": "query",
         "type": "tuple"
       }
@@ -76,9 +76,9 @@
     "name": "processQuery",
     "outputs": [
       {
-        "internalType": "uint32[]",
+        "internalType": "uint256[]",
         "name": "",
-        "type": "uint32[]"
+        "type": "uint256[]"
       }
     ],
     "stateMutability": "view",

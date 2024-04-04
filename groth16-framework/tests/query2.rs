@@ -91,9 +91,12 @@ fn test_groth16_proving_for_query2() {
     // Test Groth16 proving, verification and Solidity verification.
     test_groth16_proving_and_verification(ASSET_DIR, &proof);
 
-    // Verify with the Solidity function `respond`.
+    // Verify with the Query2 Solidity function.
     // The editing Solidity code is saved in `test_data/query2_verifier.sol`.
-    verify_solidity_respond_fun(ASSET_DIR, &query);
+    // TODO: In practice, the separate `query2.sol` and `verifier.sol` should be
+    // used, but the `revm` (Rust EVM) cannot support compilated contract
+    // deployment (as inheritance) for now.
+    verify_query2_solidity_fun(ASSET_DIR, &query);
 }
 
 /// Build for the plonky2 circuit and generate the proof.
@@ -233,15 +236,15 @@ fn test_mapping_keys() -> Vec<[u8; MAPPING_KEY_LEN]> {
         .collect()
 }
 
-/// Verify the Solidity `respond` function.
-fn verify_solidity_respond_fun(asset_dir: &str, query: &Query) {
+/// Verify the Query2 Solidity function.
+fn verify_query2_solidity_fun(asset_dir: &str, query: &Query) {
     let solidity_file_path = Path::new("test_data")
         .join("query2_verifier.sol")
         .to_string_lossy()
         .to_string();
 
     let contract = Contract::load(
-        read_file(Path::new("test_data").join("verifier.abi"))
+        read_file(Path::new("test_data").join("query2.abi"))
             .unwrap()
             .as_slice(),
     )
