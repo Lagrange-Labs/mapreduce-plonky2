@@ -48,14 +48,19 @@
             "type": "address"
           },
           {
-            "internalType": "uint32",
-            "name": "minBlockNumber",
-            "type": "uint32"
+            "internalType": "address",
+            "name": "clientAddress",
+            "type": "address"
           },
           {
-            "internalType": "uint32",
+            "internalType": "uint256",
+            "name": "minBlockNumber",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
             "name": "maxBlockNumber",
-            "type": "uint32"
+            "type": "uint256"
           },
           {
             "internalType": "uint256",

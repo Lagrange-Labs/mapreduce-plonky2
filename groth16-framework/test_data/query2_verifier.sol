@@ -588,8 +588,9 @@ contract Verifier {
     struct Query {
         address contractAddress;
         address userAddress;
-        uint32 minBlockNumber;
-        uint32 maxBlockNumber;
+        address clientAddress;
+        uint256 minBlockNumber;
+        uint256 maxBlockNumber;
         uint256 blockHash;
     }
 

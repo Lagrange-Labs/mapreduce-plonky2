@@ -49,6 +49,7 @@ const BLOCK_DB_DEPTH: usize = 2;
 struct Query {
     contract_address: Address,
     user_address: Address,
+    client_address: Address,
     min_block_number: u32,
     max_block_number: u32,
     block_hash: U256,
@@ -60,6 +61,7 @@ impl Query {
         Self {
             contract_address: Address::repeat_byte(1),
             user_address: Address::repeat_byte(2),
+            client_address: Address::repeat_byte(3),
             min_block_number: 100,
             max_block_number: 1000,
             block_hash: U256::MAX,
@@ -260,6 +262,7 @@ fn verify_solidity_respond_fun(asset_dir: &str, query: &Query) {
     let query = Token::Tuple(vec![
         Token::Address(query.contract_address),
         Token::Address(query.user_address),
+        Token::Address(query.client_address),
         Token::Uint(query.min_block_number.into()),
         Token::Uint(query.max_block_number.into()),
         Token::Uint(query.block_hash),
