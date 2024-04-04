@@ -27,8 +27,13 @@ use crate::{
 
 use super::StateWires;
 
-const DEPTH: usize = 3;
-type StateCircuit<const DEPTH: usize> = super::StateCircuit<DEPTH, GoldilocksField>;
+const MAX_DEPTH: usize = 3;
+type StateCircuit<const MAX_DEPTH: usize> = super::StateCircuit<MAX_DEPTH, GoldilocksField>;
+
+#[test]
+fn prove_and_verify_state_circuit() {
+    let _ = run_state_circuit(0xdead);
+}
 
 fn random_address(rng: &mut StdRng) -> Address {
     let mut address = Address::zero();
@@ -56,7 +61,7 @@ pub(crate) fn run_state_circuit_with_slot_and_addresses<'a>(
 ) -> ([u8; MAPPING_KEY_LEN], Vec<GoldilocksField>) {
     let (mapping_key, inputs) = StorageInputs::inputs_from_seed_and_owner(seed, user_address);
     let storage_pi = StorageInputs::from_slice(&inputs);
-    let circuit = TestStateCircuit::<DEPTH>::new_from_slot_and_addr(
+    let circuit = TestStateCircuit::<MAX_DEPTH>::new_from_slot_and_addr(
         seed,
         slot_length,
         mapping_slot,
@@ -90,13 +95,13 @@ pub(crate) fn run_state_circuit_with_slot_and_addresses<'a>(
 #[derive(Debug, Clone)]
 pub struct TestProvenanceWires {
     storage: Vec<Target>,
-    provenance: StateWires,
+    provenance: StateWires<MAX_DEPTH>,
 }
 
 #[derive(Debug, Clone)]
-pub struct TestStateCircuit<const DEPTH: usize> {
+pub struct TestStateCircuit<const MAX_DEPTH: usize> {
     storage_values: Vec<GoldilocksField>,
-    c: StateCircuit<DEPTH>,
+    c: StateCircuit<MAX_DEPTH>,
     block_number: GoldilocksField,
     root: HashOut<GoldilocksField>,
     smart_contract_address: PackedSCAddress<GoldilocksField>,
@@ -104,7 +109,7 @@ pub struct TestStateCircuit<const DEPTH: usize> {
     length_slot: GoldilocksField,
 }
 
-impl<const DEPTH: usize> TestStateCircuit<DEPTH> {
+impl<const MAX_DEPTH: usize> TestStateCircuit<MAX_DEPTH> {
     pub fn new_from_slot_and_addr(
         seed: u64,
         length_slot: u32,
@@ -121,8 +126,9 @@ impl<const DEPTH: usize> TestStateCircuit<DEPTH> {
         let mapping_slot = GoldilocksField::from_canonical_u32(mapping_slot);
         let length_slot = GoldilocksField::from_canonical_u32(length_slot);
         let block_number = GoldilocksField::from_canonical_u32(rng.next_u32());
+        let depth = GoldilocksField::from_canonical_u32(MAX_DEPTH as u32);
 
-        let siblings: Vec<_> = (0..DEPTH)
+        let siblings: Vec<_> = (0..MAX_DEPTH)
             .map(|_| {
                 let mut s = HashOut::default();
                 s.elements
@@ -132,7 +138,7 @@ impl<const DEPTH: usize> TestStateCircuit<DEPTH> {
             })
             .collect();
 
-        let positions: Vec<_> = (0..DEPTH).map(|_| rng.next_u32() & 1 == 1).collect();
+        let positions: Vec<_> = (0..MAX_DEPTH).map(|_| rng.next_u32() & 1 == 1).collect();
 
         // FIXME use crate::state::lpn::state_leaf_hash
         let preimage: Vec<_> = smart_contract_address
@@ -149,7 +155,7 @@ impl<const DEPTH: usize> TestStateCircuit<DEPTH> {
             PoseidonPermutation<GoldilocksField>,
         >(preimage.as_slice());
 
-        for i in 0..DEPTH {
+        for i in 0..MAX_DEPTH {
             let (left, right) = if positions[i] {
                 (siblings[i].clone(), state_root.clone())
             } else {
@@ -186,7 +192,7 @@ impl<const DEPTH: usize> TestStateCircuit<DEPTH> {
             mapping_slot,
             length_slot,
             block_number,
-            state_root,
+            depth,
             siblings,
             positions,
             block_hash,
@@ -204,13 +210,13 @@ impl<const DEPTH: usize> TestStateCircuit<DEPTH> {
     }
 }
 
-impl<const DEPTH: usize> UserCircuit<GoldilocksField, 2> for TestStateCircuit<DEPTH> {
+impl UserCircuit<GoldilocksField, 2> for TestStateCircuit<MAX_DEPTH> {
     type Wires = TestProvenanceWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
         let targets = b.add_virtual_targets(StorageInputs::<()>::TOTAL_LEN);
         let storage = StorageInputs::from_slice(&targets);
-        let provenance = StateCircuit::<DEPTH>::build(b, &storage);
+        let provenance = StateCircuit::<MAX_DEPTH>::build(b, &storage);
 
         TestProvenanceWires {
             storage: targets,
@@ -227,11 +233,6 @@ impl<const DEPTH: usize> UserCircuit<GoldilocksField, 2> for TestStateCircuit<DE
 
         self.c.assign(pw, &wires.provenance);
     }
-}
-
-#[test]
-fn prove_and_verify_state_circuit() {
-    let _ = run_state_circuit(0xdead);
 }
 
 type F = crate::api::F;
