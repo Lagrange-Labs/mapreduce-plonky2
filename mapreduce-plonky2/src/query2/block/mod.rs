@@ -25,7 +25,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     api::{default_config, ProofWithVK, C, D, F},
     types::{
-        HashOutput, PackedAddressTarget, PackedValueTarget, CURVE_TARGET_LEN, PACKED_VALUE_LEN,
+        HashOutput, PackedAddressTarget, PackedValueTarget, CURVE_TARGET_LEN, PACKED_ADDRESS_LEN,
+        PACKED_VALUE_LEN,
     },
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
@@ -68,7 +69,7 @@ impl CircuitInput {
     }
 }
 
-const NUM_IO: usize = BlockPublicInputs::<Target>::total_len();
+pub const NUM_IO: usize = BlockPublicInputs::<Target>::total_len();
 
 #[derive(Serialize, Deserialize)]
 pub struct Parameters {
@@ -367,11 +368,8 @@ impl<'a> BlockPublicInputs<'a, Target> {
     }
 }
 
-#[cfg(test)]
-use crate::types::PACKED_ADDRESS_LEN;
-
 impl<'a> BlockPublicInputs<'a, GoldilocksField> {
-    #[cfg(test)]
+    // Only used for testing.
     pub fn from_parts(
         block_number: GoldilocksField,
         range: GoldilocksField,

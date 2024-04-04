@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Groth16 proof
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Groth16Proof {
     /// The proofs item is an array of [U256; 8], which should be passed to the
     /// `verifyProof` function of the Solidity verifier contract.

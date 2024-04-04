@@ -320,7 +320,7 @@ const NUM_STATE_PUBLIC_INPUTS: usize = StateInputs::<Target>::TOTAL_LEN;
 // In particular, dummy circuit will always generate proofs where this
 // additional public input value is set to 1, while IVC proofs will have
 // this public input value set to 0.
-pub(crate) const NUM_IVC_PUBLIC_INPUTS: usize = NUM_IO + 1;
+pub const NUM_IVC_PUBLIC_INPUTS: usize = NUM_IO + 1;
 /// This data strcuture contains the input values related to the additional
 /// logic enforced in the block tree IVC circuit besides recursive verification
 /// of  previously generated IVC proof
@@ -660,11 +660,8 @@ impl<const MAX_DEPTH: usize> CircuitInput<MAX_DEPTH> {
     }
 }
 
-pub(crate) fn empty_merkle_root<
-    F: SerializableRichField<D>,
-    const D: usize,
-    const MAX_DEPTH: usize,
->() -> HashOut<F> {
+pub fn empty_merkle_root<F: SerializableRichField<D>, const D: usize, const MAX_DEPTH: usize>(
+) -> HashOut<F> {
     (0..MAX_DEPTH).fold(HashOut::<F>::from_partial(&[]), |hash, _| {
         PoseidonHash::two_to_one(hash, hash)
     })

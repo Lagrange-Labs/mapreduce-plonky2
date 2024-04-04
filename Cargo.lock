@@ -1980,6 +1980,7 @@ dependencies = [
  "ethers 2.0.13",
  "gnark-utils",
  "hex",
+ "itertools 0.12.1",
  "log",
  "mapreduce-plonky2",
  "plonky2",

@@ -211,12 +211,12 @@ pub struct ProofWithVK {
 }
 
 impl ProofWithVK {
-    pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
+    pub fn serialize(&self) -> Result<Vec<u8>> {
         let buff = bincode::serialize(&self)?;
         Ok(buff)
     }
 
-    pub(crate) fn deserialize(buff: &[u8]) -> Result<Self> {
+    pub fn deserialize(buff: &[u8]) -> Result<Self> {
         let s = bincode::deserialize(buff)?;
         Ok(s)
     }

@@ -31,6 +31,57 @@
   {
     "inputs": [
       {
+        "internalType": "uint8[]",
+        "name": "data",
+        "type": "uint8[]"
+      },
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "contract_address",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "user_address",
+            "type": "address"
+          },
+          {
+            "internalType": "uint32",
+            "name": "min_block_number",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint32",
+            "name": "max_block_number",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint256",
+            "name": "block_hash",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct Verifier.Query",
+        "name": "query",
+        "type": "tuple"
+      }
+    ],
+    "name": "respond",
+    "outputs": [
+      {
+        "internalType": "uint32[]",
+        "name": "",
+        "type": "uint32[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256[4]",
         "name": "compressedProof",
         "type": "uint256[4]"

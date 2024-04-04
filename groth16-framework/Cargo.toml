@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1.0"
 bytes = "1.5"
 ethereum-types = "0.14"
+ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features = false, features = ["rustls"], branch = "get-proof-0x" }
 gnark-utils = { path = "../gnark-utils" }
 hex = "0.4"
 log = "0.4"
@@ -22,7 +23,7 @@ sha3 = "0.10"
 
 [dev-dependencies]
 env_logger = "0.11"
-ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features = false, features = ["rustls"], branch = "get-proof-0x" }
 plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
 rand = "0.8"
 serial_test = "3.0"
+itertools = "0.12"
