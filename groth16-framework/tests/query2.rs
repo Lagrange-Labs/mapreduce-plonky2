@@ -262,13 +262,16 @@ fn verify_query2_solidity_fun(asset_dir: &str, query: &Query) {
             .collect(),
     );
 
+    let mut block_hash_bytes = vec![0; 32];
+    query.block_hash.to_little_endian(&mut block_hash_bytes);
+
     let query = Token::Tuple(vec![
         Token::Address(query.contract_address),
         Token::Address(query.user_address),
         Token::Address(query.client_address),
         Token::Uint(query.min_block_number.into()),
         Token::Uint(query.max_block_number.into()),
-        Token::Uint(query.block_hash),
+        Token::FixedBytes(block_hash_bytes),
     ]);
 
     // Build the ABI encoded data.

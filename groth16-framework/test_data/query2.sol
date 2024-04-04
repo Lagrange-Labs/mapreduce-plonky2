@@ -51,7 +51,7 @@ contract Query2 is Verifier {
         address clientAddress;
         uint256 minBlockNumber;
         uint256 maxBlockNumber;
-        uint256 blockHash;
+        bytes32 blockHash;
     }
 
     // This processQuery function does the followings:
@@ -161,7 +161,7 @@ contract Query2 is Verifier {
             "The parsed user address must be equal to the expected one in query."
         );
 
-        uint256 block_hash = convertToHash(pis, PI_BLOCK_HASH_OFFSET);
+        bytes32 block_hash = convertToHash(pis, PI_BLOCK_HASH_OFFSET);
         require(
             block_hash == query.blockHash,
             "The parsed block hash must be equal to the expected one in query."
@@ -209,12 +209,12 @@ contract Query2 is Verifier {
     }
 
     // Convert to a hash from a memory offset.
-    function convertToHash(bytes memory pis, uint32 offset) internal pure returns (uint256) {
+    function convertToHash(bytes memory pis, uint32 offset) internal pure returns (bytes32) {
         uint256 result;
         for (uint32 i = 0; i < PACKED_HASH_LEN; ++i) {
             result |= uint256(convertToU32(pis, offset + i * 8)) << (32 * i);
         }
 
-        return result;
+        return bytes32(result);
     }
 }
