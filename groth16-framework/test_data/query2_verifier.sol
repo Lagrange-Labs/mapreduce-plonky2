@@ -603,7 +603,7 @@ contract Verifier {
     // 4. Parse a Query instance from the plonky2 public inputs, and asset it must be equal to the
     //    expected `query` argument.
     // 5. Parse and return `L` NFT IDs (uint32) from the plonky2 public inputs.
-    function processQuery(bytes32[] calldata data, Query memory query) public view returns (uint32[] memory) {
+    function processQuery(bytes32[] calldata data, Query memory query) public view returns (uint256[] memory) {
         // 1. Do Groth16 verification.
         uint256[3] memory groth16_inputs = verifyGroth16Proof(data);
 
@@ -709,10 +709,10 @@ contract Verifier {
     }
 
     // Parse the `L` NFT IDs from the plonky2 public inputs.
-    function parseNftIds(bytes memory pis) internal pure returns (uint32[] memory) {
-        uint32[] memory nft_ids = new uint32[](L);
+    function parseNftIds(bytes memory pis) internal pure returns (uint256[] memory) {
+        uint256[] memory nft_ids = new uint256[](L);
         for (uint32 i = 0; i < L; ++i) {
-            nft_ids[i] = convertToU32(pis, PI_NFT_IDS_OFFSET + i * 8);
+            nft_ids[i] = uint256(convertToU32(pis, PI_NFT_IDS_OFFSET + i * 8));
         }
 
         return nft_ids;
