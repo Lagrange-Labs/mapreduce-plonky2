@@ -31,49 +31,54 @@
   {
     "inputs": [
       {
-        "internalType": "uint8[]",
+        "internalType": "bytes32[]",
         "name": "data",
-        "type": "uint8[]"
+        "type": "bytes32[]"
       },
       {
         "components": [
           {
             "internalType": "address",
-            "name": "contract_address",
+            "name": "contractAddress",
             "type": "address"
           },
           {
             "internalType": "address",
-            "name": "user_address",
+            "name": "userAddress",
             "type": "address"
           },
           {
-            "internalType": "uint32",
-            "name": "min_block_number",
-            "type": "uint32"
-          },
-          {
-            "internalType": "uint32",
-            "name": "max_block_number",
-            "type": "uint32"
+            "internalType": "address",
+            "name": "clientAddress",
+            "type": "address"
           },
           {
             "internalType": "uint256",
-            "name": "block_hash",
+            "name": "minBlockNumber",
             "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "maxBlockNumber",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "blockHash",
+            "type": "bytes32"
           }
         ],
-        "internalType": "struct Verifier.Query",
+        "internalType": "struct Query2.Query",
         "name": "query",
         "type": "tuple"
       }
     ],
-    "name": "respond",
+    "name": "processQuery",
     "outputs": [
       {
-        "internalType": "uint32[]",
+        "internalType": "uint256[]",
         "name": "",
-        "type": "uint32[]"
+        "type": "uint256[]"
       }
     ],
     "stateMutability": "view",
