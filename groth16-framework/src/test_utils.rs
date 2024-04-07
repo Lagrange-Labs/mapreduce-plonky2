@@ -99,5 +99,5 @@ fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
         EVMVerifier::new(&solidity_file_path).expect("Failed to initialize the EVM verifier");
 
     let verified = verifier.verify(calldata);
-    assert!(verified);
+    assert!(verified.is_ok());
 }

@@ -25,15 +25,20 @@ impl EVMVerifier {
     }
 
     /// Verify the calldata with Solidity verifier contract.
-    pub fn verify(&self, calldata: Vec<u8>) -> bool {
+    /// Return the gas_used and the output bytes if success.
+    pub fn verify(&self, calldata: Vec<u8>) -> Result<(u64, Vec<u8>)> {
         match deploy_and_call(self.deployment_code.clone(), calldata) {
-            Ok(gas_used) => {
-                log::info!("Succeeded to do EVM verification: gas_used = {gas_used}");
-                true
+            Ok(result) => {
+                log::debug!(
+                    "Succeeded to do EVM verification: gas_used = {}, output = {:?}",
+                    result.0,
+                    result.1
+                );
+                Ok(result)
             }
             Err(error) => {
                 log::error!("Failed to do EVM verification: {error}");
-                false
+                Err(error)
             }
         }
     }

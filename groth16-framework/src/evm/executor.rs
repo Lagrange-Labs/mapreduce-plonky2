@@ -1,14 +1,16 @@
 //! Test contract deployment and call
 //! Copied and modified from [snark-verifier](https://github.com/privacy-scaling-explorations/snark-verifier).
 
+use anyhow::{bail, Result};
 use revm::{
     primitives::{CreateScheme, ExecutionResult, Output, TransactTo, TxEnv},
     InMemoryDB, EVM,
 };
 
 /// Deploy contract and then call with calldata.
-/// Returns gas_used of call to deployed contract if both transactions are successful.
-pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u64, String> {
+/// Return the gas_used and the output bytes of call to deployed contract if
+/// both transactions are successful.
+pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<(u64, Vec<u8>)> {
     let mut evm = EVM {
         env: Default::default(),
         db: Some(InMemoryDB::default()),
@@ -27,16 +29,15 @@ pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u6
             output: Output::Create(_, Some(contract)),
             ..
         } => contract,
-        ExecutionResult::Revert { gas_used, output } => {
-            return Err(format!(
+        ExecutionResult::Revert { gas_used, output } =>
+            bail!(
                 "Contract deployment transaction reverts with gas_used {gas_used} and output {:#x}",
                 output
-            ))
-        }
-        ExecutionResult::Halt { reason, gas_used } => return Err(format!(
+            ),
+        ExecutionResult::Halt { reason, gas_used } => bail!(
                 "Contract deployment transaction halts unexpectedly with gas_used {gas_used} and reason {:?}",
                 reason
-            )),
+            ),
         _ => unreachable!(),
     };
 
@@ -50,14 +51,19 @@ pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u6
     let result = evm.transact_commit().unwrap();
     log::info!("EVM result: {result:?}");
     match result {
-        ExecutionResult::Success { gas_used, .. } => Ok(gas_used),
-        ExecutionResult::Revert { gas_used, output } => Err(format!(
+        ExecutionResult::Success {
+            gas_used,
+            output: Output::Call(bytes),
+            ..
+        } => Ok((gas_used, bytes.to_vec())),
+        ExecutionResult::Revert { gas_used, output } => bail!(
             "Contract call transaction reverts with gas_used {gas_used} and output {:#x}",
             output
-        )),
-        ExecutionResult::Halt { reason, gas_used } => Err(format!(
+        ),
+        ExecutionResult::Halt { reason, gas_used } => bail!(
             "Contract call transaction halts unexpectedly with gas_used {gas_used} and reason {:?}",
             reason
-        )),
+        ),
+        _ => unreachable!(),
     }
 }

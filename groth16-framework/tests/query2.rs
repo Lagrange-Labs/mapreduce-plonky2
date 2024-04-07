@@ -45,6 +45,9 @@ use std::{iter::once, path::Path, str::FromStr};
 const L: usize = 5;
 const BLOCK_DB_DEPTH: usize = 2;
 
+/// Test NFT IDs
+const TEST_NFT_IDS: [u32; L] = [0, 1, 2, 3, 4];
+
 /// The query struct used to check with the plonky2 public inputs in Solidity.
 struct Query {
     contract_address: Address,
@@ -64,7 +67,7 @@ impl Query {
             client_address: Address::repeat_byte(3),
             min_block_number: 100,
             max_block_number: 1000,
-            block_hash: U256::MAX,
+            block_hash: U256::zero(),
         }
     }
 }
@@ -232,7 +235,7 @@ fn plonky2_build_and_prove(asset_dir: &str, query: &Query) -> (CircuitData<F, C,
 /// Generate the test mapping keys.
 fn test_mapping_keys() -> Vec<[u8; MAPPING_KEY_LEN]> {
     (0..L)
-        .map(|i| left_pad::<MAPPING_KEY_LEN>(&[i as u8]))
+        .map(|i| left_pad::<MAPPING_KEY_LEN>(&TEST_NFT_IDS[i].to_le_bytes()))
         .collect()
 }
 
@@ -252,13 +255,16 @@ fn verify_query2_solidity_fun(asset_dir: &str, query: &Query) {
 
     // Read the combined bytes of the full proof.
     let proof_bytes = read_file(Path::new(asset_dir).join("full_proof.bin")).unwrap();
-    log_nft_ids(&proof_bytes);
 
     // Encode to a bytes32 array.
     let data = Token::Array(
         proof_bytes
             .chunks(32)
-            .map(|b| Token::FixedBytes(b.to_vec()))
+            .map(|b| {
+                let u = U256::from_little_endian(b);
+                println!("0x{:x}", u);
+                Token::FixedBytes(b.to_vec())
+            })
             .collect(),
     );
 
@@ -284,43 +290,27 @@ fn verify_query2_solidity_fun(asset_dir: &str, query: &Query) {
     let verifier =
         EVMVerifier::new(&solidity_file_path).expect("Failed to initialize the EVM verifier");
 
-    let verified = verifier.verify(calldata);
-    assert!(verified);
-}
+    // Verify in Solidity.
+    let output = verifier
+        .verify(calldata)
+        .expect("Failed to verify in Solidity")
+        .1;
 
-/// Log output the NFT IDs from the plonky2 public inputs.
-fn log_nft_ids(data: &[u8]) {
-    // The total length of the plonky2 public inputs. Each input value is
-    // serialized as an uint64. It's related with both the full proof
-    // serialization and the wrapped circuit code.
-    const PI_TOTAL_LEN: usize = L + 24;
+    // Parse the Solidity output.
+    let output = fun
+        .decode_output(&output)
+        .expect("Failed to decode the Solidity output");
+    let nft_ids = match output.as_slice() {
+        [Token::Array(arr)] => arr
+            .into_iter()
+            .map(|token| match token {
+                Token::Uint(u) => u.as_u32(),
+                _ => unreachable!(),
+            })
+            .collect::<Vec<_>>(),
+        _ => unreachable!(),
+    };
 
-    // The byte offset of the NFT IDS located in the plonky2 public inputs.
-    const NFT_IDS_OFFSET_IN_PI: usize = 16;
-
-    // Same code with the Solidity `respond` function for testing.
-    let mut pis = [0_u8; PI_TOTAL_LEN * 8];
-    for i in 0..PI_TOTAL_LEN * 8 {
-        pis[i] = data[352 + i];
-    }
-
-    let mut nft_ids = [0_u32; L];
-    for i in 0..L {
-        let mut chunk = [0_u8; 4];
-        for j in 0..4 {
-            chunk[j] = pis[(NFT_IDS_OFFSET_IN_PI + i) * 8 + j];
-        }
-        nft_ids[i] = convert_to_uint32(chunk);
-    }
-
-    log::info!("NFT IDs retrieved from the public inputs: {nft_ids:?}");
-}
-
-/// Convert 4 bytes to an U32. Same code with Solidity for testing.
-fn convert_to_uint32(data: [u8; 4]) -> u32 {
-    let mut result = 0_u32;
-    for i in 0..4 {
-        result |= (data[i] << (8 * i)) as u32;
-    }
-    return result;
+    // Check the returned NFT IDs.
+    assert_eq!(nft_ids, TEST_NFT_IDS);
 }
