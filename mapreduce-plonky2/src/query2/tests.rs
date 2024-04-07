@@ -146,6 +146,7 @@ fn test_query2_mini_tree() {
         MAPPING_SLOT,
         smart_contract_address,
         user_address,
+        10
     );
     let (right_value, right_leaf_proof_io) = run_state_circuit_with_slot_and_addresses(
         0xbeef,
@@ -153,6 +154,7 @@ fn test_query2_mini_tree() {
         MAPPING_SLOT,
         smart_contract_address,
         user_address,
+        11
     );
 
     let left_leaf_pi = BlockQueryPublicInputs::<'_, F>::from(left_leaf_proof_io.as_slice());
@@ -203,9 +205,8 @@ fn test_query2_mini_tree() {
     // we can choose anything as long as they satisfy the constraints when aggregating
     // query_min >= min_block during aggregation
     // query_max <= max_block during aggregation
-    let query_min_block_number =
-        root_proof.block_number() - root_proof.range() - GoldilocksField::ONE;
-    let query_max_block_number = root_proof.block_number() + GoldilocksField::ONE;
+    let query_min_block_number = root_proof.block_number() - GoldilocksField::ONE;
+    let query_max_block_number = root_proof.block_number();
 
     let num_entries = 2;
     // entries sorted !

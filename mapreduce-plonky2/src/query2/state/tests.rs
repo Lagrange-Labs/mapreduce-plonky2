@@ -49,6 +49,7 @@ pub(crate) fn run_state_circuit<'a>(seed: u64) -> ([u8; MAPPING_KEY_LEN], Vec<Go
         rng.next_u32(),
         random_address(rng),
         random_address(rng),
+        rng.next_u32(),
     )
 }
 
@@ -58,6 +59,7 @@ pub(crate) fn run_state_circuit_with_slot_and_addresses<'a>(
     mapping_slot: u32,
     sc_address: Address,
     user_address: Address,
+    block_nr: u32,
 ) -> ([u8; MAPPING_KEY_LEN], Vec<GoldilocksField>) {
     let (mapping_key, inputs) = StorageInputs::inputs_from_seed_and_owner(seed, user_address);
     let storage_pi = StorageInputs::from_slice(&inputs);
@@ -67,6 +69,7 @@ pub(crate) fn run_state_circuit_with_slot_and_addresses<'a>(
         mapping_slot,
         sc_address,
         &storage_pi,
+        block_nr
     );
     let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit.clone());
     let pi = BlockPublicInputs::<'_, GoldilocksField>::from(proof.public_inputs.as_slice());
@@ -116,6 +119,7 @@ impl<const MAX_DEPTH: usize> TestStateCircuit<MAX_DEPTH> {
         mapping_slot: u32,
         smart_contract_address: Address,
         storage: &StorageInputs<GoldilocksField>,
+        block_number: u32,
     ) -> Self {
         let rng = &mut StdRng::seed_from_u64(seed);
 
@@ -125,7 +129,7 @@ impl<const MAX_DEPTH: usize> TestStateCircuit<MAX_DEPTH> {
 
         let mapping_slot = GoldilocksField::from_canonical_u32(mapping_slot);
         let length_slot = GoldilocksField::from_canonical_u32(length_slot);
-        let block_number = GoldilocksField::from_canonical_u32(rng.next_u32());
+        let block_number = GoldilocksField::from_canonical_u32(block_number);
         let depth = GoldilocksField::from_canonical_u32(MAX_DEPTH as u32);
 
         let siblings: Vec<_> = (0..MAX_DEPTH)
@@ -287,6 +291,7 @@ pub(crate) fn generate_inputs_for_state_circuit(
         mapping_slot,
         smart_contract_address,
         &StorageInputs::from(storage_pi.as_slice()),
+        rng.next_u32(),
     )
     .c;
 
