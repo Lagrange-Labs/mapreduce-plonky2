@@ -300,7 +300,7 @@ mod test {
         // block range asked is just one block less than latest block in db
         let query_max_number = block_db_pi.block_number_data() - F::ONE;
         let query_range = F::from_canonical_usize(10);
-        let query_min_number = query_max_number - query_range;
+        let query_min_number = query_max_number - query_range + F::ONE;
         let query_root = HashOut {
             elements: block_db_pi.root_data().try_into().unwrap(),
         };

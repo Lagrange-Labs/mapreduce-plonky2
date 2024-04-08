@@ -114,7 +114,6 @@ impl<const L: usize> RevelationCircuit<L> {
         let one = b.one();
         let min_bound_plus_1 = b.add(min_bound, one);
 
-
         let t = b._true();
         // TODO: check the bit count, 32 ought to be enough?
         let correct_min = greater_than_or_equal_to(b, min_bound_plus_1, min_block_number, 32);
