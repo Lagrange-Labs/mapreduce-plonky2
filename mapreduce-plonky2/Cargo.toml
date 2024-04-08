@@ -3,46 +3,34 @@ name = "mapreduce-plonky2"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-anyhow = "1.0.75"
-itertools = "0.12.0"
-ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features = false, features = ["rustls"], branch = "get-proof-0x" }
-plonky2 = { version = "0.1.4" }
+anyhow.workspace = true
+bincode.workspace = true
+env_logger.workspace = true
+eth_trie.workspace = true
+ethers.workspace = true
+hashbrown.workspace = true
+itertools.workspace = true
+log.workspace = true
+paste.workspace = true
+plonky2.workspace = true
+plonky2_crypto.workspace = true
+plonky2_ecgfp5.workspace = true
+rand.workspace = true
+rlp.workspace = true
+serde.workspace = true
+serde_arrays.workspace = true
+sha3.workspace = true
+
 recursion_framework = { path = "../recursion-framework" }
 
-# supporting latest plonky2
-plonky2_crypto = { git = "https://github.com/Lagrange-Labs/plonky2-crypto", branch = "feat/serialization" }
-plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
-rand = "0.8.5"
-serde = "1.0.193"
-# TODO: see if we can revert to upstream repo: originally used 
-# to fetch proof with "node" instead of already encoded struct
-eth_trie = { git = "https://github.com/nikkolasg/eth-trie.rs" }
-rlp = "0.5.2"
-sha3 = "0.10.8"
-bincode = "1.3.3"
-hashbrown = "0.14.3"
-log = "0.4.14"
-env_logger = "0.9.0"
-paste = "1.0.14"
-serde_arrays = "0.1.0"
-
 [dev-dependencies]
-anyhow = "1.0.75"
-csv = "1.3.0"
-hex = "0.4.3"
-itertools = "0.12.0"
-rlp = "0.5.2"
-rmp-serde = "1.1.2"
-serde_json = "1.0.108"
-sha3 = "0.10.8"
-tokio = { version = "1.34.0", features = ["macros", "rt-multi-thread"] }
-env_logger = { version = "0.9.0", default-features = false }
-log = { version = "0.4.14", default-features = false }
-rand = "0.8.5"
-serial_test = "3.0.0"
+csv.workspace = true
+hex.workspace = true
+rmp-serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+serial_test.workspace = true
 
 [features]
 ci = []
