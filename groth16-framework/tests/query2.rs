@@ -46,7 +46,7 @@ const L: usize = 5;
 const BLOCK_DB_DEPTH: usize = 2;
 
 /// Test NFT IDs
-const TEST_NFT_IDS: [u32; L] = [0, 1, 2, 3, 4];
+const TEST_NFT_IDS: [u32; L] = [0, 0, 0, 0, 0];
 
 /// The query struct used to check with the plonky2 public inputs in Solidity.
 struct Query {
@@ -62,12 +62,17 @@ impl Query {
     /// Create the test Query data.
     fn new_test() -> Self {
         Self {
-            contract_address: Address::repeat_byte(1),
-            user_address: Address::repeat_byte(2),
-            client_address: Address::repeat_byte(3),
-            min_block_number: 100,
-            max_block_number: 1000,
-            block_hash: U256::zero(),
+            contract_address: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd")
+                .unwrap(),
+            user_address: Address::from_str("0x21471c9771c39149b1e42483a785a49f3873d0a5").unwrap(),
+            client_address: Address::from_str("0x21471c9771c39149b1e42483a785a49f3873d0a5")
+                .unwrap(),
+            min_block_number: 5594951,
+            max_block_number: 5594951,
+            block_hash: U256::from_little_endian(&[
+                59, 29, 137, 127, 105, 222, 146, 7, 197, 154, 29, 147, 160, 158, 243, 163, 194,
+                164, 70, 74, 21, 84, 190, 107, 170, 77, 180, 48, 171, 56, 194, 78,
+            ]),
         }
     }
 }
