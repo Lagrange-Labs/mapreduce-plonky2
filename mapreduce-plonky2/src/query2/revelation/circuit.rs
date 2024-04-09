@@ -99,11 +99,24 @@ impl<const L: usize> RevelationCircuit<L> {
         // Assert the roots of the query and the block db are the same
         b.connect_hashes(root_proof.root(), db_proof.root());
         b.connect_hashes(db_proof.init_root(), empty_root);
+
         let min_bound = b.sub(root_proof.block_number(), root_proof.range());
+
+        // Comment from tests:
+        // query_min >= min_block during aggregation
+        // query_max <= max_block during aggregation
+
+        // It seems that if min_block == query_min and max_block == query_max,
+        // then subtracting the range(interpreted as the number of blocks)
+        // from the max_block goes 1 below the min_block_number.
+
+        // Add 1 to the min_bound
+        let one = b.one();
+        let min_bound_plus_1 = b.add(min_bound, one);
 
         let t = b._true();
         // TODO: check the bit count, 32 ought to be enough?
-        let correct_min = greater_than_or_equal_to(b, min_bound, min_block_number, 32);
+        let correct_min = greater_than_or_equal_to(b, min_bound_plus_1, min_block_number, 32);
         let correct_max = less_than_or_equal_to(b, root_proof.block_number(), max_block_number, 32);
         b.connect(correct_min.target, t.target);
         b.connect(correct_max.target, t.target);
