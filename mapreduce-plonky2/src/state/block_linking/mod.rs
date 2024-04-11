@@ -526,6 +526,7 @@ mod tests {
         if let Some(n) = bn {
             block_number = U64::from(n);
         }
+        println!("[+] Block_linking proof with block number {}", block_number);
         // Get block.
         let block = provider.get_block(block_number).await?.unwrap();
         // Query the MPT proof.
