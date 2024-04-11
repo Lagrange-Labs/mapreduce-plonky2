@@ -437,7 +437,7 @@ mod tests {
         let contract_address = "0x941e5ad4482f0e9009b6c087c513cfcd53ac5346";
 
         // Written as constants from the result.
-        const DEPTH: usize = 8;
+        const DEPTH: usize = 9;
         const NODE_LEN: usize = 532;
         const BLOCK_LEN: usize = 620;
         const VALUE_LEN: usize = 50;
