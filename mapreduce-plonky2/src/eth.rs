@@ -391,6 +391,21 @@ pub(crate) mod test {
         url.to_string()
     }
 
+    #[tokio::test]
+    async fn test_rlp_andrus() -> Result<()> {
+        let url = get_sepolia_url();
+        let block_number1 = 5674446;
+        let block_number2 = block_number1 + 1;
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+        let block = provider.get_block(U64::from(block_number1)).await?.unwrap();
+        let comp_hash = keccak256(&block.rlp());
+        let block_next = provider.get_block(U64::from(block_number2)).await?.unwrap();
+        let exp_hash = block_next.parent_hash;
+        assert!(comp_hash == exp_hash.as_bytes());
+        Ok(())
+    }
+
     use super::*;
     #[tokio::test]
     async fn test_sepolia_slot() -> Result<()> {

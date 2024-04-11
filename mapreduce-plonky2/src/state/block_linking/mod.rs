@@ -245,7 +245,7 @@ mod tests {
         api::tests::TestDummyCircuit,
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        eth::{test::get_sepolia_url, ProofQuery, RLPBlock},
+        eth::{test::get_sepolia_url, BlockUtil, ProofQuery, RLPBlock},
         keccak::{OutputHash, HASH_LEN},
         utils::{convert_u8_slice_to_u32_fields, convert_u8_to_u32_slice, keccak256},
     };
@@ -555,7 +555,7 @@ mod tests {
 
         let storage_pi = generate_storage_inputs::<_, VALUE_LEN>(&state_mpt);
 
-        let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
+        let header_rlp = block.rlp();
         let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
 
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN> {
