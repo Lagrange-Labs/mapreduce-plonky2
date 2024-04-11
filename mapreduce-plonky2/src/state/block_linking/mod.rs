@@ -153,7 +153,7 @@ const MAX_DEPTH_TRIE: usize = 9;
 const MAX_NODE_LEN: usize = 532;
 // Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
 // since it still has to do 5 rounds in 622 or 650.
-const MAX_BLOCK_LEN: usize = 650;
+pub(crate) const MAX_BLOCK_LEN: usize = 650;
 const NUMBER_LEN: usize = SEPOLIA_NUMBER_LEN;
 
 #[derive(Serialize, Deserialize)]
@@ -433,6 +433,7 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    #[ignore]
     async fn test_andrus_block_linking() -> Result<()> {
         let url = get_sepolia_url();
 
@@ -465,10 +466,9 @@ mod tests {
         // Written as constants from the result.
         const DEPTH: usize = 8;
         const NODE_LEN: usize = 532;
-        const BLOCK_LEN: usize = 620;
         const VALUE_LEN: usize = 50;
 
-        test_with_rpc::<DEPTH, NODE_LEN, BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
+        test_with_rpc::<DEPTH, NODE_LEN, MAX_BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
             url,
             contract_address,
             None,

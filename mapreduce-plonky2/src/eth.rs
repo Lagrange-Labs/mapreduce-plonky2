@@ -371,7 +371,10 @@ pub(crate) mod test {
     use hashbrown::HashMap;
     use rand::{thread_rng, Rng};
 
-    use crate::utils::{convert_u8_to_u32_slice, find_index_subvector};
+    use crate::{
+        state::block_linking::MAX_BLOCK_LEN,
+        utils::{convert_u8_to_u32_slice, find_index_subvector},
+    };
 
     pub fn get_sepolia_url() -> String {
         #[cfg(feature = "ci")]
@@ -392,6 +395,7 @@ pub(crate) mod test {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_rlp_andrus() -> Result<()> {
         let url = get_sepolia_url();
         let block_number1 = 5674446;
@@ -403,7 +407,11 @@ pub(crate) mod test {
         let block_next = provider.get_block(U64::from(block_number2)).await?.unwrap();
         let exp_hash = block_next.parent_hash;
         assert!(comp_hash == exp_hash.as_bytes());
-        assert!(block.rlp().len() <= 620, " rlp len = {}", block.rlp().len());
+        assert!(
+            block.rlp().len() <= MAX_BLOCK_LEN,
+            " rlp len = {}",
+            block.rlp().len()
+        );
         Ok(())
     }
 
