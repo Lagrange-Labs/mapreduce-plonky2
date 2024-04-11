@@ -403,6 +403,7 @@ pub(crate) mod test {
         let block_next = provider.get_block(U64::from(block_number2)).await?.unwrap();
         let exp_hash = block_next.parent_hash;
         assert!(comp_hash == exp_hash.as_bytes());
+        assert!(block.rlp().len() <= 620, " rlp len = {}", block.rlp().len());
         Ok(())
     }
 
