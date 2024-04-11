@@ -365,19 +365,24 @@ impl ProofQuery {
 #[cfg(test)]
 pub(crate) mod test {
 
-    use std::str::FromStr;
+    use std::{env, str::FromStr};
 
     use ethers::types::H256;
     use hashbrown::HashMap;
     use rand::{thread_rng, Rng};
 
-    use crate::utils::{convert_u8_to_u32_slice, find_index_subvector};
+    use crate::{
+        state::block_linking::MAX_BLOCK_LEN,
+        utils::{convert_u8_to_u32_slice, find_index_subvector},
+    };
 
     pub fn get_sepolia_url() -> String {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
-        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+        let url = env::var("CI_SEPOLIA")
+            .or(Ok("https://ethereum-sepolia-rpc.publicnode.com".to_string()))
+            .unwrap();
         url.to_string()
     }
 
@@ -387,6 +392,27 @@ pub(crate) mod test {
         #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
         url.to_string()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_rlp_andrus() -> Result<()> {
+        let url = get_sepolia_url();
+        let block_number1 = 5674446;
+        let block_number2 = block_number1 + 1;
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+        let block = provider.get_block(U64::from(block_number1)).await?.unwrap();
+        let comp_hash = keccak256(&block.rlp());
+        let block_next = provider.get_block(U64::from(block_number2)).await?.unwrap();
+        let exp_hash = block_next.parent_hash;
+        assert!(comp_hash == exp_hash.as_bytes());
+        assert!(
+            block.rlp().len() <= MAX_BLOCK_LEN,
+            " rlp len = {}",
+            block.rlp().len()
+        );
+        Ok(())
     }
 
     use super::*;

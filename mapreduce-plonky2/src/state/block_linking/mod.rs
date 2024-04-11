@@ -151,7 +151,9 @@ const D: usize = crate::api::D;
 const MAX_DEPTH_TRIE: usize = 9;
 // 16*32 hashes + 16 RLP headers associated + 1 empty RLP headers (last slot) + (1 + 2) list RLP header
 const MAX_NODE_LEN: usize = 532;
-const MAX_BLOCK_LEN: usize = 620;
+// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
+// since it still has to do 5 rounds in 622 or 650.
+pub(crate) const MAX_BLOCK_LEN: usize = 650;
 const NUMBER_LEN: usize = SEPOLIA_NUMBER_LEN;
 
 #[derive(Serialize, Deserialize)]
@@ -245,7 +247,7 @@ mod tests {
         api::tests::TestDummyCircuit,
         benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
-        eth::{ProofQuery, RLPBlock},
+        eth::{test::get_sepolia_url, BlockUtil, ProofQuery, RLPBlock},
         keccak::{OutputHash, HASH_LEN},
         utils::{convert_u8_slice_to_u32_fields, convert_u8_to_u32_slice, keccak256},
     };
@@ -429,6 +431,27 @@ mod tests {
             .unwrap()
     }
 
+    #[tokio::test]
+    #[serial]
+    #[ignore]
+    async fn test_andrus_block_linking() -> Result<()> {
+        let url = get_sepolia_url();
+
+        let contract_address = "0x941e5ad4482f0e9009b6c087c513cfcd53ac5346";
+
+        // Written as constants from the result.
+        const DEPTH: usize = 9;
+        const NODE_LEN: usize = 532;
+        const VALUE_LEN: usize = 50;
+
+        test_with_rpc::<DEPTH, NODE_LEN, MAX_BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
+            &url,
+            contract_address,
+            Some(5674446),
+        )
+        .await
+    }
+
     /// Test the block-linking circuit with Sepolia RPC.
     #[tokio::test]
     #[serial]
@@ -443,12 +466,12 @@ mod tests {
         // Written as constants from the result.
         const DEPTH: usize = 8;
         const NODE_LEN: usize = 532;
-        const BLOCK_LEN: usize = 620;
         const VALUE_LEN: usize = 50;
 
-        test_with_rpc::<DEPTH, NODE_LEN, BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
+        test_with_rpc::<DEPTH, NODE_LEN, MAX_BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
             url,
             contract_address,
+            None,
         )
         .await
     }
@@ -470,6 +493,7 @@ mod tests {
         test_with_rpc::<MAX_DEPTH_TRIE, MAX_NODE_LEN, MAX_BLOCK_LEN, VALUE_LEN, SEPOLIA_NUMBER_LEN>(
             url,
             contract_address,
+            None,
         )
         .await
     }
@@ -484,6 +508,7 @@ mod tests {
     >(
         url: &str,
         contract_address: &str,
+        bn: Option<u64>,
     ) -> Result<()>
     where
         [(); PAD_LEN(NODE_LEN)]:,
@@ -498,7 +523,11 @@ mod tests {
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
         // Get the latest block number.
-        let block_number = provider.get_block_number().await?;
+        let mut block_number = provider.get_block_number().await?;
+        if let Some(n) = bn {
+            block_number = U64::from(n);
+        }
+        println!("[+] Block_linking proof with block number {}", block_number);
         // Get block.
         let block = provider.get_block(block_number).await?.unwrap();
         // Query the MPT proof.
@@ -527,7 +556,7 @@ mod tests {
 
         let storage_pi = generate_storage_inputs::<_, VALUE_LEN>(&state_mpt);
 
-        let header_rlp = rlp::encode(&RLPBlock(&block)).to_vec();
+        let header_rlp = block.rlp();
         let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
 
         let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN> {
