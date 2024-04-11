@@ -365,7 +365,7 @@ impl ProofQuery {
 #[cfg(test)]
 pub(crate) mod test {
 
-    use std::str::FromStr;
+    use std::{env, str::FromStr};
 
     use ethers::types::H256;
     use hashbrown::HashMap;
@@ -377,7 +377,9 @@ pub(crate) mod test {
         #[cfg(feature = "ci")]
         let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
-        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+        let url = env::var("CI_SEPOLIA")
+            .or(Ok("https://ethereum-sepolia-rpc.publicnode.com".to_string()))
+            .unwrap();
         url.to_string()
     }
 
