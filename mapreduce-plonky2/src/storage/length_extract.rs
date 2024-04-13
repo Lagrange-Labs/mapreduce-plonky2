@@ -235,7 +235,7 @@ where
     }
 }
 
-pub const MAX_DEPTH_TRIE: usize = 4;
+pub const MAX_DEPTH_TRIE: usize = 6;
 pub type CircuitInput = ArrayLengthExtractCircuit<MAX_DEPTH_TRIE, MAX_BRANCH_NODE_LEN>;
 pub type PublicParameters = Parameters<
     MAX_DEPTH_TRIE,
