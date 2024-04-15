@@ -6,6 +6,8 @@ use std::{
 };
 
 fn main() {
+    env::set_var("CGO_ENABLED", "0");
+
     let lib_name = "go-gnark-utils";
     let out_dir = env::var("OUT_DIR").unwrap();
 
