@@ -212,7 +212,7 @@ contract Query2 is Verifier {
     function convertToAddress(bytes memory pis, uint32 offset) internal pure returns (address) {
         uint160 result;
         for (uint32 i = 0; i < PACKED_ADDRESS_LEN; ++i) {
-            result |= uint160(convertToU32(pis, offset + i * 8)) << (32 * i);
+            result |= uint160(convertToLeftPaddingU32(pis, offset + i * 8)) << (32 * (PACKED_ADDRESS_LEN - 1 - i));
         }
 
         return address(result);
@@ -222,7 +222,7 @@ contract Query2 is Verifier {
     function convertToHash(bytes memory pis, uint32 offset) internal pure returns (bytes32) {
         uint256 result;
         for (uint32 i = 0; i < PACKED_HASH_LEN; ++i) {
-            result |= uint256(convertToU32(pis, offset + i * 8)) << (32 * i);
+            result |= uint256(convertToLeftPaddingU32(pis, offset + i * 8)) << (32 * (PACKED_HASH_LEN - 1 - i));
         }
 
         return bytes32(result);
