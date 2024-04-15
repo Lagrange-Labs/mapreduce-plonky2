@@ -90,6 +90,11 @@ impl<'a> PublicInputs<'a, Target> {
         let data = self.mpt_root_data();
         array::from_fn(|i| U32Target(data[i])).into()
     }
+
+    pub fn merkle_root(&self) -> HashOutTarget {
+        let root = self.merkle_root_data();
+        HashOutTarget::from(std::array::from_fn(|i| root[i]))
+    }
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {

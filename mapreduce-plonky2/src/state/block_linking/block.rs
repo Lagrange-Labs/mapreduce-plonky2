@@ -27,7 +27,7 @@ const HEADER_RLP_NUMBER_LEN: usize = HEADER_RLP_NUMBER_OFFSET - 1;
 const HEADER_RLP_NUMBER_OFFSET: usize = 450;
 
 /// On sepolia, the block number is encoded on 3 bytes (u24)
-pub(super) const SEPOLIA_NUMBER_LEN: usize = 3;
+pub(crate) const SEPOLIA_NUMBER_LEN: usize = 3;
 
 #[derive(Serialize, Deserialize)]
 /// The block input wires

@@ -22,14 +22,14 @@ const PADDED_LEN: usize = PAD_LEN(MAX_EXTENSION_NODE_LEN);
 /// MPT proof verification circuits.
 #[derive(Clone, Debug)]
 pub struct ExtensionNodeCircuit {
-    pub(super) node: Vec<u8>,
+    pub(crate) node: Vec<u8>,
 }
 
 /// Wires associated with this processing.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ExtensionWires {
-    pub(super) node: VectorWire<Target, PADDED_LEN>,
-    keccak: KeccakWires<PADDED_LEN>,
+    pub(crate) node: VectorWire<Target, PADDED_LEN>,
+    pub(crate) keccak: KeccakWires<PADDED_LEN>,
 }
 
 impl ExtensionNodeCircuit {
