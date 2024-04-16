@@ -77,8 +77,8 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     /// Returns the accumulator digest defined over the public inputs
-    pub fn accumulator(&self) -> CurveTarget {
-        convert_point_to_curve_target(self.accumulator_info())
+    pub fn digest(&self) -> CurveTarget {
+        convert_point_to_curve_target(self.digest_info())
     }
 
     /// Returns the merkle hash C of the subtree this proof has processed.
@@ -129,7 +129,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     // small utility function to transform a list of target to a curvetarget.
-    pub(crate) fn accumulator_info(&self) -> ([T; 5], [T; 5], T) {
+    pub(crate) fn digest_info(&self) -> ([T; 5], [T; 5], T) {
         convert_slice_to_curve_point(&self.proof_inputs[Self::D_IDX..])
     }
 

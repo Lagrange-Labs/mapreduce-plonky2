@@ -24,8 +24,8 @@ pub(crate) struct ExtensionWires(StorageExtensionWires);
 
 pub(crate) struct ExtensionCircuit(StorageExtensionCircuit);
 
-type F = crate::api::F;
-const D: usize = crate::api::D;
+type F = super::F;
+const D: usize = super::D;
 const PADDED_LEN: usize = PAD_LEN(MAX_EXTENSION_NODE_LEN);
 
 impl ExtensionCircuit {
@@ -69,7 +69,7 @@ impl ExtensionCircuit {
             child_pi.mapping_slot(),
             child_pi.length_slot(),
             &root.output_array,
-            &child_pi.accumulator(),
+            &child_pi.digest(),
             &child_pi.lpn_root(),
         );
 

@@ -29,8 +29,8 @@ where
     keccak: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
 }
 
-type F = crate::api::F;
-const D: usize = crate::api::D;
+type F = super::F;
+const D: usize = super::D;
 
 impl<const NODE_LEN: usize> BranchCircuit<NODE_LEN>
 where
@@ -78,7 +78,7 @@ where
             child_pi.mapping_slot(),
             child_pi.length_slot(),
             &root.output_array,
-            &child_pi.accumulator(),
+            &child_pi.digest(),
             &child_pi.lpn_root(),
         );
 

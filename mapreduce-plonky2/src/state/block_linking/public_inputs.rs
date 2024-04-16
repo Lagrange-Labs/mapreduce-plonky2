@@ -64,7 +64,7 @@ impl<'a, T: Clone> BlockLinkingInputs<'a, T> {
             .contract_address() // always register the packed version
             .register_as_public_input(cb);
         // Register the curve point of digest (avoid F must be GoldilocksField).
-        let digest_data = account_inputs.accumulator_info();
+        let digest_data = account_inputs.digest_info();
         cb.register_public_inputs(&digest_data.0);
         cb.register_public_inputs(&digest_data.1);
         cb.register_public_input(digest_data.2);
