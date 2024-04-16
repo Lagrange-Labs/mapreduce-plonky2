@@ -9,6 +9,7 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = "1.0"
+base64 = "0.22"
 bincode = "1.3"
 bytes = "1.5"
 csv = "1.3"

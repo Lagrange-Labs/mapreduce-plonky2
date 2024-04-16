@@ -38,8 +38,14 @@ pub fn test_groth16_proving_and_verification(asset_dir: &str, plonky2_proof: &[u
 
 /// Test to generate the proof.
 fn groth16_prove(asset_dir: &str, plonky2_proof: &[u8]) -> Groth16Proof {
+    // Read r1cs, pk and circuit bytes from asset dir.
+    let r1cs = read_file(Path::new(asset_dir).join("r1cs.bin")).unwrap();
+    let pk = read_file(Path::new(asset_dir).join("pk.bin")).unwrap();
+    let circuit = read_file(Path::new(asset_dir).join("circuit.bin")).unwrap();
+
     // Initialize the Groth16 prover.
-    let prover = Groth16Prover::new(asset_dir).expect("Failed to initialize the prover");
+    let prover =
+        Groth16Prover::from_bytes(&r1cs, &pk, &circuit).expect("Failed to initialize the prover");
 
     // Construct the file paths to save the Groth16 and full proofs.
     let groth16_proof_path = Path::new(asset_dir).join("groth16_proof.json");
@@ -78,7 +84,7 @@ fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
         .to_string();
 
     let contract = Contract::load(
-        read_file(Path::new("test_data").join("verifier.abi"))
+        read_file(Path::new("test_data").join("query2.abi"))
             .unwrap()
             .as_slice(),
     )
