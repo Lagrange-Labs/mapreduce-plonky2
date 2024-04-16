@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     api::verify_proof_fixed_circuit,
     array::{Array, Vector, VectorWire},
-    keccak::{InputData, KeccakCircuit, KeccakWires, OutputByteHash, OutputHash},
+    keccak::{InputData, KeccakCircuit, KeccakWires, OutputByteHash},
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, MAX_LEAF_VALUE_LEN, PAD_LEN},
     rlp::decode_fixed_list,
     storage::PublicInputs as StorageInputs,
@@ -111,45 +111,28 @@ where
             &storage_pi.digest(),
             &storage_pi.merkle_root(),
         );
-
-        let leaf_wires = LeafWires {
-            contract_address,
-            keccak_contract_address,
-            storage_root_offset,
-            node,
-            root: leaf_hash,
-        };
-
-        // Verify the account node includes the hash of storage MPT root.
-
-        Self::verify_storage_root_hash_inclusion(cb, &leaf_wires, &storage_pi.mpt_root());
-
-        leaf_wires
-    }
-
-    /// Verify the account node includes the hash of storage MPT root.
-    fn verify_storage_root_hash_inclusion(
-        cb: &mut CircuitBuilder<F, D>,
-        wires: &LeafWires<NODE_LEN>,
-        storage_root_hash: &OutputHash,
-    ) {
-        let tt = cb._true();
-        let account_node = &wires.node;
+        /* Verify the account node includes the hash of storage MPT root. */
 
         // Verify the offset of storage MPT root hash is within range. We use 7
         // bits for the range check since the account node is composed by
         // [nonce (U64), balance (U256), storage_hash (H256), code_hash (H256)]
         // and it has 104 bytes.
-        let within_range = less_than(cb, wires.storage_root_offset, account_node.real_len, 7);
-        cb.connect(within_range.target, tt.target);
+        let within_range = less_than(cb, storage_root_offset, node.real_len, 7);
+        cb.connect(within_range.target, t.target);
 
         // Verify the account node includes the storage MPT root hash.
-        let expected_storage_root: OutputByteHash = account_node
-            .arr
-            .extract_array(cb, wires.storage_root_offset);
+        let expected_storage_root: OutputByteHash = node.arr.extract_array(cb, storage_root_offset);
         expected_storage_root
             .convert_u8_to_u32(cb)
-            .enforce_equal(cb, storage_root_hash);
+            .enforce_equal(cb, &storage_pi.mpt_root());
+
+        LeafWires {
+            contract_address,
+            keccak_contract_address,
+            storage_root_offset,
+            node,
+            root: leaf_hash,
+        }
     }
 
     /// Assign the wires.
@@ -228,6 +211,8 @@ impl<const NODE_LEN: usize> LeafInput<NODE_LEN> {
     }
 }
 
+// Leaf circuit does not need to verify any proof of account circuit set, so the number of
+// verifiers for `CircuitLogicWires` is 0
 impl<const NODE_LEN: usize> CircuitLogicWires<F, D, 0> for LeafRecursiveWires<NODE_LEN>
 where
     [(); PAD_LEN(NODE_LEN)]:,

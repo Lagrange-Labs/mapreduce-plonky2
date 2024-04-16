@@ -32,6 +32,8 @@ where
 type F = super::F;
 const D: usize = super::D;
 
+// Branch circuit needs to verify the proof for the child node in the MPT path being verified,
+// so the number of verifiers for `CircuitLogicWires` is 1
 impl<const NODE_LEN: usize> BranchCircuit<NODE_LEN>
 where
     [(); PAD_LEN(NODE_LEN)]:,

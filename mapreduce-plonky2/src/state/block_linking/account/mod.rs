@@ -147,16 +147,16 @@ mod tests {
 
     use crate::{
         api::tests::TestDummyCircuit,
-        benches::init_logging,
         eth::ProofQuery,
         storage::PublicInputs as StorageInputs,
-        utils::{convert_u8_slice_to_u32_fields, keccak256, test::random_vector},
+        utils::{convert_u8_slice_to_u32_fields, keccak256},
     };
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use ethers::{
         providers::{Http, Middleware, Provider},
         types::{Address, BlockId, BlockNumber, H256},
     };
+    use mp2_test::{log::init_logging, utils::random_vector};
     use plonky2::field::types::Field;
     use serial_test::serial;
 

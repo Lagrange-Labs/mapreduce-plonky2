@@ -83,6 +83,8 @@ impl ExtensionCircuit {
 
 const NUM_IO: usize = PublicInputs::<Target>::TOTAL_LEN;
 
+// Extension circuit needs to verify the proof for the child node, so the number of verifiers for
+// `CircuitLogicWires` is 1
 impl CircuitLogicWires<F, D, 1> for ExtensionWires {
     type CircuitBuilderParams = ();
 
