@@ -2,6 +2,7 @@
 
 use crate::{go, utils::handle_c_result};
 use anyhow::{bail, Result};
+use base64::prelude::{Engine, BASE64_STANDARD};
 use std::ffi::{CStr, CString};
 
 /// Initialize the prover.
@@ -9,6 +10,16 @@ pub fn init_prover(asset_dir: &str) -> Result<()> {
     let asset_dir = CString::new(asset_dir)?;
 
     let result = unsafe { go::InitProver(asset_dir.as_ptr()) };
+
+    handle_c_result(result)
+}
+
+/// Initialize the prover from bytes.
+pub fn init_prover_from_bytes(r1cs: &[u8], pk: &[u8]) -> Result<()> {
+    let base64_r1cs = CString::new(BASE64_STANDARD.encode(r1cs))?;
+    let base64_pk = CString::new(BASE64_STANDARD.encode(pk))?;
+
+    let result = unsafe { go::InitProverFromBytes(base64_r1cs.as_ptr(), base64_pk.as_ptr()) };
 
     handle_c_result(result)
 }

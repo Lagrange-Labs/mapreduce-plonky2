@@ -38,6 +38,20 @@ impl Groth16Prover {
         Ok(Self { wrapper })
     }
 
+    /// Initialize the Groth16 prover from bytes.
+    pub fn from_bytes(r1cs: &[u8], pk: &[u8], circuit: &[u8]) -> Result<Self> {
+        // Initialize the Go prover from bytes.
+        gnark_utils::init_prover_from_bytes(r1cs, pk)?;
+
+        // Deserialize the circuit data.
+        let circuit_data = deserialize_circuit_data(&circuit)?;
+
+        // Build the wrapped circuit.
+        let wrapper = WrappedCircuit::build_from_raw_circuit(circuit_data);
+
+        Ok(Self { wrapper })
+    }
+
     /// Generate the Groth16 proof from the plonky2 proof. It returns the
     /// little-endian bytes as:
     /// `groth16_proof.proofs + groth16_proof.inputs + plonky2_proof.public_inputs`.

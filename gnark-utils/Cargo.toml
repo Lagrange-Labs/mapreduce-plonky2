@@ -9,3 +9,4 @@ gobuild.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true

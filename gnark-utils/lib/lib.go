@@ -15,6 +15,7 @@ import "C"
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -77,7 +78,7 @@ func CompileAndGenerateAssets(
 	// Compile the verifier circuit and generate the assets (R1CS, PK and VK).
 	r1cs, pk, vk, err := CompileVerifierCircuit(
 		C.GoString(commonCircuitData),
-		C.GoString(verifierOnlyCircuitData),)
+		C.GoString(verifierOnlyCircuitData))
 	if err != nil {
 		return C.CString(fmt.Sprintf("failed to compile verifier circuit: %v", err))
 	}
@@ -100,11 +101,37 @@ func InitProver(assetDirStr *C.char) *C.char {
 
 	var err error
 	assetDir := C.GoString(assetDirStr)
-	R1CS, err = LoadCircuit(assetDir)
+	R1CS, err = LoadCircuitFromFile(assetDir)
 	if err != nil {
 		return C.CString(fmt.Sprintf("failed to load verifier circuit: %v", err))
 	}
-	PK, err = LoadProvingKey(assetDir)
+	PK, err = LoadProvingKeyFromFile(assetDir)
+	if err != nil {
+		return C.CString(fmt.Sprintf("failed to load proving key: %v", err))
+	}
+
+	return nil
+}
+
+//export InitProverFromBytes
+func InitProverFromBytes(base64R1CS *C.char, base64PK *C.char) *C.char {
+	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
+
+	r1csBytes, err := base64.StdEncoding.DecodeString(C.GoString(base64R1CS))
+	if err != nil {
+		return C.CString(fmt.Sprintf("failed to decode Base64 R1CS: %v", err))
+	}
+
+	pkBytes, err := base64.StdEncoding.DecodeString(C.GoString(base64PK))
+	if err != nil {
+		return C.CString(fmt.Sprintf("failed to decode Base64 PK: %v", err))
+	}
+
+	R1CS, err = LoadCircuitFromBytes(r1csBytes)
+	if err != nil {
+		return C.CString(fmt.Sprintf("failed to load verifier circuit: %v", err))
+	}
+	PK, err = LoadProvingKeyFromBytes(pkBytes)
 	if err != nil {
 		return C.CString(fmt.Sprintf("failed to load proving key: %v", err))
 	}
@@ -201,7 +228,6 @@ func CompileVerifierCircuit(
 		return nil, nil, nil, err
 	}
 	proofWithPis := NewProofWithPublicInputs(commonCircuitData)
-	
 
 	circuit := VerifierCircuit{
 		ProofWithPis:      proofWithPis,
@@ -297,7 +323,18 @@ func SaveVerifierSolidity(assetDir string, vk groth16.VerifyingKey) error {
 	return nil
 }
 
-func LoadCircuit(assetDir string) (constraint.ConstraintSystem, error) {
+func LoadCircuitFromBytes(r1csBytes []byte) (constraint.ConstraintSystem, error) {
+	r1cs := groth16.NewCS(ecc.BN254)
+	r1csReader := bytes.NewReader(r1csBytes)
+	_, err := r1cs.ReadFrom(r1csReader)
+	if err != nil {
+		return nil, errors.Wrap(err, "read r1cs bytes")
+	}
+
+	return r1cs, nil
+}
+
+func LoadCircuitFromFile(assetDir string) (constraint.ConstraintSystem, error) {
 	r1cs := groth16.NewCS(ecc.BN254)
 	f, err := os.Open(assetDir + "/r1cs.bin")
 	if err != nil {
@@ -313,13 +350,25 @@ func LoadCircuit(assetDir string) (constraint.ConstraintSystem, error) {
 	return r1cs, nil
 }
 
-func LoadProvingKey(assetDir string) (groth16.ProvingKey, error) {
+func LoadProvingKeyFromBytes(pkBytes []byte) (groth16.ProvingKey, error) {
+	pk := groth16.NewProvingKey(ecc.BN254)
+	pkReader := bytes.NewReader(pkBytes)
+	_, err := pk.ReadFrom(pkReader)
+	if err != nil {
+		return pk, errors.Wrap(err, "read pk bytes")
+	}
+
+	return pk, nil
+}
+
+func LoadProvingKeyFromFile(assetDir string) (groth16.ProvingKey, error) {
 	pk := groth16.NewProvingKey(ecc.BN254)
 	f, err := os.Open(assetDir + "/pk.bin")
 	if err != nil {
 		return pk, errors.Wrap(err, "open pk file")
 	}
-	_, err = pk.ReadFrom(f)
+	pkReader := bufio.NewReader(f)
+	_, err = pk.ReadFrom(pkReader)
 	if err != nil {
 		return pk, errors.Wrap(err, "read pk file")
 	}

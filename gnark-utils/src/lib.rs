@@ -6,7 +6,7 @@ mod utils;
 mod verify;
 
 pub use compile::compile_and_generate_assets;
-pub use prove::{init_prover, prove};
+pub use prove::{init_prover, init_prover_from_bytes, prove};
 pub use verify::{init_verifier, verify};
 
 mod go {
@@ -25,6 +25,13 @@ mod go {
         /// Initialize the prover. The asset dir must include `r1cs.bin` and
         /// `pk.bin`.
         pub fn InitProver(asset_dir: *const c_char) -> *const c_char;
+
+        /// Initialize the prover from bytes. Both `r1cs` and `pk` bytes are
+        /// encoded into Base64.
+        pub fn InitProverFromBytes(
+            base64_r1cs: *const c_char,
+            base64_pk: *const c_char,
+        ) -> *const c_char;
 
         /// Generate the proof from data. The InitProver function must be called
         /// before.
