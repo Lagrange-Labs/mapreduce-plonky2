@@ -16,6 +16,8 @@ pub fn init_prover(asset_dir: &str) -> Result<()> {
 
 /// Initialize the prover from bytes.
 pub fn init_prover_from_bytes(r1cs: Vec<u8>, pk: Vec<u8>) -> Result<()> {
+    // Manual drop the Vecs of big memory before calling the Go function below.
+    // It may cause out of memory.
     let base64_r1cs = CString::new(BASE64_STANDARD.encode(&r1cs))?;
     drop(r1cs);
     let base64_pk = CString::new(BASE64_STANDARD.encode(&pk))?;

@@ -42,6 +42,9 @@ impl Groth16Prover {
     pub fn from_bytes(r1cs: Vec<u8>, pk: Vec<u8>, circuit: Vec<u8>) -> Result<Self> {
         // Deserialize the circuit data.
         let circuit_data = deserialize_circuit_data(&circuit)?;
+
+        // Manual drop the Vec of big memory before calling the Go function in
+        // gnark-utils.
         drop(circuit);
 
         // Initialize the Go prover from bytes.
