@@ -39,12 +39,16 @@ impl Groth16Prover {
     }
 
     /// Initialize the Groth16 prover from bytes.
-    pub fn from_bytes(r1cs: &[u8], pk: &[u8], circuit: &[u8]) -> Result<Self> {
-        // Initialize the Go prover from bytes.
-        gnark_utils::init_prover_from_bytes(r1cs, pk)?;
-
+    pub fn from_bytes(r1cs: Vec<u8>, pk: Vec<u8>, circuit: Vec<u8>) -> Result<Self> {
         // Deserialize the circuit data.
         let circuit_data = deserialize_circuit_data(&circuit)?;
+
+        // Manual drop the Vec of big memory before calling the Go function in
+        // gnark-utils.
+        drop(circuit);
+
+        // Initialize the Go prover from bytes.
+        gnark_utils::init_prover_from_bytes(r1cs, pk)?;
 
         // Build the wrapped circuit.
         let wrapper = WrappedCircuit::build_from_raw_circuit(circuit_data);
