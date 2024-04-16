@@ -45,7 +45,7 @@ fn groth16_prove(asset_dir: &str, plonky2_proof: &[u8]) -> Groth16Proof {
 
     // Initialize the Groth16 prover.
     let prover =
-        Groth16Prover::from_bytes(&r1cs, &pk, &circuit).expect("Failed to initialize the prover");
+        Groth16Prover::from_bytes(r1cs, pk, circuit).expect("Failed to initialize the prover");
 
     // Construct the file paths to save the Groth16 and full proofs.
     let groth16_proof_path = Path::new(asset_dir).join("groth16_proof.json");
