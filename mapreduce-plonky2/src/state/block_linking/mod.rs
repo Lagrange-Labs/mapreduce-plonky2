@@ -476,6 +476,8 @@ mod tests {
         )
         .await
     }
+    use rayon::iter::IntoParallelRefIterator;
+    use rayon::iter::ParallelIterator;
 
     #[tokio::test]
     #[serial]
@@ -496,7 +498,7 @@ mod tests {
             MAX_BLOCK_LEN,
             VALUE_LEN,
             SEPOLIA_NUMBER_LEN,
-        >(url, contract_address, None, false)
+        >(url, contract_address, None, 3)
         .await?;
         Ok(())
     }
@@ -511,7 +513,7 @@ mod tests {
         url: &str,
         contract_address: &str,
         bn: Option<u64>,
-        parallel: bool,
+        n: usize,
     ) -> Result<()>
     where
         [(); PAD_LEN(NODE_LEN)]:,
@@ -574,7 +576,7 @@ mod tests {
         let wires = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN>::build(&mut b);
         let circuit_data = b.build::<C>();
         println!("[+] Circuit data built in {:?}s", now.elapsed().as_secs());
-        println!("[+] Generating two proofs (parallel = {})... ", parallel);
+        println!("[+] Generating two proofs (n = {})... ", n);
 
         let gen_proof = || {
             let mut pw = PartialWitness::new();
@@ -582,13 +584,15 @@ mod tests {
             circuit_data.prove(pw).expect("invalid proof");
         };
         let now = std::time::Instant::now();
-        rayon::join(|| gen_proof(), || gen_proof());
+        let v = (0..n).collect::<Vec<usize>>();
+        v.par_iter().map(|_| gen_proof()).collect::<Vec<_>>();
         let elapsed = now.elapsed().as_secs();
         println!("[+] PARALLEL Proof generated in {:?}s", elapsed);
 
         let now = std::time::Instant::now();
-        gen_proof();
-        gen_proof();
+        for _ in 0..n {
+            gen_proof();
+        }
         let elapsed = now.elapsed().as_secs();
         println!("[+] SEQUENTIAL Proof generated in {:?}s", elapsed);
         Ok(())
