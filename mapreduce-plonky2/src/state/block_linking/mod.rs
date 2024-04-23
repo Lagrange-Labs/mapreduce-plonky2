@@ -498,18 +498,6 @@ mod tests {
             SEPOLIA_NUMBER_LEN,
         >(url, contract_address, None, false)
         .await?;
-        let sequential_time = test_with_rpc2::<
-            MAX_DEPTH_TRIE,
-            MAX_NODE_LEN,
-            MAX_BLOCK_LEN,
-            VALUE_LEN,
-            SEPOLIA_NUMBER_LEN,
-        >(url, contract_address, None, true)
-        .await?;
-        println!(
-            "sequential {} vs paralle {}",
-            sequential_time, parallel_time
-        );
         Ok(())
     }
     /// Test with RPC `eth_getProof`.
@@ -524,7 +512,7 @@ mod tests {
         contract_address: &str,
         bn: Option<u64>,
         parallel: bool,
-    ) -> Result<u64>
+    ) -> Result<()>
     where
         [(); PAD_LEN(NODE_LEN)]:,
         [(); PAD_LEN(BLOCK_LEN)]:,
@@ -594,15 +582,16 @@ mod tests {
             circuit_data.prove(pw).expect("invalid proof");
         };
         let now = std::time::Instant::now();
-        if parallel {
-            rayon::join(|| gen_proof(), || gen_proof());
-        } else {
-            gen_proof();
-            gen_proof();
-        }
+        rayon::join(|| gen_proof(), || gen_proof());
         let elapsed = now.elapsed().as_secs();
-        println!("[+] Proof generated in {:?}s", elapsed);
-        Ok(elapsed)
+        println!("[+] PARALLEL Proof generated in {:?}s", elapsed);
+
+        let now = std::time::Instant::now();
+        gen_proof();
+        gen_proof();
+        let elapsed = now.elapsed().as_secs();
+        println!("[+] SEQUENTIAL Proof generated in {:?}s", elapsed);
+        Ok(())
     }
 
     /// Test the block-linking circuit with Mainnet RPC.
