@@ -31,6 +31,7 @@ rmp-serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 serial_test.workspace = true
+rayon = "1.10.0"
 
 [features]
 ci = []

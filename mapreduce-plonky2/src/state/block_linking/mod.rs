@@ -262,6 +262,7 @@ mod tests {
         iop::witness::WitnessWrite,
         plonk::{
             circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
@@ -474,6 +475,134 @@ mod tests {
             None,
         )
         .await
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_blocklinking_sequentially() -> Result<()> {
+        let url = "https://eth.llamarpc.com";
+        // TODO: this Mainnet contract address only works with state proof
+        //let contract_address = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
+
+        // pidgy pinguins
+        let contract_address = "0xBd3531dA5CF5857e7CfAA92426877b022e612cf8";
+
+        // Written as constant from the result.
+        const VALUE_LEN: usize = 50;
+
+        let parallel_time = test_with_rpc2::<
+            MAX_DEPTH_TRIE,
+            MAX_NODE_LEN,
+            MAX_BLOCK_LEN,
+            VALUE_LEN,
+            SEPOLIA_NUMBER_LEN,
+        >(url, contract_address, None, false)
+        .await?;
+        let sequential_time = test_with_rpc2::<
+            MAX_DEPTH_TRIE,
+            MAX_NODE_LEN,
+            MAX_BLOCK_LEN,
+            VALUE_LEN,
+            SEPOLIA_NUMBER_LEN,
+        >(url, contract_address, None, true)
+        .await?;
+        println!(
+            "sequential {} vs paralle {}",
+            sequential_time, parallel_time
+        );
+        Ok(())
+    }
+    /// Test with RPC `eth_getProof`.
+    async fn test_with_rpc2<
+        const DEPTH: usize,
+        const NODE_LEN: usize,
+        const BLOCK_LEN: usize,
+        const VALUE_LEN: usize,
+        const NUMBER_LEN: usize,
+    >(
+        url: &str,
+        contract_address: &str,
+        bn: Option<u64>,
+        parallel: bool,
+    ) -> Result<u64>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+        [(); PAD_LEN(BLOCK_LEN)]:,
+        [(); DEPTH - 1]:,
+    {
+        init_logging();
+
+        let contract_address = Address::from_str(contract_address)?;
+
+        let provider =
+            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+
+        // Get the latest block number.
+        let mut block_number = provider.get_block_number().await?;
+        if let Some(n) = bn {
+            block_number = U64::from(n);
+        }
+        println!("[+] Block_linking proof with block number {}", block_number);
+        // Get block.
+        let block = provider.get_block(block_number).await?.unwrap();
+        // Query the MPT proof.
+        let query = ProofQuery::new_simple_slot(contract_address, 0);
+        let res = query
+            .query_mpt_proof(&provider, Some(block_number.into()))
+            .await?;
+        // TODO: this Mainnet contract address only works with state proof
+        // (not storage proof) for now.
+        query.verify_state_proof(&res)?;
+
+        // Construct the state MPT via the RPC response.
+        let account_address = query.contract;
+        let nodes = res
+            .account_proof
+            .iter()
+            .rev() // we want the leaf first and root last
+            .map(|b| b.to_vec())
+            .collect::<Vec<Vec<u8>>>();
+        let root_hash = H256(keccak256(nodes.last().unwrap()).try_into().unwrap());
+        let state_mpt = TestStateMPT {
+            account_address,
+            root_hash,
+            nodes,
+        };
+
+        let storage_pi = generate_storage_inputs::<_, VALUE_LEN>(&state_mpt);
+
+        let header_rlp = block.rlp();
+        let exp_hash = H256(keccak256(&header_rlp).try_into().unwrap());
+
+        let test_circuit = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN> {
+            exp_block_number: block.number.unwrap(),
+            exp_parent_hash: block.parent_hash,
+            exp_hash,
+            c: BlockLinkingCircuit::new(&storage_pi, account_address, header_rlp, state_mpt.nodes),
+            storage_pi,
+        };
+        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let now = std::time::Instant::now();
+        let wires = TestCircuit::<DEPTH, NODE_LEN, BLOCK_LEN, NUMBER_LEN>::build(&mut b);
+        let circuit_data = b.build::<C>();
+        println!("[+] Circuit data built in {:?}s", now.elapsed().as_secs());
+        println!("[+] Generating two proofs (parallel = {})... ", parallel);
+
+        let gen_proof = || {
+            let mut pw = PartialWitness::new();
+            test_circuit.clone().prove(&mut pw, &wires);
+            circuit_data.prove(pw).expect("invalid proof");
+        };
+        let now = std::time::Instant::now();
+        if parallel {
+            rayon::join(|| gen_proof(), || gen_proof());
+        } else {
+            gen_proof();
+            gen_proof();
+        }
+        let elapsed = now.elapsed().as_secs();
+        println!("[+] Proof generated in {:?}s", elapsed);
+        Ok(elapsed)
     }
 
     /// Test the block-linking circuit with Mainnet RPC.
