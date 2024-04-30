@@ -1,5 +1,7 @@
 //! Plonky2 documentation
 
+// TODO: enable it later.
+// #![warn(missing_docs)]
 #![feature(generic_const_exprs)]
 #![feature(generic_arg_infer)]
 #![feature(const_for)]
