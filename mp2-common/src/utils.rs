@@ -13,7 +13,11 @@ use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTa
 use sha3::Digest;
 use sha3::Keccak256;
 
-use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
+use crate::{
+    group_hashing::{CircuitBuilderGroupHashing, EXTENSION_DEGREE},
+    types::HashOutput,
+    ProofTuple,
+};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
@@ -262,6 +266,22 @@ pub fn hash_two_to_one<F: RichField, H: Hasher<F>>(
 ) -> HashOutput {
     let [left, right] = [left, right].map(|bytes| H::Hash::from_bytes(&bytes));
     H::two_to_one(left, right).to_bytes().try_into().unwrap()
+}
+
+/// Pack the values then compute the digest.
+pub fn pack_and_compute_digest<F: RichField + Extendable<D>, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    inputs: &[Target],
+) -> CurveTarget
+where
+    CircuitBuilder<F, D>: CircuitBuilderGroupHashing,
+{
+    let packed: Vec<_> = convert_u8_targets_to_u32(b, &inputs)
+        .into_iter()
+        .map(|input| input.0)
+        .collect();
+
+    b.map_to_curve_point(&packed)
 }
 
 // TODO move that to a vec/array specific module?

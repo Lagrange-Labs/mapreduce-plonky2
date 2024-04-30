@@ -79,21 +79,22 @@ impl<'a> PublicInputs<'a, Target> {
         }
     }
 
-    /// Return the accumulator digest defined over the public inputs.
-    pub fn accumulator(&self) -> CurveTarget {
-        convert_point_to_curve_target(self.accumulator_info())
+    /// Return the values digest defined over the public inputs.
+    pub fn values_digest(&self) -> CurveTarget {
+        convert_point_to_curve_target(self.values_digest_info())
     }
 
     /// Return the metadata digest defined over the public inputs.
-    pub fn metadata(&self) -> CurveTarget {
-        convert_point_to_curve_target(self.metadata_info())
+    pub fn metadata_digest(&self) -> CurveTarget {
+        convert_point_to_curve_target(self.metadata_digest_info())
     }
 }
 
 impl<'a> PublicInputs<'a, GFp> {
-    /// Return the accumulator digest defined over the public inputs.
-    pub fn accumulator(&self) -> WeierstrassPoint {
-        let (x, y, is_inf) = self.accumulator_info();
+    /// Return the values digest defined over the public inputs.
+    pub fn values_digest(&self) -> WeierstrassPoint {
+        let (x, y, is_inf) = self.values_digest_info();
+
         WeierstrassPoint {
             x: GFp5::from_basefield_array(from_fn::<GFp, 5, _>(|i| x[i])),
             y: GFp5::from_basefield_array(from_fn::<GFp, 5, _>(|i| y[i])),
@@ -116,6 +117,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     pub(crate) const DM_RANGE: PublicInputRange = DM_RANGE;
     pub(crate) const N_RANGE: PublicInputRange = N_RANGE;
 
+    pub(crate) const TOTAL_LEN: usize = N_RANGE.end;
+
     pub fn from(proof_inputs: &'a [T]) -> Self {
         Self { proof_inputs }
     }
@@ -124,11 +127,11 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         &self.proof_inputs[H_RANGE]
     }
 
-    fn accumulator_info(&self) -> ([T; 5], [T; 5], T) {
+    fn values_digest_info(&self) -> ([T; 5], [T; 5], T) {
         convert_slice_to_curve_point(&self.proof_inputs[Self::DV_RANGE])
     }
 
-    fn metadata_info(&self) -> ([T; 5], [T; 5], T) {
+    fn metadata_digest_info(&self) -> ([T; 5], [T; 5], T) {
         convert_slice_to_curve_point(&self.proof_inputs[Self::DM_RANGE])
     }
 

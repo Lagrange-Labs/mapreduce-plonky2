@@ -10,6 +10,7 @@ use ethers::{
     },
 };
 use rlp::{Encodable, Rlp, RlpStream};
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "ci")]
 use std::env;
 use std::{array::from_fn as create_array, sync::Arc};
@@ -243,7 +244,7 @@ pub struct ProofQuery {
     pub(crate) slot: StorageSlot,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum StorageSlot {
     /// simple storage slot like a uin256 etc that fits in 32bytes
     /// Argument is the slot location in the contract
