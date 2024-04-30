@@ -8,9 +8,9 @@
 #[cfg(test)]
 use common::benches;
 use common::{
-    array, circuit, eth, group_hashing, keccak, merkle_tree, mpt_sequential, poseidon, rlp, types,
-    utils,
+    array, circuit, eth, group_hashing, keccak, merkle_tree, mpt_sequential, poseidon, rlp,
 };
+pub use common::{types, utils};
 
 pub mod api;
 pub mod block;
