@@ -8,8 +8,7 @@ mod tests {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use std::time::Instant;
-
-    use crate::benches::init_logging;
+    use test_utils::log::init_logging;
 
     #[test]
     fn compare_quin_random_access() -> Result<()> {

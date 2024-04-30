@@ -5,8 +5,6 @@
 #![feature(const_for)]
 #![feature(generic_const_items)]
 
-#[cfg(test)]
-use common::benches;
 use common::{array, circuit, group_hashing, keccak, merkle_tree, mpt_sequential, poseidon, rlp};
 pub use common::{eth, types, utils};
 

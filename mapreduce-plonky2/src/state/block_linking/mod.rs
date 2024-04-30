@@ -243,7 +243,6 @@ mod tests {
     use super::*;
     use crate::{
         api::tests::TestDummyCircuit,
-        benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::{test::get_sepolia_url, BlockUtil, ProofQuery, RLPBlock},
         keccak::{OutputHash, HASH_LEN},
@@ -270,6 +269,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use serial_test::serial;
     use std::{str::FromStr, sync::Arc};
+    use test_utils::log::init_logging;
     use tests::block::SEPOLIA_NUMBER_LEN;
 
     const D: usize = 2;

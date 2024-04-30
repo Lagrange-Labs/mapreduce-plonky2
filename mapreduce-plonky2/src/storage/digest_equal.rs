@@ -263,7 +263,6 @@ mod tests {
     use super::*;
     use crate::{
         api::tests::TestDummyCircuit,
-        benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::{left_pad32, ProofQuery},
         storage::{self, key::MappingSlot},
@@ -286,6 +285,7 @@ mod tests {
     use rand::thread_rng;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use serial_test::serial;
+    use test_utils::log::init_logging;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;

@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 bincode.workspace = true
-env_logger = { workspace = true, optional = true }
 eth_trie.workspace = true
 ethers.workspace = true
 hashbrown.workspace = true
@@ -24,10 +23,11 @@ sha3.workspace = true
 tokio = { workspace = true, optional = true }
 
 recursion_framework = { path = "../recursion-framework" }
+test_utils = { path = "../test-utils", optional = true }
+
 
 [dev-dependencies]
 csv.workspace = true
-env_logger.workspace = true
 hex.workspace = true
 rand.workspace = true
 rmp-serde.workspace = true
@@ -35,6 +35,8 @@ serde_json.workspace = true
 serial_test.workspace = true
 tokio.workspace = true
 
+test_utils = { path = "../test-utils" }
+
 [features]
 ci = []
-extra = ["env_logger", "hex", "rand", "serde_json", "tokio"]
+extra = ["hex", "rand", "serde_json", "test_utils", "tokio"]

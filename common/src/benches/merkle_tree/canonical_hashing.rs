@@ -9,7 +9,6 @@
 
 use super::{prove_all_leaves, prove_branches_recursive, C, D, F};
 use crate::{
-    benches::init_logging,
     circuit::{CyclicCircuit, UserCircuit},
     merkle_tree::{DigestArityCircuit, MerkleLeafValue, MerkleNode, MerkleTree},
     utils::read_le_u32,
@@ -20,6 +19,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use rand::Rng;
+use test_utils::log::init_logging;
 
 /// The maximum child number of a Merkle tree branch
 const ARITY: usize = 4;

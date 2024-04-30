@@ -16,9 +16,10 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+mod benches;
+
 pub mod array;
-#[cfg(any(feature = "extra", test))]
-pub mod benches;
 pub mod circuit;
 pub mod eth;
 pub mod group_hashing;

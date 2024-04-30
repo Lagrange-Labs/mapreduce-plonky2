@@ -554,8 +554,8 @@ pub mod test {
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, Rng, RngCore};
+    use test_utils::log::init_logging;
 
-    use crate::benches::init_logging;
     use crate::eth::ProofQuery;
     use crate::keccak::{HASH_LEN, PACKED_HASH_LEN};
     use crate::mpt_sequential::{bytes_to_nibbles, NB_ITEMS_LEAF};

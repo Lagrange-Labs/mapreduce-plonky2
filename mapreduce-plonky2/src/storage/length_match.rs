@@ -231,7 +231,6 @@ mod tests {
     use super::*;
     use crate::{
         api::{mapping::api::NUM_IO, tests::TestDummyCircuit},
-        benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         utils::test::random_vector,
     };
@@ -246,6 +245,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use std::array;
+    use test_utils::log::init_logging;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;

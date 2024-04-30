@@ -24,8 +24,8 @@ use plonky2::{
 };
 use rand::Rng;
 use std::array::from_fn as create_array;
+use test_utils::log::init_logging;
 
-use super::init_logging;
 use super::test::Benchable;
 use crate::circuit::CyclicCircuit;
 use crate::circuit::{PCDCircuit, Padder, UserCircuit};

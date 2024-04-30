@@ -250,7 +250,6 @@ mod tests {
     use super::*;
     use crate::{
         array::{Array, Vector, VectorWire},
-        benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::{
             left_pad,
@@ -272,6 +271,7 @@ mod tests {
     };
     use rand::{thread_rng, Rng};
     use std::{str::FromStr, sync::Arc};
+    use test_utils::log::init_logging;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;

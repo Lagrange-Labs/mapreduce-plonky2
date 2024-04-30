@@ -218,9 +218,9 @@ mod test {
         },
     };
     use serial_test::serial;
+    use test_utils::log::init_logging;
 
     use crate::{
-        benches::init_logging,
         circuit::{test::run_circuit, UserCircuit},
         eth::ProofQuery,
         mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
