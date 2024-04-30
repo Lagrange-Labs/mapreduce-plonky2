@@ -1,13 +1,6 @@
 //! Circuits for proving Merkle Tree nodes recursively.
 
-mod backup;
-mod merkle_tree;
 mod state_tree;
-
-#[cfg(any(feature = "extra", test))]
-pub use backup::DigestArityCircuit;
-#[cfg(any(feature = "extra", test))]
-pub use merkle_tree::{MerkleLeafValue, MerkleNode, MerkleTree};
 
 /// The trait of digest tree circuit
 /// With this trait, both the arity circuit and multiset hashing circuit could
