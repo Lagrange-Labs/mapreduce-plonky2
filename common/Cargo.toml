@@ -37,4 +37,4 @@ tokio.workspace = true
 
 [features]
 ci = []
-test = ["env_logger", "hex", "rand", "serde_json", "tokio"]
+extra = ["env_logger", "hex", "rand", "serde_json", "tokio"]

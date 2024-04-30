@@ -17,7 +17,7 @@ use plonky2::{
 use serde::{Deserialize, Serialize};
 
 pub mod array;
-#[cfg(any(feature = "test", test))]
+#[cfg(any(feature = "extra", test))]
 pub mod benches;
 pub mod circuit;
 pub mod eth;

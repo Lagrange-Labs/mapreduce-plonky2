@@ -528,7 +528,7 @@ pub fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
     nibbles
 }
 
-#[cfg(any(feature = "test", test))]
+#[cfg(any(feature = "extra", test))]
 pub mod test {
     use std::array::from_fn as create_array;
     use std::str::FromStr;

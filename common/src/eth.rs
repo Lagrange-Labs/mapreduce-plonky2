@@ -362,7 +362,7 @@ impl ProofQuery {
     }
 }
 
-#[cfg(any(feature = "test", test))]
+#[cfg(any(feature = "extra", test))]
 pub mod test {
     use std::{env, str::FromStr};
 

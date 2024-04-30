@@ -33,7 +33,7 @@ serde_json.workspace = true
 tokio.workspace = true
 serial_test.workspace = true
 
-common = { path = "../common", features = ["test"] }
+common = { path = "../common", features = ["extra"] }
 
 [features]
 ci = []

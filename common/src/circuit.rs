@@ -114,7 +114,7 @@ where
     base_common: CommonCircuitData<F, D>,
     /// CircuitData of this circuit
     circuit_data: CircuitData<F, CC, D>,
-    #[cfg(any(feature = "test", test))]
+    #[cfg(any(feature = "extra", test))]
     pub num_gates: usize,
 }
 
@@ -181,7 +181,7 @@ where
             user_wires: wires,
             base_common: cd,
             circuit_data: cyclic_data,
-            #[cfg(any(feature = "test", test))]
+            #[cfg(any(feature = "extra", test))]
             num_gates,
         }
     }
@@ -325,7 +325,7 @@ where
     }
 }
 
-#[cfg(any(feature = "test", test))]
+#[cfg(any(feature = "extra", test))]
 pub mod test {
     use std::fmt::Debug;
 

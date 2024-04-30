@@ -322,7 +322,7 @@ impl<const N: usize> Packer for [u8; N] {
     }
 }
 
-#[cfg(any(feature = "test", test))]
+#[cfg(any(feature = "extra", test))]
 pub mod test {
     use super::{Packer, ToFields};
     use crate::utils::{

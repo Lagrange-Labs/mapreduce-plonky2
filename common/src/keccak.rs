@@ -272,7 +272,7 @@ impl<'a, F, const N: usize> InputData<'a, F, N> {
     }
 }
 
-#[cfg(any(feature = "test", test))]
+#[cfg(any(feature = "extra", test))]
 pub mod test {
     use super::{InputData, KeccakCircuit, KeccakWires};
     use crate::{
