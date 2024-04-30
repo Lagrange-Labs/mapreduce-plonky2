@@ -7,10 +7,8 @@
 
 #[cfg(test)]
 use common::benches;
-use common::{
-    array, circuit, eth, group_hashing, keccak, merkle_tree, mpt_sequential, poseidon, rlp,
-};
-pub use common::{types, utils};
+use common::{array, circuit, group_hashing, keccak, merkle_tree, mpt_sequential, poseidon, rlp};
+pub use common::{eth, types, utils};
 
 pub mod api;
 pub mod block;
