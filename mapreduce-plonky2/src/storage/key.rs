@@ -6,7 +6,7 @@ use crate::{
     eth::{left_pad32, StorageSlot},
     keccak::{ByteKeccakWires, InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, PAD_LEN},
-    types::MAPPING_KEY_LEN,
+    types::{MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
     utils::keccak256,
 };
 use plonky2::{
@@ -20,7 +20,6 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::mapping::leaf::VALUE_LEN;
 /// One input element length to Keccak
 const INPUT_ELEMENT_LEN: usize = 32;
 /// The tuple (pair) length of elements to Keccak
@@ -231,7 +230,7 @@ pub struct MappingSlotWires {
 }
 
 /// Size of the input to the digest and hash function
-pub(crate) const MAPPING_INPUT_TOTAL_LEN: usize = MAPPING_KEY_LEN + VALUE_LEN;
+pub(crate) const MAPPING_INPUT_TOTAL_LEN: usize = MAPPING_KEY_LEN + MAPPING_LEAF_VALUE_LEN;
 /// Value but with the padding taken into account.
 const MAPPING_INPUT_PADDED_LEN: usize = PAD_LEN(MAPPING_INPUT_TOTAL_LEN);
 impl MappingSlot {

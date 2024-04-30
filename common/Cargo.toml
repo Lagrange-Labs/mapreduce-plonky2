@@ -1,39 +1,40 @@
 [package]
-name = "mapreduce-plonky2"
+name = "common"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
 bincode.workspace = true
-env_logger.workspace = true
+env_logger = { workspace = true, optional = true }
 eth_trie.workspace = true
 ethers.workspace = true
 hashbrown.workspace = true
+hex = { workspace = true, optional = true }
 itertools.workspace = true
 log.workspace = true
-paste.workspace = true
 plonky2.workspace = true
 plonky2_crypto.workspace = true
 plonky2_ecgfp5.workspace = true
-rand.workspace = true
+rand = { workspace = true, optional = true }
 rlp.workspace = true
 serde.workspace = true
-serde_arrays.workspace = true
+serde_json = { workspace = true, optional = true }
 sha3.workspace = true
+tokio = { workspace = true, optional = true }
 
 recursion_framework = { path = "../recursion-framework" }
-common = { path = "../common" }
 
 [dev-dependencies]
 csv.workspace = true
+env_logger.workspace = true
 hex.workspace = true
+rand.workspace = true
 rmp-serde.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
 serial_test.workspace = true
-
-common = { path = "../common", features = ["test"] }
+tokio.workspace = true
 
 [features]
 ci = []
+test = ["env_logger", "hex", "rand", "serde_json", "tokio"]

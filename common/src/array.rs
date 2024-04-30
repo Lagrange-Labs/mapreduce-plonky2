@@ -16,7 +16,7 @@ use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 use crate::utils::{less_than, less_than_or_equal_to};
 
 /// Utility trait to convert any value into its field representation equivalence
-pub(crate) trait ToField<F: RichField> {
+pub trait ToField<F: RichField> {
     fn to_field(&self) -> F;
 }
 
@@ -119,7 +119,7 @@ where
         let arr = Array::<T, MAX_LEN>::new(b);
         Self { arr, real_len }
     }
-    pub(crate) fn assign<F: RichField, V: ToField<F>>(
+    pub fn assign<F: RichField, V: ToField<F>>(
         &self,
         pw: &mut PartialWitness<F>,
         value: &Vector<V, MAX_LEN>,
@@ -184,7 +184,7 @@ where
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    pub(crate) arr: [T; N],
+    pub arr: [T; N],
 }
 
 impl<T: Targetable + Clone + Serialize, const N: usize> PartialEq for Array<T, N>
@@ -345,7 +345,7 @@ where
     }
     /// Assigns each value in the given array to the respective wire in `self`. Each value is first
     /// converted to a field element.
-    pub(crate) fn assign_from_data<V: ToField<F>, F: RichField>(
+    pub fn assign_from_data<V: ToField<F>, F: RichField>(
         &self,
         pw: &mut PartialWitness<F>,
         array: &[V; SIZE],
@@ -586,7 +586,7 @@ where
 }
 /// Returns the size of the array in 32-bit units, rounded up.
 #[allow(non_snake_case)]
-pub(crate) const fn L32(a: usize) -> usize {
+pub const fn L32(a: usize) -> usize {
     if a % 4 != 0 {
         a / 4 + 1
     } else {
@@ -594,7 +594,7 @@ pub(crate) const fn L32(a: usize) -> usize {
     }
 }
 impl<const SIZE: usize> Array<Target, SIZE> {
-    pub(crate) fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
+    pub fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
     ) -> Array<U32Target, { L32(SIZE) }>

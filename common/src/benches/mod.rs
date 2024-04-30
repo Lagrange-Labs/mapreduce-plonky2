@@ -10,7 +10,7 @@ mod recursion;
 
 /// Sets RUST_LOG=debug and initializes the logger
 /// if it hasn't been enabled already.
-pub(crate) fn init_logging() {
+pub fn init_logging() {
     if !log_enabled!(Level::Debug) {
         env::set_var("RUST_LOG", "debug");
         let _ = env_logger::builder()

@@ -592,6 +592,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
+name = "common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "csv",
+ "env_logger 0.11.3",
+ "eth_trie",
+ "ethers 2.0.13",
+ "hashbrown 0.14.3",
+ "hex",
+ "itertools 0.12.1",
+ "log",
+ "plonky2",
+ "plonky2_crypto",
+ "plonky2_ecgfp5",
+ "rand",
+ "recursion_framework",
+ "rlp",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha3",
+ "tokio",
+]
+
+[[package]]
 name = "const-hex"
 version = "1.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1982,6 +2010,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "common",
  "env_logger 0.11.3",
  "ethereum-types",
  "ethers 2.0.13",
@@ -2546,6 +2575,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "common",
  "csv",
  "env_logger 0.11.3",
  "eth_trie",

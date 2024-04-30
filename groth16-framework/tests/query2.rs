@@ -1,6 +1,13 @@
 //! Test the Groth16 proving process for the query2 circuit.
 
 use anyhow::Result;
+use common::{
+    eth::{left_pad, left_pad32},
+    group_hashing,
+    keccak::PACKED_HASH_LEN,
+    types::MAPPING_KEY_LEN,
+    utils::{Packer, ToFields},
+};
 use ethers::abi::{Contract, Token};
 use ethers::types::{Address, U256};
 use groth16_framework::{
@@ -16,17 +23,12 @@ use mapreduce_plonky2::{
         empty_merkle_root, PublicInputs as BlockDbPublicInputs,
         NUM_IVC_PUBLIC_INPUTS as BLOCK_DB_NUM_IO,
     },
-    eth::{left_pad, left_pad32},
-    group_hashing,
-    keccak::PACKED_HASH_LEN,
     query2::{
         block::BlockPublicInputs,
         block::NUM_IO as QUERY2_BLOCK_NUM_IO,
         revelation::{Parameters, RevelationRecursiveInput},
         CircuitInput, PublicParameters,
     },
-    types::MAPPING_KEY_LEN,
-    utils::{Packer, ToFields},
 };
 use plonky2::{
     field::{

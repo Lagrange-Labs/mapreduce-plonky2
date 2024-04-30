@@ -272,8 +272,8 @@ impl<'a, F, const N: usize> InputData<'a, F, N> {
     }
 }
 
-#[cfg(test)]
-mod test {
+#[cfg(any(feature = "test", test))]
+pub mod test {
     use super::{InputData, KeccakCircuit, KeccakWires};
     use crate::{
         array::{Array, Vector, VectorWire},

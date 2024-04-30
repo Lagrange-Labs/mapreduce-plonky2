@@ -4,9 +4,9 @@ mod backup;
 mod merkle_tree;
 mod state_tree;
 
-#[cfg(test)]
+#[cfg(any(feature = "test", test))]
 pub use backup::DigestArityCircuit;
-#[cfg(test)]
+#[cfg(any(feature = "test", test))]
 pub use merkle_tree::{MerkleLeafValue, MerkleNode, MerkleTree};
 
 /// The trait of digest tree circuit

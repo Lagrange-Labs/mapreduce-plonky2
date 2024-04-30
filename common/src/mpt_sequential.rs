@@ -73,7 +73,7 @@ where
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    pub(crate) nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
+    pub nodes: [VectorWire<Target, { PAD_LEN(NODE_LEN) }>; DEPTH],
     /// in the case of a fixed circuit, the actual tree depth might be smaller.
     /// In this case, we set false on the part of the path we should not process.
     /// NOTE: for node at index i in the path, the boolean indicating if we should
@@ -99,9 +99,9 @@ where
     )]
     keccak_wires: [KeccakWires<{ PAD_LEN(NODE_LEN) }>; DEPTH],
     /// The leaf value wires. It is provably extracted from the leaf node.
-    pub(crate) leaf: Array<Target, MAX_LEAF_VALUE_LEN>,
+    pub leaf: Array<Target, MAX_LEAF_VALUE_LEN>,
     /// The root hash value wire.
-    pub(crate) root: OutputHash,
+    pub root: OutputHash,
 }
 
 impl<const DEPTH: usize, const NODE_LEN: usize> Circuit<DEPTH, NODE_LEN>
@@ -319,7 +319,7 @@ where
     /// * The child hash / value of the node.
     /// * A boolean that must be true if the given node is a leaf or an extension.
     /// * The nibble position before this advance.
-    pub(crate) fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
+    pub fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
         key: &MPTKeyWire,
@@ -345,7 +345,7 @@ where
 
     /// Returns the key with the pointer moved, returns the child hash / value of the node,
     /// and returns booleans that must be true IF the given node is a leaf or an extension.
-    pub(crate) fn advance_key_leaf_or_extension<
+    pub fn advance_key_leaf_or_extension<
         F: RichField + Extendable<D>,
         const D: usize,
         const LIST_LEN: usize,
@@ -519,7 +519,7 @@ impl MPTKeyWire {
     }
 }
 
-pub(crate) fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
+pub fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
     let mut nibbles = Vec::new();
     for b in bytes {
         nibbles.push(b >> 4);
@@ -528,7 +528,7 @@ pub(crate) fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
     nibbles
 }
 
-#[cfg(test)]
+#[cfg(any(feature = "test", test))]
 pub mod test {
     use std::array::from_fn as create_array;
     use std::str::FromStr;
@@ -555,12 +555,12 @@ pub mod test {
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, Rng, RngCore};
 
-    use crate::api::mapping::leaf::VALUE_LEN;
     use crate::benches::init_logging;
     use crate::eth::ProofQuery;
     use crate::keccak::{HASH_LEN, PACKED_HASH_LEN};
     use crate::mpt_sequential::{bytes_to_nibbles, NB_ITEMS_LEAF};
     use crate::rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN};
+    use crate::types::MAPPING_LEAF_VALUE_LEN;
     use crate::utils::convert_u8_targets_to_u32;
     use crate::{
         array::Array,
@@ -691,7 +691,7 @@ pub mod test {
         ProofQuery::verify_storage_proof(&res)?;
 
         let value = res.storage_proof[0].value;
-        let mut value_bytes = [0u8; VALUE_LEN];
+        let mut value_bytes = [0u8; MAPPING_LEAF_VALUE_LEN];
         value.to_big_endian(&mut value_bytes);
         let encoded_value = rlp::encode(&value_bytes.to_vec()).to_vec();
         let mpt_proof = res.storage_proof[0]
@@ -817,7 +817,7 @@ pub mod test {
         run_circuit::<F, D, C, _>(circuit);
     }
 
-    pub(crate) fn visit_proof(proof: &[Vec<u8>]) {
+    pub fn visit_proof(proof: &[Vec<u8>]) {
         let mut child_hash = vec![];
         let mut partial_key = vec![];
         for node in proof.iter() {

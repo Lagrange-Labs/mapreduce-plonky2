@@ -42,3 +42,12 @@ pub type PackedMappingKeyTarget = Array<U32Target, PACKED_MAPPING_KEY_LEN>;
 /// Regular hash output function - it can be generated from field elements using
 /// poseidon with the output serialized or via regular hash functions.
 pub type HashOutput = [u8; 32];
+
+/// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
+/// since it still has to do 5 rounds in 622 or 650.
+pub const MAX_BLOCK_LEN: usize = 650;
+
+/// This constant represents the maximum size a value can be inside the storage trie.
+/// It is different than the `MAX_LEAF_VALUE_LEN` constant because it represents the
+/// value **not** RLP encoded,i.e. without the 1-byte RLP header.
+pub const MAPPING_LEAF_VALUE_LEN: usize = 32;

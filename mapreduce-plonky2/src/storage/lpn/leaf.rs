@@ -8,8 +8,10 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    api::mapping::leaf::VALUE_LEN, array::Array, circuit::UserCircuit,
-    group_hashing::CircuitBuilderGroupHashing, types::MAPPING_KEY_LEN,
+    array::Array,
+    circuit::UserCircuit,
+    group_hashing::CircuitBuilderGroupHashing,
+    types::{MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
 };
 
 use super::PublicInputs;
@@ -20,7 +22,7 @@ pub struct LeafCircuit {
     /// The mapping key we want to insert in our db. Left-padded with zeroes if necessary
     pub mapping_key: [u8; MAPPING_KEY_LEN],
     /// The mapping value associated to this mapping key. Left-padded with zeroes if necessary
-    pub mapping_value: [u8; VALUE_LEN],
+    pub mapping_value: [u8; MAPPING_LEAF_VALUE_LEN],
 }
 
 #[derive(Serialize, Deserialize)]
@@ -31,7 +33,7 @@ pub struct LeafWires {
     // The mapping key associated to this leaf, expected in byte format
     pub key: Array<Target, MAPPING_KEY_LEN>,
     // The value encoded in this leaf, expected in byte format
-    pub value: Array<Target, VALUE_LEN>,
+    pub value: Array<Target, MAPPING_LEAF_VALUE_LEN>,
 }
 
 impl LeafCircuit {
@@ -46,7 +48,7 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires {
         let key = Array::<Target, MAPPING_KEY_LEN>::new(b);
-        let value = Array::<Target, VALUE_LEN>::new(b);
+        let value = Array::<Target, MAPPING_LEAF_VALUE_LEN>::new(b);
         let kv = key.concat(&value).to_targets();
         let kv_u32 = kv.convert_u8_to_u32(b).to_targets();
 

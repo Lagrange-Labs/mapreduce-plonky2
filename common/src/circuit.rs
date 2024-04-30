@@ -114,8 +114,8 @@ where
     base_common: CommonCircuitData<F, D>,
     /// CircuitData of this circuit
     circuit_data: CircuitData<F, CC, D>,
-    #[cfg(test)]
-    pub(crate) num_gates: usize,
+    #[cfg(any(feature = "test", test))]
+    pub num_gates: usize,
 }
 
 /// The number of elements added to public inputs list when adding a verifier data as public
@@ -181,7 +181,7 @@ where
             user_wires: wires,
             base_common: cd,
             circuit_data: cyclic_data,
-            #[cfg(test)]
+            #[cfg(any(feature = "test", test))]
             num_gates,
         }
     }
@@ -325,8 +325,8 @@ where
     }
 }
 
-#[cfg(test)]
-pub(crate) mod test {
+#[cfg(any(feature = "test", test))]
+pub mod test {
     use std::fmt::Debug;
 
     use plonky2::{
@@ -344,7 +344,7 @@ pub(crate) mod test {
     use super::UserCircuit;
 
     /// Proves and verifies the provided circuit instance.
-    pub(crate) fn run_circuit<
+    pub fn run_circuit<
         F: RichField + Extendable<D>,
         const D: usize,
         C: GenericConfig<D, F = F>,

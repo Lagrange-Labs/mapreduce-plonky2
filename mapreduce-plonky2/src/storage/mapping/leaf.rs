@@ -5,7 +5,7 @@ use crate::mpt_sequential::MAX_LEAF_VALUE_LEN;
 use crate::rlp::short_string_len;
 use crate::storage::key::{MappingSlotWires, MAPPING_INPUT_TOTAL_LEN};
 use crate::storage::MAX_LEAF_NODE_LEN;
-use crate::types::MAPPING_KEY_LEN;
+use crate::types::{MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN};
 use crate::utils::convert_u8_targets_to_u32;
 use crate::{
     array::{Array, Vector, VectorWire},
@@ -25,11 +25,6 @@ use serde::{Deserialize, Serialize};
 use super::super::key::MappingSlot;
 use crate::storage::mapping::public_inputs::PublicInputs;
 
-/// This constant represents the maximum size a value can be inside the storage trie.
-/// It is different than the `MAX_LEAF_VALUE_LEN` constant because it represents the
-/// value **not** RLP encoded,i.e. without the 1-byte RLP header.
-pub(crate) const VALUE_LEN: usize = 32;
-
 /// Circuit implementing the circuit to prove the correct derivation of the
 /// MPT key from a mapping key and mapping slot. It also do the usual recursive
 /// MPT proof verification logic.
@@ -47,7 +42,7 @@ where
     node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     mapping_slot: MappingSlotWires,
-    value: Array<Target, VALUE_LEN>,
+    value: Array<Target, MAPPING_LEAF_VALUE_LEN>,
 }
 impl<const N: usize> LeafWires<N>
 where
@@ -95,13 +90,13 @@ where
         // Create vector of only the relevant data - skipping the RLP header
         // + stick with the same encoding of the data but pad_left32.
         let big_endian_left_padded = encoded_value
-            .take_last::<GoldilocksField, 2, VALUE_LEN>()
+            .take_last::<GoldilocksField, 2, MAPPING_LEAF_VALUE_LEN>()
             .into_vec(data_len)
-            .normalize_left::<_, _, VALUE_LEN>(b);
+            .normalize_left::<_, _, MAPPING_LEAF_VALUE_LEN>(b);
         // Then creates the initial accumulator from the (mapping_key, value)
         let mut inputs = [b.zero(); MAPPING_INPUT_TOTAL_LEN];
         inputs[0..MAPPING_KEY_LEN].copy_from_slice(&mapping_slot_wires.mapping_key.arr);
-        inputs[MAPPING_KEY_LEN..MAPPING_KEY_LEN + VALUE_LEN]
+        inputs[MAPPING_KEY_LEN..MAPPING_KEY_LEN + MAPPING_LEAF_VALUE_LEN]
             .copy_from_slice(&big_endian_left_padded.arr);
         // couldn't make it work with array API because of const generic issue...
         //let packed = Array { arr: inputs }.convert_u8_to_u32(b);
@@ -185,7 +180,7 @@ mod test {
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use super::{LeafCircuit, LeafWires, PublicInputs, VALUE_LEN};
+    use super::{LeafCircuit, LeafWires, PublicInputs, MAPPING_LEAF_VALUE_LEN};
     use crate::array::Array;
     use crate::circuit::UserCircuit;
     use crate::eth::StorageSlot;
@@ -208,10 +203,10 @@ mod test {
         [(); PAD_LEN(NODE_LEN)]:,
     {
         // normal wires + expected extracted value
-        type Wires = (LeafWires<NODE_LEN>, Array<Target, VALUE_LEN>);
+        type Wires = (LeafWires<NODE_LEN>, Array<Target, MAPPING_LEAF_VALUE_LEN>);
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let exp_value = Array::<Target, VALUE_LEN>::new(b);
+            let exp_value = Array::<Target, MAPPING_LEAF_VALUE_LEN>::new(b);
             let leaf_wires = LeafCircuit::<NODE_LEN>::build(b);
             leaf_wires.value.enforce_equal(b, &exp_value);
             //let eq = leaf_wires.value.equals(b, &exp_value);
@@ -233,9 +228,9 @@ mod test {
         let mapping_key = hex::decode("1234").unwrap();
         let mapping_slot = 2;
         let slot = StorageSlot::Mapping(mapping_key.clone(), mapping_slot);
-        let (mut trie, _) = generate_random_storage_mpt::<3, VALUE_LEN>();
+        let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         // generating a fake uint256 value
-        let random_value = random_vector(VALUE_LEN);
+        let random_value = random_vector(MAPPING_LEAF_VALUE_LEN);
         let encoded_value: Vec<u8> = rlp::encode(&random_value).to_vec();
         trie.insert(&slot.mpt_key(), &encoded_value).unwrap();
         trie.root_hash().unwrap();

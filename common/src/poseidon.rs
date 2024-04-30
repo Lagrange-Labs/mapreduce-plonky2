@@ -13,7 +13,7 @@ type H = PoseidonHash;
 type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
 
 /// Hash the concatenation of the two provided 4-wide inputs, swapping them if specified.
-pub(crate) fn hash_maybe_swap<F, const D: usize>(
+pub fn hash_maybe_swap<F, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     inputs: &[[Target; NUM_HASH_OUT_ELTS]; 2],
     do_swap: BoolTarget,

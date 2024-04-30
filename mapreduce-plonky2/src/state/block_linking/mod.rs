@@ -8,6 +8,7 @@ use crate::{
     api::{default_config, deserialize_proof, serialize_proof, verify_proof_fixed_circuit},
     mpt_sequential::PAD_LEN,
     storage::PublicInputs as StorageInputs,
+    types::MAX_BLOCK_LEN,
 };
 use account::{Account, AccountInputsWires};
 use anyhow::Result;
@@ -151,9 +152,6 @@ const D: usize = crate::api::D;
 const MAX_DEPTH_TRIE: usize = 9;
 // 16*32 hashes + 16 RLP headers associated + 1 empty RLP headers (last slot) + (1 + 2) list RLP header
 const MAX_NODE_LEN: usize = 532;
-// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
-// since it still has to do 5 rounds in 622 or 650.
-pub(crate) const MAX_BLOCK_LEN: usize = 650;
 const NUMBER_LEN: usize = SEPOLIA_NUMBER_LEN;
 
 #[derive(Serialize, Deserialize)]

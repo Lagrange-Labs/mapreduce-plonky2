@@ -19,7 +19,7 @@ const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
 
-pub(crate) fn verify_proof_tuple<
+pub fn verify_proof_tuple<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,
@@ -47,7 +47,7 @@ impl<F: RichField> IntTargetWriter for PartialWitness<F> {
 }
 
 // Returns the index where the subvector starts in v, if any.
-pub(crate) fn find_index_subvector(v: &[u8], sub: &[u8]) -> Option<usize> {
+pub fn find_index_subvector(v: &[u8], sub: &[u8]) -> Option<usize> {
     v.windows(sub.len()).position(|s| s == sub)
 }
 
@@ -60,7 +60,7 @@ pub fn keccak256(data: &[u8]) -> Vec<u8> {
 }
 
 /// Convert an u8 slice to an u32-field vector.
-pub(crate) fn convert_u8_slice_to_u32_fields<F: RichField>(values: &[u8]) -> Vec<F> {
+pub fn convert_u8_slice_to_u32_fields<F: RichField>(values: &[u8]) -> Vec<F> {
     assert!(values.len() % 4 == 0);
 
     values
@@ -73,7 +73,7 @@ pub(crate) fn convert_u8_slice_to_u32_fields<F: RichField>(values: &[u8]) -> Vec
 }
 
 /// Convert an u32-field slice to an u8 vector.
-pub(crate) fn convert_u32_fields_to_u8_vec<F: RichField>(fields: &[F]) -> Vec<u8> {
+pub fn convert_u32_fields_to_u8_vec<F: RichField>(fields: &[F]) -> Vec<u8> {
     fields
         .iter()
         .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
@@ -98,7 +98,7 @@ pub(crate) fn convert_u8_values_to_u32<F: RichField>(values: &[F]) -> Vec<F> {
         .collect()
 }
 
-pub(crate) fn convert_u8_targets_to_u32<F: RichField + Extendable<D>, const D: usize>(
+pub fn convert_u8_targets_to_u32<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
 ) -> Vec<U32Target> {
@@ -197,7 +197,7 @@ pub fn greater_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Resize the input vector if needed
-pub(crate) fn convert_u8_to_u32_slice(data: &[u8]) -> Vec<u32> {
+pub fn convert_u8_to_u32_slice(data: &[u8]) -> Vec<u32> {
     let mut d = data.to_vec();
     if data.len() % 4 != 0 {
         d.resize(data.len() + (4 - (data.len() % 4)), 0);
@@ -210,7 +210,7 @@ pub(crate) fn convert_u8_to_u32_slice(data: &[u8]) -> Vec<u32> {
 }
 
 // taken from rust doc https://doc.rust-lang.org/std/primitive.u32.html#method.from_be_bytes
-pub(crate) fn read_le_u32(input: &mut &[u8]) -> u32 {
+pub fn read_le_u32(input: &mut &[u8]) -> u32 {
     let (int_bytes, rest) = input.split_at(std::mem::size_of::<u32>());
     *input = rest;
     u32::from_le_bytes(int_bytes.try_into().unwrap())
@@ -321,8 +321,9 @@ impl<const N: usize> Packer for [u8; N] {
         convert_u8_to_u32_slice(self.as_slice())
     }
 }
-#[cfg(test)]
-pub(crate) mod test {
+
+#[cfg(any(feature = "test", test))]
+pub mod test {
     use super::{Packer, ToFields};
     use crate::utils::{
         convert_u8_to_u32_slice, greater_than, greater_than_or_equal_to, less_than,
@@ -360,7 +361,7 @@ pub(crate) mod test {
         let _: Vec<GoldilocksField> = addr.as_fixed_bytes().pack().to_fields();
     }
 
-    pub(crate) fn random_vector<T>(size: usize) -> Vec<T>
+    pub fn random_vector<T>(size: usize) -> Vec<T>
     where
         rand::distributions::Standard: rand::distributions::Distribution<T>,
     {

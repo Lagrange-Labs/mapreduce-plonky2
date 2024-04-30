@@ -1,9 +1,10 @@
 [workspace]
 members = [
+    "common",
+    "gnark-utils",
+    "groth16-framework",
     "mapreduce-plonky2",
     "recursion-framework",
-    "groth16-framework",
-    "gnark-utils",
 ]
 resolver = "2"
 
