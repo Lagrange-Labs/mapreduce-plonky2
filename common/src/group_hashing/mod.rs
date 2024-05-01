@@ -16,7 +16,7 @@ mod sswu_value;
 mod utils;
 
 /// Extension degree of EcGFp5 curve
-pub const N: usize = 5;
+pub const EXTENSION_DEGREE: usize = 5;
 
 pub use curve_add::add_curve_point;
 /// Field-to-curve and curve point addition functions
@@ -42,7 +42,7 @@ pub trait CircuitBuilderGroupHashing {
 
 impl<F, const D: usize> CircuitBuilderGroupHashing for CircuitBuilder<F, D>
 where
-    F: RichField + Extendable<D> + Extendable<N>,
+    F: RichField + Extendable<D> + Extendable<EXTENSION_DEGREE>,
     Self: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
 {
     fn add_curve_point(&mut self, targets: &[CurveTarget]) -> CurveTarget {

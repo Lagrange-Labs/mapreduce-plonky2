@@ -1,6 +1,6 @@
 //! Field-to-curve point conversion arithmetic and circuit functions
 
-use super::N;
+use super::EXTENSION_DEGREE as N;
 use plonky2::{
     field::extension::{quintic::QuinticExtension, Extendable, FieldExtension},
     hash::{

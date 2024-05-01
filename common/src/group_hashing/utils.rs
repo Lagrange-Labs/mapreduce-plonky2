@@ -1,6 +1,6 @@
 //! Map to curve utility functions
 
-use super::N;
+use super::EXTENSION_DEGREE as N;
 use plonky2::{
     field::extension::{quintic::QuinticExtension, Extendable, FieldExtension},
     hash::hash_types::RichField,

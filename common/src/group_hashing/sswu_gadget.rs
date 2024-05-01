@@ -3,7 +3,7 @@
 use super::{
     field_to_curve::ToCurveTarget,
     utils::{a_sw, b_sw, neg_b_div_a_sw, neg_z_inv_sw, two_thirds, z_sw},
-    N,
+    EXTENSION_DEGREE as N,
 };
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,

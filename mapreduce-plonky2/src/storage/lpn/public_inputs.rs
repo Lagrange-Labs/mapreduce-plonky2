@@ -57,8 +57,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     pub(crate) fn digest_raw(
         &self,
     ) -> (
-        [T; crate::group_hashing::N],
-        [T; crate::group_hashing::N],
+        [T; crate::group_hashing::EXTENSION_DEGREE],
+        [T; crate::group_hashing::EXTENSION_DEGREE],
         T,
     ) {
         let raw = &self.inputs[Self::D_IDX..Self::D_IDX + Self::D_LEN];

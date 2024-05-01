@@ -78,7 +78,7 @@ pub(crate) fn simple_swu(u: GFp5) -> Point {
 
 #[cfg(test)]
 mod tests {
-    use super::{super::N, *};
+    use super::{super::EXTENSION_DEGREE as N, *};
     use plonky2::field::extension::FieldExtension;
     use std::array;
 

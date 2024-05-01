@@ -1,6 +1,6 @@
 //! Curve point addition arithmetic and circuit functions
 
-use super::N;
+use super::EXTENSION_DEGREE as N;
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField,
     plonk::circuit_builder::CircuitBuilder,

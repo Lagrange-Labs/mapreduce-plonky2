@@ -13,7 +13,7 @@ use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTa
 use sha3::Digest;
 use sha3::Keccak256;
 
-use crate::{group_hashing::N, types::HashOutput, ProofTuple};
+use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
@@ -233,11 +233,13 @@ pub fn read_le_u32(input: &mut &[u8]) -> u32 {
 /// Convert a list of elements to a curve point.
 pub fn convert_slice_to_curve_point<T: Copy>(s: &[T]) -> ([T; 5], [T; 5], T) {
     // 5 F for each coordinates + 1 bool flag
-    assert!(s.len() >= 2 * N + 1);
+    assert!(s.len() >= 2 * EXTENSION_DEGREE + 1);
 
-    let x = s[..N].try_into().unwrap();
-    let y = s[N..2 * N].try_into().unwrap();
-    let flag = s[2 * N];
+    let x = s[..EXTENSION_DEGREE].try_into().unwrap();
+    let y = s[EXTENSION_DEGREE..2 * EXTENSION_DEGREE]
+        .try_into()
+        .unwrap();
+    let flag = s[2 * EXTENSION_DEGREE];
 
     (x, y, flag)
 }
