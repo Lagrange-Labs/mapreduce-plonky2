@@ -272,12 +272,11 @@ impl<'a, F, const N: usize> InputData<'a, F, N> {
     }
 }
 
-#[cfg(any(feature = "extra", test))]
-pub mod test {
+#[cfg(test)]
+mod test {
     use super::{InputData, KeccakCircuit, KeccakWires};
     use crate::{
         array::{Array, Vector, VectorWire},
-        circuit::{test::run_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit},
         keccak::{compute_size_with_padding, ByteKeccakWires, OutputByteHash, HASH_LEN},
         utils::{keccak256, read_le_u32},
     };
@@ -291,6 +290,7 @@ pub mod test {
         },
     };
     use rand::{thread_rng, Rng};
+    use test_utils::circuit::{run_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit};
 
     impl<F, const D: usize, const N: usize> UserCircuit<F, D> for KeccakCircuit<N>
     where

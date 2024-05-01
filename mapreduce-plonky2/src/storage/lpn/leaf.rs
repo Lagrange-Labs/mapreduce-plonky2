@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     array::Array,
-    circuit::UserCircuit,
     group_hashing::CircuitBuilderGroupHashing,
     types::{MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
 };
@@ -41,10 +40,6 @@ impl LeafCircuit {
         wires.key.assign_from_data(pw, &self.mapping_key);
         wires.value.assign_from_data(pw, &self.mapping_value);
     }
-}
-
-impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
-    type Wires = LeafWires;
 
     fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> LeafWires {
         let key = Array::<Target, MAPPING_KEY_LEN>::new(b);
@@ -60,7 +55,7 @@ impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
         LeafWires { key, value }
     }
 
-    fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
+    fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &LeafWires) {
         self.assign(pw, wires);
     }
 }
@@ -87,5 +82,23 @@ impl CircuitLogicWires<GoldilocksField, 2, 0> for LeafWires {
     ) -> anyhow::Result<()> {
         inputs.assign(pw, self);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use test_utils::circuit::UserCircuit;
+
+    impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
+        type Wires = LeafWires;
+
+        fn build(b: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
+            LeafCircuit::build(b)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &LeafWires) {
+            self.assign(pw, wires);
+        }
     }
 }

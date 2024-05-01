@@ -263,10 +263,9 @@ mod tests {
     use super::*;
     use crate::{
         api::tests::TestDummyCircuit,
-        circuit::{test::run_circuit, UserCircuit},
         eth::{left_pad32, ProofQuery},
         storage::{self, key::MappingSlot},
-        utils::{convert_u8_to_u32_slice, keccak256, test::random_vector},
+        utils::{convert_u8_to_u32_slice, keccak256},
     };
     use ethers::{
         providers::{Http, Provider},
@@ -285,7 +284,11 @@ mod tests {
     use rand::thread_rng;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use serial_test::serial;
-    use test_utils::log::init_logging;
+    use test_utils::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::random_vector,
+    };
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;

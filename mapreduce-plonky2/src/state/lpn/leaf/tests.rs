@@ -19,9 +19,9 @@ use plonky2::{
     },
 };
 use rand::{rngs::StdRng, RngCore, SeedableRng};
+use test_utils::circuit::{run_circuit, UserCircuit};
 
 use crate::{
-    circuit::{test::run_circuit, UserCircuit},
     state::lpn::state_leaf_hash,
     state::{BlockLinkingInputs, StateInputs},
 };

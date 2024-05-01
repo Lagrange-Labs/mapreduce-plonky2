@@ -7,7 +7,7 @@
 #![feature(const_for)]
 #![feature(generic_const_items)]
 
-use common::{array, circuit, group_hashing, keccak, merkle_tree, mpt_sequential, poseidon, rlp};
+use common::{array, group_hashing, keccak, merkle_tree, mpt_sequential, poseidon, rlp};
 pub use common::{eth, types, utils};
 
 pub mod api;

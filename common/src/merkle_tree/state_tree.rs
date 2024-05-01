@@ -145,8 +145,7 @@ mod tests {
         plonk::config::PoseidonGoldilocksConfig,
     };
     use rand::{rngs::StdRng, RngCore, SeedableRng};
-
-    use crate::circuit::{test::run_circuit, UserCircuit};
+    use test_utils::circuit::{run_circuit, UserCircuit};
 
     use super::*;
 

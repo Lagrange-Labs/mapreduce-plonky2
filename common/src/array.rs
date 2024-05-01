@@ -652,12 +652,15 @@ mod test {
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, Rng};
     use std::panic;
+    use test_utils::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
 
     use crate::{
         array::{Array, ToField, Vector, VectorWire, L32},
-        circuit::{test::run_circuit, UserCircuit},
         eth::left_pad,
-        utils::{convert_u8_to_u32_slice, find_index_subvector, test::random_vector},
+        utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;

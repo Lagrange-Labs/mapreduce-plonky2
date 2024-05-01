@@ -59,8 +59,7 @@ mod tests {
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::config::PoseidonGoldilocksConfig,
     };
-
-    use crate::circuit::{test::run_circuit, UserCircuit};
+    use test_utils::circuit::{run_circuit, UserCircuit};
 
     use super::*;
 

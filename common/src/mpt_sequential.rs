@@ -1,6 +1,9 @@
 use crate::{
     array::{Array, Vector, VectorWire},
-    keccak::{InputData, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
+    keccak::{
+        compute_size_with_padding, InputData, KeccakCircuit, KeccakWires, OutputHash, HASH_LEN,
+        PACKED_HASH_LEN,
+    },
     rlp::{
         decode_compact_encoding, decode_fixed_list, RlpHeader, RlpList, MAX_ITEMS_IN_LIST,
         MAX_KEY_NIBBLE_LEN,
@@ -9,6 +12,7 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
+use eth_trie::Nibbles;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -25,7 +29,6 @@ use recursion_framework::serialization::serialize_array;
 use recursion_framework::serialization::serialize_long_array;
 use serde::{Deserialize, Serialize};
 
-use crate::keccak::{compute_size_with_padding, KeccakCircuit, OutputHash};
 /// Number of items in the RLP encoded list in a leaf node.
 const NB_ITEMS_LEAF: usize = 2;
 /// Currently a constant set to denote the length of the value we are extracting from the MPT trie.
@@ -528,8 +531,74 @@ pub fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
     nibbles
 }
 
-#[cfg(any(feature = "extra", test))]
-pub mod test {
+pub fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
+    let mut padded = nibbles.to_vec();
+    if padded.len() % 2 == 1 {
+        padded.insert(0, 0);
+    }
+    let mut bytes = Vec::new();
+    for i in 0..nibbles.len() / 2 {
+        bytes.push((nibbles[i * 2] << 4) | (nibbles[i * 2 + 1] & 0x0F));
+    }
+    bytes
+}
+
+pub fn visit_proof(proof: &[Vec<u8>]) {
+    let mut child_hash = vec![];
+    let mut partial_key = vec![];
+    for node in proof.iter() {
+        visit_node(node, &child_hash, &mut partial_key);
+        child_hash = keccak256(node);
+        println!(
+            "\t=> full partial key: hex {:?}",
+            hex::encode(nibbles_to_bytes(&partial_key))
+        );
+    }
+}
+
+pub fn visit_node(node: &[u8], child_hash: &[u8], partial_key: &mut Vec<u8>) {
+    println!("[+] Node ({} bytes) {}", node.len(), hex::encode(node));
+    let node_list: Vec<Vec<u8>> = rlp::decode_list(node);
+    match node_list.len() {
+        2 => {
+            // extension case: verify the hash is present and lookup the key
+            if !child_hash.is_empty() {
+                let _ = find_index_subvector(node, child_hash)
+                    .expect("extension should contain hash of child");
+            }
+            // we don't need to decode the RLP header on top of it, since it is
+            // already done in the decode_list function.
+            let key_nibbles_struct = Nibbles::from_compact(&node_list[0]);
+            let key_nibbles = key_nibbles_struct.nibbles();
+            println!(
+                "\t=> Leaf/Extension node: partial key extracted: {:?}",
+                hex::encode(nibbles_to_bytes(key_nibbles))
+            );
+            partial_key.splice(0..0, key_nibbles.to_vec());
+        }
+        16 | 17 => {
+            // branch case: search the nibble where the hash is present
+            let branch_idx = node_list
+                .iter()
+                .enumerate()
+                .find(|(_, h)| *h == child_hash)
+                .map(|(i, _)| i)
+                .expect("didn't find hash in parent") as u8;
+            println!(
+                "\t=> Branch node: (len branch = {}) partial key (nibble): {:?}",
+                node_list.len(),
+                hex::encode(vec![branch_idx]).pop().unwrap()
+            );
+            partial_key.insert(0, branch_idx);
+        }
+        _ => {
+            panic!("invalid node")
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
     use std::array::from_fn as create_array;
     use std::str::FromStr;
     use std::sync::Arc;
@@ -554,37 +623,30 @@ pub mod test {
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, Rng, RngCore};
-    use test_utils::log::init_logging;
+    use test_utils::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        mpt_sequential::generate_random_storage_mpt,
+    };
 
     use crate::eth::ProofQuery;
     use crate::keccak::{HASH_LEN, PACKED_HASH_LEN};
-    use crate::mpt_sequential::{bytes_to_nibbles, NB_ITEMS_LEAF};
     use crate::rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN};
     use crate::types::MAPPING_LEAF_VALUE_LEN;
     use crate::utils::convert_u8_targets_to_u32;
     use crate::{
         array::Array,
-        circuit::{test::run_circuit, UserCircuit},
-        mpt_sequential::MPTKeyWire,
         utils::{find_index_subvector, keccak256},
     };
 
-    use super::{Circuit, InputWires, OutputWires, MAX_LEAF_VALUE_LEN, PAD_LEN};
+    use super::{
+        bytes_to_nibbles, nibbles_to_bytes, visit_node, visit_proof, Circuit, InputWires,
+        MPTKeyWire, OutputWires, MAX_LEAF_VALUE_LEN, NB_ITEMS_LEAF, PAD_LEN,
+    };
+
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
-
-    pub(crate) fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
-        let mut padded = nibbles.to_vec();
-        if padded.len() % 2 == 1 {
-            padded.insert(0, 0);
-        }
-        let mut bytes = Vec::new();
-        for i in 0..nibbles.len() / 2 {
-            bytes.push((nibbles[i * 2] << 4) | (nibbles[i * 2 + 1] & 0x0F));
-        }
-        bytes
-    }
 
     #[derive(Clone, Debug)]
     struct TestCircuit<const DEPTH: usize, const NODE_LEN: usize> {
@@ -815,59 +877,6 @@ pub mod test {
             checking_value: true,
         };
         run_circuit::<F, D, C, _>(circuit);
-    }
-
-    pub fn visit_proof(proof: &[Vec<u8>]) {
-        let mut child_hash = vec![];
-        let mut partial_key = vec![];
-        for node in proof.iter() {
-            visit_node(node, &child_hash, &mut partial_key);
-            child_hash = keccak256(node);
-            println!(
-                "\t=> full partial key: hex {:?}",
-                hex::encode(nibbles_to_bytes(&partial_key))
-            );
-        }
-    }
-    fn visit_node(node: &[u8], child_hash: &[u8], partial_key: &mut Vec<u8>) {
-        println!("[+] Node ({} bytes) {}", node.len(), hex::encode(node));
-        let node_list: Vec<Vec<u8>> = rlp::decode_list(node);
-        match node_list.len() {
-            2 => {
-                // extension case: verify the hash is present and lookup the key
-                if !child_hash.is_empty() {
-                    let _ = find_index_subvector(node, child_hash)
-                        .expect("extension should contain hash of child");
-                }
-                // we don't need to decode the RLP header on top of it, since it is
-                // already done in the decode_list function.
-                let key_nibbles_struct = Nibbles::from_compact(&node_list[0]);
-                let key_nibbles = key_nibbles_struct.nibbles();
-                println!(
-                    "\t=> Leaf/Extension node: partial key extracted: {:?}",
-                    hex::encode(nibbles_to_bytes(key_nibbles))
-                );
-                partial_key.splice(0..0, key_nibbles.to_vec());
-            }
-            16 | 17 => {
-                // branch case: search the nibble where the hash is present
-                let branch_idx = node_list
-                    .iter()
-                    .enumerate()
-                    .find(|(_, h)| *h == child_hash)
-                    .map(|(i, _)| i)
-                    .expect("didn't find hash in parent") as u8;
-                println!(
-                    "\t=> Branch node: (len branch = {}) partial key (nibble): {:?}",
-                    node_list.len(),
-                    hex::encode(vec![branch_idx]).pop().unwrap()
-                );
-                partial_key.insert(0, branch_idx);
-            }
-            _ => {
-                panic!("invalid node")
-            }
-        }
     }
 
     #[test]
@@ -1199,39 +1208,5 @@ pub mod test {
         let data = b.build::<C>();
         let proof = data.prove(pw).unwrap();
         data.verify(proof).unwrap();
-    }
-    // generate a random storage trie and a key. The MPT proof corresponding to
-    // that key is guaranteed to be of DEPTH length. Each leaves in the trie
-    // is of NODE_LEN length.
-    // The returned key is RLP encoded
-    pub fn generate_random_storage_mpt<const DEPTH: usize, const VALUE_LEN: usize>(
-    ) -> (EthTrie<MemoryDB>, Vec<u8>) {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(Arc::clone(&memdb));
-        let mut keys = Vec::new();
-        let right_key_idx: usize;
-        // loop: insert random elements as long as a random selected proof is not of the right length
-        loop {
-            println!(
-                "[+] Random mpt: insertion of {} elements so far...",
-                keys.len()
-            );
-            let key = thread_rng().gen::<[u8; MAX_KEY_NIBBLE_LEN / 2]>().to_vec();
-            let random_bytes = (0..VALUE_LEN)
-                .map(|_| thread_rng().gen::<u8>())
-                .collect::<Vec<_>>();
-            trie.insert(&key, &random_bytes).expect("can't insert");
-            keys.push(key.clone());
-            trie.root_hash().expect("root hash problem");
-            if let Some(idx) = (0..keys.len()).find(|k| {
-                let ke = &keys[*k];
-                let proof = trie.get_proof(ke).unwrap();
-                proof.len() == DEPTH
-            }) {
-                right_key_idx = idx;
-                break;
-            }
-        }
-        (trie, keys[right_key_idx].to_vec())
     }
 }

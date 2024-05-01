@@ -15,10 +15,10 @@ use plonky2::{
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use recursion_framework::framework_testing::TestingRecursiveCircuits;
 use serial_test::serial;
+use test_utils::circuit::{run_circuit, UserCircuit};
 
 use crate::{
     array::Array,
-    circuit::{test::run_circuit, UserCircuit},
     query2::{
         block::BlockPublicInputs, storage::public_inputs::PublicInputs as StorageInputs,
         PackedSCAddress,

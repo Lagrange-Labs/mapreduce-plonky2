@@ -135,6 +135,20 @@ pub fn convert_u8_targets_to_u32<F: RichField + Extendable<D>, const D: usize>(
         .collect_vec()
 }
 
+/// Transform the bits to a number target.
+pub fn bits_to_num<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    bits: &[BoolTarget],
+) -> Target {
+    let mut res = builder.zero();
+    let mut e2 = builder.one();
+    for bit in bits {
+        res = builder.mul_add(e2, bit.target, res);
+        e2 = builder.add(e2, e2);
+    }
+    res
+}
+
 /// Returns the bits of the given number.
 pub fn num_to_bits<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
@@ -322,9 +336,9 @@ impl<const N: usize> Packer for [u8; N] {
     }
 }
 
-#[cfg(any(feature = "extra", test))]
-pub mod test {
-    use super::{Packer, ToFields};
+#[cfg(test)]
+mod test {
+    use super::{bits_to_num, Packer, ToFields};
     use crate::utils::{
         convert_u8_to_u32_slice, greater_than, greater_than_or_equal_to, less_than,
         less_than_or_equal_to, num_to_bits,
@@ -342,30 +356,10 @@ pub mod test {
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use rand::{thread_rng, Rng, RngCore};
 
-    pub fn bits_to_num<F: RichField + Extendable<D>, const D: usize>(
-        builder: &mut CircuitBuilder<F, D>,
-        bits: &[BoolTarget],
-    ) -> Target {
-        let mut res = builder.zero();
-        let mut e2 = builder.one();
-        for bit in bits {
-            res = builder.mul_add(e2, bit.target, res);
-            e2 = builder.add(e2, e2);
-        }
-        res
-    }
-
     #[test]
     fn test_pack() {
         let addr = Address::random();
         let _: Vec<GoldilocksField> = addr.as_fixed_bytes().pack().to_fields();
-    }
-
-    pub fn random_vector<T>(size: usize) -> Vec<T>
-    where
-        rand::distributions::Standard: rand::distributions::Distribution<T>,
-    {
-        (0..size).map(|_| thread_rng().gen::<T>()).collect()
     }
 
     #[test]

@@ -168,21 +168,22 @@ impl CircuitLogicWires<GoldilocksField, 2, 0> for StorageLeafWire {
 }
 #[cfg(test)]
 mod test {
-    use crate::circuit::test::run_circuit;
-    use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
     use crate::storage::lpn::leaf_digest_for_mapping;
     use crate::utils::keccak256;
-    use crate::utils::test::random_vector;
     use eth_trie::{Nibbles, Trie};
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use test_utils::{
+        circuit::{run_circuit, UserCircuit},
+        mpt_sequential::generate_random_storage_mpt,
+        utils::random_vector,
+    };
 
     use super::{LeafCircuit, LeafWires, PublicInputs, MAPPING_LEAF_VALUE_LEN};
     use crate::array::Array;
-    use crate::circuit::UserCircuit;
     use crate::eth::StorageSlot;
     use crate::mpt_sequential::bytes_to_nibbles;
     use crate::storage::key::MappingSlot;

@@ -195,10 +195,10 @@ mod test {
         arithmetic_u32::{CircuitBuilderU32, U32Target},
         witness::WitnessU32,
     };
+    use test_utils::circuit::{run_circuit, UserCircuit};
 
     use crate::{
         array::Array,
-        circuit::{test::run_circuit, UserCircuit},
         eth::BlockUtil,
         keccak::HASH_LEN,
         mpt_sequential::PAD_LEN,

@@ -18,8 +18,9 @@ mod test {
     };
     use serde::Serialize;
     use std::time;
+    use test_utils::circuit::UserCircuit;
 
-    use crate::{circuit::UserCircuit, utils::verify_proof_tuple};
+    use crate::utils::verify_proof_tuple;
 
     #[derive(Serialize, Clone, Debug)]
     pub(crate) struct BenchResult {

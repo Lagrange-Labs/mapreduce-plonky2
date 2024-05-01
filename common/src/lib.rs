@@ -20,7 +20,6 @@ use serde::{Deserialize, Serialize};
 mod benches;
 
 pub mod array;
-pub mod circuit;
 pub mod eth;
 pub mod group_hashing;
 pub mod hash;

@@ -180,14 +180,16 @@ mod test {
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use plonky2_ecgfp5::gadgets::curve::CurveTarget;
     use std::array::from_fn as create_array;
+    use test_utils::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
 
     use crate::{
         array::Array,
-        circuit::{test::run_circuit, UserCircuit},
         group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
         keccak::PACKED_HASH_LEN,
         mpt_sequential::MPTKeyWire,
-        utils::test::random_vector,
     };
 
     use super::PublicInputs;

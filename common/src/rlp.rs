@@ -358,9 +358,9 @@ mod tests {
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use test_utils::mpt_sequential::generate_random_storage_mpt;
 
     use crate::array::Array;
-    use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::{
         decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, MAX_ENC_KEY_LEN,
         MAX_LEN_BYTES,

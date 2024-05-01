@@ -673,9 +673,7 @@ mod tests {
     use super::*;
     use crate::{
         array::Array,
-        circuit::{test::run_circuit, UserCircuit},
         keccak::{HASH_LEN, PACKED_HASH_LEN},
-        utils::test::random_vector,
     };
     use plonky2::{
         field::types::{Field, Sample},
@@ -689,7 +687,11 @@ mod tests {
     use recursion_framework::framework_testing::{
         new_universal_circuit_builder_for_testing, TestingRecursiveCircuits,
     };
-    use test_utils::log::init_logging;
+    use test_utils::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::random_vector,
+    };
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;

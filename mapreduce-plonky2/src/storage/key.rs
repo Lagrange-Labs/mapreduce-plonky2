@@ -299,10 +299,10 @@ mod test {
         },
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
+    use test_utils::circuit::{run_circuit, UserCircuit};
 
     use crate::{
         array::Array,
-        circuit::{test::run_circuit, UserCircuit},
         eth::StorageSlot,
         keccak::{HASH_LEN, PACKED_HASH_LEN},
         mpt_sequential::bytes_to_nibbles,

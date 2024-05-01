@@ -12,13 +12,11 @@ use plonky2::{
         config::{GenericHashOut, PoseidonGoldilocksConfig},
     },
 };
+use test_utils::circuit::{run_circuit, UserCircuit};
 
-use crate::{
-    circuit::{test::run_circuit, UserCircuit},
-    state::{
-        lpn::{node::NodeCircuit, state_node_hash},
-        StateInputs,
-    },
+use crate::state::{
+    lpn::{node::NodeCircuit, state_node_hash},
+    StateInputs,
 };
 
 #[test]

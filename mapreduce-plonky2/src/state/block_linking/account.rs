@@ -218,17 +218,18 @@ mod test {
         },
     };
     use serial_test::serial;
-    use test_utils::log::init_logging;
+    use test_utils::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::random_vector,
+    };
 
     use crate::{
-        circuit::{test::run_circuit, UserCircuit},
         eth::ProofQuery,
         mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
         state::block_linking::block::SEPOLIA_NUMBER_LEN,
         storage::PublicInputs as StorageInputs,
-        utils::{
-            convert_u8_slice_to_u32_fields, find_index_subvector, keccak256, test::random_vector,
-        },
+        utils::{convert_u8_slice_to_u32_fields, find_index_subvector, keccak256},
     };
 
     const D: usize = 2;

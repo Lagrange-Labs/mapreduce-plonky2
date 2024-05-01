@@ -9,22 +9,17 @@ bincode.workspace = true
 eth_trie.workspace = true
 ethers.workspace = true
 hashbrown.workspace = true
-hex = { workspace = true, optional = true }
+hex.workspace = true
 itertools.workspace = true
 log.workspace = true
 plonky2.workspace = true
 plonky2_crypto.workspace = true
 plonky2_ecgfp5.workspace = true
-rand = { workspace = true, optional = true }
 rlp.workspace = true
 serde.workspace = true
-serde_json = { workspace = true, optional = true }
 sha3.workspace = true
-tokio = { workspace = true, optional = true }
 
 recursion_framework = { path = "../recursion-framework" }
-test_utils = { path = "../test-utils", optional = true }
-
 
 [dev-dependencies]
 csv.workspace = true
@@ -38,5 +33,4 @@ tokio.workspace = true
 test_utils = { path = "../test-utils" }
 
 [features]
-ci = []
-extra = ["hex", "rand", "serde_json", "test_utils", "tokio"]
+ci = ["test_utils/ci"]

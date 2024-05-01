@@ -24,10 +24,10 @@ use plonky2::{
     },
 };
 use rand::{rngs::StdRng, RngCore, SeedableRng};
+use test_utils::circuit::{run_circuit, UserCircuit};
 
 use crate::{
     api::ProofWithVK,
-    circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
     group_hashing::map_to_curve_point,
     storage::lpn::{intermediate_node_hash, leaf_hash_for_mapping},

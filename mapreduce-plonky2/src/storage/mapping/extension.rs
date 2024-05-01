@@ -130,15 +130,15 @@ mod test {
         },
     };
     use rand::{thread_rng, Rng};
+    use test_utils::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
 
-    use crate::circuit::test::run_circuit;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
     use crate::storage::mapping::extension::MAX_EXTENSION_NODE_LEN;
     use crate::utils::{convert_u8_to_u32_slice, keccak256};
-    use crate::{
-        circuit::UserCircuit, group_hashing::map_to_curve_point,
-        storage::mapping::public_inputs::PublicInputs, utils::test::random_vector,
-    };
+    use crate::{group_hashing::map_to_curve_point, storage::mapping::public_inputs::PublicInputs};
 
     use super::ExtensionNodeCircuit;
     const D: usize = 2;
