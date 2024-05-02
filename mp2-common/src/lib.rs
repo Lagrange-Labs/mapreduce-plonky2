@@ -27,6 +27,7 @@ pub mod keccak;
 pub mod merkle_tree;
 pub mod mpt_sequential;
 pub mod poseidon;
+pub mod public_inputs;
 pub mod rlp;
 pub mod types;
 pub mod utils;

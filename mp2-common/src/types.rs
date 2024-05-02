@@ -1,8 +1,21 @@
 //! Custom types
 
 use crate::array::Array;
-use plonky2::iop::target::Target;
+use plonky2::{
+    field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},
+    iop::target::Target,
+    plonk::circuit_builder::CircuitBuilder,
+};
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+
+/// Default field
+pub type GFp = GoldilocksField;
+
+/// Quintic extension field
+pub type GFp5 = QuinticExtension<GFp>;
+
+/// Default circuit builder
+pub type CBuilder = CircuitBuilder<GoldilocksField, 2>;
 
 /// Length of an U64
 pub const U64_LEN: usize = 8;

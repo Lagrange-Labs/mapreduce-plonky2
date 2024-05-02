@@ -1,5 +1,5 @@
 [package]
-name = "mp2-v1"
+name = "mp2-v1" # TODO: fix the name to a meaningful one.
 version = "0.1.0"
 edition = "2021"
 

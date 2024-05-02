@@ -1,14 +1,12 @@
 //! Public inputs for Extraction Leaf/Extension/Branch circuits
 
-use crate::{
-    public_inputs::{PublicInputRange, PublicInputTargets},
-    types::{CBuilder, GFp, GFp5},
-};
 use mp2_common::{
     array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::MPTKeyWire,
+    public_inputs::{PublicInputRange, PublicInputTargets},
     rlp::MAX_KEY_NIBBLE_LEN,
+    types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 use plonky2::{
@@ -33,11 +31,9 @@ use std::array::from_fn;
 const H_RANGE: PublicInputRange = 0..PACKED_HASH_LEN;
 const K_RANGE: PublicInputRange = H_RANGE.end..H_RANGE.end + MAX_KEY_NIBBLE_LEN;
 const T_RANGE: PublicInputRange = K_RANGE.end..K_RANGE.end + 1;
-const DV_RANGE: PublicInputRange = T_RANGE.end..T_RANGE.end + 11;
-const DM_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + 11;
+const DV_RANGE: PublicInputRange = T_RANGE.end..T_RANGE.end + CURVE_TARGET_LEN;
+const DM_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + CURVE_TARGET_LEN;
 const N_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + 1;
-
-const ALL_RANGES: [PublicInputRange; 6] = [H_RANGE, K_RANGE, T_RANGE, DV_RANGE, DM_RANGE, N_RANGE];
 
 /// Public inputs wrapper of any proof generated in this module
 #[derive(Clone, Debug)]
@@ -46,9 +42,8 @@ pub struct PublicInputs<'a, T> {
 }
 
 impl<'a> PublicInputTargets for PublicInputs<'a, Target> {
-    fn all_ranges() -> &'static [PublicInputRange] {
-        &ALL_RANGES
-    }
+    const RANGES: &'static [PublicInputRange] =
+        &[H_RANGE, K_RANGE, T_RANGE, DV_RANGE, DM_RANGE, N_RANGE];
 }
 
 impl<'a> PublicInputs<'a, Target> {
@@ -140,7 +135,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     fn mpt_key_info(&self) -> (&[T], T) {
         let key = &self.proof_inputs[K_RANGE];
-        let ptr = self.proof_inputs[T_RANGE][0];
+        let ptr = self.proof_inputs[T_RANGE.start];
 
         (key, ptr)
     }
