@@ -10,33 +10,18 @@ pub type PublicInputRange = Range<usize>;
 pub trait PublicInputTargets {
     const RANGES: &'static [PublicInputRange];
 
-    /// Register each public input with the index checking.
-    fn register_each<Fun>(cb: &mut CBuilder, fun: Fun)
-    where
-        Fun: Fn(&mut CBuilder),
-    {
-        let num = cb.num_public_inputs();
+    /// Register the public inputs with the index checking.
+    fn register_with_check(cb: &mut CBuilder, funs: &[&dyn Fn(&mut CBuilder)]) {
+        assert_eq!(Self::RANGES.len(), funs.len());
 
-        // Check the current and get the next public input indexes.
-        let ii = Self::RANGES
-            .binary_search_by(|span| span.start.cmp(&num))
-            .unwrap_or_else(|_| {
-                panic!(
-                    "Current public input number '{}' is not included by '{:?}'.",
-                    num,
-                    Self::RANGES,
-                )
-            });
-        let next_idx = Self::RANGES.get(ii + 1).expect("Out of range").start;
+        Self::RANGES.iter().zip(funs).for_each(|(range, fun)| {
+            fun(cb);
 
-        // Callback to register the public input.
-        fun(cb);
-
-        // Check the registered public input number.
-        assert_eq!(
-            cb.num_public_inputs(),
-            next_idx,
-            "Registered wrong number of public inputs"
-        );
+            assert_eq!(
+                cb.num_public_inputs(),
+                range.end,
+                "Registered wrong number of public inputs"
+            );
+        });
     }
 }

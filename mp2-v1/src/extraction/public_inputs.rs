@@ -55,12 +55,17 @@ impl<'a> PublicInputs<'a, Target> {
         dm: CurveTarget,
         n: Target,
     ) {
-        Self::register_each(cb, |cb| h.register_as_public_input(cb));
-        Self::register_each(cb, |cb| k.key.register_as_public_input(cb));
-        Self::register_each(cb, |cb| cb.register_public_input(k.pointer));
-        Self::register_each(cb, |cb| cb.register_curve_public_input(dv));
-        Self::register_each(cb, |cb| cb.register_curve_public_input(dm));
-        Self::register_each(cb, |cb| cb.register_public_input(n));
+        Self::register_with_check(
+            cb,
+            &[
+                &|cb| h.register_as_public_input(cb),
+                &|cb| k.key.register_as_public_input(cb),
+                &|cb| cb.register_public_input(k.pointer),
+                &|cb| cb.register_curve_public_input(dv),
+                &|cb| cb.register_curve_public_input(dm),
+                &|cb| cb.register_public_input(n),
+            ],
+        );
     }
 
     /// Return the merkle hash of the subtree this proof has processed.
