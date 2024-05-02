@@ -53,13 +53,13 @@ where
 
 #[cfg(test)]
 mod tests {
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,
         hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::config::PoseidonGoldilocksConfig,
     };
-    use test_utils::circuit::{run_circuit, UserCircuit};
 
     use super::*;
 

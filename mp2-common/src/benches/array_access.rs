@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
+    use mp2_test::log::init_logging;
     use plonky2::field::types::Field;
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
@@ -8,7 +9,6 @@ mod tests {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use std::time::Instant;
-    use test_utils::log::init_logging;
 
     #[test]
     fn compare_quin_random_access() -> Result<()> {

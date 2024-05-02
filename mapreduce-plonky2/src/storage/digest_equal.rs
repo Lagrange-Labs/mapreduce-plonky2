@@ -271,6 +271,11 @@ mod tests {
         providers::{Http, Provider},
         types::Address,
     };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::random_vector,
+    };
     use plonky2::{
         field::types::{Field, Sample},
         iop::witness::{PartialWitness, WitnessWrite},
@@ -284,11 +289,6 @@ mod tests {
     use rand::thread_rng;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use serial_test::serial;
-    use test_utils::{
-        circuit::{run_circuit, UserCircuit},
-        log::init_logging,
-        utils::random_vector,
-    };
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;

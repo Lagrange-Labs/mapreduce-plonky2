@@ -1,5 +1,5 @@
 [package]
-name = "common"
+name = "mp2_common"
 version = "0.1.0"
 edition = "2021"
 
@@ -30,7 +30,7 @@ serde_json.workspace = true
 serial_test.workspace = true
 tokio.workspace = true
 
-test_utils = { path = "../test-utils" }
+mp2_test = { path = "../mp2-test" }
 
 [features]
-ci = ["test_utils/ci"]
+ci = ["mp2_test/ci"]

@@ -8,8 +8,8 @@
 #![feature(generic_const_items)]
 
 // NOTE: it's convenient to only avoid changing dependencies in each source file for v0.
-use common::{array, group_hashing, keccak, merkle_tree, mpt_sequential, poseidon, rlp};
-pub use common::{eth, types, utils};
+use mp2_common::{array, group_hashing, keccak, merkle_tree, mpt_sequential, poseidon, rlp};
+pub use mp2_common::{eth, types, utils};
 
 pub mod api;
 pub mod block;

@@ -166,6 +166,10 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
 #[cfg(test)]
 mod test {
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
     use plonky2::field::types::Field;
     use plonky2::{
         iop::{
@@ -180,10 +184,6 @@ mod test {
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use plonky2_ecgfp5::gadgets::curve::CurveTarget;
     use std::array::from_fn as create_array;
-    use test_utils::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
 
     use crate::{
         array::Array,

@@ -18,7 +18,6 @@ serde.workspace = true
 serde_json.workspace = true
 sha3.workspace = true
 
-common = { path = "../common" }
 gnark-utils = { path = "../gnark-utils" }
 mapreduce-plonky2 = { path = "../mapreduce-plonky2" }
 recursion_framework = { path = "../recursion-framework" }
@@ -29,3 +28,5 @@ itertools.workspace = true
 plonky2_ecgfp5.workspace = true
 rand.workspace = true
 serial_test.workspace = true
+
+mp2_common = { path = "../mp2-common" }

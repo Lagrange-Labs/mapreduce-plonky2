@@ -592,34 +592,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
-name = "common"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bincode",
- "csv",
- "eth_trie",
- "ethers 2.0.13",
- "hashbrown 0.14.3",
- "hex",
- "itertools 0.12.1",
- "log",
- "plonky2",
- "plonky2_crypto",
- "plonky2_ecgfp5",
- "rand",
- "recursion_framework",
- "rlp",
- "rmp-serde",
- "serde",
- "serde_json",
- "serial_test",
- "sha3",
- "test_utils",
- "tokio",
-]
-
-[[package]]
 name = "const-hex"
 version = "1.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2010,7 +1982,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
- "common",
  "env_logger 0.11.3",
  "ethereum-types",
  "ethers 2.0.13",
@@ -2019,6 +1990,7 @@ dependencies = [
  "itertools 0.12.1",
  "log",
  "mapreduce-plonky2",
+ "mp2_common",
  "plonky2",
  "plonky2_ecgfp5",
  "plonky2x",
@@ -2575,7 +2547,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
- "common",
  "csv",
  "env_logger 0.11.3",
  "eth_trie",
@@ -2584,6 +2555,8 @@ dependencies = [
  "hex",
  "itertools 0.12.1",
  "log",
+ "mp2_common",
+ "mp2_test",
  "paste",
  "plonky2",
  "plonky2_crypto",
@@ -2597,7 +2570,6 @@ dependencies = [
  "serde_json",
  "serial_test",
  "sha3",
- "test_utils",
  "tokio",
 ]
 
@@ -2641,6 +2613,47 @@ dependencies = [
  "libc",
  "wasi 0.11.0+wasi-snapshot-preview1",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "mp2_common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "csv",
+ "eth_trie",
+ "ethers 2.0.13",
+ "hashbrown 0.14.3",
+ "hex",
+ "itertools 0.12.1",
+ "log",
+ "mp2_test",
+ "plonky2",
+ "plonky2_crypto",
+ "plonky2_ecgfp5",
+ "rand",
+ "recursion_framework",
+ "rlp",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha3",
+ "tokio",
+]
+
+[[package]]
+name = "mp2_test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger 0.11.3",
+ "eth_trie",
+ "hashbrown 0.14.3",
+ "log",
+ "plonky2",
+ "rand",
 ]
 
 [[package]]
@@ -4504,19 +4517,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "test_utils"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "env_logger 0.11.3",
- "eth_trie",
- "hashbrown 0.14.3",
- "log",
- "plonky2",
- "rand",
 ]
 
 [[package]]

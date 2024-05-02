@@ -9,6 +9,7 @@ use crate::{
 };
 use ethers::types::Address;
 use itertools::Itertools;
+use mp2_test::circuit::{run_circuit, UserCircuit};
 use plonky2::{
     field::{
         goldilocks_field::GoldilocksField,
@@ -24,7 +25,6 @@ use plonky2::{
         config::{GenericConfig, PoseidonGoldilocksConfig},
     },
 };
-use test_utils::circuit::{run_circuit, UserCircuit};
 
 use crate::block::public_inputs::PublicInputs as BlockDBPublicInputs;
 

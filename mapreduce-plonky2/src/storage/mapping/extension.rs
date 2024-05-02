@@ -120,6 +120,10 @@ mod test {
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
     use plonky2::field::types::Field;
     use plonky2::{
         field::goldilocks_field::GoldilocksField,
@@ -130,10 +134,6 @@ mod test {
         },
     };
     use rand::{thread_rng, Rng};
-    use test_utils::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
 
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
     use crate::storage::mapping::extension::MAX_EXTENSION_NODE_LEN;

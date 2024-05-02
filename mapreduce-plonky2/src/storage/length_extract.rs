@@ -259,6 +259,11 @@ mod tests {
         providers::{Http, Provider},
         types::{Address, H160},
     };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        eth::{get_mainnet_url, get_sepolia_url},
+        log::init_logging,
+    };
     use plonky2::{
         field::types::Field,
         iop::witness::PartialWitness,
@@ -266,11 +271,6 @@ mod tests {
     };
     use rand::{thread_rng, Rng};
     use std::{str::FromStr, sync::Arc};
-    use test_utils::{
-        circuit::{run_circuit, UserCircuit},
-        eth::{get_mainnet_url, get_sepolia_url},
-        log::init_logging,
-    };
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;

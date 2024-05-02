@@ -368,8 +368,8 @@ mod test {
 
     use ethers::types::H256;
     use hashbrown::HashMap;
+    use mp2_test::eth::{get_mainnet_url, get_sepolia_url};
     use rand::{thread_rng, Rng};
-    use test_utils::eth::{get_mainnet_url, get_sepolia_url};
 
     use crate::{
         types::MAX_BLOCK_LEN,

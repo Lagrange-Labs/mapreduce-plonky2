@@ -211,6 +211,10 @@ mod test {
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
     use plonky2::field::types::Field;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
@@ -219,10 +223,6 @@ mod test {
         plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
     use rand::{thread_rng, Rng};
-    use test_utils::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
 
     use crate::mpt_sequential::bytes_to_nibbles;
     use crate::{

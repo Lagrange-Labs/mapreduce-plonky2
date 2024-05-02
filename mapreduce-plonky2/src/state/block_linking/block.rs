@@ -185,6 +185,7 @@ impl<const MIN_NUMBER_LEN: usize> BlockHeader<MIN_NUMBER_LEN> {
 mod test {
     use anyhow::Result;
     use ethers::providers::{Http, Middleware, Provider};
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -195,7 +196,6 @@ mod test {
         arithmetic_u32::{CircuitBuilderU32, U32Target},
         witness::WitnessU32,
     };
-    use test_utils::circuit::{run_circuit, UserCircuit};
 
     use crate::{
         array::Array,

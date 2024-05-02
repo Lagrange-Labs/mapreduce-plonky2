@@ -253,6 +253,11 @@ mod tests {
         providers::{Http, Middleware, Provider},
         types::{Address, Block, H160, H256, U64},
     };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        eth::get_sepolia_url,
+        log::init_logging,
+    };
     use plonky2::{
         field::types::Field,
         iop::witness::WitnessWrite,
@@ -268,11 +273,6 @@ mod tests {
     use rand::{thread_rng, Rng};
     use serial_test::serial;
     use std::{str::FromStr, sync::Arc};
-    use test_utils::{
-        circuit::{run_circuit, UserCircuit},
-        eth::get_sepolia_url,
-        log::init_logging,
-    };
     use tests::block::SEPOLIA_NUMBER_LEN;
 
     const D: usize = 2;

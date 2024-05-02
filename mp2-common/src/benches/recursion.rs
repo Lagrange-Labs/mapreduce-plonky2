@@ -2,6 +2,10 @@ use crate::benches::test::{bench_simple_circuit, run_benchs, BenchResult};
 use crate::keccak::{self, KeccakWires};
 use itertools::Itertools;
 use log::info;
+use mp2_test::{
+    circuit::{CyclicCircuit, NoopCircuit, PCDCircuit, Padder, ProofOrDummyTarget, UserCircuit},
+    log::init_logging,
+};
 use plonky2::field::types::Sample;
 use plonky2::gates::exponentiation::ExponentiationGate;
 use plonky2::{
@@ -23,10 +27,6 @@ use plonky2::{
 };
 use rand::Rng;
 use std::array::from_fn as create_array;
-use test_utils::{
-    circuit::{CyclicCircuit, NoopCircuit, PCDCircuit, Padder, ProofOrDummyTarget, UserCircuit},
-    log::init_logging,
-};
 
 use super::test::Benchable;
 use std::{iter, time};

@@ -606,6 +606,11 @@ mod test {
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use ethers::providers::{Http, Provider};
     use ethers::types::{Address, EIP1186ProofResponse};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        mpt_sequential::generate_random_storage_mpt,
+    };
     use plonky2::field::types::Field;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
@@ -623,11 +628,6 @@ mod test {
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, Rng, RngCore};
-    use test_utils::{
-        circuit::{run_circuit, UserCircuit},
-        log::init_logging,
-        mpt_sequential::generate_random_storage_mpt,
-    };
 
     use crate::eth::ProofQuery;
     use crate::keccak::{HASH_LEN, PACKED_HASH_LEN};

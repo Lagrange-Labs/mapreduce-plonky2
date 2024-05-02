@@ -206,6 +206,11 @@ mod test {
         providers::{Http, Middleware, Provider},
         types::{Address, BlockId, BlockNumber, H256},
     };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::random_vector,
+    };
     use plonky2::{
         field::types::Field,
         iop::{
@@ -218,11 +223,6 @@ mod test {
         },
     };
     use serial_test::serial;
-    use test_utils::{
-        circuit::{run_circuit, UserCircuit},
-        log::init_logging,
-        utils::random_vector,
-    };
 
     use crate::{
         eth::ProofQuery,

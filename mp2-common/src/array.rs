@@ -637,6 +637,10 @@ const RANDOM_ACCESS_SIZE: usize = 64;
 #[cfg(test)]
 mod test {
     use core::array::from_fn as create_array;
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -652,10 +656,6 @@ mod test {
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, Rng};
     use std::panic;
-    use test_utils::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
 
     use crate::{
         array::{Array, ToField, Vector, VectorWire, L32},

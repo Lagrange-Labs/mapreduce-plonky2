@@ -675,6 +675,11 @@ mod tests {
         array::Array,
         keccak::{HASH_LEN, PACKED_HASH_LEN},
     };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::random_vector,
+    };
     use plonky2::{
         field::types::{Field, Sample},
         hash::{
@@ -686,11 +691,6 @@ mod tests {
     use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::{
         new_universal_circuit_builder_for_testing, TestingRecursiveCircuits,
-    };
-    use test_utils::{
-        circuit::{run_circuit, UserCircuit},
-        log::init_logging,
-        utils::random_vector,
     };
 
     const D: usize = 2;

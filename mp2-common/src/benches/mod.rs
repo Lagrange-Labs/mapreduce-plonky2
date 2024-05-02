@@ -8,6 +8,7 @@ mod recursion;
 
 #[cfg(test)]
 mod test {
+    use mp2_test::circuit::UserCircuit;
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -18,7 +19,6 @@ mod test {
     };
     use serde::Serialize;
     use std::time;
-    use test_utils::circuit::UserCircuit;
 
     use crate::utils::verify_proof_tuple;
 

@@ -369,11 +369,11 @@ impl PublicParameters {
 #[cfg(test)]
 mod test {
     use eth_trie::{EthTrie, MemoryDB, Trie};
+    use mp2_test::{mpt_sequential::generate_random_storage_mpt, utils::random_vector};
     use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
     use plonky2_ecgfp5::curve::curve::Point;
     use serial_test::serial;
     use std::sync::Arc;
-    use test_utils::{mpt_sequential::generate_random_storage_mpt, utils::random_vector};
 
     use super::*;
     use crate::{

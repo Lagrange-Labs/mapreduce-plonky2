@@ -86,7 +86,7 @@ impl CircuitLogicWires<GoldilocksField, 2, 0> for LeafWires {
 #[cfg(test)]
 mod test {
     use super::*;
-    use test_utils::circuit::UserCircuit;
+    use mp2_test::circuit::UserCircuit;
 
     impl UserCircuit<GoldilocksField, 2> for LeafCircuit {
         type Wires = LeafWires;

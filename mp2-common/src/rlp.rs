@@ -350,6 +350,7 @@ mod tests {
     use anyhow::Result;
 
     use eth_trie::{Nibbles, Trie};
+    use mp2_test::mpt_sequential::generate_random_storage_mpt;
     use plonky2::field::extension::Extendable;
     use plonky2::field::types::Field;
     use plonky2::hash::hash_types::RichField;
@@ -358,7 +359,6 @@ mod tests {
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use test_utils::mpt_sequential::generate_random_storage_mpt;
 
     use crate::array::Array;
     use crate::rlp::{

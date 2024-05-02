@@ -289,6 +289,7 @@ impl MappingSlot {
 #[cfg(test)]
 mod test {
 
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -299,7 +300,6 @@ mod test {
         },
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
-    use test_utils::circuit::{run_circuit, UserCircuit};
 
     use crate::{
         array::Array,

@@ -280,6 +280,7 @@ mod test {
         keccak::{compute_size_with_padding, ByteKeccakWires, OutputByteHash, HASH_LEN},
         utils::{keccak256, read_le_u32},
     };
+    use mp2_test::circuit::{run_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit};
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -290,7 +291,6 @@ mod test {
         },
     };
     use rand::{thread_rng, Rng};
-    use test_utils::circuit::{run_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit};
 
     impl<F, const D: usize, const N: usize> UserCircuit<F, D> for KeccakCircuit<N>
     where

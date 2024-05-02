@@ -1,5 +1,6 @@
 use std::ops::Add;
 
+use mp2_test::circuit::{run_circuit, UserCircuit};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::HashOut,
@@ -13,7 +14,6 @@ use plonky2::{
         proof::ProofWithPublicInputs,
     },
 };
-use test_utils::circuit::{run_circuit, UserCircuit};
 
 use crate::{
     eth::left_pad32,

@@ -172,15 +172,15 @@ mod test {
     use crate::storage::lpn::leaf_digest_for_mapping;
     use crate::utils::keccak256;
     use eth_trie::{Nibbles, Trie};
-    use plonky2::iop::target::Target;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use test_utils::{
+    use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         mpt_sequential::generate_random_storage_mpt,
         utils::random_vector,
     };
+    use plonky2::iop::target::Target;
+    use plonky2::iop::witness::PartialWitness;
+    use plonky2::plonk::circuit_builder::CircuitBuilder;
+    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
     use super::{LeafCircuit, LeafWires, PublicInputs, MAPPING_LEAF_VALUE_LEN};
     use crate::array::Array;

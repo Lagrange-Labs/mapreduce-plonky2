@@ -230,6 +230,11 @@ impl TryInto<(ProofWithVK, ProofWithPublicInputs<F, C, D>)> for CircuitInput {
 mod tests {
     use super::*;
     use crate::api::{mapping::api::NUM_IO, tests::TestDummyCircuit};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::random_vector,
+    };
     use plonky2::{
         field::types::Field,
         iop::witness::{PartialWitness, WitnessWrite},
@@ -241,11 +246,6 @@ mod tests {
     use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use std::array;
-    use test_utils::{
-        circuit::{run_circuit, UserCircuit},
-        log::init_logging,
-        utils::random_vector,
-    };
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
