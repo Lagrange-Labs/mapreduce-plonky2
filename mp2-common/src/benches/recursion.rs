@@ -1,8 +1,11 @@
 use crate::benches::test::{bench_simple_circuit, run_benchs, BenchResult};
-use crate::circuit::{NoopCircuit, ProofOrDummyTarget};
 use crate::keccak::{self, KeccakWires};
 use itertools::Itertools;
 use log::info;
+use mp2_test::{
+    circuit::{CyclicCircuit, NoopCircuit, PCDCircuit, Padder, ProofOrDummyTarget, UserCircuit},
+    log::init_logging,
+};
 use plonky2::field::types::Sample;
 use plonky2::gates::exponentiation::ExponentiationGate;
 use plonky2::{
@@ -25,10 +28,7 @@ use plonky2::{
 use rand::Rng;
 use std::array::from_fn as create_array;
 
-use super::init_logging;
 use super::test::Benchable;
-use crate::circuit::CyclicCircuit;
-use crate::circuit::{PCDCircuit, Padder, UserCircuit};
 use std::{iter, time};
 
 /// Circuit hashing ELEMS field elements into a standard Poseidon 256 bit output

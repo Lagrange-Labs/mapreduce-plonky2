@@ -28,3 +28,5 @@ itertools.workspace = true
 plonky2_ecgfp5.workspace = true
 rand.workspace = true
 serial_test.workspace = true
+
+mp2_common = { path = "../mp2-common" }

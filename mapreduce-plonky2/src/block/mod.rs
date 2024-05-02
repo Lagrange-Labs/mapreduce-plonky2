@@ -673,10 +673,12 @@ mod tests {
     use super::*;
     use crate::{
         array::Array,
-        benches::init_logging,
-        circuit::{test::run_circuit, UserCircuit},
         keccak::{HASH_LEN, PACKED_HASH_LEN},
-        utils::test::random_vector,
+    };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::random_vector,
     };
     use plonky2::{
         field::types::{Field, Sample},

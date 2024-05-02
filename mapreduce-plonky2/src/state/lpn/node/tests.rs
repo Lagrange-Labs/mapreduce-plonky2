@@ -1,5 +1,6 @@
 //! Tests module for the intermediate node circuit
 
+use mp2_test::circuit::{run_circuit, UserCircuit};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
@@ -13,12 +14,9 @@ use plonky2::{
     },
 };
 
-use crate::{
-    circuit::{test::run_circuit, UserCircuit},
-    state::{
-        lpn::{node::NodeCircuit, state_node_hash},
-        StateInputs,
-    },
+use crate::state::{
+    lpn::{node::NodeCircuit, state_node_hash},
+    StateInputs,
 };
 
 #[test]

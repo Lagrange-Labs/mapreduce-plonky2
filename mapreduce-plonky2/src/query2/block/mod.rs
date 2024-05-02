@@ -287,8 +287,8 @@ impl<'a, T: Clone + Copy> BlockPublicInputs<'a, T> {
     fn digest_raw(
         &self,
     ) -> (
-        [T; crate::group_hashing::N],
-        [T; crate::group_hashing::N],
+        [T; crate::group_hashing::EXTENSION_DEGREE],
+        [T; crate::group_hashing::EXTENSION_DEGREE],
         T,
     ) {
         convert_slice_to_curve_point(&self.inputs[Inputs::Digest.range()])

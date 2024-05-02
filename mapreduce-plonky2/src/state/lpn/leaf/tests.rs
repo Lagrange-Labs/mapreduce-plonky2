@@ -3,6 +3,7 @@
 use std::array;
 
 use ethers::types::Address;
+use mp2_test::circuit::{run_circuit, UserCircuit};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::PrimeField64},
     hash::{
@@ -21,7 +22,6 @@ use plonky2::{
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 
 use crate::{
-    circuit::{test::run_circuit, UserCircuit},
     state::lpn::state_leaf_hash,
     state::{BlockLinkingInputs, StateInputs},
 };

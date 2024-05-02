@@ -250,20 +250,19 @@ mod tests {
     use super::*;
     use crate::{
         array::{Array, Vector, VectorWire},
-        benches::init_logging,
-        circuit::{test::run_circuit, UserCircuit},
-        eth::{
-            left_pad,
-            test::{get_mainnet_url, get_sepolia_url},
-            ProofQuery, StorageSlot,
-        },
-        mpt_sequential::{test::visit_proof, MAX_LEAF_VALUE_LEN},
+        eth::{left_pad, ProofQuery, StorageSlot},
+        mpt_sequential::{visit_proof, MAX_LEAF_VALUE_LEN},
         utils::{convert_u8_targets_to_u32, convert_u8_to_u32_slice, keccak256},
     };
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use ethers::{
         providers::{Http, Provider},
         types::{Address, H160},
+    };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        eth::{get_mainnet_url, get_sepolia_url},
+        log::init_logging,
     };
     use plonky2::{
         field::types::Field,

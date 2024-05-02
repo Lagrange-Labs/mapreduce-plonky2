@@ -6,6 +6,7 @@ use std::{
 };
 
 use itertools::Itertools;
+use mp2_test::circuit::{run_circuit, UserCircuit};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{
@@ -27,7 +28,6 @@ use rand::{rngs::StdRng, RngCore, SeedableRng};
 
 use crate::{
     api::ProofWithVK,
-    circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
     group_hashing::map_to_curve_point,
     storage::lpn::{intermediate_node_hash, leaf_hash_for_mapping},

@@ -13,7 +13,7 @@ type H = PoseidonHash;
 type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
 
 /// Hash the concatenation of the two provided 4-wide inputs, swapping them if specified.
-pub(crate) fn hash_maybe_swap<F, const D: usize>(
+pub fn hash_maybe_swap<F, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     inputs: &[[Target; NUM_HASH_OUT_ELTS]; 2],
     do_swap: BoolTarget,
@@ -53,14 +53,13 @@ where
 
 #[cfg(test)]
 mod tests {
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,
         hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::config::PoseidonGoldilocksConfig,
     };
-
-    use crate::circuit::{test::run_circuit, UserCircuit};
 
     use super::*;
 

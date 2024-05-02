@@ -1,6 +1,5 @@
 use crate::{
     block::empty_merkle_root,
-    circuit::test::run_circuit,
     keccak::PACKED_HASH_LEN,
     query2::{
         revelation::RevelationPublicInputs, state::tests::run_state_circuit_with_slot_and_addresses,
@@ -10,6 +9,7 @@ use crate::{
 };
 use ethers::types::Address;
 use itertools::Itertools;
+use mp2_test::circuit::{run_circuit, UserCircuit};
 use plonky2::{
     field::{
         goldilocks_field::GoldilocksField,
@@ -26,7 +26,7 @@ use plonky2::{
     },
 };
 
-use crate::{block::public_inputs::PublicInputs as BlockDBPublicInputs, circuit::UserCircuit};
+use crate::block::public_inputs::PublicInputs as BlockDBPublicInputs;
 
 use super::{
     block::{

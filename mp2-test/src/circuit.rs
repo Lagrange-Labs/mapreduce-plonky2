@@ -1,5 +1,3 @@
-use crate::utils::verify_proof_tuple;
-use crate::ProofTuple;
 use anyhow::Result;
 use hashbrown::HashMap;
 use log::{debug, info};
@@ -16,10 +14,23 @@ use plonky2::{
     iop::witness::PartialWitness,
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitData, CommonCircuitData, VerifierCircuitTarget},
+        circuit_data::{
+            CircuitData, CommonCircuitData, VerifierCircuitData, VerifierCircuitTarget,
+            VerifierOnlyCircuitData,
+        },
         config::{AlgebraicHasher, GenericConfig},
     },
 };
+use std::fmt::Debug;
+
+/// Bundle containing the raw proof, the verification key, and some common data
+/// necessary for prover and verifier.
+/// TODO: This is a temporary tuple. We need to save the verification key separately.
+type ProofTuple<F, C, const D: usize> = (
+    ProofWithPublicInputs<F, C, D>,
+    VerifierOnlyCircuitData<C, D>,
+    CommonCircuitData<F, D>,
+);
 
 /// Simple trait defining the main utilities method to define circuits almost
 /// as gadgets / library calls.
@@ -114,8 +125,7 @@ where
     base_common: CommonCircuitData<F, D>,
     /// CircuitData of this circuit
     circuit_data: CircuitData<F, CC, D>,
-    #[cfg(test)]
-    pub(crate) num_gates: usize,
+    pub num_gates: usize,
 }
 
 /// The number of elements added to public inputs list when adding a verifier data as public
@@ -181,7 +191,6 @@ where
             user_wires: wires,
             base_common: cd,
             circuit_data: cyclic_data,
-            #[cfg(test)]
             num_gates,
         }
     }
@@ -256,11 +265,11 @@ where
             &self.circuit_data.common.clone(),
         )?;
         debug!("[+] Verifying proof");
-        verify_proof_tuple(&(
-            proof.clone(),
-            self.circuit_data.verifier_only.clone(),
-            self.circuit_data.common.clone(),
-        ))
+        let vcd = VerifierCircuitData {
+            verifier_only: self.circuit_data.verifier_only.clone(),
+            common: self.circuit_data.common.clone(),
+        };
+        vcd.verify(proof.clone())
     }
     fn build_first_proof(padder: Padder<F, D>) -> CommonCircuitData<F, D> {
         let config = CircuitConfig::standard_recursion_config();
@@ -325,55 +334,36 @@ where
     }
 }
 
-#[cfg(test)]
-pub(crate) mod test {
-    use std::fmt::Debug;
-
-    use plonky2::{
-        field::extension::Extendable,
-        hash::hash_types::RichField,
-        iop::witness::PartialWitness,
-        plonk::{
-            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
-            proof::ProofWithPublicInputs,
-        },
+/// Proves and verifies the provided circuit instance.
+pub fn run_circuit<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    C: GenericConfig<D, F = F>,
+    U: UserCircuit<F, D> + Debug,
+>(
+    u: U,
+) -> ProofWithPublicInputs<F, C, D> {
+    let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+    let mut pw = PartialWitness::new();
+    // small hack to print the name of the circuit being generated
+    println!(
+        "[+] Building circuit data with circuit {:?}...",
+        &format!("{:?}", u)[0..20]
+    );
+    let now = std::time::Instant::now();
+    let wires = U::build(&mut b);
+    let circuit_data = b.build::<C>();
+    println!("[+] Circuit data built in {:?}s", now.elapsed().as_secs());
+    println!("[+] Generating a proof ... ");
+    let now = std::time::Instant::now();
+    u.prove(&mut pw, &wires);
+    let proof = circuit_data.prove(pw).expect("invalid proof");
+    println!("[+] Proof generated in {:?}s", now.elapsed().as_secs());
+    let vcd = VerifierCircuitData {
+        verifier_only: circuit_data.verifier_only,
+        common: circuit_data.common,
     };
+    vcd.verify(proof.clone()).expect("failed to verify proof");
 
-    use crate::utils::verify_proof_tuple;
-
-    use super::UserCircuit;
-
-    /// Proves and verifies the provided circuit instance.
-    pub(crate) fn run_circuit<
-        F: RichField + Extendable<D>,
-        const D: usize,
-        C: GenericConfig<D, F = F>,
-        U: UserCircuit<F, D> + Debug,
-    >(
-        u: U,
-    ) -> ProofWithPublicInputs<F, C, D> {
-        let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-        let mut pw = PartialWitness::new();
-        // small hack to print the name of the circuit being generated
-        println!(
-            "[+] Building circuit data with circuit {:?}...",
-            &format!("{:?}", u)[0..20]
-        );
-        let now = std::time::Instant::now();
-        let wires = U::build(&mut b);
-        let circuit_data = b.build::<C>();
-        println!("[+] Circuit data built in {:?}s", now.elapsed().as_secs());
-        println!("[+] Generating a proof ... ");
-        let now = std::time::Instant::now();
-        u.prove(&mut pw, &wires);
-        let proof = circuit_data.prove(pw).expect("invalid proof");
-        println!("[+] Proof generated in {:?}s", now.elapsed().as_secs());
-        verify_proof_tuple(&(
-            proof.clone(),
-            circuit_data.verifier_only,
-            circuit_data.common,
-        ))
-        .unwrap();
-        proof
-    }
+    proof
 }

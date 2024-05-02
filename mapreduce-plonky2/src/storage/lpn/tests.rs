@@ -1,5 +1,6 @@
 use std::ops::Add;
 
+use mp2_test::circuit::{run_circuit, UserCircuit};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::HashOut,
@@ -15,7 +16,6 @@ use plonky2::{
 };
 
 use crate::{
-    circuit::{test::run_circuit, UserCircuit},
     eth::left_pad32,
     storage::lpn::{intermediate_node_hash, leaf_digest_for_mapping, leaf_hash_for_mapping},
 };

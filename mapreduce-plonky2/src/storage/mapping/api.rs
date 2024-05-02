@@ -369,6 +369,7 @@ impl PublicParameters {
 #[cfg(test)]
 mod test {
     use eth_trie::{EthTrie, MemoryDB, Trie};
+    use mp2_test::{mpt_sequential::generate_random_storage_mpt, utils::random_vector};
     use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
     use plonky2_ecgfp5::curve::curve::Point;
     use serial_test::serial;
@@ -376,12 +377,8 @@ mod test {
 
     use super::*;
     use crate::{
-        api::lpn_storage::leaf_digest_for_mapping,
-        eth::StorageSlot,
-        mpt_sequential::{bytes_to_nibbles, test::generate_random_storage_mpt},
-        storage::key::MappingSlot,
-        types::ADDRESS_LEN,
-        utils::test::random_vector,
+        api::lpn_storage::leaf_digest_for_mapping, eth::StorageSlot,
+        mpt_sequential::bytes_to_nibbles, storage::key::MappingSlot, types::ADDRESS_LEN,
     };
 
     struct TestData {

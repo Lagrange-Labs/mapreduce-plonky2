@@ -8,6 +8,7 @@ use crate::{
     api::{default_config, deserialize_proof, serialize_proof, verify_proof_fixed_circuit},
     mpt_sequential::PAD_LEN,
     storage::PublicInputs as StorageInputs,
+    types::MAX_BLOCK_LEN,
 };
 use account::{Account, AccountInputsWires};
 use anyhow::Result;
@@ -151,9 +152,6 @@ const D: usize = crate::api::D;
 const MAX_DEPTH_TRIE: usize = 9;
 // 16*32 hashes + 16 RLP headers associated + 1 empty RLP headers (last slot) + (1 + 2) list RLP header
 const MAX_NODE_LEN: usize = 532;
-// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
-// since it still has to do 5 rounds in 622 or 650.
-pub(crate) const MAX_BLOCK_LEN: usize = 650;
 const NUMBER_LEN: usize = SEPOLIA_NUMBER_LEN;
 
 #[derive(Serialize, Deserialize)]
@@ -245,9 +243,7 @@ mod tests {
     use super::*;
     use crate::{
         api::tests::TestDummyCircuit,
-        benches::init_logging,
-        circuit::{test::run_circuit, UserCircuit},
-        eth::{test::get_sepolia_url, BlockUtil, ProofQuery, RLPBlock},
+        eth::{BlockUtil, ProofQuery, RLPBlock},
         keccak::{OutputHash, HASH_LEN},
         utils::{convert_u8_slice_to_u32_fields, convert_u8_to_u32_slice, keccak256},
     };
@@ -256,6 +252,11 @@ mod tests {
     use ethers::{
         providers::{Http, Middleware, Provider},
         types::{Address, Block, H160, H256, U64},
+    };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        eth::get_sepolia_url,
+        log::init_logging,
     };
     use plonky2::{
         field::types::Field,

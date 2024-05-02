@@ -120,6 +120,10 @@ mod test {
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
     use plonky2::field::types::Field;
     use plonky2::{
         field::goldilocks_field::GoldilocksField,
@@ -131,14 +135,10 @@ mod test {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::circuit::test::run_circuit;
     use crate::rlp::MAX_KEY_NIBBLE_LEN;
     use crate::storage::mapping::extension::MAX_EXTENSION_NODE_LEN;
     use crate::utils::{convert_u8_to_u32_slice, keccak256};
-    use crate::{
-        circuit::UserCircuit, group_hashing::map_to_curve_point,
-        storage::mapping::public_inputs::PublicInputs, utils::test::random_vector,
-    };
+    use crate::{group_hashing::map_to_curve_point, storage::mapping::public_inputs::PublicInputs};
 
     use super::ExtensionNodeCircuit;
     const D: usize = 2;

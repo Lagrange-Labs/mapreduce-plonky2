@@ -5,7 +5,8 @@ use groth16_framework::{
     test_utils::{save_plonky2_proof_pis, test_groth16_proving_and_verification},
     C, D, F,
 };
-use mapreduce_plonky2::{api::serialize_proof, group_hashing::CircuitBuilderGroupHashing};
+use mapreduce_plonky2::api::serialize_proof;
+use mp2_common::group_hashing::CircuitBuilderGroupHashing;
 use plonky2::{
     field::types::Field,
     iop::{

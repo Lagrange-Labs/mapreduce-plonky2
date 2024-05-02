@@ -277,10 +277,10 @@ mod test {
     use super::{InputData, KeccakCircuit, KeccakWires};
     use crate::{
         array::{Array, Vector, VectorWire},
-        circuit::{test::run_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit},
         keccak::{compute_size_with_padding, ByteKeccakWires, OutputByteHash, HASH_LEN},
         utils::{keccak256, read_le_u32},
     };
+    use mp2_test::circuit::{run_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit};
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,

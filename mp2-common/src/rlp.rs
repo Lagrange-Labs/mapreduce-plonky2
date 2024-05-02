@@ -350,6 +350,7 @@ mod tests {
     use anyhow::Result;
 
     use eth_trie::{Nibbles, Trie};
+    use mp2_test::mpt_sequential::generate_random_storage_mpt;
     use plonky2::field::extension::Extendable;
     use plonky2::field::types::Field;
     use plonky2::hash::hash_types::RichField;
@@ -360,7 +361,6 @@ mod tests {
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
     use crate::array::Array;
-    use crate::mpt_sequential::test::generate_random_storage_mpt;
     use crate::rlp::{
         decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, MAX_ENC_KEY_LEN,
         MAX_LEN_BYTES,

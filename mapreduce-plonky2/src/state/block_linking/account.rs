@@ -206,6 +206,11 @@ mod test {
         providers::{Http, Middleware, Provider},
         types::{Address, BlockId, BlockNumber, H256},
     };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::random_vector,
+    };
     use plonky2::{
         field::types::Field,
         iop::{
@@ -220,15 +225,11 @@ mod test {
     use serial_test::serial;
 
     use crate::{
-        benches::init_logging,
-        circuit::{test::run_circuit, UserCircuit},
         eth::ProofQuery,
         mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
         state::block_linking::block::SEPOLIA_NUMBER_LEN,
         storage::PublicInputs as StorageInputs,
-        utils::{
-            convert_u8_slice_to_u32_fields, find_index_subvector, keccak256, test::random_vector,
-        },
+        utils::{convert_u8_slice_to_u32_fields, find_index_subvector, keccak256},
     };
 
     const D: usize = 2;

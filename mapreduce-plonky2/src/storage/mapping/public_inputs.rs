@@ -166,6 +166,10 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
 #[cfg(test)]
 mod test {
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
     use plonky2::field::types::Field;
     use plonky2::{
         iop::{
@@ -183,11 +187,9 @@ mod test {
 
     use crate::{
         array::Array,
-        circuit::{test::run_circuit, UserCircuit},
         group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
         keccak::PACKED_HASH_LEN,
         mpt_sequential::MPTKeyWire,
-        utils::test::random_vector,
     };
 
     use super::PublicInputs;

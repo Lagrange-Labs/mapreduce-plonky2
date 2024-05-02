@@ -185,6 +185,7 @@ impl<const MIN_NUMBER_LEN: usize> BlockHeader<MIN_NUMBER_LEN> {
 mod test {
     use anyhow::Result;
     use ethers::providers::{Http, Middleware, Provider};
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -198,7 +199,6 @@ mod test {
 
     use crate::{
         array::Array,
-        circuit::{test::run_circuit, UserCircuit},
         eth::BlockUtil,
         keccak::HASH_LEN,
         mpt_sequential::PAD_LEN,

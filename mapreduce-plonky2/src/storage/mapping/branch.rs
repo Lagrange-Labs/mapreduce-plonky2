@@ -211,6 +211,10 @@ mod test {
     use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
     use plonky2::field::types::Field;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
@@ -220,15 +224,13 @@ mod test {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::circuit::test::run_circuit;
     use crate::mpt_sequential::bytes_to_nibbles;
     use crate::{
-        circuit::UserCircuit,
         group_hashing::map_to_curve_point,
         mpt_sequential::PAD_LEN,
         rlp::MAX_KEY_NIBBLE_LEN,
         storage::mapping::public_inputs::PublicInputs,
-        utils::{convert_u8_to_u32_slice, keccak256, test::random_vector},
+        utils::{convert_u8_to_u32_slice, keccak256},
     };
 
     use super::{BranchCircuit, BranchWires};

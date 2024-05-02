@@ -3,6 +3,7 @@ use crate::{query2::state::CircuitInputsInternal, types::MAPPING_KEY_LEN};
 use std::iter;
 
 use ethers::types::Address;
+use mp2_test::circuit::{run_circuit, UserCircuit};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
@@ -18,7 +19,6 @@ use serial_test::serial;
 
 use crate::{
     array::Array,
-    circuit::{test::run_circuit, UserCircuit},
     query2::{
         block::BlockPublicInputs, storage::public_inputs::PublicInputs as StorageInputs,
         PackedSCAddress,

@@ -4,24 +4,11 @@ use std::io::Write;
 
 mod array_access;
 #[cfg(test)]
-mod merkle_tree;
-#[cfg(test)]
 mod recursion;
-
-/// Sets RUST_LOG=debug and initializes the logger
-/// if it hasn't been enabled already.
-pub(crate) fn init_logging() {
-    if !log_enabled!(Level::Debug) {
-        env::set_var("RUST_LOG", "debug");
-        let _ = env_logger::builder()
-            .format(|buf, record| writeln!(buf, "    {}", record.args()))
-            .try_init();
-        log::set_max_level(LevelFilter::Debug);
-    }
-}
 
 #[cfg(test)]
 mod test {
+    use mp2_test::circuit::UserCircuit;
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -33,7 +20,7 @@ mod test {
     use serde::Serialize;
     use std::time;
 
-    use crate::{circuit::UserCircuit, utils::verify_proof_tuple};
+    use crate::utils::verify_proof_tuple;
 
     #[derive(Serialize, Clone, Debug)]
     pub(crate) struct BenchResult {

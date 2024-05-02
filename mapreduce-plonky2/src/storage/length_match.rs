@@ -229,11 +229,11 @@ impl TryInto<(ProofWithVK, ProofWithPublicInputs<F, C, D>)> for CircuitInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        api::{mapping::api::NUM_IO, tests::TestDummyCircuit},
-        benches::init_logging,
-        circuit::{test::run_circuit, UserCircuit},
-        utils::test::random_vector,
+    use crate::api::{mapping::api::NUM_IO, tests::TestDummyCircuit};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::random_vector,
     };
     use plonky2::{
         field::types::Field,

@@ -146,7 +146,7 @@ impl BlockData {
     }
 }
 
-pub(crate) trait BlockUtil {
+pub trait BlockUtil {
     fn block_hash(&self) -> Vec<u8> {
         keccak256(&self.rlp())
     }
@@ -238,13 +238,13 @@ pub fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     }
 }
 
-pub(crate) struct ProofQuery {
-    pub(crate) contract: Address,
+pub struct ProofQuery {
+    pub contract: Address,
     pub(crate) slot: StorageSlot,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum StorageSlot {
+pub enum StorageSlot {
     /// simple storage slot like a uin256 etc that fits in 32bytes
     /// Argument is the slot location in the contract
     Simple(usize),
@@ -363,36 +363,18 @@ impl ProofQuery {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
-
+mod test {
     use std::{env, str::FromStr};
 
     use ethers::types::H256;
     use hashbrown::HashMap;
+    use mp2_test::eth::{get_mainnet_url, get_sepolia_url};
     use rand::{thread_rng, Rng};
 
     use crate::{
-        state::block_linking::MAX_BLOCK_LEN,
+        types::MAX_BLOCK_LEN,
         utils::{convert_u8_to_u32_slice, find_index_subvector},
     };
-
-    pub fn get_sepolia_url() -> String {
-        #[cfg(feature = "ci")]
-        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
-        #[cfg(not(feature = "ci"))]
-        let url = env::var("CI_SEPOLIA")
-            .or(Ok("https://ethereum-sepolia-rpc.publicnode.com".to_string()))
-            .unwrap();
-        url.to_string()
-    }
-
-    pub fn get_mainnet_url() -> String {
-        #[cfg(feature = "ci")]
-        let url = env::var("CI_ETH").expect("CI_ETH env var not set");
-        #[cfg(not(feature = "ci"))]
-        let url = "https://eth.llamarpc.com";
-        url.to_string()
-    }
 
     #[tokio::test]
     #[ignore]

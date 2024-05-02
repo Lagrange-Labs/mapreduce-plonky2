@@ -137,6 +137,7 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
 mod tests {
     use std::array;
 
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::{goldilocks_field::GoldilocksField, types::Field},
         hash::{
@@ -145,8 +146,6 @@ mod tests {
         plonk::config::PoseidonGoldilocksConfig,
     };
     use rand::{rngs::StdRng, RngCore, SeedableRng};
-
-    use crate::circuit::{test::run_circuit, UserCircuit};
 
     use super::*;
 

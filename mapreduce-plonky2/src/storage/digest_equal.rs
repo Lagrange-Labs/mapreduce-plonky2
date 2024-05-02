@@ -10,7 +10,7 @@ use crate::{
     api::{
         default_config, deserialize_proof, serialize_proof, verify_proof_fixed_circuit, ProofWithVK,
     },
-    group_hashing::{CircuitBuilderGroupHashing, N},
+    group_hashing::{CircuitBuilderGroupHashing, EXTENSION_DEGREE},
     keccak::{OutputHash, PACKED_HASH_LEN},
     utils::{
         convert_point_to_curve_target, convert_slice_to_curve_point, convert_u32_fields_to_u8_vec,
@@ -100,7 +100,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     /// `M` Storage slot of the mapping
     /// `S` Storage slot of the variable holding the length
     pub(crate) const D_IDX: usize = 0;
-    pub(crate) const C1_IDX: usize = Self::D_IDX + 2 * N + 1; // 2*N+1 for curve target
+    pub(crate) const C1_IDX: usize = Self::D_IDX + 2 * EXTENSION_DEGREE + 1; // 2*EXTENSION_DEGREE+1 for curve target
     pub(crate) const C2_IDX: usize = Self::C1_IDX + PACKED_HASH_LEN;
     pub(crate) const M_IDX: usize = Self::C2_IDX + NUM_HASH_OUT_ELTS;
     pub(crate) const S_IDX: usize = Self::M_IDX + 1;
@@ -263,15 +263,18 @@ mod tests {
     use super::*;
     use crate::{
         api::tests::TestDummyCircuit,
-        benches::init_logging,
-        circuit::{test::run_circuit, UserCircuit},
         eth::{left_pad32, ProofQuery},
         storage::{self, key::MappingSlot},
-        utils::{convert_u8_to_u32_slice, keccak256, test::random_vector},
+        utils::{convert_u8_to_u32_slice, keccak256},
     };
     use ethers::{
         providers::{Http, Provider},
         types::Address,
+    };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::random_vector,
     };
     use plonky2::{
         field::types::{Field, Sample},
@@ -406,11 +409,12 @@ mod tests {
             .collect();
 
         // Set the digest.
-        pi[MPTPublicInputs::<F>::D_IDX..MPTPublicInputs::<F>::D_IDX + N]
+        pi[MPTPublicInputs::<F>::D_IDX..MPTPublicInputs::<F>::D_IDX + EXTENSION_DEGREE]
             .copy_from_slice(&digest.x.0);
-        pi[MPTPublicInputs::<F>::D_IDX + N..MPTPublicInputs::<F>::D_IDX + 2 * N]
+        pi[MPTPublicInputs::<F>::D_IDX + EXTENSION_DEGREE
+            ..MPTPublicInputs::<F>::D_IDX + 2 * EXTENSION_DEGREE]
             .copy_from_slice(&digest.y.0);
-        pi[MPTPublicInputs::<F>::D_IDX + 2 * N] = F::from_bool(digest.is_inf);
+        pi[MPTPublicInputs::<F>::D_IDX + 2 * EXTENSION_DEGREE] = F::from_bool(digest.is_inf);
 
         pi
     }
@@ -422,11 +426,12 @@ mod tests {
             .collect();
 
         // Set the digest.
-        pi[MerklePublicInputs::<F>::D_IDX..MerklePublicInputs::<F>::D_IDX + N]
+        pi[MerklePublicInputs::<F>::D_IDX..MerklePublicInputs::<F>::D_IDX + EXTENSION_DEGREE]
             .copy_from_slice(&digest.x.0);
-        pi[MerklePublicInputs::<F>::D_IDX + N..MerklePublicInputs::<F>::D_IDX + 2 * N]
+        pi[MerklePublicInputs::<F>::D_IDX + EXTENSION_DEGREE
+            ..MerklePublicInputs::<F>::D_IDX + 2 * EXTENSION_DEGREE]
             .copy_from_slice(&digest.y.0);
-        pi[MerklePublicInputs::<F>::D_IDX + 2 * N] = F::from_bool(digest.is_inf);
+        pi[MerklePublicInputs::<F>::D_IDX + 2 * EXTENSION_DEGREE] = F::from_bool(digest.is_inf);
 
         pi
     }
