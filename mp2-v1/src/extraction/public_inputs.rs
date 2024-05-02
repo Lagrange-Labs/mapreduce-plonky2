@@ -4,7 +4,7 @@ use mp2_common::{
     array::Array,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::MPTKeyWire,
-    public_inputs::{PublicInputRange, PublicInputTargets},
+    public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
@@ -41,7 +41,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) proof_inputs: &'a [T],
 }
 
-impl<'a> PublicInputTargets for PublicInputs<'a, Target> {
+impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     const RANGES: &'static [PublicInputRange] =
         &[H_RANGE, K_RANGE, T_RANGE, DV_RANGE, DM_RANGE, N_RANGE];
 }
@@ -55,17 +55,11 @@ impl<'a> PublicInputs<'a, Target> {
         dm: CurveTarget,
         n: Target,
     ) {
-        Self::register_with_check(
-            cb,
-            &[
-                &|cb| h.register_as_public_input(cb),
-                &|cb| k.key.register_as_public_input(cb),
-                &|cb| cb.register_public_input(k.pointer),
-                &|cb| cb.register_curve_public_input(dv),
-                &|cb| cb.register_curve_public_input(dm),
-                &|cb| cb.register_public_input(n),
-            ],
-        );
+        h.register_as_public_input(cb);
+        k.register_as_input(cb);
+        cb.register_curve_public_input(dv);
+        cb.register_curve_public_input(dm);
+        cb.register_public_input(n);
     }
 
     /// Return the merkle hash of the subtree this proof has processed.
