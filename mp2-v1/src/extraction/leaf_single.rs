@@ -7,10 +7,13 @@ use super::{
 };
 use mp2_common::{
     array::{Array, Vector, VectorWire},
+    group_hashing::CircuitBuilderGroupHashing,
     keccak::{InputData, KeccakCircuit, KeccakWires},
-    mpt_sequential::{left_pad_leaf_value, MPTNodeWires, MAX_LEAF_VALUE_LEN, PAD_LEN},
+    mpt_sequential::{
+        utils::left_pad_leaf_value, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN,
+    },
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
-    utils::pack_and_compute_digest,
+    utils::convert_u8_targets_to_u32,
 };
 use plonky2::{
     hash::poseidon::PoseidonHash,
@@ -31,6 +34,7 @@ where
     slot: SimpleSlotWires,
     value: Array<Target, MAPPING_LEAF_VALUE_LEN>,
 }
+
 impl<const N: usize> LeafSingleWires<N>
 where
     [(); PAD_LEN(N)]:,
@@ -52,15 +56,14 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     pub fn build(b: &mut CBuilder) -> LeafSingleWires<NODE_LEN> {
-        let zero = b.zero();
-        let one = b.one();
-        let tru = b._true();
-
         let slot = SimpleSlot::build(b);
 
         // Build the node wires.
         let wires =
-            MPTNodeWires::<NODE_LEN, MAX_LEAF_VALUE_LEN>::build_and_advance_key(b, &slot.mpt_key);
+            MPTLeafOrExtensionNode::build_and_advance_key::<_, 2, NODE_LEN, MAX_LEAF_VALUE_LEN>(
+                b,
+                &slot.mpt_key,
+            );
         let node = wires.node;
         let root = wires.root;
 
@@ -77,11 +80,21 @@ where
             .into_iter()
             .chain(iter::once(slot.slot))
             .collect();
-        let metadata_digest = pack_and_compute_digest(b, &inputs);
+        assert_eq!(inputs.len(), 5);
+
+        let metadata_digest = b.map_to_curve_point(&inputs);
 
         // Compute the values digest - D(identifier || value).
-        let inputs: Vec<_> = identifier.into_iter().chain(value.arr).collect();
-        let values_digest = pack_and_compute_digest(b, &inputs);
+        assert_eq!(value.arr.len(), MAPPING_LEAF_VALUE_LEN);
+        let packed_value: Vec<_> = convert_u8_targets_to_u32(b, &value.arr)
+            .into_iter()
+            .map(|t| t.0)
+            .collect();
+        let inputs: Vec<_> = identifier.into_iter().chain(packed_value).collect();
+        let values_digest = b.map_to_curve_point(&inputs);
+
+        // Only one leaf in this node.
+        let n = b.one();
 
         // Register the public inputs.
         PublicInputs::register(
@@ -90,7 +103,7 @@ where
             &wires.key,
             values_digest,
             metadata_digest,
-            one,
+            n,
         );
 
         LeafSingleWires {
@@ -138,5 +151,145 @@ impl CircuitLogicWires<GFp, 2, 0> for LeafSingleWires<MAX_LEAF_NODE_LEN> {
     ) -> anyhow::Result<()> {
         inputs.assign(pw, self);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eth_trie::{Nibbles, Trie};
+    use mp2_common::{
+        array::Array,
+        eth::{left_pad32, StorageSlot},
+        group_hashing::map_to_curve_point,
+        mpt_sequential::utils::bytes_to_nibbles,
+        rlp::MAX_KEY_NIBBLE_LEN,
+        utils::{convert_u8_to_u32_slice, keccak256},
+    };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit, C, D, F},
+        mpt_sequential::generate_random_storage_mpt,
+        utils::random_vector,
+    };
+    use plonky2::{
+        field::types::Field,
+        iop::{target::Target, witness::PartialWitness},
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            config::{GenericConfig, Hasher, PoseidonGoldilocksConfig},
+        },
+    };
+
+    #[derive(Clone, Debug)]
+    struct TestLeafSingleCircuit<const NODE_LEN: usize> {
+        c: LeafSingleCircuit<NODE_LEN>,
+        exp_value: Vec<u8>,
+    }
+
+    impl<const NODE_LEN: usize> UserCircuit<F, D> for TestLeafSingleCircuit<NODE_LEN>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+    {
+        // Leaf wires + expected extracted value
+        type Wires = (
+            LeafSingleWires<NODE_LEN>,
+            Array<Target, MAPPING_LEAF_VALUE_LEN>,
+        );
+
+        fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let exp_value = Array::<Target, MAPPING_LEAF_VALUE_LEN>::new(b);
+
+            let leaf_wires = LeafSingleCircuit::<NODE_LEN>::build(b);
+            leaf_wires.value.enforce_equal(b, &exp_value);
+
+            (leaf_wires, exp_value)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.c.assign(pw, &wires.0);
+            wires
+                .1
+                .assign_bytes(pw, &self.exp_value.clone().try_into().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_values_extraction_leaf_single_circuit() {
+        const NODE_LEN: usize = 80;
+
+        let simple_slot = 2_u8;
+        let slot = StorageSlot::Simple(simple_slot as usize);
+
+        let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
+        let value = random_vector(MAPPING_LEAF_VALUE_LEN);
+        let encoded_value: Vec<u8> = rlp::encode(&value).to_vec();
+        trie.insert(&slot.mpt_key(), &encoded_value).unwrap();
+        trie.root_hash().unwrap();
+
+        let proof = trie.get_proof(&slot.mpt_key_vec()).unwrap();
+        let node = proof.last().unwrap().clone();
+
+        let c = LeafSingleCircuit::<NODE_LEN> {
+            node: node.clone(),
+            slot: SimpleSlot::new(simple_slot),
+        };
+        let test_circuit = TestLeafSingleCircuit {
+            c,
+            exp_value: value.clone(),
+        };
+
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
+        let pi = PublicInputs::new(&proof.public_inputs);
+
+        {
+            let exp_hash = keccak256(&node);
+            let exp_hash = convert_u8_to_u32_slice(&exp_hash);
+            assert_eq!(pi.root_hash(), exp_hash);
+        }
+        {
+            let (key, ptr) = pi.mpt_key_info();
+
+            let exp_key = slot.mpt_key_vec();
+            let exp_key: Vec<_> = bytes_to_nibbles(&exp_key)
+                .into_iter()
+                .map(F::from_canonical_u8)
+                .collect();
+            assert_eq!(key, exp_key);
+
+            let leaf_key: Vec<Vec<u8>> = rlp::decode_list(&node);
+            let nib = Nibbles::from_compact(&leaf_key[0]);
+            let exp_ptr = F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1 - nib.nibbles().len());
+            assert_eq!(exp_ptr, ptr);
+        }
+        // identifier = Poseidon(slot as u8)
+        let identifier = PoseidonHash::hash_no_pad(&[GFp::from_canonical_u8(simple_slot)]).elements;
+        // Check values digest
+        {
+            assert!(value.len() <= MAPPING_LEAF_VALUE_LEN);
+
+            let value = left_pad32(&value);
+            let packed_value: Vec<_> = convert_u8_to_u32_slice(&value)
+                .into_iter()
+                .map(GFp::from_canonical_u32)
+                .collect();
+
+            // values_digest = D(identifier || value)
+            let inputs: Vec<_> = identifier.into_iter().chain(packed_value).collect();
+            let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
+
+            assert_eq!(pi.values_digest(), exp_digest);
+        }
+        // Check metadata digest
+        {
+            // metadata_digest = D(identifier || slot as u8)
+            let inputs: Vec<_> = identifier
+                .into_iter()
+                .chain(iter::once(GFp::from_canonical_u8(simple_slot)))
+                .collect();
+            let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
+
+            assert_eq!(pi.metadata_digest(), exp_digest);
+        }
+        assert_eq!(pi.n(), F::ONE);
     }
 }

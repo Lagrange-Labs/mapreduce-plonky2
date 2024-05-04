@@ -378,7 +378,7 @@ mod test {
     use super::*;
     use crate::{
         api::lpn_storage::leaf_digest_for_mapping, eth::StorageSlot,
-        mpt_sequential::bytes_to_nibbles, storage::key::MappingSlot, types::ADDRESS_LEN,
+        mpt_sequential::utils::bytes_to_nibbles, storage::key::MappingSlot, types::ADDRESS_LEN,
     };
 
     struct TestData {

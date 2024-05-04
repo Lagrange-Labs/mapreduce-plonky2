@@ -251,7 +251,7 @@ mod tests {
     use crate::{
         array::{Array, Vector, VectorWire},
         eth::{left_pad, ProofQuery, StorageSlot},
-        mpt_sequential::{visit_proof, MAX_LEAF_VALUE_LEN},
+        mpt_sequential::{utils::visit_proof, MAX_LEAF_VALUE_LEN},
         utils::{convert_u8_targets_to_u32, convert_u8_to_u32_slice, keccak256},
     };
     use eth_trie::{EthTrie, MemoryDB, Trie};

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::{array::from_fn as create_array, sync::Arc};
 
-use crate::{mpt_sequential::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
+use crate::{mpt_sequential::utils::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
 /// bad transactions, so we only compute over valid transactions.
 pub struct TxAndReceipt(Transaction, TransactionReceipt);

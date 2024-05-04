@@ -5,14 +5,13 @@ use crate::{
         PACKED_HASH_LEN,
     },
     rlp::{
-        decode_compact_encoding, decode_fixed_list, short_string_len, RlpHeader, RlpList,
-        MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN,
+        decode_compact_encoding, decode_fixed_list, RlpHeader, RlpList, MAX_ITEMS_IN_LIST,
+        MAX_KEY_NIBBLE_LEN,
     },
     utils::{convert_u8_targets_to_u32, find_index_subvector, keccak256},
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
-use eth_trie::Nibbles;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -28,6 +27,14 @@ use recursion_framework::serialization::deserialize_long_array;
 use recursion_framework::serialization::serialize_array;
 use recursion_framework::serialization::serialize_long_array;
 use serde::{Deserialize, Serialize};
+use utils::bytes_to_nibbles;
+
+mod key;
+mod leaf_or_extension;
+pub mod utils;
+
+pub use key::MPTKeyWire;
+pub use leaf_or_extension::{MPTLeafOrExtensionNode, MPTLeafOrExtensionWires};
 
 /// Number of items in the RLP encoded list in a leaf node.
 const NB_ITEMS_LEAF: usize = 2;
@@ -384,295 +391,6 @@ where
     }
 }
 
-/// A structure that keeps a running pointer to the portion of the key the circuit
-/// already has proven.
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub struct MPTKeyWire {
-    /// Represents the full key of the value(s) we're looking at in the MPT trie.
-    pub key: Array<Target, MAX_KEY_NIBBLE_LEN>,
-    /// Represents which portion of the key we already processed. The pointer
-    /// goes _backwards_ since circuit starts proving from the leaf up to the root.
-    /// i.e. pointer must be equal to F::NEG_ONE when we reach the root.
-    pub pointer: Target,
-}
-
-impl MPTKeyWire {
-    pub fn current_nibble<F: RichField + Extendable<D>, const D: usize>(
-        &self,
-        b: &mut CircuitBuilder<F, D>,
-    ) -> Target {
-        self.key.value_at(b, self.pointer)
-    }
-
-    /// move the pointer to the next nibble. In this implementation it is the
-    /// _previous_ nibble since we are proving from bottom to up in the trie.
-    pub fn advance_by<F: RichField + Extendable<D>, const D: usize>(
-        &self,
-        b: &mut CircuitBuilder<F, D>,
-        len: Target,
-    ) -> Self {
-        Self {
-            key: self.key.clone(),
-            pointer: b.sub(self.pointer, len),
-        }
-    }
-
-    /// Returns self if condition is true, otherwise returns other.
-    /// NOTE: it is expected the two keys are the same, it always return
-    /// the key from `self`. Only the pointer is selected.
-    pub fn select<F: RichField + Extendable<D>, const D: usize>(
-        &self,
-        b: &mut CircuitBuilder<F, D>,
-        condition: BoolTarget,
-        other: &Self,
-    ) -> Self {
-        Self {
-            key: self.key.clone(),
-            pointer: b.select(condition, self.pointer, other.pointer),
-        }
-    }
-
-    /// Create a new fresh key wire
-    pub fn new<F: RichField + Extendable<D>, const D: usize>(b: &mut CircuitBuilder<F, D>) -> Self {
-        Self {
-            key: Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b),
-            pointer: b.add_virtual_target(),
-        }
-    }
-    /// Assign the key wire to the circuit.
-    pub fn assign<F: RichField>(
-        &self,
-        p: &mut PartialWitness<F>,
-        key_nibbles: &[u8; MAX_KEY_NIBBLE_LEN],
-        ptr: usize,
-    ) {
-        let f_nibbles = create_array(|i| F::from_canonical_u8(key_nibbles[i]));
-        self.key.assign(p, &f_nibbles);
-        p.set_target(self.pointer, F::from_canonical_usize(ptr));
-    }
-
-    /// Proves the prefix of this key and other's key up to pointer, not included,
-    /// are the same and check both pointers are the same.
-    /// i.e. check self.key[0..self.pointer] == other.key[0..other.pointer]
-    /// Note how it's not `0..=self.pointer`, we check up to pointer excluded.
-    pub fn enforce_prefix_equal<F: RichField + Extendable<D>, const D: usize>(
-        &self,
-        b: &mut CircuitBuilder<F, D>,
-        other: &Self,
-    ) {
-        b.connect(self.pointer, other.pointer);
-        self.key.enforce_slice_equals(b, &other.key, self.pointer);
-    }
-    /// Similar to `enforce_prefix_equal` but returns a boolean target instead
-    /// of enforcing the equality.
-    pub fn is_prefix_equal<F: RichField + Extendable<D>, const D: usize>(
-        &self,
-        b: &mut CircuitBuilder<F, D>,
-        other: &Self,
-    ) -> BoolTarget {
-        let ptr_equal = b.is_equal(self.pointer, other.pointer);
-        let key_equal = self.key.is_slice_equals(b, &other.key, self.pointer);
-        b.and(ptr_equal, key_equal)
-    }
-
-    /// Register the key and pointer as public inputs.
-    pub fn register_as_input<F: RichField + Extendable<D>, const D: usize>(
-        &self,
-        b: &mut CircuitBuilder<F, D>,
-    ) {
-        self.key.register_as_public_input(b);
-        b.register_public_input(self.pointer);
-    }
-
-    /// Initialize a new MPTKeyWire from the array of `U32Target`.
-    /// It returns a MPTKeyWire with the pointer set to the last nibble, as in an initial
-    /// case.
-    pub fn init_from_u32_targets<F: RichField + Extendable<D>, const D: usize>(
-        b: &mut CircuitBuilder<F, D>,
-        arr: &Array<U32Target, PACKED_HASH_LEN>,
-    ) -> Self {
-        Self {
-            key: Array {
-                arr: arr
-                    .arr
-                    .iter()
-                    .flat_map(|u32_limb| {
-                        // decompose the `U32Target` in 16 limbs of 2 bits each; the output limbs are already range-checked
-                        // by the `split_le_base` operation
-                        let limbs: [Target; 16] =
-                            b.split_le_base::<4>(u32_limb.0, 16).try_into().unwrap();
-                        // now we need to pack each pair of 2 bit limbs into a nibble, but for each byte we want nibbles to
-                        // be ordered in big-endian
-                        limbs
-                            .chunks(4)
-                            .flat_map(|chunk| {
-                                vec![
-                                    b.mul_const_add(F::from_canonical_u8(4), chunk[3], chunk[2]),
-                                    b.mul_const_add(F::from_canonical_u8(4), chunk[1], chunk[0]),
-                                ]
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .unwrap(),
-            },
-            pointer: b.constant(F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)),
-        }
-    }
-}
-
-/// MPT node related wires that build the node and advance the key
-pub struct MPTNodeWires<const NODE_LEN: usize, const VALUE_LEN: usize>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
-    /// MPT node
-    pub node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
-    /// MPT root
-    pub root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
-    /// New MPT key after advancing the previous key
-    pub key: MPTKeyWire,
-    /// New MPT value
-    pub value: Array<Target, VALUE_LEN>,
-}
-
-impl<const NODE_LEN: usize, const VALUE_LEN: usize> MPTNodeWires<NODE_LEN, VALUE_LEN>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
-    /// Build the MPT node and advance the key.
-    pub fn build_and_advance_key<F: RichField + Extendable<D>, const D: usize>(
-        b: &mut CircuitBuilder<F, D>,
-        prev_key: &MPTKeyWire,
-    ) -> Self
-    where
-        [(); PAD_LEN(NODE_LEN)]:,
-    {
-        let zero = b.zero();
-        let tru = b._true();
-
-        // Build the node and ensure it only includes bytes.
-        let node = VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b);
-        node.assert_bytes(b);
-
-        // Expose the keccak root of this subtree starting at this node.
-        let root = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &node);
-
-        // Advance the key and extract the value (only decode two headers in the case of leaf).
-        let rlp_headers = decode_fixed_list::<_, D, 2>(b, &node.arr.arr, zero);
-        let (key, value, valid) = Circuit::<1, NODE_LEN>::advance_key_leaf_or_extension::<
-            F,
-            D,
-            2,
-            VALUE_LEN,
-        >(b, &node.arr, prev_key, &rlp_headers);
-        b.connect(tru.target, valid.target);
-
-        Self {
-            node,
-            root,
-            key,
-            value,
-        }
-    }
-}
-
-pub fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
-    let mut nibbles = Vec::new();
-    for b in bytes {
-        nibbles.push(b >> 4);
-        nibbles.push(b & 0x0F);
-    }
-    nibbles
-}
-
-pub fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
-    let mut padded = nibbles.to_vec();
-    if padded.len() % 2 == 1 {
-        padded.insert(0, 0);
-    }
-    let mut bytes = Vec::new();
-    for i in 0..nibbles.len() / 2 {
-        bytes.push((nibbles[i * 2] << 4) | (nibbles[i * 2 + 1] & 0x0F));
-    }
-    bytes
-}
-
-/// Left pad the leaf value and return as big-endian.
-pub fn left_pad_leaf_value<
-    F: RichField + Extendable<D>,
-    const D: usize,
-    const VALUE_LEN: usize,
-    const PADDED_LEN: usize,
->(
-    b: &mut CircuitBuilder<F, D>,
-    value: &Array<Target, VALUE_LEN>,
-) -> Array<Target, PADDED_LEN> {
-    // Read the length of the relevant RLP data.
-    let data_len = short_string_len(b, &value[0]);
-
-    // Create vector of only the relevant data - skipping the RLP header and stick with the same encoding of the data but pad_left32.
-    value
-        .take_last::<F, D, PADDED_LEN>()
-        .into_vec(data_len)
-        .normalize_left::<_, _, PADDED_LEN>(b)
-}
-
-pub fn visit_proof(proof: &[Vec<u8>]) {
-    let mut child_hash = vec![];
-    let mut partial_key = vec![];
-    for node in proof.iter() {
-        visit_node(node, &child_hash, &mut partial_key);
-        child_hash = keccak256(node);
-        println!(
-            "\t=> full partial key: hex {:?}",
-            hex::encode(nibbles_to_bytes(&partial_key))
-        );
-    }
-}
-
-pub fn visit_node(node: &[u8], child_hash: &[u8], partial_key: &mut Vec<u8>) {
-    println!("[+] Node ({} bytes) {}", node.len(), hex::encode(node));
-    let node_list: Vec<Vec<u8>> = rlp::decode_list(node);
-    match node_list.len() {
-        2 => {
-            // extension case: verify the hash is present and lookup the key
-            if !child_hash.is_empty() {
-                let _ = find_index_subvector(node, child_hash)
-                    .expect("extension should contain hash of child");
-            }
-            // we don't need to decode the RLP header on top of it, since it is
-            // already done in the decode_list function.
-            let key_nibbles_struct = Nibbles::from_compact(&node_list[0]);
-            let key_nibbles = key_nibbles_struct.nibbles();
-            println!(
-                "\t=> Leaf/Extension node: partial key extracted: {:?}",
-                hex::encode(nibbles_to_bytes(key_nibbles))
-            );
-            partial_key.splice(0..0, key_nibbles.to_vec());
-        }
-        16 | 17 => {
-            // branch case: search the nibble where the hash is present
-            let branch_idx = node_list
-                .iter()
-                .enumerate()
-                .find(|(_, h)| *h == child_hash)
-                .map(|(i, _)| i)
-                .expect("didn't find hash in parent") as u8;
-            println!(
-                "\t=> Branch node: (len branch = {}) partial key (nibble): {:?}",
-                node_list.len(),
-                hex::encode(vec![branch_idx]).pop().unwrap()
-            );
-            partial_key.insert(0, branch_idx);
-        }
-        _ => {
-            panic!("invalid node")
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::array::from_fn as create_array;
@@ -716,8 +434,8 @@ mod test {
     };
 
     use super::{
-        bytes_to_nibbles, nibbles_to_bytes, visit_node, visit_proof, Circuit, InputWires,
-        MPTKeyWire, OutputWires, MAX_LEAF_VALUE_LEN, NB_ITEMS_LEAF, PAD_LEN,
+        utils::{bytes_to_nibbles, nibbles_to_bytes, visit_node, visit_proof},
+        Circuit, InputWires, MPTKeyWire, OutputWires, MAX_LEAF_VALUE_LEN, NB_ITEMS_LEAF, PAD_LEN,
     };
 
     const D: usize = 2;

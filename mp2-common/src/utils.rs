@@ -1,7 +1,8 @@
 use anyhow::Result;
 use itertools::Itertools;
-use plonky2::field::extension::Extendable;
-use plonky2::hash::hash_types::RichField;
+use plonky2::field::{extension::Extendable, types::Field};
+use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField};
+use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -9,13 +10,16 @@ use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher};
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
-use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
+use plonky2_ecgfp5::{
+    curve::curve::Point,
+    gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget},
+};
 use sha3::Digest;
 use sha3::Keccak256;
 
 use crate::{
-    group_hashing::{CircuitBuilderGroupHashing, EXTENSION_DEGREE},
-    types::HashOutput,
+    group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing, EXTENSION_DEGREE},
+    types::{GFp, HashOutput},
     ProofTuple,
 };
 
@@ -268,20 +272,37 @@ pub fn hash_two_to_one<F: RichField, H: Hasher<F>>(
     H::two_to_one(left, right).to_bytes().try_into().unwrap()
 }
 
-/// Pack the values then compute the digest.
-pub fn pack_and_compute_digest<F: RichField + Extendable<D>, const D: usize>(
+/// Pack the inputs then compute the Poseidon hash value.
+pub fn pack_and_compute_poseidon_value<F: RichField>(inputs: &[u8]) -> HashOut<F> {
+    assert!(
+        inputs.len() % 4 == 0,
+        "Inputs must be a multiple of 4 bytes"
+    );
+
+    let packed: Vec<_> = convert_u8_to_u32_slice(inputs)
+        .into_iter()
+        .map(F::from_canonical_u32)
+        .collect();
+
+    PoseidonHash::hash_no_pad(&packed)
+}
+
+/// Pack the inputs then compute the Poseidon hash target.
+pub fn pack_and_compute_poseidon_target<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     inputs: &[Target],
-) -> CurveTarget
-where
-    CircuitBuilder<F, D>: CircuitBuilderGroupHashing,
-{
+) -> HashOutTarget {
+    assert!(
+        inputs.len() % 4 == 0,
+        "Inputs must be a multiple of 4 bytes"
+    );
+
     let packed: Vec<_> = convert_u8_targets_to_u32(b, &inputs)
         .into_iter()
         .map(|input| input.0)
         .collect();
 
-    b.map_to_curve_point(&packed)
+    b.hash_n_to_hash_no_pad::<PoseidonHash>(packed)
 }
 
 // TODO move that to a vec/array specific module?
