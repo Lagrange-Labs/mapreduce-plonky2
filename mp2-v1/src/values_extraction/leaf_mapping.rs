@@ -3,7 +3,7 @@
 use super::{
     key::{MappingSlot, MappingSlotWires},
     public_inputs::PublicInputs,
-    MAX_LEAF_NODE_LEN,
+    KEY_ID_PREFIX, MAX_LEAF_NODE_LEN, VALUE_ID_PREFIX,
 };
 use mp2_common::{
     array::{Array, Vector, VectorWire},
@@ -20,14 +20,10 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;
-
-// Constant prefixes for key and value IDs. Restrict both prefixes to 3-bytes,
-// so `prefix + slot (u8)` could be converted to an U32.
-const KEY_ID_PREFIX: &[u8] = b"KEY";
-const VALUE_ID_PREFIX: &[u8] = b"VAL";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct LeafMappingWires<const NODE_LEN: usize>
@@ -117,16 +113,7 @@ where
         let k_digest = b.map_to_curve_point(&inputs);
         let inputs: Vec<_> = value_id.into_iter().chain(packed_value).collect();
         let v_digest = b.map_to_curve_point(&inputs);
-        let inputs: Vec<_> = k_digest
-            .0
-             .0
-            .into_iter()
-            .flat_map(|ext| ext.0)
-            .chain(iter::once(k_digest.0 .1.target))
-            .chain(v_digest.0 .0.into_iter().flat_map(|ext| ext.0))
-            .chain(iter::once(v_digest.0 .1.target))
-            .collect();
-        let values_digest = b.map_to_curve_point(&inputs);
+        let values_digest = b.curve_add(k_digest, v_digest);
 
         // Only one leaf in this node.
         let n = b.one();
@@ -191,7 +178,14 @@ impl CircuitLogicWires<GFp, 2, 0> for LeafMappingWires<MAX_LEAF_NODE_LEN> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        super::{
+            compute_leaf_mapping_key_id, compute_leaf_mapping_metadata_digest,
+            compute_leaf_mapping_value_id, compute_leaf_mapping_values_digest,
+        },
+        *,
+    };
+
     use eth_trie::{Nibbles, Trie};
     use mp2_common::{
         array::Array,
@@ -298,62 +292,18 @@ mod tests {
             let exp_ptr = F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1 - nib.nibbles().len());
             assert_eq!(exp_ptr, ptr);
         }
-        // key_id = Poseidon(KEY || slot as u8)
-        // value_id = Poseidon(VAL || slot as u8)
-        let [key_id, value_id] = [KEY_ID_PREFIX, VALUE_ID_PREFIX].map(|prefix| {
-            let inputs: Vec<_> = prefix
-                .iter()
-                .cloned()
-                .chain(iter::once(mapping_slot))
-                .collect();
-            assert_eq!(inputs.len(), 4);
-
-            pack_and_compute_poseidon_value(&inputs).elements
-        });
+        let key_id = compute_leaf_mapping_key_id(mapping_slot);
+        let value_id = compute_leaf_mapping_value_id(mapping_slot);
         // Check values digest
         {
-            assert!(mapping_key.len() <= MAPPING_KEY_LEN);
-            assert!(value.len() <= MAPPING_LEAF_VALUE_LEN);
-
-            let [packed_key, packed_value] = [mapping_key, value].map(|arr| {
-                let arr = left_pad32(&arr);
-
-                convert_u8_to_u32_slice(&arr)
-                    .into_iter()
-                    .map(GFp::from_canonical_u32)
-                    .collect::<Vec<_>>()
-            });
-
-            // values_digest = D(D(key_id || key) + D(value_id || value))
-            let inputs: Vec<_> = key_id.into_iter().chain(packed_key).collect();
-            let k_digest = map_to_curve_point(&inputs).to_weierstrass();
-            let inputs: Vec<_> = value_id.into_iter().chain(packed_value).collect();
-            let v_digest = map_to_curve_point(&inputs).to_weierstrass();
-            let inputs: Vec<_> = k_digest
-                .x
-                .0
-                .into_iter()
-                .chain(k_digest.y.0)
-                .chain(iter::once(GFp::from_bool(k_digest.is_inf)))
-                .chain(v_digest.x.0)
-                .chain(v_digest.y.0)
-                .chain(iter::once(GFp::from_bool(v_digest.is_inf)))
-                .collect();
-            let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
-
-            assert_eq!(pi.values_digest(), exp_digest);
+            let exp_digest =
+                compute_leaf_mapping_values_digest(&key_id, &value_id, &mapping_key, &value);
+            assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
         }
         // Check metadata digest
         {
-            // metadata_digest = D(key_id || value_id || slot as u8)
-            let inputs: Vec<_> = key_id
-                .into_iter()
-                .chain(value_id)
-                .chain(iter::once(GFp::from_canonical_u8(mapping_slot)))
-                .collect();
-            let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
-
-            assert_eq!(pi.metadata_digest(), exp_digest);
+            let exp_digest = compute_leaf_mapping_metadata_digest(&key_id, &value_id, mapping_slot);
+            assert_eq!(pi.metadata_digest(), exp_digest.to_weierstrass());
         }
         assert_eq!(pi.n(), F::ONE);
     }

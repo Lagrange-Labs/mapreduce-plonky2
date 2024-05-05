@@ -156,7 +156,13 @@ impl CircuitLogicWires<GFp, 2, 0> for LeafSingleWires<MAX_LEAF_NODE_LEN> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        super::{
+            compute_leaf_single_id, compute_leaf_single_metadata_digest,
+            compute_leaf_single_values_digest,
+        },
+        *,
+    };
     use eth_trie::{Nibbles, Trie};
     use mp2_common::{
         array::Array,
@@ -262,34 +268,16 @@ mod tests {
             let exp_ptr = F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1 - nib.nibbles().len());
             assert_eq!(exp_ptr, ptr);
         }
-        // identifier = Poseidon(slot as u8)
-        let identifier = PoseidonHash::hash_no_pad(&[GFp::from_canonical_u8(simple_slot)]).elements;
+        let id = compute_leaf_single_id(simple_slot);
         // Check values digest
         {
-            assert!(value.len() <= MAPPING_LEAF_VALUE_LEN);
-
-            let value = left_pad32(&value);
-            let packed_value: Vec<_> = convert_u8_to_u32_slice(&value)
-                .into_iter()
-                .map(GFp::from_canonical_u32)
-                .collect();
-
-            // values_digest = D(identifier || value)
-            let inputs: Vec<_> = identifier.into_iter().chain(packed_value).collect();
-            let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
-
-            assert_eq!(pi.values_digest(), exp_digest);
+            let exp_digest = compute_leaf_single_values_digest(&id, &value);
+            assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
         }
         // Check metadata digest
         {
-            // metadata_digest = D(identifier || slot as u8)
-            let inputs: Vec<_> = identifier
-                .into_iter()
-                .chain(iter::once(GFp::from_canonical_u8(simple_slot)))
-                .collect();
-            let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
-
-            assert_eq!(pi.metadata_digest(), exp_digest);
+            let exp_digest = compute_leaf_single_metadata_digest(&id, simple_slot);
+            assert_eq!(pi.metadata_digest(), exp_digest.to_weierstrass());
         }
         assert_eq!(pi.n(), F::ONE);
     }
