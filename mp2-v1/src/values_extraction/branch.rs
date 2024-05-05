@@ -44,11 +44,11 @@ where
 
 #[derive(Clone, Debug)]
 pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDREN: usize> {
-    node: Vec<u8>,
-    common_prefix: Vec<u8>,
-    expected_pointer: usize,
-    n_proof_valid: usize,
-    is_simple_aggregation: bool,
+    pub(crate) node: Vec<u8>,
+    pub(crate) common_prefix: Vec<u8>,
+    pub(crate) expected_pointer: usize,
+    pub(crate) n_proof_valid: usize,
+    pub(crate) is_simple_aggregation: bool,
 }
 
 impl<const NODE_LEN: usize, const N_CHILDREN: usize> BranchCircuit<NODE_LEN, N_CHILDREN>
@@ -245,9 +245,10 @@ mod tests {
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{convert_u8_to_u32_slice, keccak256},
+        C, D, F,
     };
     use mp2_test::{
-        circuit::{run_circuit, UserCircuit, C, D, F},
+        circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
     use plonky2::{

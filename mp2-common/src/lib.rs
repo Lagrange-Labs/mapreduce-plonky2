@@ -10,7 +10,7 @@ use plonky2::{
     hash::hash_types::RichField,
     plonk::{
         circuit_data::{CommonCircuitData, VerifierOnlyCircuitData},
-        config::GenericConfig,
+        config::{GenericConfig, PoseidonGoldilocksConfig},
         proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs},
     },
 };
@@ -31,6 +31,10 @@ pub mod public_inputs;
 pub mod rlp;
 pub mod types;
 pub mod utils;
+
+pub const D: usize = 2;
+pub type C = PoseidonGoldilocksConfig;
+pub type F = <C as GenericConfig<D>>::F;
 
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.

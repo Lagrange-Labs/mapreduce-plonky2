@@ -18,14 +18,10 @@ use plonky2::{
             CircuitData, CommonCircuitData, VerifierCircuitData, VerifierCircuitTarget,
             VerifierOnlyCircuitData,
         },
-        config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig},
+        config::{AlgebraicHasher, GenericConfig},
     },
 };
 use std::fmt::Debug;
-
-pub const D: usize = 2;
-pub type C = PoseidonGoldilocksConfig;
-pub type F = <C as GenericConfig<D>>::F;
 
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.

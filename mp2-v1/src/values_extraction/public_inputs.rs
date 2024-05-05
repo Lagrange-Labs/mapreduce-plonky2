@@ -167,9 +167,10 @@ pub(crate) mod tests {
         group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
         keccak::PACKED_HASH_LEN,
         mpt_sequential::MPTKeyWire,
+        C, D, F,
     };
     use mp2_test::{
-        circuit::{run_circuit, UserCircuit, C, D, F},
+        circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
     use plonky2::{

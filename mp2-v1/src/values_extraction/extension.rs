@@ -102,9 +102,10 @@ mod tests {
         group_hashing::map_to_curve_point,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{convert_u8_to_u32_slice, keccak256},
+        C, D, F,
     };
     use mp2_test::{
-        circuit::{run_circuit, UserCircuit, C, D, F},
+        circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
     use plonky2::{

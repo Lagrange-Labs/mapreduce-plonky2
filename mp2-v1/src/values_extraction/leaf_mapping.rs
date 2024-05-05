@@ -200,9 +200,10 @@ mod tests {
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{convert_u8_to_u32_slice, keccak256, pack_and_compute_poseidon_value},
+        C, D, F,
     };
     use mp2_test::{
-        circuit::{run_circuit, UserCircuit, C, D, F},
+        circuit::{run_circuit, UserCircuit},
         mpt_sequential::generate_random_storage_mpt,
         utils::random_vector,
     };
