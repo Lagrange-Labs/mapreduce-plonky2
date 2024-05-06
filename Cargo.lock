@@ -2616,38 +2616,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mp2-v1"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bincode",
- "csv",
- "env_logger 0.11.3",
- "eth_trie",
- "ethers 2.0.13",
- "hashbrown 0.14.3",
- "hex",
- "itertools 0.12.1",
- "log",
- "mp2_common",
- "mp2_test",
- "paste",
- "plonky2",
- "plonky2_crypto",
- "plonky2_ecgfp5",
- "rand",
- "recursion_framework",
- "rlp",
- "rmp-serde",
- "serde",
- "serde_arrays",
- "serde_json",
- "serial_test",
- "sha3",
- "tokio",
-]
-
-[[package]]
 name = "mp2_common"
 version = "0.1.0"
 dependencies = [
@@ -2686,6 +2654,38 @@ dependencies = [
  "log",
  "plonky2",
  "rand",
+]
+
+[[package]]
+name = "mp2_v1"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "csv",
+ "env_logger 0.11.3",
+ "eth_trie",
+ "ethers 2.0.13",
+ "hashbrown 0.14.3",
+ "hex",
+ "itertools 0.12.1",
+ "log",
+ "mp2_common",
+ "mp2_test",
+ "paste",
+ "plonky2",
+ "plonky2_crypto",
+ "plonky2_ecgfp5",
+ "rand",
+ "recursion_framework",
+ "rlp",
+ "rmp-serde",
+ "serde",
+ "serde_arrays",
+ "serde_json",
+ "serial_test",
+ "sha3",
+ "tokio",
 ]
 
 [[package]]
