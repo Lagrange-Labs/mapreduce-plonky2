@@ -305,7 +305,7 @@ mod test {
         array::Array,
         eth::StorageSlot,
         keccak::{HASH_LEN, PACKED_HASH_LEN},
-        mpt_sequential::bytes_to_nibbles,
+        mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{convert_u8_slice_to_u32_fields, keccak256},
     };
