@@ -113,7 +113,16 @@ where
         let k_digest = b.map_to_curve_point(&inputs);
         let inputs: Vec<_> = value_id.into_iter().chain(packed_value).collect();
         let v_digest = b.map_to_curve_point(&inputs);
-        let values_digest = b.curve_add(k_digest, v_digest);
+        // D(key_id || key) + D(value_id || value)
+        let add_digest = b.curve_add(k_digest, v_digest);
+        let inputs: Vec<_> = add_digest
+            .0
+             .0
+            .into_iter()
+            .flat_map(|ext| ext.0)
+            .chain(iter::once(k_digest.0 .1.target))
+            .collect();
+        let values_digest = b.map_to_curve_point(&inputs);
 
         // Only one leaf in this node.
         let n = b.one();

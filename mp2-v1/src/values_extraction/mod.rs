@@ -93,8 +93,16 @@ pub(crate) fn compute_leaf_mapping_values_digest(
     let k_digest = map_to_curve_point(&inputs);
     let inputs: Vec<_> = value_id.elements.into_iter().chain(packed_value).collect();
     let v_digest = map_to_curve_point(&inputs);
-
-    k_digest + v_digest
+    // D(key_id || key) + D(value_id || value)
+    let add_digest = (k_digest + v_digest).to_weierstrass();
+    let inputs: Vec<_> = add_digest
+        .x
+        .0
+        .into_iter()
+        .chain(add_digest.y.0)
+        .chain(iter::once(GFp::from_bool(add_digest.is_inf)))
+        .collect();
+    map_to_curve_point(&inputs)
 }
 
 /// Calculate `metadata_digest = D(key_id || value_id || slot)` for mapping variable leaf.

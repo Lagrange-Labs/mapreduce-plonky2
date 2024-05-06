@@ -40,7 +40,8 @@ pub enum CircuitInput {
     LeafSingle(LeafSingleCircuit<MAX_LEAF_NODE_LEN>),
     LeafMapping(LeafMappingCircuit<MAX_LEAF_NODE_LEN>),
     Extension(ExtensionInput),
-    Branch(BranchInput),
+    BranchSingle(BranchInput),
+    BranchMapping(BranchInput),
 }
 
 impl CircuitInput {
@@ -63,22 +64,23 @@ impl CircuitInput {
     /// Create a circuit input for proving an extension MPT node.
     pub fn new_extension(node: Vec<u8>, child_proof: Vec<u8>) -> Self {
         CircuitInput::Extension(ExtensionInput {
-            input: InputNode {
-                // The `is_simple_slot` flag is useless for an extension node.
-                is_simple_slot: false,
-                node,
-            },
+            input: InputNode { node },
             serialized_child_proofs: vec![child_proof],
         })
     }
 
-    /// Create a circuit input for proving an branch MPT node.
-    pub fn new_branch(is_simple_slot: bool, node: Vec<u8>, child_proofs: Vec<Vec<u8>>) -> Self {
-        CircuitInput::Branch(ProofInputSerialized {
-            input: InputNode {
-                is_simple_slot,
-                node,
-            },
+    /// Create a circuit input for proving a branch MPT node of single variable.
+    pub fn new_single_variable_branch(node: Vec<u8>, child_proofs: Vec<Vec<u8>>) -> Self {
+        CircuitInput::BranchSingle(ProofInputSerialized {
+            input: InputNode { node },
+            serialized_child_proofs: child_proofs,
+        })
+    }
+
+    /// Create a circuit input for proving a branch MPT node of mapping variable.
+    pub fn new_mapping_variable_branch(node: Vec<u8>, child_proofs: Vec<Vec<u8>>) -> Self {
+        CircuitInput::BranchMapping(ProofInputSerialized {
+            input: InputNode { node },
             serialized_child_proofs: child_proofs,
         })
     }
@@ -142,8 +144,6 @@ impl<T> ProofInputSerialized<T> {
 /// Struct containing the expected input MPT Extension/Branch node
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct InputNode {
-    /// The flag to identify if the storage slot is a simple slot or mapping slot
-    is_simple_slot: bool,
     node: Vec<u8>,
 }
 
@@ -190,6 +190,7 @@ macro_rules! impl_branch_circuits {
                 set: &RecursiveCircuits<F, C, D>,
                 branch_node: InputNode,
                 child_proofs: Vec<ProofWithVK>,
+                is_simple_aggregation: bool,
             ) -> Result<ProofWithVK> {
                 // first, determine manually the common prefix, the ptr and the mapping slot
                 // from the public inputs of the children proofs.
@@ -248,7 +249,7 @@ macro_rules! impl_branch_circuits {
                                  common_prefix,
                                  expected_pointer: pointer,
                                  n_proof_valid: $i,
-                                 is_simple_aggregation: branch_node.is_simple_slot,
+                                 is_simple_aggregation,
                              }
                          ).map(|p| (p, self.[< b $i >].get_verifier_data().clone()).into())
                      },
@@ -272,7 +273,7 @@ macro_rules! impl_branch_circuits {
                                  common_prefix,
                                  expected_pointer: pointer,
                                  n_proof_valid: num_real_proofs,
-                                 is_simple_aggregation: branch_node.is_simple_slot,
+                                 is_simple_aggregation,
                              },
                          ).map(|p| (p, self.[< b $i>].get_verifier_data().clone()).into())
                      }
@@ -373,10 +374,15 @@ impl PublicParameters {
                 )
                 .map(|p| (p, self.extension.get_verifier_data().clone()).into())
             }
-            CircuitInput::Branch(branch) => {
+            CircuitInput::BranchSingle(branch) => {
                 let child_proofs = branch.get_child_proofs()?;
                 self.branches
-                    .generate_proof(set, branch.input, child_proofs)
+                    .generate_proof(set, branch.input, child_proofs, true)
+            }
+            CircuitInput::BranchMapping(branch) => {
+                let child_proofs = branch.get_child_proofs()?;
+                self.branches
+                    .generate_proof(set, branch.input, child_proofs, false)
             }
         }
     }
@@ -496,9 +502,8 @@ mod tests {
 
         // Test for branch circuit.
         let branch_node = proof[proof.len() - 2].to_vec();
-        test_circuit_input(CircuitInput::Branch(BranchInput {
+        test_circuit_input(CircuitInput::BranchMapping(BranchInput {
             input: InputNode {
-                is_simple_slot: false,
                 node: branch_node.clone(),
             },
             serialized_child_proofs: vec![encoded],
@@ -506,12 +511,12 @@ mod tests {
     }
 
     fn generate_storage_trie_and_keys(
-        is_simple_slot: bool,
+        is_simple_aggregation: bool,
         slot: u8,
         num_children: usize,
     ) -> TestData {
         let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
-        let (mapping_key, slot) = if is_simple_slot {
+        let (mapping_key, slot) = if is_simple_aggregation {
             (None, StorageSlot::Simple(slot as usize))
         } else {
             let mapping_key = random_vector(20);
@@ -556,13 +561,13 @@ mod tests {
         }
     }
 
-    fn test_apis(is_simple_slot: bool) {
+    fn test_apis(is_simple_aggregation: bool) {
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(memdb.clone());
 
         let key1 = [1u8; 4];
         let val1 = [2u8; ADDRESS_LEN];
-        let slot1 = if is_simple_slot {
+        let slot1 = if is_simple_aggregation {
             StorageSlot::Simple(TEST_SLOT as usize)
         } else {
             StorageSlot::Mapping(key1.to_vec(), TEST_SLOT as usize)
@@ -571,7 +576,7 @@ mod tests {
 
         let key2 = [3u8; 4];
         let val2 = [4u8; ADDRESS_LEN];
-        let slot2 = if is_simple_slot {
+        let slot2 = if is_simple_aggregation {
             // Must be a different slot value for single variables.
             StorageSlot::Simple(TEST_SLOT as usize + 1)
         } else {
@@ -596,7 +601,7 @@ mod tests {
         let params = build_circuits_params();
 
         println!("Proving leaf 1...");
-        let leaf_input1 = if is_simple_slot {
+        let leaf_input1 = if is_simple_aggregation {
             CircuitInput::new_single_variable_leaf(proof1[1].clone(), TEST_SLOT)
         } else {
             CircuitInput::new_mapping_variable_leaf(proof1[1].clone(), TEST_SLOT, key1.to_vec())
@@ -610,7 +615,7 @@ mod tests {
         }
 
         println!("Proving leaf 2...");
-        let leaf_input2 = if is_simple_slot {
+        let leaf_input2 = if is_simple_aggregation {
             CircuitInput::new_single_variable_leaf(proof2[1].clone(), TEST_SLOT + 1)
         } else {
             CircuitInput::new_mapping_variable_leaf(proof2[1].clone(), TEST_SLOT, key2.to_vec())
@@ -618,18 +623,25 @@ mod tests {
         let leaf_proof2 = generate_proof(&params, leaf_input2).unwrap();
 
         println!("Proving branch...");
-        let branch_input = CircuitInput::new_branch(
-            is_simple_slot,
-            proof1[0].clone(),
-            vec![leaf_proof1, leaf_proof2],
-        );
+        let branch_input = if is_simple_aggregation {
+            CircuitInput::new_single_variable_branch(
+                proof1[0].clone(),
+                vec![leaf_proof1, leaf_proof2],
+            )
+        } else {
+            CircuitInput::new_mapping_variable_branch(
+                proof1[0].clone(),
+                vec![leaf_proof1, leaf_proof2],
+            )
+        };
 
         generate_proof(&params, branch_input).unwrap();
     }
 
-    fn test_circuits(is_simple_slot: bool, num_children: usize) {
+    fn test_circuits(is_simple_aggregation: bool, num_children: usize) {
         let params = PublicParameters::build();
-        let mut test_data = generate_storage_trie_and_keys(is_simple_slot, TEST_SLOT, num_children);
+        let mut test_data =
+            generate_storage_trie_and_keys(is_simple_aggregation, TEST_SLOT, num_children);
 
         let trie = &mut test_data.trie;
         let mpt1 = test_data.mpt_keys[0].as_slice();
@@ -642,7 +654,7 @@ mod tests {
         assert_eq!(p1[p1.len() - 2], p2[p2.len() - 2]);
 
         let mapping_key = random_vector(20);
-        let l1_inputs = if is_simple_slot {
+        let l1_inputs = if is_simple_aggregation {
             CircuitInput::new_single_variable_leaf(p1.last().unwrap().to_vec(), TEST_SLOT)
         } else {
             CircuitInput::new_mapping_variable_leaf(
@@ -664,8 +676,11 @@ mod tests {
 
         let branch_node = p1[p1.len() - 2].to_vec();
         println!("[+] Generating branch proof 1...");
-        let branch_inputs =
-            CircuitInput::new_branch(is_simple_slot, branch_node.clone(), vec![leaf1_proof_buff]);
+        let branch_inputs = if is_simple_aggregation {
+            CircuitInput::new_single_variable_branch(branch_node.clone(), vec![leaf1_proof_buff])
+        } else {
+            CircuitInput::new_mapping_variable_branch(branch_node.clone(), vec![leaf1_proof_buff])
+        };
         let branch1_buff = generate_proof(&params, branch_inputs).unwrap();
         let branch1 = ProofWithVK::deserialize(&branch1_buff).unwrap();
         let exp_vk = params.branches.b1.get_verifier_data();
@@ -708,7 +723,7 @@ mod tests {
             let branch_pub = PublicInputs::new(&proof.proof().public_inputs[..NUM_IO]);
 
             let value: Vec<u8> = rlp::decode(&trie.get(mpt1).unwrap().unwrap()).unwrap();
-            let [leaf_values_digest, leaf_metadata_digest] = if is_simple_slot {
+            let [leaf_values_digest, leaf_metadata_digest] = if is_simple_aggregation {
                 let id = compute_leaf_single_id(TEST_SLOT);
                 let dv = compute_leaf_single_values_digest(&id, &value);
                 let dm = compute_leaf_single_metadata_digest(&id, TEST_SLOT);
@@ -726,7 +741,7 @@ mod tests {
 
             let values_digest =
                 (0..num_children).fold(Point::NEUTRAL, |acc, _| acc + leaf_values_digest);
-            let metadata_digest = if is_simple_slot {
+            let metadata_digest = if is_simple_aggregation {
                 (0..num_children).fold(Point::NEUTRAL, |acc, _| acc + leaf_metadata_digest)
             } else {
                 leaf_metadata_digest
@@ -754,17 +769,21 @@ mod tests {
         let leaf2_proof = gen_fake_proof(mpt2);
 
         println!("[+] Generating branch proof 2...");
-        let branch_inputs = CircuitInput::Branch(BranchInput {
+        let branch_input = BranchInput {
             input: InputNode {
-                is_simple_slot,
                 node: branch_node.clone(),
             },
             serialized_child_proofs: vec![
                 bincode::serialize(&leaf1_proof).unwrap(),
                 bincode::serialize(&leaf2_proof).unwrap(),
             ],
-        });
-        let branch2 = params.generate_proof(branch_inputs).unwrap();
+        };
+        let branch_input = if is_simple_aggregation {
+            CircuitInput::BranchSingle(branch_input)
+        } else {
+            CircuitInput::BranchMapping(branch_input)
+        };
+        let branch2 = params.generate_proof(branch_input).unwrap();
         let exp_vk = params.branches.b4.get_verifier_data().clone();
         assert_eq!(branch2.verifier_data(), &exp_vk);
         check_public_input(2, &branch2);
@@ -781,14 +800,18 @@ mod tests {
             )
         }
         println!("[+] Generating branch proof {}...", num_children);
-        let branch_inputs = CircuitInput::Branch(BranchInput {
+        let branch_input = BranchInput {
             input: InputNode {
-                is_simple_slot,
                 node: branch_node.clone(),
             },
             serialized_child_proofs,
-        });
-        let branch_proof = params.generate_proof(branch_inputs).unwrap();
+        };
+        let branch_input = if is_simple_aggregation {
+            CircuitInput::BranchSingle(branch_input)
+        } else {
+            CircuitInput::BranchMapping(branch_input)
+        };
+        let branch_proof = params.generate_proof(branch_input).unwrap();
         let exp_vk = params.branches.b9.get_verifier_data().clone();
         assert_eq!(branch_proof.verifier_data(), &exp_vk);
         check_public_input(num_children, &branch_proof);
