@@ -5,6 +5,7 @@ members = [
     "mapreduce-plonky2",
     "mp2-common",
     "mp2-test",
+    "mp2-v1",
     "recursion-framework",
 ]
 resolver = "2"
