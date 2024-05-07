@@ -44,24 +44,17 @@ pub struct PublicInputs<'a, T> {
 impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     const RANGES: &'static [PublicInputRange] =
         &[H_RANGE, K_RANGE, T_RANGE, DV_RANGE, DM_RANGE, N_RANGE];
+
+    fn register_args(&self, cb: &mut CBuilder) {
+        self.root_hash().register_as_public_input(cb);
+        self.mpt_key().register_as_input(cb);
+        cb.register_curve_public_input(self.accumulator());
+        cb.register_curve_public_input(self.metadata());
+        cb.register_public_input(self.n());
+    }
 }
 
 impl<'a> PublicInputs<'a, Target> {
-    pub fn register(
-        cb: &mut CBuilder,
-        h: &OutputHash,
-        k: &MPTKeyWire,
-        dv: CurveTarget,
-        dm: CurveTarget,
-        n: Target,
-    ) {
-        h.register_as_public_input(cb);
-        k.register_as_input(cb);
-        cb.register_curve_public_input(dv);
-        cb.register_curve_public_input(dm);
-        cb.register_public_input(n);
-    }
-
     /// Return the merkle hash of the subtree this proof has processed.
     pub fn root_hash(&self) -> OutputHash {
         let hash = self.root_hash_info();
