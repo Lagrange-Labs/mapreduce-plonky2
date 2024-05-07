@@ -41,27 +41,16 @@ pub struct PublicInputs<'a, T> {
     pub(crate) proof_inputs: &'a [T],
 }
 
-#[derive(Clone, Debug)]
-pub struct PublicInputsArgs<'a> {
-    h: &'a OutputHash,
-    k: &'a MPTKeyWire,
-    dv: CurveTarget,
-    dm: CurveTarget,
-    n: Target,
-}
-
 impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
-    type RegisterArgs = PublicInputsArgs<'a>;
-
     const RANGES: &'static [PublicInputRange] =
         &[H_RANGE, K_RANGE, T_RANGE, DV_RANGE, DM_RANGE, N_RANGE];
 
-    fn register_args(cb: &mut CBuilder, args: PublicInputsArgs<'a>) {
-        args.h.register_as_public_input(cb);
-        args.k.register_as_input(cb);
-        cb.register_curve_public_input(args.dv);
-        cb.register_curve_public_input(args.dm);
-        cb.register_public_input(args.n);
+    fn register_args(&self, cb: &mut CBuilder) {
+        self.root_hash().register_as_public_input(cb);
+        self.mpt_key().register_as_input(cb);
+        cb.register_curve_public_input(self.accumulator());
+        cb.register_curve_public_input(self.metadata());
+        cb.register_public_input(self.n());
     }
 }
 

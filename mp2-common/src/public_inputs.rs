@@ -9,10 +9,6 @@ pub type PublicInputRange = Range<usize>;
 
 /// Public input common trait
 pub trait PublicInputCommon {
-    /// Values to be registered on the [CBuilder] as public inputs. These values can be either
-    /// owned or referenced, and they should conform to the expected [PublicInputsCommon::RANGES].
-    type RegisterArgs;
-
     /// The slices within the public inputs arguments of this structure encompass the following
     /// ranges, which correspond to the logical attributes of the circuit.
     const RANGES: &'static [PublicInputRange];
@@ -21,17 +17,17 @@ pub trait PublicInputCommon {
     ///
     /// This function is not intended for use during circuit definition. Instead, please utilize
     /// the [PublicInputCommon::register] function for such purposes.
-    fn register_args(cb: &mut CBuilder, args: Self::RegisterArgs);
+    fn register_args(&self, cb: &mut CBuilder);
 
     /// Registers the provided arguments as public inputs of the circuit.
     ///
     /// It will perform a validation, asserting the number of registered public inputs corresponds
     /// to the defined range arguments in length.
-    fn register(cb: &mut CBuilder, args: Self::RegisterArgs) {
+    fn register(&self, cb: &mut CBuilder) {
         let len: usize = Self::RANGES.iter().map(|r| r.end - r.start).sum();
         let initial = cb.num_public_inputs();
 
-        Self::register_args(cb, args);
+        self.register_args(cb);
 
         let dif = cb.num_public_inputs() - initial;
 
