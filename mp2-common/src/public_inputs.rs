@@ -34,6 +34,10 @@ pub trait PublicInputCommon {
         // This assertion can be replaced with `debug_assert_eq` in production environments to
         // prevent rewind overhead. The runtime overhead in normal cases is expected to be
         // insignificant, while maintaining this check enhances test robustness.
+        //
+        // If multiple circuits utilizing the same proving key have overlapping public inputs
+        // (i.e., the same target is used as public input in each circuit), potential issues may
+        // arise. However, such a scenario is unlikely to occur under normal circumstances.
         assert_eq!(dif, len, "The number of registered public inputs {dif} doesn't match the expected ranges length {len}.");
     }
 }
