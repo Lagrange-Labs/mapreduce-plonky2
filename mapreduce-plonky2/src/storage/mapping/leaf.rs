@@ -185,7 +185,7 @@ mod test {
     use super::{LeafCircuit, LeafWires, PublicInputs, MAPPING_LEAF_VALUE_LEN};
     use crate::array::Array;
     use crate::eth::StorageSlot;
-    use crate::mpt_sequential::bytes_to_nibbles;
+    use crate::mpt_sequential::utils::bytes_to_nibbles;
     use crate::storage::key::MappingSlot;
     use crate::utils::convert_u8_to_u32_slice;
     use plonky2::field::types::Field;

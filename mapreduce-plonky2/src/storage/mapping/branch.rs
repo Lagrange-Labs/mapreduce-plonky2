@@ -224,7 +224,7 @@ mod test {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::mpt_sequential::bytes_to_nibbles;
+    use crate::mpt_sequential::utils::bytes_to_nibbles;
     use crate::{
         group_hashing::map_to_curve_point,
         mpt_sequential::PAD_LEN,
