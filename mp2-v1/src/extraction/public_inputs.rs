@@ -41,27 +41,31 @@ pub struct PublicInputs<'a, T> {
     pub(crate) proof_inputs: &'a [T],
 }
 
+#[derive(Clone, Debug)]
+pub struct PublicInputsArgs<'a> {
+    h: &'a OutputHash,
+    k: &'a MPTKeyWire,
+    dv: CurveTarget,
+    dm: CurveTarget,
+    n: Target,
+}
+
 impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+    type RegisterArgs = PublicInputsArgs<'a>;
+
     const RANGES: &'static [PublicInputRange] =
         &[H_RANGE, K_RANGE, T_RANGE, DV_RANGE, DM_RANGE, N_RANGE];
+
+    fn register_args(cb: &mut CBuilder, args: PublicInputsArgs<'a>) {
+        args.h.register_as_public_input(cb);
+        args.k.register_as_input(cb);
+        cb.register_curve_public_input(args.dv);
+        cb.register_curve_public_input(args.dm);
+        cb.register_public_input(args.n);
+    }
 }
 
 impl<'a> PublicInputs<'a, Target> {
-    pub fn register(
-        cb: &mut CBuilder,
-        h: &OutputHash,
-        k: &MPTKeyWire,
-        dv: CurveTarget,
-        dm: CurveTarget,
-        n: Target,
-    ) {
-        h.register_as_public_input(cb);
-        k.register_as_input(cb);
-        cb.register_curve_public_input(dv);
-        cb.register_curve_public_input(dm);
-        cb.register_public_input(n);
-    }
-
     /// Return the merkle hash of the subtree this proof has processed.
     pub fn root_hash(&self) -> OutputHash {
         let hash = self.root_hash_info();
