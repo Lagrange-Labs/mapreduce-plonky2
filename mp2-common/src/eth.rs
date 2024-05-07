@@ -281,6 +281,12 @@ impl StorageSlot {
     pub fn mpt_nibbles(&self) -> [u8; MAX_KEY_NIBBLE_LEN] {
         bytes_to_nibbles(&self.mpt_key_vec()).try_into().unwrap()
     }
+    pub fn is_simple_slot(&self) -> bool {
+        match self {
+            StorageSlot::Simple(_) => true,
+            StorageSlot::Mapping(_, _) => false,
+        }
+    }
 }
 impl ProofQuery {
     pub fn new_simple_slot(address: Address, slot: usize) -> Self {

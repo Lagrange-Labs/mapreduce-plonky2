@@ -1151,7 +1151,7 @@ dependencies = [
 [[package]]
 name = "eth_trie"
 version = "0.4.0"
-source = "git+https://github.com/nikkolasg/eth-trie.rs#df8087bba96340b17bb2e40c98a0519cd5b6ba0f"
+source = "git+https://github.com/silathdiir/eth-trie.rs?branch=pub-recover-from-db#3cca6668a197175133269f2fc9c903df5a54b167"
 dependencies = [
  "ethereum-types",
  "hashbrown 0.14.5",
@@ -2377,6 +2377,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a5bbe824c507c5da5956355e86a746d82e0e1464f65d862cc5e71da70e94b2c"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "integration_tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "env_logger 0.11.3",
+ "eth_trie",
+ "ethers 2.0.13",
+ "hex",
+ "log",
+ "mp2_common",
+ "mp2_test",
+ "mp2_v1",
+ "plonky2",
+ "rlp",
+ "tokio",
 ]
 
 [[package]]
