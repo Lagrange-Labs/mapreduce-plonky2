@@ -32,8 +32,6 @@ pub struct ExtensionNodeCircuit {
 
 impl ExtensionNodeCircuit {
     pub fn build(b: &mut CBuilder, child_proof: PublicInputs<Target>) -> ExtensionNodeWires {
-        let ttrue = b._true();
-
         // Build the node wires.
         let wires = MPTLeafOrExtensionNode::build_and_advance_key::<
             _,
@@ -47,8 +45,7 @@ impl ExtensionNodeCircuit {
         // Constrain the extracted hash is the one exposed by the proof.
         let packed_child_hash = wires.value.convert_u8_to_u32(b);
         let given_child_hash = child_proof.root_hash();
-        let equals = packed_child_hash.equals(b, &given_child_hash);
-        b.connect(ttrue.target, equals.target);
+        packed_child_hash.enforce_equal(b, &given_child_hash);
 
         // Expose the public inputs.
         PublicInputs::register(
