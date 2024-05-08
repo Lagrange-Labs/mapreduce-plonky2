@@ -151,17 +151,13 @@ where
                 arr: convert_u8_targets_to_u32(b, &hash.arr).try_into().unwrap(),
             };
             let child_hash = proof_inputs.root_hash();
-            let hash_equals = packed_hash.equals(b, &child_hash);
-            let hash_maybe_equal = b.select(should_process, hash_equals.target, ttrue.target);
-            b.connect(hash_maybe_equal, ttrue.target);
+            packed_hash.enforce_equal(b, &child_hash);
 
             // We now check that the MPT key at this point is equal to the one
             // given by the prover. Reason why it is secure is because this
             // circuit only cares that _all_ keys share the _same_ prefix, so if
             // they're all equal to `common_prefix`, they're all equal.
-            let is_equal = common_prefix.is_prefix_equal(b, &child_key);
-            let prefix_maybe_equal = b.select(should_process, is_equal.target, ttrue.target);
-            b.connect(prefix_maybe_equal, ttrue.target);
+            common_prefix.enforce_prefix_equal(b, &child_key);
         }
 
         // We've compared the pointers _before_ advancing the key for each leaf,
