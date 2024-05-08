@@ -250,8 +250,20 @@ mod tests {
         iop::{target::Target, witness::WitnessWrite},
         plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
+    use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
-    use std::sync::Arc;
+    use std::{array, sync::Arc};
+
+    #[derive(Clone, Debug, Default)]
+    struct TestChildData {
+        ptr: usize,
+        key: Vec<u8>,
+        value: Vec<u8>,
+        leaf: Vec<u8>,
+        metadata: Vec<u8>,
+        proof: Vec<Vec<u8>>,
+        pi: Vec<GFp>,
+    }
 
     #[derive(Clone, Debug)]
     struct TestBranchCircuit<'a, const NODE_LEN: usize, const N_CHILDREN: usize> {
@@ -289,53 +301,48 @@ mod tests {
     }
 
     #[test]
-    fn test_values_extraction_branch_circuit_simple_type() {
-        test_branch_circuit(true);
-    }
-
-    #[test]
-    fn test_values_extraction_branch_circuit_multiple_type() {
-        test_branch_circuit(false);
-    }
-
-    fn test_branch_circuit(is_simple_aggregation: bool) {
+    fn test_values_extraction_branch_circuit_simple_type_for_2_children() {
         const NODE_LEN: usize = 100;
         const N_CHILDREN: usize = 2;
 
-        // We need to create a trie that for sure contains an branch node:
-        // We insert two values under two keys which only differ by their last nibble/byte
-        // Normally, the trie should look like :
-        // root = extension node
-        // branch = point of different between the two keys
-        // two leaves
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(Arc::clone(&memdb));
-        let key1 = random_vector(32);
-        let mut key2 = key1.clone();
-        key2[31] = thread_rng().gen();
-        let value1 = random_vector(32);
-        let value2 = random_vector(32);
-        trie.insert(&key1, &value1).unwrap();
-        trie.insert(&key2, &value2).unwrap();
-        trie.root_hash().unwrap();
-        let proof1 = trie.get_proof(&key1).unwrap();
-        let proof2 = trie.get_proof(&key2).unwrap();
-        assert!(proof1.len() == 3);
-        assert_eq!(proof1[1], proof2[1]);
-        let node = proof1[1].clone();
-        let leaf1 = proof1.last().unwrap();
-        let leaf2 = proof2.last().unwrap();
+        test_branch_circuit::<NODE_LEN, N_CHILDREN>(true);
+    }
+
+    #[test]
+    fn test_values_extraction_branch_circuit_simple_type_for_3_children() {
+        const NODE_LEN: usize = 100;
+        const N_CHILDREN: usize = 3;
+
+        test_branch_circuit::<NODE_LEN, N_CHILDREN>(true);
+    }
+
+    #[test]
+    fn test_values_extraction_branch_circuit_multiple_type_for_2_children() {
+        const NODE_LEN: usize = 100;
+        const N_CHILDREN: usize = 2;
+
+        test_branch_circuit::<NODE_LEN, N_CHILDREN>(false);
+    }
+
+    #[test]
+    fn test_values_extraction_branch_circuit_multiple_type_for_3_children() {
+        const NODE_LEN: usize = 100;
+        const N_CHILDREN: usize = 3;
+
+        test_branch_circuit::<NODE_LEN, N_CHILDREN>(false);
+    }
+
+    fn test_branch_circuit<const NODE_LEN: usize, const N_CHILDREN: usize>(
+        is_simple_aggregation: bool,
+    ) where
+        [(); PAD_LEN(NODE_LEN)]:,
+    {
         let compute_key_ptr = |leaf: &[u8]| {
             let tuple: Vec<Vec<u8>> = rlp::decode_list(leaf);
             let partial_nibbles = Nibbles::from_compact(&tuple[0]);
             let partial_key_len = partial_nibbles.nibbles().len();
             MAX_KEY_NIBBLE_LEN - 1 - partial_key_len
         };
-        let ptr1 = compute_key_ptr(leaf1);
-        let ptr2 = compute_key_ptr(leaf2);
-        assert_eq!(ptr1, ptr2);
-
-        // Create the two public inputs.
         let compute_digest = |arr: Vec<u8>| {
             map_to_curve_point(
                 &arr.into_iter()
@@ -343,7 +350,7 @@ mod tests {
                     .collect::<Vec<_>>(),
             )
         };
-        let compute_pi = |key: &[u8], value: &[u8], leaf: &[u8], metadata: &[u8]| {
+        let compute_pi = |ptr: usize, key: &[u8], value: &[u8], leaf: &[u8], metadata: &[u8]| {
             let h = convert_u8_to_u32_slice(&keccak256(leaf));
             let [values_digest, metadata_digest] =
                 [value, metadata].map(|arr| compute_digest(arr.to_vec()).to_weierstrass());
@@ -352,37 +359,72 @@ mod tests {
             new_extraction_public_inputs(
                 &h,
                 &bytes_to_nibbles(key),
-                ptr1,
+                ptr,
                 &values_digest,
                 &metadata_digest,
                 1,
             )
         };
-        let metadata1 = random_vector(20);
-        let child_pi1 = compute_pi(&key1, &value1, leaf1, &metadata1);
-        let metadata2 = if is_simple_aggregation {
-            random_vector(20)
-        } else {
-            // Set the same metadata digests for `multiple` aggregation type.
-            metadata1.clone()
-        };
-        let child_pi2 = compute_pi(&key2, &value2, leaf2, &metadata2);
-        assert_eq!(child_pi1.len(), PublicInputs::<F>::TOTAL_LEN);
-        assert_eq!(child_pi2.len(), PublicInputs::<F>::TOTAL_LEN);
+
+        let mut children: [TestChildData; N_CHILDREN] =
+            array::from_fn(|_| TestChildData::default());
+
+        // We need to create a trie that for sure contains a branch node:
+        // We insert N_CHILDREN values under keys which only differ by their last nibble/byte
+        // Normally, the trie should look like:
+        // root = extension node
+        // branch = point of different between the keys
+        // N_CHILDREN leaves
+        let memdb = Arc::new(MemoryDB::new(true));
+        let mut trie = EthTrie::new(Arc::clone(&memdb));
+
+        let key = random_vector(32);
+        for i in 0..N_CHILDREN {
+            let mut key = key.clone();
+            key[31] = thread_rng().gen();
+            let value = random_vector(32);
+            trie.insert(&key, &value).unwrap();
+
+            children[i].key = key;
+            children[i].value = value;
+        }
+        trie.root_hash().unwrap();
+
+        let metadata = random_vector(20);
+        for i in 0..N_CHILDREN {
+            let proof = trie.get_proof(&children[i].key).unwrap();
+            assert!(proof.len() == 3);
+            let leaf = proof.last().unwrap();
+            let ptr = compute_key_ptr(leaf);
+
+            let metadata = if is_simple_aggregation {
+                random_vector(20)
+            } else {
+                // Set the same metadata digests for `multiple` aggregation type.
+                metadata.clone()
+            };
+            let pi = compute_pi(ptr, &children[i].key, &children[i].value, leaf, &metadata);
+            assert_eq!(pi.len(), PublicInputs::<F>::TOTAL_LEN);
+
+            children[i].proof = proof.clone();
+            children[i].leaf = leaf.clone();
+            children[i].ptr = ptr;
+            children[i].metadata = metadata;
+            children[i].pi = pi;
+        }
+        let node = children[0].proof[1].clone();
 
         let c = BranchCircuit::<NODE_LEN, N_CHILDREN> {
             node: node.clone(),
             // Any of the two keys should work since we only care about the common prefix.
-            common_prefix: bytes_to_nibbles(&key1),
-            expected_pointer: ptr1,
-            n_proof_valid: 2,
+            common_prefix: bytes_to_nibbles(&children[0].key),
+            expected_pointer: children[0].ptr,
+            n_proof_valid: N_CHILDREN,
             is_simple_aggregation,
         };
-        let circuit = TestBranchCircuit {
-            c,
-            exp_pis: [&child_pi1, &child_pi2].map(|pi| PublicInputs::new(pi)),
-        };
-        let proof = run_circuit::<F, D, C, _>(circuit);
+        let exp_pis = array::from_fn(|i| PublicInputs::new(&children[i].pi));
+        let circuit = TestBranchCircuit::<NODE_LEN, N_CHILDREN> { c, exp_pis };
+        let proof = run_circuit::<F, D, C, TestBranchCircuit<NODE_LEN, N_CHILDREN>>(circuit);
         let pi = PublicInputs::<F>::new(&proof.public_inputs);
 
         {
@@ -392,34 +434,36 @@ mod tests {
         }
         {
             let (key, ptr) = pi.mpt_key_info();
-            let exp_key: Vec<_> = bytes_to_nibbles(&key1)
+            let exp_key: Vec<_> = bytes_to_nibbles(&children[0].key)
                 .into_iter()
                 .map(F::from_canonical_u8)
                 .collect();
             assert_eq!(key, exp_key);
 
             // -1 because branch circuit exposes the new pointer.
-            let exp_ptr = F::from_canonical_usize(ptr1 - 1);
+            let exp_ptr = F::from_canonical_usize(children[0].ptr - 1);
             assert_eq!(ptr, exp_ptr);
         }
         // Check values digest
         {
-            let acc1 = compute_digest(value1);
-            let acc2 = compute_digest(value2);
-            let branch_acc = acc1 + acc2;
+            let mut branch_acc = Point::NEUTRAL;
+            for i in 0..N_CHILDREN {
+                branch_acc += compute_digest(children[i].value.clone());
+            }
 
             assert_eq!(pi.values_digest(), branch_acc.to_weierstrass());
         }
         // Check metadata digest
         {
-            let acc1 = compute_digest(metadata1);
-            let acc2 = compute_digest(metadata2);
-            let branch_acc = if is_simple_aggregation {
-                acc1 + acc2
-            } else {
-                assert_eq!(acc1, acc2);
-                acc1
-            };
+            let mut branch_acc = compute_digest(children[0].metadata.clone());
+            for i in 1..N_CHILDREN {
+                let child_acc = compute_digest(children[i].metadata.clone());
+                if is_simple_aggregation {
+                    branch_acc += child_acc;
+                } else {
+                    assert_eq!(branch_acc, child_acc);
+                };
+            }
 
             assert_eq!(pi.metadata_digest(), branch_acc.to_weierstrass());
         }
