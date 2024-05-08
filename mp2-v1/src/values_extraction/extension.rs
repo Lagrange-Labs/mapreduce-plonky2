@@ -7,6 +7,7 @@ use mp2_common::{
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTLeafOrExtensionNode, PAD_LEN},
     types::{CBuilder, GFp},
+    D,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -36,7 +37,7 @@ impl ExtensionNodeCircuit {
         // Build the node wires.
         let wires = MPTLeafOrExtensionNode::build_and_advance_key::<
             _,
-            2,
+            D,
             MAX_EXTENSION_NODE_LEN,
             HASH_LEN,
         >(b, &child_proof.mpt_key());
@@ -70,9 +71,8 @@ impl ExtensionNodeCircuit {
     }
 }
 
-/// D = 2,
 /// Num of children = 1
-impl CircuitLogicWires<GFp, 2, 1> for ExtensionNodeWires {
+impl CircuitLogicWires<GFp, D, 1> for ExtensionNodeWires {
     type CircuitBuilderParams = ();
 
     type Inputs = ExtensionNodeCircuit;
@@ -81,7 +81,7 @@ impl CircuitLogicWires<GFp, 2, 1> for ExtensionNodeWires {
 
     fn circuit_logic(
         builder: &mut CBuilder,
-        verified_proofs: [&ProofWithPublicInputsTarget<2>; 1],
+        verified_proofs: [&ProofWithPublicInputsTarget<D>; 1],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         let inputs = PublicInputs::new(&verified_proofs[0].public_inputs);

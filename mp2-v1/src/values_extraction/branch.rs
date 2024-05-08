@@ -9,6 +9,7 @@ use mp2_common::{
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     types::{CBuilder, GFp},
     utils::{convert_u8_targets_to_u32, less_than},
+    D,
 };
 use plonky2::{
     field::types::Field,
@@ -94,7 +95,7 @@ where
 
         // we already decode the RLP headers here since we need it to verify the
         // validity of the hash exposed by the proofs.
-        let headers = decode_fixed_list::<_, 2, MAX_ITEMS_IN_LIST>(b, &node.arr.arr, zero);
+        let headers = decode_fixed_list::<_, D, MAX_ITEMS_IN_LIST>(b, &node.arr.arr, zero);
 
         let zero_point = b.curve_zero();
         let mut seen_nibbles = vec![];
@@ -207,9 +208,7 @@ where
     }
 }
 
-/// D = 2,
-/// Num of children = 0
-impl<const NODE_LEN: usize, const N_CHILDREN: usize> CircuitLogicWires<GFp, 2, N_CHILDREN>
+impl<const NODE_LEN: usize, const N_CHILDREN: usize> CircuitLogicWires<GFp, D, N_CHILDREN>
     for BranchWires<NODE_LEN>
 where
     [(); PAD_LEN(NODE_LEN)]:,
@@ -222,7 +221,7 @@ where
 
     fn circuit_logic(
         builder: &mut CBuilder,
-        verified_proofs: [&ProofWithPublicInputsTarget<2>; N_CHILDREN],
+        verified_proofs: [&ProofWithPublicInputsTarget<D>; N_CHILDREN],
         _: Self::CircuitBuilderParams,
     ) -> Self {
         let inputs: [PublicInputs<Target>; N_CHILDREN] =

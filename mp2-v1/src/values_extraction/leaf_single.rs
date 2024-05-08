@@ -14,6 +14,7 @@ use mp2_common::{
     },
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
     utils::convert_u8_targets_to_u32,
+    D,
 };
 use plonky2::{
     hash::poseidon::PoseidonHash,
@@ -60,7 +61,7 @@ where
 
         // Build the node wires.
         let wires =
-            MPTLeafOrExtensionNode::build_and_advance_key::<_, 2, NODE_LEN, MAX_LEAF_VALUE_LEN>(
+            MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
                 b,
                 &slot.mpt_key,
             );
@@ -127,9 +128,8 @@ where
     }
 }
 
-/// D = 2,
 /// Num of children = 0
-impl CircuitLogicWires<GFp, 2, 0> for LeafSingleWires<MAX_LEAF_NODE_LEN> {
+impl CircuitLogicWires<GFp, D, 0> for LeafSingleWires<MAX_LEAF_NODE_LEN> {
     type CircuitBuilderParams = ();
 
     type Inputs = LeafSingleCircuit<MAX_LEAF_NODE_LEN>;
@@ -137,8 +137,8 @@ impl CircuitLogicWires<GFp, 2, 0> for LeafSingleWires<MAX_LEAF_NODE_LEN> {
     const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
 
     fn circuit_logic(
-        builder: &mut CircuitBuilder<GFp, 2>,
-        _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<2>; 0],
+        builder: &mut CircuitBuilder<GFp, D>,
+        _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         LeafSingleCircuit::build(builder)
