@@ -8,6 +8,7 @@ use mp2_common::{
     mpt_sequential::{
         utils::left_pad_leaf_value, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN,
     },
+    public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
     utils::convert_u8_targets_to_u32,
@@ -105,14 +106,27 @@ where
         let n = b.one();
 
         // Register the public inputs.
-        PublicInputs::register(
-            b,
-            &root.output_array,
-            &wires.key,
-            values_digest,
-            metadata_digest,
-            n,
-        );
+        let proof_inputs: Vec<_> = root
+            // Root hash
+            .output_array
+            .arr
+            .map(|t| t.0)
+            .into_iter()
+            // MPT key
+            .chain(wires.key.key.arr)
+            .chain(iter::once(wires.key.pointer))
+            // Values digest
+            .chain(values_digest.0 .0[0].0)
+            .chain(values_digest.0 .0[1].0)
+            .chain(iter::once(values_digest.0 .1.target))
+            // Metadata digest
+            .chain(metadata_digest.0 .0[0].0)
+            .chain(metadata_digest.0 .0[1].0)
+            .chain(iter::once(metadata_digest.0 .1.target))
+            // N
+            .chain(iter::once(n))
+            .collect();
+        PublicInputs::new(&proof_inputs).register(b);
 
         LeafSingleWires {
             node,

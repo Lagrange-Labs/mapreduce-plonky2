@@ -127,6 +127,7 @@ where
         let n = b.one();
 
         // Register the public inputs.
+        /* TODO
         PublicInputs::register(
             b,
             &root.output_array,
@@ -135,6 +136,7 @@ where
             metadata_digest,
             n,
         );
+        */
 
         LeafMappingWires {
             node,

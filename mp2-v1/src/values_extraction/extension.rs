@@ -48,6 +48,7 @@ impl ExtensionNodeCircuit {
         packed_child_hash.enforce_equal(b, &given_child_hash);
 
         // Expose the public inputs.
+        /* TODO
         PublicInputs::register(
             b,
             &root.output_array,
@@ -56,6 +57,7 @@ impl ExtensionNodeCircuit {
             child_proof.metadata_digest(),
             child_proof.n(),
         );
+        */
 
         ExtensionNodeWires { node, root }
     }

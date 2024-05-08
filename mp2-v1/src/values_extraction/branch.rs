@@ -164,6 +164,7 @@ where
         let new_prefix = common_prefix.advance_by(b, one);
 
         // We now extract the public input to register for the proofs.
+        /* TODO
         PublicInputs::register(
             b,
             &root.output_array,
@@ -172,6 +173,7 @@ where
             metadata_digest,
             n,
         );
+        */
 
         BranchWires {
             node,
