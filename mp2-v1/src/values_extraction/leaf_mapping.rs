@@ -79,6 +79,9 @@ where
         let key_id = b.add_virtual_hash();
         let value_id = b.add_virtual_hash();
 
+        // Range check for the slot byte since we don't export it as a public input for now.
+        b.range_check(slot.mapping_slot, 8);
+
         // Build the node wires.
         let wires =
             MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
