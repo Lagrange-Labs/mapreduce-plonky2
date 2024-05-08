@@ -1,5 +1,6 @@
-//! Module handling the recursive proving of mapping entries specically
-//! inside a storage trie.
+//! Module handling the recursive proving of the correct derivation of the MPT path
+//! depending on the type of variables the slot is holding (simple unit variable like uint256 
+//! variable length & composite type like a mapping).
 
 use mp2_common::{
     array::{Array, Vector, VectorWire},
