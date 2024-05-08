@@ -252,7 +252,7 @@ mod tests {
     };
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
-    use std::{array, sync::Arc};
+    use std::{array, iter, sync::Arc};
 
     #[derive(Clone, Debug, Default)]
     struct TestChildData {
@@ -301,41 +301,46 @@ mod tests {
     }
 
     #[test]
-    fn test_values_extraction_branch_circuit_simple_type_for_2_children() {
+    fn test_values_extraction_branch_circuit_simple_type_without_padding() {
         const NODE_LEN: usize = 100;
         const N_CHILDREN: usize = 2;
+        const N_PADDING: usize = 0;
 
-        test_branch_circuit::<NODE_LEN, N_CHILDREN>(true);
+        test_branch_circuit::<NODE_LEN, N_CHILDREN, N_PADDING>(true);
     }
 
     #[test]
-    fn test_values_extraction_branch_circuit_simple_type_for_3_children() {
-        const NODE_LEN: usize = 100;
-        const N_CHILDREN: usize = 3;
-
-        test_branch_circuit::<NODE_LEN, N_CHILDREN>(true);
-    }
-
-    #[test]
-    fn test_values_extraction_branch_circuit_multiple_type_for_2_children() {
+    fn test_values_extraction_branch_circuit_simple_type_with_padding() {
         const NODE_LEN: usize = 100;
         const N_CHILDREN: usize = 2;
+        const N_PADDING: usize = 1;
 
-        test_branch_circuit::<NODE_LEN, N_CHILDREN>(false);
+        test_branch_circuit::<NODE_LEN, N_CHILDREN, N_PADDING>(true);
     }
 
     #[test]
-    fn test_values_extraction_branch_circuit_multiple_type_for_3_children() {
+    fn test_values_extraction_branch_circuit_multiple_type_without_padding() {
         const NODE_LEN: usize = 100;
-        const N_CHILDREN: usize = 3;
+        const N_CHILDREN: usize = 2;
+        const N_PADDING: usize = 0;
 
-        test_branch_circuit::<NODE_LEN, N_CHILDREN>(false);
+        test_branch_circuit::<NODE_LEN, N_CHILDREN, N_PADDING>(false);
     }
 
-    fn test_branch_circuit<const NODE_LEN: usize, const N_CHILDREN: usize>(
+    #[test]
+    fn test_values_extraction_branch_circuit_multiple_type_with_padding() {
+        const NODE_LEN: usize = 100;
+        const N_CHILDREN: usize = 2;
+        const N_PADDING: usize = 1;
+
+        test_branch_circuit::<NODE_LEN, N_CHILDREN, N_PADDING>(false);
+    }
+
+    fn test_branch_circuit<const NODE_LEN: usize, const N_CHILDREN: usize, const N_PADDING: usize>(
         is_simple_aggregation: bool,
     ) where
         [(); PAD_LEN(NODE_LEN)]:,
+        [(); { N_CHILDREN + N_PADDING }]:,
     {
         let compute_key_ptr = |leaf: &[u8]| {
             let tuple: Vec<Vec<u8>> = rlp::decode_list(leaf);
@@ -414,7 +419,7 @@ mod tests {
         }
         let node = children[0].proof[1].clone();
 
-        let c = BranchCircuit::<NODE_LEN, N_CHILDREN> {
+        let c = BranchCircuit::<NODE_LEN, { N_CHILDREN + N_PADDING }> {
             node: node.clone(),
             // Any of the two keys should work since we only care about the common prefix.
             common_prefix: bytes_to_nibbles(&children[0].key),
@@ -422,9 +427,20 @@ mod tests {
             n_proof_valid: N_CHILDREN,
             is_simple_aggregation,
         };
-        let exp_pis = array::from_fn(|i| PublicInputs::new(&children[i].pi));
-        let circuit = TestBranchCircuit::<NODE_LEN, N_CHILDREN> { c, exp_pis };
-        let proof = run_circuit::<F, D, C, TestBranchCircuit<NODE_LEN, N_CHILDREN>>(circuit);
+
+        // Extend the child public inputs with padding.
+        let mut exp_pis: Vec<_> = children.iter().map(|child| child.pi.clone()).collect();
+        let last_pi = exp_pis.last().unwrap().clone();
+        exp_pis.extend(iter::repeat(last_pi).take(N_PADDING));
+        let exp_pis: Vec<_> = exp_pis.iter().map(|pi| PublicInputs::new(pi)).collect();
+
+        let circuit = TestBranchCircuit::<NODE_LEN, { N_CHILDREN + N_PADDING }> {
+            c,
+            exp_pis: exp_pis.try_into().unwrap(),
+        };
+        let proof = run_circuit::<F, D, C, TestBranchCircuit<NODE_LEN, { N_CHILDREN + N_PADDING }>>(
+            circuit,
+        );
         let pi = PublicInputs::<F>::new(&proof.public_inputs);
 
         {
