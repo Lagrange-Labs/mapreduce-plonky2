@@ -1,11 +1,12 @@
 //! Module handling the branch node inside a storage trie
 
-use super::public_inputs::PublicInputs;
+use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use anyhow::Result;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
+    public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     types::{CBuilder, GFp},
     utils::{convert_u8_targets_to_u32, less_than},
@@ -164,14 +165,14 @@ where
         let new_prefix = common_prefix.advance_by(b, one);
 
         // We now extract the public input to register for the proofs.
-        PublicInputs::register(
-            b,
-            &root.output_array,
-            &new_prefix,
-            values_digest,
-            metadata_digest,
-            n,
-        );
+        PublicInputsArgs {
+            h: &root.output_array,
+            k: &new_prefix,
+            dv: values_digest,
+            dm: metadata_digest,
+            n: n,
+        }
+        .register(b);
 
         BranchWires {
             node,

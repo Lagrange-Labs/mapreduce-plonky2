@@ -1,11 +1,15 @@
 //! Module handling the extension node inside a storage trie
 
-use super::{public_inputs::PublicInputs, MAX_EXTENSION_NODE_LEN};
+use super::{
+    public_inputs::{PublicInputs, PublicInputsArgs},
+    MAX_EXTENSION_NODE_LEN,
+};
 use anyhow::Result;
 use mp2_common::{
     array::{Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTLeafOrExtensionNode, PAD_LEN},
+    public_inputs::PublicInputCommon,
     types::{CBuilder, GFp},
     D,
 };
@@ -48,14 +52,14 @@ impl ExtensionNodeCircuit {
         packed_child_hash.enforce_equal(b, &given_child_hash);
 
         // Expose the public inputs.
-        PublicInputs::register(
-            b,
-            &root.output_array,
-            &wires.key,
-            child_proof.values_digest(),
-            child_proof.metadata_digest(),
-            child_proof.n(),
-        );
+        PublicInputsArgs {
+            h: &root.output_array,
+            k: &wires.key,
+            dv: child_proof.values_digest(),
+            dm: child_proof.metadata_digest(),
+            n: child_proof.n(),
+        }
+        .register(b);
 
         ExtensionNodeWires { node, root }
     }

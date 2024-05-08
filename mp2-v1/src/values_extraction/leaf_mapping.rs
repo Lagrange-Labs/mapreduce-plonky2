@@ -1,6 +1,9 @@
 //! Module handling the mapping entries inside a storage trie
 
-use super::{public_inputs::PublicInputs, MAX_LEAF_NODE_LEN};
+use super::{
+    public_inputs::{PublicInputs, PublicInputsArgs},
+    MAX_LEAF_NODE_LEN,
+};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
@@ -8,6 +11,7 @@ use mp2_common::{
     mpt_sequential::{
         utils::left_pad_leaf_value, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN,
     },
+    public_inputs::PublicInputCommon,
     storage_key::{MappingSlot, MappingSlotWires},
     types::{CBuilder, GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
     utils::convert_u8_targets_to_u32,
@@ -127,14 +131,14 @@ where
         let n = b.one();
 
         // Register the public inputs.
-        PublicInputs::register(
-            b,
-            &root.output_array,
-            &wires.key,
-            values_digest,
-            metadata_digest,
-            n,
-        );
+        PublicInputsArgs {
+            h: &root.output_array,
+            k: &wires.key,
+            dv: values_digest,
+            dm: metadata_digest,
+            n: n,
+        }
+        .register(b);
 
         LeafMappingWires {
             node,
