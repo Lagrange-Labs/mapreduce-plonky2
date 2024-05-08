@@ -1,10 +1,6 @@
 //! Module handling the mapping entries inside a storage trie
 
-use super::{
-    key::{MappingSlot, MappingSlotWires},
-    public_inputs::PublicInputs,
-    KEY_ID_PREFIX, MAX_LEAF_NODE_LEN, VALUE_ID_PREFIX,
-};
+use super::{public_inputs::PublicInputs, KEY_ID_PREFIX, MAX_LEAF_NODE_LEN, VALUE_ID_PREFIX};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
@@ -12,6 +8,7 @@ use mp2_common::{
     mpt_sequential::{
         utils::left_pad_leaf_value, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN,
     },
+    storage_key::{MappingSlot, MappingSlotWires},
     types::{CBuilder, GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
     utils::{convert_u8_targets_to_u32, pack_and_compute_poseidon_target},
     D,

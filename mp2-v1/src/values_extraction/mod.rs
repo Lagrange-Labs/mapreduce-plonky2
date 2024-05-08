@@ -14,7 +14,6 @@ use std::iter;
 
 mod branch;
 mod extension;
-mod key;
 mod leaf_mapping;
 mod leaf_single;
 pub mod public_inputs;

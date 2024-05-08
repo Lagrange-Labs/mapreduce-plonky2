@@ -1,10 +1,6 @@
 //! Module handling the single variable inside a storage trie
 
-use super::{
-    key::{SimpleSlot, SimpleSlotWires},
-    public_inputs::PublicInputs,
-    MAX_LEAF_NODE_LEN,
-};
+use super::{public_inputs::PublicInputs, MAX_LEAF_NODE_LEN};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
@@ -12,6 +8,7 @@ use mp2_common::{
     mpt_sequential::{
         utils::left_pad_leaf_value, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN,
     },
+    storage_key::{SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
     utils::convert_u8_targets_to_u32,
     D,

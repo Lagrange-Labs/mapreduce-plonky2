@@ -2,7 +2,7 @@
 //! depending on the type of variables the slot is holding (simple unit variable like uint256
 //! variable length & composite type like a mapping).
 
-use mp2_common::{
+use crate::{
     array::{Array, Vector, VectorWire},
     eth::{left_pad32, StorageSlot},
     keccak::{ByteKeccakWires, InputData, KeccakCircuit, KeccakWires, HASH_LEN},
@@ -33,15 +33,15 @@ const INPUT_PADDED_LEN: usize = PAD_LEN(INPUT_TUPLE_LEN);
 pub struct KeccakMPTWires {
     /// Actual keccak wires created for the computation of the "location" for
     /// the storage slot
-    pub(crate) keccak_location: ByteKeccakWires<INPUT_PADDED_LEN>,
+    pub keccak_location: ByteKeccakWires<INPUT_PADDED_LEN>,
     /// Actual keccak wires created for the computation of the final MPT key
     /// from the location. THIS is the one to use to look up a key in the
     /// associated MPT trie.
-    pub(crate) keccak_mpt_key: KeccakWires<{ PAD_LEN(HASH_LEN) }>,
+    pub keccak_mpt_key: KeccakWires<{ PAD_LEN(HASH_LEN) }>,
     /// The MPT key derived in circuit from the storage slot, in NIBBLES
     /// TODO: it represents the same information as "exp" but in nibbles.
     /// It doesn't need to be assigned, but is used in the higher level circuits
-    pub(crate) mpt_key: MPTKeyWire,
+    pub mpt_key: MPTKeyWire,
 }
 
 struct KeccakMPT;
@@ -114,7 +114,7 @@ impl KeccakMPT {
 /// WARNING: Currently takes the assumption that the storage slot number fits
 /// inside a single byte.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SimpleSlot(pub(super) StorageSlot);
+pub struct SimpleSlot(pub StorageSlot);
 
 impl SimpleSlot {
     pub fn new(slot: u8) -> Self {
@@ -137,12 +137,12 @@ impl From<StorageSlot> for SimpleSlot {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SimpleSlotWires {
     /// Simple storage slot which is assumed to fit in a single byte
-    pub(crate) slot: Target,
+    pub slot: Target,
     /// Wires associated computing the keccak for the MPT key
-    pub(crate) keccak_mpt: KeccakWires<{ PAD_LEN(INPUT_ELEMENT_LEN) }>,
+    pub keccak_mpt: KeccakWires<{ PAD_LEN(INPUT_ELEMENT_LEN) }>,
     /// The MPT key derived in circuit from the storage slot, in NIBBLES
     /// TODO: It doesn't need to be assigned, but is used in the higher level circuits
-    pub(crate) mpt_key: MPTKeyWire,
+    pub mpt_key: MPTKeyWire,
 }
 
 // TODO: refactor to extract common functions with MappingSlot.
@@ -223,11 +223,11 @@ impl MappingSlot {
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct MappingSlotWires {
     /// "input" mapping key which is maxed out at 32 bytes
-    pub(crate) mapping_key: Array<Target, MAPPING_KEY_LEN>,
+    pub mapping_key: Array<Target, MAPPING_KEY_LEN>,
     /// "input" mapping slot which is assumed to fit in a single byte
-    pub(crate) mapping_slot: Target,
+    pub mapping_slot: Target,
     /// Wires associated with the MPT key
-    pub(crate) keccak_mpt: KeccakMPTWires,
+    pub keccak_mpt: KeccakMPTWires,
 }
 
 /// Size of the input to the digest and hash function
