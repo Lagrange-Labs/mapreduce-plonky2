@@ -18,17 +18,14 @@ use mp2_common::{
     D,
 };
 use plonky2::{
-    hash::hash_types::{HashOut, HashOutTarget},
+    field::types::Field,
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use recursion_framework::{
-    circuit_builder::CircuitLogicWires,
-    serialization::{deserialize, serialize},
-};
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;
 
@@ -41,8 +38,7 @@ where
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     slot: SimpleSlotWires,
     value: Array<Target, MAPPING_LEAF_VALUE_LEN>,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    identifier: HashOutTarget,
+    id: Target,
 }
 
 impl<const N: usize> LeafSingleWires<N>
@@ -59,7 +55,7 @@ where
 pub(crate) struct LeafSingleCircuit<const NODE_LEN: usize> {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: SimpleSlot,
-    identifier: HashOut<GFp>,
+    pub(crate) id: u64,
 }
 
 impl<const NODE_LEN: usize> LeafSingleCircuit<NODE_LEN>
@@ -68,7 +64,7 @@ where
 {
     pub fn build(b: &mut CBuilder) -> LeafSingleWires<NODE_LEN> {
         let slot = SimpleSlot::build(b);
-        let identifier = b.add_virtual_hash();
+        let id = b.add_virtual_target();
 
         // Range check for the slot byte since we don't export it as a public input for now.
         b.range_check(slot.slot, 8);
@@ -86,14 +82,7 @@ where
         let value = left_pad_leaf_value(b, &wires.value);
 
         // Compute the metadata digest - D(identifier || slot).
-        let inputs: Vec<_> = identifier
-            .elements
-            .into_iter()
-            .chain(iter::once(slot.slot))
-            .collect();
-        assert_eq!(inputs.len(), 5);
-
-        let metadata_digest = b.map_to_curve_point(&inputs);
+        let metadata_digest = b.map_to_curve_point(&[id, slot.slot]);
 
         // Compute the values digest - D(identifier || value).
         assert_eq!(value.arr.len(), MAPPING_LEAF_VALUE_LEN);
@@ -101,11 +90,7 @@ where
             .into_iter()
             .map(|t| t.0)
             .collect();
-        let inputs: Vec<_> = identifier
-            .elements
-            .into_iter()
-            .chain(packed_value)
-            .collect();
+        let inputs: Vec<_> = iter::once(id).chain(packed_value).collect();
         let values_digest = b.map_to_curve_point(&inputs);
 
         // Only one leaf in this node.
@@ -126,7 +111,7 @@ where
             root,
             slot,
             value,
-            identifier,
+            id,
         }
     }
 
@@ -140,7 +125,7 @@ where
             &InputData::Assigned(&pad_node),
         );
         self.slot.assign(pw, &wires.slot);
-        pw.set_hash_target(wires.identifier, self.identifier);
+        pw.set_target(wires.id, GFp::from_canonical_u64(self.id));
     }
 }
 
@@ -174,8 +159,8 @@ impl CircuitLogicWires<GFp, D, 0> for LeafSingleWires<MAX_LEAF_NODE_LEN> {
 mod tests {
     use super::{
         super::{
-            compute_leaf_single_id, compute_leaf_single_metadata_digest,
-            compute_leaf_single_values_digest,
+            compute_leaf_single_id,
+            tests::{compute_leaf_single_metadata_digest, compute_leaf_single_values_digest},
         },
         *,
     };
@@ -247,7 +232,7 @@ mod tests {
         let simple_slot = 2_u8;
         let slot = StorageSlot::Simple(simple_slot as usize);
         let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let identifier = compute_leaf_single_id(simple_slot, &contract_address);
+        let id = compute_leaf_single_id(simple_slot, &contract_address);
 
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);
@@ -261,7 +246,7 @@ mod tests {
         let c = LeafSingleCircuit::<NODE_LEN> {
             node: node.clone(),
             slot: SimpleSlot::new(simple_slot),
-            identifier,
+            id,
         };
         let test_circuit = TestLeafSingleCircuit {
             c,
@@ -293,12 +278,12 @@ mod tests {
         }
         // Check values digest
         {
-            let exp_digest = compute_leaf_single_values_digest(&identifier, &value);
+            let exp_digest = compute_leaf_single_values_digest(id, &value);
             assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
         }
         // Check metadata digest
         {
-            let exp_digest = compute_leaf_single_metadata_digest(&identifier, simple_slot);
+            let exp_digest = compute_leaf_single_metadata_digest(id, simple_slot);
             assert_eq!(pi.metadata_digest(), exp_digest.to_weierstrass());
         }
         assert_eq!(pi.n(), F::ONE);

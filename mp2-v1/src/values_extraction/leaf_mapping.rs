@@ -18,7 +18,7 @@ use mp2_common::{
     D,
 };
 use plonky2::{
-    hash::hash_types::{HashOut, HashOutTarget},
+    field::types::Field,
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
@@ -26,10 +26,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
-use recursion_framework::{
-    circuit_builder::CircuitLogicWires,
-    serialization::{deserialize, serialize},
-};
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;
 
@@ -42,10 +39,8 @@ where
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     slot: MappingSlotWires,
     value: Array<Target, MAPPING_LEAF_VALUE_LEN>,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    key_id: HashOutTarget,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    value_id: HashOutTarget,
+    key_id: Target,
+    value_id: Target,
 }
 
 impl<const N: usize> LeafMappingWires<N>
@@ -66,8 +61,8 @@ where
 pub(crate) struct LeafMappingCircuit<const NODE_LEN: usize> {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: MappingSlot,
-    pub(crate) key_id: HashOut<GFp>,
-    pub(crate) value_id: HashOut<GFp>,
+    pub(crate) key_id: u64,
+    pub(crate) value_id: u64,
 }
 
 impl<const NODE_LEN: usize> LeafMappingCircuit<NODE_LEN>
@@ -76,8 +71,8 @@ where
 {
     pub fn build(b: &mut CBuilder) -> LeafMappingWires<NODE_LEN> {
         let slot = MappingSlot::mpt_key(b);
-        let key_id = b.add_virtual_hash();
-        let value_id = b.add_virtual_hash();
+        let key_id = b.add_virtual_target();
+        let value_id = b.add_virtual_target();
 
         // Range check for the slot byte since we don't export it as a public input for now.
         b.range_check(slot.mapping_slot, 8);
@@ -95,16 +90,7 @@ where
         let value = left_pad_leaf_value(b, &wires.value);
 
         // Compute the metadata digest - D(key_id || value_id || slot).
-        let inputs: Vec<_> = key_id
-            .elements
-            .iter()
-            .cloned()
-            .chain(value_id.elements)
-            .chain([slot.mapping_slot])
-            .collect();
-        assert_eq!(inputs.len(), 9);
-
-        let metadata_digest = b.map_to_curve_point(&inputs);
+        let metadata_digest = b.map_to_curve_point(&[key_id, value_id, slot.mapping_slot]);
 
         // Compute the values digest - D(D(key_id || key) + D(value_id || value)).
         assert_eq!(slot.mapping_key.arr.len(), MAPPING_KEY_LEN);
@@ -115,9 +101,9 @@ where
                 .map(|t| t.0)
                 .collect::<Vec<_>>()
         });
-        let inputs: Vec<_> = key_id.elements.into_iter().chain(packed_key).collect();
+        let inputs: Vec<_> = iter::once(key_id).chain(packed_key).collect();
         let k_digest = b.map_to_curve_point(&inputs);
-        let inputs: Vec<_> = value_id.elements.into_iter().chain(packed_value).collect();
+        let inputs: Vec<_> = iter::once(value_id).chain(packed_value).collect();
         let v_digest = b.map_to_curve_point(&inputs);
         // D(key_id || key) + D(value_id || value)
         let add_digest = b.curve_add(k_digest, v_digest);
@@ -163,8 +149,8 @@ where
             &InputData::Assigned(&pad_node),
         );
         self.slot.assign(pw, &wires.slot);
-        pw.set_hash_target(wires.key_id, self.key_id);
-        pw.set_hash_target(wires.value_id, self.value_id);
+        pw.set_target(wires.key_id, GFp::from_canonical_u64(self.key_id));
+        pw.set_target(wires.value_id, GFp::from_canonical_u64(self.value_id));
     }
 }
 
@@ -198,8 +184,8 @@ impl CircuitLogicWires<GFp, D, 0> for LeafMappingWires<MAX_LEAF_NODE_LEN> {
 mod tests {
     use super::{
         super::{
-            compute_leaf_mapping_key_id, compute_leaf_mapping_metadata_digest,
-            compute_leaf_mapping_value_id, compute_leaf_mapping_values_digest,
+            compute_leaf_mapping_key_id, compute_leaf_mapping_value_id,
+            tests::{compute_leaf_mapping_metadata_digest, compute_leaf_mapping_values_digest},
         },
         *,
     };
@@ -321,12 +307,12 @@ mod tests {
         // Check values digest
         {
             let exp_digest =
-                compute_leaf_mapping_values_digest(&key_id, &value_id, &mapping_key, &value);
+                compute_leaf_mapping_values_digest(key_id, value_id, &mapping_key, &value);
             assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
         }
         // Check metadata digest
         {
-            let exp_digest = compute_leaf_mapping_metadata_digest(&key_id, &value_id, mapping_slot);
+            let exp_digest = compute_leaf_mapping_metadata_digest(key_id, value_id, mapping_slot);
             assert_eq!(pi.metadata_digest(), exp_digest.to_weierstrass());
         }
         assert_eq!(pi.n(), F::ONE);
