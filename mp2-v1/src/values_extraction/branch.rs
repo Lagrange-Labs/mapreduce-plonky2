@@ -114,7 +114,6 @@ where
                 // Check if the metadata digests are same for `multiple` aggregation type.
                 let is_equal = b.curve_eq(metadata_digest, child_digest);
                 let should_check = b.not(is_simple_aggregation);
-                let should_check = b.and(should_process, should_check);
                 let should_check = b.or(is_equal, should_check);
                 b.connect(is_equal.target, should_check.target);
 
