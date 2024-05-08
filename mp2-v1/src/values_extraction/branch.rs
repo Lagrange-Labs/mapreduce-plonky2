@@ -111,11 +111,11 @@ where
             let child_digest = proof_inputs.metadata_digest();
             if i > 0 {
                 // Check if the metadata digests are same for `multiple` aggregation type.
+                let is_equal = b.curve_eq(metadata_digest, child_digest);
                 let should_check = b.not(is_simple_aggregation);
                 let should_check = b.and(should_process, should_check);
-                let exp_digest = b.curve_select(should_check, child_digest, metadata_digest);
-                let is_equal = b.curve_eq(metadata_digest, exp_digest);
-                b.connect(is_equal.target, ttrue.target);
+                let should_check = b.or(is_equal, should_check);
+                b.connect(is_equal.target, should_check.target);
 
                 // Accumulate the metadata digests for `simple` aggregation type.
                 let should_acc = b.and(should_process, is_simple_aggregation);
