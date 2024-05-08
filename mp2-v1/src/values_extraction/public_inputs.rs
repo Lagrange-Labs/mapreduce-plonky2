@@ -119,13 +119,6 @@ impl<'a> PublicInputs<'a, GFp> {
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
-    pub(crate) const H_RANGE: PublicInputRange = H_RANGE;
-    pub(crate) const K_RANGE: PublicInputRange = K_RANGE;
-    pub(crate) const T_RANGE: PublicInputRange = T_RANGE;
-    pub(crate) const DV_RANGE: PublicInputRange = DV_RANGE;
-    pub(crate) const DM_RANGE: PublicInputRange = DM_RANGE;
-    pub(crate) const N_RANGE: PublicInputRange = N_RANGE;
-
     pub(crate) const TOTAL_LEN: usize = N_RANGE.end;
 
     pub fn new(proof_inputs: &'a [T]) -> Self {
@@ -144,16 +137,16 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     pub fn values_digest_info(&self) -> ([T; 5], [T; 5], T) {
-        convert_slice_to_curve_point(&self.proof_inputs[Self::DV_RANGE])
+        convert_slice_to_curve_point(&self.proof_inputs[DV_RANGE])
     }
 
     pub fn metadata_digest_info(&self) -> ([T; 5], [T; 5], T) {
-        convert_slice_to_curve_point(&self.proof_inputs[Self::DM_RANGE])
+        convert_slice_to_curve_point(&self.proof_inputs[DM_RANGE])
     }
 
     /// Return the number of leaves extracted from this subtree.
     pub fn n(&self) -> T {
-        self.proof_inputs[Self::N_RANGE][0]
+        self.proof_inputs[N_RANGE][0]
     }
 }
 
