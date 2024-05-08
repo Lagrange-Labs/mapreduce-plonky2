@@ -112,7 +112,7 @@ where
              .0
             .into_iter()
             .flat_map(|ext| ext.0)
-            .chain(iter::once(k_digest.0 .1.target))
+            .chain(iter::once(add_digest.0 .1.target))
             .collect();
         let values_digest = b.map_to_curve_point(&inputs);
 
