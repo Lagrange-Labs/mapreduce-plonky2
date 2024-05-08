@@ -35,6 +35,29 @@ const DV_RANGE: PublicInputRange = T_RANGE.end..T_RANGE.end + CURVE_TARGET_LEN;
 const DM_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + CURVE_TARGET_LEN;
 const N_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + 1;
 
+/// Public inputs wrapper for registering
+#[derive(Clone, Debug)]
+pub struct PublicInputsArgs<'a> {
+    pub(crate) h: &'a OutputHash,
+    pub(crate) k: &'a MPTKeyWire,
+    pub(crate) dv: CurveTarget,
+    pub(crate) dm: CurveTarget,
+    pub(crate) n: Target,
+}
+
+impl<'a> PublicInputCommon for PublicInputsArgs<'a> {
+    const RANGES: &'static [PublicInputRange] =
+        &[H_RANGE, K_RANGE, T_RANGE, DV_RANGE, DM_RANGE, N_RANGE];
+
+    fn register_args(&self, cb: &mut CBuilder) {
+        self.h.register_as_public_input(cb);
+        self.k.register_as_input(cb);
+        cb.register_curve_public_input(self.dv);
+        cb.register_curve_public_input(self.dm);
+        cb.register_public_input(self.n);
+    }
+}
+
 /// Public inputs wrapper of any proof generated in this module
 #[derive(Clone, Debug)]
 pub struct PublicInputs<'a, T> {
@@ -44,21 +67,6 @@ pub struct PublicInputs<'a, T> {
 impl<'a> PublicInputs<'a, Target> {
     const RANGES: &'static [PublicInputRange] =
         &[H_RANGE, K_RANGE, T_RANGE, DV_RANGE, DM_RANGE, N_RANGE];
-
-    pub fn register(
-        b: &mut CBuilder,
-        h: &OutputHash,
-        k: &MPTKeyWire,
-        dv: CurveTarget,
-        dm: CurveTarget,
-        n: Target,
-    ) {
-        h.register_as_public_input(b);
-        k.register_as_input(b);
-        b.register_curve_public_input(dv);
-        b.register_curve_public_input(dm);
-        b.register_public_input(n);
-    }
 
     /// Get the merkle hash of the subtree this proof has processed.
     pub fn root_hash(&self) -> OutputHash {
@@ -248,7 +256,14 @@ pub(crate) mod tests {
             let dm = b.add_virtual_curve_target();
             let n = b.add_virtual_target();
 
-            PublicInputs::register(b, &h, &k, dv, dm, n);
+            PublicInputsArgs {
+                h: &h,
+                k: &k,
+                dv,
+                dm,
+                n,
+            }
+            .register(b);
 
             (h, k, dv, dm, n)
         }
