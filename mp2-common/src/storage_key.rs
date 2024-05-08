@@ -290,7 +290,7 @@ impl MappingSlot {
 #[cfg(test)]
 mod test {
     use super::{MappingSlot, MappingSlotWires, SimpleSlot, SimpleSlotWires};
-    use mp2_common::{
+    use crate::{
         array::Array,
         eth::StorageSlot,
         keccak::{HASH_LEN, PACKED_HASH_LEN},
