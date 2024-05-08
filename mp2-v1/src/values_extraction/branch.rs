@@ -134,8 +134,7 @@ where
                 MPTCircuit::<1, NODE_LEN>::advance_key_branch(b, &node.arr, &child_key, &headers);
 
             // We always enforce it's a branch node, i.e. that it has 17 entries.
-            let node_maybe_valid = b.select(should_process, is_valid.target, ttrue.target);
-            b.connect(node_maybe_valid, ttrue.target);
+            b.connect(is_valid.target, ttrue.target);
 
             // Make sure we don't process twice the same proof for same nibble.
             seen_nibbles.iter().for_each(|sn| {
