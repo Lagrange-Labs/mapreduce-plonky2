@@ -14,11 +14,17 @@ use mp2_common::{
     D,
 };
 use plonky2::{
-    hash::poseidon::PoseidonHash,
-    iop::{target::Target, witness::PartialWitness},
+    hash::hash_types::{HashOut, HashOutTarget},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::circuit_builder::CircuitBuilder,
 };
-use recursion_framework::circuit_builder::CircuitLogicWires;
+use recursion_framework::{
+    circuit_builder::CircuitLogicWires,
+    serialization::{deserialize, serialize},
+};
 use serde::{Deserialize, Serialize};
 use std::iter;
 
@@ -31,6 +37,8 @@ where
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     slot: SimpleSlotWires,
     value: Array<Target, MAPPING_LEAF_VALUE_LEN>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    identifier: HashOutTarget,
 }
 
 impl<const N: usize> LeafSingleWires<N>
@@ -47,6 +55,7 @@ where
 pub(crate) struct LeafSingleCircuit<const NODE_LEN: usize> {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: SimpleSlot,
+    identifier: HashOut<GFp>,
 }
 
 impl<const NODE_LEN: usize> LeafSingleCircuit<NODE_LEN>
@@ -55,6 +64,7 @@ where
 {
     pub fn build(b: &mut CBuilder) -> LeafSingleWires<NODE_LEN> {
         let slot = SimpleSlot::build(b);
+        let identifier = b.add_virtual_hash();
 
         // Build the node wires.
         let wires =
@@ -68,13 +78,9 @@ where
         // Left pad the leaf value.
         let value = left_pad_leaf_value(b, &wires.value);
 
-        // Compute the identifier (simple slot which is assumed to fit in a single byte).
-        let identifier = b
-            .hash_n_to_hash_no_pad::<PoseidonHash>(vec![slot.slot])
-            .elements;
-
         // Compute the metadata digest - D(identifier || slot).
         let inputs: Vec<_> = identifier
+            .elements
             .into_iter()
             .chain(iter::once(slot.slot))
             .collect();
@@ -88,7 +94,11 @@ where
             .into_iter()
             .map(|t| t.0)
             .collect();
-        let inputs: Vec<_> = identifier.into_iter().chain(packed_value).collect();
+        let inputs: Vec<_> = identifier
+            .elements
+            .into_iter()
+            .chain(packed_value)
+            .collect();
         let values_digest = b.map_to_curve_point(&inputs);
 
         // Only one leaf in this node.
@@ -109,6 +119,7 @@ where
             root,
             slot,
             value,
+            identifier,
         }
     }
 
@@ -122,6 +133,7 @@ where
             &InputData::Assigned(&pad_node),
         );
         self.slot.assign(pw, &wires.slot);
+        pw.set_hash_target(wires.identifier, self.identifier);
     }
 }
 
@@ -161,6 +173,7 @@ mod tests {
         *,
     };
     use eth_trie::{Nibbles, Trie};
+    use ethers::types::Address;
     use mp2_common::{
         array::Array,
         eth::{left_pad32, StorageSlot},
@@ -183,6 +196,9 @@ mod tests {
             config::{GenericConfig, Hasher, PoseidonGoldilocksConfig},
         },
     };
+    use std::str::FromStr;
+
+    const TEST_CONTRACT_ADDRESS: &str = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
 
     #[derive(Clone, Debug)]
     struct TestLeafSingleCircuit<const NODE_LEN: usize> {
@@ -223,6 +239,8 @@ mod tests {
 
         let simple_slot = 2_u8;
         let slot = StorageSlot::Simple(simple_slot as usize);
+        let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
+        let identifier = compute_leaf_single_id(simple_slot, &contract_address);
 
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);
@@ -236,6 +254,7 @@ mod tests {
         let c = LeafSingleCircuit::<NODE_LEN> {
             node: node.clone(),
             slot: SimpleSlot::new(simple_slot),
+            identifier,
         };
         let test_circuit = TestLeafSingleCircuit {
             c,
@@ -265,15 +284,14 @@ mod tests {
             let exp_ptr = F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1 - nib.nibbles().len());
             assert_eq!(exp_ptr, ptr);
         }
-        let id = compute_leaf_single_id(simple_slot);
         // Check values digest
         {
-            let exp_digest = compute_leaf_single_values_digest(&id, &value);
+            let exp_digest = compute_leaf_single_values_digest(&identifier, &value);
             assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
         }
         // Check metadata digest
         {
-            let exp_digest = compute_leaf_single_metadata_digest(&id, simple_slot);
+            let exp_digest = compute_leaf_single_metadata_digest(&identifier, simple_slot);
             assert_eq!(pi.metadata_digest(), exp_digest.to_weierstrass());
         }
         assert_eq!(pi.n(), F::ONE);

@@ -1,6 +1,6 @@
 //! Module handling the mapping entries inside a storage trie
 
-use super::{public_inputs::PublicInputs, KEY_ID_PREFIX, MAX_LEAF_NODE_LEN, VALUE_ID_PREFIX};
+use super::{public_inputs::PublicInputs, MAX_LEAF_NODE_LEN};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
@@ -10,16 +10,22 @@ use mp2_common::{
     },
     storage_key::{MappingSlot, MappingSlotWires},
     types::{CBuilder, GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
-    utils::{convert_u8_targets_to_u32, pack_and_compute_poseidon_target},
+    utils::convert_u8_targets_to_u32,
     D,
 };
 use plonky2::{
-    field::types::Field,
-    iop::{target::Target, witness::PartialWitness},
+    hash::hash_types::{HashOut, HashOutTarget},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
-use recursion_framework::circuit_builder::CircuitLogicWires;
+use recursion_framework::{
+    circuit_builder::CircuitLogicWires,
+    serialization::{deserialize, serialize},
+};
 use serde::{Deserialize, Serialize};
 use std::iter;
 
@@ -32,6 +38,10 @@ where
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     slot: MappingSlotWires,
     value: Array<Target, MAPPING_LEAF_VALUE_LEN>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    key_id: HashOutTarget,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    value_id: HashOutTarget,
 }
 
 impl<const N: usize> LeafMappingWires<N>
@@ -52,6 +62,8 @@ where
 pub(crate) struct LeafMappingCircuit<const NODE_LEN: usize> {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: MappingSlot,
+    pub(crate) key_id: HashOut<GFp>,
+    pub(crate) value_id: HashOut<GFp>,
 }
 
 impl<const NODE_LEN: usize> LeafMappingCircuit<NODE_LEN>
@@ -60,6 +72,8 @@ where
 {
     pub fn build(b: &mut CBuilder) -> LeafMappingWires<NODE_LEN> {
         let slot = MappingSlot::mpt_key(b);
+        let key_id = b.add_virtual_hash();
+        let value_id = b.add_virtual_hash();
 
         // Build the node wires.
         let wires =
@@ -73,25 +87,12 @@ where
         // Left pad the leaf value.
         let value = left_pad_leaf_value(b, &wires.value);
 
-        // Compute the key and value IDs - Poseidon(KEY || slot) and Poseidon(VAL || slot).
-        let [key_id, value_id] = [KEY_ID_PREFIX, VALUE_ID_PREFIX].map(|prefix| {
-            let prefix: Vec<_> = prefix.iter().cloned().map(GFp::from_canonical_u8).collect();
-            let prefix = b.constants(&prefix);
-
-            let inputs: Vec<_> = prefix
-                .into_iter()
-                .chain(iter::once(slot.mapping_slot))
-                .collect();
-            assert_eq!(inputs.len(), 4);
-
-            pack_and_compute_poseidon_target(b, &inputs).elements
-        });
-
         // Compute the metadata digest - D(key_id || value_id || slot).
         let inputs: Vec<_> = key_id
+            .elements
             .iter()
             .cloned()
-            .chain(value_id)
+            .chain(value_id.elements)
             .chain([slot.mapping_slot])
             .collect();
         assert_eq!(inputs.len(), 9);
@@ -107,9 +108,9 @@ where
                 .map(|t| t.0)
                 .collect::<Vec<_>>()
         });
-        let inputs: Vec<_> = key_id.into_iter().chain(packed_key).collect();
+        let inputs: Vec<_> = key_id.elements.into_iter().chain(packed_key).collect();
         let k_digest = b.map_to_curve_point(&inputs);
-        let inputs: Vec<_> = value_id.into_iter().chain(packed_value).collect();
+        let inputs: Vec<_> = value_id.elements.into_iter().chain(packed_value).collect();
         let v_digest = b.map_to_curve_point(&inputs);
         // D(key_id || key) + D(value_id || value)
         let add_digest = b.curve_add(k_digest, v_digest);
@@ -140,6 +141,8 @@ where
             root,
             slot,
             value,
+            key_id,
+            value_id,
         }
     }
 
@@ -153,6 +156,8 @@ where
             &InputData::Assigned(&pad_node),
         );
         self.slot.assign(pw, &wires.slot);
+        pw.set_hash_target(wires.key_id, self.key_id);
+        pw.set_hash_target(wires.value_id, self.value_id);
     }
 }
 
@@ -191,8 +196,8 @@ mod tests {
         },
         *,
     };
-
     use eth_trie::{Nibbles, Trie};
+    use ethers::types::Address;
     use mp2_common::{
         array::Array,
         eth::{left_pad32, StorageSlot},
@@ -215,6 +220,9 @@ mod tests {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
+    use std::str::FromStr;
+
+    const TEST_CONTRACT_ADDRESS: &str = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
 
     #[derive(Clone, Debug)]
     struct TestLeafMappingCircuit<const NODE_LEN: usize> {
@@ -256,6 +264,9 @@ mod tests {
         let mapping_slot = 2_u8;
         let mapping_key = hex::decode("1234").unwrap();
         let slot = StorageSlot::Mapping(mapping_key.clone(), mapping_slot as usize);
+        let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
+        let key_id = compute_leaf_mapping_key_id(mapping_slot, &contract_address);
+        let value_id = compute_leaf_mapping_value_id(mapping_slot, &contract_address);
 
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);
@@ -269,6 +280,8 @@ mod tests {
         let c = LeafMappingCircuit::<NODE_LEN> {
             node: node.clone(),
             slot: MappingSlot::new(mapping_slot, mapping_key.clone()),
+            key_id,
+            value_id,
         };
         let test_circuit = TestLeafMappingCircuit {
             c,
@@ -298,8 +311,6 @@ mod tests {
             let exp_ptr = F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1 - nib.nibbles().len());
             assert_eq!(exp_ptr, ptr);
         }
-        let key_id = compute_leaf_mapping_key_id(mapping_slot);
-        let value_id = compute_leaf_mapping_value_id(mapping_slot);
         // Check values digest
         {
             let exp_digest =

@@ -1,8 +1,9 @@
+use ethers::types::Address;
 use mp2_common::{
     eth::left_pad32,
     group_hashing::map_to_curve_point,
     types::{GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
-    utils::{convert_u8_to_u32_slice, pack_and_compute_poseidon_value},
+    utils::{convert_u8_to_u32_slice, pack_and_compute_poseidon_value, Packer},
 };
 use plonky2::{
     field::types::Field,
@@ -30,8 +31,29 @@ pub(crate) const KEY_ID_PREFIX: &[u8] = b"KEY";
 pub(crate) const VALUE_ID_PREFIX: &[u8] = b"VAL";
 
 /// Calculate `id = Poseidon(slot)` for single variable leaf.
-pub(crate) fn compute_leaf_single_id(slot: u8) -> HashOut<GFp> {
-    PoseidonHash::hash_no_pad(&[GFp::from_canonical_u8(slot)])
+pub fn compute_leaf_single_id(slot: u8, contract_address: &Address) -> HashOut<GFp> {
+    let packed_contract_address: Vec<_> = contract_address
+        .0
+        .pack()
+        .into_iter()
+        .map(GFp::from_canonical_u32)
+        .collect();
+
+    let inputs: Vec<_> = iter::once(GFp::from_canonical_u8(slot))
+        .chain(packed_contract_address)
+        .collect();
+
+    PoseidonHash::hash_no_pad(&inputs)
+}
+
+/// Calculate `key_id = Poseidon(KEY || slot)` for mapping variable leaf.
+pub fn compute_leaf_mapping_key_id(slot: u8, contract_address: &Address) -> HashOut<GFp> {
+    compute_id_with_prefix(KEY_ID_PREFIX, slot, contract_address)
+}
+
+/// Calculate `value_id = Poseidon(VAL || slot)` for mapping variable leaf.
+pub fn compute_leaf_mapping_value_id(slot: u8, contract_address: &Address) -> HashOut<GFp> {
+    compute_id_with_prefix(VALUE_ID_PREFIX, slot, contract_address)
 }
 
 /// Calculate `values_digest = D(id || value)` for single variable leaf.
@@ -56,16 +78,6 @@ pub(crate) fn compute_leaf_single_metadata_digest(id: &HashOut<GFp>, slot: u8) -
         .chain(iter::once(GFp::from_canonical_u8(slot)))
         .collect();
     map_to_curve_point(&inputs)
-}
-
-/// Calculate `key_id = Poseidon(KEY || slot)` for mapping variable leaf.
-pub(crate) fn compute_leaf_mapping_key_id(slot: u8) -> HashOut<GFp> {
-    compute_id_with_prefix(KEY_ID_PREFIX, slot)
-}
-
-/// Calculate `value_id = Poseidon(VAL || slot)` for mapping variable leaf.
-pub(crate) fn compute_leaf_mapping_value_id(slot: u8) -> HashOut<GFp> {
-    compute_id_with_prefix(VALUE_ID_PREFIX, slot)
 }
 
 /// Calculate `values_digest = D(D(key_id || key) + D(value_id || value))` for mapping variable leaf.
@@ -119,7 +131,12 @@ pub(crate) fn compute_leaf_mapping_metadata_digest(
 }
 
 /// Calculate ID with prefix.
-fn compute_id_with_prefix(prefix: &[u8], slot: u8) -> HashOut<GFp> {
-    let inputs: Vec<_> = prefix.iter().cloned().chain(iter::once(slot)).collect();
+fn compute_id_with_prefix(prefix: &[u8], slot: u8, contract_address: &Address) -> HashOut<GFp> {
+    let inputs: Vec<_> = prefix
+        .iter()
+        .cloned()
+        .chain(iter::once(slot))
+        .chain(contract_address.0)
+        .collect();
     pack_and_compute_poseidon_value(&inputs)
 }
