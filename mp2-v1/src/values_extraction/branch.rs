@@ -268,7 +268,7 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TestBranchCircuit<'a, const NODE_LEN: usize, const N_CHILDREN: usize> {
         c: BranchCircuit<NODE_LEN, N_CHILDREN>,
-        exp_pis: [PublicInputs<'a, F>; N_CHILDREN],
+        child_pis: [PublicInputs<'a, F>; N_CHILDREN],
     }
 
     impl<'a, const NODE_LEN: usize, const N_CHILDREN: usize> UserCircuit<F, D>
@@ -282,9 +282,9 @@ mod tests {
             let inputs: Vec<_> = (0..N_CHILDREN)
                 .map(|_| c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN))
                 .collect();
-            let exp_pis = array::from_fn(|i| PublicInputs::new(&inputs[i]));
+            let child_pis = array::from_fn(|i| PublicInputs::new(&inputs[i]));
 
-            let branch_wires = BranchCircuit::<NODE_LEN, N_CHILDREN>::build(c, &exp_pis);
+            let branch_wires = BranchCircuit::<NODE_LEN, N_CHILDREN>::build(c, &child_pis);
 
             (branch_wires, inputs.try_into().unwrap())
         }
@@ -292,10 +292,10 @@ mod tests {
         fn prove(&self, pw: &mut PartialWitness<GFp>, wires: &Self::Wires) {
             self.c.assign(pw, &wires.0);
 
-            assert_eq!(self.exp_pis.len(), wires.1.len());
+            assert_eq!(self.child_pis.len(), wires.1.len());
             for i in 0..N_CHILDREN {
-                assert_eq!(self.exp_pis[i].proof_inputs.len(), wires.1[i].len());
-                pw.set_target_arr(&wires.1[i], self.exp_pis[i].proof_inputs);
+                assert_eq!(self.child_pis[i].proof_inputs.len(), wires.1[i].len());
+                pw.set_target_arr(&wires.1[i], self.child_pis[i].proof_inputs);
             }
         }
     }
@@ -303,44 +303,44 @@ mod tests {
     #[test]
     fn test_values_extraction_branch_circuit_simple_type_without_padding() {
         const NODE_LEN: usize = 100;
-        const N_CHILDREN: usize = 2;
+        const N_REAL: usize = 2;
         const N_PADDING: usize = 0;
 
-        test_branch_circuit::<NODE_LEN, N_CHILDREN, N_PADDING>(true);
+        test_branch_circuit::<NODE_LEN, N_REAL, N_PADDING>(true);
     }
 
     #[test]
     fn test_values_extraction_branch_circuit_simple_type_with_padding() {
         const NODE_LEN: usize = 100;
-        const N_CHILDREN: usize = 2;
+        const N_REAL: usize = 2;
         const N_PADDING: usize = 1;
 
-        test_branch_circuit::<NODE_LEN, N_CHILDREN, N_PADDING>(true);
+        test_branch_circuit::<NODE_LEN, N_REAL, N_PADDING>(true);
     }
 
     #[test]
     fn test_values_extraction_branch_circuit_multiple_type_without_padding() {
         const NODE_LEN: usize = 100;
-        const N_CHILDREN: usize = 2;
+        const N_REAL: usize = 2;
         const N_PADDING: usize = 0;
 
-        test_branch_circuit::<NODE_LEN, N_CHILDREN, N_PADDING>(false);
+        test_branch_circuit::<NODE_LEN, N_REAL, N_PADDING>(false);
     }
 
     #[test]
     fn test_values_extraction_branch_circuit_multiple_type_with_padding() {
         const NODE_LEN: usize = 100;
-        const N_CHILDREN: usize = 2;
+        const N_REAL: usize = 2;
         const N_PADDING: usize = 1;
 
-        test_branch_circuit::<NODE_LEN, N_CHILDREN, N_PADDING>(false);
+        test_branch_circuit::<NODE_LEN, N_REAL, N_PADDING>(false);
     }
 
-    fn test_branch_circuit<const NODE_LEN: usize, const N_CHILDREN: usize, const N_PADDING: usize>(
+    fn test_branch_circuit<const NODE_LEN: usize, const N_REAL: usize, const N_PADDING: usize>(
         is_simple_aggregation: bool,
     ) where
         [(); PAD_LEN(NODE_LEN)]:,
-        [(); { N_CHILDREN + N_PADDING }]:,
+        [(); { N_REAL + N_PADDING }]:,
     {
         let compute_key_ptr = |leaf: &[u8]| {
             let tuple: Vec<Vec<u8>> = rlp::decode_list(leaf);
@@ -371,20 +371,19 @@ mod tests {
             )
         };
 
-        let mut children: [TestChildData; N_CHILDREN] =
-            array::from_fn(|_| TestChildData::default());
+        let mut children: [TestChildData; N_REAL] = array::from_fn(|_| TestChildData::default());
 
         // We need to create a trie that for sure contains a branch node:
-        // We insert N_CHILDREN values under keys which only differ by their last nibble/byte
+        // We insert N_REAL values under keys which only differ by their last nibble/byte
         // Normally, the trie should look like:
         // root = extension node
         // branch = point of different between the keys
-        // N_CHILDREN leaves
+        // N_REAL leaves
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
 
         let key = random_vector(32);
-        for i in 0..N_CHILDREN {
+        for i in 0..N_REAL {
             let mut key = key.clone();
             key[31] = thread_rng().gen();
             let value = random_vector(32);
@@ -396,7 +395,7 @@ mod tests {
         trie.root_hash().unwrap();
 
         let metadata = random_vector(20);
-        for i in 0..N_CHILDREN {
+        for i in 0..N_REAL {
             let proof = trie.get_proof(&children[i].key).unwrap();
             assert!(proof.len() == 3);
             let leaf = proof.last().unwrap();
@@ -419,28 +418,27 @@ mod tests {
         }
         let node = children[0].proof[1].clone();
 
-        let c = BranchCircuit::<NODE_LEN, { N_CHILDREN + N_PADDING }> {
+        let c = BranchCircuit::<NODE_LEN, { N_REAL + N_PADDING }> {
             node: node.clone(),
             // Any of the two keys should work since we only care about the common prefix.
             common_prefix: bytes_to_nibbles(&children[0].key),
             expected_pointer: children[0].ptr,
-            n_proof_valid: N_CHILDREN,
+            n_proof_valid: N_REAL,
             is_simple_aggregation,
         };
 
-        // Extend the child public inputs with padding.
-        let mut exp_pis: Vec<_> = children.iter().map(|child| child.pi.clone()).collect();
-        let last_pi = exp_pis.last().unwrap().clone();
-        exp_pis.extend(iter::repeat(last_pi).take(N_PADDING));
-        let exp_pis: Vec<_> = exp_pis.iter().map(|pi| PublicInputs::new(pi)).collect();
+        // Extend the children public inputs by repeatedly copying the last real one as paddings.
+        let mut child_pis: Vec<_> = children.iter().map(|child| child.pi.clone()).collect();
+        let last_pi = child_pis.last().unwrap().clone();
+        child_pis.extend(iter::repeat(last_pi).take(N_PADDING));
+        let child_pis: Vec<_> = child_pis.iter().map(|pi| PublicInputs::new(pi)).collect();
 
-        let circuit = TestBranchCircuit::<NODE_LEN, { N_CHILDREN + N_PADDING }> {
+        let circuit = TestBranchCircuit::<NODE_LEN, { N_REAL + N_PADDING }> {
             c,
-            exp_pis: exp_pis.try_into().unwrap(),
+            child_pis: child_pis.try_into().unwrap(),
         };
-        let proof = run_circuit::<F, D, C, TestBranchCircuit<NODE_LEN, { N_CHILDREN + N_PADDING }>>(
-            circuit,
-        );
+        let proof =
+            run_circuit::<F, D, C, TestBranchCircuit<NODE_LEN, { N_REAL + N_PADDING }>>(circuit);
         let pi = PublicInputs::<F>::new(&proof.public_inputs);
 
         {
@@ -463,7 +461,7 @@ mod tests {
         // Check values digest
         {
             let mut branch_acc = Point::NEUTRAL;
-            for i in 0..N_CHILDREN {
+            for i in 0..N_REAL {
                 branch_acc += compute_digest(children[i].value.clone());
             }
 
@@ -472,7 +470,7 @@ mod tests {
         // Check metadata digest
         {
             let mut branch_acc = compute_digest(children[0].metadata.clone());
-            for i in 1..N_CHILDREN {
+            for i in 1..N_REAL {
                 let child_acc = compute_digest(children[i].metadata.clone());
                 if is_simple_aggregation {
                     branch_acc += child_acc;
@@ -483,6 +481,6 @@ mod tests {
 
             assert_eq!(pi.metadata_digest(), branch_acc.to_weierstrass());
         }
-        assert_eq!(pi.n(), F::from_canonical_usize(N_CHILDREN));
+        assert_eq!(pi.n(), F::from_canonical_usize(N_REAL));
     }
 }
