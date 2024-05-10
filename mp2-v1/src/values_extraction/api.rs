@@ -496,17 +496,16 @@ mod tests {
 
         let test_circuit_input = |input: CircuitInput| {
             // Test circuit input serialization.
-            let encoded = bincode::serialize(&input).unwrap();
-            let decoded_input: CircuitInput = bincode::deserialize(&encoded).unwrap();
+            let encoded_input = bincode::serialize(&input).unwrap();
+            let decoded_input: CircuitInput = bincode::deserialize(&encoded_input).unwrap();
 
             // Test proof serialization.
-            let encoded = bincode::serialize(&input).unwrap();
             let proof = params.generate_proof(decoded_input).unwrap();
-            let encoded = bincode::serialize(&proof).unwrap();
-            let decoded_proof: ProofWithVK = bincode::deserialize(&encoded).unwrap();
+            let encoded_proof = bincode::serialize(&proof).unwrap();
+            let decoded_proof: ProofWithVK = bincode::deserialize(&encoded_proof).unwrap();
             assert_eq!(proof, decoded_proof);
 
-            encoded
+            encoded_proof
         };
 
         // Test for leaf single variable circuit.
