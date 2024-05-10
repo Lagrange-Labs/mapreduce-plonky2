@@ -704,7 +704,6 @@ mod tests {
         assert_eq!(p1.len(), p2.len());
         assert_eq!(p1[p1.len() - 2], p2[p2.len() - 2]);
 
-        let mapping_key = random_vector(20);
         let l1_inputs = if is_simple_aggregation {
             CircuitInput::new_single_variable_leaf(
                 p1.last().unwrap().to_vec(),
@@ -715,7 +714,7 @@ mod tests {
             CircuitInput::new_mapping_variable_leaf(
                 p1.last().unwrap().to_vec(),
                 TEST_SLOT,
-                mapping_key.clone(),
+                test_data.mapping_key.clone().unwrap(),
                 &contract_address,
             )
         };
@@ -785,7 +784,12 @@ mod tests {
 
                 [dv, dm]
             } else {
-                let dv = compute_leaf_mapping_values_digest(key_id, value_id, &mapping_key, &value);
+                let dv = compute_leaf_mapping_values_digest(
+                    key_id,
+                    value_id,
+                    &test_data.mapping_key.clone().unwrap(),
+                    &value,
+                );
                 let dm = compute_leaf_mapping_metadata_digest(key_id, value_id, TEST_SLOT);
 
                 [dv, dm]
