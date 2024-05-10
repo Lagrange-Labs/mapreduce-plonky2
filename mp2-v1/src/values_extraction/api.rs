@@ -589,7 +589,10 @@ mod tests {
     }
 
     fn test_apis(is_simple_aggregation: bool) {
-        let [identifier, key_id, value_id] = thread_rng().gen::<[u64; 3]>();
+        let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
+        let id = compute_leaf_single_id(TEST_SLOT, &contract_address);
+        let key_id = compute_leaf_mapping_key_id(TEST_SLOT, &contract_address);
+        let value_id = compute_leaf_mapping_value_id(TEST_SLOT, &contract_address);
 
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(memdb.clone());
@@ -631,14 +634,13 @@ mod tests {
 
         println!("Proving leaf 1...");
         let leaf_input1 = if is_simple_aggregation {
-            CircuitInput::new_single_variable_leaf(proof1[1].clone(), TEST_SLOT, identifier.clone())
+            CircuitInput::new_single_variable_leaf(proof1[1].clone(), TEST_SLOT, &contract_address)
         } else {
             CircuitInput::new_mapping_variable_leaf(
                 proof1[1].clone(),
                 TEST_SLOT,
                 key1.to_vec(),
-                key_id.clone(),
-                value_id.clone(),
+                &contract_address,
             )
         };
         let leaf_proof1 = generate_proof(&params, leaf_input1).unwrap();
@@ -651,14 +653,17 @@ mod tests {
 
         println!("Proving leaf 2...");
         let leaf_input2 = if is_simple_aggregation {
-            CircuitInput::new_single_variable_leaf(proof2[1].clone(), TEST_SLOT + 1, identifier)
+            CircuitInput::new_single_variable_leaf(
+                proof2[1].clone(),
+                TEST_SLOT + 1,
+                &contract_address,
+            )
         } else {
             CircuitInput::new_mapping_variable_leaf(
                 proof2[1].clone(),
                 TEST_SLOT,
                 key2.to_vec(),
-                key_id,
-                value_id,
+                &contract_address,
             )
         };
         let leaf_proof2 = generate_proof(&params, leaf_input2).unwrap();
@@ -680,7 +685,10 @@ mod tests {
     }
 
     fn test_circuits(is_simple_aggregation: bool, num_children: usize) {
-        let [id, key_id, value_id] = thread_rng().gen::<_>();
+        let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
+        let id = compute_leaf_single_id(TEST_SLOT, &contract_address);
+        let key_id = compute_leaf_mapping_key_id(TEST_SLOT, &contract_address);
+        let value_id = compute_leaf_mapping_value_id(TEST_SLOT, &contract_address);
 
         let params = PublicParameters::build();
         let mut test_data =
@@ -698,14 +706,17 @@ mod tests {
 
         let mapping_key = random_vector(20);
         let l1_inputs = if is_simple_aggregation {
-            CircuitInput::new_single_variable_leaf(p1.last().unwrap().to_vec(), TEST_SLOT, id)
+            CircuitInput::new_single_variable_leaf(
+                p1.last().unwrap().to_vec(),
+                TEST_SLOT,
+                &contract_address,
+            )
         } else {
             CircuitInput::new_mapping_variable_leaf(
                 p1.last().unwrap().to_vec(),
                 TEST_SLOT,
                 mapping_key.clone(),
-                key_id,
-                value_id,
+                &contract_address,
             )
         };
 
