@@ -2,6 +2,7 @@
 
 use super::{
     branch::{BranchCircuit, BranchWires},
+    compute_leaf_mapping_key_id, compute_leaf_mapping_value_id, compute_leaf_single_id,
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
@@ -10,19 +11,15 @@ use super::{
 };
 use crate::api::{default_config, ProofWithVK};
 use anyhow::{bail, Result};
-use ethers::types::U256;
+use ethers::types::Address;
 use log::debug;
 use mp2_common::{
     mpt_sequential::PAD_LEN,
     storage_key::{MappingSlot, SimpleSlot},
-    types::GFp,
     C, D, F,
 };
 use paste::paste;
-use plonky2::{
-    field::types::{Field, PrimeField64},
-    hash::hash_types::HashOut,
-};
+use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut};
 #[cfg(test)]
 use recursion_framework::framework_testing::{
     new_universal_circuit_builder_for_testing, TestingRecursiveCircuits,
@@ -54,7 +51,9 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     /// Create a circuit input for proving a leaf MPT node of single variable.
-    pub fn new_single_variable_leaf(node: Vec<u8>, slot: u8, id: u64) -> Self {
+    pub fn new_single_variable_leaf(node: Vec<u8>, slot: u8, contract_address: &Address) -> Self {
+        let id = compute_leaf_single_id(slot, contract_address);
+
         CircuitInput::LeafSingle(LeafSingleCircuit {
             node,
             slot: SimpleSlot::new(slot),
@@ -67,9 +66,11 @@ impl CircuitInput {
         node: Vec<u8>,
         slot: u8,
         mapping_key: Vec<u8>,
-        key_id: u64,
-        value_id: u64,
+        contract_address: &Address,
     ) -> Self {
+        let key_id = compute_leaf_mapping_key_id(slot, contract_address);
+        let value_id = compute_leaf_mapping_value_id(slot, contract_address);
+
         CircuitInput::LeafMapping(LeafMappingCircuit {
             node,
             slot: MappingSlot::new(slot, mapping_key),
