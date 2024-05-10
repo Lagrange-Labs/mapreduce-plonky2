@@ -480,7 +480,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_values_extraction_mapping_variable_circuits() {
-        test_circuits(true, 6);
+        test_circuits(false, 6);
     }
 
     #[test]
