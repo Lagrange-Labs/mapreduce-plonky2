@@ -363,10 +363,7 @@ impl PublicParameters {
     }
 
     fn generate_proof(&self, circuit_type: CircuitInput) -> Result<ProofWithVK> {
-        #[cfg(not(test))]
-        let set = &self.set;
-        #[cfg(test)]
-        let set = &self.set.get_recursive_circuit_set();
+        let set = &self.get_mapping_circuit_set();
         match circuit_type {
             CircuitInput::LeafSingle(leaf) => set
                 .generate_proof(&self.leaf_single, [], [], leaf)
