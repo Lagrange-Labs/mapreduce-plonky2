@@ -28,12 +28,12 @@ use std::array;
 //     - It can be an accumulation of *cell* digest or *rows* digest. The distinction is made in subsequent circuits.
 // - `DM : Digest[F]` : Metadata digest (e.g. simple variable `D(identifier || slot)`)
 // - `N : F` - Number of leaves extracted from this subtree
-const H_RANGE: PublicInputRange = 0..PACKED_HASH_LEN;
-const K_RANGE: PublicInputRange = H_RANGE.end..H_RANGE.end + MAX_KEY_NIBBLE_LEN;
-const T_RANGE: PublicInputRange = K_RANGE.end..K_RANGE.end + 1;
-const DV_RANGE: PublicInputRange = T_RANGE.end..T_RANGE.end + CURVE_TARGET_LEN;
-const DM_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + CURVE_TARGET_LEN;
-const N_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + 1;
+pub(crate) const H_RANGE: PublicInputRange = 0..PACKED_HASH_LEN;
+pub(crate) const K_RANGE: PublicInputRange = H_RANGE.end..H_RANGE.end + MAX_KEY_NIBBLE_LEN;
+pub(crate) const T_RANGE: PublicInputRange = K_RANGE.end..K_RANGE.end + 1;
+pub(crate) const DV_RANGE: PublicInputRange = T_RANGE.end..T_RANGE.end + CURVE_TARGET_LEN;
+pub(crate) const DM_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + CURVE_TARGET_LEN;
+pub(crate) const N_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + 1;
 
 /// Public inputs wrapper for registering
 #[derive(Clone, Debug)]

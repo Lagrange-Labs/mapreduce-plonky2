@@ -10,11 +10,14 @@ use plonky2::{
 };
 use std::iter;
 
+pub mod api;
 mod branch;
 mod extension;
 mod leaf_mapping;
 mod leaf_single;
 pub mod public_inputs;
+
+pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
 
 pub(crate) const MAX_BRANCH_NODE_LEN: usize = 532;
 /// rlp( rlp(max key 32b) + rlp(max value 32b) ) + 1 for compact encoding
