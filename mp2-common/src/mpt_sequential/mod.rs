@@ -73,7 +73,8 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
 {
-    pub(crate) key: MPTKeyWire,
+    /// The MPT key for the node.
+    pub key: MPTKeyWire,
     /// a vector of buffers whose size is the padded size of the maximum node length
     /// the padding may occur anywhere in the array but it can fit the maximum node size
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight

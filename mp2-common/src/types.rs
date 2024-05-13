@@ -14,8 +14,11 @@ pub type GFp = GoldilocksField;
 /// Quintic extension field
 pub type GFp5 = QuinticExtension<GFp>;
 
+/// `D` value used for the default [CBuilder].
+pub const CBuilderD: usize = 2;
+
 /// Default circuit builder
-pub type CBuilder = CircuitBuilder<GoldilocksField, 2>;
+pub type CBuilder = CircuitBuilder<GoldilocksField, CBuilderD>;
 
 /// Length of an U64
 pub const U64_LEN: usize = 8;
