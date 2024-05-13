@@ -73,6 +73,9 @@ where
         let length_slot = MappingSlot::mpt_key(cb);
         let is_rlp_encoded = cb.add_virtual_bool_target_safe();
 
+        // storage mapping is not RLP encoded
+        cb.is_equal(is_rlp_encoded.target, zero);
+
         // we don't check the range of length & variable because they define the public input DM;
         // hence, they are guaranteed by the verifier to be correct
 
