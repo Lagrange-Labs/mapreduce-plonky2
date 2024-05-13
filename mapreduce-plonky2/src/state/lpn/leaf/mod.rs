@@ -24,9 +24,6 @@ use crate::{
     state::{lpn::StateInputs, BlockLinkingInputs},
 };
 
-#[cfg(test)]
-mod tests;
-
 /// Circuit to prove the correct formation of the leaf node.
 ///
 /// Will take the [BlockLinkingInputs] as argument.
