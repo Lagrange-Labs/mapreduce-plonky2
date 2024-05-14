@@ -1,9 +1,9 @@
-use std::{array, sync::Arc};
+use std::{array, iter, marker::PhantomData, sync::Arc};
 
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethers::types::H160;
 use mp2_common::{
-    eth::StorageSlot,
+    eth::{left_pad32, StorageSlot},
     group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
     mpt_sequential::PAD_LEN,
     types::{CBuilder, CBuilderD, GFp, GFp5},
@@ -20,13 +20,16 @@ use rand::{thread_rng, Rng};
 
 use crate::length_extraction::public_inputs::PublicInputs;
 
-use super::leaf_value::{LeafValueLengthCircuit, LeafValueLengthWires};
+use super::{
+    leaf_mapping::{LeafMappingLengthCircuit, LeafMappingLengthWires},
+    leaf_value::{LeafValueLengthCircuit, LeafValueLengthWires},
+};
+
+const DEPTH: usize = 4;
+const NODE_LEN: usize = 500;
 
 #[test]
-fn prove_and_verify_leaf_extraction_circuit() {
-    const DEPTH: usize = 4;
-    const NODE_LEN: usize = 500;
-
+fn prove_and_verify_leaf_value_extraction_circuit() {
     let test_data = TestData::generate::<DEPTH>();
     let exp_slot = GFp::from_canonical_u8(test_data.slot);
     let exp_value = GFp::from_canonical_u32(test_data.value);
@@ -37,13 +40,17 @@ fn prove_and_verify_leaf_extraction_circuit() {
             .collect();
 
     for is_rlp_encoded in [true, false] {
-        let test_circuit = LengthExtractionCircuit::<DEPTH, NODE_LEN> {
+        let test_circuit = LengthExtractionTestCircuit::<
+            LeafValueLengthCircuit<DEPTH, NODE_LEN>,
+            LeafValueLengthWires<DEPTH, NODE_LEN>,
+        > {
             base: LeafValueLengthCircuit::new(
                 test_data.slot,
                 test_data.slot,
                 is_rlp_encoded,
                 test_data.nodes.clone(),
             ),
+            wires: PhantomData,
         };
 
         let dm = map_to_curve_point(&[
@@ -70,25 +77,97 @@ fn prove_and_verify_leaf_extraction_circuit() {
     }
 }
 
-#[derive(Clone, Debug)]
-struct LengthExtractionCircuit<const DEPTH: usize, const NODE_LEN: usize>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-    [(); DEPTH - 1]:,
-{
-    base: LeafValueLengthCircuit<DEPTH, NODE_LEN>,
+#[test]
+fn prove_and_verify_leaf_mapping_extraction_circuit() {
+    const DEPTH: usize = 4;
+    const NODE_LEN: usize = 500;
+
+    let test_data = TestData::generate::<DEPTH>();
+    let exp_slot = GFp::from_canonical_u8(test_data.slot);
+    let exp_value = GFp::from_canonical_u32(test_data.value);
+    let exp_root_hash: Vec<_> =
+        convert_u8_to_u32_slice(&keccak256(test_data.nodes.last().unwrap()))
+            .into_iter()
+            .map(GFp::from_canonical_u32)
+            .collect();
+
+    let variable_key: Vec<_> = test_data.nodes[0].iter().cloned().take(32).collect();
+    let variable_key_field: Vec<_> = variable_key
+        .iter()
+        .map(|k| GFp::from_canonical_u8(*k))
+        .collect();
+    let test_circuit = LengthExtractionTestCircuit::<
+        LeafMappingLengthCircuit<DEPTH, NODE_LEN>,
+        LeafMappingLengthWires<DEPTH, NODE_LEN>,
+    > {
+        base: LeafMappingLengthCircuit::new(
+            test_data.slot,
+            test_data.slot,
+            variable_key.clone(),
+            test_data.nodes.clone(),
+        ),
+        wires: PhantomData,
+    };
+
+    let is_rlp_encoded = GFp::ZERO;
+    let dm = map_to_curve_point(
+        &iter::once(GFp::from_canonical_u8(test_data.slot))
+            .chain(iter::once(GFp::from_canonical_u8(test_data.slot)))
+            .chain(variable_key_field.iter().cloned())
+            .chain(iter::once(is_rlp_encoded))
+            .collect::<Vec<_>>(),
+    );
+
+    let proof = run_circuit::<_, CBuilderD, PoseidonGoldilocksConfig, _>(test_circuit);
+    let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
+
+    let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().0[i]);
+    let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().1[i]);
+    let is_inf = pi.metadata().2 == &GFp::ONE;
+    let dm_p = WeierstrassPoint {
+        x: GFp5::from_basefield_array(x),
+        y: GFp5::from_basefield_array(y),
+        is_inf,
+    };
+
+    assert_eq!(pi.length(), &exp_value);
+    assert_eq!(pi.root_hash(), exp_root_hash);
+    assert_eq!(dm.to_weierstrass(), dm_p);
 }
 
-impl<const DEPTH: usize, const NODE_LEN: usize> UserCircuit<GFp, CBuilderD>
-    for LengthExtractionCircuit<DEPTH, NODE_LEN>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-    [(); DEPTH - 1]:,
+#[derive(Clone, Debug)]
+struct LengthExtractionTestCircuit<T, W> {
+    base: T,
+    wires: PhantomData<W>,
+}
+
+impl UserCircuit<GFp, CBuilderD>
+    for LengthExtractionTestCircuit<
+        LeafValueLengthCircuit<DEPTH, NODE_LEN>,
+        LeafValueLengthWires<DEPTH, NODE_LEN>,
+    >
 {
     type Wires = LeafValueLengthWires<DEPTH, NODE_LEN>;
 
     fn build(cb: &mut CBuilder) -> Self::Wires {
         LeafValueLengthCircuit::build(cb)
+    }
+
+    fn prove(&self, pw: &mut PartialWitness<GFp>, wires: &Self::Wires) {
+        self.base.assign(pw, wires).unwrap();
+    }
+}
+
+impl UserCircuit<GFp, CBuilderD>
+    for LengthExtractionTestCircuit<
+        LeafMappingLengthCircuit<DEPTH, NODE_LEN>,
+        LeafMappingLengthWires<DEPTH, NODE_LEN>,
+    >
+{
+    type Wires = LeafMappingLengthWires<DEPTH, NODE_LEN>;
+
+    fn build(cb: &mut CBuilder) -> Self::Wires {
+        LeafMappingLengthCircuit::build(cb)
     }
 
     fn prove(&self, pw: &mut PartialWitness<GFp>, wires: &Self::Wires) {
