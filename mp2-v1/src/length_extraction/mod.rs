@@ -5,8 +5,9 @@ use mp2_common::{
         Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
     },
     storage_key::SimpleSlotWires,
-    types::{CBuilder, CBuilderD, GFp},
+    types::{CBuilder, GFp},
     utils::less_than,
+    D,
 };
 use plonky2::{field::types::Field, iop::target::Target};
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
@@ -56,7 +57,7 @@ where
     let offset = cb.select(is_single_byte, zero, one);
     let rlp_length = mpt_output
         .leaf
-        .extract_array::<_, CBuilderD, 4>(cb, offset)
+        .extract_array::<_, D, 4>(cb, offset)
         .into_vec(value)
         .arr
         .reverse()

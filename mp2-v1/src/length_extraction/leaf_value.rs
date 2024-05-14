@@ -1,3 +1,5 @@
+//! Database length extraction circuit for a single/simple slot value.
+
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     mpt_sequential::{
@@ -5,8 +7,9 @@ use mp2_common::{
     },
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleSlotWires},
-    types::{CBuilder, CBuilderD, GFp},
+    types::{CBuilder, GFp},
     utils::less_than,
+    D,
 };
 
 use plonky2::{
@@ -19,7 +22,7 @@ use plonky2::{
 
 use super::{build_length_slot, public_inputs::PublicInputs};
 
-/// The wires structure for the leaf length extraction
+/// The wires structure for the leaf length extraction of a single/simple value.
 #[derive(Clone, Debug)]
 pub struct LeafValueLengthWires<const DEPTH: usize, const NODE_LEN: usize>
 where
@@ -33,7 +36,7 @@ where
     mpt_output: MPTOutputWires<DEPTH, NODE_LEN>,
 }
 
-/// The circuit definition for the leaf length extraction.
+/// The circuit definition for the leaf length extraction of a single/simple value.
 #[derive(Clone, Debug)]
 pub struct LeafValueLengthCircuit<const DEPTH: usize, const NODE_LEN: usize> {
     length_slot: SimpleSlot,
@@ -111,7 +114,7 @@ where
         self.variable_slot.assign(pw, &wires.variable_slot);
 
         self.mpt_circuit
-            .assign_wires::<_, CBuilderD>(pw, &wires.mpt_input, &wires.mpt_output)?;
+            .assign_wires::<_, D>(pw, &wires.mpt_input, &wires.mpt_output)?;
 
         Ok(())
     }

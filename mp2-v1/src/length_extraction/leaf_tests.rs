@@ -6,8 +6,9 @@ use mp2_common::{
     eth::{left_pad32, StorageSlot},
     group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
     mpt_sequential::PAD_LEN,
-    types::{CBuilder, CBuilderD, GFp, GFp5},
+    types::{CBuilder, GFp, GFp5},
     utils::{convert_u8_to_u32_slice, keccak256},
+    D,
 };
 use mp2_test::circuit::{run_circuit, UserCircuit};
 use plonky2::{
@@ -59,7 +60,7 @@ fn prove_and_verify_leaf_value_extraction_circuit() {
             GFp::from_bool(is_rlp_encoded),
         ]);
 
-        let proof = run_circuit::<_, CBuilderD, PoseidonGoldilocksConfig, _>(test_circuit);
+        let proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(test_circuit);
         let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
 
         let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().0[i]);
@@ -118,7 +119,7 @@ fn prove_and_verify_leaf_mapping_extraction_circuit() {
             .collect::<Vec<_>>(),
     );
 
-    let proof = run_circuit::<_, CBuilderD, PoseidonGoldilocksConfig, _>(test_circuit);
+    let proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(test_circuit);
     let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
 
     let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().0[i]);
@@ -141,7 +142,7 @@ struct LengthExtractionTestCircuit<T, W> {
     wires: PhantomData<W>,
 }
 
-impl UserCircuit<GFp, CBuilderD>
+impl UserCircuit<GFp, D>
     for LengthExtractionTestCircuit<
         LeafValueLengthCircuit<DEPTH, NODE_LEN>,
         LeafValueLengthWires<DEPTH, NODE_LEN>,
@@ -158,7 +159,7 @@ impl UserCircuit<GFp, CBuilderD>
     }
 }
 
-impl UserCircuit<GFp, CBuilderD>
+impl UserCircuit<GFp, D>
     for LengthExtractionTestCircuit<
         LeafMappingLengthCircuit<DEPTH, NODE_LEN>,
         LeafMappingLengthWires<DEPTH, NODE_LEN>,
