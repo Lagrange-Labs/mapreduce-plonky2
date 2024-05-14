@@ -28,6 +28,7 @@ where
 {
     variable_slot: Target,
     length_slot: SimpleSlotWires,
+    is_rlp_encoded: BoolTarget,
     mpt_input: MPTInputWires<DEPTH, NODE_LEN>,
     mpt_output: MPTOutputWires<DEPTH, NODE_LEN>,
 }
@@ -37,6 +38,7 @@ where
 pub struct LeafValueLengthCircuit<const DEPTH: usize, const NODE_LEN: usize> {
     length_slot: SimpleSlot,
     variable_slot: GFp,
+    is_rlp_encoded: bool,
     mpt_circuit: MPTCircuit<DEPTH, NODE_LEN>,
 }
 
@@ -46,7 +48,12 @@ where
     [(); DEPTH - 1]:,
 {
     /// Creates a new instance of the circuit.
-    pub fn new(length_slot: u8, variable_slot: u8, nodes: Vec<Vec<u8>>) -> Self {
+    pub fn new(
+        length_slot: u8,
+        variable_slot: u8,
+        is_rlp_encoded: bool,
+        nodes: Vec<Vec<u8>>,
+    ) -> Self {
         let length_slot = SimpleSlot::new(length_slot);
         let variable_slot = GFp::from_canonical_u8(variable_slot);
         let mpt_circuit = MPTCircuit::new(length_slot.0.mpt_key(), nodes);
@@ -54,6 +61,7 @@ where
         Self {
             length_slot,
             variable_slot,
+            is_rlp_encoded,
             mpt_circuit,
         }
     }
@@ -69,7 +77,7 @@ where
         let length_slot = SimpleSlot::build(cb);
 
         // storage value is RLP encoded
-        let is_rlp_encoded = one;
+        let is_rlp_encoded = cb.add_virtual_bool_target_safe();
 
         // we don't check the range of length & variable because they define the public input DM;
         // hence, they are guaranteed by the verifier to be correct
@@ -98,7 +106,7 @@ where
             .reverse()
             .convert_u8_to_u32(cb)[0];
 
-        let dm = cb.map_to_curve_point(&[length_slot.slot, variable_slot, is_rlp_encoded]);
+        let dm = cb.map_to_curve_point(&[length_slot.slot, variable_slot, is_rlp_encoded.target]);
         let dm = (&dm.0 .0[0].0[..], &dm.0 .0[1].0[..], &dm.0 .1.target);
         let k = &mpt_input.key.key.arr;
         let t = &mpt_input.key.pointer;
@@ -110,6 +118,7 @@ where
         LeafValueLengthWires {
             variable_slot,
             length_slot,
+            is_rlp_encoded,
             mpt_input,
             mpt_output,
         }
@@ -123,6 +132,11 @@ where
         wires: &LeafValueLengthWires<DEPTH, NODE_LEN>,
     ) -> anyhow::Result<()> {
         pw.set_target(wires.variable_slot, self.variable_slot);
+        pw.set_target(
+            wires.is_rlp_encoded.target,
+            GFp::from_bool(self.is_rlp_encoded),
+        );
+
         self.length_slot.assign(pw, &wires.length_slot);
 
         self.mpt_circuit

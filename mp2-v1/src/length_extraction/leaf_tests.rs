@@ -1,17 +1,21 @@
-use std::sync::Arc;
+use std::{array, sync::Arc};
 
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethers::types::H160;
 use mp2_common::{
     eth::StorageSlot,
+    group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
     mpt_sequential::PAD_LEN,
-    types::{CBuilder, CBuilderD, GFp},
+    types::{CBuilder, CBuilderD, GFp, GFp5},
     utils::{convert_u8_to_u32_slice, keccak256},
 };
 use mp2_test::circuit::{run_circuit, UserCircuit};
 use plonky2::{
-    field::types::Field, iop::witness::PartialWitness, plonk::config::PoseidonGoldilocksConfig,
+    field::{extension::FieldExtension, types::Field},
+    iop::witness::PartialWitness,
+    plonk::config::PoseidonGoldilocksConfig,
 };
+use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
 use rand::{thread_rng, Rng};
 
 use crate::length_extraction::public_inputs::PublicInputs;
@@ -32,15 +36,38 @@ fn prove_and_verify_leaf_extraction_circuit() {
             .map(GFp::from_canonical_u32)
             .collect();
 
-    let test_circuit = LengthExtractionCircuit::<DEPTH, NODE_LEN> {
-        base: LeafValueLengthCircuit::new(test_data.slot, test_data.slot, test_data.nodes),
-    };
+    for is_rlp_encoded in [true, false] {
+        let test_circuit = LengthExtractionCircuit::<DEPTH, NODE_LEN> {
+            base: LeafValueLengthCircuit::new(
+                test_data.slot,
+                test_data.slot,
+                is_rlp_encoded,
+                test_data.nodes.clone(),
+            ),
+        };
 
-    let proof = run_circuit::<_, CBuilderD, PoseidonGoldilocksConfig, _>(test_circuit);
-    let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
+        let dm = map_to_curve_point(&[
+            GFp::from_canonical_u8(test_data.slot),
+            GFp::from_canonical_u8(test_data.slot),
+            GFp::from_bool(is_rlp_encoded),
+        ]);
 
-    assert_eq!(pi.length(), &exp_value);
-    assert_eq!(pi.root_hash(), exp_root_hash);
+        let proof = run_circuit::<_, CBuilderD, PoseidonGoldilocksConfig, _>(test_circuit);
+        let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
+
+        let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().0[i]);
+        let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().1[i]);
+        let is_inf = pi.metadata().2 == &GFp::ONE;
+        let dm_p = WeierstrassPoint {
+            x: GFp5::from_basefield_array(x),
+            y: GFp5::from_basefield_array(y),
+            is_inf,
+        };
+
+        assert_eq!(pi.length(), &exp_value);
+        assert_eq!(pi.root_hash(), exp_root_hash);
+        assert_eq!(dm.to_weierstrass(), dm_p);
+    }
 }
 
 #[derive(Clone, Debug)]

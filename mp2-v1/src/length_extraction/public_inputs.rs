@@ -60,7 +60,7 @@ impl<'a, T> PublicInputs<'a, T> {
             &pi[H_RANGE],
             (
                 &pi[DM_RANGE.start..DM_RANGE.start + CURVE_TARGET_LEN / 2],
-                &pi[DM_RANGE.start + CURVE_TARGET_LEN / 2..DM_RANGE.end - 2],
+                &pi[DM_RANGE.start + CURVE_TARGET_LEN / 2..DM_RANGE.end - 1],
                 &pi[DM_RANGE.end - 1],
             ),
             &pi[K_RANGE],
