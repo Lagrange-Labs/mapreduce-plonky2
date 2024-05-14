@@ -54,6 +54,21 @@ impl<'a, T> PublicInputs<'a, T> {
         Self { h, dm, k, t, n }
     }
 
+    /// Creates a new instance of the public inputs from a contiguous slice.
+    pub fn from_slice(pi: &'a [T]) -> Self {
+        Self::new(
+            &pi[H_RANGE],
+            (
+                &pi[DM_RANGE.start..DM_RANGE.start + CURVE_TARGET_LEN / 2],
+                &pi[DM_RANGE.start + CURVE_TARGET_LEN / 2..DM_RANGE.end - 2],
+                &pi[DM_RANGE.end - 1],
+            ),
+            &pi[K_RANGE],
+            &pi[T_RANGE.start],
+            &pi[N_RANGE.start],
+        )
+    }
+
     /// Returns the packed block hash.
     pub const fn root_hash(&self) -> &[T] {
         self.h

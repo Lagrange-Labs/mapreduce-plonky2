@@ -20,50 +20,46 @@ use plonky2::{
 use super::public_inputs::PublicInputs;
 
 /// The wires structure for the leaf length extraction
-pub struct LeafLengthWires<const DEPTH: usize, const NODE_LEN: usize>
+#[derive(Clone, Debug)]
+pub struct LeafValueLengthWires<const DEPTH: usize, const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
 {
-    length_slot: SimpleSlotWires,
     variable_slot: Target,
+    length_slot: SimpleSlotWires,
     mpt_input: MPTInputWires<DEPTH, NODE_LEN>,
     mpt_output: MPTOutputWires<DEPTH, NODE_LEN>,
-    is_rlp_encoded: BoolTarget,
 }
 
 /// The circuit definition for the leaf length extraction.
-pub struct LeafLengthCircuit<const DEPTH: usize, const NODE_LEN: usize> {
+#[derive(Clone, Debug)]
+pub struct LeafValueLengthCircuit<const DEPTH: usize, const NODE_LEN: usize> {
     length_slot: SimpleSlot,
     variable_slot: GFp,
     mpt_circuit: MPTCircuit<DEPTH, NODE_LEN>,
-    is_rlp_encoded: bool,
 }
 
-impl<const DEPTH: usize, const NODE_LEN: usize> LeafLengthCircuit<DEPTH, NODE_LEN> {
+impl<const DEPTH: usize, const NODE_LEN: usize> LeafValueLengthCircuit<DEPTH, NODE_LEN>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+    [(); DEPTH - 1]:,
+{
     /// Creates a new instance of the circuit.
-    pub const fn new(
-        length_slot: SimpleSlot,
-        variable_slot: GFp,
-        mpt_circuit: MPTCircuit<DEPTH, NODE_LEN>,
-        is_rlp_encoded: bool,
-    ) -> Self {
+    pub fn new(length_slot: u8, variable_slot: u8, nodes: Vec<Vec<u8>>) -> Self {
+        let length_slot = SimpleSlot::new(length_slot);
+        let variable_slot = GFp::from_canonical_u8(variable_slot);
+        let mpt_circuit = MPTCircuit::new(length_slot.0.mpt_key(), nodes);
+
         Self {
             length_slot,
             variable_slot,
             mpt_circuit,
-            is_rlp_encoded,
         }
     }
-}
 
-impl<const DEPTH: usize, const NODE_LEN: usize> LeafLengthCircuit<DEPTH, NODE_LEN>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-    [(); DEPTH - 1]:,
-{
     /// Build the circuit, assigning the public inputs and returning the internal wires.
-    pub fn build(cb: &mut CBuilder) -> LeafLengthWires<DEPTH, NODE_LEN> {
+    pub fn build(cb: &mut CBuilder) -> LeafValueLengthWires<DEPTH, NODE_LEN> {
         let zero = cb.zero();
         let one = cb.one();
 
@@ -71,10 +67,9 @@ where
         // mapping and is part of the public inputs
         let variable_slot = cb.add_virtual_target();
         let length_slot = SimpleSlot::build(cb);
-        let is_rlp_encoded = cb.add_virtual_bool_target_safe();
 
         // storage value is RLP encoded
-        cb.is_equal(is_rlp_encoded.target, one);
+        let is_rlp_encoded = one;
 
         // we don't check the range of length & variable because they define the public input DM;
         // hence, they are guaranteed by the verifier to be correct
@@ -99,11 +94,11 @@ where
             .leaf
             .extract_array::<_, CBuilderD, 4>(cb, offset)
             .into_vec(value)
-            .normalize_left::<_, CBuilderD, 4>(cb)
+            .arr
             .reverse()
             .convert_u8_to_u32(cb)[0];
 
-        let dm = cb.map_to_curve_point(&[length_slot.slot, variable_slot, is_rlp_encoded.target]);
+        let dm = cb.map_to_curve_point(&[length_slot.slot, variable_slot, is_rlp_encoded]);
         let dm = (&dm.0 .0[0].0[..], &dm.0 .0[1].0[..], &dm.0 .1.target);
         let k = &mpt_input.key.key.arr;
         let t = &mpt_input.key.pointer;
@@ -112,12 +107,11 @@ where
 
         PublicInputs::new(&h, dm, k, t, n).register(cb);
 
-        LeafLengthWires {
+        LeafValueLengthWires {
+            variable_slot,
             length_slot,
             mpt_input,
             mpt_output,
-            is_rlp_encoded,
-            variable_slot,
         }
     }
 
@@ -126,17 +120,13 @@ where
     pub fn assign(
         &self,
         pw: &mut PartialWitness<GFp>,
-        wires: &LeafLengthWires<DEPTH, NODE_LEN>,
+        wires: &LeafValueLengthWires<DEPTH, NODE_LEN>,
     ) -> anyhow::Result<()> {
-        self.length_slot.assign(pw, &wires.length_slot);
         pw.set_target(wires.variable_slot, self.variable_slot);
+        self.length_slot.assign(pw, &wires.length_slot);
+
         self.mpt_circuit
             .assign_wires::<_, CBuilderD>(pw, &wires.mpt_input, &wires.mpt_output)?;
-
-        pw.set_target(
-            wires.is_rlp_encoded.target,
-            GFp::from_bool(self.is_rlp_encoded),
-        );
 
         Ok(())
     }
