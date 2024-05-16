@@ -4,7 +4,7 @@ use super::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN};
 use crate::{
     array::{Array, VectorWire},
     keccak::{KeccakCircuit, KeccakWires},
-    rlp::decode_fixed_list,
+    rlp::{decode_fixed_list, RlpList},
 };
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
@@ -24,6 +24,8 @@ where
     pub key: MPTKeyWire,
     /// New MPT value
     pub value: Array<Target, VALUE_LEN>,
+    /// RLP headers
+    pub rlp_headers: RlpList<2>,
 }
 
 /// MPT leaf or extension node gadget
@@ -68,6 +70,7 @@ impl MPTLeafOrExtensionNode {
             root,
             key,
             value,
+            rlp_headers,
         }
     }
 }

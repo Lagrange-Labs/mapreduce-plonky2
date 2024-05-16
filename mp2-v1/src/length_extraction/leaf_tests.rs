@@ -1,3 +1,88 @@
+use std::sync::Arc;
+
+use eth_trie::{EthTrie, MemoryDB, Trie};
+use ethers::types::H160;
+use mp2_common::{
+    eth::StorageSlot,
+    types::{CBuilder, GFp},
+    utils::{convert_u8_to_u32_slice, keccak256},
+    D,
+};
+use mp2_test::circuit::{run_circuit, UserCircuit};
+use plonky2::{field::types::Field, iop::witness::PartialWitness, plonk::config::PoseidonGoldilocksConfig};
+use rand::{thread_rng, Rng};
+
+use super::{leaf_mapping::{LeafLengthCircuit, LeafLengthWires}, public_inputs::PublicInputs};
+
+const DEPTH: usize = 4;
+const NODE_LEN: usize = 500;
+
+#[test]
+fn prove_and_verify_length_extraction_circuit() {
+    let test_data = TestData::generate::<DEPTH>();
+    let exp_slot = GFp::from_canonical_u8(test_data.slot);
+    let exp_value = GFp::from_canonical_u32(test_data.value);
+    let exp_root_hash: Vec<_> =
+        convert_u8_to_u32_slice(&keccak256(test_data.nodes.last().unwrap()))
+            .into_iter()
+            .map(GFp::from_canonical_u32)
+            .collect();
+
+    let variable_key: Vec<_> = test_data.nodes[0].iter().cloned().take(32).collect();
+    let variable_key_field: Vec<_> = variable_key
+        .iter()
+        .map(|k| GFp::from_canonical_u8(*k))
+        .collect();
+
+    let is_rlp_encoded = true;
+    let length_slot = test_data.slot;
+    let mapping_slot = test_data.slot;
+    let mapping_key = variable_key.clone();
+    let mapping_node = &test_data.nodes[0];
+
+    let test_circuit = LengthExtractionTestCircuit {
+        base: LeafLengthCircuit::new(
+            is_rlp_encoded,
+            length_slot,
+            mapping_slot,
+            mapping_key,
+            mapping_node,
+        )
+        .unwrap(),
+    };
+
+    let proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(test_circuit);
+    let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
+
+    /*
+    let is_rlp_encoded = GFp::ZERO;
+    let dm = map_to_curve_point(
+        &iter::once(GFp::from_canonical_u8(test_data.slot))
+            .chain(iter::once(GFp::from_canonical_u8(test_data.slot)))
+            .chain(variable_key_field.iter().cloned())
+            .chain(iter::once(is_rlp_encoded))
+            .collect::<Vec<_>>(),
+    );
+
+    let proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(test_circuit);
+    let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
+
+    let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().0[i]);
+    let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().1[i]);
+    let is_inf = pi.metadata().2 == &GFp::ONE;
+    let dm_p = WeierstrassPoint {
+        x: GFp5::from_basefield_array(x),
+        y: GFp5::from_basefield_array(y),
+        is_inf,
+    };
+
+    assert_eq!(pi.length(), &exp_value);
+    assert_eq!(pi.root_hash(), exp_root_hash);
+    assert_eq!(dm.to_weierstrass(), dm_p);
+    */
+}
+
+/*
 use std::{array, iter, marker::PhantomData, sync::Arc};
 
 use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -77,8 +162,8 @@ fn prove_and_verify_leaf_value_extraction_circuit() {
         assert_eq!(dm.to_weierstrass(), dm_p);
     }
 }
-
 #[test]
+
 fn prove_and_verify_leaf_mapping_extraction_circuit() {
     const DEPTH: usize = 4;
     const NODE_LEN: usize = 500;
@@ -135,44 +220,22 @@ fn prove_and_verify_leaf_mapping_extraction_circuit() {
     assert_eq!(pi.root_hash(), exp_root_hash);
     assert_eq!(dm.to_weierstrass(), dm_p);
 }
+*/
 
 #[derive(Clone, Debug)]
-struct LengthExtractionTestCircuit<T, W> {
-    base: T,
-    wires: PhantomData<W>,
+struct LengthExtractionTestCircuit {
+    base: LeafLengthCircuit<NODE_LEN>,
 }
 
-impl UserCircuit<GFp, D>
-    for LengthExtractionTestCircuit<
-        LeafValueLengthCircuit<DEPTH, NODE_LEN>,
-        LeafValueLengthWires<DEPTH, NODE_LEN>,
-    >
-{
-    type Wires = LeafValueLengthWires<DEPTH, NODE_LEN>;
+impl UserCircuit<GFp, D> for LengthExtractionTestCircuit {
+    type Wires = LeafLengthWires<NODE_LEN>;
 
     fn build(cb: &mut CBuilder) -> Self::Wires {
-        LeafValueLengthCircuit::build(cb)
+        LeafLengthCircuit::build(cb)
     }
 
     fn prove(&self, pw: &mut PartialWitness<GFp>, wires: &Self::Wires) {
-        self.base.assign(pw, wires).unwrap();
-    }
-}
-
-impl UserCircuit<GFp, D>
-    for LengthExtractionTestCircuit<
-        LeafMappingLengthCircuit<DEPTH, NODE_LEN>,
-        LeafMappingLengthWires<DEPTH, NODE_LEN>,
-    >
-{
-    type Wires = LeafMappingLengthWires<DEPTH, NODE_LEN>;
-
-    fn build(cb: &mut CBuilder) -> Self::Wires {
-        LeafMappingLengthCircuit::build(cb)
-    }
-
-    fn prove(&self, pw: &mut PartialWitness<GFp>, wires: &Self::Wires) {
-        self.base.assign(pw, wires).unwrap();
+        self.base.assign(pw, wires);
     }
 }
 

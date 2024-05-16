@@ -1,120 +1,125 @@
 //! Database length extraction circuit for a mapping slot value.
 
-use core::iter;
+use core::array;
 
 use mp2_common::{
+    array::{Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
-    mpt_sequential::{
-        Circuit as MPTCircuit, InputWires as MPTInputWires, OutputWires as MPTOutputWires, PAD_LEN,
-    },
+    keccak::PACKED_HASH_LEN,
+    mpt_sequential::{MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN},
     public_inputs::PublicInputCommon,
     storage_key::{MappingSlot, MappingSlotWires, SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp},
-    utils::less_than,
     D,
 };
 use plonky2::{
     field::types::Field,
-    iop::{target::BoolTarget, witness::PartialWitness},
+    iop::{
+        target::{BoolTarget, Target},
+        witness::{PartialWitness, WitnessWrite},
+    },
 };
 
-use super::{build_length_slot, public_inputs::PublicInputs};
+use super::public_inputs::PublicInputs;
 
 /// The wires structure for the leaf length extraction of a mapping value.
 #[derive(Clone, Debug)]
-pub struct LeafMappingLengthWires<const DEPTH: usize, const NODE_LEN: usize>
+pub struct LeafLengthWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
-    [(); DEPTH - 1]:,
 {
-    variable_slot: MappingSlotWires,
-    length_slot: SimpleSlotWires,
-    mpt_input: MPTInputWires<DEPTH, NODE_LEN>,
-    mpt_output: MPTOutputWires<DEPTH, NODE_LEN>,
+    pub is_rlp_encoded: BoolTarget,
+    pub length_slot: SimpleSlotWires,
+    pub variable_slot: MappingSlotWires,
+    pub variable_node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
 }
 
 /// The circuit definition for the leaf length extraction of a mapping value.
 #[derive(Clone, Debug)]
-pub struct LeafMappingLengthCircuit<const DEPTH: usize, const NODE_LEN: usize> {
-    length_slot: SimpleSlot,
-    variable_slot: MappingSlot,
-    mpt_circuit: MPTCircuit<DEPTH, NODE_LEN>,
-}
-
-impl<const DEPTH: usize, const NODE_LEN: usize> LeafMappingLengthCircuit<DEPTH, NODE_LEN>
+pub struct LeafLengthCircuit<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
-    [(); DEPTH - 1]:,
+{
+    pub is_rlp_encoded: bool,
+    pub length_slot: SimpleSlot,
+    pub variable_slot: MappingSlot,
+    pub variable_node: Vector<u8, { PAD_LEN(NODE_LEN) }>,
+}
+
+impl<const NODE_LEN: usize> LeafLengthCircuit<NODE_LEN>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
 {
     /// Creates a new instance of the circuit.
     pub fn new(
+        is_rlp_encoded: bool,
         length_slot: u8,
-        variable_slot: u8,
-        variable_key: Vec<u8>,
-        nodes: Vec<Vec<u8>>,
-    ) -> Self {
-        let length_slot = SimpleSlot::new(length_slot);
-        let variable_slot = MappingSlot::new(variable_slot, variable_key);
-        let mpt_circuit = MPTCircuit::new(length_slot.0.mpt_key(), nodes);
-
-        Self {
-            length_slot,
-            variable_slot,
-            mpt_circuit,
-        }
+        mapping_slot: u8,
+        mapping_key: Vec<u8>,
+        mapping_node: &[u8],
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            is_rlp_encoded,
+            length_slot: SimpleSlot::new(length_slot),
+            variable_slot: MappingSlot::new(mapping_slot, mapping_key),
+            variable_node: Vector::from_vec(mapping_node)?,
+        })
     }
 
     /// Build the circuit, assigning the public inputs and returning the internal wires.
-    pub fn build(cb: &mut CBuilder) -> LeafMappingLengthWires<DEPTH, NODE_LEN> {
-        let zero = cb.zero();
-        let one = cb.one();
+    pub fn build(cb: &mut CBuilder) -> LeafLengthWires<NODE_LEN> {
+        let t_p = cb.constant(GFp::from_canonical_u32(64));
+        let is_rlp_encoded = cb.add_virtual_bool_target_safe();
 
         let length_slot = SimpleSlot::build(cb);
+        let mpt_length =
+            MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
+                cb,
+                &length_slot.mpt_key,
+            );
+
         let variable_slot = MappingSlot::mpt_key(cb);
-        let (mpt_input, mpt_output, rlp_length) = build_length_slot(cb, &length_slot);
+        let mpt_mapping =
+            MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
+                cb,
+                &variable_slot.keccak_mpt.mpt_key,
+            );
 
-        // mapping slot isn't RLP encoded
-        let is_rlp_encoded = zero;
+        let length = length_slot.slot;
+        let variable = variable_slot.mapping_slot;
 
-        // NOTE: we diverge from the simple value slot metadata commitment as we add the mapping
-        // key as part of the point
-        let dm = cb.map_to_curve_point(
-            &iter::once(length_slot.slot)
-                .chain(iter::once(variable_slot.mapping_slot))
-                .chain(variable_slot.mapping_key.arr.iter().copied())
-                .chain(iter::once(is_rlp_encoded))
-                .collect::<Vec<_>>(),
+        let dm = cb.map_to_curve_point(&[length, variable, is_rlp_encoded.target]);
+        let dm = (&dm.0 .0[0].0[..], &dm.0 .0[1].0[..], &dm.0 .1.target);
+
+        let h = array::from_fn::<_, PACKED_HASH_LEN, _>(|i| mpt_mapping.root.output_array.arr[i].0);
+        let k = &mpt_mapping.key.key.arr;
+        let t = cb.sub(t_p, mpt_mapping.key.pointer);
+        let n = cb.select(
+            is_rlp_encoded,
+            mpt_mapping.rlp_headers.len[0],
+            mpt_length.value[0],
         );
 
-        let dm = (&dm.0 .0[0].0[..], &dm.0 .0[1].0[..], &dm.0 .1.target);
-        let k = &mpt_input.key.key.arr;
-        let t = &mpt_input.key.pointer;
-        let n = &rlp_length.0;
-        let h: Vec<_> = mpt_output.root.arr.iter().map(|t| t.0).collect();
+        PublicInputs::new(&h, dm, k, &t, &n).register(cb);
 
-        PublicInputs::new(&h, dm, k, t, n).register(cb);
-
-        LeafMappingLengthWires {
-            variable_slot,
+        LeafLengthWires {
+            is_rlp_encoded,
             length_slot,
-            mpt_input,
-            mpt_output,
+            variable_slot,
+            variable_node: mpt_mapping.node,
         }
     }
 
     /// Assigns the values of this instance into the provided partial witness, using the generated
     /// circuit wires.
-    pub fn assign(
-        &self,
-        pw: &mut PartialWitness<GFp>,
-        wires: &LeafMappingLengthWires<DEPTH, NODE_LEN>,
-    ) -> anyhow::Result<()> {
+    pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &LeafLengthWires<NODE_LEN>) {
+        pw.set_target(
+            wires.is_rlp_encoded.target,
+            GFp::from_bool(self.is_rlp_encoded),
+        );
+
         self.length_slot.assign(pw, &wires.length_slot);
         self.variable_slot.assign(pw, &wires.variable_slot);
-
-        self.mpt_circuit
-            .assign_wires::<_, D>(pw, &wires.mpt_input, &wires.mpt_output)?;
-
-        Ok(())
+        wires.variable_node.assign(pw, &self.variable_node);
     }
 }
