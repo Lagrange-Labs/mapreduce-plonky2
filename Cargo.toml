@@ -57,3 +57,4 @@ opt-level = 3
 [patch.crates-io]
 plonky2 = { git = "https://github.com/Lagrange-Labs/plonky2", branch = "upstream"  }
 plonky2_monolith = { git = "https://github.com/Lagrange-Labs/monolith" }
+plonky2_field = { git = "https://github.com/Lagrange-Labs/plonky2", branch = "upstream"  }
