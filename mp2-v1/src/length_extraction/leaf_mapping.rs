@@ -3,10 +3,12 @@
 use core::array;
 
 use mp2_common::{
-    array::{Vector, VectorWire},
+    array::Vector,
     group_hashing::CircuitBuilderGroupHashing,
     keccak::PACKED_HASH_LEN,
-    mpt_sequential::{MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN},
+    mpt_sequential::{
+        MPTLeafOrExtensionNode, MPTLeafOrExtensionWires, MAX_LEAF_VALUE_LEN, PAD_LEN,
+    },
     public_inputs::PublicInputCommon,
     storage_key::{MappingSlot, MappingSlotWires, SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp},
@@ -15,7 +17,7 @@ use mp2_common::{
 use plonky2::{
     field::types::Field,
     iop::{
-        target::{BoolTarget, Target},
+        target::BoolTarget,
         witness::{PartialWitness, WitnessWrite},
     },
 };
@@ -30,8 +32,9 @@ where
 {
     pub is_rlp_encoded: BoolTarget,
     pub length_slot: SimpleSlotWires,
+    pub length_mpt: MPTLeafOrExtensionWires<NODE_LEN, MAX_LEAF_VALUE_LEN>,
     pub variable_slot: MappingSlotWires,
-    pub variable_node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
+    pub variable_mpt: MPTLeafOrExtensionWires<NODE_LEN, MAX_LEAF_VALUE_LEN>,
 }
 
 /// The circuit definition for the leaf length extraction of a mapping value.
@@ -42,6 +45,7 @@ where
 {
     pub is_rlp_encoded: bool,
     pub length_slot: SimpleSlot,
+    pub length_node: Vector<u8, { PAD_LEN(NODE_LEN) }>,
     pub variable_slot: MappingSlot,
     pub variable_node: Vector<u8, { PAD_LEN(NODE_LEN) }>,
 }
@@ -54,15 +58,17 @@ where
     pub fn new(
         is_rlp_encoded: bool,
         length_slot: u8,
-        mapping_slot: u8,
-        mapping_key: Vec<u8>,
-        mapping_node: &[u8],
+        length_node: &[u8],
+        variable_slot: u8,
+        variable_key: Vec<u8>,
+        variable_node: &[u8],
     ) -> anyhow::Result<Self> {
         Ok(Self {
             is_rlp_encoded,
             length_slot: SimpleSlot::new(length_slot),
-            variable_slot: MappingSlot::new(mapping_slot, mapping_key),
-            variable_node: Vector::from_vec(mapping_node)?,
+            length_node: Vector::from_vec(length_node)?,
+            variable_slot: MappingSlot::new(variable_slot, variable_key),
+            variable_node: Vector::from_vec(variable_node)?,
         })
     }
 
@@ -72,14 +78,14 @@ where
         let is_rlp_encoded = cb.add_virtual_bool_target_safe();
 
         let length_slot = SimpleSlot::build(cb);
-        let mpt_length =
+        let length_mpt =
             MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
                 cb,
                 &length_slot.mpt_key,
             );
 
         let variable_slot = MappingSlot::mpt_key(cb);
-        let mpt_mapping =
+        let variable_mpt =
             MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
                 cb,
                 &variable_slot.keccak_mpt.mpt_key,
@@ -91,13 +97,14 @@ where
         let dm = cb.map_to_curve_point(&[length, variable, is_rlp_encoded.target]);
         let dm = (&dm.0 .0[0].0[..], &dm.0 .0[1].0[..], &dm.0 .1.target);
 
-        let h = array::from_fn::<_, PACKED_HASH_LEN, _>(|i| mpt_mapping.root.output_array.arr[i].0);
-        let k = &mpt_mapping.key.key.arr;
-        let t = cb.sub(t_p, mpt_mapping.key.pointer);
+        let h =
+            array::from_fn::<_, PACKED_HASH_LEN, _>(|i| variable_mpt.root.output_array.arr[i].0);
+        let k = &variable_mpt.key.key.arr;
+        let t = cb.sub(t_p, variable_mpt.key.pointer);
         let n = cb.select(
             is_rlp_encoded,
-            mpt_mapping.rlp_headers.len[0],
-            mpt_length.value[0],
+            variable_mpt.rlp_headers.len[0],
+            length_mpt.value[0],
         );
 
         PublicInputs::new(&h, dm, k, &t, &n).register(cb);
@@ -105,8 +112,9 @@ where
         LeafLengthWires {
             is_rlp_encoded,
             length_slot,
+            length_mpt,
             variable_slot,
-            variable_node: mpt_mapping.node,
+            variable_mpt,
         }
     }
 
@@ -119,7 +127,8 @@ where
         );
 
         self.length_slot.assign(pw, &wires.length_slot);
+        wires.length_mpt.assign(pw, &self.length_node);
         self.variable_slot.assign(pw, &wires.variable_slot);
-        wires.variable_node.assign(pw, &self.variable_node);
+        wires.variable_mpt.assign(pw, &self.variable_node);
     }
 }

@@ -2,16 +2,23 @@
 
 use super::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN};
 use crate::{
-    array::{Array, VectorWire},
-    keccak::{KeccakCircuit, KeccakWires},
+    array::{Array, Vector, VectorWire},
+    keccak::{InputData, KeccakCircuit, KeccakWires},
     rlp::{decode_fixed_list, RlpList},
+    types::GFp,
 };
 use plonky2::{
-    field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
+    field::extension::Extendable,
+    hash::hash_types::RichField,
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::circuit_builder::CircuitBuilder,
 };
 
 /// Wrapped wires for a MPT leaf or extension node
+#[derive(Clone, Debug)]
 pub struct MPTLeafOrExtensionWires<const NODE_LEN: usize, const VALUE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
@@ -26,6 +33,16 @@ where
     pub value: Array<Target, VALUE_LEN>,
     /// RLP headers
     pub rlp_headers: RlpList<2>,
+}
+
+impl<const NODE_LEN: usize, const VALUE_LEN: usize> MPTLeafOrExtensionWires<NODE_LEN, VALUE_LEN>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+{
+    pub fn assign(&self, pw: &mut PartialWitness<GFp>, node: &Vector<u8, { PAD_LEN(NODE_LEN) }>) {
+        self.node.assign(pw, node);
+        KeccakCircuit::assign(pw, &self.root, &InputData::Assigned(node));
+    }
 }
 
 /// MPT leaf or extension node gadget
