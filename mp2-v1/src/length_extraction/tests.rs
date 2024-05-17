@@ -15,7 +15,6 @@ use plonky2::{
     plonk::config::PoseidonGoldilocksConfig,
 };
 use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
-use rand::{rngs::StdRng, Rng, SeedableRng};
 
 use super::{LeafLengthCircuit, LeafLengthWires, PublicInputs};
 
@@ -23,45 +22,45 @@ const NODE_LEN: usize = 500;
 
 #[test]
 fn prove_and_verify_length_extraction_circuit() {
-    let seed = 0xbeef;
-    let length = u32::MAX;
+    let mut cases = vec![];
 
-    // variable slot is simply a witness for length extraction circuit
-    let variable_slot = 0xfa;
-    let is_rlp_encoded = true;
+    // max u32 shouldn't overflow
+    cases.push((true, 0xba, u32::MAX, 0xfa));
 
-    let (slot, length, node) = generate_length_slot(seed, length);
-    let root_hash: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-        .into_iter()
-        .map(GFp::from_canonical_u32)
-        .collect();
+    for (is_rlp_encoded, slot, length, variable_slot) in cases {
+        let node = generate_length_slot_node(is_rlp_encoded, slot, length);
+        let root_hash: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
+            .into_iter()
+            .map(GFp::from_canonical_u32)
+            .collect();
 
-    let test_circuit = LengthExtractionTestCircuit {
-        base: LeafLengthCircuit::new(is_rlp_encoded, slot, &node, variable_slot).unwrap(),
-    };
+        let test_circuit = LengthExtractionTestCircuit {
+            base: LeafLengthCircuit::new(is_rlp_encoded, slot, &node, variable_slot).unwrap(),
+        };
 
-    let proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(test_circuit);
-    let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
+        let proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(test_circuit);
+        let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
 
-    let length = GFp::from_canonical_u32(length);
-    let dm = map_to_curve_point(&[
-        GFp::from_canonical_u8(slot),
-        GFp::from_canonical_u8(variable_slot),
-        GFp::from_bool(is_rlp_encoded),
-    ]);
+        let length = GFp::from_canonical_u32(length);
+        let dm = map_to_curve_point(&[
+            GFp::from_canonical_u8(slot),
+            GFp::from_canonical_u8(variable_slot),
+            GFp::from_bool(is_rlp_encoded),
+        ]);
 
-    let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().0[i]);
-    let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().1[i]);
-    let is_inf = pi.metadata().2 == &GFp::ONE;
-    let dm_p = WeierstrassPoint {
-        x: GFp5::from_basefield_array(x),
-        y: GFp5::from_basefield_array(y),
-        is_inf,
-    };
+        let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().0[i]);
+        let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| pi.metadata().1[i]);
+        let is_inf = pi.metadata().2 == &GFp::ONE;
+        let dm_p = WeierstrassPoint {
+            x: GFp5::from_basefield_array(x),
+            y: GFp5::from_basefield_array(y),
+            is_inf,
+        };
 
-    assert_eq!(pi.length(), &length);
-    assert_eq!(pi.root_hash(), root_hash);
-    assert_eq!(dm.to_weierstrass(), dm_p);
+        assert_eq!(pi.length(), &length);
+        assert_eq!(pi.root_hash(), root_hash);
+        assert_eq!(dm.to_weierstrass(), dm_p);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -81,21 +80,22 @@ impl UserCircuit<GFp, D> for LengthExtractionTestCircuit {
     }
 }
 
-fn generate_length_slot(seed: u64, length: u32) -> (u8, u32, Vec<u8>) {
-    let rng = &mut StdRng::seed_from_u64(seed);
-
+fn generate_length_slot_node(is_rlp_encoded: bool, slot: u8, length: u32) -> Vec<u8> {
     let memdb = Arc::new(MemoryDB::new(true));
     let mut trie = EthTrie::new(Arc::clone(&memdb));
 
     // generate the data
-    let slot = rng.gen::<u8>();
     let storage_slot = StorageSlot::Simple(slot as usize);
     let mpt_key = storage_slot.mpt_key_vec();
-    let encoded_value = rlp::encode(&length.to_be_bytes().to_vec());
+    let encoded_value = if is_rlp_encoded {
+        rlp::encode(&length).to_vec()
+    } else {
+        length.to_be_bytes().to_vec()
+    };
 
     trie.insert(&mpt_key, &encoded_value).unwrap();
 
     let node = trie.get_proof(&mpt_key).unwrap()[0].clone();
 
-    (slot, length, node)
+    node
 }
