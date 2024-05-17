@@ -8,7 +8,7 @@ use mp2_common::{
     utils::{convert_u8_to_u32_slice, keccak256},
     D,
 };
-use mp2_test::circuit::{run_circuit, UserCircuit};
+use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
 use plonky2::{
     field::{extension::FieldExtension, types::Field},
     iop::witness::PartialWitness,
@@ -22,12 +22,40 @@ const NODE_LEN: usize = 500;
 
 #[test]
 fn prove_and_verify_length_extraction_circuit() {
+    let setup = setup_circuit::<_, D, PoseidonGoldilocksConfig, LengthExtractionTestCircuit>();
     let mut cases = vec![];
 
     // max u32 shouldn't overflow
-    cases.push((true, 0xba, u32::MAX, 0xfa));
+    cases.push(TestCase {
+        is_rlp_encoded: true,
+        slot: 0xba,
+        length: u32::MAX,
+        variable_slot: 0xfa,
+    });
 
-    for (is_rlp_encoded, slot, length, variable_slot) in cases {
+    // encoded RLP low value should decode
+    cases.push(TestCase {
+        is_rlp_encoded: true,
+        slot: 0xba,
+        length: 15,
+        variable_slot: 0xfa,
+    });
+
+    // raw value should decode
+    cases.push(TestCase {
+        is_rlp_encoded: false,
+        slot: 0xba,
+        length: 8943278,
+        variable_slot: 0xfa,
+    });
+
+    for TestCase {
+        is_rlp_encoded,
+        slot,
+        length,
+        variable_slot,
+    } in cases
+    {
         let node = generate_length_slot_node(is_rlp_encoded, slot, length);
         let root_hash: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
             .into_iter()
@@ -38,7 +66,7 @@ fn prove_and_verify_length_extraction_circuit() {
             base: LeafLengthCircuit::new(is_rlp_encoded, slot, &node, variable_slot).unwrap(),
         };
 
-        let proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(test_circuit);
+        let proof = prove_circuit(&setup, &test_circuit);
         let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
 
         let length = GFp::from_canonical_u32(length);
@@ -80,6 +108,13 @@ impl UserCircuit<GFp, D> for LengthExtractionTestCircuit {
     }
 }
 
+struct TestCase {
+    pub is_rlp_encoded: bool,
+    pub slot: u8,
+    pub length: u32,
+    pub variable_slot: u8,
+}
+
 fn generate_length_slot_node(is_rlp_encoded: bool, slot: u8, length: u32) -> Vec<u8> {
     let memdb = Arc::new(MemoryDB::new(true));
     let mut trie = EthTrie::new(Arc::clone(&memdb));
@@ -95,7 +130,5 @@ fn generate_length_slot_node(is_rlp_encoded: bool, slot: u8, length: u32) -> Vec
 
     trie.insert(&mpt_key, &encoded_value).unwrap();
 
-    let node = trie.get_proof(&mpt_key).unwrap()[0].clone();
-
-    node
+    trie.get_proof(&mpt_key).unwrap()[0].clone()
 }
