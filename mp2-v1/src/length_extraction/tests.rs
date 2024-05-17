@@ -17,10 +17,7 @@ use plonky2::{
 use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
-use super::{
-    leaf_mapping::{LeafLengthCircuit, LeafLengthWires},
-    public_inputs::PublicInputs,
-};
+use super::{LeafLengthCircuit, LeafLengthWires, PublicInputs};
 
 const NODE_LEN: usize = 500;
 
