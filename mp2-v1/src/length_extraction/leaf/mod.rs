@@ -76,11 +76,10 @@ where
         let zero = cb.zero();
         let one = cb.one();
 
+        // we don't range check the variable slot as it is part of the DM public commitment
         let t_p = cb.constant(GFp::from_canonical_u32(64));
         let variable_slot = cb.add_virtual_target();
         let is_rlp_encoded = cb.add_virtual_bool_target_safe();
-
-        // we don't range check the variable slot as it is part of the DM public commitment
 
         let length_slot = SimpleSlot::build(cb);
         let length_mpt =
@@ -88,9 +87,6 @@ where
                 cb,
                 &length_slot.mpt_key,
             );
-
-        let dm = cb.map_to_curve_point(&[length_slot.slot, variable_slot, is_rlp_encoded.target]);
-        let dm = (&dm.0 .0[0].0[..], &dm.0 .0[1].0[..], &dm.0 .1.target);
 
         let length_raw = Array {
             arr: array::from_fn::<_, 4, _>(|i| length_mpt.value[3 - i]),
@@ -112,12 +108,13 @@ where
             .reverse()
             .convert_u8_to_u32(cb)[0];
 
+        let dm = cb.map_to_curve_point(&[length_slot.slot, variable_slot, is_rlp_encoded.target]);
         let h = array::from_fn::<_, PACKED_HASH_LEN, _>(|i| length_mpt.root.output_array.arr[i].0);
         let k = &length_mpt.key.key.arr;
         let t = cb.sub(t_p, length_mpt.key.pointer);
         let n = cb.select(is_rlp_encoded, length_rlp_encoded.0, length_raw.0);
 
-        PublicInputs::new(&h, dm, k, &t, &n).register(cb);
+        PublicInputs::new(&h, &dm, k, &t, &n).register(cb);
 
         LeafLengthWires {
             is_rlp_encoded,

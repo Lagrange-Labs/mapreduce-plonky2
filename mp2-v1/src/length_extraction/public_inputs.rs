@@ -5,6 +5,7 @@ use mp2_common::{
     types::{CBuilder, CURVE_TARGET_LEN},
 };
 use plonky2::iop::target::Target;
+use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
 // Length extraction public inputs:
 // - `H : [8]F` packed Keccak hash of the block
@@ -42,31 +43,43 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     }
 }
 
-impl<'a, T> PublicInputs<'a, T> {
+impl<'a> PublicInputs<'a, Target> {
     /// Creates a new instance of the public inputs from its logical components.
-    pub const fn new(
-        h: &'a [T],
-        dm: (&'a [T], &'a [T], &'a T),
-        k: &'a [T],
-        t: &'a T,
-        n: &'a T,
+    pub fn new(
+        h: &'a [Target],
+        dm: &'a CurveTarget,
+        k: &'a [Target],
+        t: &'a Target,
+        n: &'a Target,
     ) -> Self {
-        Self { h, dm, k, t, n }
-    }
+        let dm_x = &dm.0 .0[0].0[..];
+        let dm_y = &dm.0 .0[1].0[..];
+        let dm_is_inf = &dm.0 .1.target;
 
+        Self {
+            h,
+            dm: (dm_x, dm_y, dm_is_inf),
+            k,
+            t,
+            n,
+        }
+    }
+}
+
+impl<'a, T> PublicInputs<'a, T> {
     /// Creates a new instance of the public inputs from a contiguous slice.
     pub fn from_slice(pi: &'a [T]) -> Self {
-        Self::new(
-            &pi[H_RANGE],
-            (
+        Self {
+            h: &pi[H_RANGE],
+            dm: (
                 &pi[DM_RANGE.start..DM_RANGE.start + CURVE_TARGET_LEN / 2],
                 &pi[DM_RANGE.start + CURVE_TARGET_LEN / 2..DM_RANGE.end - 1],
                 &pi[DM_RANGE.end - 1],
             ),
-            &pi[K_RANGE],
-            &pi[T_RANGE.start],
-            &pi[N_RANGE.start],
-        )
+            k: &pi[K_RANGE],
+            t: &pi[T_RANGE.start],
+            n: &pi[N_RANGE.start],
+        }
     }
 
     /// Returns the packed block hash.
