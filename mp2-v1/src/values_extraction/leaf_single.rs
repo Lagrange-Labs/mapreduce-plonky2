@@ -223,6 +223,10 @@ mod tests {
                 .1
                 .assign_bytes(pw, &self.exp_value.clone().try_into().unwrap());
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::LeafSingle")
+        }
     }
 
     #[test]

@@ -317,6 +317,10 @@ mod tests {
             pw.set_target_arr(&wires.0, &self.mpt_pi);
             pw.set_target_arr(&wires.1, &self.merkle_pi);
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::DigestEqual")
+        }
     }
 
     /// Test the digest-equal circuit with simple random previous public inputs.

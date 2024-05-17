@@ -260,6 +260,10 @@ mod test {
             self.a.assign::<F, D>(pw, &wires.0).unwrap();
             pw.set_target_arr(&wires.1, &self.storage_pi);
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::Account")
+        }
     }
     use anyhow::Result;
 

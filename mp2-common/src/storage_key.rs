@@ -381,6 +381,10 @@ mod test {
             );
             self.m.assign(pw, &wires.0);
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::MappingSlot")
+        }
     }
 
     const D: usize = 2;
@@ -424,6 +428,10 @@ mod test {
             let circuit = SimpleSlot::new(self.slot);
             circuit.assign(pw, &wires.0);
             wires.1.assign_bytes(pw, &eth_slot.mpt_nibbles());
+        }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::SimpleSlot")
         }
     }
 

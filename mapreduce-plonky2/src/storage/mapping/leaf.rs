@@ -222,6 +222,10 @@ mod test {
                 .1
                 .assign_bytes(pw, &self.exp_value.clone().try_into().unwrap());
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::LeafCircuit")
+        }
     }
 
     #[test]
@@ -299,6 +303,10 @@ mod test {
         }
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.assign(pw, wires);
+        }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::LeafCircuit")
         }
     }
 }

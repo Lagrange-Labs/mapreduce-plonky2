@@ -67,6 +67,10 @@ impl UserCircuit<GoldilocksField, D> for FullNodeCircuitValidator<'_> {
         pw.set_target_arr(&wires.1[1], self.children[1].inputs);
         self.validated.assign(pw, &wires.0);
     }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::FullNode")
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -90,6 +94,10 @@ impl UserCircuit<F, D> for PartialNodeCircuitValidator<'_> {
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
         pw.set_target_arr(&wires.1, self.child_proof.inputs);
         self.validated.assign(pw, &wires.0);
+    }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::PartialNode")
     }
 }
 
@@ -119,6 +127,10 @@ impl<const L: usize, const MAX_DEPTH: usize> UserCircuit<F, D>
         pw.set_target_arr(&wires.1, self.db_proof.proof_inputs);
         pw.set_target_arr(&wires.2, self.root_proof.inputs);
         self.validated.assign(pw, &wires.0);
+    }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::Revelation")
     }
 }
 

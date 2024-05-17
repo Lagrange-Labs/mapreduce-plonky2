@@ -47,6 +47,9 @@ where
 
     /// Create a proof, giving the wires already generated at the first step.
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires);
+
+    /// The pretty name of this circuit
+    fn name() -> &'static str;
 }
 
 /// Extension to the `UserCircuit` trait that allows a circuit to be used in a
@@ -317,6 +320,10 @@ where
     type Wires = ();
     fn build(_: &mut CircuitBuilder<F, D>) -> Self::Wires {}
     fn prove(&self, _: &mut PartialWitness<F>, _: &Self::Wires) {}
+
+    fn name() -> &'static str {
+        concat!("NOOP")
+    }
 }
 
 impl<F, const D: usize, const N: usize> PCDCircuit<F, D, N> for NoopCircuit
@@ -359,6 +366,7 @@ pub fn run_circuit<
     u.prove(&mut pw, &wires);
     let proof = circuit_data.prove(pw).expect("invalid proof");
     println!("[+] Proof generated in {:?}s", now.elapsed().as_secs());
+    eprintln!("BENCH:{},{}", U::name(), now.elapsed().as_secs_f32());
     let vcd = VerifierCircuitData {
         verifier_only: circuit_data.verifier_only,
         common: circuit_data.common,

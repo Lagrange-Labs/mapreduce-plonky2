@@ -142,5 +142,9 @@ mod tests {
                 pw.set_target(wires.b.elements[i], self.b[i]);
             }
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::SwapHash")
+        }
     }
 }

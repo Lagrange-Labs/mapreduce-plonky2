@@ -734,6 +734,10 @@ mod tests {
 
             self.c.assign(pw, &wires.3);
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::BlockTree")
+        }
     }
 
     #[test]
@@ -1076,6 +1080,10 @@ mod tests {
                     .assign(pw, &self.state_inputs.clone().try_into().unwrap());
                 // assign the expect hash output
                 pw.set_hash_target(wires.1, self.expected);
+            }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::Test??")
             }
         }
     }

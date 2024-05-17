@@ -281,6 +281,10 @@ mod test {
             }
             self.c.assign(pw, &wires.0);
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::BranchCircuit")
+        }
     }
 
     #[test]

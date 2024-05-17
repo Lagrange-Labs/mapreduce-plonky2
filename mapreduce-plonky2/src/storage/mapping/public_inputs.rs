@@ -236,6 +236,10 @@ mod test {
                 &create_array(|i| F::from_canonical_u64(self.c[i] as u64)),
             );
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::PublicInputs")
+        }
     }
     #[test]
     fn test_public_inputs() {

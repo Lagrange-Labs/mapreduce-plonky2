@@ -274,6 +274,10 @@ mod tests {
             pw.set_target_arr(&wires.0, &self.length_pi);
             pw.set_target_arr(&wires.1, &self.mapping_pi);
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::LengthMatch")
+        }
     }
 
     /// Test the length-match circuit with simple random previous public inputs.

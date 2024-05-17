@@ -279,6 +279,10 @@ pub(crate) mod tests {
             pw.set_curve_target(wires.3, self.dm);
             pw.set_target(wires.4, F::from_canonical_usize(self.n));
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::PI")
+        }
     }
 
     #[test]

@@ -100,5 +100,13 @@ mod test {
         fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &LeafWires) {
             self.assign(pw, wires);
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::Leaf")
+        }
+    }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::LeafCircuit")
     }
 }

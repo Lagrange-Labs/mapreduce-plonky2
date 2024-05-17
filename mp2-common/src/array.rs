@@ -710,6 +710,10 @@ mod test {
                 );
                 pw.set_bool_target(wires.3, self.cond);
             }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::Array1")
+            }
         }
         let mut rng = thread_rng();
         let mut arr = [0u8; SIZE];
@@ -767,6 +771,10 @@ mod test {
                     .unwrap();
                 wires.1.assign(pw, &u32arr);
             }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::Array2")
+            }
         }
         let mut rng = thread_rng();
         let mut arr = [0u8; SIZE];
@@ -807,6 +815,10 @@ mod test {
                     .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
                 pw.set_target(wires.1, F::from_canonical_usize(self.idx));
                 pw.set_target(wires.2, F::from_canonical_u8(self.exp));
+            }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::Value")
             }
         }
         let mut rng = thread_rng();
@@ -851,6 +863,10 @@ mod test {
                     .2
                     .assign(pw, &create_array(|i| F::from_canonical_u8(self.exp[i])));
             }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::ExtractArray")
+            }
         }
         let mut rng = thread_rng();
         let mut arr = [0u8; SIZE];
@@ -891,6 +907,10 @@ mod test {
                 wires
                     .2
                     .assign(pw, &create_array(|i| F::from_canonical_u8(self.exp[i])));
+            }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::ContainsSubarray")
             }
         }
         let mut rng = thread_rng();
@@ -982,6 +1002,10 @@ mod test {
                     .assign(pw, &Vector::<u8, SIZE>::from_vec(&self.sub).unwrap());
                 pw.set_bool_target(wires.3, self.exp);
             }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::ContainsVector")
+            }
         }
         let mut rng = thread_rng();
         let mut arr = [0u8; SIZE];
@@ -1026,6 +1050,10 @@ mod test {
             fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
                 let fields = self.vector.iter().map(|x| x.to_field()).collect::<Vec<_>>();
                 wires.assign(pw, &fields.try_into().unwrap());
+            }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::AssertBytes")
             }
         }
 
@@ -1077,6 +1105,10 @@ mod test {
                     .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr2[i])));
                 pw.set_target(wires.1, F::from_canonical_usize(self.ptr));
             }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::SliceEqual")
+            }
         }
         const N: usize = 45;
         let arr: [u8; N] = random_vector(N).try_into().unwrap();
@@ -1125,6 +1157,10 @@ mod test {
             fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
                 wires.0.assign(pw, &self.input);
                 wires.1.assign_bytes(pw, &self.exp);
+            }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::NormalizeLeft")
             }
         }
 

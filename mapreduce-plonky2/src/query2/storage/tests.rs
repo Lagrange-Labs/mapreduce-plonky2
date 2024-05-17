@@ -67,6 +67,10 @@ impl<'a> UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuitValidator<'a
         self.validated.assign(pw, &wires.0);
         pw.set_target_arr(&wires.1, self.proved_child.inputs);
     }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::PartialInnerNode")
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -95,6 +99,10 @@ impl<'a> UserCircuit<GoldilocksField, 2> for FullInnerNodeCircuitValidator<'a> {
         pw.set_target_arr(&wires.1[0], self.children[0].inputs);
         pw.set_target_arr(&wires.1[1], self.children[1].inputs);
         self.validated.assign(pw, &wires.0);
+    }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::FullInnerNode")
     }
 }
 

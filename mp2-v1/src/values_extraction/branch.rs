@@ -298,6 +298,10 @@ mod tests {
                 pw.set_target_arr(&wires.1[i], self.child_pis[i].proof_inputs);
             }
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::Branch")
+        }
     }
 
     #[test]

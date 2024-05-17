@@ -233,6 +233,10 @@ impl UserCircuit<GoldilocksField, 2> for TestStateCircuit<MAX_DEPTH> {
 
         self.c.assign(pw, &wires.provenance);
     }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::StorageInputs")
+    }
 }
 
 type F = crate::api::F;

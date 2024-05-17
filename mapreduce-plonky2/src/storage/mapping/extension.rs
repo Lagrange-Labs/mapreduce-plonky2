@@ -181,6 +181,10 @@ mod test {
             assert_eq!(self.inputs.proof_inputs.len(), wires.1.len());
             pw.set_target_arr(&wires.1, self.inputs.proof_inputs)
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::ExtensionNode")
+        }
     }
 
     #[test]

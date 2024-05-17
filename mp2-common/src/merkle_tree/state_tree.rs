@@ -280,5 +280,9 @@ mod tests {
 
             wires.wires.assign(pw, self.depth);
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::StateTree")
+        }
     }
 }

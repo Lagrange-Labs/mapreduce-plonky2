@@ -125,4 +125,8 @@ impl UserCircuit<GoldilocksField, 2> for TestNodeCircuit {
             .zip(wires.right.iter())
             .for_each(|(&v, &t)| pw.set_target(t, v));
     }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::NodeCircuit")
+    }
 }

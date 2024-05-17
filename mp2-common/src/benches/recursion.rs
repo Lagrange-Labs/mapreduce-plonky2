@@ -93,6 +93,10 @@ where
         let output = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&self.inputs);
         pw.set_hash_target(wires.outputs, output);
     }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::PoseidonHash")
+    }
 }
 impl Benchable for NoopCircuit {}
 impl<F, const ELEMS: usize> Benchable for PoseidonCircuit<F, ELEMS> {
@@ -173,6 +177,10 @@ where
             c.prove(pw, w)
         }
     }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::PoseidonCircuit")
+    }
 }
 impl<F, const E: usize, const N: usize> Benchable for RepeatedPoseidon<F, E, N> {
     fn n(&self) -> usize {
@@ -248,6 +256,10 @@ where
         for (i, circuit) in self.circuits.iter().enumerate() {
             circuit.prove(pw, &wires[i]);
         }
+    }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::KeccakCircuit")
     }
 }
 

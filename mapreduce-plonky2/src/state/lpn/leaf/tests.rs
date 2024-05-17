@@ -159,4 +159,8 @@ impl UserCircuit<GoldilocksField, 2> for TestLeafCircuit {
             .zip(block_linking.inner.iter())
             .for_each(|(&v, &t)| pw.set_target(t, v));
     }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::Leaf")
+    }
 }

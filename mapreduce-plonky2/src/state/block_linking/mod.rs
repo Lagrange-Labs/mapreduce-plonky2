@@ -360,6 +360,10 @@ mod tests {
 
             self.c.assign::<F, D>(pw, &wires.4).unwrap();
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::BlockLinking")
+        }
     }
 
     /// Test the block-linking circuit with a generated random MPT.

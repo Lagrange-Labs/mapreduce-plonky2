@@ -54,6 +54,10 @@ impl UserCircuit<GoldilocksField, 2> for NodeCircuitValidator<'_> {
         pw.set_target_arr(&wires.1[1], self.children[1].inputs);
         self.validated.assign(pw, &wires.0);
     }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "::NodeCircuit")
+    }
 }
 
 #[test]

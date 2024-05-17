@@ -98,5 +98,9 @@ mod test {
         fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
             self.assign(pw, wires);
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::Leaf")
+        }
     }
 }

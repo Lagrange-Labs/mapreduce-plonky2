@@ -251,6 +251,10 @@ mod test {
                 .2
                 .assign_from_data(pw, &self.exp_state_hash.clone().try_into().unwrap())
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::BlockHeader")
+        }
     }
 
     #[tokio::test]

@@ -313,6 +313,10 @@ mod tests {
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.base.assign::<F, D>(pw, wires).unwrap();
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::ArrayLengthExtract")
+        }
     }
 
     /// Test the length-match circuit with a generated random MPT.
@@ -440,6 +444,10 @@ mod tests {
             for (wire, node) in wires.nodes.iter().zip(padded_nodes.iter()) {
                 wire.assign(pw, node);
             }
+        }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::Pidgy")
         }
     }
 

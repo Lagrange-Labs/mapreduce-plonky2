@@ -147,6 +147,10 @@ mod tests {
             );
             pw.set_target_arr(&wires.1, self.exp_pi.proof_inputs)
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::ExtensionNode")
+        }
     }
 
     #[test]

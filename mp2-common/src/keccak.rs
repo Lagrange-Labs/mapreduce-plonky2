@@ -308,6 +308,10 @@ mod test {
             let vector = Vector::<u8, N>::from_vec(&self.data).unwrap();
             KeccakCircuit::<N>::assign(pw, wires, &InputData::NonAssigned(&vector));
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::KeccakCircuit")
+        }
     }
     impl<F, const D: usize, const BYTES: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
         for KeccakCircuit<BYTES>
@@ -370,6 +374,10 @@ mod test {
 
                 wires.output_array.assign(pw, &exp_u32.try_into().unwrap());
             }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::Keccak1")
+            }
         }
 
         let mut rng = thread_rng();
@@ -423,6 +431,10 @@ mod test {
                 wires
                     .1
                     .assign_bytes(pw, &self.exp.clone().try_into().unwrap());
+            }
+
+            fn name() -> &'static str {
+                concat!(module_path!(), "::Keccak2")
             }
         }
 

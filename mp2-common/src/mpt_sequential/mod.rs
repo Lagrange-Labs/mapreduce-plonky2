@@ -505,6 +505,10 @@ mod test {
             );
             pw.set_bool_target(wires.4, self.checking_value);
         }
+
+        fn name() -> &'static str {
+            concat!(module_path!(), "::Circuit")
+        }
     }
     use anyhow::Result;
 
