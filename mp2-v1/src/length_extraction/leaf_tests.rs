@@ -35,34 +35,23 @@ fn prove_and_verify_length_extraction_circuit() {
             .map(GFp::from_canonical_u32)
             .collect();
 
-    let variable_key: Vec<_> = test_data.nodes[0].iter().cloned().take(32).collect();
-
     let is_rlp_encoded = true;
     let length_slot = test_data.slot;
     let length_node = &test_data.nodes[0];
-    let variable_slot = test_data.slot;
-    let variable_key = variable_key.clone();
-    let variable_node = &test_data.nodes[0];
+    let variable_slot = 0xfa;
 
     let test_circuit = LengthExtractionTestCircuit {
-        base: LeafLengthCircuit::new(
-            is_rlp_encoded,
-            length_slot,
-            length_node,
-            variable_slot,
-            variable_key,
-            variable_node,
-        )
-        .unwrap(),
+        base: LeafLengthCircuit::new(is_rlp_encoded, length_slot, length_node, variable_slot)
+            .unwrap(),
     };
 
     let proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(test_circuit);
     let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
 
-    let expected_length = GFp::from_canonical_u8(33);
+    let expected_length = GFp::from_canonical_u32(test_data.value);
     let dm = map_to_curve_point(&[
         GFp::from_canonical_u8(test_data.slot),
-        GFp::from_canonical_u8(test_data.slot),
+        GFp::from_canonical_u8(variable_slot),
         GFp::from_bool(is_rlp_encoded),
     ]);
 
