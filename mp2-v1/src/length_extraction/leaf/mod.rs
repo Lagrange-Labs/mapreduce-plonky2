@@ -76,12 +76,13 @@ where
         let zero = cb.zero();
         let one = cb.one();
 
-        // we don't range check the variable slot as it is part of the DM public commitment
-        let t_p = cb.constant(GFp::from_canonical_u32(64));
+        // we don't range check the variable and length slots as they are part of the DM public
+        // commitment
         let variable_slot = cb.add_virtual_target();
+        let length_slot = SimpleSlot::build(cb);
+        let t_p = cb.constant(GFp::from_canonical_u32(64));
         let is_rlp_encoded = cb.add_virtual_bool_target_safe();
 
-        let length_slot = SimpleSlot::build(cb);
         let length_mpt =
             MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
                 cb,
