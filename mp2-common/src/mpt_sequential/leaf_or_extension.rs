@@ -4,16 +4,13 @@ use super::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN};
 use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires},
-    rlp::{decode_fixed_list, RlpList},
+    rlp::decode_fixed_list,
     types::GFp,
 };
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
-    iop::{
-        target::Target,
-        witness::{PartialWitness, WitnessWrite},
-    },
+    iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
 
@@ -31,8 +28,6 @@ where
     pub key: MPTKeyWire,
     /// New MPT value
     pub value: Array<Target, VALUE_LEN>,
-    /// RLP headers
-    pub rlp_headers: RlpList<2>,
 }
 
 impl<const NODE_LEN: usize, const VALUE_LEN: usize> MPTLeafOrExtensionWires<NODE_LEN, VALUE_LEN>
@@ -87,7 +82,6 @@ impl MPTLeafOrExtensionNode {
             root,
             key,
             value,
-            rlp_headers,
         }
     }
 }

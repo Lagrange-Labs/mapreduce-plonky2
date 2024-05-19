@@ -103,7 +103,7 @@ where
     fn from_iter<I: IntoIterator<Item = V>>(iter: I) -> Self {
         let mut real_len = 0;
         let mut it = iter.into_iter();
-        let arr = create_array(|i| {
+        let arr = create_array(|_| {
             it.next()
                 .map(|v| {
                     real_len += 1;
