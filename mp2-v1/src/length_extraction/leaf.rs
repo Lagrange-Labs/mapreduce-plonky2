@@ -25,10 +25,7 @@ use plonky2::{
 
 use super::PublicInputs;
 
-#[cfg(test)]
-mod tests;
-
-/// The wires structure for the leaf length extraction of a mapping value.
+/// The wires structure for the leaf length extraction.
 #[derive(Clone, Debug)]
 pub struct LeafLengthWires<const NODE_LEN: usize>
 where
@@ -40,7 +37,7 @@ where
     pub variable_slot: Target,
 }
 
-/// The circuit definition for the leaf length extraction of a mapping value.
+/// The circuit definition for the leaf length extraction.
 #[derive(Clone, Debug)]
 pub struct LeafLengthCircuit<const NODE_LEN: usize>
 where

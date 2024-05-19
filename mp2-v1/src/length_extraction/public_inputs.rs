@@ -1,5 +1,9 @@
+use core::array;
+
 use mp2_common::{
+    array::Array,
     keccak::PACKED_HASH_LEN,
+    mpt_sequential::MPTKeyWire,
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, CURVE_TARGET_LEN},
@@ -22,11 +26,11 @@ const N_RANGE: PublicInputRange = T_RANGE.end..T_RANGE.end + 1;
 /// Public inputs for the dynamic-length variable extraction.
 #[derive(Clone, Debug)]
 pub struct PublicInputs<'a, T> {
-    h: &'a [T],
-    dm: (&'a [T], &'a [T], &'a T),
-    k: &'a [T],
-    t: &'a T,
-    n: &'a T,
+    pub(crate) h: &'a [T],
+    pub(crate) dm: (&'a [T], &'a [T], &'a T),
+    pub(crate) k: &'a [T],
+    pub(crate) t: &'a T,
+    pub(crate) n: &'a T,
 }
 
 impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
@@ -64,9 +68,25 @@ impl<'a> PublicInputs<'a, Target> {
             n,
         }
     }
+
+    /// MPT key wires corresponding to the slot holding the length.
+    pub fn mpt_key_wire(&self) -> MPTKeyWire {
+        let key = self.mpt_key();
+        let pointer = *self.mpt_key_pointer();
+
+        MPTKeyWire {
+            key: Array {
+                arr: array::from_fn(|i| key[i]),
+            },
+            pointer,
+        }
+    }
 }
 
 impl<'a, T> PublicInputs<'a, T> {
+    /// Total length of the public inputs.
+    pub const TOTAL_LEN: usize = N_RANGE.end;
+
     /// Creates a new instance of the public inputs from a contiguous slice.
     pub fn from_slice(pi: &'a [T]) -> Self {
         Self {
