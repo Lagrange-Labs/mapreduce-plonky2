@@ -57,8 +57,11 @@ where
         let node = VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(cb);
         let headers = decode_fixed_list::<_, D, MAX_ITEMS_IN_LIST>(cb, &node.arr.arr, zero);
 
-        let (k_p, hash, _, _) =
+        let (k_p, hash, is_branch, _) =
             MPTCircuit::<1, NODE_LEN>::advance_key_branch(cb, &node.arr, &key, &headers);
+
+        // asserts this is a branch node
+        cb.assert_bool(is_branch);
 
         for (i, h) in convert_u8_targets_to_u32(cb, &hash.arr)
             .into_iter()
