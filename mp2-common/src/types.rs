@@ -1,6 +1,6 @@
 //! Custom types
 
-use crate::array::Array;
+use crate::{array::Array, D};
 use plonky2::{
     field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},
     iop::target::Target,
@@ -15,7 +15,7 @@ pub type GFp = GoldilocksField;
 pub type GFp5 = QuinticExtension<GFp>;
 
 /// Default circuit builder
-pub type CBuilder = CircuitBuilder<GoldilocksField, 2>;
+pub type CBuilder = CircuitBuilder<GoldilocksField, D>;
 
 /// Length of an U64
 pub const U64_LEN: usize = 8;
