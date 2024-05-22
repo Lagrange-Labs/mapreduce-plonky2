@@ -39,6 +39,8 @@ impl ExtensionLengthCircuit {
 
     /// Build the circuit, assigning the public inputs and returning the internal wires.
     pub fn build(cb: &mut CBuilder, child_proof: PublicInputs<Target>) -> ExtensionLengthWires {
+        let one = cb.one();
+
         let mpt_key = child_proof.mpt_key_wire();
         let mpt = MPTLeafOrExtensionNode::build_and_advance_key::<
             _,
@@ -55,7 +57,7 @@ impl ExtensionLengthCircuit {
             .for_each(|(v, p)| cb.connect(v.to_target(), *p));
 
         let PublicInputs { dm, k, n, .. } = child_proof;
-        let t = &mpt.key.pointer;
+        let t = &cb.sub(*child_proof.mpt_key_pointer(), one);
         let h = &array::from_fn::<_, PACKED_HASH_LEN, _>(|i| mpt.root.output_array.arr[i].0);
         PublicInputs { h, dm, k, t, n }.register(cb);
 

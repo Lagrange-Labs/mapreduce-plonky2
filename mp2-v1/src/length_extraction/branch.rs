@@ -52,16 +52,21 @@ where
         child_proof: PublicInputs<Target>,
     ) -> BranchLengthWires<NODE_LEN> {
         let zero = cb.zero();
+        let one = cb.one();
 
-        let key = child_proof.mpt_key_wire();
         let node = VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(cb);
         let headers = decode_fixed_list::<_, D, MAX_ITEMS_IN_LIST>(cb, &node.arr.arr, zero);
+
+        node.assert_bytes(cb);
+
+        let mut key = child_proof.mpt_key_wire();
+        key.pointer = cb.add(*child_proof.mpt_key_pointer(), one);
 
         let (k_p, hash, is_branch, _) =
             MPTCircuit::<1, NODE_LEN>::advance_key_branch(cb, &node.arr, &key, &headers);
 
         // asserts this is a branch node
-        cb.assert_bool(is_branch);
+        cb.assert_one(is_branch.target);
 
         for (i, h) in convert_u8_targets_to_u32(cb, &hash.arr)
             .into_iter()
@@ -72,7 +77,7 @@ where
 
         let root = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &node);
         let h = &array::from_fn::<_, PACKED_HASH_LEN, _>(|i| root.output_array.arr[i].0);
-        let t = &k_p.pointer;
+        let t = &cb.sub(k_p.pointer, one);
 
         let PublicInputs { dm, k, n, .. } = child_proof;
         PublicInputs { h, dm, k, t, n }.register(cb);
