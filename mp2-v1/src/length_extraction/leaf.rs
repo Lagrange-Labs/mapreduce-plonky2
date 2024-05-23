@@ -77,7 +77,6 @@ where
         // commitment
         let variable_slot = cb.add_virtual_target();
         let length_slot = SimpleSlot::build(cb);
-        let t_p = cb.constant(GFp::from_canonical_u32(64));
         let is_rlp_encoded = cb.add_virtual_bool_target_safe();
 
         let length_mpt =
@@ -109,10 +108,10 @@ where
         let dm = cb.map_to_curve_point(&[length_slot.slot, variable_slot, is_rlp_encoded.target]);
         let h = array::from_fn::<_, PACKED_HASH_LEN, _>(|i| length_mpt.root.output_array.arr[i].0);
         let k = &length_slot.mpt_key.key.arr;
-        let t = cb.sub(t_p, length_mpt.key.pointer);
+        let t = &length_slot.mpt_key.pointer;
         let n = cb.select(is_rlp_encoded, length_rlp_encoded.0, length_raw.0);
 
-        PublicInputs::new(&h, &dm, k, &t, &n).register(cb);
+        PublicInputs::new(&h, &dm, k, t, &n).register(cb);
 
         LeafLengthWires {
             is_rlp_encoded,
