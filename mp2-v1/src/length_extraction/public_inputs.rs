@@ -1,4 +1,4 @@
-use core::array;
+use core::{array, iter};
 
 use mp2_common::{
     array::Array,
@@ -80,6 +80,22 @@ impl<'a> PublicInputs<'a, Target> {
             },
             pointer,
         }
+    }
+}
+
+impl<'a, T: Clone> PublicInputs<'a, T> {
+    /// Creates a vector from the parts of the public inputs
+    pub fn to_vec(&self) -> Vec<T> {
+        self.h
+            .iter()
+            .chain(self.dm.0.iter())
+            .chain(self.dm.1.iter())
+            .chain(iter::once(self.dm.2))
+            .chain(self.k.iter())
+            .chain(iter::once(self.t))
+            .chain(iter::once(self.n))
+            .cloned()
+            .collect()
     }
 }
 
