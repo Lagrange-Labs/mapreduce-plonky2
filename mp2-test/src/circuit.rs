@@ -341,6 +341,53 @@ where
     }
 }
 
+/// Setup the circuit to be proven via an instance.
+pub fn setup_circuit<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    C: GenericConfig<D, F = F>,
+    U: UserCircuit<F, D> + Debug,
+>() -> (U::Wires, CircuitData<F, C, D>, VerifierCircuitData<F, C, D>) {
+    let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+    let now = std::time::Instant::now();
+    let wires = U::build(&mut b);
+    let circuit_data = b.build::<C>();
+    let vcd = VerifierCircuitData {
+        verifier_only: circuit_data.verifier_only.clone(),
+        common: circuit_data.common.clone(),
+    };
+
+    println!("[+] Circuit data built in {:?}s", now.elapsed().as_secs());
+
+    (wires, circuit_data, vcd)
+}
+
+/// Prove and verify a circuit instance with a previously generated setup.
+pub fn prove_circuit<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    C: GenericConfig<D, F = F>,
+    U: UserCircuit<F, D> + Debug,
+>(
+    setup: &(U::Wires, CircuitData<F, C, D>, VerifierCircuitData<F, C, D>),
+    u: &U,
+) -> ProofWithPublicInputs<F, C, D> {
+    let mut pw = PartialWitness::new();
+
+    println!("[+] Generating a proof ... ");
+    let now = std::time::Instant::now();
+    u.prove(&mut pw, &setup.0);
+    let proof = setup.1.prove(pw).expect("invalid proof");
+    println!("[+] Proof generated in {:?}s", now.elapsed().as_secs());
+    eprintln!("BENCH:{},{}", U::name(), now.elapsed().as_secs_f32());
+    setup
+        .2
+        .verify(proof.clone())
+        .expect("failed to verify proof");
+
+    proof
+}
+
 /// Proves and verifies the provided circuit instance.
 pub fn run_circuit<
     F: RichField + Extendable<D>,
@@ -350,28 +397,6 @@ pub fn run_circuit<
 >(
     u: U,
 ) -> ProofWithPublicInputs<F, C, D> {
-    let mut b = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-    let mut pw = PartialWitness::new();
-    // small hack to print the name of the circuit being generated
-    println!(
-        "[+] Building circuit data with circuit {:?}...",
-        &format!("{:?}", u)[0..20]
-    );
-    let now = std::time::Instant::now();
-    let wires = U::build(&mut b);
-    let circuit_data = b.build::<C>();
-    println!("[+] Circuit data built in {:?}s", now.elapsed().as_secs());
-    println!("[+] Generating a proof ... ");
-    let now = std::time::Instant::now();
-    u.prove(&mut pw, &wires);
-    let proof = circuit_data.prove(pw).expect("invalid proof");
-    println!("[+] Proof generated in {:?}s", now.elapsed().as_secs());
-    eprintln!("BENCH:{},{}", U::name(), now.elapsed().as_secs_f32());
-    let vcd = VerifierCircuitData {
-        verifier_only: circuit_data.verifier_only,
-        common: circuit_data.common,
-    };
-    vcd.verify(proof.clone()).expect("failed to verify proof");
-
-    proof
+    let setup = setup_circuit::<F, D, C, U>();
+    prove_circuit(&setup, &u)
 }

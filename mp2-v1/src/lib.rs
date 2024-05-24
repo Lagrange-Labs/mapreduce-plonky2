@@ -4,4 +4,5 @@
 #![feature(generic_const_exprs)]
 
 pub mod api;
+pub mod length_extraction;
 pub mod values_extraction;

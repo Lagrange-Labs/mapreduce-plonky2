@@ -95,6 +95,27 @@ impl<T: Default + Clone + Debug, const MAX_LEN: usize> Vector<T, MAX_LEN> {
     }
 }
 
+impl<T, const MAX_LEN: usize, V> FromIterator<V> for Vector<T, MAX_LEN>
+where
+    T: Default + Clone + Debug,
+    V: Into<T>,
+{
+    fn from_iter<I: IntoIterator<Item = V>>(iter: I) -> Self {
+        let mut real_len = 0;
+        let mut it = iter.into_iter();
+        let arr = create_array(|_| {
+            it.next()
+                .map(|v| {
+                    real_len += 1;
+                    v.into()
+                })
+                .unwrap_or_default()
+        });
+
+        Self { arr, real_len }
+    }
+}
+
 impl<F: RichField, const MAX_LEN: usize> Vector<F, MAX_LEN> {}
 
 impl<const SIZE: usize, T: Targetable + Clone + Serialize> Index<usize> for VectorWire<T, SIZE>

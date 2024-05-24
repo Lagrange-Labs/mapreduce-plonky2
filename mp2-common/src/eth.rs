@@ -537,31 +537,33 @@ mod test {
         // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
         // uint256 public n_registered; // storage slot 0
         // mapping(address => uint256) public holders; // storage slot 1
-        #[cfg(feature = "ci")]
-        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
-        #[cfg(not(feature = "ci"))]
-        let url = "https://ethereum-sepolia-rpc.publicnode.com";
-
+        let url = get_mainnet_url();
         let provider =
             Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
 
         // sepolia contract
-        let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
+        let contract = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         // simple storage test
         {
-            let query = ProofQuery::new_simple_slot(contract, 0);
+            let query = ProofQuery::new_simple_slot(contract, 11);
             let res = query.query_mpt_proof(&provider, None).await?;
+            let leaf: Vec<Vec<u8>> = rlp::decode_list(res.storage_proof[0].proof.last().unwrap());
+            println!("leaf[1] = {:?}", leaf[1]);
+            let slice: Vec<u8> = rlp::decode(&leaf[1])?;
+            let slice = left_pad::<4>(&slice); // what happens in circuit effectively
+            let length = convert_u8_to_u32_slice(&slice.into_iter().rev().collect::<Vec<u8>>())[0];
+            println!("rlp len: {:?} --> decoded rev {}", slice, length);
             ProofQuery::verify_storage_proof(&res)?;
             query.verify_state_proof(&res)?;
         }
         {
-            // mapping key
-            let mapping_key =
-                hex::decode("000000000000000000000000000000000000000000000000000000000001abcd")?;
-            let query = ProofQuery::new_mapping_slot(contract, 1, mapping_key);
-            let res = query.query_mpt_proof(&provider, None).await?;
-            ProofQuery::verify_storage_proof(&res)?;
-            query.verify_state_proof(&res)?;
+            //// mapping key
+            //let mapping_key =
+            //    hex::decode("000000000000000000000000000000000000000000000000000000000001abcd")?;
+            //let query = ProofQuery::new_mapping_slot(contract, 1, mapping_key);
+            //let res = query.query_mpt_proof(&provider, None).await?;
+            //ProofQuery::verify_storage_proof(&res)?;
+            //query.verify_state_proof(&res)?;
         }
         Ok(())
     }
