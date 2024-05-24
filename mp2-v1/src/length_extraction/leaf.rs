@@ -32,6 +32,7 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     pub length_slot: SimpleSlotWires,
+    pub key_pointer: Target,
     pub length_mpt: MPTLeafOrExtensionWires<NODE_LEN, MAX_LEAF_VALUE_LEN>,
     pub variable_slot: Target,
 }
@@ -43,6 +44,7 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     pub length_slot: SimpleSlot,
+    pub key_pointer: u8,
     pub length_node: Vector<u8, { PAD_LEN(NODE_LEN) }>,
     pub variable_slot: u8,
 }
@@ -52,9 +54,15 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     /// Creates a new instance of the circuit.
-    pub fn new(length_slot: u8, length_node: &[u8], variable_slot: u8) -> anyhow::Result<Self> {
+    pub fn new(
+        length_slot: u8,
+        key_pointer: u8,
+        length_node: &[u8],
+        variable_slot: u8,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             length_slot: SimpleSlot::new(length_slot),
+            key_pointer,
             length_node: Vector::from_vec(length_node)?,
             variable_slot,
         })
@@ -67,8 +75,11 @@ where
 
         // we don't range check the variable and length slots as they are part of the DM public
         // commitment
+        let key_pointer = cb.add_virtual_target();
         let variable_slot = cb.add_virtual_target();
-        let length_slot = SimpleSlot::build(cb);
+        let mut length_slot = SimpleSlot::build(cb);
+
+        length_slot.mpt_key.pointer = key_pointer;
 
         let length_mpt =
             MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
@@ -101,6 +112,7 @@ where
 
         LeafLengthWires {
             length_slot,
+            key_pointer,
             length_mpt,
             variable_slot,
         }
@@ -109,6 +121,7 @@ where
     /// Assigns the values of this instance into the provided partial witness, using the generated
     /// circuit wires.
     pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &LeafLengthWires<NODE_LEN>) {
+        pw.set_target(wires.key_pointer, GFp::from_canonical_u8(self.key_pointer));
         pw.set_target(
             wires.variable_slot,
             GFp::from_canonical_u8(self.variable_slot),
