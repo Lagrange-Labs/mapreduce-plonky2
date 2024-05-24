@@ -79,7 +79,12 @@ impl Groth16Prover {
         plonky2_proof: &ProofWithPublicInputs<F, C, D>,
     ) -> Result<Groth16Proof> {
         // Generate the wrapped proof.
+        let now = std::time::Instant::now();
         let wrapped_output = self.wrapper.prove(plonky2_proof)?;
+        println!(
+            "succinctx wrapping proving time elapsed {}",
+            now.elapsed().in_millis()
+        );
 
         // Note this verifier data is from the wrapped proof. However the wrapped proof hardcodes the
         // specific mapreduce-plonky2 proof verification key in its circuit, so indirectly, verifier knows the
@@ -89,7 +94,10 @@ impl Groth16Prover {
         let proof = serde_json::to_string(&wrapped_output.proof)?;
 
         // Generate the Groth16 proof.
+        let now = std::time::Instant::now();
         let groth16_proof_str = gnark_utils::prove(&verifier_data, &proof)?;
+        println!("groth16 proving time elapsed {}", now.elapsed().in_millis());
+
         let groth16_proof = serde_json::from_str(&groth16_proof_str)?;
 
         Ok(groth16_proof)
