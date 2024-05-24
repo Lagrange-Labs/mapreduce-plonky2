@@ -10,10 +10,7 @@ use mp2_common::{
     types::{CBuilder, GFp},
     D,
 };
-use plonky2::{
-    field::types::Field,
-    iop::{target::Target, witness::PartialWitness},
-};
+use plonky2::iop::{target::Target, witness::PartialWitness};
 
 use crate::values_extraction::MAX_EXTENSION_NODE_LEN;
 
@@ -43,11 +40,8 @@ impl ExtensionLengthCircuit {
     /// Build the circuit, assigning the public inputs and returning the internal wires.
     pub fn build(cb: &mut CBuilder, child_proof: PublicInputs<Target>) -> ExtensionLengthWires {
         let one = cb.one();
-        let t_p = cb.constant(GFp::from_canonical_u8(64));
 
-        let mut key = child_proof.mpt_key_wire();
-        key.pointer = cb.sub(t_p, *child_proof.mpt_key_pointer());
-
+        let key = child_proof.mpt_key_wire();
         let mpt = MPTLeafOrExtensionNode::build_and_advance_key::<
             _,
             D,
@@ -63,7 +57,7 @@ impl ExtensionLengthCircuit {
             .for_each(|(v, p)| cb.connect(v.to_target(), *p));
 
         let PublicInputs { dm, k, n, .. } = child_proof;
-        let t = &cb.sub(*child_proof.mpt_key_pointer(), one);
+        let t = &cb.add(*child_proof.mpt_key_pointer(), one);
         let h = &array::from_fn::<_, PACKED_HASH_LEN, _>(|i| mpt.root.output_array.arr[i].0);
         PublicInputs { h, dm, k, t, n }.register(cb);
 

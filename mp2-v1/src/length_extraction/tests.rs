@@ -67,7 +67,7 @@ fn prove_and_verify_length_extraction_circuit() {
         let leaf_proof = prove_circuit(&setup_leaf, &leaf_circuit);
         let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
         let length = GFp::from_canonical_u32(case.length);
-        let pointer = GFp::from_canonical_u8(63);
+        let pointer = GFp::from_canonical_u8(1);
 
         case.assert_correct_dm(case.length_slot, &leaf_pi);
         case.assert_correct_root(&length_node, &leaf_pi);
@@ -84,7 +84,7 @@ fn prove_and_verify_length_extraction_circuit() {
         };
         let branch_proof = prove_circuit(&setup_branch, &branch_circuit);
         let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
-        let pointer = GFp::from_canonical_u8(62);
+        let pointer = GFp::from_canonical_u8(2);
 
         case.assert_correct_dm(case.length_slot, &branch_pi);
         case.assert_correct_root(&branch_node, &branch_pi);
@@ -101,7 +101,7 @@ fn prove_and_verify_length_extraction_circuit() {
         };
         let ext_proof = prove_circuit(&setup_extension, &ext_circuit);
         let ext_pi = PublicInputs::<GFp>::from_slice(&ext_proof.public_inputs);
-        let pointer = GFp::from_canonical_u8(61);
+        let pointer = GFp::from_canonical_u8(3);
 
         case.assert_correct_dm(case.length_slot, &ext_pi);
         case.assert_correct_root(&ext_node, &ext_pi);
@@ -118,7 +118,7 @@ fn prove_and_verify_length_extraction_circuit() {
         };
         let root_proof = prove_circuit(&setup_branch, &root_circuit);
         let root_pi = PublicInputs::<GFp>::from_slice(&root_proof.public_inputs);
-        let pointer = GFp::from_canonical_u8(60);
+        let pointer = GFp::from_canonical_u8(4);
 
         case.assert_correct_dm(case.length_slot, &root_pi);
         case.assert_correct_root(&root_node, &root_pi);
