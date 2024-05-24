@@ -83,7 +83,7 @@ impl Groth16Prover {
         let wrapped_output = self.wrapper.prove(plonky2_proof)?;
         println!(
             "succinctx wrapping proving time elapsed {}",
-            now.elapsed().in_millis()
+            now.elapsed().as_millis()
         );
 
         // Note this verifier data is from the wrapped proof. However the wrapped proof hardcodes the
@@ -96,7 +96,7 @@ impl Groth16Prover {
         // Generate the Groth16 proof.
         let now = std::time::Instant::now();
         let groth16_proof_str = gnark_utils::prove(&verifier_data, &proof)?;
-        println!("groth16 proving time elapsed {}", now.elapsed().in_millis());
+        println!("groth16 proving time elapsed {}", now.elapsed().as_millis());
 
         let groth16_proof = serde_json::from_str(&groth16_proof_str)?;
 
