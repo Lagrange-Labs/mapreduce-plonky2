@@ -78,6 +78,8 @@ impl Groth16Prover {
         &self,
         plonky2_proof: &ProofWithPublicInputs<F, C, D>,
     ) -> Result<Groth16Proof> {
+        let now = std::time::Instant::now();
+
         // Generate the wrapped proof.
         let wrapped_output = self.wrapper.prove(plonky2_proof)?;
 
@@ -91,6 +93,8 @@ impl Groth16Prover {
         // Generate the Groth16 proof.
         let groth16_proof_str = gnark_utils::prove(&verifier_data, &proof)?;
         let groth16_proof = serde_json::from_str(&groth16_proof_str)?;
+
+        println!("proving time elapsed {}", now.elapsed().as_millis());
 
         Ok(groth16_proof)
     }
