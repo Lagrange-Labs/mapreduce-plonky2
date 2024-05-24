@@ -64,7 +64,6 @@ where
     pub fn build(cb: &mut CBuilder) -> LeafLengthWires<NODE_LEN> {
         let zero = cb.zero();
         let one = cb.one();
-        let t_p = cb.constant(GFp::from_canonical_u8(64));
 
         // we don't range check the variable and length slots as they are part of the DM public
         // commitment
@@ -92,13 +91,13 @@ where
             .reverse()
             .convert_u8_to_u32(cb)[0];
 
-        let dm = cb.map_to_curve_point(&[length_slot.slot, variable_slot]);
-        let h = array::from_fn::<_, PACKED_HASH_LEN, _>(|i| length_mpt.root.output_array.arr[i].0);
+        let dm = &cb.map_to_curve_point(&[length_slot.slot, variable_slot]);
+        let h = &array::from_fn::<_, PACKED_HASH_LEN, _>(|i| length_mpt.root.output_array.arr[i].0);
         let k = &length_slot.mpt_key.key.arr;
-        let t = &cb.sub(t_p, length_slot.mpt_key.pointer);
-        let n = length_rlp_encoded.0;
+        let t = &length_slot.mpt_key.pointer;
+        let n = &length_rlp_encoded.0;
 
-        PublicInputs::new(&h, &dm, k, t, &n).register(cb);
+        PublicInputs::new(h, dm, k, t, n).register(cb);
 
         LeafLengthWires {
             length_slot,

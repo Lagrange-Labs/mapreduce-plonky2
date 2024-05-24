@@ -67,7 +67,7 @@ fn prove_and_verify_length_extraction_circuit() {
         let leaf_proof = prove_circuit(&setup_leaf, &leaf_circuit);
         let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
         let length = GFp::from_canonical_u32(case.length);
-        let pointer = GFp::from_canonical_u8(1);
+        let pointer = GFp::from_canonical_u8(63);
 
         case.assert_correct_dm(case.length_slot, &leaf_pi);
         case.assert_correct_root(&length_node, &leaf_pi);
@@ -84,7 +84,7 @@ fn prove_and_verify_length_extraction_circuit() {
         };
         let branch_proof = prove_circuit(&setup_branch, &branch_circuit);
         let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
-        let pointer = GFp::from_canonical_u8(2);
+        let pointer = GFp::from_canonical_u8(62);
 
         case.assert_correct_dm(case.length_slot, &branch_pi);
         case.assert_correct_root(&branch_node, &branch_pi);
@@ -101,7 +101,7 @@ fn prove_and_verify_length_extraction_circuit() {
         };
         let ext_proof = prove_circuit(&setup_extension, &ext_circuit);
         let ext_pi = PublicInputs::<GFp>::from_slice(&ext_proof.public_inputs);
-        let pointer = GFp::from_canonical_u8(3);
+        let pointer = GFp::from_canonical_u8(60);
 
         case.assert_correct_dm(case.length_slot, &ext_pi);
         case.assert_correct_root(&ext_node, &ext_pi);
@@ -118,7 +118,7 @@ fn prove_and_verify_length_extraction_circuit() {
         };
         let root_proof = prove_circuit(&setup_branch, &root_circuit);
         let root_pi = PublicInputs::<GFp>::from_slice(&root_proof.public_inputs);
-        let pointer = GFp::from_canonical_u8(4);
+        let pointer = GFp::from_canonical_u8(59);
 
         case.assert_correct_dm(case.length_slot, &root_pi);
         case.assert_correct_root(&root_node, &root_pi);
@@ -224,7 +224,7 @@ impl TestCase {
         let length_value = rlp::encode(&self.length).to_vec();
         let length_node = Node::from_leaf(length_nibbles.clone(), length_value);
 
-        let next_nibble = length_nibbles.offset(1).at(0);
+        let next_nibble = length_nibbles.at(63);
         let branch_node: [_; 16] = array::from_fn(|i| {
             if i == next_nibble {
                 length_node.clone()
@@ -248,10 +248,10 @@ impl TestCase {
         });
         let branch_node = Node::from_branch(branch_node, None);
 
-        let prefix = length_nibbles.offset(2);
+        let prefix = length_nibbles.offset(62);
         let ext_node = Node::from_extension(prefix, branch_node.clone());
 
-        let next_nibble = length_nibbles.offset(3).at(0);
+        let next_nibble = length_nibbles.at(60);
         let root_node: [_; 16] = array::from_fn(|i| {
             if i == next_nibble {
                 ext_node.clone()
