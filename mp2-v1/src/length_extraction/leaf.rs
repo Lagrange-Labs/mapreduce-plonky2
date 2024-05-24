@@ -3,7 +3,7 @@
 use core::array;
 
 use mp2_common::{
-    array::{Array, Vector},
+    array::Vector,
     group_hashing::CircuitBuilderGroupHashing,
     keccak::PACKED_HASH_LEN,
     mpt_sequential::{
@@ -18,7 +18,7 @@ use mp2_common::{
 use plonky2::{
     field::types::Field,
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
 };
@@ -31,7 +31,6 @@ pub struct LeafLengthWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    pub is_rlp_encoded: BoolTarget,
     pub length_slot: SimpleSlotWires,
     pub length_mpt: MPTLeafOrExtensionWires<NODE_LEN, MAX_LEAF_VALUE_LEN>,
     pub variable_slot: Target,
@@ -43,7 +42,6 @@ pub struct LeafLengthCircuit<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    pub is_rlp_encoded: bool,
     pub length_slot: SimpleSlot,
     pub length_node: Vector<u8, { PAD_LEN(NODE_LEN) }>,
     pub variable_slot: u8,
@@ -54,14 +52,8 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     /// Creates a new instance of the circuit.
-    pub fn new(
-        is_rlp_encoded: bool,
-        length_slot: u8,
-        length_node: &[u8],
-        variable_slot: u8,
-    ) -> anyhow::Result<Self> {
+    pub fn new(length_slot: u8, length_node: &[u8], variable_slot: u8) -> anyhow::Result<Self> {
         Ok(Self {
-            is_rlp_encoded,
             length_slot: SimpleSlot::new(length_slot),
             length_node: Vector::from_vec(length_node)?,
             variable_slot,
@@ -77,18 +69,12 @@ where
         // commitment
         let variable_slot = cb.add_virtual_target();
         let length_slot = SimpleSlot::build(cb);
-        let is_rlp_encoded = cb.add_virtual_bool_target_safe();
 
         let length_mpt =
             MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
                 cb,
                 &length_slot.mpt_key,
             );
-
-        let length_raw = Array {
-            arr: array::from_fn::<_, 4, _>(|i| length_mpt.value[3 - i]),
-        }
-        .convert_u8_to_u32(cb)[0];
 
         // extract the rlp encoded value
         let prefix = length_mpt.value[0];
@@ -105,16 +91,15 @@ where
             .reverse()
             .convert_u8_to_u32(cb)[0];
 
-        let dm = cb.map_to_curve_point(&[length_slot.slot, variable_slot, is_rlp_encoded.target]);
+        let dm = cb.map_to_curve_point(&[length_slot.slot, variable_slot]);
         let h = array::from_fn::<_, PACKED_HASH_LEN, _>(|i| length_mpt.root.output_array.arr[i].0);
         let k = &length_slot.mpt_key.key.arr;
         let t = &length_slot.mpt_key.pointer;
-        let n = cb.select(is_rlp_encoded, length_rlp_encoded.0, length_raw.0);
+        let n = length_rlp_encoded.0;
 
         PublicInputs::new(&h, &dm, k, t, &n).register(cb);
 
         LeafLengthWires {
-            is_rlp_encoded,
             length_slot,
             length_mpt,
             variable_slot,
@@ -127,10 +112,6 @@ where
         pw.set_target(
             wires.variable_slot,
             GFp::from_canonical_u8(self.variable_slot),
-        );
-        pw.set_target(
-            wires.is_rlp_encoded.target,
-            GFp::from_bool(self.is_rlp_encoded),
         );
 
         self.length_slot.assign(pw, &wires.length_slot);

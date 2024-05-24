@@ -12,7 +12,10 @@ use mp2_common::{
     utils::convert_u8_targets_to_u32,
     D,
 };
-use plonky2::iop::{target::Target, witness::PartialWitness};
+use plonky2::{
+    field::types::Field,
+    iop::{target::Target, witness::PartialWitness},
+};
 
 use super::PublicInputs;
 
@@ -53,6 +56,7 @@ where
     ) -> BranchLengthWires<NODE_LEN> {
         let zero = cb.zero();
         let one = cb.one();
+        let t_p = cb.constant(GFp::from_canonical_u8(64));
 
         let node = VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(cb);
         let headers = decode_fixed_list::<_, D, MAX_ITEMS_IN_LIST>(cb, &node.arr.arr, zero);
@@ -60,9 +64,9 @@ where
         node.assert_bytes(cb);
 
         let mut key = child_proof.mpt_key_wire();
-        key.pointer = cb.add(*child_proof.mpt_key_pointer(), one);
+        key.pointer = cb.sub(t_p, *child_proof.mpt_key_pointer());
 
-        let (k_p, hash, is_branch, _) =
+        let (_, hash, is_branch, _) =
             MPTCircuit::<1, NODE_LEN>::advance_key_branch(cb, &node.arr, &key, &headers);
 
         // asserts this is a branch node
@@ -77,7 +81,7 @@ where
 
         let root = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &node);
         let h = &array::from_fn::<_, PACKED_HASH_LEN, _>(|i| root.output_array.arr[i].0);
-        let t = &cb.sub(k_p.pointer, one);
+        let t = &cb.sub(*child_proof.mpt_key_pointer(), one);
 
         let PublicInputs { dm, k, n, .. } = child_proof;
         PublicInputs { h, dm, k, t, n }.register(cb);

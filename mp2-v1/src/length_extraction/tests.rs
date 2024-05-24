@@ -17,8 +17,8 @@ use plonky2::{
     },
     plonk::config::PoseidonGoldilocksConfig,
 };
-use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
-use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
+use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 
 use super::{
     BranchLengthCircuit, BranchLengthWires, ExtensionLengthCircuit, ExtensionLengthWires,
@@ -37,205 +37,95 @@ fn prove_and_verify_length_extraction_circuit() {
     // max u32 shouldn't overflow
     cases.push(TestCase {
         seed: 0xbeef,
-        depth: 3,
-        is_rlp_encoded: true,
-        length: u32::MAX,
-        ext_length: u8::MAX as u32,
+        length_slot: 0xba,
         variable_slot: 0xfa,
+        length: u32::MAX,
     });
 
-    /*
     // encoded RLP low value should decode
     cases.push(TestCase {
-        seed: 0xdead,
-        depth: 4,
-        is_rlp_encoded: true,
+        seed: 0xbeef,
+        length_slot: 0xba,
+        variable_slot: 0xfa,
         length: 15,
-        ext_length: u8::MAX as u32,
-        variable_slot: 0xfa,
     });
-
-    // raw value should decode
-    cases.push(TestCase {
-        seed: 0xdead,
-        depth: 4,
-        is_rlp_encoded: true,
-        length: 8943278,
-        ext_length: u8::MAX as u32,
-        variable_slot: 0xfa,
-    });
-    */
 
     for case in cases {
-        // Leaf extraction
-
-        let TreePath {
-            slot,
-            key,
-            mut path,
-            ext_key,
-            ext_path,
+        let TestData {
+            length_key,
+            length_node,
+            branch_node,
+            ext_node,
+            root_node,
         } = case.generate();
 
-        let node = path.pop().unwrap();
+        // Leaf extraction
+
         let leaf_circuit =
-            LeafLengthCircuit::new(case.is_rlp_encoded, slot, &node, case.variable_slot).unwrap();
+            LeafLengthCircuit::new(case.length_slot, &length_node, case.variable_slot).unwrap();
 
         let leaf_proof = prove_circuit(&setup_leaf, &leaf_circuit);
         let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
         let length = GFp::from_canonical_u32(case.length);
         let pointer = GFp::from_canonical_u8(63);
 
-        case.assert_correct_dm(slot, &leaf_pi);
-        case.assert_correct_root(&node, &leaf_pi);
+        case.assert_correct_dm(case.length_slot, &leaf_pi);
+        case.assert_correct_root(&length_node, &leaf_pi);
 
         assert_eq!(leaf_pi.length(), &length);
-        assert_eq!(leaf_pi.mpt_key(), &key);
+        assert_eq!(leaf_pi.mpt_key(), &length_key);
         assert_eq!(leaf_pi.mpt_key_pointer(), &pointer);
 
-        /*
-        // Branch extraction
+        // First branch extraction
 
         let branch_circuit = BranchTestCircuit {
-            base: BranchLengthCircuit::<NODE_LEN>::new(&path[case.depth - 2]).unwrap(),
+            base: BranchLengthCircuit::<NODE_LEN>::new(&branch_node).unwrap(),
             pi: &leaf_proof.public_inputs,
         };
-
         let branch_proof = prove_circuit(&setup_branch, &branch_circuit);
         let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
+        let pointer = GFp::from_canonical_u8(62);
+
+        case.assert_correct_dm(case.length_slot, &branch_pi);
+        case.assert_correct_root(&branch_node, &branch_pi);
+
+        assert_eq!(branch_pi.length(), &length);
+        assert_eq!(branch_pi.mpt_key(), &length_key);
+        assert_eq!(branch_pi.mpt_key_pointer(), &pointer);
+
+        // Extension extraction
+
+        let ext_circuit = ExtensionTestCircuit {
+            base: ExtensionLengthCircuit::new(ext_node.clone()),
+            pi: &branch_pi.to_vec(),
+        };
+        let ext_proof = prove_circuit(&setup_extension, &ext_circuit);
+        let ext_pi = PublicInputs::<GFp>::from_slice(&ext_proof.public_inputs);
         let pointer = GFp::from_canonical_u8(61);
 
-        case.assert_correct_dm(slot, &branch_pi);
-        case.assert_correct_root(&path[case.depth - 2], &branch_pi);
-
-        assert_eq!(branch_pi.length(), &length);
-        assert_eq!(branch_pi.mpt_key(), &key);
-        assert_eq!(branch_pi.mpt_key_pointer(), &pointer);
-        */
-
-        // Extension extraction
-
-        /*
-        let TreePath {
-            slot,
-            key,
-            path,
-            ext_key,
-            ext_path,
-        } = case.generate(true);
-
-        let ext_circuit = ExtensionTestCircuit {
-            base: ExtensionLengthCircuit::new(ext_path[case.depth - 1].clone()),
-            pi: &leaf_pi.to_vec(),
-        };
-        let ext_proof = prove_circuit(&setup_extension, &ext_circuit);
-        */
-
-        /*
-        let ext_pi = PublicInputs::<GFp>::from_slice(&ext_proof.public_inputs);
-
-        let pointer = GFp::from_canonical_u8(64);
-        let root = keccak256(&extension);
-        let root_hash: Vec<_> = convert_u8_to_u32_slice(&root)
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
-
-        let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| ext_pi.metadata().0[i]);
-        let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| ext_pi.metadata().1[i]);
-        let is_inf = ext_pi.metadata().2 == &GFp::ONE;
-        let dm_p = WeierstrassPoint {
-            x: GFp5::from_basefield_array(x),
-            y: GFp5::from_basefield_array(y),
-            is_inf,
-        };
-
-        let dm = map_to_curve_point(&[
-            GFp::from_canonical_u8(slot),
-            GFp::from_canonical_u8(variable_slot),
-            GFp::from_bool(is_rlp_encoded),
-        ]);
+        case.assert_correct_dm(case.length_slot, &ext_pi);
+        case.assert_correct_root(&ext_node, &ext_pi);
 
         assert_eq!(ext_pi.length(), &length);
-        assert_eq!(ext_pi.root_hash(), root_hash);
-        assert_eq!(dm.to_weierstrass(), dm_p);
-        assert_eq!(ext_pi.mpt_key(), &key);
+        assert_eq!(ext_pi.mpt_key(), &length_key);
         assert_eq!(ext_pi.mpt_key_pointer(), &pointer);
-        */
 
-        /*
+        // Root extraction
 
-
-        let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| branch_pi.metadata().0[i]);
-        let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| branch_pi.metadata().1[i]);
-        let is_inf = branch_pi.metadata().2 == &GFp::ONE;
-        let dm_p = WeierstrassPoint {
-            x: GFp5::from_basefield_array(x),
-            y: GFp5::from_basefield_array(y),
-            is_inf,
+        let root_circuit = BranchTestCircuit {
+            base: BranchLengthCircuit::<NODE_LEN>::new(&root_node).unwrap(),
+            pi: &ext_proof.public_inputs,
         };
+        let root_proof = prove_circuit(&setup_branch, &root_circuit);
+        let root_pi = PublicInputs::<GFp>::from_slice(&root_proof.public_inputs);
+        let pointer = GFp::from_canonical_u8(60);
 
-        let pointer = GFp::from_canonical_usize(61);
-        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&path[depth - 2]))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
+        case.assert_correct_dm(case.length_slot, &root_pi);
+        case.assert_correct_root(&root_node, &root_pi);
 
-        assert_eq!(branch_pi.length(), &length);
-        assert_eq!(branch_pi.root_hash(), &root);
-        assert_eq!(dm.to_weierstrass(), dm_p);
-        assert_eq!(branch_pi.mpt_key(), &key);
-        assert_eq!(branch_pi.mpt_key_pointer(), &pointer);
-        */
-
-        /*
-        // Extension extraction
-        // creates a dummy extension
-
-        let PublicInputs { dm, k, t, n, .. } = leaf_pi;
-        let ext_pi = PublicInputs {
-            h: &extension_hash,
-            dm,
-            k,
-            t,
-            n,
-        }
-        .to_vec();
-        let ext_circuit = ExtensionTestCircuit {
-            base: ExtensionLengthCircuit::new(extension.clone()),
-            pi: &ext_pi,
-        };
-        let ext_proof = prove_circuit(&setup_extension, &ext_circuit);
-        let ext_pi = PublicInputs::<GFp>::from_slice(&ext_proof.public_inputs);
-
-        let pointer = GFp::from_canonical_u8(64);
-        let root = keccak256(&extension);
-        let root_hash: Vec<_> = convert_u8_to_u32_slice(&root)
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
-
-        let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| ext_pi.metadata().0[i]);
-        let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| ext_pi.metadata().1[i]);
-        let is_inf = ext_pi.metadata().2 == &GFp::ONE;
-        let dm_p = WeierstrassPoint {
-            x: GFp5::from_basefield_array(x),
-            y: GFp5::from_basefield_array(y),
-            is_inf,
-        };
-
-        let dm = map_to_curve_point(&[
-            GFp::from_canonical_u8(slot),
-            GFp::from_canonical_u8(variable_slot),
-            GFp::from_bool(is_rlp_encoded),
-        ]);
-
-        assert_eq!(ext_pi.length(), &length);
-        assert_eq!(ext_pi.root_hash(), root_hash);
-        assert_eq!(dm.to_weierstrass(), dm_p);
-        assert_eq!(ext_pi.mpt_key(), &key);
-        assert_eq!(ext_pi.mpt_key_pointer(), &pointer);
-        */
+        assert_eq!(root_pi.length(), &length);
+        assert_eq!(root_pi.mpt_key(), &length_key);
+        assert_eq!(root_pi.mpt_key_pointer(), &pointer);
     }
 }
 
@@ -307,104 +197,103 @@ impl<'a> UserCircuit<GFp, D> for ExtensionTestCircuit<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
-struct TreePath {
-    pub slot: u8,
-    pub key: Vec<GFp>,
-    pub ext_key: Vec<GFp>,
-    pub path: Vec<Vec<u8>>,
-    pub ext_path: Vec<Vec<u8>>,
-}
-
 struct TestCase {
     pub seed: u64,
-    pub depth: usize,
-    pub is_rlp_encoded: bool,
-    pub length: u32,
-    pub ext_length: u32,
+    pub length_slot: u8,
     pub variable_slot: u8,
+    pub length: u32,
+}
+
+struct TestData {
+    pub length_key: Vec<GFp>,
+    pub length_node: Vec<u8>,
+    pub branch_node: Vec<u8>,
+    pub ext_node: Vec<u8>,
+    pub root_node: Vec<u8>,
 }
 
 impl TestCase {
-    /// Insert random slots until the depth is of the desired size
-    fn generate(&self) -> TreePath {
+    pub fn generate(&self) -> TestData {
         let rng = &mut StdRng::seed_from_u64(self.seed);
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
-        let mut elements = Vec::new();
 
-        let (slot, key, ext_key) = loop {
-            let slot = rng.gen::<u8>();
-            let storage_slot = StorageSlot::Simple(slot as usize);
-            let key = storage_slot.mpt_key_vec();
+        let storage_slot = StorageSlot::Simple(self.length_slot as usize);
+        let length_key = storage_slot.mpt_key_vec();
+        let length_nibbles = Nibbles::from_raw(&length_key, true);
+        let length_value = rlp::encode(&self.length).to_vec();
+        let length_node = Node::from_leaf(length_nibbles.clone(), length_value);
 
-            let value = rng.next_u32().to_be_bytes().to_vec();
-            let value = if self.is_rlp_encoded {
-                rlp::encode(&value).to_vec()
+        let next_nibble = length_nibbles.offset(1).at(0);
+        let branch_node: [_; 16] = array::from_fn(|i| {
+            if i == next_nibble {
+                length_node.clone()
             } else {
-                value
-            };
+                let mut rng_nibbles = [0u8; 32];
+                let mut rng_value = [0u8; 32];
 
-            trie.insert(&key, &value).unwrap();
-            trie.root_hash().unwrap();
+                rng.fill_bytes(&mut rng_nibbles);
+                rng.fill_bytes(&mut rng_value);
 
-            elements.push((slot, key));
+                let rng_nibbles = Nibbles::from_raw(&rng_nibbles, false);
 
-            if let Some((slot, key)) = elements
-                .iter()
-                .find(|(_, key)| trie.get_proof(key).unwrap().len() == self.depth)
-            {
-                // cheap way to generate an extension node by modifying only the last key nibble
-                let mut ext_key = key.clone();
-                ext_key[31] = ext_key[31] ^ 0b10000000;
-
-                let ext_value = self.ext_length.to_be_bytes().to_vec();
-                let ext_value = if self.is_rlp_encoded {
-                    rlp::encode(&ext_value).to_vec()
-                } else {
-                    ext_value
-                };
-
-                let value = self.length.to_be_bytes().to_vec();
-                let value = if self.is_rlp_encoded {
-                    rlp::encode(&value).to_vec()
-                } else {
-                    value
-                };
-
-                trie.insert(&key, &value).unwrap();
-                trie.insert(&ext_key, &ext_value).unwrap();
-                trie.root_hash().unwrap();
-
-                break (*slot, key, ext_key);
+                match rng.next_u32() % 4 {
+                    0 => Node::Empty,
+                    1 => Node::from_leaf(rng_nibbles, rng_value.to_vec()),
+                    2 => Node::from_branch(array::from_fn(|_| Node::Empty), None),
+                    3 => Node::from_extension(rng_nibbles, Node::Empty),
+                    _ => unreachable!(),
+                }
             }
-        };
+        });
+        let branch_node = Node::from_branch(branch_node, None);
 
-        let path = trie.get_proof(key).unwrap();
-        let nibbles = Nibbles::from_raw(&key, true);
-        let key = nibbles
+        let prefix = length_nibbles.offset(2);
+        let ext_node = Node::from_extension(prefix, branch_node.clone());
+
+        let next_nibble = length_nibbles.offset(3).at(0);
+        let root_node: [_; 16] = array::from_fn(|i| {
+            if i == next_nibble {
+                ext_node.clone()
+            } else {
+                let mut rng_nibbles = [0u8; 32];
+                let mut rng_value = [0u8; 32];
+
+                rng.fill_bytes(&mut rng_nibbles);
+                rng.fill_bytes(&mut rng_value);
+
+                let rng_nibbles = Nibbles::from_raw(&rng_nibbles, false);
+
+                match rng.next_u32() % 4 {
+                    0 => Node::Empty,
+                    1 => Node::from_leaf(rng_nibbles, rng_value.to_vec()),
+                    2 => Node::from_branch(array::from_fn(|_| Node::Empty), None),
+                    3 => Node::from_extension(rng_nibbles, Node::Empty),
+                    _ => unreachable!(),
+                }
+            }
+        });
+        let root_node = Node::from_branch(root_node, None);
+
+        // trie encoding mutates the state
+        trie.encode_raw(&branch_node);
+        trie.encode_raw(&ext_node);
+        trie.encode_raw(&root_node);
+        trie.root_hash().unwrap();
+
+        let length_key = length_nibbles
             .nibbles()
             .to_vec()
             .into_iter()
             .map(GFp::from_canonical_u8)
             .collect();
 
-        //let ext_path = trie.get_proof(&ext_key).unwrap();
-        let ext_path = vec![];
-        let ext_nibbles = Nibbles::from_raw(&ext_key, true);
-        let ext_key = ext_nibbles
-            .nibbles()
-            .to_vec()
-            .into_iter()
-            .map(GFp::from_canonical_u8)
-            .collect();
-
-        TreePath {
-            slot,
-            key,
-            ext_key,
-            path,
-            ext_path,
+        TestData {
+            length_key,
+            length_node: trie.encode_raw(&length_node),
+            branch_node: trie.encode_raw(&branch_node),
+            ext_node: trie.encode_raw(&ext_node),
+            root_node: trie.encode_raw(&root_node),
         }
     }
 
@@ -412,7 +301,6 @@ impl TestCase {
         let dm = map_to_curve_point(&[
             GFp::from_canonical_u8(slot),
             GFp::from_canonical_u8(self.variable_slot),
-            GFp::from_bool(self.is_rlp_encoded),
         ])
         .to_weierstrass();
 
