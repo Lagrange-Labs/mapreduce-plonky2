@@ -121,7 +121,7 @@ mod tests {
     use std::{array, path::Path};
 
     /// Test proving and verifying with a simple circuit.
-    #[ignore] // Ignore for long running time in CI.
+    // #[ignore] // Ignore for long running time in CI.
     #[serial]
     #[test]
     fn test_groth16_proving_simple() {
