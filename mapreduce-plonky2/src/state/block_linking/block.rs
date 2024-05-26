@@ -253,7 +253,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::BlockHeader")
+            concat!(module_path!(), "::BlockHeader::ignore")
         }
     }
 
