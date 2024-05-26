@@ -238,7 +238,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::PublicInputs")
+            concat!(module_path!(), "::MptKeyWire::ignore")
         }
     }
     #[test]

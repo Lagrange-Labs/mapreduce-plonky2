@@ -144,7 +144,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::SwapHash")
+            concat!(module_path!(), "::SwapHash::ignore")
         }
     }
 }

@@ -262,7 +262,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::Account")
+            concat!(module_path!(), "::Account::ignore")
         }
     }
     use anyhow::Result;

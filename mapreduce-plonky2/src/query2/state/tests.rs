@@ -235,7 +235,7 @@ impl UserCircuit<GoldilocksField, 2> for TestStateCircuit<MAX_DEPTH> {
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::StorageInputs")
+        concat!(module_path!(), "--Query2::State")
     }
 }
 

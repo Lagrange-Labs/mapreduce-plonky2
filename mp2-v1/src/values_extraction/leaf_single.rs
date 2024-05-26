@@ -225,7 +225,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::LeafSingle")
+            concat!(module_path!(), "--ValueExtract::LeafSingle")
         }
     }
 

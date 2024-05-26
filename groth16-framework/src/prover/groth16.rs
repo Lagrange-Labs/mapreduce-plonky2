@@ -93,8 +93,8 @@ impl Groth16Prover {
         // Generate the Groth16 proof.
         let groth16_proof_str = gnark_utils::prove(&verifier_data, &proof)?;
         let groth16_proof = serde_json::from_str(&groth16_proof_str)?;
-
-        println!("proving time elapsed {}", now.elapsed().as_millis());
+        // run test test_groth16_proving_simple
+        eprintln!("BENCH:{},{}", "Groth16", now.elapsed().as_secs_f32());
 
         Ok(groth16_proof)
     }

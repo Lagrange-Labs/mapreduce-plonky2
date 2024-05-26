@@ -56,7 +56,7 @@ impl UserCircuit<GoldilocksField, 2> for NodeCircuitValidator<'_> {
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::NodeCircuit")
+        concat!(module_path!(), "--StorageDb::Branch")
     }
 }
 

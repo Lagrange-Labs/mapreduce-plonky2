@@ -161,6 +161,6 @@ impl UserCircuit<GoldilocksField, 2> for TestLeafCircuit {
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::Leaf")
+        concat!(module_path!(), "--StateDb::Leaf")
     }
 }

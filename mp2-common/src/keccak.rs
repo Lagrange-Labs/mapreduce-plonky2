@@ -310,7 +310,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::KeccakCircuit")
+            concat!(module_path!(), "::KeccakCircuit::ignore")
         }
     }
     impl<F, const D: usize, const BYTES: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
@@ -376,7 +376,7 @@ mod test {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::Keccak1")
+                concat!(module_path!(), "::Keccak1::ignore")
             }
         }
 
@@ -434,7 +434,7 @@ mod test {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::Keccak2")
+                concat!(module_path!(), "::Keccak2::ignore")
             }
         }
 

@@ -69,7 +69,7 @@ impl UserCircuit<GoldilocksField, D> for FullNodeCircuitValidator<'_> {
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::FullNode")
+        concat!(module_path!(), "--Query2::Block::FullNode")
     }
 }
 
@@ -97,7 +97,7 @@ impl UserCircuit<F, D> for PartialNodeCircuitValidator<'_> {
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::PartialNode")
+        concat!(module_path!(), "--Query2::Block::PartialNode")
     }
 }
 
@@ -130,7 +130,7 @@ impl<const L: usize, const MAX_DEPTH: usize> UserCircuit<F, D>
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::Revelation")
+        concat!(module_path!(), "--Query2::Revelation")
     }
 }
 

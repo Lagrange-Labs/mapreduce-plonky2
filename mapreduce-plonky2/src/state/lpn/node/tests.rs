@@ -127,6 +127,6 @@ impl UserCircuit<GoldilocksField, 2> for TestNodeCircuit {
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::NodeCircuit")
+        concat!(module_path!(), "--StateDb::Branch")
     }
 }

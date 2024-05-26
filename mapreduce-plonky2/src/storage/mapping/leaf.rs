@@ -224,7 +224,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::LeafCircuit")
+            concat!(module_path!(), "--MptData::Leaf")
         }
     }
 
@@ -306,7 +306,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::LeafCircuit")
+            concat!(module_path!(), "--MptData::Leaf")
         }
     }
 }

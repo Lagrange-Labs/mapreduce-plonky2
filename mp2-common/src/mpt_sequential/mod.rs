@@ -507,7 +507,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::Circuit")
+            concat!(module_path!(), "::MptSequential::ignore")
         }
     }
     use anyhow::Result;

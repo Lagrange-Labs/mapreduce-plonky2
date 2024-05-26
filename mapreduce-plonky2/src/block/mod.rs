@@ -736,7 +736,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::BlockTree")
+            concat!(module_path!(), "::BlocksDb")
         }
     }
 
@@ -1083,7 +1083,7 @@ mod tests {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::Test??")
+                concat!(module_path!(), "::leafdata::ignore")
             }
         }
     }

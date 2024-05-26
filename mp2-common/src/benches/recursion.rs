@@ -95,7 +95,7 @@ where
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::PoseidonHash")
+        concat!(module_path!(), "::PoseidonHash::ignore")
     }
 }
 impl Benchable for NoopCircuit {}
@@ -179,7 +179,7 @@ where
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::PoseidonCircuit")
+        concat!(module_path!(), "::PoseidonCircuit::ignore")
     }
 }
 impl<F, const E: usize, const N: usize> Benchable for RepeatedPoseidon<F, E, N> {
@@ -259,7 +259,7 @@ where
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::KeccakCircuit")
+        concat!(module_path!(), "::KeccakCircuit::ignore")
     }
 }
 

@@ -69,7 +69,7 @@ impl<'a> UserCircuit<GoldilocksField, 2> for PartialInnerNodeCircuitValidator<'a
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::PartialInnerNode")
+        concat!(module_path!(), "--Query2::Storage::PartialNode")
     }
 }
 
@@ -102,7 +102,7 @@ impl<'a> UserCircuit<GoldilocksField, 2> for FullInnerNodeCircuitValidator<'a> {
     }
 
     fn name() -> &'static str {
-        concat!(module_path!(), "::FullInnerNode")
+        concat!(module_path!(), "--Query2::Storage::FullNode")
     }
 }
 

@@ -300,7 +300,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::Branch")
+            concat!(module_path!(), "--ValueExtract::Branch")
         }
     }
 

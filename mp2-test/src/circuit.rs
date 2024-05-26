@@ -322,7 +322,7 @@ where
     fn prove(&self, _: &mut PartialWitness<F>, _: &Self::Wires) {}
 
     fn name() -> &'static str {
-        concat!("NOOP")
+        concat!("NOOP::ignore")
     }
 }
 

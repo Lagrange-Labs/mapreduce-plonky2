@@ -281,7 +281,7 @@ pub(crate) mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::PI")
+            concat!(module_path!(), "::PI::ignore")
         }
     }
 

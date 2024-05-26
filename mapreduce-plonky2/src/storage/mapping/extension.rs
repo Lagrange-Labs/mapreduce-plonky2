@@ -183,7 +183,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::ExtensionNode")
+            concat!(module_path!(), "--MptData::Extension")
         }
     }
 

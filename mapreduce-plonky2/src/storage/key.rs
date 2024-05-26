@@ -385,7 +385,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::MappingSlot")
+            concat!(module_path!(), "::MappingSlot::ignore")
         }
     }
 
@@ -433,7 +433,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::SimpleSlot")
+            concat!(module_path!(), "::SimpleSlot::ignore")
         }
     }
 

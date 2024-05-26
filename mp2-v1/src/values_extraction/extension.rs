@@ -149,7 +149,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::ExtensionNode")
+            concat!(module_path!(), "--ValueExtract::Extension")
         }
     }
 

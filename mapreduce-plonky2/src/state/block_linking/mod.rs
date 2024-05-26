@@ -362,7 +362,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::BlockLinking")
+            concat!(module_path!(), "--BlockLinking")
         }
     }
 

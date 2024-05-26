@@ -250,7 +250,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::LeafMapping")
+            concat!(module_path!(), "--ValueExtract::LeafMapping")
         }
     }
 

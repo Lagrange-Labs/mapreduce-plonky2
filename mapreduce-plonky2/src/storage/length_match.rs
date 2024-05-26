@@ -276,7 +276,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::LengthMatch")
+            concat!(module_path!(), "--LengthMatch")
         }
     }
 

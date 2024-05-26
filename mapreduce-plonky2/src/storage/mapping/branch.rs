@@ -283,7 +283,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::BranchCircuit")
+            concat!(module_path!(), "--MptData::Branch")
         }
     }
 

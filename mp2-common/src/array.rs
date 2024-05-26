@@ -733,7 +733,7 @@ mod test {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::Array1")
+                concat!(module_path!(), "::Array1::ignore")
             }
         }
         let mut rng = thread_rng();
@@ -794,7 +794,7 @@ mod test {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::Array2")
+                concat!(module_path!(), "::Array2::ignore")
             }
         }
         let mut rng = thread_rng();
@@ -839,7 +839,7 @@ mod test {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::Value")
+                concat!(module_path!(), "::Value::ignore")
             }
         }
         let mut rng = thread_rng();
@@ -886,7 +886,7 @@ mod test {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::ExtractArray")
+                concat!(module_path!(), "::ExtractArray::ignore")
             }
         }
         let mut rng = thread_rng();
@@ -931,7 +931,7 @@ mod test {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::ContainsSubarray")
+                concat!(module_path!(), "::ContainsSubarray::ignore")
             }
         }
         let mut rng = thread_rng();
@@ -1025,7 +1025,7 @@ mod test {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::ContainsVector")
+                concat!(module_path!(), "::ContainsVector::ignore")
             }
         }
         let mut rng = thread_rng();
@@ -1074,7 +1074,7 @@ mod test {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::AssertBytes")
+                concat!(module_path!(), "::AssertBytes::ignore")
             }
         }
 
@@ -1128,7 +1128,7 @@ mod test {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::SliceEqual")
+                concat!(module_path!(), "::SliceEqual::ignore")
             }
         }
         const N: usize = 45;
@@ -1181,7 +1181,7 @@ mod test {
             }
 
             fn name() -> &'static str {
-                concat!(module_path!(), "::NormalizeLeft")
+                concat!(module_path!(), "::NormalizeLeft::ignore")
             }
         }
 

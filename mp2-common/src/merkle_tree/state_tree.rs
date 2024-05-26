@@ -282,7 +282,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::StateTree")
+            concat!(module_path!(), "::StateTree::ignore")
         }
     }
 }

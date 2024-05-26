@@ -102,11 +102,7 @@ mod test {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::Leaf")
+            concat!(module_path!(), "--StorageDb::Leaf")
         }
-    }
-
-    fn name() -> &'static str {
-        concat!(module_path!(), "::LeafCircuit")
     }
 }

@@ -315,7 +315,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::ArrayLengthExtract")
+            concat!(module_path!(), "--LengthExtract")
         }
     }
 
@@ -447,7 +447,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::Pidgy")
+            concat!(module_path!(), "::PudgyExtract::ignore")
         }
     }
 

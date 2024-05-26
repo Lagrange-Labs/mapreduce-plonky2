@@ -319,7 +319,7 @@ mod tests {
         }
 
         fn name() -> &'static str {
-            concat!(module_path!(), "::DigestEqual")
+            concat!(module_path!(), "--Equivalence")
         }
     }
 
