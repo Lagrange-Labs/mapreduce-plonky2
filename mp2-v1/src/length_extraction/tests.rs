@@ -132,6 +132,10 @@ impl UserCircuit<GFp, D> for LeafLengthCircuit<NODE_LEN> {
     fn prove(&self, pw: &mut PartialWitness<GFp>, wires: &Self::Wires) {
         self.assign(pw, wires);
     }
+
+    fn name() -> &'static str {
+        concat!(module_path!(), "--LengthExtraction::LeafLength")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +163,9 @@ impl<'a> UserCircuit<GFp, D> for BranchTestCircuit<'a> {
     fn prove(&self, pw: &mut PartialWitness<GFp>, wires: &Self::Wires) {
         pw.set_target_arr(&wires.pi, self.pi);
         self.base.assign(pw, &wires.base);
+    }
+    fn name() -> &'static str {
+        concat!(module_path!(), "--LengthExtraction::BranchTest")
     }
 }
 
