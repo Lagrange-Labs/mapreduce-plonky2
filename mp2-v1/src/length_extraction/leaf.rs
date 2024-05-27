@@ -93,7 +93,7 @@ where
 
         let dm = &cb.map_to_curve_point(&[length_slot.slot, variable_slot]);
         let h = &array::from_fn::<_, PACKED_HASH_LEN, _>(|i| length_mpt.root.output_array.arr[i].0);
-        let k = &length_slot.mpt_key.key.arr;
+        let k = &length_mpt.key.key.arr;
         let t = &length_mpt.key.pointer;
         let n = &length_rlp_encoded.0;
 
