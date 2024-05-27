@@ -13,11 +13,6 @@
 //! DM commitment, MPT key (K), MPT key pointer for the next tree level (T), and the decoded leaf
 //! node length (N).
 //!
-//! A leaf node located at depth 5 in the MPT is expected to have its key pointer initialized as 3.
-//! This expectation arises due to the leaf node being bypassed during traversal, allowing the
-//! circuit to present the pointer for the subsequent iteration (therefore, we always subtract 2
-//! from the leaf depth).
-//!
 //! # Extension
 //!
 //! The extension node circuit accepts a branch child proof as input and extracts the expected
