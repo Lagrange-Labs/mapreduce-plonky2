@@ -100,6 +100,21 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
 }
 
 impl<'a, T> PublicInputs<'a, T> {
+    /// Creates a new instance from its internal parts.
+    pub fn from_parts(
+        h: &'a [T],
+        dm: (&'a [T], &'a [T], &'a T),
+        k: &'a [T],
+        t: &'a T,
+        n: &'a T,
+    ) -> Self {
+        assert_eq!(h.len(), H_RANGE.end - H_RANGE.start);
+        assert_eq!(dm.0.len() + dm.1.len() + 1, DM_RANGE.end - DM_RANGE.start);
+        assert_eq!(k.len(), K_RANGE.end - K_RANGE.start);
+
+        Self { h, dm, k, t, n }
+    }
+
     /// Total length of the public inputs.
     pub const TOTAL_LEN: usize = N_RANGE.end;
 
