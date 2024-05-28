@@ -167,9 +167,9 @@ pub mod tests {
 
         // compute the public inputs for the first iteration
 
-        let parent = &proof[depth - 1];
+        let child = &proof[depth - 1];
         let d = GFp::from_canonical_usize(depth - 2);
-        let child_hash: Vec<_> = convert_u8_to_u32_slice(&keccak256(parent))
+        let child_hash: Vec<_> = convert_u8_to_u32_slice(&keccak256(child))
             .into_iter()
             .map(GFp::from_canonical_u32)
             .collect();
