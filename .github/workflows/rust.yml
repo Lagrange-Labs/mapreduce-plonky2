@@ -36,7 +36,7 @@ jobs:
           command: check
   test:
     name: Test Suite
-    runs-on: lg-prover-32CPU
+    runs-on: self-hosted
     steps:
       - run: |
           sudo add-apt-repository ppa:ethereum/ethereum
@@ -71,7 +71,7 @@ jobs:
 
   fmt:
     name: Rustfmt
-    runs-on: lg-prover-32CPU
+    runs-on: self-hosted
     steps:
       - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
       - uses: actions/checkout@v2
