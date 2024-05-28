@@ -12,7 +12,7 @@ jobs:
     name: Check
     runs-on: self-hosted
     steps:
-      - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
+      - run: apt-get update && apt-get install -yq pkg-config libssl-dev
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v3
         with:
@@ -39,9 +39,9 @@ jobs:
     runs-on: lagrange-runners
     steps:
       - run: |
-          sudo add-apt-repository ppa:ethereum/ethereum
-          sudo apt-get update
-          sudo apt-get install -yq pkg-config libssl-dev solc
+          add-apt-repository ppa:ethereum/ethereum
+          apt-get update
+          apt-get install -yq pkg-config libssl-dev solc
       - name: Checkout sources
         uses: actions/checkout@v2
       - uses: actions/setup-go@v3
@@ -73,7 +73,7 @@ jobs:
     name: Rustfmt
     runs-on: lagrange-runners
     steps:
-      - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
+      - run: apt-get update && apt-get install -yq pkg-config libssl-dev
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v3
         with:
