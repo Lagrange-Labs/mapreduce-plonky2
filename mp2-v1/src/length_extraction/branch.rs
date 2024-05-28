@@ -99,11 +99,10 @@ where
 pub mod tests {
     use std::{array, sync::Arc};
 
-    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use eth_trie::{EthTrie, MemoryDB, Trie};
     use mp2_common::{
         eth::StorageSlot,
         group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
-        rlp::MAX_KEY_NIBBLE_LEN,
         types::{CBuilder, GFp, GFp5},
         utils::{convert_u8_to_u32_slice, keccak256},
         D,
