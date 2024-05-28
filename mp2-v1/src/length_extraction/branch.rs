@@ -147,7 +147,7 @@ pub mod tests {
             trie.root_hash().unwrap();
 
             let proof = trie.get_proof(&mpt_key).unwrap();
-            if proof.len() == 4 {
+            if proof.len() == depth {
                 break (length_slot, proof, mpt_key, value, variable_slot);
             }
         };
