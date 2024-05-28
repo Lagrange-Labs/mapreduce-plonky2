@@ -12,7 +12,6 @@ jobs:
     name: Check
     runs-on: self-hosted
     steps:
-      - run: apt-get update && apt-get install -yq pkg-config libssl-dev
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v3
         with:
