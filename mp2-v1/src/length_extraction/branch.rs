@@ -99,15 +99,16 @@ where
 pub mod tests {
     use std::{array, sync::Arc};
 
-    use eth_trie::{EthTrie, MemoryDB, Trie};
+    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
         group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
+        rlp::MAX_KEY_NIBBLE_LEN,
         types::{CBuilder, GFp, GFp5},
         utils::{convert_u8_to_u32_slice, keccak256},
         D,
     };
-    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
     use plonky2::{
         field::{extension::FieldExtension, types::Field},
         iop::{
@@ -128,9 +129,11 @@ pub mod tests {
     #[test]
     fn prove_and_verify_length_extraction_branch_circuit() {
         let rng = &mut StdRng::seed_from_u64(0xffff);
+        let setup = setup_circuit::<_, D, PoseidonGoldilocksConfig, BranchTestCircuit>();
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
 
+        let depth = 4;
         let (length_slot, proof, mpt_key, value, variable_slot) = loop {
             let length_slot = rng.gen::<u8>();
             let variable_slot = rng.gen::<u8>();
@@ -138,9 +141,7 @@ pub mod tests {
 
             let mpt_key = storage_slot.mpt_key_vec();
             let value = rng.next_u32();
-            let mut encoded = rlp::encode(&value).to_vec();
-
-            encoded.resize(32, 0);
+            let encoded = rlp::encode(&value).to_vec();
 
             trie.insert(&mpt_key, &encoded).unwrap();
             trie.root_hash().unwrap();
@@ -156,47 +157,59 @@ pub mod tests {
             key.push(GFp::from_canonical_u8(k >> 4));
             key.push(GFp::from_canonical_u8(k & 0x0f));
         }
-
         let length = GFp::from_canonical_u32(value);
-        let t = GFp::from_canonical_u8(0);
         let dm = map_to_curve_point(&[
             GFp::from_canonical_u8(length_slot),
             GFp::from_canonical_u8(variable_slot),
         ])
         .to_weierstrass();
         let is_inf = GFp::from_bool(dm.is_inf);
-        let child_hash: Vec<_> = convert_u8_to_u32_slice(&keccak256(&proof[1]))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
 
-        let branch_pi =
-            PublicInputs::from_parts(&child_hash, (&dm.x.0, &dm.y.0, &is_inf), &key, &t, &length);
-        let branch_circuit = BranchTestCircuit {
-            base: BranchLengthCircuit::new(&proof[0].clone()).unwrap(),
-            pi: &branch_pi.to_vec(),
-        };
-        let branch_proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(branch_circuit);
-        let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
+        // skip leaf, traverse the remainder path up to root
+        for d in 0..depth - 1 {
+            let parent = &proof[d + 1];
+            let node = &proof[d];
 
-        let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| branch_pi.metadata().1[i]);
-        let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| branch_pi.metadata().0[i]);
-        let is_inf = branch_pi.metadata().2 == &GFp::ONE;
-        let dm_p = WeierstrassPoint {
-            x: GFp5::from_basefield_array(x),
-            y: GFp5::from_basefield_array(y),
-            is_inf,
-        };
-        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&proof[0]))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
+            let d = GFp::from_canonical_usize(d);
+            let t = d - GFp::ONE;
+            let child_hash: Vec<_> = convert_u8_to_u32_slice(&keccak256(parent))
+                .into_iter()
+                .map(GFp::from_canonical_u32)
+                .collect();
 
-        assert_eq!(branch_pi.length(), &length);
-        assert_eq!(branch_pi.root_hash(), &root);
-        assert_eq!(branch_pi.mpt_key(), &key);
-        assert_eq!(dm, dm_p);
-        assert_eq!(branch_pi.mpt_key_pointer(), &(GFp::ZERO - GFp::ONE));
+            let branch_pi = PublicInputs::from_parts(
+                &child_hash,
+                (&dm.x.0, &dm.y.0, &is_inf),
+                &key,
+                &d,
+                &length,
+            );
+            let branch_circuit = BranchTestCircuit {
+                base: BranchLengthCircuit::new(&node.clone()).unwrap(),
+                pi: &branch_pi.to_vec(),
+            };
+            let branch_proof = prove_circuit(&setup, &branch_circuit);
+            let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
+
+            let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| branch_pi.metadata().1[i]);
+            let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| branch_pi.metadata().0[i]);
+            let is_inf = branch_pi.metadata().2 == &GFp::ONE;
+            let dm_p = WeierstrassPoint {
+                x: GFp5::from_basefield_array(x),
+                y: GFp5::from_basefield_array(y),
+                is_inf,
+            };
+            let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
+                .into_iter()
+                .map(GFp::from_canonical_u32)
+                .collect();
+
+            assert_eq!(branch_pi.length(), &length);
+            assert_eq!(branch_pi.root_hash(), &root);
+            assert_eq!(branch_pi.mpt_key(), &key);
+            assert_eq!(dm, dm_p);
+            assert_eq!(branch_pi.mpt_key_pointer(), &t);
+        }
     }
 
     #[derive(Debug, Clone)]
