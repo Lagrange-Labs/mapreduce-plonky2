@@ -80,10 +80,11 @@ impl ExtensionLengthCircuit {
 pub mod tests {
     use std::{array, iter, sync::Arc};
 
-    use eth_trie::{EthTrie, MemoryDB, Trie};
+    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
         group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
+        rlp::MAX_KEY_NIBBLE_LEN,
         types::{CBuilder, GFp, GFp5},
         utils::{convert_u8_to_u32_slice, keccak256},
         D,
@@ -187,11 +188,16 @@ pub mod tests {
             .map(GFp::from_canonical_u32)
             .collect();
 
+        let rlp_headers: Vec<Vec<u8>> = rlp::decode_list(&node);
+        let rlp_nibbles = Nibbles::from_compact(&rlp_headers[0]);
+        let t = MAX_KEY_NIBBLE_LEN - 1 - rlp_nibbles.nibbles().len();
+        let t = GFp::from_canonical_usize(t);
+
         assert_eq!(ext_pi.length(), &length);
         assert_eq!(ext_pi.root_hash(), &root);
         assert_eq!(ext_pi.mpt_key(), &key);
         assert_eq!(dm, dm_p);
-        assert_eq!(ext_pi.mpt_key_pointer(), &GFp::ONE);
+        assert_eq!(ext_pi.mpt_key_pointer(), &t);
     }
 
     #[derive(Debug, Clone)]
