@@ -190,8 +190,8 @@ pub mod tests {
 
         let rlp_headers: Vec<Vec<u8>> = rlp::decode_list(&node);
         let rlp_nibbles = Nibbles::from_compact(&rlp_headers[0]);
-        let t = MAX_KEY_NIBBLE_LEN - 1 - rlp_nibbles.nibbles().len();
-        let t = GFp::from_canonical_usize(t);
+        let t = GFp::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)
+            - GFp::from_canonical_usize(rlp_nibbles.nibbles().len());
 
         assert_eq!(ext_pi.length(), &length);
         assert_eq!(ext_pi.root_hash(), &root);

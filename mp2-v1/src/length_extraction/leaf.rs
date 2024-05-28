@@ -123,15 +123,16 @@ where
 pub mod tests {
     use std::{array, sync::Arc};
 
-    use eth_trie::{EthTrie, MemoryDB, Trie};
+    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
         group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
+        rlp::MAX_KEY_NIBBLE_LEN,
         types::{GFp, GFp5},
         utils::{convert_u8_to_u32_slice, keccak256},
         D,
     };
-    use mp2_test::circuit::run_circuit;
+    use mp2_test::circuit::{prove_circuit, setup_circuit};
     use plonky2::{
         field::{extension::FieldExtension, types::Field},
         plonk::config::PoseidonGoldilocksConfig,
@@ -147,64 +148,96 @@ pub mod tests {
     fn prove_and_verify_length_extraction_leaf_circuit() {
         let rng = &mut StdRng::seed_from_u64(0xffff);
         let memdb = Arc::new(MemoryDB::new(true));
+        let setup = setup_circuit::<_, D, PoseidonGoldilocksConfig, LeafLengthCircuit<NODE_LEN>>();
         let mut trie = EthTrie::new(Arc::clone(&memdb));
+        let mut cases = vec![];
 
-        let (length_slot, proof, mpt_key, value, variable_slot) = loop {
-            let length_slot = rng.gen::<u8>();
-            let variable_slot = rng.gen::<u8>();
-            let storage_slot = StorageSlot::Simple(length_slot as usize);
+        cases.push(TestCase {
+            depth: 1,
+            length: 0,
+        });
+        cases.push(TestCase {
+            depth: 2,
+            length: 15,
+        });
+        cases.push(TestCase {
+            depth: 3,
+            length: u32::MAX - 1,
+        });
 
-            let mpt_key = storage_slot.mpt_key_vec();
-            let value = rng.next_u32();
-            let mut encoded = rlp::encode(&value).to_vec();
+        for TestCase { depth, length } in cases {
+            let (length_slot, proof, mpt_key, value, variable_slot) = loop {
+                let length_slot = rng.gen::<u8>();
+                let variable_slot = rng.gen::<u8>();
+                let storage_slot = StorageSlot::Simple(length_slot as usize);
 
-            encoded.resize(32, 0);
+                let mpt_key = storage_slot.mpt_key_vec();
+                let value = rng.next_u32();
+                let encoded = rlp::encode(&value).to_vec();
 
-            trie.insert(&mpt_key, &encoded).unwrap();
-            trie.root_hash().unwrap();
+                trie.insert(&mpt_key, &encoded).unwrap();
+                trie.root_hash().unwrap();
 
-            let proof = trie.get_proof(&mpt_key).unwrap();
-            if proof.len() == 3 {
-                break (length_slot, proof, mpt_key, value, variable_slot);
+                let proof = trie.get_proof(&mpt_key).unwrap();
+                if proof.len() == depth {
+                    let value = length;
+                    let encoded = rlp::encode(&value).to_vec();
+
+                    trie.insert(&mpt_key, &encoded).unwrap();
+                    trie.root_hash().unwrap();
+
+                    let proof = trie.get_proof(&mpt_key).unwrap();
+
+                    break (length_slot, proof, mpt_key, value, variable_slot);
+                }
+            };
+
+            let mut key = Vec::with_capacity(64);
+            for k in mpt_key {
+                key.push(GFp::from_canonical_u8(k >> 4));
+                key.push(GFp::from_canonical_u8(k & 0x0f));
             }
-        };
 
-        let mut key = Vec::with_capacity(64);
-        for k in mpt_key {
-            key.push(GFp::from_canonical_u8(k >> 4));
-            key.push(GFp::from_canonical_u8(k & 0x0f));
+            let length = GFp::from_canonical_u32(value);
+            let dm = map_to_curve_point(&[
+                GFp::from_canonical_u8(length_slot),
+                GFp::from_canonical_u8(variable_slot),
+            ])
+            .to_weierstrass();
+
+            let node = proof.last().unwrap();
+            let leaf_circuit = LeafLengthCircuit::new(length_slot, &node, variable_slot).unwrap();
+            let leaf_proof = prove_circuit(&setup, &leaf_circuit);
+            let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
+
+            let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| leaf_pi.metadata().1[i]);
+            let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| leaf_pi.metadata().0[i]);
+            let is_inf = leaf_pi.metadata().2 == &GFp::ONE;
+            let dm_p = WeierstrassPoint {
+                x: GFp5::from_basefield_array(x),
+                y: GFp5::from_basefield_array(y),
+                is_inf,
+            };
+            let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
+                .into_iter()
+                .map(GFp::from_canonical_u32)
+                .collect();
+
+            let rlp_headers: Vec<Vec<u8>> = rlp::decode_list(&node);
+            let rlp_nibbles = Nibbles::from_compact(&rlp_headers[0]);
+            let t = GFp::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)
+                - GFp::from_canonical_usize(rlp_nibbles.nibbles().len());
+
+            assert_eq!(leaf_pi.length(), &length);
+            assert_eq!(leaf_pi.root_hash(), &root);
+            assert_eq!(leaf_pi.mpt_key(), &key);
+            assert_eq!(dm, dm_p);
+            assert_eq!(leaf_pi.mpt_key_pointer(), &t);
         }
+    }
 
-        let length = GFp::from_canonical_u32(value);
-        let dm = map_to_curve_point(&[
-            GFp::from_canonical_u8(length_slot),
-            GFp::from_canonical_u8(variable_slot),
-        ])
-        .to_weierstrass();
-
-        let leaf_circuit = LeafLengthCircuit::new(length_slot, &proof[2], variable_slot).unwrap();
-        let leaf_proof = run_circuit::<_, D, PoseidonGoldilocksConfig, LeafLengthCircuit<NODE_LEN>>(
-            leaf_circuit,
-        );
-        let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
-
-        let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| leaf_pi.metadata().1[i]);
-        let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| leaf_pi.metadata().0[i]);
-        let is_inf = leaf_pi.metadata().2 == &GFp::ONE;
-        let dm_p = WeierstrassPoint {
-            x: GFp5::from_basefield_array(x),
-            y: GFp5::from_basefield_array(y),
-            is_inf,
-        };
-        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&proof[2]))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
-
-        assert_eq!(leaf_pi.length(), &length);
-        assert_eq!(leaf_pi.root_hash(), &root);
-        assert_eq!(leaf_pi.mpt_key(), &key);
-        assert_eq!(dm, dm_p);
-        assert_eq!(leaf_pi.mpt_key_pointer(), &GFp::ONE);
+    pub struct TestCase {
+        pub depth: usize,
+        pub length: u32,
     }
 }
