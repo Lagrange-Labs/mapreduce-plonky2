@@ -10,9 +10,9 @@ name: Check, Test, and Format
 jobs:
   check:
     name: Check
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
-      - run: apt-get update && apt-get install -yq pkg-config libssl-dev
+      - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v3
         with:
@@ -22,7 +22,7 @@ jobs:
           profile: minimal
           toolchain: nightly
           override: true
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -34,47 +34,13 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: check
-  test:
-    name: Test Suite
-    runs-on: lagrange-runners
-    steps:
-      - run: |
-          add-apt-repository ppa:ethereum/ethereum
-          apt-get update
-          apt-get install -yq pkg-config libssl-dev solc
-      - name: Checkout sources
-        uses: actions/checkout@v2
-      - uses: actions/setup-go@v3
-        with:
-          go-version: ~1.20
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          override: true
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: "--all --release -- --test-threads 32"
-        env: 
-          CI_RPC_URL: ${{ secrets.CI_RPC_URL }}
 
   fmt:
     name: Rustfmt
-    runs-on: lagrange-runners
+    runs-on: ubuntu-latest
     steps:
-      - run: apt-get update && apt-get install -yq pkg-config libssl-dev
-      - uses: actions/checkout@v2
+      - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
+      - uses: actions/checkout@v3
       - uses: actions/setup-go@v3
         with:
           go-version: ~1.20
@@ -83,7 +49,7 @@ jobs:
           profile: minimal
           toolchain: nightly
           override: true
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -97,3 +63,25 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
+
+  test:
+    name: Test Suite
+    runs-on: nix-128g
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install toolchain
+        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "rustup show"
+      - name: Run cargo test
+        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo test --all --release -- --test-threads 16"
+        env:
+          CI_RPC_URL: ${{ secrets.CI_RPC_URL }}
