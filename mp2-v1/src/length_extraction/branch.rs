@@ -165,35 +165,37 @@ pub mod tests {
         .to_weierstrass();
         let is_inf = GFp::from_bool(dm.is_inf);
 
-        // skip leaf, traverse the remainder path up to root
-        for d in 0..depth - 1 {
-            let parent = &proof[d + 1];
-            let node = &proof[d];
+        // compute the public inputs for the first iteration
 
+        let parent = &proof[depth - 1];
+        let d = GFp::from_canonical_usize(depth - 2);
+        let child_hash: Vec<_> = convert_u8_to_u32_slice(&keccak256(parent))
+            .into_iter()
+            .map(GFp::from_canonical_u32)
+            .collect();
+
+        let mut branch_pi =
+            PublicInputs::from_parts(&child_hash, (&dm.x.0, &dm.y.0, &is_inf), &key, &d, &length)
+                .to_vec();
+
+        // traverse from leaf's child to root
+        for d in (0..depth - 1).rev() {
+            let node = &proof[d];
             let d = GFp::from_canonical_usize(d);
             let t = d - GFp::ONE;
-            let child_hash: Vec<_> = convert_u8_to_u32_slice(&keccak256(parent))
-                .into_iter()
-                .map(GFp::from_canonical_u32)
-                .collect();
 
-            let branch_pi = PublicInputs::from_parts(
-                &child_hash,
-                (&dm.x.0, &dm.y.0, &is_inf),
-                &key,
-                &d,
-                &length,
-            );
             let branch_circuit = BranchTestCircuit {
                 base: BranchLengthCircuit::new(&node.clone()).unwrap(),
-                pi: &branch_pi.to_vec(),
+                pi: &branch_pi,
             };
             let branch_proof = prove_circuit(&setup, &branch_circuit);
-            let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
+            let proof_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
 
-            let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| branch_pi.metadata().1[i]);
-            let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| branch_pi.metadata().0[i]);
-            let is_inf = branch_pi.metadata().2 == &GFp::ONE;
+            branch_pi = proof_pi.to_vec();
+
+            let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| proof_pi.metadata().1[i]);
+            let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| proof_pi.metadata().0[i]);
+            let is_inf = proof_pi.metadata().2 == &GFp::ONE;
             let dm_p = WeierstrassPoint {
                 x: GFp5::from_basefield_array(x),
                 y: GFp5::from_basefield_array(y),
@@ -204,11 +206,11 @@ pub mod tests {
                 .map(GFp::from_canonical_u32)
                 .collect();
 
-            assert_eq!(branch_pi.length(), &length);
-            assert_eq!(branch_pi.root_hash(), &root);
-            assert_eq!(branch_pi.mpt_key(), &key);
+            assert_eq!(proof_pi.length(), &length);
+            assert_eq!(proof_pi.root_hash(), &root);
+            assert_eq!(proof_pi.mpt_key(), &key);
             assert_eq!(dm, dm_p);
-            assert_eq!(branch_pi.mpt_key_pointer(), &t);
+            assert_eq!(proof_pi.mpt_key_pointer(), &t);
         }
     }
 
