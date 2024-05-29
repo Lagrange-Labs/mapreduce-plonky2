@@ -1,7 +1,9 @@
+use eth_trie::Nibbles;
 use ethers::utils::keccak256;
 use mp2_common::{
     eth::{left_pad, ProofQuery},
     mpt_sequential::utils::visit_proof,
+    rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp},
     utils::convert_u8_to_u32_slice,
     D,
@@ -76,8 +78,11 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
 
     // Pudgy leaf
 
-    let key_pointer = nodes.len() as u8 - 2;
-    let mut pointer = GFp::from_canonical_u8(key_pointer);
+    let rlp_headers: Vec<Vec<u8>> = rlp::decode_list(&nodes[0]);
+    let rlp_nibbles = Nibbles::from_compact(&rlp_headers[0]);
+    let mut pointer = GFp::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)
+        - GFp::from_canonical_usize(rlp_nibbles.nibbles().len());
+
     let leaf_circuit = LeafLengthCircuit::new(slot, &nodes[0], variable_slot).unwrap();
     let leaf_proof = prove_circuit(&setup_leaf, &leaf_circuit);
     let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
