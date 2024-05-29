@@ -1,4 +1,4 @@
-use core::array;
+use core::{array, iter};
 
 use mp2_common::{
     array::Array,
@@ -83,7 +83,38 @@ impl<'a> PublicInputs<'a, Target> {
     }
 }
 
+impl<'a, T: Clone> PublicInputs<'a, T> {
+    /// Creates a vector from the parts of the public inputs
+    pub fn to_vec(&self) -> Vec<T> {
+        self.h
+            .iter()
+            .chain(self.dm.0.iter())
+            .chain(self.dm.1.iter())
+            .chain(iter::once(self.dm.2))
+            .chain(self.k.iter())
+            .chain(iter::once(self.t))
+            .chain(iter::once(self.n))
+            .cloned()
+            .collect()
+    }
+}
+
 impl<'a, T> PublicInputs<'a, T> {
+    /// Creates a new instance from its internal parts.
+    pub fn from_parts(
+        h: &'a [T],
+        dm: (&'a [T], &'a [T], &'a T),
+        k: &'a [T],
+        t: &'a T,
+        n: &'a T,
+    ) -> Self {
+        assert_eq!(h.len(), H_RANGE.end - H_RANGE.start);
+        assert_eq!(dm.0.len() + dm.1.len() + 1, DM_RANGE.end - DM_RANGE.start);
+        assert_eq!(k.len(), K_RANGE.end - K_RANGE.start);
+
+        Self { h, dm, k, t, n }
+    }
+
     /// Total length of the public inputs.
     pub const TOTAL_LEN: usize = N_RANGE.end;
 

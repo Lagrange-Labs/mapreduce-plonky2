@@ -3,7 +3,7 @@
 use core::array;
 
 use mp2_common::{
-    array::{Array, Vector},
+    array::Vector,
     group_hashing::CircuitBuilderGroupHashing,
     keccak::PACKED_HASH_LEN,
     mpt_sequential::{
@@ -18,7 +18,7 @@ use mp2_common::{
 use plonky2::{
     field::types::Field,
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
 };
@@ -31,7 +31,6 @@ pub struct LeafLengthWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    pub is_rlp_encoded: BoolTarget,
     pub length_slot: SimpleSlotWires,
     pub length_mpt: MPTLeafOrExtensionWires<NODE_LEN, MAX_LEAF_VALUE_LEN>,
     pub variable_slot: Target,
@@ -43,7 +42,6 @@ pub struct LeafLengthCircuit<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    pub is_rlp_encoded: bool,
     pub length_slot: SimpleSlot,
     pub length_node: Vector<u8, { PAD_LEN(NODE_LEN) }>,
     pub variable_slot: u8,
@@ -54,14 +52,8 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     /// Creates a new instance of the circuit.
-    pub fn new(
-        is_rlp_encoded: bool,
-        length_slot: u8,
-        length_node: &[u8],
-        variable_slot: u8,
-    ) -> anyhow::Result<Self> {
+    pub fn new(length_slot: u8, length_node: &[u8], variable_slot: u8) -> anyhow::Result<Self> {
         Ok(Self {
-            is_rlp_encoded,
             length_slot: SimpleSlot::new(length_slot),
             length_node: Vector::from_vec(length_node)?,
             variable_slot,
@@ -77,19 +69,12 @@ where
         // commitment
         let variable_slot = cb.add_virtual_target();
         let length_slot = SimpleSlot::build(cb);
-        let t_p = cb.constant(GFp::from_canonical_u32(64));
-        let is_rlp_encoded = cb.add_virtual_bool_target_safe();
 
         let length_mpt =
             MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
                 cb,
                 &length_slot.mpt_key,
             );
-
-        let length_raw = Array {
-            arr: array::from_fn::<_, 4, _>(|i| length_mpt.value[3 - i]),
-        }
-        .convert_u8_to_u32(cb)[0];
 
         // extract the rlp encoded value
         let prefix = length_mpt.value[0];
@@ -106,16 +91,15 @@ where
             .reverse()
             .convert_u8_to_u32(cb)[0];
 
-        let dm = cb.map_to_curve_point(&[length_slot.slot, variable_slot, is_rlp_encoded.target]);
-        let h = array::from_fn::<_, PACKED_HASH_LEN, _>(|i| length_mpt.root.output_array.arr[i].0);
+        let dm = &cb.map_to_curve_point(&[length_slot.slot, variable_slot]);
+        let h = &array::from_fn::<_, PACKED_HASH_LEN, _>(|i| length_mpt.root.output_array.arr[i].0);
         let k = &length_mpt.key.key.arr;
-        let t = cb.sub(t_p, length_mpt.key.pointer);
-        let n = cb.select(is_rlp_encoded, length_rlp_encoded.0, length_raw.0);
+        let t = &length_mpt.key.pointer;
+        let n = &length_rlp_encoded.0;
 
-        PublicInputs::new(&h, &dm, k, &t, &n).register(cb);
+        PublicInputs::new(h, dm, k, t, n).register(cb);
 
         LeafLengthWires {
-            is_rlp_encoded,
             length_slot,
             length_mpt,
             variable_slot,
@@ -129,12 +113,131 @@ where
             wires.variable_slot,
             GFp::from_canonical_u8(self.variable_slot),
         );
-        pw.set_target(
-            wires.is_rlp_encoded.target,
-            GFp::from_bool(self.is_rlp_encoded),
-        );
 
         self.length_slot.assign(pw, &wires.length_slot);
         wires.length_mpt.assign(pw, &self.length_node);
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use std::{array, sync::Arc};
+
+    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use mp2_common::{
+        eth::StorageSlot,
+        group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
+        rlp::MAX_KEY_NIBBLE_LEN,
+        types::{GFp, GFp5},
+        utils::{convert_u8_to_u32_slice, keccak256},
+        D,
+    };
+    use mp2_test::circuit::{prove_circuit, setup_circuit};
+    use plonky2::{
+        field::{extension::FieldExtension, types::Field},
+        plonk::config::PoseidonGoldilocksConfig,
+    };
+    use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
+    use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
+
+    use crate::length_extraction::{LeafLengthCircuit, PublicInputs};
+
+    const NODE_LEN: usize = 532;
+
+    #[test]
+    fn prove_and_verify_length_extraction_leaf_circuit() {
+        let rng = &mut StdRng::seed_from_u64(0xffff);
+        let memdb = Arc::new(MemoryDB::new(true));
+        let setup = setup_circuit::<_, D, PoseidonGoldilocksConfig, LeafLengthCircuit<NODE_LEN>>();
+        let mut trie = EthTrie::new(Arc::clone(&memdb));
+        let mut cases = vec![];
+
+        cases.push(TestCase {
+            depth: 1,
+            length: 0,
+        });
+        cases.push(TestCase {
+            depth: 2,
+            length: 15,
+        });
+        cases.push(TestCase {
+            depth: 3,
+            length: u32::MAX - 1,
+        });
+
+        for TestCase { depth, length } in cases {
+            let (length_slot, proof, mpt_key, value, variable_slot) = loop {
+                let length_slot = rng.gen::<u8>();
+                let variable_slot = rng.gen::<u8>();
+                let storage_slot = StorageSlot::Simple(length_slot as usize);
+
+                let mpt_key = storage_slot.mpt_key_vec();
+                let value = rng.next_u32();
+                let encoded = rlp::encode(&value).to_vec();
+
+                trie.insert(&mpt_key, &encoded).unwrap();
+                trie.root_hash().unwrap();
+
+                let proof = trie.get_proof(&mpt_key).unwrap();
+                if proof.len() == depth {
+                    let value = length;
+                    let encoded = rlp::encode(&value).to_vec();
+
+                    trie.insert(&mpt_key, &encoded).unwrap();
+                    trie.root_hash().unwrap();
+
+                    let proof = trie.get_proof(&mpt_key).unwrap();
+
+                    break (length_slot, proof, mpt_key, value, variable_slot);
+                }
+            };
+
+            let mut key = Vec::with_capacity(64);
+            for k in mpt_key {
+                key.push(GFp::from_canonical_u8(k >> 4));
+                key.push(GFp::from_canonical_u8(k & 0x0f));
+            }
+
+            let length = GFp::from_canonical_u32(value);
+            let dm = map_to_curve_point(&[
+                GFp::from_canonical_u8(length_slot),
+                GFp::from_canonical_u8(variable_slot),
+            ])
+            .to_weierstrass();
+
+            let node = proof.last().unwrap();
+            let leaf_circuit = LeafLengthCircuit::new(length_slot, &node, variable_slot).unwrap();
+            let leaf_proof = prove_circuit(&setup, &leaf_circuit);
+            let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
+
+            let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| leaf_pi.metadata().1[i]);
+            let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| leaf_pi.metadata().0[i]);
+            let is_inf = leaf_pi.metadata().2 == &GFp::ONE;
+            let dm_p = WeierstrassPoint {
+                x: GFp5::from_basefield_array(x),
+                y: GFp5::from_basefield_array(y),
+                is_inf,
+            };
+            let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
+                .into_iter()
+                .map(GFp::from_canonical_u32)
+                .collect();
+
+            let rlp_headers: Vec<Vec<u8>> = rlp::decode_list(&node);
+            let rlp_nibbles = Nibbles::from_compact(&rlp_headers[0]);
+            let t = GFp::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)
+                - GFp::from_canonical_usize(rlp_nibbles.nibbles().len());
+
+            assert_eq!(leaf_pi.length(), &length);
+            assert_eq!(leaf_pi.root_hash(), &root);
+            assert_eq!(leaf_pi.mpt_key(), &key);
+            assert_eq!(dm, dm_p);
+            assert_eq!(leaf_pi.mpt_key_pointer(), &t);
+        }
+    }
+
+    pub struct TestCase {
+        pub depth: usize,
+        pub length: u32,
     }
 }

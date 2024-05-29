@@ -79,8 +79,6 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install toolchain
-        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "rustup show"
       - name: Run cargo test
         run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo test --all --release -- --test-threads 16"
         env:
