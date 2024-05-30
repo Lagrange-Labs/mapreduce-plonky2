@@ -5,28 +5,57 @@ use core::array;
 use mp2_common::{
     array::{Targetable, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
-    mpt_sequential::{MPTLeafOrExtensionNode, PAD_LEN},
+    mpt_sequential::MPTLeafOrExtensionNode,
     public_inputs::PublicInputCommon,
     types::{CBuilder, GFp},
     D,
 };
-use plonky2::iop::{target::Target, witness::PartialWitness};
+use plonky2::{
+    iop::{target::Target, witness::PartialWitness},
+    plonk::proof::ProofWithPublicInputsTarget,
+};
+use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
 
-use crate::values_extraction::MAX_EXTENSION_NODE_LEN;
+use crate::{MAX_EXTENSION_NODE_LEN, MAX_EXTENSION_NODE_LEN_PADDED};
 
 use super::PublicInputs;
 
-const PADDED_LEN: usize = PAD_LEN(MAX_EXTENSION_NODE_LEN);
-
 /// The wires structure for the extension extension extraction.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExtensionLengthWires {
-    node: VectorWire<Target, PADDED_LEN>,
-    root: KeccakWires<PADDED_LEN>,
+    node: VectorWire<Target, MAX_EXTENSION_NODE_LEN_PADDED>,
+    root: KeccakWires<MAX_EXTENSION_NODE_LEN_PADDED>,
+}
+
+impl CircuitLogicWires<GFp, D, 1> for ExtensionLengthWires {
+    type CircuitBuilderParams = ();
+    type Inputs = ExtensionLengthCircuit;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
+
+    fn circuit_logic(
+        cb: &mut CBuilder,
+        verified_proofs: [&ProofWithPublicInputsTarget<D>; 1],
+        _builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        let pis = &verified_proofs[0].public_inputs[..PublicInputs::<GFp>::TOTAL_LEN];
+        let pis = PublicInputs::from_slice(pis);
+
+        ExtensionLengthCircuit::build(cb, pis)
+    }
+
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut PartialWitness<GFp>,
+    ) -> anyhow::Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
+    }
 }
 
 /// The circuit definition for the extension length extraction.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExtensionLengthCircuit {
     node: Vec<u8>,
 }
@@ -68,11 +97,15 @@ impl ExtensionLengthCircuit {
     /// Assigns the values of this instance into the provided partial witness, using the generated
     /// circuit wires.
     pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &ExtensionLengthWires) {
-        let node = Vector::<u8, PADDED_LEN>::from_vec(&self.node).unwrap();
+        let node = Vector::<u8, MAX_EXTENSION_NODE_LEN_PADDED>::from_vec(&self.node).unwrap();
 
         wires.node.assign(pw, &node);
 
-        KeccakCircuit::<PADDED_LEN>::assign(pw, &wires.root, &InputData::Assigned(&node));
+        KeccakCircuit::<MAX_EXTENSION_NODE_LEN_PADDED>::assign(
+            pw,
+            &wires.root,
+            &InputData::Assigned(&node),
+        );
     }
 }
 

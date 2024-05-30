@@ -14,6 +14,32 @@ use recursion_framework::serialization::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Struct containing the expected input MPT Extension/Branch node
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InputNode {
+    pub node: Vec<u8>,
+}
+
+/// This data structure allows to specify the inputs for a circuit that needs to
+/// recursively verify proofs; the generic type `T` allows to specify the
+/// specific inputs of each circuits besides the proofs that need to be
+/// recursively verified, while the proofs are serialized in byte format.
+#[derive(Serialize, Deserialize)]
+pub struct ProofInputSerialized<T> {
+    pub input: T,
+    pub serialized_child_proofs: Vec<Vec<u8>>,
+}
+
+impl<T> ProofInputSerialized<T> {
+    /// Deserialize child proofs and return the set of deserialized 'MTPProof`s
+    pub fn get_child_proofs(&self) -> anyhow::Result<Vec<ProofWithVK>> {
+        self.serialized_child_proofs
+            .iter()
+            .map(|proof| ProofWithVK::deserialize(proof))
+            .collect::<Result<Vec<_>, _>>()
+    }
+}
+
 /// Set of inputs necessary to generate proofs for each circuit employed in the
 /// pre-processing stage of LPN
 pub enum CircuitInput {

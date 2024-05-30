@@ -1,9 +1,8 @@
 //! Module handling the extension node inside a storage trie
 
-use super::{
-    public_inputs::{PublicInputs, PublicInputsArgs},
-    MAX_EXTENSION_NODE_LEN,
-};
+use crate::MAX_EXTENSION_NODE_LEN;
+
+use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use anyhow::Result;
 use mp2_common::{
     array::{Vector, VectorWire},

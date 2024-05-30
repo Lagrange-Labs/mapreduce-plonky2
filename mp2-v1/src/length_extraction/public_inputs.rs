@@ -100,6 +100,9 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
 }
 
 impl<'a, T> PublicInputs<'a, T> {
+    /// Total length of the public inputs.
+    pub const TOTAL_LEN: usize = N_RANGE.end;
+
     /// Creates a new instance from its internal parts.
     pub fn from_parts(
         h: &'a [T],
@@ -115,11 +118,10 @@ impl<'a, T> PublicInputs<'a, T> {
         Self { h, dm, k, t, n }
     }
 
-    /// Total length of the public inputs.
-    pub const TOTAL_LEN: usize = N_RANGE.end;
-
     /// Creates a new instance of the public inputs from a contiguous slice.
     pub fn from_slice(pi: &'a [T]) -> Self {
+        assert_eq!(Self::TOTAL_LEN, pi.len());
+
         Self {
             h: &pi[H_RANGE],
             dm: (

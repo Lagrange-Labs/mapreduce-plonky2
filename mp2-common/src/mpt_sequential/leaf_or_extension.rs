@@ -13,9 +13,10 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
+use serde::{Deserialize, Serialize};
 
 /// Wrapped wires for a MPT leaf or extension node
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MPTLeafOrExtensionWires<const NODE_LEN: usize, const VALUE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,

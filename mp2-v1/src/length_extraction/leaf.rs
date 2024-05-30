@@ -6,9 +6,7 @@ use mp2_common::{
     array::Vector,
     group_hashing::CircuitBuilderGroupHashing,
     keccak::PACKED_HASH_LEN,
-    mpt_sequential::{
-        MPTLeafOrExtensionNode, MPTLeafOrExtensionWires, MAX_LEAF_VALUE_LEN, PAD_LEN,
-    },
+    mpt_sequential::{MPTLeafOrExtensionNode, MPTLeafOrExtensionWires, MAX_LEAF_VALUE_LEN},
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp},
@@ -21,47 +19,68 @@ use plonky2::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
+    plonk::proof::ProofWithPublicInputsTarget,
 };
+use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
+
+use crate::MAX_LEAF_NODE_LEN;
 
 use super::PublicInputs;
 
+type LengthMPTWires = MPTLeafOrExtensionWires<MAX_LEAF_NODE_LEN, MAX_LEAF_VALUE_LEN>;
+
 /// The wires structure for the leaf length extraction.
-#[derive(Clone, Debug)]
-pub struct LeafLengthWires<const NODE_LEN: usize>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LeafLengthWires {
     pub length_slot: SimpleSlotWires,
-    pub length_mpt: MPTLeafOrExtensionWires<NODE_LEN, MAX_LEAF_VALUE_LEN>,
+    pub length_mpt: LengthMPTWires,
     pub variable_slot: Target,
 }
 
+impl CircuitLogicWires<GFp, D, 0> for LeafLengthWires {
+    type CircuitBuilderParams = ();
+    type Inputs = LeafLengthCircuit;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
+
+    fn circuit_logic(
+        cb: &mut CBuilder,
+        _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
+        _builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        Self::Inputs::build(cb)
+    }
+
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut PartialWitness<GFp>,
+    ) -> anyhow::Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
+    }
+}
+
 /// The circuit definition for the leaf length extraction.
-#[derive(Clone, Debug)]
-pub struct LeafLengthCircuit<const NODE_LEN: usize>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LeafLengthCircuit {
     pub length_slot: SimpleSlot,
-    pub length_node: Vector<u8, { PAD_LEN(NODE_LEN) }>,
+    pub length_node: Vec<u8>,
     pub variable_slot: u8,
 }
 
-impl<const NODE_LEN: usize> LeafLengthCircuit<NODE_LEN>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
+impl LeafLengthCircuit {
     /// Creates a new instance of the circuit.
-    pub fn new(length_slot: u8, length_node: &[u8], variable_slot: u8) -> anyhow::Result<Self> {
-        Ok(Self {
+    pub fn new(length_slot: u8, length_node: Vec<u8>, variable_slot: u8) -> Self {
+        Self {
             length_slot: SimpleSlot::new(length_slot),
-            length_node: Vector::from_vec(length_node)?,
+            length_node,
             variable_slot,
-        })
+        }
     }
 
     /// Build the circuit, assigning the public inputs and returning the internal wires.
-    pub fn build(cb: &mut CBuilder) -> LeafLengthWires<NODE_LEN> {
+    pub fn build(cb: &mut CBuilder) -> LeafLengthWires {
         let zero = cb.zero();
         let one = cb.one();
 
@@ -70,11 +89,12 @@ where
         let variable_slot = cb.add_virtual_target();
         let length_slot = SimpleSlot::build(cb);
 
-        let length_mpt =
-            MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
-                cb,
-                &length_slot.mpt_key,
-            );
+        let length_mpt = MPTLeafOrExtensionNode::build_and_advance_key::<
+            _,
+            D,
+            MAX_LEAF_NODE_LEN,
+            MAX_LEAF_VALUE_LEN,
+        >(cb, &length_slot.mpt_key);
 
         // extract the rlp encoded value
         let prefix = length_mpt.value[0];
@@ -108,14 +128,17 @@ where
 
     /// Assigns the values of this instance into the provided partial witness, using the generated
     /// circuit wires.
-    pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &LeafLengthWires<NODE_LEN>) {
+    pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &LeafLengthWires) {
         pw.set_target(
             wires.variable_slot,
             GFp::from_canonical_u8(self.variable_slot),
         );
 
         self.length_slot.assign(pw, &wires.length_slot);
-        wires.length_mpt.assign(pw, &self.length_node);
+        wires.length_mpt.assign(
+            pw,
+            &Vector::from_vec(&self.length_node).expect("invalid node length"),
+        );
     }
 }
 
@@ -128,13 +151,14 @@ pub mod tests {
         eth::StorageSlot,
         group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
         rlp::MAX_KEY_NIBBLE_LEN,
-        types::{GFp, GFp5},
+        types::{CBuilder, GFp, GFp5},
         utils::{convert_u8_to_u32_slice, keccak256},
         D,
     };
-    use mp2_test::circuit::{prove_circuit, setup_circuit};
+    use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
     use plonky2::{
         field::{extension::FieldExtension, types::Field},
+        iop::witness::PartialWitness,
         plonk::config::PoseidonGoldilocksConfig,
     };
     use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
@@ -142,13 +166,13 @@ pub mod tests {
 
     use crate::length_extraction::{LeafLengthCircuit, PublicInputs};
 
-    const NODE_LEN: usize = 532;
+    use super::LeafLengthWires;
 
     #[test]
     fn prove_and_verify_length_extraction_leaf_circuit() {
         let rng = &mut StdRng::seed_from_u64(0xffff);
         let memdb = Arc::new(MemoryDB::new(true));
-        let setup = setup_circuit::<_, D, PoseidonGoldilocksConfig, LeafLengthCircuit<NODE_LEN>>();
+        let setup = setup_circuit::<_, D, PoseidonGoldilocksConfig, LeafLengthCircuit>();
         let mut trie = EthTrie::new(Arc::clone(&memdb));
         let mut cases = vec![];
 
@@ -206,7 +230,7 @@ pub mod tests {
             .to_weierstrass();
 
             let node = proof.last().unwrap();
-            let leaf_circuit = LeafLengthCircuit::new(length_slot, &node, variable_slot).unwrap();
+            let leaf_circuit = LeafLengthCircuit::new(length_slot, node.clone(), variable_slot);
             let leaf_proof = prove_circuit(&setup, &leaf_circuit);
             let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
 
@@ -233,6 +257,18 @@ pub mod tests {
             assert_eq!(leaf_pi.mpt_key(), &key);
             assert_eq!(dm, dm_p);
             assert_eq!(leaf_pi.mpt_key_pointer(), &t);
+        }
+    }
+
+    impl UserCircuit<GFp, D> for LeafLengthCircuit {
+        type Wires = LeafLengthWires;
+
+        fn build(cb: &mut CBuilder) -> Self::Wires {
+            LeafLengthCircuit::build(cb)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<GFp>, wires: &Self::Wires) {
+            self.assign(pw, wires);
         }
     }
 

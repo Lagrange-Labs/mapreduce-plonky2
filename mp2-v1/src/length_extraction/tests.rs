@@ -13,11 +13,12 @@ use plonky2::{
     field::types::Field, iop::witness::PartialWitness, plonk::config::PoseidonGoldilocksConfig,
 };
 
-use crate::length_extraction::{branch::tests::BranchTestCircuit, BranchLengthCircuit};
+use crate::{
+    length_extraction::{branch::tests::BranchTestCircuit, BranchLengthCircuit},
+    MAX_BRANCH_NODE_LEN,
+};
 
 use super::{LeafLengthCircuit, LeafLengthWires, PublicInputs};
-
-const NODE_LEN: usize = 532;
 
 #[test]
 fn prove_and_verify_length_extraction_circuit_for_pudgy() {
@@ -67,12 +68,12 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
 
     // extractd from test_pudgy_pinguins_slot
     const DEPTH: usize = 5;
-    assert!(nodes.iter().all(|x| x.len() <= NODE_LEN));
+    assert!(nodes.iter().all(|x| x.len() <= MAX_BRANCH_NODE_LEN));
     assert!(nodes.len() <= DEPTH);
 
     // setup the circuits
 
-    let setup_leaf = setup_circuit::<_, D, PoseidonGoldilocksConfig, LeafLengthCircuit<NODE_LEN>>();
+    let setup_leaf = setup_circuit::<_, D, PoseidonGoldilocksConfig, LeafLengthCircuit>();
     let setup_branch = setup_circuit::<_, D, PoseidonGoldilocksConfig, BranchTestCircuit>();
     let variable_slot = 0xfa;
 
@@ -83,7 +84,7 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
     let mut pointer = GFp::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)
         - GFp::from_canonical_usize(rlp_nibbles.nibbles().len());
 
-    let leaf_circuit = LeafLengthCircuit::new(slot, &nodes[0], variable_slot).unwrap();
+    let leaf_circuit = LeafLengthCircuit::new(slot, nodes[0].clone(), variable_slot);
     let leaf_proof = prove_circuit(&setup_leaf, &leaf_circuit);
     let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
     let length = GFp::from_canonical_u32(length);
@@ -104,7 +105,7 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
         pointer -= GFp::ONE;
 
         let branch_circuit = BranchTestCircuit {
-            base: BranchLengthCircuit::<NODE_LEN>::new(node).unwrap(),
+            base: BranchLengthCircuit::new(node.clone()),
             pi: &pi,
         };
         let branch_proof = prove_circuit(&setup_branch, &branch_circuit);
@@ -119,18 +120,6 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
         assert_eq!(branch_pi.mpt_key_pointer(), &pointer);
 
         pi = branch_proof.public_inputs;
-    }
-}
-
-impl UserCircuit<GFp, D> for LeafLengthCircuit<NODE_LEN> {
-    type Wires = LeafLengthWires<NODE_LEN>;
-
-    fn build(cb: &mut CBuilder) -> Self::Wires {
-        LeafLengthCircuit::build(cb)
-    }
-
-    fn prove(&self, pw: &mut PartialWitness<GFp>, wires: &Self::Wires) {
-        self.assign(pw, wires);
     }
 }
 
