@@ -168,11 +168,18 @@ impl PublicParameters {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
+        eth::StorageSlot,
+        group_hashing::map_to_curve_point,
+        rlp::MAX_KEY_NIBBLE_LEN,
         types::GFp,
         utils::{convert_u8_to_u32_slice, keccak256},
     };
     use plonky2::field::types::Field;
+    use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
     use crate::{
         api::ProofWithVK,
@@ -182,7 +189,7 @@ mod tests {
     use super::{LengthCircuitInput, PublicParameters};
 
     #[test]
-    fn length_extraction_api_works() {
+    fn length_extraction_api_pudgy_works() {
         let PudgyState {
             slot,
             length,
@@ -240,5 +247,130 @@ mod tests {
             assert_eq!(pi.metadata_point(), dm);
             assert_eq!(pi.mpt_key_pointer(), &pointer);
         }
+    }
+
+    #[test]
+    fn length_extraction_api_extension_works() {
+        let rng = &mut StdRng::seed_from_u64(0xffff);
+        let params = PublicParameters::build();
+        let memdb = Arc::new(MemoryDB::new(true));
+        let mut trie = EthTrie::new(Arc::clone(&memdb));
+
+        let length_slot = rng.gen::<u8>();
+        let variable_slot = rng.gen::<u8>();
+        let storage_slot = StorageSlot::Simple(length_slot as usize);
+
+        let key1 = storage_slot.mpt_key_vec();
+        let mut key2 = storage_slot.mpt_key_vec();
+
+        while key2[31] == key1[31] {
+            key2[31] = rng.gen();
+        }
+
+        let value1 = rng.next_u32();
+        let value2 = rng.next_u32();
+
+        let mut bytes1 = rlp::encode(&value1);
+        let mut bytes2 = rlp::encode(&value2);
+
+        // padding is required for a consistent EthTrie path
+        // check https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/212
+        bytes1.resize(32, 0);
+        bytes2.resize(32, 0);
+
+        trie.insert(&key1, &bytes1).unwrap();
+        trie.insert(&key2, &bytes2).unwrap();
+        trie.root_hash().unwrap();
+
+        let mut proof = trie.get_proof(&key1).unwrap();
+
+        let node = proof.first().unwrap().clone();
+        let root_rlp: Vec<Vec<u8>> = rlp::decode_list(&node);
+        assert_eq!(root_rlp.len(), 2);
+
+        let mut key = Vec::with_capacity(64);
+        for k in key1 {
+            key.push(GFp::from_canonical_u8(k >> 4));
+            key.push(GFp::from_canonical_u8(k & 0b00001111));
+        }
+
+        let length = GFp::from_canonical_u32(value1);
+        let dm = map_to_curve_point(&[
+            GFp::from_canonical_u8(length_slot),
+            GFp::from_canonical_u8(variable_slot),
+        ])
+        .to_weierstrass();
+
+        // Leaf extraction
+
+        let node = proof.pop().unwrap();
+        let leaf_circuit = LengthCircuitInput::new_leaf(length_slot, node.clone(), variable_slot);
+        let child_proof = params.generate_proof(leaf_circuit).unwrap();
+
+        let lp = ProofWithVK::deserialize(&child_proof).unwrap();
+        let pis = lp.proof.public_inputs;
+        let pi = PublicInputs::from_slice(&pis[..PublicInputs::<GFp>::TOTAL_LEN]);
+
+        let rlp_headers: Vec<Vec<u8>> = rlp::decode_list(&node);
+        let rlp_nibbles = Nibbles::from_compact(&rlp_headers[0]);
+        let pointer = GFp::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)
+            - GFp::from_canonical_usize(rlp_nibbles.nibbles().len());
+
+        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
+            .into_iter()
+            .map(GFp::from_canonical_u32)
+            .collect();
+
+        assert_eq!(pi.length(), &length);
+        assert_eq!(pi.root_hash(), &root);
+        assert_eq!(pi.mpt_key(), &key);
+        assert_eq!(pi.metadata_point(), dm);
+        assert_eq!(pi.mpt_key_pointer(), &pointer);
+
+        // Branch extraction
+
+        let pointer = pointer - GFp::ONE;
+        let node = proof.pop().unwrap();
+
+        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
+            .into_iter()
+            .map(GFp::from_canonical_u32)
+            .collect();
+
+        let branch_circuit = LengthCircuitInput::new_branch(node, child_proof);
+        let child_proof = params.generate_proof(branch_circuit).unwrap();
+
+        let lp = ProofWithVK::deserialize(&child_proof).unwrap();
+        let pis = lp.proof.public_inputs;
+        let pi = PublicInputs::from_slice(&pis[..PublicInputs::<GFp>::TOTAL_LEN]);
+
+        assert_eq!(pi.length(), &length);
+        assert_eq!(pi.root_hash(), &root);
+        assert_eq!(pi.mpt_key(), &key);
+        assert_eq!(pi.metadata_point(), dm);
+        assert_eq!(pi.mpt_key_pointer(), &pointer);
+
+        // Extension extraction
+
+        let pointer = GFp::ZERO - GFp::ONE;
+        let node = proof.pop().unwrap();
+
+        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
+            .into_iter()
+            .map(GFp::from_canonical_u32)
+            .collect();
+
+        let ext_circuit = LengthCircuitInput::new_extension(node, child_proof);
+        let child_proof = params.generate_proof(ext_circuit).unwrap();
+
+        let lp = ProofWithVK::deserialize(&child_proof).unwrap();
+        let pis = lp.proof.public_inputs;
+        let pi = PublicInputs::from_slice(&pis[..PublicInputs::<GFp>::TOTAL_LEN]);
+
+        assert_eq!(pi.length(), &length);
+        assert_eq!(pi.root_hash(), &root);
+        assert_eq!(pi.mpt_key(), &key);
+        assert_eq!(pi.metadata_point(), dm);
+        assert_eq!(pi.mpt_key_pointer(), &pointer);
     }
 }
