@@ -1,9 +1,8 @@
 //! Module handling the mapping entries inside a storage trie
 
-use super::{
-    public_inputs::{PublicInputs, PublicInputsArgs},
-    MAX_LEAF_NODE_LEN,
-};
+use crate::MAX_LEAF_NODE_LEN;
+
+use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,

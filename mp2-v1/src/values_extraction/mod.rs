@@ -19,12 +19,6 @@ pub mod public_inputs;
 
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
 
-pub(crate) const MAX_BRANCH_NODE_LEN: usize = 532;
-/// rlp( rlp(max key 32b) + rlp(max value 32b) ) + 1 for compact encoding
-/// see test_len()
-pub(crate) const MAX_EXTENSION_NODE_LEN: usize = 69;
-pub(crate) const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
-
 /// Constant prefixes for key and value IDs. Restrict both prefixes to 3-bytes,
 /// so `prefix + slot (u8)` could be converted to an U32.
 pub(crate) const KEY_ID_PREFIX: &[u8] = b"KEY";

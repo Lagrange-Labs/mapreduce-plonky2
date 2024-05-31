@@ -5,62 +5,81 @@ use core::array;
 use mp2_common::{
     array::{Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, PACKED_HASH_LEN},
-    mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
+    mpt_sequential::Circuit as MPTCircuit,
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     types::{CBuilder, GFp},
     utils::convert_u8_targets_to_u32,
     D,
 };
-use plonky2::iop::{target::Target, witness::PartialWitness};
+use plonky2::{
+    iop::{target::Target, witness::PartialWitness},
+    plonk::proof::ProofWithPublicInputsTarget,
+};
+use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
+
+use crate::{MAX_BRANCH_NODE_LEN, MAX_BRANCH_NODE_LEN_PADDED};
 
 use super::PublicInputs;
 
 /// The wires structure for the branch length extraction.
-#[derive(Clone, Debug)]
-pub struct BranchLengthWires<const NODE_LEN: usize>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
-    node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
-    root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BranchLengthWires {
+    node: VectorWire<Target, MAX_BRANCH_NODE_LEN_PADDED>,
+    root: KeccakWires<MAX_BRANCH_NODE_LEN_PADDED>,
+}
+
+impl CircuitLogicWires<GFp, D, 1> for BranchLengthWires {
+    type CircuitBuilderParams = ();
+    type Inputs = BranchLengthCircuit;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
+
+    fn circuit_logic(
+        cb: &mut CBuilder,
+        verified_proofs: [&ProofWithPublicInputsTarget<D>; 1],
+        _builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        let pis = &verified_proofs[0].public_inputs[..PublicInputs::<GFp>::TOTAL_LEN];
+        let pis = PublicInputs::from_slice(pis);
+
+        BranchLengthCircuit::build(cb, pis)
+    }
+
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut PartialWitness<GFp>,
+    ) -> anyhow::Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
+    }
 }
 
 /// The circuit definition for the branch length extraction.
-#[derive(Clone, Debug)]
-pub struct BranchLengthCircuit<const NODE_LEN: usize>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
-    node: Vector<u8, { PAD_LEN(NODE_LEN) }>,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BranchLengthCircuit {
+    node: Vec<u8>,
 }
 
-impl<const NODE_LEN: usize> BranchLengthCircuit<NODE_LEN>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
+impl BranchLengthCircuit {
     /// Creates a new instance of the circuit.
-    pub fn new(node: &[u8]) -> anyhow::Result<Self> {
-        Ok(Self {
-            node: Vector::from_vec(node)?,
-        })
+    pub fn new(node: Vec<u8>) -> Self {
+        Self { node }
     }
 
     /// Build the circuit, assigning the public inputs and returning the internal wires.
-    pub fn build(
-        cb: &mut CBuilder,
-        child_proof: PublicInputs<Target>,
-    ) -> BranchLengthWires<NODE_LEN> {
+    pub fn build(cb: &mut CBuilder, child_proof: PublicInputs<Target>) -> BranchLengthWires {
         let zero = cb.zero();
 
-        let node = VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(cb);
+        let node = VectorWire::<Target, MAX_BRANCH_NODE_LEN_PADDED>::new(cb);
         let headers = decode_fixed_list::<_, D, MAX_ITEMS_IN_LIST>(cb, &node.arr.arr, zero);
 
         node.assert_bytes(cb);
 
         let key = child_proof.mpt_key_wire();
         let (key, hash, is_branch, _) =
-            MPTCircuit::<1, NODE_LEN>::advance_key_branch(cb, &node.arr, &key, &headers);
+            MPTCircuit::<1, MAX_BRANCH_NODE_LEN>::advance_key_branch(cb, &node.arr, &key, &headers);
 
         // asserts this is a branch node
         cb.assert_one(is_branch.target);
@@ -72,7 +91,7 @@ where
             cb.connect(h.0, child_proof.root_hash()[i]);
         }
 
-        let root = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(cb, &node);
+        let root = KeccakCircuit::<MAX_BRANCH_NODE_LEN_PADDED>::hash_vector(cb, &node);
         let h = &array::from_fn::<_, PACKED_HASH_LEN, _>(|i| root.output_array.arr[i].0);
         let t = &key.pointer;
 
@@ -84,46 +103,45 @@ where
 
     /// Assigns the values of this instance into the provided partial witness, using the generated
     /// circuit wires.
-    pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &BranchLengthWires<NODE_LEN>) {
-        wires.node.assign(pw, &self.node);
+    pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &BranchLengthWires) {
+        let node = Vector::from_vec(&self.node).expect("invalid node length");
 
-        KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
+        wires.node.assign(pw, &node);
+
+        KeccakCircuit::<MAX_BRANCH_NODE_LEN_PADDED>::assign(
             pw,
             &wires.root,
-            &InputData::Assigned(&self.node),
+            &InputData::Assigned(&node),
         );
     }
 }
 
 #[cfg(test)]
 pub mod tests {
-    use std::{array, sync::Arc};
+    use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use mp2_common::{
         eth::StorageSlot,
-        group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
-        types::{CBuilder, GFp, GFp5},
+        group_hashing::map_to_curve_point,
+        types::{CBuilder, GFp},
         utils::{convert_u8_to_u32_slice, keccak256},
         D,
     };
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
     use plonky2::{
-        field::{extension::FieldExtension, types::Field},
+        field::types::Field,
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
         plonk::config::PoseidonGoldilocksConfig,
     };
-    use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
     use crate::length_extraction::PublicInputs;
 
     use super::{BranchLengthCircuit, BranchLengthWires};
-
-    const NODE_LEN: usize = 532;
 
     #[test]
     fn prove_and_verify_length_extraction_branch_circuit() {
@@ -184,22 +202,13 @@ pub mod tests {
             let t = d - GFp::ONE;
 
             let branch_circuit = BranchTestCircuit {
-                base: BranchLengthCircuit::new(&node.clone()).unwrap(),
+                base: BranchLengthCircuit::new(node.clone()),
                 pi: &branch_pi,
             };
             let branch_proof = prove_circuit(&setup, &branch_circuit);
             let proof_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
 
             branch_pi = proof_pi.to_vec();
-
-            let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| proof_pi.metadata().1[i]);
-            let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| proof_pi.metadata().0[i]);
-            let is_inf = proof_pi.metadata().2 == &GFp::ONE;
-            let dm_p = WeierstrassPoint {
-                x: GFp5::from_basefield_array(x),
-                y: GFp5::from_basefield_array(y),
-                is_inf,
-            };
             let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
                 .into_iter()
                 .map(GFp::from_canonical_u32)
@@ -208,20 +217,20 @@ pub mod tests {
             assert_eq!(proof_pi.length(), &length);
             assert_eq!(proof_pi.root_hash(), &root);
             assert_eq!(proof_pi.mpt_key(), &key);
-            assert_eq!(dm, dm_p);
+            assert_eq!(proof_pi.metadata_point(), dm);
             assert_eq!(proof_pi.mpt_key_pointer(), &t);
         }
     }
 
     #[derive(Debug, Clone)]
     pub struct BranchTestWires {
-        pub base: BranchLengthWires<NODE_LEN>,
+        pub base: BranchLengthWires,
         pub pi: Vec<Target>,
     }
 
     #[derive(Debug, Clone)]
     pub struct BranchTestCircuit<'a> {
-        pub base: BranchLengthCircuit<NODE_LEN>,
+        pub base: BranchLengthCircuit,
         pub pi: &'a [GFp],
     }
 

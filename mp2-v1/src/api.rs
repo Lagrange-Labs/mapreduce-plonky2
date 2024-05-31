@@ -1,6 +1,9 @@
 //! Main APIs and related structures
 
-use crate::values_extraction;
+use crate::{
+    length_extraction::{self, LengthCircuitInput},
+    values_extraction,
+};
 use anyhow::Result;
 use mp2_common::{C, D, F};
 use plonky2::plonk::{
@@ -14,25 +17,57 @@ use recursion_framework::serialization::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Struct containing the expected input MPT Extension/Branch node
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InputNode {
+    pub node: Vec<u8>,
+}
+
+/// This data structure allows to specify the inputs for a circuit that needs to
+/// recursively verify proofs; the generic type `T` allows to specify the
+/// specific inputs of each circuits besides the proofs that need to be
+/// recursively verified, while the proofs are serialized in byte format.
+#[derive(Serialize, Deserialize)]
+pub struct ProofInputSerialized<T> {
+    pub input: T,
+    pub serialized_child_proofs: Vec<Vec<u8>>,
+}
+
+impl<T> ProofInputSerialized<T> {
+    /// Deserialize child proofs and return the set of deserialized 'MTPProof`s
+    pub fn get_child_proofs(&self) -> anyhow::Result<Vec<ProofWithVK>> {
+        self.serialized_child_proofs
+            .iter()
+            .map(|proof| ProofWithVK::deserialize(proof))
+            .collect::<Result<Vec<_>, _>>()
+    }
+}
+
 /// Set of inputs necessary to generate proofs for each circuit employed in the
 /// pre-processing stage of LPN
 pub enum CircuitInput {
     /// Input for circuits extracting the values from MPT storage proofs
+    LengthExtraction(LengthCircuitInput),
     ValuesExtraction(values_extraction::CircuitInput),
 }
 
 #[derive(Serialize, Deserialize)]
 /// Parameters defining all the circuits employed for the pre-processing stage of LPN
 pub struct PublicParameters {
+    length_extraction: length_extraction::PublicParameters,
     values_extraction: values_extraction::PublicParameters,
 }
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
 pub fn build_circuits_params() -> PublicParameters {
+    let length_extraction = length_extraction::PublicParameters::build();
     let values_extraction = values_extraction::build_circuits_params();
 
-    PublicParameters { values_extraction }
+    PublicParameters {
+        values_extraction,
+        length_extraction,
+    }
 }
 
 /// Generate a proof for a circuit in the set of circuits employed in the
@@ -40,6 +75,7 @@ pub fn build_circuits_params() -> PublicParameters {
 /// circuit the proof should be generated
 pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
     match input {
+        CircuitInput::LengthExtraction(input) => params.length_extraction.generate_proof(input),
         CircuitInput::ValuesExtraction(input) => {
             values_extraction::generate_proof(&params.values_extraction, input)
         }

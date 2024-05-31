@@ -23,6 +23,7 @@
 //! The branch node traverses the tree until it reaches the MPT root node, represented by a T value
 //! of -1. At each level, it returns the new root and an updated T value.
 
+mod api;
 mod branch;
 mod extension;
 mod leaf;
@@ -31,6 +32,7 @@ mod public_inputs;
 #[cfg(test)]
 mod tests;
 
+pub use api::{LengthCircuitInput, PublicParameters};
 pub use branch::{BranchLengthCircuit, BranchLengthWires};
 pub use extension::{ExtensionLengthCircuit, ExtensionLengthWires};
 pub use leaf::{LeafLengthCircuit, LeafLengthWires};

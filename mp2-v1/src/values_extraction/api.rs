@@ -7,9 +7,11 @@ use super::{
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
+};
+use crate::{
+    api::{default_config, InputNode, ProofInputSerialized, ProofWithVK},
     MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN,
 };
-use crate::api::{default_config, ProofWithVK};
 use anyhow::{bail, Result};
 use ethers::types::Address;
 use log::debug;
@@ -137,32 +139,6 @@ pub fn generate_proof(
     circuit_type: CircuitInput,
 ) -> Result<Vec<u8>> {
     circuit_params.generate_proof(circuit_type)?.serialize()
-}
-
-/// This data structure allows to specify the inputs for a circuit that needs to
-/// recursively verify proofs; the generic type `T` allows to specify the
-/// specific inputs of each circuits besides the proofs that need to be
-/// recursively verified, while the proofs are serialized in byte format.
-#[derive(Serialize, Deserialize)]
-struct ProofInputSerialized<T> {
-    input: T,
-    serialized_child_proofs: Vec<Vec<u8>>,
-}
-
-impl<T> ProofInputSerialized<T> {
-    /// Deserialize child proofs and return the set of deserialized 'MTPProof`s
-    fn get_child_proofs(&self) -> Result<Vec<ProofWithVK>> {
-        self.serialized_child_proofs
-            .iter()
-            .map(|proof| ProofWithVK::deserialize(proof))
-            .collect::<Result<Vec<_>, _>>()
-    }
-}
-
-/// Struct containing the expected input MPT Extension/Branch node
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct InputNode {
-    node: Vec<u8>,
 }
 
 /// generate a macro filling the BranchCircuit structs manually
