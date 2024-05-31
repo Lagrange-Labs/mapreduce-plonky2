@@ -2,14 +2,18 @@ use core::{array, iter};
 
 use mp2_common::{
     array::Array,
+    group_hashing::EXTENSION_DEGREE,
     keccak::PACKED_HASH_LEN,
     mpt_sequential::MPTKeyWire,
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
-    types::{CBuilder, CURVE_TARGET_LEN},
+    types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
 };
-use plonky2::iop::target::Target;
-use plonky2_ecgfp5::gadgets::curve::CurveTarget;
+use plonky2::{
+    field::{extension::FieldExtension, types::Field},
+    iop::target::Target,
+};
+use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 
 // Length extraction public inputs:
 // - `H : [8]F` packed Keccak hash of the block
@@ -120,8 +124,6 @@ impl<'a, T> PublicInputs<'a, T> {
 
     /// Creates a new instance of the public inputs from a contiguous slice.
     pub fn from_slice(pi: &'a [T]) -> Self {
-        assert_eq!(Self::TOTAL_LEN, pi.len());
-
         Self {
             h: &pi[H_RANGE],
             dm: (
@@ -161,5 +163,20 @@ impl<'a, T> PublicInputs<'a, T> {
     /// Length of the dynamic length variable.
     pub const fn length(&self) -> &T {
         &self.n
+    }
+}
+
+impl<'a> PublicInputs<'a, GFp> {
+    /// Creates a [WeierstrassPoint] from the metadata.
+    pub fn metadata_point(&self) -> WeierstrassPoint {
+        let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| self.metadata().1[i]);
+        let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| self.metadata().0[i]);
+        let is_inf = self.metadata().2 == &GFp::ONE;
+
+        WeierstrassPoint {
+            x: GFp5::from_basefield_array(x),
+            y: GFp5::from_basefield_array(y),
+            is_inf,
+        }
     }
 }

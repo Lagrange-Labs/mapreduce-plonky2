@@ -144,24 +144,21 @@ impl LeafLengthCircuit {
 
 #[cfg(test)]
 pub mod tests {
-    use std::{array, sync::Arc};
+    use std::sync::Arc;
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
-        group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
+        group_hashing::map_to_curve_point,
         rlp::MAX_KEY_NIBBLE_LEN,
-        types::{CBuilder, GFp, GFp5},
+        types::{CBuilder, GFp},
         utils::{convert_u8_to_u32_slice, keccak256},
         D,
     };
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
     use plonky2::{
-        field::{extension::FieldExtension, types::Field},
-        iop::witness::PartialWitness,
-        plonk::config::PoseidonGoldilocksConfig,
+        field::types::Field, iop::witness::PartialWitness, plonk::config::PoseidonGoldilocksConfig,
     };
-    use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
     use crate::length_extraction::{LeafLengthCircuit, PublicInputs};
@@ -234,14 +231,6 @@ pub mod tests {
             let leaf_proof = prove_circuit(&setup, &leaf_circuit);
             let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
 
-            let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| leaf_pi.metadata().1[i]);
-            let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| leaf_pi.metadata().0[i]);
-            let is_inf = leaf_pi.metadata().2 == &GFp::ONE;
-            let dm_p = WeierstrassPoint {
-                x: GFp5::from_basefield_array(x),
-                y: GFp5::from_basefield_array(y),
-                is_inf,
-            };
             let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
                 .into_iter()
                 .map(GFp::from_canonical_u32)
@@ -255,7 +244,7 @@ pub mod tests {
             assert_eq!(leaf_pi.length(), &length);
             assert_eq!(leaf_pi.root_hash(), &root);
             assert_eq!(leaf_pi.mpt_key(), &key);
-            assert_eq!(dm, dm_p);
+            assert_eq!(leaf_pi.metadata_point(), dm);
             assert_eq!(leaf_pi.mpt_key_pointer(), &t);
         }
     }

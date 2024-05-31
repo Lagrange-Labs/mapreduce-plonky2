@@ -111,27 +111,26 @@ impl ExtensionLengthCircuit {
 
 #[cfg(test)]
 pub mod tests {
-    use std::{array, iter, sync::Arc};
+    use std::{iter, sync::Arc};
 
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
-        group_hashing::{map_to_curve_point, EXTENSION_DEGREE},
+        group_hashing::map_to_curve_point,
         rlp::MAX_KEY_NIBBLE_LEN,
-        types::{CBuilder, GFp, GFp5},
+        types::{CBuilder, GFp},
         utils::{convert_u8_to_u32_slice, keccak256},
         D,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
-        field::{extension::FieldExtension, types::Field},
+        field::types::Field,
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
         plonk::config::PoseidonGoldilocksConfig,
     };
-    use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
     use crate::length_extraction::PublicInputs;
@@ -208,14 +207,6 @@ pub mod tests {
         let ext_proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(ext_circuit);
         let ext_pi = PublicInputs::<GFp>::from_slice(&ext_proof.public_inputs);
 
-        let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| ext_pi.metadata().1[i]);
-        let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| ext_pi.metadata().0[i]);
-        let is_inf = ext_pi.metadata().2 == &GFp::ONE;
-        let dm_p = WeierstrassPoint {
-            x: GFp5::from_basefield_array(x),
-            y: GFp5::from_basefield_array(y),
-            is_inf,
-        };
         let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&proof[0]))
             .into_iter()
             .map(GFp::from_canonical_u32)
@@ -229,7 +220,7 @@ pub mod tests {
         assert_eq!(ext_pi.length(), &length);
         assert_eq!(ext_pi.root_hash(), &root);
         assert_eq!(ext_pi.mpt_key(), &key);
-        assert_eq!(dm, dm_p);
+        assert_eq!(ext_pi.metadata_point(), dm);
         assert_eq!(ext_pi.mpt_key_pointer(), &t);
     }
 
