@@ -1,6 +1,9 @@
 //! Main APIs and related structures
 
-use crate::values_extraction;
+use crate::{
+    length_extraction::{self, LengthCircuitInput},
+    values_extraction,
+};
 use anyhow::Result;
 use mp2_common::{C, D, F};
 use plonky2::plonk::{
@@ -44,21 +47,27 @@ impl<T> ProofInputSerialized<T> {
 /// pre-processing stage of LPN
 pub enum CircuitInput {
     /// Input for circuits extracting the values from MPT storage proofs
+    LengthExtraction(LengthCircuitInput),
     ValuesExtraction(values_extraction::CircuitInput),
 }
 
 #[derive(Serialize, Deserialize)]
 /// Parameters defining all the circuits employed for the pre-processing stage of LPN
 pub struct PublicParameters {
+    length_extraction: length_extraction::PublicParameters,
     values_extraction: values_extraction::PublicParameters,
 }
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
 pub fn build_circuits_params() -> PublicParameters {
+    let length_extraction = length_extraction::PublicParameters::build();
     let values_extraction = values_extraction::build_circuits_params();
 
-    PublicParameters { values_extraction }
+    PublicParameters {
+        values_extraction,
+        length_extraction,
+    }
 }
 
 /// Generate a proof for a circuit in the set of circuits employed in the
@@ -66,6 +75,7 @@ pub fn build_circuits_params() -> PublicParameters {
 /// circuit the proof should be generated
 pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
     match input {
+        CircuitInput::LengthExtraction(input) => params.length_extraction.generate_proof(input),
         CircuitInput::ValuesExtraction(input) => {
             values_extraction::generate_proof(&params.values_extraction, input)
         }
