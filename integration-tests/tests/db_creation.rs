@@ -1,80 +1,66 @@
-//! Database creation tests
+//! Database creation test cases
 
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
 
-use ethers::prelude::Address;
-use integration_tests::{
-    utils::load_or_generate_public_params, values_extraction::TestStorageTrie,
-};
-use mp2_common::eth::StorageSlot;
-use mp2_test::utils::random_vector;
-use mp2_v1::api::{ProofWithVK, PublicParameters};
-use std::str::FromStr;
+use integration_tests::TestContext;
+use mp2_common::eth::left_pad32;
+use mp2_test::eth::get_mainnet_url;
+use mp2_v1::api::ProofWithVK;
+use serial_test::serial;
 
-/// Cached filename of the public parameters
-const PUBLIC_PARAMS_FILE: &str = "mp2.params";
-
-const TEST_SLOT: usize = 10;
-const TEST_CONTRACT_ADDRESS: &str = "0x00000000000000000000000000000000000000fe";
+// Pidgy pinguins contract address for testing
+const PIDGY_ADDRESS: &str = "0xbd3531da5cf5857e7cfaa92426877b022e612cf8";
 
 /// Test the database creation for single variables.
-#[test]
-fn test_db_creation_for_single_variables() {
-    // Load the public parameters from a file, or generate a new one.
-    let params = load_or_generate_public_params(PUBLIC_PARAMS_FILE).unwrap();
+#[tokio::test]
+#[serial]
+async fn test_db_creation_for_single_variables() {
+    // Build the test context.
+    let rpc_url = get_mainnet_url();
+    let ctx = TestContext::new(&rpc_url);
 
-    // Generate the values extraction proof (C.1) for single variables.
-    let _proof = prove_single_values_extraction(&params);
+    // Generate the proof of Values Extraction (C.1).
+    let _proof = prove_single_values_extraction(&ctx).await;
 
     // TODO: add further steps of database creation.
 }
 
 /// Test the database creation for mapping variables.
-#[test]
-fn test_db_creation_for_mapping_variables() {
-    // Load the public parameters from a file, or generate a new one.
-    let params = load_or_generate_public_params(PUBLIC_PARAMS_FILE).unwrap();
+#[tokio::test]
+#[serial]
+async fn test_db_creation_for_mapping_variables() {
+    // Build the test context.
+    let rpc_url = get_mainnet_url();
+    let ctx = TestContext::new(&rpc_url);
 
-    // Generate the values extraction proof (C.1) for mapping variables.
-    let _proof = prove_mapping_values_extraction(&params);
+    // Generate the proof of Values Extraction (C.1).
+    let _proof = prove_mapping_values_extraction(&ctx).await;
 
     // TODO: add further steps of database creation.
 }
 
 /// Generate the Values Extraction (C.1) proof for single variables.
-fn prove_single_values_extraction(params: &PublicParameters) -> ProofWithVK {
-    // Create a test contract address.
-    let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
+async fn prove_single_values_extraction(ctx: &TestContext) -> ProofWithVK {
+    const TEST_SLOT: u8 = 8;
 
-    // Create the test simple slots.
-    let slots: Vec<_> = (TEST_SLOT..TEST_SLOT + 6)
-        .map(StorageSlot::Simple)
-        .collect();
-
-    // Generate the test trie.
-    let mut trie = TestStorageTrie::new(contract_address, slots);
-
-    // Generate the proof.
-    trie.prove_all(params)
+    ctx.prove_single_values_extraction(PIDGY_ADDRESS, TEST_SLOT)
+        .await
 }
 
-/// Generate the Values Extraction (C.1) proof for single variables.
-fn prove_mapping_values_extraction(params: &PublicParameters) -> ProofWithVK {
-    // Create a test contract address.
-    let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
+/// Generate the Values Extraction (C.1) proof for mapping variables.
+async fn prove_mapping_values_extraction(ctx: &TestContext) -> ProofWithVK {
+    // Extract from
+    // <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol>.
+    // Assume it's using ERC731Enumerable that inherits ERC721.
+    const TEST_SLOT: u8 = 2;
 
-    // Create the test mapping slots.
-    let slots = [TEST_SLOT; 4]
-        .map(|slot| {
-            // Must be the same slot value for mapping variables.
-            StorageSlot::Mapping(random_vector(4), slot)
-        })
-        .to_vec();
+    // Frist pinguin holder <https://dune.com/queries/2450476/4027653>
+    // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
+    // NFT ID: <https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116>
+    const NFT_ID: u32 = 1116;
+    let mapping_key = left_pad32(&NFT_ID.to_be_bytes()).to_vec();
 
-    // Generate the test trie.
-    let mut trie = TestStorageTrie::new(contract_address, slots);
-
-    // Generate the proof.
-    trie.prove_all(params)
+    ctx.prove_mapping_values_extraction(PIDGY_ADDRESS, TEST_SLOT, mapping_key)
+        .await
 }

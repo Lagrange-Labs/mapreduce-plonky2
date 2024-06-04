@@ -1151,7 +1151,7 @@ dependencies = [
 [[package]]
 name = "eth_trie"
 version = "0.4.0"
-source = "git+https://github.com/silathdiir/eth-trie.rs?branch=pub-recover-from-db#3cca6668a197175133269f2fc9c903df5a54b167"
+source = "git+https://github.com/nikkolasg/eth-trie.rs#df8087bba96340b17bb2e40c98a0519cd5b6ba0f"
 dependencies = [
  "ethereum-types",
  "hashbrown 0.14.5",
@@ -2385,16 +2385,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
- "env_logger 0.11.3",
- "eth_trie",
  "ethers 2.0.13",
- "hex",
- "log",
  "mp2_common",
  "mp2_test",
  "mp2_v1",
- "plonky2",
  "rlp",
+ "serial_test",
  "tokio",
 ]
 
