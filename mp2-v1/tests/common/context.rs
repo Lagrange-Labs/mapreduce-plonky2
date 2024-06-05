@@ -1,9 +1,10 @@
 //! Test context used in the test cases
 
-use crate::utils::load_or_generate_public_params;
+use super::utils::load_or_generate_public_params;
 use ethers::prelude::{EIP1186ProofResponse, Http, Provider};
+use log::warn;
 use mp2_common::eth::ProofQuery;
-use mp2_v1::api::{generate_proof, CircuitInput, PublicParameters};
+use mp2_v1::api::PublicParameters;
 
 /// Cached filename of the public parameters
 const PUBLIC_PARAMS_FILE: &str = "mp2.params";
@@ -26,17 +27,19 @@ impl TestContext {
         Self { params, rpc }
     }
 
-    /// Generate the plonky2 proof.
-    pub fn generate_proof(&self, input: CircuitInput) -> Vec<u8> {
-        generate_proof(&self.params, input).unwrap()
+    /// Get the public parameters.
+    pub fn params(&self) -> &PublicParameters {
+        &self.params
     }
 
     /// Query the MPT proof.
     pub async fn query_mpt_proof(&self, query: &ProofQuery) -> EIP1186ProofResponse {
         // Query the MPT proof with retries.
-        for _ in 0..RETRY_NUM {
+        for i in 0..RETRY_NUM {
             if let Ok(response) = query.query_mpt_proof(&self.rpc, None).await {
                 return response;
+            } else {
+                warn!("Failed to query the MPT proof at {i} time")
             }
         }
 

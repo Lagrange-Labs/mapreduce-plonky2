@@ -1,6 +1,7 @@
 //! Test utility functions
 
 use anyhow::Result;
+use log::info;
 use mp2_v1::api::{build_circuits_params, PublicParameters};
 use std::{
     fs::File,
@@ -16,6 +17,8 @@ pub fn load_or_generate_public_params<P: AsRef<Path>>(file_path: P) -> Result<Pu
 
         let public_params = bincode::deserialize_from(reader)?;
 
+        info!("Read the public parameters from the cached file");
+
         return Ok(public_params);
     }
 
@@ -25,6 +28,8 @@ pub fn load_or_generate_public_params<P: AsRef<Path>>(file_path: P) -> Result<Pu
     let writer = BufWriter::new(file);
 
     bincode::serialize_into(writer, &public_params)?;
+
+    info!("Build the public parameters and save to the cached file");
 
     Ok(public_params)
 }

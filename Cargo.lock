@@ -2380,21 +2380,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "integration_tests"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bincode",
- "ethers 2.0.13",
- "mp2_common",
- "mp2_test",
- "mp2_v1",
- "rlp",
- "serial_test",
- "tokio",
-]
-
-[[package]]
 name = "ipnet"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

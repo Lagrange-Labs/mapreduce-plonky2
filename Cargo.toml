@@ -2,7 +2,6 @@
 members = [
     "gnark-utils",
     "groth16-framework",
-    "integration-tests",
     "mapreduce-plonky2",
     "mp2-common",
     "mp2-test",
