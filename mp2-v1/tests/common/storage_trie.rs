@@ -106,7 +106,9 @@ impl TrieNode {
         convert_u8_to_u32_slice(&hash)
     }
 
-    /// Find or add the child node path recursively. The path is arranged in the reverse order.
+    /// Find or add the child node path recursively. The path is arranged in the reverse order,
+    /// from leaf to the root, the last node is popped from the path in each rescusive round.
+    /// Reuse the all nodes same as the specified node path, only add the non-existing ones.
     fn find_or_add_child(&mut self, mut nodes: Vec<RawNode>) {
         if nodes.is_empty() {
             return;
@@ -115,7 +117,9 @@ impl TrieNode {
         // Pop the new node to find in the current children.
         let new_node = nodes.pop().unwrap();
 
-        // Find or add this new node as a child.
+        // Iterate to find the new child node in the children of the current node.
+        // Reuse the child if found, otherwise add a new one. Then add the next
+        // node of the path recursively.
         match self.children.iter_mut().find(|child| child.raw == new_node) {
             Some(child) => child.find_or_add_child(nodes),
             None => {
