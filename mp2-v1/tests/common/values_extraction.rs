@@ -35,12 +35,12 @@ impl TestContext {
             let response = self.query_mpt_proof(&query).await;
 
             // Get the nodes to prove. Reverse to the sequence from leaf to root.
-            let mut nodes: Vec<_> = response.storage_proof[0]
+            let nodes: Vec<_> = response.storage_proof[0]
                 .proof
                 .iter()
+                .rev()
                 .map(|node| node.to_vec())
                 .collect();
-            nodes.reverse();
 
             let slot = StorageSlot::Simple(slot);
             info!("Save the simple slot {slot:?} to the test storage trie");
@@ -97,9 +97,9 @@ impl TestContext {
             let mut nodes: Vec<_> = response.storage_proof[0]
                 .proof
                 .iter()
+                .rev()
                 .map(|node| node.to_vec())
                 .collect();
-            nodes.reverse();
 
             let slot = StorageSlot::Mapping(mapping_key, slot);
             info!("Save the mapping slot {slot:?} to the test storage trie");
