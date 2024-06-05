@@ -107,7 +107,7 @@ impl ProofWithVK {
         Ok(s)
     }
 
-    pub(crate) fn proof(&self) -> &ProofWithPublicInputs<F, C, D> {
+    pub fn proof(&self) -> &ProofWithPublicInputs<F, C, D> {
         &self.proof
     }
 

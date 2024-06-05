@@ -3,8 +3,13 @@
 use super::{storage_trie::TestStorageTrie, TestContext};
 use ethers::prelude::Address;
 use log::info;
-use mp2_common::eth::{ProofQuery, StorageSlot};
-use mp2_v1::api::ProofWithVK;
+use mp2_common::{
+    eth::{ProofQuery, StorageSlot},
+    mpt_sequential::utils::bytes_to_nibbles,
+    F,
+};
+use mp2_v1::{api::ProofWithVK, values_extraction::public_inputs::PublicInputs};
+use plonky2::field::types::Field;
 use std::str::FromStr;
 
 type MappingKey = Vec<u8>;
@@ -44,7 +49,25 @@ impl TestContext {
         }
 
         info!("Prove the test storage trie including the simple slots {slots:?}");
-        trie.prove_all(&contract_address, self.params())
+        let proof = trie.prove_all(&contract_address, self.params());
+
+        // Check the public inputs.
+        let pi = PublicInputs::new(&proof.proof().public_inputs);
+        assert_eq!(pi.n(), F::from_canonical_usize(slots.len()));
+        assert_eq!(pi.root_hash(), trie.root_hash());
+        {
+            let exp_key = StorageSlot::Simple(slots[0] as usize).mpt_key_vec();
+            let exp_key: Vec<_> = bytes_to_nibbles(&exp_key)
+                .into_iter()
+                .map(F::from_canonical_u8)
+                .collect();
+
+            let (key, ptr) = pi.mpt_key_info();
+            assert_eq!(key, exp_key);
+            assert_eq!(ptr, F::NEG_ONE);
+        }
+
+        proof
     }
 
     /// Generate the Values Extraction (C.1) proof for mapping variables.
@@ -56,6 +79,9 @@ impl TestContext {
     ) -> ProofWithVK {
         let slot = slot as usize;
         let contract_address = Address::from_str(contract_address).unwrap();
+
+        let first_mapping_key = mapping_keys[0].clone();
+        let storage_slot_number = mapping_keys.len();
 
         // Initialize the test trie.
         let mut trie = TestStorageTrie::new();
@@ -82,6 +108,24 @@ impl TestContext {
         }
 
         info!("Prove the test storage trie including the mapping slots ({slot}, ...)");
-        trie.prove_all(&contract_address, self.params())
+        let proof = trie.prove_all(&contract_address, self.params());
+
+        // Check the public inputs.
+        let pi = PublicInputs::new(&proof.proof().public_inputs);
+        assert_eq!(pi.n(), F::from_canonical_usize(storage_slot_number));
+        assert_eq!(pi.root_hash(), trie.root_hash());
+        {
+            let exp_key = StorageSlot::Mapping(first_mapping_key, slot).mpt_key_vec();
+            let exp_key: Vec<_> = bytes_to_nibbles(&exp_key)
+                .into_iter()
+                .map(F::from_canonical_u8)
+                .collect();
+
+            let (key, ptr) = pi.mpt_key_info();
+            assert_eq!(key, exp_key);
+            assert_eq!(ptr, F::NEG_ONE);
+        }
+
+        proof
     }
 }

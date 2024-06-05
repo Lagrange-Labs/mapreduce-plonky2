@@ -4,7 +4,10 @@ use ethers::{
     prelude::Address,
     utils::rlp::{Prototype, Rlp},
 };
-use mp2_common::eth::StorageSlot;
+use mp2_common::{
+    eth::StorageSlot,
+    utils::{convert_u8_to_u32_slice, keccak256},
+};
 use mp2_v1::{
     api::{generate_proof, CircuitInput, ProofWithVK, PublicParameters},
     values_extraction,
@@ -95,6 +98,12 @@ impl TrieNode {
             Prototype::List(BRANCH_RLP_SIZE) => TrieNodeType::Branch,
             _ => panic!("Invalid RLP size for the storage proof"),
         }
+    }
+
+    /// Calculate the hash of this node.
+    fn hash(&self) -> Vec<u32> {
+        let hash = keccak256(&self.raw);
+        convert_u8_to_u32_slice(&hash)
     }
 
     /// Find or add the child node path recursively. The path is arranged in the reverse order.
@@ -217,6 +226,11 @@ impl TestStorageTrie {
             root: None,
             slots: HashMap::new(),
         }
+    }
+
+    /// Get the root hash of this trie.
+    pub fn root_hash(&self) -> Vec<u32> {
+        self.root.as_ref().unwrap().hash()
     }
 
     /// Add a storage slot with a proof path of raw nodes which sequence is from leaf to root.
