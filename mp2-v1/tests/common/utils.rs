@@ -10,7 +10,9 @@ use std::{
 };
 
 /// Load or generate the public parameters.
-pub fn load_or_generate_public_params<P: AsRef<Path>>(file_path: P) -> Result<PublicParameters> {
+pub(crate) fn load_or_generate_public_params<P: AsRef<Path>>(
+    file_path: P,
+) -> Result<PublicParameters> {
     if file_path.as_ref().exists() {
         let file = File::open(&file_path)?;
         let reader = BufReader::new(file);

@@ -216,7 +216,7 @@ impl TrieNode {
 
 /// Test storage trie
 #[derive(Debug)]
-pub struct TestStorageTrie {
+pub(crate) struct TestStorageTrie {
     /// Root of this trie
     root: Option<TrieNode>,
     /// Storage slot map indexed by the raw node
@@ -225,7 +225,7 @@ pub struct TestStorageTrie {
 
 impl TestStorageTrie {
     /// Initialize a test storage trie.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             root: None,
             slots: HashMap::new(),
@@ -233,7 +233,7 @@ impl TestStorageTrie {
     }
 
     /// Get the root hash of this trie.
-    pub fn root_hash(&self) -> Vec<u32> {
+    pub(crate) fn root_hash(&self) -> Vec<u32> {
         self.root.as_ref().unwrap().hash()
     }
 
@@ -241,7 +241,7 @@ impl TestStorageTrie {
     /// If the current trie already has a root (initialized by a slot before), the new slot must satisfy:
     /// - It's the same type of storage slot as previous ones (simple or mapping).
     /// - The node path has the same root of the current trie.
-    pub fn add_slot(&mut self, slot: StorageSlot, mut nodes: Vec<RawNode>) {
+    pub(crate) fn add_slot(&mut self, slot: StorageSlot, mut nodes: Vec<RawNode>) {
         self.check_new_slot(&slot, &nodes);
 
         // Save the slot to a map and index by the leaf node.
@@ -259,7 +259,11 @@ impl TestStorageTrie {
     }
 
     /// Generate the proof for the trie.
-    pub fn prove_all(&self, contract_address: &Address, params: &PublicParameters) -> ProofWithVK {
+    pub(crate) fn prove_all(
+        &self,
+        contract_address: &Address,
+        params: &PublicParameters,
+    ) -> ProofWithVK {
         let ctx = ProvingContext::new(contract_address, params, &self.slots);
 
         // Must prove with 1 slot at least.

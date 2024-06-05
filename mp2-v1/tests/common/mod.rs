@@ -2,7 +2,7 @@
 
 mod context;
 mod storage_trie;
-pub mod utils;
-pub mod values_extraction;
+mod utils;
+mod values_extraction;
 
-pub use context::TestContext;
+pub(crate) use context::TestContext;

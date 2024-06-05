@@ -16,7 +16,7 @@ type MappingKey = Vec<u8>;
 
 impl TestContext {
     /// Generate the Values Extraction (C.1) proof for single variables.
-    pub async fn prove_single_values_extraction(
+    pub(crate) async fn prove_single_values_extraction(
         &self,
         contract_address: &str,
         slots: &[u8],
@@ -71,7 +71,7 @@ impl TestContext {
     }
 
     /// Generate the Values Extraction (C.1) proof for mapping variables.
-    pub async fn prove_mapping_values_extraction(
+    pub(crate) async fn prove_mapping_values_extraction(
         &self,
         contract_address: &str,
         slot: u8,
