@@ -131,7 +131,7 @@ impl TrieNode {
     fn prove(&self, ctx: ProvingContext) -> SerializedProof {
         match self.node_type() {
             TrieNodeType::Branch => self.prove_branch(ctx),
-            TrieNodeType::Extension => self.prove_extentsion(ctx),
+            TrieNodeType::Extension => self.prove_extension(ctx),
             TrieNodeType::Leaf => self.prove_leaf(ctx),
         }
     }
@@ -160,7 +160,7 @@ impl TrieNode {
     }
 
     /// Prove an extension node.
-    fn prove_extentsion(&self, ctx: ProvingContext) -> SerializedProof {
+    fn prove_extension(&self, ctx: ProvingContext) -> SerializedProof {
         // Has one child for the extension node.
         assert_eq!(self.children.len(), 1);
 
