@@ -83,11 +83,8 @@ where
         let new_mpt_key = wires.key;
 
         // Verify the account node includes the hash of storage MPT root,
-        // the offset of storage root hash should be within range. We use 7
-        // bits for the range check since the account node is composed by
-        // [nonce (U64), balance (U256), storage_hash (H256), code_hash (H256)]
-        // and it has 104 bytes.
-        let within_range = less_than(b, storage_root_offset, node.real_len, 7);
+        let max_node_len = b.constant(F::from_canonical_usize(MAX_LEAF_NODE_LEN));
+        let within_range = less_than(b, storage_root_offset, max_node_len, 7);
         b.connect(within_range.target, ttrue.target);
 
         // Extract the storage root hash.

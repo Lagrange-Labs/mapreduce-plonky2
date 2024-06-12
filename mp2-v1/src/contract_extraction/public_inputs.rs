@@ -116,6 +116,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     /// Create from a slice.
     pub fn from_slice(pi: &'a [T]) -> Self {
+        assert!(pi.len() >= Self::TOTAL_LEN);
+
         Self {
             h: &pi[H_RANGE],
             dm: (
@@ -194,7 +196,7 @@ mod tests {
         let dm = Point::sample(&mut rng).to_weierstrass();
         let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
         let dm = (dm.x.0.as_slice(), dm.y.0.as_slice(), &dm_is_inf);
-        let k = &random_vector::<u8>(64).to_fields();
+        let k = &random_vector::<u8>(MAX_KEY_NIBBLE_LEN).to_fields();
         let t = &2_u8.to_field();
         let s = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
         let exp_pi = PublicInputs { h, dm, k, t, s };

@@ -73,7 +73,8 @@ where
         packed_hash.enforce_equal(b, &child_hash);
 
         // Register the public inputs.
-        let PublicInputs { h, dm, s, .. } = child_proof;
+        let PublicInputs { dm, s, .. } = child_proof;
+        let h = &root.output_array.to_targets().arr;
         let k = &new_mpt_key.key.arr;
         let t = &new_mpt_key.pointer;
         PublicInputs { h, dm, k, t, s }.register(b);
@@ -129,6 +130,7 @@ mod tests {
         keccak::PACKED_HASH_LEN,
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
+        types::PACKED_ADDRESS_LEN,
         utils::{convert_u8_to_u32_slice, keccak256, Fieldable, ToFields},
         C,
     };
@@ -188,14 +190,18 @@ mod tests {
         // two leaves (we only prove one at a time)
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
-        let mut key = random_vector(32);
-        let value = random_vector(32);
-        trie.insert(&key, &value).unwrap();
-        key[31] = thread_rng().gen();
-        let value = random_vector(32);
-        trie.insert(&key, &value).unwrap();
+        let mut key1 = random_vector::<u8>(32);
+        let mut key2 = key1.clone();
+        key2[31] = key2[31]
+            .checked_sub(thread_rng().gen_range(1..10))
+            .unwrap_or_default();
+        assert!(key1 != key2);
+        let value1 = random_vector(32);
+        let value2 = random_vector(32);
+        trie.insert(&key1, &value1).unwrap();
+        trie.insert(&key2, &value2).unwrap();
         trie.root_hash().unwrap();
-        let nodes = trie.get_proof(&key).unwrap();
+        let nodes = trie.get_proof(&key2).unwrap();
         assert_eq!(nodes.len(), 3);
         let leaf = nodes.last().unwrap();
         let ptr = compute_mpt_key_ptr(leaf);
@@ -204,10 +210,11 @@ mod tests {
 
         // Prepare the public inputs for the branch node circuit.
         let h = &convert_u8_to_u32_slice(&keccak256(leaf)).to_fields();
-        let dm = map_to_curve_point(&random_vector::<u32>(20).to_fields()).to_weierstrass();
+        let dm = map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
+            .to_weierstrass();
         let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
         let dm = (dm.x.0.as_slice(), dm.y.0.as_slice(), &dm_is_inf);
-        let k = &bytes_to_nibbles(&key).to_fields();
+        let k = &bytes_to_nibbles(&key2).to_fields();
         let t = &ptr.to_field();
         let s = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
         let child_pi = PublicInputs { h, dm, k, t, s };
@@ -223,7 +230,10 @@ mod tests {
         let pi = PublicInputs::<F>::from_slice(&proof.public_inputs);
 
         // Check packed block hash
-        assert_eq!(pi.h, child_pi.h);
+        {
+            let hash = convert_u8_to_u32_slice(&keccak256(&branch)).to_fields();
+            assert_eq!(pi.h, hash);
+        }
         // Check metadata digest
         assert_eq!(pi.dm, child_pi.dm);
         // Check MPT key and pointer

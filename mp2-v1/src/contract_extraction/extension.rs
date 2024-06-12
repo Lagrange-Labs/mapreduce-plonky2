@@ -51,7 +51,8 @@ impl ExtensionCircuit {
         packed_hash.enforce_equal(b, &given_hash);
 
         // Register the public inputs.
-        let PublicInputs { h, dm, s, .. } = child_proof;
+        let PublicInputs { dm, s, .. } = child_proof;
+        let h = &root.output_array.to_targets().arr;
         let k = &new_mpt_key.key.arr;
         let t = &new_mpt_key.pointer;
         PublicInputs { h, dm, k, t, s }.register(b);
@@ -98,6 +99,7 @@ mod tests {
         group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,
         rlp::MAX_KEY_NIBBLE_LEN,
+        types::PACKED_ADDRESS_LEN,
         utils::{convert_u8_to_u32_slice, keccak256, Fieldable, ToFields},
         C,
     };
@@ -144,9 +146,12 @@ mod tests {
         // two leaves
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
-        let key1 = random_vector(32);
+        let key1 = random_vector::<u8>(32);
         let mut key2 = key1.clone();
-        key2[31] = thread_rng().gen();
+        key2[31] = key2[31]
+            .checked_add(thread_rng().gen_range(1..10))
+            .unwrap_or_default();
+        assert!(key1 != key2);
         let value1 = random_vector(32);
         let value2 = random_vector(32);
         trie.insert(&key1, &value1).unwrap();
@@ -159,10 +164,11 @@ mod tests {
 
         // Prepare the public inputs for the extension node circuit.
         let h = &convert_u8_to_u32_slice(&keccak256(&proof[1])).to_fields();
-        let dm = map_to_curve_point(&random_vector::<u32>(20).to_fields()).to_weierstrass();
+        let dm = map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
+            .to_weierstrass();
         let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
         let dm = (dm.x.0.as_slice(), dm.y.0.as_slice(), &dm_is_inf);
-        let k = &random_vector::<u32>(64).to_fields();
+        let k = &random_vector::<u32>(MAX_KEY_NIBBLE_LEN).to_fields();
         let t = &63_u8.to_field();
         let s = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
         let child_pi = PublicInputs { h, dm, k, t, s };
@@ -175,7 +181,10 @@ mod tests {
         let pi = PublicInputs::from_slice(&proof.public_inputs);
 
         // Check packed block hash
-        assert_eq!(pi.h, child_pi.h);
+        {
+            let hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
+            assert_eq!(pi.h, hash);
+        }
         // Check metadata digest
         assert_eq!(pi.dm, child_pi.dm);
         // Check MPT key and pointer
