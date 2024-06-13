@@ -83,8 +83,9 @@ where
         let new_mpt_key = wires.key;
 
         // Verify the account node includes the hash of storage MPT root.
-        let hash_len = b.constant(F::from_canonical_usize(HASH_LEN));
-        let max_storage_root_offset = b.sub(node.real_len, hash_len);
+        // storage_root_offfset < node_real_len - hash_len + 1
+        let hash_len_sub_one = b.constant(F::from_canonical_usize(HASH_LEN - 1));
+        let max_storage_root_offset = b.sub(node.real_len, hash_len_sub_one);
         let within_range = less_than(b, storage_root_offset, max_storage_root_offset, 7);
         b.connect(within_range.target, ttrue.target);
 
