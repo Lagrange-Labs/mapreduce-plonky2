@@ -6,7 +6,7 @@ use ethers::prelude::H160;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
-    keccak::{InputData, KeccakCircuit, KeccakWires, OutputByteHash},
+    keccak::{InputData, KeccakCircuit, KeccakWires, OutputByteHash, HASH_LEN},
     mpt_sequential::{MPTKeyWire, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::{AddressTarget, CBuilder, ADDRESS_LEN},
@@ -82,9 +82,10 @@ where
         let root = wires.root;
         let new_mpt_key = wires.key;
 
-        // Verify the account node includes the hash of storage MPT root,
-        let max_node_len = b.constant(F::from_canonical_usize(MAX_LEAF_NODE_LEN));
-        let within_range = less_than(b, storage_root_offset, max_node_len, 7);
+        // Verify the account node includes the hash of storage MPT root.
+        let hash_len = b.constant(F::from_canonical_usize(HASH_LEN));
+        let max_storage_root_offset = b.sub(node.real_len, hash_len);
+        let within_range = less_than(b, storage_root_offset, max_storage_root_offset, 7);
         b.connect(within_range.target, ttrue.target);
 
         // Extract the storage root hash.
