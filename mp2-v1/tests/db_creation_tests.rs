@@ -68,6 +68,24 @@ async fn prove_single_values_extraction(ctx: &TestContext) -> ProofWithVK {
         .await
 }
 
+/// Test the database creation for length extraction.
+#[tokio::test]
+#[serial]
+async fn test_db_creation_for_leaf_extraction() {
+    info!("Start to test Database Creation for length extraction");
+
+    // Initialize the test context.
+    let rpc_url = get_mainnet_url();
+    let ctx = TestContext::new(&rpc_url);
+    info!("Initialized the test context");
+
+    // Generate the proof of Values Extraction (C.2).
+    let _proof = prove_length_extraction(&ctx).await;
+    info!("Generated Length Extraction (C.2) proof");
+
+    info!("Finish testing Database Creation for length extraction");
+}
+
 /// Generate the Values Extraction (C.1) proof for mapping variables.
 async fn prove_mapping_values_extraction(ctx: &TestContext) -> ProofWithVK {
     // Extract from
@@ -90,5 +108,15 @@ async fn prove_mapping_values_extraction(ctx: &TestContext) -> ProofWithVK {
         .collect();
 
     ctx.prove_mapping_values_extraction(PUDGY_PENGUINS_ADDRESS, TEST_SLOT, mapping_keys)
+        .await
+}
+
+/// Generate the Length Extraction (C.2) proof.
+async fn prove_length_extraction(ctx: &TestContext) -> ProofWithVK {
+    // Pudgy Penguins simple slots:
+    // slot-8: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/extensions/ERC721Enumerable.sol#L21>
+    const TEST_SLOTS: [u8; 1] = [8];
+
+    ctx.prove_length_extraction(PUDGY_PENGUINS_ADDRESS, &TEST_SLOTS)
         .await
 }
