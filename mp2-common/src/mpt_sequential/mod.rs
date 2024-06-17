@@ -43,6 +43,12 @@ const NB_ITEMS_LEAF: usize = 2;
 /// Given we target MPT storage proof, the value is 32 bytes + 1 byte for RLP encoding.
 pub const MAX_LEAF_VALUE_LEN: usize = 33;
 
+/// RLP item size for the extension node
+pub const MPT_EXTENSION_RLP_SIZE: usize = 2;
+
+/// RLP item size for the branch node
+pub const MPT_BRANCH_RLP_SIZE: usize = 17;
+
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
 #[allow(non_snake_case)]

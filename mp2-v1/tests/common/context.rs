@@ -9,9 +9,6 @@ use mp2_v1::api::PublicParameters;
 /// Cached filename of the public parameters
 const PUBLIC_PARAMS_FILE: &str = "mp2.params";
 
-/// Retry number for the RPC request
-const RETRY_NUM: usize = 3;
-
 /// Test context
 pub(crate) struct TestContext {
     params: PublicParameters,
@@ -34,16 +31,7 @@ impl TestContext {
 
     /// Query the MPT proof.
     pub(crate) async fn query_mpt_proof(&self, query: &ProofQuery) -> EIP1186ProofResponse {
-        // Query the MPT proof with retries.
-        for i in 0..RETRY_NUM {
-            if let Ok(response) = query.query_mpt_proof(&self.rpc, None).await {
-                return response;
-            } else {
-                warn!("Failed to query the MPT proof at {i} time")
-            }
-        }
-
-        panic!("Failed to query the MPT proof");
+        query.query_mpt_proof(&self.rpc, None).await.unwrap()
     }
 
     /// Reset the RPC provider. It could be used to query data from the
