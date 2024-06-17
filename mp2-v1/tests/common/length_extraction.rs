@@ -16,6 +16,7 @@ impl TestContext {
         &self,
         contract_address: &str,
         slots: &[u8],
+        variable_slot: u8,
     ) -> ProofWithVK {
         let contract_address = Address::from_str(contract_address).unwrap();
 
@@ -30,7 +31,7 @@ impl TestContext {
         }
 
         info!("Prove the test storage trie including the simple slots {slots:?}");
-        let proof = trie.prove_length(&contract_address, self.params());
+        let proof = trie.prove_length(&contract_address, variable_slot, self.params());
 
         // Check the public inputs.
         let pi = PublicInputs::from_slice(&proof.proof().public_inputs);

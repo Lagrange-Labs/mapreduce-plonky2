@@ -37,6 +37,7 @@ struct ProvingContext<'a> {
     contract_address: &'a Address,
     params: &'a PublicParameters,
     slots: &'a HashMap<RawNode, StorageSlot>,
+    variable_slot: Option<u8>,
 }
 
 impl<'a> ProvingContext<'a> {
@@ -45,11 +46,13 @@ impl<'a> ProvingContext<'a> {
         contract_address: &'a Address,
         params: &'a PublicParameters,
         slots: &'a HashMap<RawNode, StorageSlot>,
+        variable_slot: Option<u8>,
     ) -> Self {
         Self {
             contract_address,
             params,
             slots,
+            variable_slot,
         }
     }
 
@@ -234,7 +237,7 @@ impl TrieNode {
         assert_eq!(self.children.len(), 0);
 
         let node = self.raw.clone();
-        let variable_slot = 0xfa;
+        let variable_slot = ctx.variable_slot.unwrap();
 
         // Find the storage slot for this leaf node.
         let slot = ctx.slots.get(&node).unwrap();
@@ -374,9 +377,10 @@ impl TestStorageTrie {
     pub(crate) fn prove_length(
         &self,
         contract_address: &Address,
+        variable_slot: u8,
         params: &PublicParameters,
     ) -> ProofWithVK {
-        let ctx = ProvingContext::new(contract_address, params, &self.slots);
+        let ctx = ProvingContext::new(contract_address, params, &self.slots, Some(variable_slot));
 
         // Must prove with 1 slot at least.
         let proof = self.root.as_ref().unwrap().prove_length(ctx);
@@ -390,7 +394,7 @@ impl TestStorageTrie {
         contract_address: &Address,
         params: &PublicParameters,
     ) -> ProofWithVK {
-        let ctx = ProvingContext::new(contract_address, params, &self.slots);
+        let ctx = ProvingContext::new(contract_address, params, &self.slots, None);
 
         // Must prove with 1 slot at least.
         let proof = self.root.as_ref().unwrap().prove_value(ctx);

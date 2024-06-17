@@ -116,7 +116,8 @@ async fn prove_length_extraction(ctx: &TestContext) -> ProofWithVK {
     // Pudgy Penguins simple slots:
     // slot-8: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/extensions/ERC721Enumerable.sol#L21>
     const TEST_SLOTS: [u8; 1] = [8];
+    const VARIABLE_SLOT: u8 = 0xfa;
 
-    ctx.prove_length_extraction(PUDGY_PENGUINS_ADDRESS, &TEST_SLOTS)
+    ctx.prove_length_extraction(PUDGY_PENGUINS_ADDRESS, &TEST_SLOTS, VARIABLE_SLOT)
         .await
 }
