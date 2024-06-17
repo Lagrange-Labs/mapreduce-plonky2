@@ -14,5 +14,6 @@ pub const MAX_EXTENSION_NODE_LEN_PADDED: usize = PAD_LEN(69);
 pub const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
 
 pub mod api;
+pub mod contract_extraction;
 pub mod length_extraction;
 pub mod values_extraction;
