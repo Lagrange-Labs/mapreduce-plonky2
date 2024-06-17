@@ -128,7 +128,7 @@ mod tests {
         array::ToField,
         group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,
-        mpt_sequential::utils::bytes_to_nibbles,
+        mpt_sequential::{mpt_key_ptr, utils::bytes_to_nibbles},
         rlp::MAX_KEY_NIBBLE_LEN,
         types::PACKED_ADDRESS_LEN,
         utils::{convert_u8_to_u32_slice, keccak256, Fieldable, ToFields},
@@ -174,14 +174,6 @@ mod tests {
     fn test_contract_extraction_branch_circuit() {
         const NODE_LEN: usize = 100;
 
-        // Closure to calculate the MPT key pointer.
-        let compute_mpt_key_ptr = |leaf: &[u8]| {
-            let tuple: Vec<Vec<u8>> = rlp::decode_list(leaf);
-            let partial_nibbles = Nibbles::from_compact(&tuple[0]);
-            let partial_key_len = partial_nibbles.nibbles().len();
-            MAX_KEY_NIBBLE_LEN - 1 - partial_key_len
-        };
-
         // We need to create a trie that for sure contains a branch node:
         // We insert two values under two keys which only differ by their last nibble/byte
         // Normally, the trie should look like:
@@ -204,7 +196,8 @@ mod tests {
         let nodes = trie.get_proof(&key2).unwrap();
         assert_eq!(nodes.len(), 3);
         let leaf = nodes.last().unwrap();
-        let ptr = compute_mpt_key_ptr(leaf);
+        let tuple: Vec<Vec<u8>> = rlp::decode_list(leaf);
+        let ptr = mpt_key_ptr(&tuple[0]);
         let branch = nodes[1].clone();
         assert!(rlp::decode_list::<Vec<u8>>(&branch).len() == 17);
 
