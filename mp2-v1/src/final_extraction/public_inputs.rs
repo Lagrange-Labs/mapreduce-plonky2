@@ -178,9 +178,9 @@ mod tests {
         let exp_pi = &exp_pi.to_vec();
         assert_eq!(exp_pi.len(), PublicInputs::<Target>::TOTAL_LEN);
 
-        //let test_circuit = TestPICircuit { exp_pi };
-        //let proof = run_circuit::<F, D, C, _>(test_circuit);
+        let test_circuit = TestPICircuit { exp_pi };
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
 
-        //assert_eq!(&proof.public_inputs, exp_pi);
+        assert_eq!(&proof.public_inputs, exp_pi);
     }
 }
