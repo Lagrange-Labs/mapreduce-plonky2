@@ -30,6 +30,7 @@ pub use curve_add::add_curve_point;
 /// Field-to-curve and curve point addition functions
 pub use field_to_curve::map_to_curve_point;
 
+use crate::utils::ToTargets;
 use crate::{
     types::{GFp, GFp5},
     utils::{FromFields, FromTargets, ToFields},
@@ -98,8 +99,26 @@ impl FromTargets for CurveTarget {
     }
 }
 
+impl ToTargets for CurveTarget {
+    fn to_targets(&self) -> Vec<Target> {
+        let mut x = self.0 .0[0].to_targets();
+        let mut y = self.0 .0[1].to_targets();
+        let mut is_inf = self.0 .1.target;
+        x.append(&mut y);
+        x.push(is_inf);
+        x
+    }
+}
+
+impl ToTargets for QuinticExtensionTarget {
+    fn to_targets(&self) -> Vec<Target> {
+        self.0.to_vec()
+    }
+}
+
 impl FromFields<GFp> for WeierstrassPoint {
     fn from_fields(t: &[GFp]) -> Self {
+        let q = GoldilocksField::from_canonical_u16(14);
         let x = std::array::from_fn::<_, EXTENSION_DEGREE, _>(|i| t[i]);
         let y = std::array::from_fn::<_, EXTENSION_DEGREE, _>(|i| t[i + EXTENSION_DEGREE]);
         let is_inf = t[EXTENSION_DEGREE * 2] == GFp::ONE;
@@ -112,16 +131,23 @@ impl FromFields<GFp> for WeierstrassPoint {
     }
 }
 
-impl ToFields for WeierstrassPoint {
-    fn to_fields<F>(&self) -> Vec<F> {
+// problem with regular ToField is the generic was in the
+// function so we couldn't implement that function specifically
+// for goldilock
+pub trait ToFields2<F> {
+    fn to_fields(&self) -> Vec<F>;
+}
+
+impl ToFields2<GoldilocksField> for WeierstrassPoint {
+    fn to_fields(&self) -> Vec<GoldilocksField> {
         let mut v = vec![];
         v.extend_from_slice(&self.x.0);
         v.extend_from_slice(&self.y.0);
-        let v = GoldilocksField::ONE;
         v.push(match self.is_inf {
-            true => F::ONE,
-            false => F::ZERO,
+            true => GoldilocksField::ONE,
+            false => GoldilocksField::ZERO,
         });
         v
     }
 }
+

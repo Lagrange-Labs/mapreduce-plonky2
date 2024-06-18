@@ -350,6 +350,10 @@ pub trait FromTargets {
     fn from_targets(t: &[Target]) -> Self;
 }
 
+pub trait ToTargets {
+    fn to_targets(&self) -> Vec<Target>;
+}
+
 pub trait FromFields<F> {
     fn from_fields(t: &[F]) -> Self;
 }
