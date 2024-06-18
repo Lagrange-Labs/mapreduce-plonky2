@@ -346,6 +346,13 @@ impl Fieldable for u32 {
         F::from_canonical_u32(*self)
     }
 }
+pub trait FromTargets {
+    fn from_targets(t: &[Target]) -> Self;
+}
+
+pub trait FromFields<F> {
+    fn from_fields(t: &[F]) -> Self;
+}
 
 pub trait Packer {
     type T;
