@@ -35,6 +35,7 @@ pub mod serialization;
 pub mod storage_key;
 pub mod types;
 pub mod utils;
+pub mod u256;
 
 pub const D: usize = 2;
 pub type C = PoseidonGoldilocksConfig;
