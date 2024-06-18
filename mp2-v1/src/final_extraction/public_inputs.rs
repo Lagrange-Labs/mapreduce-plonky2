@@ -65,18 +65,14 @@ impl<'a> PublicInputs<'a, GFp> {
     }
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl<'a, T> PublicInputs<'a, T> {
     /// Create a new public inputs.
-    pub fn new(
-        h: &'a [Target],
-        ph: &'a [Target],
-        dv: &'a [Target],
-        dm: &'a [Target],
-        bn: &'a [Target],
-    ) -> Self {
+    pub fn new(h: &'a [T], ph: &'a [T], dv: &'a [T], dm: &'a [T], bn: &'a [T]) -> Self {
         Self { h, ph, dv, dm, bn }
     }
+}
 
+impl<'a> PublicInputs<'a, Target> {
     /// Get the blockchain block hash corresponding to the values extracted
     pub fn block_hash(&self) -> OutputHash {
         let hash = self.h;
@@ -165,7 +161,6 @@ mod tests {
             pw.set_target_arr(&wires, self.exp_pi);
         }
     }
-    use mp2_common::group_hashing::ToFields2;
 
     #[test]
     fn test_contract_extraction_public_inputs() {
@@ -173,13 +168,13 @@ mod tests {
 
         let o = GFp::ONE;
         // Prepare the public inputs.
-        let h = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
-        let ph = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
-        let dm = &Point::sample(&mut rng).to_weierstrass().to_fields();
-        let dv = &Point::sample(&mut rng).to_weierstrass().to_fields();
+        let h = random_vector::<u32>(PACKED_HASH_LEN).to_fields();
+        let ph = random_vector::<u32>(PACKED_HASH_LEN).to_fields();
+        let dm = Point::sample(&mut rng).to_weierstrass().to_fields();
+        let dv = Point::sample(&mut rng).to_weierstrass().to_fields();
         // block number as u256
         let bn = &random_vector::<u32>(8).to_fields();
-        let exp_pi = PublicInputs { h, ph, dm, dv, bn };
+        let exp_pi = PublicInputs::new(&h, &ph, &dv, &dm, &bn);
         let exp_pi = &exp_pi.to_vec();
         assert_eq!(exp_pi.len(), PublicInputs::<Target>::TOTAL_LEN);
 

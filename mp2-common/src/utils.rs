@@ -305,44 +305,43 @@ pub fn pack_and_compute_poseidon_target<F: RichField + Extendable<D>, const D: u
     b.hash_n_to_hash_no_pad::<PoseidonHash>(packed)
 }
 
-// TODO move that to a vec/array specific module?
-pub trait ToFields {
-    fn to_fields<F: RichField>(&self) -> Vec<F>;
+pub trait ToFields<F: RichField> {
+    fn to_fields(&self) -> Vec<F>;
 }
 
-impl ToFields for &[u8] {
-    fn to_fields<F: RichField>(&self) -> Vec<F> {
+impl<F: RichField> ToFields<F> for &[u8] {
+    fn to_fields(&self) -> Vec<F> {
         self.iter().map(|x| F::from_canonical_u8(*x)).collect()
     }
 }
-impl ToFields for &[u32] {
-    fn to_fields<F: RichField>(&self) -> Vec<F> {
+impl<F: RichField> ToFields<F> for &[u32] {
+    fn to_fields(&self) -> Vec<F> {
         self.iter().map(|x| F::from_canonical_u32(*x)).collect()
     }
 }
-pub trait Fieldable {
-    fn to_field<F: RichField>(&self) -> F;
+pub trait Fieldable<F: RichField> {
+    fn to_field(&self) -> F;
 }
 
-impl Fieldable for u8 {
-    fn to_field<F: RichField>(&self) -> F {
+impl<F: RichField> Fieldable<F> for u8 {
+    fn to_field(&self) -> F {
         F::from_canonical_u8(*self)
     }
 }
-impl<T: Fieldable> ToFields for Vec<T> {
-    fn to_fields<F: RichField>(&self) -> Vec<F> {
+impl<F: RichField, T: Fieldable<F>> ToFields<F> for Vec<T> {
+    fn to_fields(&self) -> Vec<F> {
         self.iter().map(|x| x.to_field()).collect()
     }
 }
 
-impl<const N: usize, T: Fieldable> ToFields for [T; N] {
-    fn to_fields<F: RichField>(&self) -> Vec<F> {
+impl<F: RichField, const N: usize, T: Fieldable<F>> ToFields<F> for [T; N] {
+    fn to_fields(&self) -> Vec<F> {
         self.iter().map(|x| x.to_field()).collect()
     }
 }
 
-impl Fieldable for u32 {
-    fn to_field<F: RichField>(&self) -> F {
+impl<F: RichField> Fieldable<F> for u32 {
+    fn to_field(&self) -> F {
         F::from_canonical_u32(*self)
     }
 }

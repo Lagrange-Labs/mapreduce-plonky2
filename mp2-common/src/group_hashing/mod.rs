@@ -131,14 +131,7 @@ impl FromFields<GFp> for WeierstrassPoint {
     }
 }
 
-// problem with regular ToField is the generic was in the
-// function so we couldn't implement that function specifically
-// for goldilock
-pub trait ToFields2<F> {
-    fn to_fields(&self) -> Vec<F>;
-}
-
-impl ToFields2<GoldilocksField> for WeierstrassPoint {
+impl ToFields<GoldilocksField> for WeierstrassPoint {
     fn to_fields(&self) -> Vec<GoldilocksField> {
         let mut v = vec![];
         v.extend_from_slice(&self.x.0);
@@ -150,4 +143,3 @@ impl ToFields2<GoldilocksField> for WeierstrassPoint {
         v
     }
 }
-
