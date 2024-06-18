@@ -71,7 +71,7 @@ async fn prove_single_values_extraction(ctx: &TestContext) -> ProofWithVK {
 /// Test the database creation for length extraction.
 #[tokio::test]
 #[serial]
-async fn test_db_creation_for_leaf_extraction() {
+async fn test_db_creation_for_length_extraction() {
     info!("Start to test Database Creation for length extraction");
 
     // Initialize the test context.
