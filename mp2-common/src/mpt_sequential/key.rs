@@ -2,6 +2,7 @@
 
 use crate::{array::Array, keccak::PACKED_HASH_LEN, rlp::MAX_KEY_NIBBLE_LEN};
 use core::array::from_fn as create_array;
+use eth_trie::Nibbles;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -13,6 +14,12 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use serde::{Deserialize, Serialize};
+
+/// Calculate the pointer from the MPT key.
+pub fn mpt_key_ptr(mpt_key: &[u8]) -> usize {
+    let nibbles = Nibbles::from_compact(mpt_key);
+    MAX_KEY_NIBBLE_LEN - 1 - nibbles.nibbles().len()
+}
 
 /// A structure that keeps a running pointer to the portion of the key the circuit
 /// already has proven.
