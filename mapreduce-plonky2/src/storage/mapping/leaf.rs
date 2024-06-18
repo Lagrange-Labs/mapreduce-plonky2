@@ -101,7 +101,6 @@ where
             .into_vec(value_len)
             .normalize_left::<_, _, MAPPING_LEAF_VALUE_LEN>(b);
 
-
         // Then creates the initial accumulator from the (mapping_key, value)
         let mut inputs = [b.zero(); MAPPING_INPUT_TOTAL_LEN];
         inputs[0..MAPPING_KEY_LEN].copy_from_slice(&mapping_slot_wires.mapping_key.arr);
@@ -181,10 +180,16 @@ mod test {
     use crate::storage::lpn::leaf_digest_for_mapping;
     use crate::utils::keccak256;
     use eth_trie::{Nibbles, Trie};
-    use ethers::{providers::{Http, Provider}, types::Address};
+    use ethers::{
+        providers::{Http, Provider},
+        types::Address,
+    };
     use mp2_common::eth::ProofQuery;
     use mp2_test::{
-        circuit::{run_circuit, UserCircuit}, eth::get_holesky_url, mpt_sequential::generate_random_storage_mpt, utils::random_vector
+        circuit::{run_circuit, UserCircuit},
+        eth::get_holesky_url,
+        mpt_sequential::generate_random_storage_mpt,
+        utils::random_vector,
     };
     use plonky2::iop::target::Target;
     use plonky2::iop::witness::PartialWitness;
@@ -199,7 +204,7 @@ mod test {
     use crate::utils::convert_u8_to_u32_slice;
     use plonky2::field::types::Field;
     use std::str::FromStr;
-    
+
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;

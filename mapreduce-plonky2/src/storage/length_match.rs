@@ -13,6 +13,7 @@ use crate::{
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
 };
 use anyhow::Result;
+use mp2_common::serialization::{deserialize, serialize};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     iop::{
@@ -27,11 +28,8 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
-use recursion_framework::{
-    framework::{
-        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
-    },
-    serialization::{deserialize, serialize},
+use recursion_framework::framework::{
+    RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
 };
 use serde::{Deserialize, Serialize};
 use std::array;

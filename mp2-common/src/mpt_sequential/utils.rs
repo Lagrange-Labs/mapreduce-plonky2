@@ -42,7 +42,6 @@ pub fn left_pad_leaf_value<
     b: &mut CircuitBuilder<F, D>,
     value: &Array<Target, VALUE_LEN>,
 ) -> Array<Target, PADDED_LEN> {
-
     // Read the length of the relevant data (RLP header - 0x80)
     let zero = b.zero();
     let one = b.one();

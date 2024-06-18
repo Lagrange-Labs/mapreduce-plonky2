@@ -28,8 +28,8 @@ use plonky2::{
     },
 };
 
+use mp2_common::serialization::{deserialize, serialize};
 pub use public_inputs::BlockLinkingInputs;
-use recursion_framework::serialization::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 
 use self::block::SEPOLIA_NUMBER_LEN;

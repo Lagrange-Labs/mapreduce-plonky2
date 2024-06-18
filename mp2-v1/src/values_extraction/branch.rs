@@ -2,6 +2,7 @@
 
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use anyhow::Result;
+use mp2_common::serialization::{deserialize, serialize};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
@@ -22,10 +23,7 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
-use recursion_framework::{
-    circuit_builder::CircuitLogicWires,
-    serialization::{deserialize, serialize},
-};
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::array;
 

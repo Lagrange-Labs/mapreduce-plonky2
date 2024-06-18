@@ -13,6 +13,9 @@ use crate::{
 };
 use anyhow::Result;
 use ethers::types::H160;
+use mp2_common::serialization::{
+    circuit_data_serialization::SerializableRichField, deserialize, serialize,
+};
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -24,8 +27,6 @@ use plonky2::{
     },
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use recursion_framework::serialization::circuit_data_serialization::SerializableRichField;
-use recursion_framework::serialization::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 use std::array::{self};
 

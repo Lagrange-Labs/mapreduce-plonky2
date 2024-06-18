@@ -3,6 +3,7 @@
 
 use std::iter;
 
+use mp2_common::serialization::{deserialize, serialize};
 use plonky2::{
     field::extension::Extendable,
     hash::{hash_types::RichField, poseidon::PoseidonHash},
@@ -13,10 +14,7 @@ use plonky2::{
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
-use recursion_framework::{
-    circuit_builder::CircuitLogicWires,
-    serialization::{deserialize, serialize},
-};
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::{

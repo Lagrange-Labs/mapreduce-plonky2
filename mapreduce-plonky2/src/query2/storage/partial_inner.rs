@@ -1,5 +1,6 @@
 //! Mechanism for partially-recomputed inner node, i.e. only one child proof needs to be recomputed
 
+use mp2_common::serialization::{deserialize, serialize};
 use plonky2::{
     field::goldilocks_field::GoldilocksField,
     hash::hash_types::{HashOut, HashOutTarget},
@@ -9,10 +10,7 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use recursion_framework::{
-    circuit_builder::CircuitLogicWires,
-    serialization::{deserialize, serialize},
-};
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::poseidon::hash_maybe_swap;

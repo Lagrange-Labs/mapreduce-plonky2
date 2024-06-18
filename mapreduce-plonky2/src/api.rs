@@ -1,14 +1,14 @@
 use anyhow::Result;
+use mp2_common::serialization::{
+    circuit_data_serialization::SerializableRichField, deserialize, serialize,
+};
 use plonky2::plonk::{
     circuit_builder::CircuitBuilder,
     circuit_data::{CircuitConfig, VerifierCircuitData, VerifierOnlyCircuitData},
     config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig},
     proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
 };
-use recursion_framework::{
-    framework::RecursiveCircuits,
-    serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize},
-};
+use recursion_framework::framework::RecursiveCircuits;
 use serde::{Deserialize, Serialize};
 
 pub use crate::storage::{

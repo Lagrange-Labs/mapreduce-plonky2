@@ -6,7 +6,10 @@ use mp2_common::{
     array::Vector,
     group_hashing::CircuitBuilderGroupHashing,
     keccak::PACKED_HASH_LEN,
-    mpt_sequential::{utils::left_pad_leaf_value, MPTLeafOrExtensionNode, MPTLeafOrExtensionWires, MAX_LEAF_VALUE_LEN},
+    mpt_sequential::{
+        utils::left_pad_leaf_value, MPTLeafOrExtensionNode, MPTLeafOrExtensionWires,
+        MAX_LEAF_VALUE_LEN,
+    },
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp},
@@ -97,9 +100,10 @@ impl LeafLengthCircuit {
         >(cb, &length_slot.mpt_key);
 
         // extract the rlp encoded value
-        let length_rlp_encoded = left_pad_leaf_value::<GFp,D,MAX_LEAF_VALUE_LEN,4>(cb, &length_mpt.value)
-            .reverse()
-            .convert_u8_to_u32(cb)[0];
+        let length_rlp_encoded =
+            left_pad_leaf_value::<GFp, D, MAX_LEAF_VALUE_LEN, 4>(cb, &length_mpt.value)
+                .reverse()
+                .convert_u8_to_u32(cb)[0];
 
         let dm = &cb.map_to_curve_point(&[length_slot.slot, variable_slot]);
         let h = &array::from_fn::<_, PACKED_HASH_LEN, _>(|i| length_mpt.root.output_array.arr[i].0);

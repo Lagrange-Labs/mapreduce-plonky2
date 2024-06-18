@@ -3,6 +3,7 @@ use std::iter;
 
 use ethers::types::Address;
 use itertools::Itertools;
+use mp2_common::serialization::{deserialize, serialize};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{
@@ -23,7 +24,6 @@ use recursion_framework::{
     framework::{
         RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
     },
-    serialization::{deserialize, serialize},
 };
 use serde::{Deserialize, Serialize};
 

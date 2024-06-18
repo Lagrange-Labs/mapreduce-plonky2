@@ -16,6 +16,10 @@ use crate::{
     utils::{convert_u8_to_u32_slice, hash_two_to_one},
 };
 use anyhow::Result;
+use mp2_common::serialization::{
+    circuit_data_serialization::SerializableRichField, deserialize, deserialize_array, serialize,
+    serialize_array,
+};
 use plonky2::{
     field::{extension::Extendable, goldilocks_field::GoldilocksField, types::Field},
     hash::{
@@ -42,10 +46,6 @@ use recursion_framework::{
     framework::{
         prepare_recursive_circuit_for_circuit_set, RecursiveCircuits,
         RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
-    },
-    serialization::{
-        circuit_data_serialization::SerializableRichField, deserialize, deserialize_array,
-        serialize, serialize_array,
     },
 };
 use serde::{Deserialize, Serialize};

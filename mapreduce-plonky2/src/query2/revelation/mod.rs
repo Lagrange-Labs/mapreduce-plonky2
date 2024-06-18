@@ -1,9 +1,7 @@
 use anyhow::Result;
-use recursion_framework::{
-    framework::{
-        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
-    },
-    serialization::{deserialize, serialize},
+use mp2_common::serialization::{deserialize, serialize};
+use recursion_framework::framework::{
+    RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
 };
 use serde::{Deserialize, Serialize};
 use std::{array::from_fn as create_array, collections::BTreeMap};
