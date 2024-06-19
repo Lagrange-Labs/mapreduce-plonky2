@@ -5,7 +5,7 @@ use mp2_common::{
     mpt_sequential::utils::visit_proof,
     rlp::MAX_KEY_NIBBLE_LEN,
     types::GFp,
-    utils::convert_u8_to_u32_slice,
+    utils::{BytesPacker, ToFields},
     D,
 };
 use mp2_test::circuit::{prove_circuit, setup_circuit};
@@ -17,7 +17,7 @@ use crate::{
     MAX_BRANCH_NODE_LEN,
 };
 
-use super::{LeafLengthCircuit, PublicInputs};
+use super::{api::compute_metadata_digest, LeafLengthCircuit, PublicInputs};
 
 #[test]
 fn prove_and_verify_length_extraction_circuit_for_pudgy() {
@@ -44,10 +44,7 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
     let leaf_proof = prove_circuit(&setup_leaf, &leaf_circuit);
     let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
     let length = GFp::from_canonical_u32(length);
-    let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-        .into_iter()
-        .map(GFp::from_canonical_u32)
-        .collect();
+    let root: Vec<_> = keccak256(&node).pack_le().to_fields();
 
     assert_eq!(leaf_pi.length(), &length);
     assert_eq!(leaf_pi.root_hash(), &root);
@@ -68,11 +65,7 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
         };
         let branch_proof = prove_circuit(&setup_branch, &branch_circuit);
         let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
-        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(node))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
-
+        let root: Vec<_> = keccak256(node).pack_le().to_fields();
         assert_eq!(branch_pi.length(), &length);
         assert_eq!(branch_pi.root_hash(), &root);
         assert_eq!(branch_pi.metadata_point(), dm);
@@ -129,11 +122,7 @@ impl PudgyState {
 
         // arbitrary data
         let variable_slot = 0xfe;
-        let dm = mp2_common::group_hashing::map_to_curve_point(&[
-            GFp::from_canonical_u8(slot),
-            GFp::from_canonical_u8(variable_slot),
-        ])
-        .to_weierstrass();
+        let dm = compute_metadata_digest(slot, variable_slot).to_weierstrass();
 
         Self {
             eip,
@@ -178,8 +167,7 @@ impl PudgyState {
 
         // reverse big endian EVM to little endian
         let slice = left_pad::<4>(&slice);
-        let computed_length =
-            convert_u8_to_u32_slice(&slice.into_iter().rev().collect::<Vec<u8>>())[0];
+        let computed_length = slice.pack_be()[0];
         assert_eq!(computed_length, pudgy.length);
 
         // extractd from test_pudgy_pinguins_slot

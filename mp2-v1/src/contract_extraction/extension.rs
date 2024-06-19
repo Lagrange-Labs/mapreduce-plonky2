@@ -46,7 +46,7 @@ impl ExtensionCircuit {
         let new_mpt_key = wires.key;
 
         // Constrain the extracted hash is the one exposed by the proof.
-        let packed_hash = wires.value.convert_u8_to_u32(b);
+        let packed_hash = wires.value.convert_u8_to_u32_le(b);
         let given_hash = child_proof.root_hash();
         packed_hash.enforce_equal(b, &given_hash);
 
@@ -94,14 +94,14 @@ impl CircuitLogicWires<F, D, 1> for ExtensionWires {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use eth_trie::{EthTrie, MemoryDB, Trie};
     use mp2_common::{
         group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,
         mpt_sequential::mpt_key_ptr,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::PACKED_ADDRESS_LEN,
-        utils::{convert_u8_to_u32_slice, keccak256, Fieldable, ToFields},
+        utils::{keccak256, BytesPacker, Fieldable, ToFields},
         C,
     };
     use mp2_test::{
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(root_rlp.len(), 2);
 
         // Prepare the public inputs for the extension node circuit.
-        let h = &convert_u8_to_u32_slice(&keccak256(&proof[1])).to_fields();
+        let h = &keccak256(&proof[1]).pack_le().to_fields();
         let dm = map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
             .to_weierstrass();
         let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
@@ -183,7 +183,7 @@ mod tests {
 
         // Check packed block hash
         {
-            let hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
+            let hash = keccak256(&node).pack_le().to_fields();
             assert_eq!(pi.h, hash);
         }
         // Check metadata digest

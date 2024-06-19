@@ -95,9 +95,9 @@ where
         // Register the public inputs.
         let h = root.output_array.to_targets().arr;
         // Compute the metadata digest - `D(pack_u32(contract_address))`.
-        let packed_contract_address = contract_address.convert_u8_to_u32(b).to_targets().arr;
+        let packed_contract_address = contract_address.convert_u8_to_u32_le(b).to_targets().arr;
         let dm = b.map_to_curve_point(&packed_contract_address);
-        let s = storage_root.convert_u8_to_u32(b).to_targets().arr;
+        let s = storage_root.convert_u8_to_u32_le(b).to_targets().arr;
         PublicInputs::new(&h, &dm, &new_mpt_key.key.arr, &new_mpt_key.pointer, &s).register(b);
 
         LeafWires {
@@ -167,16 +167,16 @@ impl CircuitLogicWires<F, D, 0> for LeafWires<MAX_LEAF_NODE_LEN> {
 
 #[cfg(test)]
 mod tests {
+    use crate::contract_extraction::compute_metadata_digest;
+
     use super::*;
-    use eth_trie::{Nibbles, Trie};
+    use eth_trie::Trie;
     use ethers::types::Address;
     use mp2_common::{
-        group_hashing::map_to_curve_point,
         keccak::HASH_LEN,
         mpt_sequential::{mpt_key_ptr, utils::bytes_to_nibbles},
-        rlp::MAX_KEY_NIBBLE_LEN,
         types::MAPPING_LEAF_VALUE_LEN,
-        utils::{convert_u8_to_u32_slice, keccak256},
+        utils::{keccak256, BytesPacker, ToFields},
         C,
     };
     use mp2_test::{
@@ -234,22 +234,12 @@ mod tests {
 
         // Check packed block hash
         {
-            let exp_block_hash = keccak256(&node);
-            let exp_block_hash: Vec<_> = convert_u8_to_u32_slice(&exp_block_hash)
-                .into_iter()
-                .map(F::from_canonical_u32)
-                .collect();
-
+            let exp_block_hash = keccak256(&node).pack_le().to_fields();
             assert_eq!(pi.h, exp_block_hash);
         }
         // Check metadata digest
         {
-            let packed_contract_address: Vec<_> = convert_u8_to_u32_slice(&contract_address.0)
-                .into_iter()
-                .map(F::from_canonical_u32)
-                .collect();
-
-            let exp_digest = map_to_curve_point(&packed_contract_address);
+            let exp_digest = compute_metadata_digest(contract_address);
             assert_eq!(pi.metadata_point(), exp_digest.to_weierstrass());
         }
         // Check MPT key and pointer
@@ -269,10 +259,7 @@ mod tests {
         }
         // Check packed storage root hash
         {
-            let exp_storage_root_hash: Vec<_> = convert_u8_to_u32_slice(storage_root)
-                .into_iter()
-                .map(F::from_canonical_u32)
-                .collect();
+            let exp_storage_root_hash: Vec<_> = storage_root.pack_le().to_fields();
 
             assert_eq!(pi.s, exp_storage_root_hash);
         }

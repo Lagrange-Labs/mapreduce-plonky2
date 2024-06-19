@@ -46,7 +46,7 @@ impl ExtensionNodeCircuit {
         let root = wires.root;
 
         // Constrain the extracted hash is the one exposed by the proof.
-        let packed_child_hash = wires.value.convert_u8_to_u32(b);
+        let packed_child_hash = wires.value.convert_u8_to_u32_le(b);
         let given_child_hash = child_proof.root_hash();
         packed_child_hash.enforce_equal(b, &given_child_hash);
 
@@ -101,7 +101,7 @@ mod tests {
     use mp2_common::{
         group_hashing::map_to_curve_point,
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{convert_u8_to_u32_slice, keccak256},
+        utils::{keccak256, BytesPacker},
         C, D, F,
     };
     use mp2_test::{
@@ -109,7 +109,7 @@ mod tests {
         utils::random_vector,
     };
     use plonky2::{
-        field::{goldilocks_field::GoldilocksField, types::Field},
+        field::types::Field,
         iop::{target::Target, witness::WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder,
@@ -117,7 +117,7 @@ mod tests {
         },
     };
     use rand::{thread_rng, Rng};
-    use std::{panic, sync::Arc};
+    use std::sync::Arc;
 
     #[derive(Clone, Debug)]
     struct TestExtensionNodeCircuit<'a> {
@@ -183,7 +183,7 @@ mod tests {
         let key = random_vector(64);
         let ptr = 63;
         // Hash the child of the extension node in packed mode.
-        let child_hash = convert_u8_to_u32_slice(&keccak256(&proof[1]));
+        let child_hash = keccak256(&proof[1]).pack_le();
         let n = 15;
         let exp_pi = new_extraction_public_inputs(
             &child_hash,
@@ -217,8 +217,7 @@ mod tests {
         let pi = PublicInputs::new(&proof.public_inputs);
 
         {
-            let exp_hash = keccak256(&node);
-            let exp_hash = convert_u8_to_u32_slice(&exp_hash);
+            let exp_hash = keccak256(&node).pack_le();
             assert_eq!(pi.root_hash(), exp_hash);
         }
         {

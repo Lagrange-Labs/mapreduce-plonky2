@@ -13,7 +13,6 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp},
-    utils::less_than,
     D,
 };
 use plonky2::{
@@ -84,9 +83,6 @@ impl LeafLengthCircuit {
 
     /// Build the circuit, assigning the public inputs and returning the internal wires.
     pub fn build(cb: &mut CBuilder) -> LeafLengthWires {
-        let zero = cb.zero();
-        let one = cb.one();
-
         // we don't range check the variable and length slots as they are part of the DM public
         // commitment
         let variable_slot = cb.add_virtual_target();
@@ -102,8 +98,7 @@ impl LeafLengthCircuit {
         // extract the rlp encoded value
         let length_rlp_encoded =
             left_pad_leaf_value::<GFp, D, MAX_LEAF_VALUE_LEN, 4>(cb, &length_mpt.value)
-                .reverse()
-                .convert_u8_to_u32(cb)[0];
+                .convert_u8_to_u32_be(cb)[0];
 
         let dm = &cb.map_to_curve_point(&[length_slot.slot, variable_slot]);
         let h = &array::from_fn::<_, PACKED_HASH_LEN, _>(|i| length_mpt.root.output_array.arr[i].0);
@@ -143,10 +138,9 @@ pub mod tests {
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
-        group_hashing::map_to_curve_point,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::{CBuilder, GFp},
-        utils::{convert_u8_to_u32_slice, keccak256},
+        utils::{keccak256, BytesPacker, ToFields},
         D,
     };
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
@@ -155,7 +149,7 @@ pub mod tests {
     };
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
-    use crate::length_extraction::{LeafLengthCircuit, PublicInputs};
+    use crate::length_extraction::{api::compute_metadata_digest, LeafLengthCircuit, PublicInputs};
 
     use super::LeafLengthWires;
 
@@ -214,21 +208,14 @@ pub mod tests {
             }
 
             let length = GFp::from_canonical_u32(value);
-            let dm = map_to_curve_point(&[
-                GFp::from_canonical_u8(length_slot),
-                GFp::from_canonical_u8(variable_slot),
-            ])
-            .to_weierstrass();
+            let dm = compute_metadata_digest(length_slot, variable_slot).to_weierstrass();
 
             let node = proof.last().unwrap();
             let leaf_circuit = LeafLengthCircuit::new(length_slot, node.clone(), variable_slot);
             let leaf_proof = prove_circuit(&setup, &leaf_circuit);
             let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
 
-            let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-                .into_iter()
-                .map(GFp::from_canonical_u32)
-                .collect();
+            let root: Vec<_> = keccak256(&node).pack_le().to_fields();
 
             let rlp_headers: Vec<Vec<u8>> = rlp::decode_list(&node);
             let rlp_nibbles = Nibbles::from_compact(&rlp_headers[0]);

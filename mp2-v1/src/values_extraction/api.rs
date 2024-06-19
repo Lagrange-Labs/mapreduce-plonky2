@@ -390,30 +390,26 @@ impl PublicParameters {
 
 #[cfg(test)]
 mod tests {
+
     use super::{
         super::{
-            compute_leaf_mapping_key_id, compute_leaf_mapping_value_id, compute_leaf_single_id,
-            public_inputs,
-            tests::{
-                compute_leaf_mapping_metadata_digest, compute_leaf_mapping_values_digest,
-                compute_leaf_single_metadata_digest, compute_leaf_single_values_digest,
-            },
+            compute_leaf_mapping_key_id, compute_leaf_mapping_metadata_digest,
+            compute_leaf_mapping_value_id, compute_leaf_mapping_values_digest,
+            compute_leaf_single_id, compute_leaf_single_metadata_digest,
+            compute_leaf_single_values_digest, public_inputs,
         },
         *,
     };
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use ethers::types::Address;
     use mp2_common::{
-        eth::{left_pad32, StorageSlot},
-        group_hashing::map_to_curve_point,
+        eth::StorageSlot,
         mpt_sequential::utils::bytes_to_nibbles,
         types::{GFp, ADDRESS_LEN},
-        utils::convert_u8_to_u32_slice,
     };
     use mp2_test::{mpt_sequential::generate_random_storage_mpt, utils::random_vector};
     use plonky2::{field::types::Field, hash::poseidon::PoseidonHash, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{thread_rng, Rng};
     use serial_test::serial;
     use std::{str::FromStr, sync::Arc};
 
@@ -563,9 +559,6 @@ mod tests {
 
     fn test_apis(is_simple_aggregation: bool) {
         let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let id = compute_leaf_single_id(TEST_SLOT, &contract_address);
-        let key_id = compute_leaf_mapping_key_id(TEST_SLOT, &contract_address);
-        let value_id = compute_leaf_mapping_value_id(TEST_SLOT, &contract_address);
 
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(memdb.clone());

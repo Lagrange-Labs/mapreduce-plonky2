@@ -11,7 +11,7 @@ use crate::{
         decode_compact_encoding, decode_fixed_list, RlpHeader, RlpList, MAX_ITEMS_IN_LIST,
         MAX_KEY_NIBBLE_LEN,
     },
-    utils::{convert_u8_targets_to_u32, find_index_subvector, keccak256},
+    utils::{convert_u8_targets_to_u32_le, find_index_subvector, keccak256},
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
@@ -189,7 +189,7 @@ where
             let (new_key, extracted_child_hash, valid_node) =
                 Self::advance_key(b, &inputs.nodes[i].arr, &iterative_key);
             // transform hash from bytes to u32 targets (since this is the hash output format)
-            let extracted_hash_u32 = convert_u8_targets_to_u32(b, &extracted_child_hash.arr);
+            let extracted_hash_u32 = convert_u8_targets_to_u32_le(b, &extracted_child_hash.arr);
             let found_hash_in_parent = last_hash_output.equals(
                 b,
                 &Array::<U32Target, PACKED_HASH_LEN> {
@@ -426,7 +426,7 @@ mod test {
     use crate::keccak::{HASH_LEN, PACKED_HASH_LEN};
     use crate::rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN};
     use crate::types::MAPPING_LEAF_VALUE_LEN;
-    use crate::utils::convert_u8_targets_to_u32;
+    use crate::utils::convert_u8_targets_to_u32_le;
     use crate::{
         array::Array,
         utils::{find_index_subvector, keccak256},
@@ -469,7 +469,7 @@ mod test {
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let expected_root = Array::<Target, HASH_LEN>::new(c);
-            let packed_exp_root = convert_u8_targets_to_u32(c, &expected_root.arr);
+            let packed_exp_root = convert_u8_targets_to_u32_le(c, &expected_root.arr);
             let arr = Array::<U32Target, PACKED_HASH_LEN>::from_array(
                 packed_exp_root.try_into().unwrap(),
             );
@@ -982,7 +982,7 @@ mod test {
         let tt = b._true();
         let key_bytes = Array::<Target, HASH_LEN>::new(&mut b);
         let key_u32: Array<U32Target, PACKED_HASH_LEN> =
-            convert_u8_targets_to_u32(&mut b, &key_bytes.arr)
+            convert_u8_targets_to_u32_le(&mut b, &key_bytes.arr)
                 .into_iter()
                 .collect::<Vec<_>>()
                 .try_into()
