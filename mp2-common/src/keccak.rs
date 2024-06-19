@@ -34,7 +34,8 @@ pub const PACKED_HASH_LEN: usize = HASH_LEN / 4;
 /// of allocated wire one needs to reserve inside the circuit.
 pub const fn compute_size_with_padding(data_len: usize) -> usize {
     let input_len_bits = data_len * 8; // only pad the data that is inside the fixed buffer
-    let num_actual_blocks = 1 + input_len_bits / KECCAK256_R;
+    let should_pad = (input_len_bits != 0 && input_len_bits % KECCAK256_R != 0) as usize;
+    let num_actual_blocks = should_pad + input_len_bits / KECCAK256_R;
     let padded_len_bits = num_actual_blocks * KECCAK256_R;
     // reason why ^: this is annoying to do in circuit.
     ceil_div_usize(padded_len_bits, 8)
@@ -334,6 +335,17 @@ mod test {
         fn num_io() -> usize {
             8
         }
+    }
+
+    #[test]
+    fn padding_size_works() {
+        assert_eq!(compute_size_with_padding(0), 0);
+        assert_eq!(compute_size_with_padding(1), 136);
+        assert_eq!(compute_size_with_padding(136), 136);
+        assert_eq!(compute_size_with_padding(137), 272);
+        assert_eq!(compute_size_with_padding(271), 272);
+        assert_eq!(compute_size_with_padding(272), 272);
+        assert_eq!(compute_size_with_padding(273), 408);
     }
 
     #[test]
