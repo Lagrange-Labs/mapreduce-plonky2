@@ -59,7 +59,7 @@ pub type OutputByteHash = Array<Target, HASH_LEN>;
 /// of the array + padding to hash.
 #[derive(Clone, Debug)]
 pub struct KeccakCircuit<const N: usize> {
-    data: Vec<u8>,
+    pub data: Vec<u8>,
 }
 /// Wires containing the output of the hash function as well as the intermediate
 /// wires created. It requires assigning during proving time because of a small
@@ -78,14 +78,15 @@ pub struct ByteKeccakWires<const N: usize> {
 }
 
 impl<const N: usize> KeccakCircuit<N> {
+    /// Creates a new Keccak circuit.
+    ///
+    /// Assumes `data` to be padded.
     pub fn new(data: Vec<u8>) -> Result<Self> {
-        let total = compute_size_with_padding(data.len());
         ensure!(
-            total <= N,
-            "{} bytes can't fit in {} bytes with padding (data len {})",
-            total,
-            N,
+            data.len() <= N,
+            "{} bytes can't fit in {} bytes with padding",
             data.len(),
+            N,
         );
         // NOTE we don't pad anymore because we enforce that the resulting length is already a multiple
         // of 4 so it will fit the conversion to u32 and circuit vk would stay the same for different
@@ -96,6 +97,39 @@ impl<const N: usize> KeccakCircuit<N> {
         );
 
         Ok(Self { data })
+    }
+
+    /// Pads the provided input and creates a new instance.
+    pub fn new_unpadded(data: &[u8]) -> Result<Self> {
+        const CHUNK_LEN: usize = KECCAK256_R / 8;
+
+        let trimmed_len = data.len() / CHUNK_LEN;
+        let trimmed_len = trimmed_len * CHUNK_LEN;
+        let mut diff = trimmed_len + CHUNK_LEN - data.len();
+
+        if diff == 0 {
+            diff = CHUNK_LEN;
+        }
+
+        let data = if diff == 1 {
+            let mut padded = Vec::with_capacity(data.len() + 1);
+
+            padded.extend_from_slice(data);
+            padded.push(0x81);
+
+            padded
+        } else {
+            let mut padded = Vec::with_capacity(data.len() + diff);
+
+            padded.extend_from_slice(data);
+            padded.push(0x01);
+            padded.resize(data.len() + diff - 1, 0x00);
+            padded.push(0x80);
+
+            padded
+        };
+
+        Self::new(data)
     }
 
     /// Takes an array which is _already_ at the right padded length.
@@ -333,6 +367,25 @@ mod test {
         }
         fn num_io() -> usize {
             8
+        }
+    }
+
+    #[test]
+    fn keccak_padding_works() {
+        let cases = vec![
+            (0, 136),
+            (1, 136),
+            (135, 136),
+            (136, 272),
+            (271, 272),
+            (272, 408),
+        ];
+
+        for (d, x) in cases {
+            let c = KeccakCircuit::<408>::new_unpadded(&vec![0xfa; d]).unwrap();
+            let l = c.data.len();
+
+            assert_eq!(l, x);
         }
     }
 

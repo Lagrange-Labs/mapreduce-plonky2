@@ -1,3 +1,4 @@
+use ethers::utils::keccak256;
 use mp2_common::{
     types::{CBuilder, GFp},
     utils::convert_u8_to_u32_slice,
@@ -13,32 +14,32 @@ use super::{
     public_inputs::PublicInputs,
 };
 
-pub type SepoliaBlockCircuit = BlockCircuit<{ SepoliaBlockHeader::BLOCK_NUMBER_PAD }>;
+pub type SepoliaBlockCircuit = BlockCircuit<
+    { SepoliaBlockHeader::BLOCK_HEADER_RLP_MAX_LEN },
+    { SepoliaBlockHeader::BLOCK_NUMBER_PAD },
+>;
 
 #[test]
 fn prove_and_verify_block_extraction_circuit() {
     let setup = setup_circuit::<_, D, PoseidonGoldilocksConfig, SepoliaBlockCircuit>();
     let block = SepoliaBlockHeader::block_6139788();
-    let circuit = SepoliaBlockCircuit::new(block.rlp_headers.clone());
+    let circuit = SepoliaBlockCircuit::new(&block.rlp_headers).unwrap();
     let proof = prove_circuit(&setup, &circuit);
     let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
 
     assert_eq!(pi.prev_block_hash(), &block.prev_block_hash);
     assert_eq!(pi.block_hash(), &block.block_hash);
     assert_eq!(pi.state_root(), &block.state_root);
-    //assert_eq!(pi.block_number(), &block.block_number);
-    /*
-    let setup = setup_circuit::<_, D, PoseidonGoldilocksConfig, BlockCircuit>();
-    let (block, circuit) = SepoliaBlockHeader::circuit();
-    //let proof = prove_circuit(&setup, &leaf_circuit);
-    */
+    assert_eq!(pi.block_number(), &block.block_number);
 }
 
-impl<const BLOCK_NUMBER_PAD: usize> UserCircuit<GFp, D> for BlockCircuit<BLOCK_NUMBER_PAD> {
-    type Wires = BlockWires;
+impl<const BLOCK_HEADER_RLP_MAX_LEN: usize, const BLOCK_NUMBER_PAD: usize> UserCircuit<GFp, D>
+    for BlockCircuit<BLOCK_HEADER_RLP_MAX_LEN, BLOCK_NUMBER_PAD>
+{
+    type Wires = BlockWires<BLOCK_HEADER_RLP_MAX_LEN>;
 
     fn build(cb: &mut CBuilder) -> Self::Wires {
-        BlockCircuit::<BLOCK_NUMBER_PAD>::build(cb)
+        Self::build(cb)
     }
 
     fn prove(&self, pw: &mut PartialWitness<GFp>, wires: &Self::Wires) {
@@ -57,7 +58,8 @@ pub struct SepoliaBlockHeader {
 }
 
 impl SepoliaBlockHeader {
-    pub const BLOCK_NUMBER_PAD: usize = 4;
+    pub const BLOCK_NUMBER_PAD: usize = 3;
+    pub const BLOCK_HEADER_RLP_MAX_LEN: usize = 680;
 
     /// Returns the block header data for the block 6139788 (random arbitrary block).
     ///
@@ -165,21 +167,3 @@ impl SepoliaBlockHeader {
         }
     }
 }
-
-/*
-fn xxx() {
-    use ethers::providers::{Http, Middleware, Provider};
-    use mp2_common::eth::BlockUtil;
-
-    let url = "https://ethereum-sepolia-rpc.publicnode.com";
-    let provider = Provider::<Http>::try_from(url).unwrap();
-    let block_number = 6139788;
-    let block = provider.get_block(block_number).await.unwrap().unwrap();
-
-    let prev_block_hash = block.parent_hash.0.to_vec();
-    let block_hash = block.block_hash();
-    let block_number = block.number.unwrap().0[0];
-    let state_root = block.state_root.0.to_vec();
-    let rlp_headers = block.rlp();
-}
-*/

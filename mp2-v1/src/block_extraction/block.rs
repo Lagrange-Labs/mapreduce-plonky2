@@ -16,9 +16,6 @@ use serde::{Deserialize, Serialize};
 
 use super::public_inputs::PublicInputs;
 
-/// Length of the block RLP header.
-pub const BLOCK_HEADER_RLP_LEN: usize = 624;
-
 /// Parent hash offset in RLP encoded header.
 const HEADER_RLP_PARENT_HASH_OFFSET: usize = 4;
 
@@ -37,9 +34,9 @@ const HEADER_RLP_BLOCK_NUMBER_RLP_LENGTH_MAX: usize = 4;
 
 /// The wires structure for the block extraction.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BlockWires {
+pub struct BlockWires<const BLOCK_HEADER_RLP_MAX_LEN: usize> {
     /// Block hash.
-    pub(crate) bh: KeccakWires<BLOCK_HEADER_RLP_LEN>,
+    pub(crate) bh: KeccakWires<BLOCK_HEADER_RLP_MAX_LEN>,
 
     /// Previous block hash.
     pub(crate) prev_bh: OutputHash,
@@ -48,56 +45,60 @@ pub struct BlockWires {
     pub(crate) bn: U32Target,
 
     /// RLP encoded bytes of block header.
-    pub(crate) bh_rlp: VectorWire<Target, BLOCK_HEADER_RLP_LEN>,
+    pub(crate) rlp_headers: VectorWire<Target, BLOCK_HEADER_RLP_MAX_LEN>,
 }
 
 /// The circuit definition for the block extraction.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BlockCircuit<const BLOCK_NUMBER_PAD: usize> {
+pub struct BlockCircuit<const BLOCK_HEADER_RLP_MAX_LEN: usize, const BLOCK_NUMBER_PAD: usize> {
     /// RLP encoded bytes of block header.
-    bh_rlp: Vec<u8>,
+    pub rlp_headers: Vec<u8>,
 }
 
-impl<const BLOCK_NUMBER_PAD: usize> BlockCircuit<BLOCK_NUMBER_PAD> {
+impl<const BLOCK_HEADER_RLP_MAX_LEN: usize, const BLOCK_NUMBER_PAD: usize>
+    BlockCircuit<BLOCK_HEADER_RLP_MAX_LEN, BLOCK_NUMBER_PAD>
+{
     /// Creates a new instance of the circuit.
-    pub fn new(mut bh_rlp: Vec<u8>) -> Self {
+    pub fn new(rlp_headers: &[u8]) -> anyhow::Result<Self> {
         assert!(
             BLOCK_NUMBER_PAD <= HEADER_RLP_BLOCK_NUMBER_RLP_LENGTH_MAX,
             "the RLP block number len is not supported"
         );
 
-        Self { bh_rlp }
+        KeccakCircuit::<BLOCK_HEADER_RLP_MAX_LEN>::new_unpadded(rlp_headers).map(|c| Self {
+            rlp_headers: c.data,
+        })
     }
 
     /// Build the circuit, assigning the public inputs and returning the internal wires.
-    pub fn build(cb: &mut CBuilder) -> BlockWires {
+    pub fn build(cb: &mut CBuilder) -> BlockWires<BLOCK_HEADER_RLP_MAX_LEN> {
         let zero = cb.zero();
 
-        let bh_rlp = VectorWire::new(cb);
+        let rlp_headers = VectorWire::new(cb);
 
         // header must be bytes
-        bh_rlp.assert_bytes(cb);
+        rlp_headers.assert_bytes(cb);
 
         // extract the previous block hash from the RLP header
-        let prev_bh = &bh_rlp.arr.arr
+        let prev_bh = &rlp_headers.arr.arr
             [HEADER_RLP_PARENT_HASH_OFFSET..HEADER_RLP_PARENT_HASH_OFFSET + HASH_LEN];
         let prev_bh = OutputHash::pack_u32_from_slice(cb, prev_bh);
         let prev_bh_targets: Vec<_> = prev_bh.arr.iter().copied().map(|t| t.0).collect();
 
         // extract the state root of the block
-        let sh =
-            &bh_rlp.arr.arr[HEADER_RLP_STATE_ROOT_OFFSET..HEADER_RLP_STATE_ROOT_OFFSET + HASH_LEN];
+        let sh = &rlp_headers.arr.arr
+            [HEADER_RLP_STATE_ROOT_OFFSET..HEADER_RLP_STATE_ROOT_OFFSET + HASH_LEN];
         let sh = OutputHash::pack_u32_from_slice(cb, sh).to_u32_targets();
 
         // compute the block hash
-        let bh_wires = KeccakCircuit::hash_vector(cb, &bh_rlp);
+        let bh_wires = KeccakCircuit::hash_vector(cb, &rlp_headers);
         let bh = array::from_fn::<_, PACKED_HASH_LEN, _>(|i| bh_wires.output_array.arr[i].0);
 
         // the RLP length for the block number might vary depending on the used chain
         let bn_length_offset = GFp::from_canonical_usize(HEADER_RLP_BLOCK_NUMBER_RLP_LENGTH_OFFSET);
         let bn_length_offset = cb.constant(bn_length_offset);
         let bn_len = cb.sub(
-            bh_rlp.arr.arr[HEADER_RLP_BLOCK_NUMBER_LEN],
+            rlp_headers.arr.arr[HEADER_RLP_BLOCK_NUMBER_LEN],
             bn_length_offset,
         );
 
@@ -105,7 +106,7 @@ impl<const BLOCK_NUMBER_PAD: usize> BlockCircuit<BLOCK_NUMBER_PAD> {
         let bn_rlp_len = array::from_fn::<_, 4, _>(|i| {
             (i < BLOCK_NUMBER_PAD)
                 .then_some(
-                    bh_rlp.arr.arr[HEADER_RLP_BLOCK_NUMBER_OFFSET + BLOCK_NUMBER_PAD - 1 - i],
+                    rlp_headers.arr.arr[HEADER_RLP_BLOCK_NUMBER_OFFSET + BLOCK_NUMBER_PAD - 1 - i],
                 )
                 .unwrap_or(zero)
         });
@@ -117,7 +118,7 @@ impl<const BLOCK_NUMBER_PAD: usize> BlockCircuit<BLOCK_NUMBER_PAD> {
         let bn = (BLOCK_NUMBER_PAD..4).fold(bn_rlp_len.0, |n, i| {
             let index = cb.constant(GFp::from_canonical_usize(i));
             let is_block_number_byte = less_than(cb, index, bn_len, 2);
-            let current_byte = bh_rlp.arr.arr[HEADER_RLP_BLOCK_NUMBER_OFFSET + i];
+            let current_byte = rlp_headers.arr.arr[HEADER_RLP_BLOCK_NUMBER_OFFSET + i];
             let shifted_number = cb.mul_const_add(shift_bits, n, current_byte);
 
             cb.mul_add(is_block_number_byte.target, shifted_number, n)
@@ -130,17 +131,26 @@ impl<const BLOCK_NUMBER_PAD: usize> BlockCircuit<BLOCK_NUMBER_PAD> {
             bh: bh_wires,
             prev_bh,
             bn,
-            bh_rlp,
+            rlp_headers,
         }
     }
 
     /// Assigns the values of this instance into the provided partial witness, using the generated
     /// circuit wires.
-    pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &BlockWires) {
-        let rlp = Vector::from_vec(&self.bh_rlp).expect("the length of the bh rlp is validated");
+    pub fn assign(
+        &self,
+        pw: &mut PartialWitness<GFp>,
+        wires: &BlockWires<BLOCK_HEADER_RLP_MAX_LEN>,
+    ) {
+        let rlp =
+            Vector::from_vec(&self.rlp_headers).expect("the length of the bh rlp is validated");
 
-        wires.bh_rlp.assign(pw, &rlp);
+        wires.rlp_headers.assign(pw, &rlp);
 
-        KeccakCircuit::<BLOCK_HEADER_RLP_LEN>::assign(pw, &wires.bh, &InputData::Assigned(&rlp));
+        KeccakCircuit::<BLOCK_HEADER_RLP_MAX_LEN>::assign(
+            pw,
+            &wires.bh,
+            &InputData::Assigned(&rlp),
+        );
     }
 }
