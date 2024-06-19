@@ -95,7 +95,8 @@ impl<const BLOCK_HEADER_MAX_LEN: usize, const BLOCK_NUMBER_PAD: usize>
         let bh_wires = KeccakCircuit::hash_vector(cb, &rlp_headers);
         let bh = array::from_fn::<_, PACKED_HASH_LEN, _>(|i| bh_wires.output_array.arr[i].0);
 
-        // the RLP length for the block number might vary depending on the used chain
+        // the encoding of the block number can have a variable lengt depending on the used chain.
+        // We first read the rlp header to know the length and then extract the length.
         let bn_length_offset = GFp::from_canonical_usize(HEADER_BLOCK_NUMBER_LENGTH_OFFSET);
         let bn_length_offset = cb.constant(bn_length_offset);
         let bn_len = cb.sub(
