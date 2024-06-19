@@ -33,7 +33,7 @@ mod key;
 mod leaf_or_extension;
 pub mod utils;
 
-pub use key::MPTKeyWire;
+pub use key::{mpt_key_ptr, MPTKeyWire};
 pub use leaf_or_extension::{MPTLeafOrExtensionNode, MPTLeafOrExtensionWires};
 
 /// Number of items in the RLP encoded list in a leaf node.
