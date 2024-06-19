@@ -32,11 +32,11 @@ const S_RANGE: PublicInputRange = T_RANGE.end..T_RANGE.end + PACKED_HASH_LEN;
 /// Public inputs for contract extraction
 #[derive(Clone, Debug)]
 pub struct PublicInputs<'a, T> {
-    pub(crate) h: &'a [T],
-    pub(crate) dm: (&'a [T], &'a [T], &'a T),
-    pub(crate) k: &'a [T],
-    pub(crate) t: &'a T,
-    pub(crate) s: &'a [T],
+    pub h: &'a [T],
+    pub dm: (&'a [T], &'a [T], &'a T),
+    pub k: &'a [T],
+    pub t: &'a T,
+    pub s: &'a [T],
 }
 
 impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
