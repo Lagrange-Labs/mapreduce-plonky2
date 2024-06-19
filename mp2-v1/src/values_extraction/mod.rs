@@ -18,6 +18,7 @@ mod leaf_single;
 pub mod public_inputs;
 
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
+pub(crate) use public_inputs::PublicInputs;
 
 /// Constant prefixes for key and value IDs. Restrict both prefixes to 3-bytes,
 /// so `prefix + slot (u8)` could be converted to an U32.
