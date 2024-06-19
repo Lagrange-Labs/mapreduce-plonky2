@@ -5,7 +5,7 @@ use mp2_common::{
     keccak::{InputData, KeccakCircuit, KeccakWires, OutputHash, HASH_LEN, PACKED_HASH_LEN},
     public_inputs::PublicInputCommon,
     types::{CBuilder, GFp},
-    utils::less_than,
+    utils::{convert_u8_targets_to_u32, less_than},
 };
 use plonky2::{
     field::types::Field,
@@ -17,9 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::public_inputs::PublicInputs;
 
 /// Length of the block RLP header.
-///
-/// TODO: define & export this constant.
-pub const BLOCK_HEADER_RLP_LEN: usize = 620;
+pub const BLOCK_HEADER_RLP_LEN: usize = 624;
 
 /// Parent hash offset in RLP encoded header.
 const HEADER_RLP_PARENT_HASH_OFFSET: usize = 4;
@@ -55,22 +53,17 @@ pub struct BlockWires {
 
 /// The circuit definition for the block extraction.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BlockCircuit<const BN_RLP_PAD: usize> {
+pub struct BlockCircuit<const BLOCK_NUMBER_PAD: usize> {
     /// RLP encoded bytes of block header.
     bh_rlp: Vec<u8>,
 }
 
-impl<const BN_RLP_PAD: usize> BlockCircuit<BN_RLP_PAD> {
+impl<const BLOCK_NUMBER_PAD: usize> BlockCircuit<BLOCK_NUMBER_PAD> {
     /// Creates a new instance of the circuit.
-    pub fn new(bh_rlp: Vec<u8>) -> Self {
+    pub fn new(mut bh_rlp: Vec<u8>) -> Self {
         assert!(
-            BN_RLP_PAD <= HEADER_RLP_BLOCK_NUMBER_RLP_LENGTH_MAX,
+            BLOCK_NUMBER_PAD <= HEADER_RLP_BLOCK_NUMBER_RLP_LENGTH_MAX,
             "the RLP block number len is not supported"
-        );
-        assert_eq!(
-            bh_rlp.len(),
-            BLOCK_HEADER_RLP_LEN,
-            "the provided RLP encoded block header has an invalid length"
         );
 
         Self { bh_rlp }
@@ -86,15 +79,15 @@ impl<const BN_RLP_PAD: usize> BlockCircuit<BN_RLP_PAD> {
         bh_rlp.assert_bytes(cb);
 
         // extract the previous block hash from the RLP header
-        let prev_bh_targets = &bh_rlp.arr.arr
+        let prev_bh = &bh_rlp.arr.arr
             [HEADER_RLP_PARENT_HASH_OFFSET..HEADER_RLP_PARENT_HASH_OFFSET + HASH_LEN];
-        let prev_bh = OutputHash {
-            arr: array::from_fn(|i| U32Target(prev_bh_targets[i])),
-        };
+        let prev_bh = OutputHash::pack_u32_from_slice(cb, prev_bh);
+        let prev_bh_targets: Vec<_> = prev_bh.arr.iter().copied().map(|t| t.0).collect();
 
         // extract the state root of the block
         let sh =
             &bh_rlp.arr.arr[HEADER_RLP_STATE_ROOT_OFFSET..HEADER_RLP_STATE_ROOT_OFFSET + HASH_LEN];
+        let sh = OutputHash::pack_u32_from_slice(cb, sh).to_u32_targets();
 
         // compute the block hash
         let bh_wires = KeccakCircuit::hash_vector(cb, &bh_rlp);
@@ -110,8 +103,10 @@ impl<const BN_RLP_PAD: usize> BlockCircuit<BN_RLP_PAD> {
 
         // extracts the RLP length for the block number, assumed to be max 4xu32 limbs
         let bn_rlp_len = array::from_fn::<_, 4, _>(|i| {
-            (i < BN_RLP_PAD)
-                .then_some(bh_rlp.arr.arr[HEADER_RLP_BLOCK_NUMBER_OFFSET + BN_RLP_PAD - 1 - i])
+            (i < BLOCK_NUMBER_PAD)
+                .then_some(
+                    bh_rlp.arr.arr[HEADER_RLP_BLOCK_NUMBER_OFFSET + BLOCK_NUMBER_PAD - 1 - i],
+                )
                 .unwrap_or(zero)
         });
         let bn_rlp_len = Array::from(bn_rlp_len);
@@ -119,7 +114,7 @@ impl<const BN_RLP_PAD: usize> BlockCircuit<BN_RLP_PAD> {
 
         // endianness-aware computation of the block number from the rlp header
         let shift_bits = GFp::from_canonical_u8(255);
-        let bn = (BN_RLP_PAD..4).fold(bn_rlp_len.0, |n, i| {
+        let bn = (BLOCK_NUMBER_PAD..4).fold(bn_rlp_len.0, |n, i| {
             let index = cb.constant(GFp::from_canonical_usize(i));
             let is_block_number_byte = less_than(cb, index, bn_len, 2);
             let current_byte = bh_rlp.arr.arr[HEADER_RLP_BLOCK_NUMBER_OFFSET + i];
@@ -129,7 +124,7 @@ impl<const BN_RLP_PAD: usize> BlockCircuit<BN_RLP_PAD> {
         });
         let bn = U32Target(bn);
 
-        PublicInputs::new(&bh, &prev_bh_targets, &bn.0, sh).register(cb);
+        PublicInputs::new(&bh, &prev_bh_targets, &bn.0, &sh.arr).register(cb);
 
         BlockWires {
             bh: bh_wires,

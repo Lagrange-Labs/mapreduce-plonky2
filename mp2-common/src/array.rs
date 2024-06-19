@@ -11,9 +11,13 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use recursion_framework::serialization::{deserialize_long_array, serialize_long_array};
 use serde::{Deserialize, Serialize};
-use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
+use std::{
+    array::{self, from_fn as create_array},
+    fmt::Debug,
+    ops::Index,
+};
 
-use crate::utils::{less_than, less_than_or_equal_to};
+use crate::utils::{convert_u8_targets_to_u32, less_than, less_than_or_equal_to};
 
 /// Utility trait to convert any value into its field representation equivalence
 pub trait ToField<F: RichField> {
@@ -231,6 +235,37 @@ where
     for<'d> T: Deserialize<'d>,
 {
     pub const LEN: usize = N;
+}
+
+impl<const N: usize> Array<Target, N> {
+    pub fn pack_u32<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        cb: &mut CircuitBuilder<F, D>,
+    ) -> Array<U32Target, { N / 4 }> {
+        let arr = convert_u8_targets_to_u32(cb, &self.arr);
+        Array {
+            arr: array::from_fn(|i| arr[i]),
+        }
+    }
+}
+
+impl<const N: usize> Array<U32Target, N> {
+    pub fn pack_u32_from_slice<F: RichField + Extendable<D>, const D: usize>(
+        cb: &mut CircuitBuilder<F, D>,
+        arr: &[Target],
+    ) -> Self {
+        let arr = convert_u8_targets_to_u32(cb, arr);
+        Array {
+            arr: array::from_fn(|i| arr[i]),
+        }
+    }
+
+    /// Converts the underlying representation to packed targets.
+    pub fn to_u32_targets(self) -> Array<Target, N> {
+        Array {
+            arr: array::from_fn(|i| self.arr[i].0),
+        }
+    }
 }
 
 impl<T: Targetable + Clone + Serialize, const N: usize> Eq for Array<T, N> where
