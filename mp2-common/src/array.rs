@@ -1,4 +1,7 @@
-use crate::{serialization::{deserialize_long_array, serialize_long_array}, utils::{convert_u8_targets_to_u32_be, convert_u8_targets_to_u32_le}};
+use crate::{
+    serialization::{deserialize_long_array, serialize_long_array},
+    utils::{convert_u8_targets_to_u32_be, convert_u8_targets_to_u32_le},
+};
 use anyhow::{anyhow, Result};
 use plonky2::{
     field::{extension::Extendable, types::Field},
@@ -624,7 +627,6 @@ impl<const SIZE: usize> Array<Target, SIZE> {
     where
         [(); L32(SIZE)]:,
     {
-        
         let u32_targets = convert_u8_targets_to_u32_le(b, self.arr.as_slice());
         u32_targets.try_into().expect("cannot fail")
     }
@@ -638,7 +640,6 @@ impl<const SIZE: usize> Array<Target, SIZE> {
     where
         [(); L32(SIZE)]:,
     {
-        
         let u32_targets = convert_u8_targets_to_u32_be(b, self.arr.as_slice());
         u32_targets.try_into().expect("cannot fail")
     }
@@ -773,9 +774,7 @@ mod test {
                 wires
                     .0
                     .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
-                let u32arr: [F; L32(S)] = self.arr.pack_le().to_fields()
-                    .try_into()
-                    .unwrap();
+                let u32arr: [F; L32(S)] = self.arr.pack_le().to_fields().try_into().unwrap();
                 wires.1.assign(pw, &u32arr);
             }
         }

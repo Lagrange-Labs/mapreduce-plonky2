@@ -90,17 +90,6 @@ pub fn convert_u32_fields_to_u8_vec<F: RichField>(fields: &[F]) -> Vec<u8> {
         .collect()
 }
 
-/// Convert a slice of field elements, each representing a 32-bit integer limb, to a U256.
-/// Useful to convert `UInt256Target` public inputs to `U256`
-pub fn convert_u32_fields_to_u256<F: RichField>(fields: &[F]) -> U256 {
-    let bytes = fields
-        .iter()
-        .take(NUM_LIMBS)
-        .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
-        .collect_vec();
-    U256::from_little_endian(&bytes)
-}
-
 pub(crate) fn convert_u8_values_to_u32<F: RichField>(values: &[F]) -> Vec<F> {
     assert!(values.len() % 4 == 0);
 
@@ -163,7 +152,7 @@ pub fn convert_u8_targets_to_u32_le<F: RichField + Extendable<D>, const D: usize
 
 /// Pack a slice of targets assumed to represent byte values into a vector of `U32Target`,
 /// each representing the `u32` value given by packing 4 input byte targets, in big-endian
-/// order. 
+/// order.
 pub fn convert_u8_targets_to_u32_be<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     data: &[Target],
@@ -179,16 +168,18 @@ pub fn convert_u8_targets_to_u32_be<F: RichField + Extendable<D>, const D: usize
     let chunks = d.chunks_exact(4);
     // check that `d` has no additional data to be packed
     assert_eq!(chunks.remainder().len(), 0);
-    chunks.map(|chunk| {
-        // big-endian packing in each chunk: we multiply the previously accumulated 
-        // targets in the chunk by 256 at each step. Thus, after 4 steps, the first
-        // target has been multiplied by TWO_POWER_24, the second one by TWO_POWER_16,
-        // the third one by TWO_POWER_8 while the last one is never multiplied to a
-        // constant
-        U32Target(chunk.into_iter().fold(zero, |res, el| {
-            b.mul_const_add(F::from_canonical_usize(TWO_POWER_8), res, *el)
-        }))
-    }).collect_vec()
+    chunks
+        .map(|chunk| {
+            // big-endian packing in each chunk: we multiply the previously accumulated
+            // targets in the chunk by 256 at each step. Thus, after 4 steps, the first
+            // target has been multiplied by TWO_POWER_24, the second one by TWO_POWER_16,
+            // the third one by TWO_POWER_8 while the last one is never multiplied to a
+            // constant
+            U32Target(chunk.into_iter().fold(zero, |res, el| {
+                b.mul_const_add(F::from_canonical_usize(TWO_POWER_8), res, *el)
+            }))
+        })
+        .collect_vec()
 }
 
 /// Transform the bits to a number target.
@@ -409,7 +400,7 @@ pub trait Packer {
     fn pack(&self) -> Vec<Self::T>;
 }
 /// Packer trait for types that represent bytes
-pub trait BytesPacker: Packer<T=u32> + AsRef<[u8]> {
+pub trait BytesPacker: Packer<T = u32> + AsRef<[u8]> {
     /// pack bytes into u32 according to little-endian order
     fn pack_le(&self) -> Vec<u32>;
     /// pack bytes into u32 according to big-endian order
@@ -503,7 +494,8 @@ mod test {
 
     use super::{bits_to_num, Packer, ToFields};
     use crate::utils::{
-        convert_u8_targets_to_u32_be, convert_u8_targets_to_u32_le, greater_than, greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits, BytesPacker
+        convert_u8_targets_to_u32_be, convert_u8_targets_to_u32_le, greater_than,
+        greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits, BytesPacker,
     };
     use anyhow::Result;
     use ethers::types::Address;
@@ -522,14 +514,13 @@ mod test {
         let _: Vec<GoldilocksField> = addr.as_fixed_bytes().pack().to_fields();
     }
 
-    
     fn test_convert_u8_to_u32_with_size<const SIZE: usize>() {
         let mut rng = rand::thread_rng();
 
         // Generate a random array of bytes
         let mut data = vec![0u8; SIZE];
         rng.fill_bytes(&mut data);
-        
+
         // instantiate a circuit which packs u8 into u32 with both endianness orders
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
@@ -540,39 +531,43 @@ mod test {
         let inputs = builder.add_virtual_target_arr::<SIZE>();
         let le_u32_targets = convert_u8_targets_to_u32_le(&mut builder, inputs.as_slice());
         let be_u32_targets = convert_u8_targets_to_u32_be(&mut builder, inputs.as_slice());
-        le_u32_targets.into_iter().for_each(|t| {
-            builder.register_public_input(t.0)
-        });
-        be_u32_targets.into_iter().for_each(|t| {
-            builder.register_public_input(t.0)
-        });
+        le_u32_targets
+            .into_iter()
+            .for_each(|t| builder.register_public_input(t.0));
+        be_u32_targets
+            .into_iter()
+            .for_each(|t| builder.register_public_input(t.0));
 
         let cd = builder.build::<C>();
 
         let mut pw = PartialWitness::new();
         pw.set_target_arr(inputs.as_slice(), data.to_fields().as_slice());
         let proof = cd.prove(pw).unwrap();
-        
-        
+
         let expected_output_len = if SIZE % 4 != 0 {
             (SIZE + (4 - (SIZE % 4))) / 4
         } else {
-            SIZE/4
+            SIZE / 4
         };
         let u32_slice = data.pack_le();
 
         // Check if the length of the u32 slice is correct
         assert_eq!(u32_slice.len(), expected_output_len);
 
-        assert_eq!(proof.public_inputs[..u32_slice.len()], u32_slice.to_fields());
+        assert_eq!(
+            proof.public_inputs[..u32_slice.len()],
+            u32_slice.to_fields()
+        );
 
         let u32_slice = data.pack_be();
 
         // Check if the length of the u32 slice is correct
         assert_eq!(u32_slice.len(), expected_output_len);
 
-        assert_eq!(proof.public_inputs[u32_slice.len()..], u32_slice.to_fields());
-
+        assert_eq!(
+            proof.public_inputs[u32_slice.len()..],
+            u32_slice.to_fields()
+        );
     }
 
     #[test]
