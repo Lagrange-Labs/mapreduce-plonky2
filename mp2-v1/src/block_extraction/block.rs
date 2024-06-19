@@ -42,6 +42,7 @@ pub struct BlockWires<const BLOCK_HEADER_MAX_LEN: usize> {
     pub(crate) prev_bh: OutputHash,
 
     /// Block number.
+    /// TODO: should be u256 once #222 is merged
     pub(crate) bn: U32Target,
 
     /// RLP encoded bytes of block header.
