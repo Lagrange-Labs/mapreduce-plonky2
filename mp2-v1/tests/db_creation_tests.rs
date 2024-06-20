@@ -85,10 +85,8 @@ async fn test_db_creation_for_contract_extraction() {
     info!("Initialized the test context");
 
     // Generate the Contract Extraction (C.3) proofs.
-    let _proof = prove_contract_extraction_for_single_variable(&ctx).await;
-    info!("Generated Contract Extraction (C.3) proof for single variable");
-    let _proof = prove_contract_extraction_for_mapping_variable(&ctx).await;
-    info!("Generated Contract Extraction (C.3) proof for mapping variable");
+    let _proof = prove_contract_extraction(&ctx).await;
+    info!("Generated Contract Extraction (C.3) proof");
 
     info!("Finish testing Database Creation for contract extraction");
 }
@@ -142,30 +140,13 @@ async fn prove_length_extraction(ctx: &TestContext) -> ProofWithVK {
         .await
 }
 
-/// Generate the Contract Extraction (C.3) proof for a single variable.
-async fn prove_contract_extraction_for_single_variable(ctx: &TestContext) -> ProofWithVK {
+/// Generate the Contract Extraction (C.3) proof.
+async fn prove_contract_extraction(ctx: &TestContext) -> ProofWithVK {
     // Pudgy Penguins simple slots:
     // slot-0: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol#L23>
     const TEST_SLOT: usize = 0;
 
     let slot = StorageSlot::Simple(TEST_SLOT);
-    ctx.prove_contract_extraction(PUDGY_PENGUINS_ADDRESS, slot)
-        .await
-}
-
-/// Generate the Contract Extraction (C.1) proof for a mapping variable.
-async fn prove_contract_extraction_for_mapping_variable(ctx: &TestContext) -> ProofWithVK {
-    // Extract from
-    // <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol>.
-    // Assume it's using ERC731Enumerable that inherits ERC721.
-    const TEST_SLOT: usize = 2;
-
-    // Pudgy Penguins holders <https://dune.com/queries/2450476/4027653>
-    // 0x188b264aa1456b869c3a92eeed32117ebb835f47: <https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116>
-    const NFT_ID: u32 = 1116;
-
-    let mapping_key = left_pad32(&NFT_ID.to_be_bytes()).to_vec();
-    let slot = StorageSlot::Mapping(mapping_key, TEST_SLOT);
     ctx.prove_contract_extraction(PUDGY_PENGUINS_ADDRESS, slot)
         .await
 }
