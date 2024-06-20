@@ -5,8 +5,8 @@ use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethers::{
     providers::{Http, Middleware, Provider},
     types::{
-        Address, Block, BlockId, Bytes, EIP1186ProofResponse, Transaction, TransactionReceipt,
-        H256, U64,
+        Address, Block, BlockId, BlockNumber, Bytes, EIP1186ProofResponse, Transaction,
+        TransactionReceipt, TxHash, H256, U64,
     },
 };
 use log::warn;
@@ -242,6 +242,21 @@ pub fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
             output
         }
     }
+}
+
+/// Query the latest block.
+pub async fn query_latest_block<P: Middleware + 'static>(provider: &P) -> Result<Block<TxHash>> {
+    // Query the MPT proof with retries.
+    for i in 0..RETRY_NUM {
+        if let Ok(response) = provider.get_block(BlockNumber::Latest).await {
+            // Has one block at least.
+            return Ok(response.unwrap());
+        } else {
+            warn!("Failed to query the MPT proof at {i} time")
+        }
+    }
+
+    bail!("Failed to query the MPT proof");
 }
 
 pub struct ProofQuery {

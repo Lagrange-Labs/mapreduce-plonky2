@@ -2,13 +2,13 @@
 
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use anyhow::Result;
-use mp2_common::serialization::{deserialize, serialize};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
+    serialization::{deserialize, serialize},
     types::{CBuilder, GFp},
     utils::{convert_u8_targets_to_u32, less_than},
     D,
