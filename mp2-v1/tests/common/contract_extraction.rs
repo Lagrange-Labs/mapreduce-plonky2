@@ -90,7 +90,7 @@ fn prove_leaf(
     {
         let exp_block_hash = keccak256(&node);
         let exp_block_hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
-        assert_eq!(pi.h, exp_block_hash);
+        assert_eq!(pi.h_raw(), exp_block_hash);
     }
     // Check metadata digest
     {
@@ -100,8 +100,8 @@ fn prove_leaf(
     }
     // Check MPT key and pointer
     {
-        let key = pi.k;
-        let ptr = pi.t;
+        let key = pi.k_raw();
+        let ptr = pi.t_raw();
 
         let mpt_key = keccak256(&contract_address.0);
         let exp_key: Vec<_> = bytes_to_nibbles(&mpt_key)
@@ -117,7 +117,7 @@ fn prove_leaf(
     // Check packed storage root hash
     {
         let exp_storage_root_hash: Vec<_> = convert_u8_to_u32_slice(&storage_root).to_fields();
-        assert_eq!(pi.s, exp_storage_root_hash);
+        assert_eq!(pi.s_raw(), exp_storage_root_hash);
     }
 
     proof
@@ -138,22 +138,22 @@ fn prove_extension(params: &PublicParameters, node: Vec<u8>, child_proof: Vec<u8
     // Check packed block hash
     {
         let hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
-        assert_eq!(pi.h, hash);
+        assert_eq!(pi.h_raw(), hash);
     }
     // Check metadata digest
-    assert_eq!(pi.dm, child_pi.dm);
+    assert_eq!(pi.dm_raw(), child_pi.dm_raw());
     // Check MPT key and pointer
     {
-        assert_eq!(pi.k, child_pi.k);
+        assert_eq!(pi.k_raw(), child_pi.k_raw());
 
         // child pointer - partial key length
         let keys: Vec<Vec<u8>> = rlp::decode_list(&node);
         let nibbles = Nibbles::from_compact(&keys[0]);
-        let exp_ptr = *child_pi.t - F::from_canonical_usize(nibbles.nibbles().len());
-        assert_eq!(*pi.t, exp_ptr);
+        let exp_ptr = *child_pi.t_raw() - F::from_canonical_usize(nibbles.nibbles().len());
+        assert_eq!(*pi.t_raw(), exp_ptr);
     }
     // Check packed storage root hash
-    assert_eq!(pi.s, child_pi.s);
+    assert_eq!(pi.s_raw(), child_pi.s_raw());
 
     proof
 }
@@ -173,19 +173,19 @@ fn prove_branch(params: &PublicParameters, node: Vec<u8>, child_proof: Vec<u8>) 
     // Check packed block hash
     {
         let hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
-        assert_eq!(pi.h, hash);
+        assert_eq!(pi.h_raw(), hash);
     }
     // Check metadata digest
-    assert_eq!(pi.dm, child_pi.dm);
+    assert_eq!(pi.dm_raw(), child_pi.dm_raw());
     // Check MPT key and pointer
     {
-        assert_eq!(pi.k, child_pi.k);
+        assert_eq!(pi.k_raw(), child_pi.k_raw());
 
         // -1 because branch circuit exposes the new pointer.
-        assert_eq!(*pi.t, *child_pi.t - F::ONE);
+        assert_eq!(*pi.t_raw(), *child_pi.t_raw() - F::ONE);
     }
     // Check packed storage root hash
-    assert_eq!(pi.s, child_pi.s);
+    assert_eq!(pi.s_raw(), child_pi.s_raw());
 
     proof
 }
