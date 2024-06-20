@@ -1,5 +1,7 @@
 //! Test context used in the test cases
 
+use std::{env, fs, path::PathBuf};
+
 use ethers::prelude::{EIP1186ProofResponse, Http, Provider};
 use log::warn;
 use mp2_common::eth::ProofQuery;
@@ -16,11 +18,30 @@ pub(crate) struct TestContext {
 
 impl TestContext {
     /// Create the test context.
-    pub(crate) fn new(rpc_url: &str) -> Self {
-        let params = build_circuits_params();
-        let rpc = Provider::<Http>::try_from(rpc_url).unwrap();
+    pub(crate) fn new(rpc_url: &str) -> anyhow::Result<Self> {
+        let params = match env::var("LAGRANGE_PPARAMS") {
+            Ok(path) => {
+                let path = PathBuf::from(path);
 
-        Self { params, rpc }
+                if !path.exists() || env::var("LAGRANGE_PPARAMS_REBUILD").is_ok() {
+                    let params = build_circuits_params();
+                    let file = bincode::serialize(&params)?;
+
+                    fs::write(path, file)?;
+
+                    params
+                } else {
+                    let file = fs::read(path)?;
+
+                    bincode::deserialize(&file)?
+                }
+            }
+            _ => build_circuits_params(),
+        };
+
+        let rpc = Provider::<Http>::try_from(rpc_url)?;
+
+        Ok(Self { params, rpc })
     }
 
     /// Get the public parameters.

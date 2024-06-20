@@ -19,7 +19,7 @@ const PUDGY_PENGUINS_ADDRESS: &str = "0xbd3531da5cf5857e7cfaa92426877b022e612cf8
 async fn db_creation_integrated_tests() {
     // we generate the ctx/pparams only once for the whole execution to easy the storage load on CI
     let rpc_url = get_mainnet_url();
-    let ctx = &mut TestContext::new(&rpc_url);
+    let ctx = &mut TestContext::new(&rpc_url).unwrap();
 
     test_db_creation_for_single_variables(ctx).await;
     test_db_creation_for_mapping_variables(ctx).await;
