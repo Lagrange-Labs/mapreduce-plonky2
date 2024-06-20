@@ -1,13 +1,9 @@
 //! Test context used in the test cases
 
-use super::utils::load_or_generate_public_params;
 use ethers::prelude::{EIP1186ProofResponse, Http, Provider};
 use log::warn;
 use mp2_common::eth::ProofQuery;
-use mp2_v1::api::PublicParameters;
-
-/// Cached filename of the public parameters
-const PUBLIC_PARAMS_FILE: &str = "mp2.params";
+use mp2_v1::api::{build_circuits_params, PublicParameters};
 
 /// Retry number for the RPC request
 const RETRY_NUM: usize = 3;
@@ -21,7 +17,7 @@ pub(crate) struct TestContext {
 impl TestContext {
     /// Create the test context.
     pub(crate) fn new(rpc_url: &str) -> Self {
-        let params = load_or_generate_public_params(PUBLIC_PARAMS_FILE).unwrap();
+        let params = build_circuits_params();
         let rpc = Provider::<Http>::try_from(rpc_url).unwrap();
 
         Self { params, rpc }
