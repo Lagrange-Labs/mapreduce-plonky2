@@ -1,5 +1,6 @@
 //! Group hashing arithmetic and circuit functions
 
+use anyhow::Result;
 use plonky2::field::extension::FieldExtension;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
@@ -30,7 +31,7 @@ pub use curve_add::add_curve_point;
 /// Field-to-curve and curve point addition functions
 pub use field_to_curve::map_to_curve_point;
 
-use crate::utils::ToTargets;
+use crate::utils::{FromBytes, ToTargets};
 use crate::{
     types::{GFp, GFp5},
     utils::{FromFields, FromTargets, ToFields},
@@ -86,6 +87,12 @@ where
     }
 }
 
+impl ToTargets for QuinticExtensionTarget {
+    fn to_targets(&self) -> Vec<Target> {
+        self.0.to_vec()
+    }
+}
+
 impl FromTargets for CurveTarget {
     fn from_targets(t: &[Target]) -> Self {
         let x = QuinticExtensionTarget(t[0..EXTENSION_DEGREE].try_into().unwrap());
@@ -107,12 +114,6 @@ impl ToTargets for CurveTarget {
         x.append(&mut y);
         x.push(is_inf);
         x
-    }
-}
-
-impl ToTargets for QuinticExtensionTarget {
-    fn to_targets(&self) -> Vec<Target> {
-        self.0.to_vec()
     }
 }
 
@@ -141,5 +142,17 @@ impl ToFields<GoldilocksField> for WeierstrassPoint {
             false => GoldilocksField::ZERO,
         });
         v
+    }
+}
+
+impl FromBytes for WeierstrassPoint {
+    fn from_bytes(value: Vec<u8>) -> Result<Self> {
+        Ok(map_to_curve_point(
+            &value
+                .into_iter()
+                .map(GFp::from_canonical_u8)
+                .collect::<Vec<_>>(),
+        )
+        .to_weierstrass())
     }
 }

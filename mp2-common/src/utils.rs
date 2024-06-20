@@ -14,6 +14,7 @@ use plonky2_ecgfp5::{
     curve::curve::Point,
     gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget},
 };
+use rand::{thread_rng, Rng};
 use sha3::Digest;
 use sha3::Keccak256;
 
@@ -303,6 +304,18 @@ pub fn pack_and_compute_poseidon_target<F: RichField + Extendable<D>, const D: u
         .collect();
 
     b.hash_n_to_hash_no_pad::<PoseidonHash>(packed)
+}
+
+pub trait FromBytes {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self>
+    where
+        Self: Sized;
+    fn from_random_bytes() -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Self::from_bytes((0..32).map(|_| thread_rng().gen::<u8>()).collect())
+    }
 }
 
 pub trait ToFields<F: RichField> {

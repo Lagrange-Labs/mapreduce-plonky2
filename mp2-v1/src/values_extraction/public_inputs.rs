@@ -212,7 +212,11 @@ pub(crate) mod tests {
                 .map(GFp::from_canonical_u8)
                 .collect::<Vec<_>>(),
         );
-        arr.push(GFp::from_canonical_usize(ptr));
+        arr.push(match ptr {
+            i if i < -1 => panic!("no negative pointer but -1"),
+            -1 => GFp::NEG_ONE,
+            _ => GFp::from_canonical_usize(n as usize),
+        });
         arr.extend_from_slice(
             &dv.x
                 .0
