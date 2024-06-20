@@ -13,12 +13,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     circuit_builder::{public_input_targets, CircuitLogicWires, CircuitWithUniversalVerifier},
-    serialization::circuit_data_serialization::SerializableRichField,
     universal_verifier_gadget::{
         verifier_gadget::{UniversalVerifierBuilder, UniversalVerifierTarget},
         CircuitSet, CircuitSetDigest, CircuitSetTarget,
     },
 };
+
+use mp2_common::serialization::circuit_data_serialization::SerializableRichField;
 
 use anyhow::Result;
 
@@ -286,8 +287,9 @@ pub(crate) mod tests {
         tests::{LeafCircuitWires, RecursiveCircuitWires},
         CircuitWithUniversalVerifierBuilder,
     };
-    use crate::serialization::circuit_data_serialization::SerializableRichField;
-    use crate::serialization::{deserialize, serialize};
+    use mp2_common::serialization::{
+        circuit_data_serialization::SerializableRichField, deserialize, serialize,
+    };
 
     use super::*;
 

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use ethers::types::U256;
 use itertools::Itertools;
 use plonky2::field::{extension::Extendable, types::Field};
 use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField};
@@ -17,6 +18,7 @@ use plonky2_ecgfp5::{
 use sha3::Digest;
 use sha3::Keccak256;
 
+use crate::u256::NUM_LIMBS;
 use crate::{
     group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing, EXTENSION_DEGREE},
     types::{GFp, HashOutput},
@@ -86,6 +88,17 @@ pub fn convert_u32_fields_to_u8_vec<F: RichField>(fields: &[F]) -> Vec<u8> {
         .iter()
         .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
         .collect()
+}
+
+/// Convert a slice of field elements, each representing a 32-bit integer limb, to a U256.
+/// Useful to convert `UInt256Target` public inputs to `U256`
+pub fn convert_u32_fields_to_u256<F: RichField>(fields: &[F]) -> U256 {
+    let bytes = fields
+        .iter()
+        .take(NUM_LIMBS)
+        .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
+        .collect_vec();
+    U256::from_little_endian(&bytes)
 }
 
 pub(crate) fn convert_u8_values_to_u32<F: RichField>(values: &[F]) -> Vec<F> {
