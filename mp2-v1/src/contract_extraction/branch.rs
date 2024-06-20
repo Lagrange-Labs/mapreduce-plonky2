@@ -203,10 +203,8 @@ mod tests {
 
         // Prepare the public inputs for the branch node circuit.
         let h = &convert_u8_to_u32_slice(&keccak256(leaf)).to_fields();
-        let dm = map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
-            .to_weierstrass();
-        let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
-        let dm = (dm.x.0.as_slice(), dm.y.0.as_slice(), &dm_is_inf);
+        let dm = &map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
+            .to_weierstrass().to_fields();
         let k = &bytes_to_nibbles(&key2).to_fields();
         let t = &ptr.to_field();
         let s = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();

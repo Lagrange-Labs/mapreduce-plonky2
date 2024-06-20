@@ -8,6 +8,7 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
+    utils::{FromFields, ToTargets},
 };
 use plonky2::{
     field::{extension::FieldExtension, types::Field},
@@ -33,7 +34,7 @@ const S_RANGE: PublicInputRange = T_RANGE.end..T_RANGE.end + PACKED_HASH_LEN;
 #[derive(Clone, Debug)]
 pub struct PublicInputs<'a, T> {
     pub(crate) h: &'a [T],
-    pub(crate) dm: (&'a [T], &'a [T], &'a T),
+    pub(crate) dm: &'a [T],
     pub(crate) k: &'a [T],
     pub(crate) t: &'a T,
     pub(crate) s: &'a [T],
@@ -44,9 +45,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
 
     fn register_args(&self, cb: &mut CBuilder) {
         cb.register_public_inputs(self.h);
-        cb.register_public_inputs(self.dm.0);
-        cb.register_public_inputs(self.dm.1);
-        cb.register_public_input(*self.dm.2);
+        cb.register_public_inputs(self.dm);
         cb.register_public_inputs(self.k);
         cb.register_public_input(*self.t);
         cb.register_public_inputs(self.s);
@@ -56,15 +55,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
 impl<'a> PublicInputs<'a, GFp> {
     /// Get the metadata point.
     pub fn metadata_point(&self) -> WeierstrassPoint {
-        let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| self.dm.0[i]);
-        let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| self.dm.1[i]);
-        let is_inf = self.dm.2 == &GFp::ONE;
-
-        WeierstrassPoint {
-            x: GFp5::from_basefield_array(x),
-            y: GFp5::from_basefield_array(y),
-            is_inf,
-        }
+        WeierstrassPoint::from_fields(&self.dm)
     }
 }
 
@@ -72,22 +63,12 @@ impl<'a> PublicInputs<'a, Target> {
     /// Create a new public inputs.
     pub fn new(
         h: &'a [Target],
-        dm: &'a CurveTarget,
+        dm: &'a [Target],
         k: &'a [Target],
         t: &'a Target,
         s: &'a [Target],
     ) -> Self {
-        let dm_x = &dm.0 .0[0].0[..];
-        let dm_y = &dm.0 .0[1].0[..];
-        let dm_is_inf = &dm.0 .1.target;
-
-        Self {
-            h,
-            dm: (dm_x, dm_y, dm_is_inf),
-            k,
-            t,
-            s,
-        }
+        Self { h, dm, k, t, s }
     }
 
     /// Get the merkle hash of the subtree this proof has processed.
@@ -120,11 +101,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
         Self {
             h: &pi[H_RANGE],
-            dm: (
-                &pi[DM_RANGE.start..DM_RANGE.start + CURVE_TARGET_LEN / 2],
-                &pi[DM_RANGE.start + CURVE_TARGET_LEN / 2..DM_RANGE.end - 1],
-                &pi[DM_RANGE.end - 1],
-            ),
+            dm: &pi[DM_RANGE],
             k: &pi[K_RANGE],
             t: &pi[T_RANGE.start],
             s: &pi[S_RANGE],
@@ -135,9 +112,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     pub fn to_vec(&self) -> Vec<T> {
         self.h
             .iter()
-            .chain(self.dm.0)
-            .chain(self.dm.1)
-            .chain(iter::once(self.dm.2))
+            .chain(self.dm)
             .chain(self.k)
             .chain(iter::once(self.t))
             .chain(self.s)
@@ -149,7 +124,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         self.h
     }
 
-    pub fn dm_raw(&self) -> (&'a [T], &'a [T], &'a T) {
+    pub fn dm_raw(&self) -> &'a [T] {
         self.dm
     }
 
@@ -213,9 +188,7 @@ mod tests {
 
         // Prepare the public inputs.
         let h = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
-        let dm = Point::sample(&mut rng).to_weierstrass();
-        let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
-        let dm = (dm.x.0.as_slice(), dm.y.0.as_slice(), &dm_is_inf);
+        let dm = &Point::sample(&mut rng).to_weierstrass().to_fields();
         let k = &random_vector::<u8>(MAX_KEY_NIBBLE_LEN).to_fields();
         let t = &2_u8.to_field();
         let s = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
