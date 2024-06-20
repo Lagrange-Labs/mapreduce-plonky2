@@ -124,7 +124,7 @@ pub mod tests {
     use mp2_common::{
         eth::StorageSlot,
         types::{CBuilder, GFp},
-        utils::{keccak256, BytesPacker, ToFields},
+        utils::{keccak256, Endianness, Packer, ToFields},
         D,
     };
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
@@ -181,7 +181,7 @@ pub mod tests {
 
         let child = &proof[depth - 1];
         let d = GFp::from_canonical_usize(depth - 2);
-        let child_hash: Vec<_> = keccak256(child).pack_le().to_fields();
+        let child_hash: Vec<_> = keccak256(child).pack(Endianness::Little).to_fields();
 
         let mut branch_pi =
             PublicInputs::from_parts(&child_hash, (&dm.x.0, &dm.y.0, &is_inf), &key, &d, &length)
@@ -201,7 +201,7 @@ pub mod tests {
             let proof_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
 
             branch_pi = proof_pi.to_vec();
-            let root: Vec<_> = keccak256(&node).pack_le().to_fields();
+            let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
             assert_eq!(proof_pi.length(), &length);
             assert_eq!(proof_pi.root_hash(), &root);

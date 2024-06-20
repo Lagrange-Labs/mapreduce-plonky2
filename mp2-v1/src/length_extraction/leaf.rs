@@ -140,7 +140,7 @@ pub mod tests {
         eth::StorageSlot,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::{CBuilder, GFp},
-        utils::{keccak256, BytesPacker, ToFields},
+        utils::{keccak256, Endianness, Packer, ToFields},
         D,
     };
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
@@ -215,7 +215,7 @@ pub mod tests {
             let leaf_proof = prove_circuit(&setup, &leaf_circuit);
             let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
 
-            let root: Vec<_> = keccak256(&node).pack_le().to_fields();
+            let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
             let rlp_headers: Vec<Vec<u8>> = rlp::decode_list(&node);
             let rlp_nibbles = Nibbles::from_compact(&rlp_headers[0]);

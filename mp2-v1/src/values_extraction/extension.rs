@@ -101,7 +101,7 @@ mod tests {
     use mp2_common::{
         group_hashing::map_to_curve_point,
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{keccak256, BytesPacker},
+        utils::{keccak256, Endianness, Packer},
         C, D, F,
     };
     use mp2_test::{
@@ -183,7 +183,7 @@ mod tests {
         let key = random_vector(64);
         let ptr = 63;
         // Hash the child of the extension node in packed mode.
-        let child_hash = keccak256(&proof[1]).pack_le();
+        let child_hash = keccak256(&proof[1]).pack(Endianness::Little);
         let n = 15;
         let exp_pi = new_extraction_public_inputs(
             &child_hash,
@@ -197,7 +197,7 @@ mod tests {
 
         // Quick test to see if we can convert back to public inputs.
         assert_eq!(child_hash, exp_pi.root_hash());
-        let (exp_key, exp_ptr) = exp_pi.mpt_key_info();
+        let (exp_key, _exp_ptr) = exp_pi.mpt_key_info();
         assert_eq!(
             key.iter()
                 .cloned()
@@ -217,7 +217,7 @@ mod tests {
         let pi = PublicInputs::new(&proof.public_inputs);
 
         {
-            let exp_hash = keccak256(&node).pack_le();
+            let exp_hash = keccak256(&node).pack(Endianness::Little);
             assert_eq!(pi.root_hash(), exp_hash);
         }
         {

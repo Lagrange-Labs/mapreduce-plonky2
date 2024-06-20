@@ -675,7 +675,7 @@ mod test {
     use crate::{
         array::{Array, ToField, Vector, VectorWire, L32},
         eth::left_pad,
-        utils::{convert_u8_to_u32_slice, find_index_subvector, BytesPacker, ToFields},
+        utils::{find_index_subvector, Endianness, Packer, ToFields},
     };
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -774,7 +774,12 @@ mod test {
                 wires
                     .0
                     .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
-                let u32arr: [F; L32(S)] = self.arr.pack_le().to_fields().try_into().unwrap();
+                let u32arr: [F; L32(S)] = self
+                    .arr
+                    .pack(Endianness::Little)
+                    .to_fields()
+                    .try_into()
+                    .unwrap();
                 wires.1.assign(pw, &u32arr);
             }
         }

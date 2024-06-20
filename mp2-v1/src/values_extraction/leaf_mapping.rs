@@ -195,7 +195,7 @@ mod tests {
         eth::StorageSlot,
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{keccak256, BytesPacker},
+        utils::{keccak256, Endianness, Packer},
         C, D, F,
     };
     use mp2_test::{
@@ -283,7 +283,7 @@ mod tests {
         let pi = PublicInputs::new(&proof.public_inputs);
 
         {
-            let exp_hash = keccak256(&node).pack_le();
+            let exp_hash = keccak256(&node).pack(Endianness::Little);
             assert_eq!(pi.root_hash(), exp_hash);
         }
         {

@@ -10,7 +10,7 @@ use crate::{
     serialization::{
         circuit_data_serialization::SerializableRichField, FromBytes, SerializationError, ToBytes,
     },
-    utils::{convert_u8_to_u32_slice, BytesPacker, ToFields},
+    utils::{Endianness, Packer, ToFields},
 };
 use anyhow::{ensure, Result};
 use ethers::types::U256;
@@ -467,7 +467,7 @@ impl ToFields for U256 {
     fn to_fields<F: RichField>(&self) -> Vec<F> {
         let mut bytes = [0u8; 32];
         self.to_big_endian(&mut bytes);
-        let limbs = bytes.pack_be().to_fields();
+        let limbs = bytes.pack(Endianness::Big).to_fields();
         assert_eq!(limbs.len(), NUM_LIMBS);
         limbs
     }

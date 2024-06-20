@@ -176,7 +176,7 @@ mod tests {
         keccak::HASH_LEN,
         mpt_sequential::{mpt_key_ptr, utils::bytes_to_nibbles},
         types::MAPPING_LEAF_VALUE_LEN,
-        utils::{keccak256, BytesPacker, ToFields},
+        utils::{keccak256, Endianness, Packer, ToFields},
         C,
     };
     use mp2_test::{
@@ -234,7 +234,7 @@ mod tests {
 
         // Check packed block hash
         {
-            let exp_block_hash = keccak256(&node).pack_le().to_fields();
+            let exp_block_hash = keccak256(&node).pack(Endianness::Little).to_fields();
             assert_eq!(pi.h, exp_block_hash);
         }
         // Check metadata digest
@@ -259,7 +259,7 @@ mod tests {
         }
         // Check packed storage root hash
         {
-            let exp_storage_root_hash: Vec<_> = storage_root.pack_le().to_fields();
+            let exp_storage_root_hash: Vec<_> = storage_root.pack(Endianness::Little).to_fields();
 
             assert_eq!(pi.s, exp_storage_root_hash);
         }

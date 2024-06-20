@@ -118,7 +118,7 @@ pub mod tests {
         eth::StorageSlot,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::{CBuilder, GFp},
-        utils::{keccak256, BytesPacker, ToFields},
+        utils::{keccak256, Endianness, Packer, ToFields},
         D,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
@@ -193,7 +193,7 @@ pub mod tests {
         let leaf_proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(leaf_circuit);
         let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
 
-        let root: Vec<_> = keccak256(&node).pack_le().to_fields();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         let rlp_headers: Vec<Vec<u8>> = rlp::decode_list(&node);
         let rlp_nibbles = Nibbles::from_compact(&rlp_headers[0]);
@@ -217,7 +217,7 @@ pub mod tests {
         let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
 
         let t = t - GFp::ONE;
-        let root: Vec<_> = keccak256(&node).pack_le().to_fields();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         assert_eq!(branch_pi.length(), &length);
         assert_eq!(branch_pi.root_hash(), &root);
@@ -236,7 +236,7 @@ pub mod tests {
         let ext_pi = PublicInputs::<GFp>::from_slice(&ext_proof.public_inputs);
 
         let t = GFp::ZERO - GFp::ONE;
-        let root: Vec<_> = keccak256(&node).pack_le().to_fields();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         assert_eq!(ext_pi.length(), &length);
         assert_eq!(ext_pi.root_hash(), &root);

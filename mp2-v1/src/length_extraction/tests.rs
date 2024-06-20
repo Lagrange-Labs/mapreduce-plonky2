@@ -5,7 +5,7 @@ use mp2_common::{
     mpt_sequential::utils::visit_proof,
     rlp::MAX_KEY_NIBBLE_LEN,
     types::GFp,
-    utils::{BytesPacker, ToFields},
+    utils::{Endianness, Packer, ToFields},
     D,
 };
 use mp2_test::circuit::{prove_circuit, setup_circuit};
@@ -44,7 +44,7 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
     let leaf_proof = prove_circuit(&setup_leaf, &leaf_circuit);
     let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
     let length = GFp::from_canonical_u32(length);
-    let root: Vec<_> = keccak256(&node).pack_le().to_fields();
+    let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
     assert_eq!(leaf_pi.length(), &length);
     assert_eq!(leaf_pi.root_hash(), &root);
@@ -65,7 +65,7 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
         };
         let branch_proof = prove_circuit(&setup_branch, &branch_circuit);
         let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
-        let root: Vec<_> = keccak256(node).pack_le().to_fields();
+        let root: Vec<_> = keccak256(node).pack(Endianness::Little).to_fields();
         assert_eq!(branch_pi.length(), &length);
         assert_eq!(branch_pi.root_hash(), &root);
         assert_eq!(branch_pi.metadata_point(), dm);
@@ -167,7 +167,7 @@ impl PudgyState {
 
         // reverse big endian EVM to little endian
         let slice = left_pad::<4>(&slice);
-        let computed_length = slice.pack_be()[0];
+        let computed_length = slice.pack(Endianness::Big)[0];
         assert_eq!(computed_length, pudgy.length);
 
         // extractd from test_pudgy_pinguins_slot

@@ -238,7 +238,7 @@ mod tests {
         group_hashing::map_to_curve_point,
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{keccak256, BytesPacker},
+        utils::{keccak256, Endianness, Packer},
         C, D, F,
     };
     use mp2_test::{
@@ -356,7 +356,7 @@ mod tests {
             )
         };
         let compute_pi = |ptr: usize, key: &[u8], value: &[u8], leaf: &[u8], metadata: &[u8]| {
-            let h = keccak256(leaf).pack_le();
+            let h = keccak256(leaf).pack(Endianness::Little);
             let [values_digest, metadata_digest] =
                 [value, metadata].map(|arr| compute_digest(arr.to_vec()).to_weierstrass());
 
@@ -442,7 +442,7 @@ mod tests {
         let pi = PublicInputs::<F>::new(&proof.public_inputs);
 
         {
-            let exp_hash = keccak256(&node).pack_le();
+            let exp_hash = keccak256(&node).pack(Endianness::Little);
             assert_eq!(pi.root_hash(), exp_hash);
         }
         {

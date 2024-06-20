@@ -101,7 +101,7 @@ mod tests {
         mpt_sequential::mpt_key_ptr,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::PACKED_ADDRESS_LEN,
-        utils::{keccak256, BytesPacker, Fieldable, ToFields},
+        utils::{keccak256, Endianness, Fieldable, Packer, ToFields},
         C,
     };
     use mp2_test::{
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(root_rlp.len(), 2);
 
         // Prepare the public inputs for the extension node circuit.
-        let h = &keccak256(&proof[1]).pack_le().to_fields();
+        let h = &keccak256(&proof[1]).pack(Endianness::Little).to_fields();
         let dm = map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
             .to_weierstrass();
         let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
@@ -183,7 +183,7 @@ mod tests {
 
         // Check packed block hash
         {
-            let hash = keccak256(&node).pack_le().to_fields();
+            let hash = keccak256(&node).pack(Endianness::Little).to_fields();
             assert_eq!(pi.h, hash);
         }
         // Check metadata digest

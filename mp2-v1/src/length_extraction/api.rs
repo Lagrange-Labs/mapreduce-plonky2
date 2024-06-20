@@ -185,7 +185,7 @@ mod tests {
         eth::StorageSlot,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::GFp,
-        utils::{keccak256, BytesPacker, ToFields},
+        utils::{keccak256, Endianness, Packer, ToFields},
     };
     use plonky2::field::types::Field;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
@@ -221,7 +221,7 @@ mod tests {
         let pis = lp.proof.public_inputs;
         let pi = PublicInputs::from_slice(&pis[..PublicInputs::<GFp>::TOTAL_LEN]);
 
-        let root: Vec<_> = keccak256(&node).pack_le().to_fields();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         assert_eq!(pi.length(), &GFp::from_canonical_u32(length));
         assert_eq!(pi.root_hash(), &root);
@@ -234,7 +234,7 @@ mod tests {
         while let Some(node) = proof.pop() {
             pointer -= GFp::ONE;
 
-            let root: Vec<_> = keccak256(&node).pack_le().to_fields();
+            let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
             let branch_circuit = LengthCircuitInput::new_branch(node, child_proof);
 
@@ -315,7 +315,7 @@ mod tests {
         let pointer = GFp::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)
             - GFp::from_canonical_usize(rlp_nibbles.nibbles().len());
 
-        let root: Vec<_> = keccak256(&node).pack_le().to_fields();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         assert_eq!(pi.length(), &length);
         assert_eq!(pi.root_hash(), &root);
@@ -328,7 +328,7 @@ mod tests {
         let pointer = pointer - GFp::ONE;
         let node = proof.pop().unwrap();
 
-        let root: Vec<_> = keccak256(&node).pack_le().to_fields();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         let branch_circuit = LengthCircuitInput::new_branch(node, child_proof);
         let child_proof = params.generate_proof(branch_circuit).unwrap();
@@ -348,7 +348,7 @@ mod tests {
         let pointer = GFp::ZERO - GFp::ONE;
         let node = proof.pop().unwrap();
 
-        let root: Vec<_> = keccak256(&node).pack_le().to_fields();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
         let ext_circuit = LengthCircuitInput::new_extension(node, child_proof);
         let child_proof = params.generate_proof(ext_circuit).unwrap();
 

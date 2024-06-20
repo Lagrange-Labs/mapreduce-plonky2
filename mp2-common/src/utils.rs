@@ -1,6 +1,7 @@
 use anyhow::Result;
 use ethers::types::U256;
 use itertools::Itertools;
+use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::{extension::Extendable, types::Field};
 use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField};
 use plonky2::hash::poseidon::PoseidonHash;
@@ -70,16 +71,11 @@ pub fn keccak256(data: &[u8]) -> Vec<u8> {
 }
 
 /// Convert an u8 slice to an u32-field vector.
-pub fn convert_u8_slice_to_u32_fields<F: RichField>(values: &[u8]) -> Vec<F> {
-    assert!(values.len() % 4 == 0);
-
-    values
-        .chunks(4)
-        .map(|mut chunk| {
-            let u32_num = read_le_u32(&mut chunk);
-            F::from_canonical_u32(u32_num)
-        })
-        .collect()
+pub fn convert_u8_slice_to_u32_fields<F: RichField>(
+    values: &[u8],
+    endianness: Endianness,
+) -> Vec<F> {
+    values.pack(endianness).to_fields()
 }
 
 /// Convert an u32-field slice to an u8 vector.
@@ -90,23 +86,6 @@ pub fn convert_u32_fields_to_u8_vec<F: RichField>(fields: &[F]) -> Vec<u8> {
         .collect()
 }
 
-pub(crate) fn convert_u8_values_to_u32<F: RichField>(values: &[F]) -> Vec<F> {
-    assert!(values.len() % 4 == 0);
-
-    let two_power_8 = F::from_canonical_usize(TWO_POWER_8);
-    let two_power_16 = F::from_canonical_usize(TWO_POWER_16);
-    let two_power_24 = F::from_canonical_usize(TWO_POWER_24);
-
-    (0..values.len())
-        .step_by(4)
-        .map(|i| {
-            values[i]
-                + values[i + 1] * two_power_8
-                + values[i + 2] * two_power_16
-                + values[i + 3] * two_power_24
-        })
-        .collect()
-}
 /// Pack a slice of targets assumed to represent byte values into a vector of `U32Target`,
 /// each representing the `u32` value given by packing 4 input byte targets, in little-endian
 /// order.
@@ -257,19 +236,6 @@ pub fn greater_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
     less_than(builder, b, a_plus_1, n)
 }
 
-/// Resize the input vector if needed
-pub fn convert_u8_to_u32_slice(data: &[u8]) -> Vec<u32> {
-    let mut d = data.to_vec();
-    if data.len() % 4 != 0 {
-        d.resize(data.len() + (4 - (data.len() % 4)), 0);
-    }
-    let mut converted = Vec::new();
-    for chunk in d.chunks_exact(4) {
-        converted.push(u32::from_le_bytes(chunk.try_into().unwrap()));
-    }
-    converted
-}
-
 // taken from rust doc https://doc.rust-lang.org/std/primitive.u32.html#method.from_be_bytes
 pub fn read_le_u32(input: &mut &[u8]) -> u32 {
     let (int_bytes, rest) = input.split_at(std::mem::size_of::<u32>());
@@ -311,26 +277,17 @@ pub fn hash_two_to_one<F: RichField, H: Hasher<F>>(
     H::two_to_one(left, right).to_bytes().try_into().unwrap()
 }
 
-/// Pack the inputs (in little-endian order) then compute the Poseidon hash value.
-pub fn pack_le_and_compute_poseidon_value<F: RichField>(inputs: &[u8]) -> HashOut<F> {
+/// Pack the inputs (according to endianness) then compute the Poseidon hash value.
+pub fn pack_and_compute_poseidon_value<F: RichField>(
+    inputs: &[u8],
+    endianness: Endianness,
+) -> HashOut<F> {
     assert!(
         inputs.len() % 4 == 0,
         "Inputs must be a multiple of 4 bytes"
     );
 
-    let packed: Vec<_> = inputs.pack_le().to_fields();
-
-    PoseidonHash::hash_no_pad(&packed)
-}
-
-/// Pack the inputs (in big-endian order) then compute the Poseidon hash value.
-pub fn pack_be_and_compute_poseidon_value<F: RichField>(inputs: &[u8]) -> HashOut<F> {
-    assert!(
-        inputs.len() % 4 == 0,
-        "Inputs must be a multiple of 4 bytes"
-    );
-
-    let packed: Vec<_> = inputs.pack_be().to_fields();
+    let packed: Vec<_> = inputs.pack(endianness).to_fields();
 
     PoseidonHash::hash_no_pad(&packed)
 }
@@ -394,98 +351,117 @@ impl Fieldable for u32 {
         F::from_canonical_u32(*self)
     }
 }
+/// Trait alias defined to implement `Packer` trait for `RichField`
+/// Fields that want to be packed with `Packer` have to implement
+/// this trait (trivial implementation). Currently implemented only
+/// for Goldilocks
+pub trait PackableRichField: RichField {}
+
+impl PackableRichField for GoldilocksField {}
+
+pub enum Endianness {
+    Big,
+    Little,
+}
 
 pub trait Packer {
     type T;
-    fn pack(&self) -> Vec<Self::T>;
-}
-/// Packer trait for types that represent bytes
-pub trait BytesPacker: Packer<T = u32> + AsRef<[u8]> {
-    /// pack bytes into u32 according to little-endian order
-    fn pack_le(&self) -> Vec<u32>;
-    /// pack bytes into u32 according to big-endian order
-    fn pack_be(&self) -> Vec<u32>;
+    fn pack(&self, endianness: Endianness) -> Vec<Self::T>;
 }
 
 impl Packer for &[u8] {
     type T = u32;
-    fn pack(&self) -> Vec<u32> {
-        self.pack_le()
+    fn pack(&self, endianness: Endianness) -> Vec<u32> {
+        match endianness {
+            Endianness::Big => {
+                let pad_len = if self.len() % 4 == 0 {
+                    0
+                } else {
+                    4 - (self.len() % 4)
+                };
+                let mut d = vec![0u8; pad_len];
+                d.extend_from_slice(self);
+                let mut converted = Vec::new();
+                let chunks_iter = d.chunks_exact(4);
+                // check that there are no chunks left to be converted
+                assert_eq!(chunks_iter.remainder().len(), 0);
+                for chunk in chunks_iter {
+                    converted.push(u32::from_be_bytes(chunk.try_into().unwrap()));
+                }
+                converted
+            }
+            Endianness::Little => {
+                let mut d = self.to_vec();
+                if self.len() % 4 != 0 {
+                    d.resize(self.len() + (4 - (self.len() % 4)), 0);
+                }
+                let mut converted = Vec::new();
+                for chunk in d.chunks_exact(4) {
+                    converted.push(u32::from_le_bytes(chunk.try_into().unwrap()));
+                }
+                converted
+            }
+        }
     }
 }
 
-impl BytesPacker for &[u8] {
-    fn pack_le(&self) -> Vec<u32> {
-        convert_u8_to_u32_slice(self)
-    }
+impl<F: PackableRichField> Packer for &[F] {
+    type T = F;
 
-    fn pack_be(&self) -> Vec<u32> {
-        let pad_len = if self.len() % 4 == 0 {
-            0
-        } else {
-            4 - (self.len() % 4)
-        };
-        let mut d = vec![0u8; pad_len];
-        d.extend_from_slice(self);
-        let mut converted = Vec::new();
-        let chunks_iter = d.chunks_exact(4);
-        // check that there are no chunks left to be converted
-        assert_eq!(chunks_iter.remainder().len(), 0);
-        for chunk in chunks_iter {
-            converted.push(u32::from_be_bytes(chunk.try_into().unwrap()));
-        }
-        converted
+    fn pack(&self, endianness: Endianness) -> Vec<Self::T> {
+        // convert field elements to u8
+        self.into_iter()
+            .map(|f| f.to_canonical_u64() as u8)
+            .collect_vec()
+            .pack(endianness)
+            .into_iter()
+            .map(|el| F::from_canonical_u32(el))
+            .collect_vec()
     }
 }
 
 impl Packer for Vec<u8> {
     type T = u32;
-    fn pack(&self) -> Vec<u32> {
-        self.as_slice().pack()
+    fn pack(&self, endianness: Endianness) -> Vec<u32> {
+        self.as_slice().pack(endianness)
     }
 }
 
-impl BytesPacker for Vec<u8> {
-    fn pack_le(&self) -> Vec<u32> {
-        self.as_slice().pack_le()
-    }
+impl<F: PackableRichField> Packer for Vec<F> {
+    type T = F;
 
-    fn pack_be(&self) -> Vec<u32> {
-        self.as_slice().pack_be()
+    fn pack(&self, endianness: Endianness) -> Vec<F> {
+        self.as_slice().pack(endianness)
     }
 }
 
 impl<const N: usize> Packer for &[u8; N] {
     type T = u32;
-    fn pack(&self) -> Vec<u32> {
-        self.as_slice().pack()
+    fn pack(&self, endianness: Endianness) -> Vec<u32> {
+        self.as_slice().pack(endianness)
     }
 }
 
-impl<const N: usize> BytesPacker for &[u8; N] {
-    fn pack_le(&self) -> Vec<u32> {
-        self.as_slice().pack_le()
-    }
+impl<F: PackableRichField, const N: usize> Packer for &[F; N] {
+    type T = F;
 
-    fn pack_be(&self) -> Vec<u32> {
-        self.as_slice().pack_be()
+    fn pack(&self, endianness: Endianness) -> Vec<F> {
+        self.as_slice().pack(endianness)
     }
 }
 
 impl<const N: usize> Packer for [u8; N] {
     type T = u32;
-    fn pack(&self) -> Vec<u32> {
-        self.as_slice().pack()
+    fn pack(&self, endianness: Endianness) -> Vec<u32> {
+        self.as_slice().pack(endianness)
     }
 }
 
-impl<const N: usize> BytesPacker for [u8; N] {
-    fn pack_le(&self) -> Vec<u32> {
-        self.as_slice().pack_le()
-    }
+impl<F: PackableRichField, const N: usize> Packer for [F; N] {
+    type T = F;
 
-    fn pack_be(&self) -> Vec<u32> {
-        self.as_slice().pack_be()
+    fn pack(&self, endianness: Endianness) -> Vec<F> {
+        self.as_slice().pack(endianness)
     }
 }
 
@@ -495,7 +471,7 @@ mod test {
     use super::{bits_to_num, Packer, ToFields};
     use crate::utils::{
         convert_u8_targets_to_u32_be, convert_u8_targets_to_u32_le, greater_than,
-        greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits, BytesPacker,
+        greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits, Endianness,
     };
     use anyhow::Result;
     use ethers::types::Address;
@@ -511,7 +487,7 @@ mod test {
     #[test]
     fn test_pack() {
         let addr = Address::random();
-        let _: Vec<GoldilocksField> = addr.as_fixed_bytes().pack().to_fields();
+        let _: Vec<GoldilocksField> = addr.as_fixed_bytes().pack(Endianness::Big).to_fields();
     }
 
     fn test_convert_u8_to_u32_with_size<const SIZE: usize>() {
@@ -549,7 +525,7 @@ mod test {
         } else {
             SIZE / 4
         };
-        let u32_slice = data.pack_le();
+        let u32_slice = data.pack(Endianness::Little);
 
         // Check if the length of the u32 slice is correct
         assert_eq!(u32_slice.len(), expected_output_len);
@@ -559,7 +535,7 @@ mod test {
             u32_slice.to_fields()
         );
 
-        let u32_slice = data.pack_be();
+        let u32_slice = data.pack(Endianness::Big);
 
         // Check if the length of the u32 slice is correct
         assert_eq!(u32_slice.len(), expected_output_len);

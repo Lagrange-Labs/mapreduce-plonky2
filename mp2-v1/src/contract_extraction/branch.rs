@@ -132,7 +132,7 @@ mod tests {
         keccak::PACKED_HASH_LEN,
         mpt_sequential::{mpt_key_ptr, utils::bytes_to_nibbles},
         types::PACKED_ADDRESS_LEN,
-        utils::{keccak256, BytesPacker, ToFields},
+        utils::{keccak256, Endianness, Packer, ToFields},
         C,
     };
     use mp2_test::{
@@ -203,7 +203,7 @@ mod tests {
         assert!(rlp::decode_list::<Vec<u8>>(&branch).len() == 17);
 
         // Prepare the public inputs for the branch node circuit.
-        let h = &keccak256(leaf).pack_le().to_fields();
+        let h = &keccak256(leaf).pack(Endianness::Little).to_fields();
         let dm = map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
             .to_weierstrass();
         let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
@@ -225,7 +225,7 @@ mod tests {
 
         // Check packed block hash
         {
-            let hash = keccak256(&branch).pack_le().to_fields();
+            let hash = keccak256(&branch).pack(Endianness::Little).to_fields();
             assert_eq!(pi.h, hash);
         }
         // Check metadata digest
