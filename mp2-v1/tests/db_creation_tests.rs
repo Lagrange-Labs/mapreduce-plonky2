@@ -8,7 +8,6 @@ use log::info;
 use mp2_common::eth::{left_pad32, StorageSlot};
 use mp2_test::eth::get_mainnet_url;
 use mp2_v1::api::ProofWithVK;
-use serial_test::serial;
 
 mod common;
 
@@ -24,6 +23,7 @@ async fn db_creation_integrated_tests() {
     test_db_creation_for_single_variables(ctx).await;
     test_db_creation_for_mapping_variables(ctx).await;
     test_db_creation_for_length_extraction(ctx).await;
+    test_db_creation_for_contract_extraction(ctx).await;
 }
 
 /// Test the database creation for single variables.
@@ -76,15 +76,8 @@ async fn test_db_creation_for_length_extraction(ctx: &mut TestContext) {
 }
 
 /// Test the database creation for contract extraction (C.3).
-#[tokio::test]
-#[serial]
-async fn test_db_creation_for_contract_extraction() {
+async fn test_db_creation_for_contract_extraction(ctx: &mut TestContext) {
     info!("Start to test Database Creation for contract extraction");
-
-    // Initialize the test context.
-    let rpc_url = get_mainnet_url();
-    let ctx = TestContext::new(&rpc_url).unwrap();
-    info!("Initialized the test context");
 
     // Generate the Contract Extraction (C.3) proofs.
     let _proof = prove_contract_extraction(&ctx).await;
