@@ -18,3 +18,9 @@ pub fn get_mainnet_url() -> String {
     let url = "https://eth.llamarpc.com";
     url.to_string()
 }
+
+pub fn get_holesky_url() -> String {
+    let default_rpc_url = "https://rpc.holesky.ethpandaops.io".to_string();
+    let url = env::var("CI_HOLESKY").unwrap_or(default_rpc_url);
+    url.to_string()
+}

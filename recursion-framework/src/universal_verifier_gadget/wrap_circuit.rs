@@ -13,11 +13,11 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    serialization::{
-        circuit_data_serialization::SerializableRichField, deserialize_vec, serialize_vec,
-    },
-    universal_verifier_gadget::{circuit_set::check_circuit_digest_target, RECURSION_THRESHOLD},
+use crate::universal_verifier_gadget::{
+    circuit_set::check_circuit_digest_target, RECURSION_THRESHOLD,
+};
+use mp2_common::serialization::{
+    circuit_data_serialization::SerializableRichField, deserialize_vec, serialize_vec,
 };
 
 use anyhow::Result;
@@ -166,8 +166,8 @@ pub(crate) mod test {
     use crate::{
         circuit_builder::{tests::LeafCircuitWires, CircuitLogicWires},
         framework::tests::check_panic,
-        serialization::circuit_data_serialization::SerializableRichField,
     };
+    use mp2_common::serialization::circuit_data_serialization::SerializableRichField;
 
     use serial_test::serial;
 

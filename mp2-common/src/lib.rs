@@ -29,8 +29,12 @@ pub mod mpt_sequential;
 pub mod poseidon;
 pub mod public_inputs;
 pub mod rlp;
+/// This module contains data strcutures and traits employed to serialize the data strcutures found in the
+/// crate
+pub mod serialization;
 pub mod storage_key;
 pub mod types;
+pub mod u256;
 pub mod utils;
 
 pub const D: usize = 2;

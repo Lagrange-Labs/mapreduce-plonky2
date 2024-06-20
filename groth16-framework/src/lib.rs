@@ -113,12 +113,10 @@ mod tests {
         plonk::{
             circuit_builder::CircuitBuilder,
             circuit_data::{CircuitConfig, CircuitData},
-            proof::ProofWithPublicInputs,
         },
     };
     use rand::{thread_rng, Rng};
     use serial_test::serial;
-    use std::{array, path::Path};
 
     /// Test proving and verifying with a simple circuit.
     #[ignore] // Ignore for long running time in CI.

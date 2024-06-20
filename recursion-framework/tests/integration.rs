@@ -1,5 +1,8 @@
 use std::{array, iter::once};
 
+use mp2_common::serialization::{
+    circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array,
+};
 use plonky2::field::types::{Field, Sample};
 use plonky2::{
     field::types::PrimeField64,
@@ -15,8 +18,6 @@ use plonky2::{
         proof::ProofWithPublicInputsTarget,
     },
 };
-use recursion_framework::serialization::circuit_data_serialization::SerializableRichField;
-use recursion_framework::serialization::{deserialize_array, serialize_array};
 use recursion_framework::{
     circuit_builder::{CircuitLogicWires, CircuitWithUniversalVerifierBuilder},
     framework::{

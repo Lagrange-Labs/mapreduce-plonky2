@@ -6,15 +6,15 @@ use crate::{
     values_extraction,
 };
 use anyhow::Result;
+use mp2_common::serialization::{
+    circuit_data_serialization::SerializableRichField, deserialize, serialize,
+};
 use mp2_common::{C, D, F};
 use plonky2::plonk::{
     circuit_builder::CircuitBuilder,
     circuit_data::{CircuitConfig, VerifierCircuitData, VerifierOnlyCircuitData},
     config::{AlgebraicHasher, GenericConfig},
     proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
-};
-use recursion_framework::serialization::{
-    circuit_data_serialization::SerializableRichField, deserialize, serialize,
 };
 use serde::{Deserialize, Serialize};
 

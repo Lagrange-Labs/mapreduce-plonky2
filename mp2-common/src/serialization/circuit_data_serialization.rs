@@ -65,6 +65,8 @@ use plonky2_ecgfp5::{
     gadgets::base_field::{QuinticQuotientGenerator, QuinticSqrtGenerator},
 };
 
+use crate::u256::UInt256DivGenerator;
+
 use super::{FromBytes, SerializationError, ToBytes};
 
 impl<F: RichField, H: Hasher<F>> ToBytes for MerkleTree<F, H> {
@@ -220,7 +222,9 @@ where
         UninterleaveToU32Generator,
         // ecgfp5 generators added
         QuinticQuotientGenerator,
-        QuinticSqrtGenerator
+        QuinticSqrtGenerator,
+        // uint256 generators added
+        UInt256DivGenerator
     }
 }
 

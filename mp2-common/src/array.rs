@@ -1,3 +1,4 @@
+use crate::serialization::{deserialize_long_array, serialize_long_array};
 use anyhow::{anyhow, Result};
 use plonky2::{
     field::{extension::Extendable, types::Field},
@@ -9,7 +10,6 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use recursion_framework::serialization::{deserialize_long_array, serialize_long_array};
 use serde::{Deserialize, Serialize};
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
