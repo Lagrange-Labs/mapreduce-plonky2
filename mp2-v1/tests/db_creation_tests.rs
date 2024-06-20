@@ -15,15 +15,23 @@ mod common;
 // Pudgy Penguins contract address for testing
 const PUDGY_PENGUINS_ADDRESS: &str = "0xbd3531da5cf5857e7cfaa92426877b022e612cf8";
 
-/// Test the database creation for single variables.
 #[tokio::test]
-#[serial]
-async fn test_db_creation_for_single_variables() {
+async fn db_creation_integrated_tests() {
+    // we generate the ctx/pparams only once for the whole execution to easy the storage load on CI
+    let rpc_url = get_mainnet_url();
+    let ctx = &mut TestContext::new(&rpc_url).unwrap();
+
+    test_db_creation_for_single_variables(ctx).await;
+    test_db_creation_for_mapping_variables(ctx).await;
+    test_db_creation_for_length_extraction(ctx).await;
+}
+
+/// Test the database creation for single variables.
+async fn test_db_creation_for_single_variables(ctx: &mut TestContext) {
     info!("Start to test Database Creation for single variables");
 
     // Initialize the test context.
-    let rpc_url = get_mainnet_url();
-    let ctx = TestContext::new(&rpc_url);
+    ctx.set_rpc(&get_mainnet_url());
     info!("Initialized the test context");
 
     // Generate the proof of Values Extraction (C.1).
@@ -36,14 +44,11 @@ async fn test_db_creation_for_single_variables() {
 }
 
 /// Test the database creation for mapping variables.
-#[tokio::test]
-#[serial]
-async fn test_db_creation_for_mapping_variables() {
+async fn test_db_creation_for_mapping_variables(ctx: &mut TestContext) {
     info!("Start to test Database Creation for mapping variables");
 
     // Initialize the test context.
-    let rpc_url = get_mainnet_url();
-    let ctx = TestContext::new(&rpc_url);
+    ctx.set_rpc(&get_mainnet_url());
     info!("Initialized the test context");
 
     // Generate the proof of Values Extraction (C.1).
@@ -69,14 +74,11 @@ async fn prove_single_values_extraction(ctx: &TestContext) -> ProofWithVK {
 }
 
 /// Test the database creation for length extraction.
-#[tokio::test]
-#[serial]
-async fn test_db_creation_for_length_extraction() {
+async fn test_db_creation_for_length_extraction(ctx: &mut TestContext) {
     info!("Start to test Database Creation for length extraction");
 
     // Initialize the test context.
-    let rpc_url = get_mainnet_url();
-    let ctx = TestContext::new(&rpc_url);
+    ctx.set_rpc(&get_mainnet_url());
     info!("Initialized the test context");
 
     // Generate the proof of Values Extraction (C.2).
