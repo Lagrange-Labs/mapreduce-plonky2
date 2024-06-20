@@ -1,6 +1,7 @@
 //! Test utilities for Contract Extraction (C.3)
 
 use super::TestContext;
+use eth_trie::Nibbles;
 use ethers::prelude::Address;
 use log::info;
 use mp2_common::{
@@ -145,9 +146,11 @@ fn prove_extension(params: &PublicParameters, node: Vec<u8>, child_proof: Vec<u8
     {
         assert_eq!(pi.k, child_pi.k);
 
-        let leaf_key: Vec<Vec<u8>> = rlp::decode_list(&node);
-        let exp_ptr = F::from_canonical_usize(mpt_key_ptr(&leaf_key[0]));
-        assert_eq!(pi.t, &exp_ptr);
+        // child pointer - partial key length
+        let keys: Vec<Vec<u8>> = rlp::decode_list(&node);
+        let nibbles = Nibbles::from_compact(&keys[0]);
+        let exp_ptr = *child_pi.t - F::from_canonical_usize(nibbles.nibbles().len());
+        assert_eq!(*pi.t, exp_ptr);
     }
     // Check packed storage root hash
     assert_eq!(pi.s, child_pi.s);
