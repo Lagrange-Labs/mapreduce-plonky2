@@ -30,7 +30,3 @@ pub mod framework;
 pub mod framework_testing;
 /// Internal module that contains the core data structures and gadgets for the universal verifier
 pub(crate) mod universal_verifier_gadget;
-
-/// This module contains data strcutures and traits employed to serialize the data strcutures found in the
-/// crate
-pub mod serialization;

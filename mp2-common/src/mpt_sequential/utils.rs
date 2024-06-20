@@ -3,7 +3,7 @@
 use crate::{
     array::Array,
     rlp::short_string_len,
-    utils::{find_index_subvector, keccak256},
+    utils::{find_index_subvector, keccak256, less_than},
 };
 use eth_trie::Nibbles;
 use plonky2::{
@@ -42,14 +42,19 @@ pub fn left_pad_leaf_value<
     b: &mut CircuitBuilder<F, D>,
     value: &Array<Target, VALUE_LEN>,
 ) -> Array<Target, PADDED_LEN> {
-    // Read the length of the relevant RLP data (RLP header - 0x80).
-    let data_len = short_string_len(b, &value[0]);
+    // Read the length of the relevant data (RLP header - 0x80)
+    let zero = b.zero();
+    let one = b.one();
 
-    // Create vector of only the relevant data - skipping the RLP header and
-    // stick with the same encoding of the data but pad_left32.
+    let prefix = value[0];
+    let byte_80 = b.constant(F::from_canonical_usize(128));
+    let is_single_byte = less_than(b, prefix, byte_80, 8);
+    let value_len_80 = b.sub(value[0], byte_80);
+    let value_len = b.select(is_single_byte, one, value_len_80);
+    let offset = b.select(is_single_byte, zero, one);
     value
-        .take_last::<F, D, PADDED_LEN>()
-        .into_vec(data_len)
+        .extract_array::<F, _, PADDED_LEN>(b, offset)
+        .into_vec(value_len)
         .normalize_left::<_, _, PADDED_LEN>(b)
 }
 
