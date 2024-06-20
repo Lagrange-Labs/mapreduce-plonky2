@@ -1,24 +1,20 @@
 //! Storage trie for proving tests
 
+use super::TestContext;
 use ethers::{
     prelude::Address,
     utils::rlp::{Prototype, Rlp},
 };
 use mp2_common::{
-    eth::StorageSlot,
+    eth::{ProofQuery, StorageSlot},
+    mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
     utils::{convert_u8_to_u32_slice, keccak256},
 };
 use mp2_v1::{
     api::{generate_proof, CircuitInput, ProofWithVK, PublicParameters},
-    values_extraction,
+    length_extraction, values_extraction,
 };
 use std::collections::HashMap;
-
-/// RLP item size for the extension node
-const EXTENSION_RLP_SIZE: usize = 2;
-
-/// RLP item size for the branch node
-const BRANCH_RLP_SIZE: usize = 17;
 
 /// Maximum child number of a branch node
 const MAX_BRANCH_CHILDREN: usize = 16;
@@ -35,6 +31,7 @@ struct ProvingContext<'a> {
     contract_address: &'a Address,
     params: &'a PublicParameters,
     slots: &'a HashMap<RawNode, StorageSlot>,
+    variable_slot: Option<u8>,
 }
 
 impl<'a> ProvingContext<'a> {
@@ -43,11 +40,13 @@ impl<'a> ProvingContext<'a> {
         contract_address: &'a Address,
         params: &'a PublicParameters,
         slots: &'a HashMap<RawNode, StorageSlot>,
+        variable_slot: Option<u8>,
     ) -> Self {
         Self {
             contract_address,
             params,
             slots,
+            variable_slot,
         }
     }
 
@@ -94,8 +93,8 @@ impl TrieNode {
 
         let rlp = Rlp::new(&self.raw);
         match rlp.prototype().unwrap() {
-            Prototype::List(EXTENSION_RLP_SIZE) => TrieNodeType::Extension,
-            Prototype::List(BRANCH_RLP_SIZE) => TrieNodeType::Branch,
+            Prototype::List(MPT_EXTENSION_RLP_SIZE) => TrieNodeType::Extension,
+            Prototype::List(MPT_BRANCH_RLP_SIZE) => TrieNodeType::Branch,
             _ => panic!("Invalid RLP size for the storage proof"),
         }
     }
@@ -132,16 +131,16 @@ impl TrieNode {
     }
 
     /// Prove a trie node recursively.
-    fn prove(&self, ctx: ProvingContext) -> SerializedProof {
+    fn prove_value(&self, ctx: ProvingContext) -> SerializedProof {
         match self.node_type() {
-            TrieNodeType::Branch => self.prove_branch(ctx),
-            TrieNodeType::Extension => self.prove_extension(ctx),
-            TrieNodeType::Leaf => self.prove_leaf(ctx),
+            TrieNodeType::Branch => self.prove_value_branch(ctx),
+            TrieNodeType::Extension => self.prove_value_extension(ctx),
+            TrieNodeType::Leaf => self.prove_value_leaf(ctx),
         }
     }
 
     /// Prove a branch node.
-    fn prove_branch(&self, ctx: ProvingContext) -> SerializedProof {
+    fn prove_value_branch(&self, ctx: ProvingContext) -> SerializedProof {
         // Has one child at least and 16 at maximum.
         assert!(self.children.len() > 0);
         assert!(self.children.len() <= MAX_BRANCH_CHILDREN);
@@ -149,7 +148,11 @@ impl TrieNode {
         let node = self.raw.clone();
 
         // Generate the proofs of the child nodes.
-        let child_proofs: Vec<_> = self.children.iter().map(|node| node.prove(ctx)).collect();
+        let child_proofs: Vec<_> = self
+            .children
+            .iter()
+            .map(|node| node.prove_value(ctx))
+            .collect();
 
         // Build the branch circuit input.
         let input = if ctx.is_simple_slot() {
@@ -164,14 +167,14 @@ impl TrieNode {
     }
 
     /// Prove an extension node.
-    fn prove_extension(&self, ctx: ProvingContext) -> SerializedProof {
+    fn prove_value_extension(&self, ctx: ProvingContext) -> SerializedProof {
         // Has one child for the extension node.
         assert_eq!(self.children.len(), 1);
 
         let node = self.raw.clone();
 
         // Generate the proof of child node.
-        let child_proof = self.children[0].prove(ctx);
+        let child_proof = self.children[0].prove_value(ctx);
 
         // Build the extension circuit input.
         let input = values_extraction::CircuitInput::new_extension(node, child_proof);
@@ -182,7 +185,7 @@ impl TrieNode {
     }
 
     /// Prove a leaf node.
-    fn prove_leaf(&self, ctx: ProvingContext) -> SerializedProof {
+    fn prove_value_leaf(&self, ctx: ProvingContext) -> SerializedProof {
         // Has no child for the leaf node.
         assert_eq!(self.children.len(), 0);
 
@@ -212,6 +215,79 @@ impl TrieNode {
         // Generate the proof.
         generate_proof(ctx.params, input).unwrap()
     }
+
+    /// Prove a trie node recursively for length extraction.
+    fn prove_length(&self, ctx: ProvingContext) -> SerializedProof {
+        match self.node_type() {
+            TrieNodeType::Branch => self.prove_length_branch(ctx),
+            TrieNodeType::Extension => self.prove_length_extension(ctx),
+            TrieNodeType::Leaf => self.prove_length_leaf(ctx),
+        }
+    }
+
+    /// Prove a length extraction leaf node.
+    fn prove_length_leaf(&self, ctx: ProvingContext) -> SerializedProof {
+        // Has no child for the leaf node.
+        assert_eq!(self.children.len(), 0);
+
+        let node = self.raw.clone();
+        let variable_slot = ctx.variable_slot.unwrap();
+
+        // Find the storage slot for this leaf node.
+        let slot = ctx.slots.get(&node).unwrap();
+
+        // Build the leaf circuit input.
+        let input = match slot {
+            StorageSlot::Simple(slot) => {
+                length_extraction::LengthCircuitInput::new_leaf(*slot as u8, node, variable_slot)
+            }
+            StorageSlot::Mapping(_, slot) => {
+                length_extraction::LengthCircuitInput::new_leaf(*slot as u8, node, variable_slot)
+            }
+        };
+        let input = CircuitInput::LengthExtraction(input);
+
+        // Generate the proof.
+        generate_proof(ctx.params, input).unwrap()
+    }
+
+    /// Prove a branch node.
+    fn prove_length_branch(&self, ctx: ProvingContext) -> SerializedProof {
+        // Has one child at least and 16 at maximum.
+        assert!(self.children.len() > 0);
+        assert!(self.children.len() <= MAX_BRANCH_CHILDREN);
+
+        let node = self.raw.clone();
+
+        // Fetch the child proof of the node.
+        let child_proof = self.children[0].prove_length(ctx);
+
+        // Build the branch circuit input.
+        let input = length_extraction::LengthCircuitInput::new_branch(node, child_proof);
+        let input = CircuitInput::LengthExtraction(input);
+
+        // Generate the proof.
+        generate_proof(ctx.params, input).unwrap()
+    }
+
+    /// Prove an extension node.
+    fn prove_length_extension(&self, ctx: ProvingContext) -> SerializedProof {
+        // Has one child at least and 16 at maximum.
+        assert!(self.children.len() > 0);
+        assert!(self.children.len() <= MAX_BRANCH_CHILDREN);
+
+        let node = self.raw.clone();
+
+        // Fetch the child proof of the node.
+        let child_proof = self.children[0].prove_length(ctx);
+
+        // Build the branch circuit input.
+        let input = length_extraction::LengthCircuitInput::new_extension(node, child_proof);
+        let input = CircuitInput::LengthExtraction(input);
+
+        // Generate the proof.
+        generate_proof(ctx.params, input).unwrap()
+    }
 }
 
 /// Test storage trie
@@ -226,6 +302,8 @@ pub(crate) struct TestStorageTrie {
 impl TestStorageTrie {
     /// Initialize a test storage trie.
     pub(crate) fn new() -> Self {
+        log::info!("Initializing the test storage trie...");
+
         Self {
             root: None,
             slots: HashMap::new(),
@@ -258,16 +336,62 @@ impl TestStorageTrie {
         self.root.as_mut().unwrap().find_or_add_child(nodes);
     }
 
+    /// Query the contract at the provided address, fetch a proof using the context, and add it to
+    /// the trie's slot.
+    pub(crate) async fn query_proof_and_add_slot(
+        &mut self,
+        ctx: &TestContext,
+        contract_address: Address,
+        slot: usize,
+    ) {
+        log::info!("Querying the simple slot `{slot:?}` of the contract `{contract_address}` from the test context's RPC");
+
+        let query = ProofQuery::new_simple_slot(contract_address, slot);
+        let response = ctx.query_mpt_proof(&query, None).await;
+
+        // Get the nodes to prove. Reverse to the sequence from leaf to root.
+        let nodes: Vec<_> = response.storage_proof[0]
+            .proof
+            .iter()
+            .rev()
+            .map(|node| node.to_vec())
+            .collect();
+
+        let slot = StorageSlot::Simple(slot);
+
+        log::info!(
+            "Simple slot {slot:?} queried, appending `{}` proof nodes to the trie",
+            nodes.len()
+        );
+
+        self.add_slot(slot, nodes);
+    }
+
     /// Generate the proof for the trie.
-    pub(crate) fn prove_all(
+    pub(crate) fn prove_length(
+        &self,
+        contract_address: &Address,
+        variable_slot: u8,
+        params: &PublicParameters,
+    ) -> ProofWithVK {
+        let ctx = ProvingContext::new(contract_address, params, &self.slots, Some(variable_slot));
+
+        // Must prove with 1 slot at least.
+        let proof = self.root.as_ref().unwrap().prove_length(ctx);
+
+        ProofWithVK::deserialize(&proof).unwrap()
+    }
+
+    /// Generate the proof for the trie.
+    pub(crate) fn prove_value(
         &self,
         contract_address: &Address,
         params: &PublicParameters,
     ) -> ProofWithVK {
-        let ctx = ProvingContext::new(contract_address, params, &self.slots);
+        let ctx = ProvingContext::new(contract_address, params, &self.slots, None);
 
         // Must prove with 1 slot at least.
-        let proof = self.root.as_ref().unwrap().prove(ctx);
+        let proof = self.root.as_ref().unwrap().prove_value(ctx);
 
         ProofWithVK::deserialize(&proof).unwrap()
     }

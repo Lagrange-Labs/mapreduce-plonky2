@@ -13,7 +13,7 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::serialization::{
+use mp2_common::serialization::{
     circuit_data_serialization::SerializableRichField, deserialize, serialize,
 };
 

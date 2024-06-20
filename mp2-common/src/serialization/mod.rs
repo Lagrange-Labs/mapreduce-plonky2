@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use plonky2::util::serialization::IoError;
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
@@ -23,6 +25,12 @@ pub struct SerializationError(String);
 impl From<IoError> for SerializationError {
     fn from(value: IoError) -> Self {
         Self(format!("{}", value))
+    }
+}
+
+impl Display for SerializationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.serialize_str(self.0.as_str())
     }
 }
 

@@ -98,7 +98,6 @@ mod tests {
     use mp2_common::{
         group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,
-        mpt_sequential::mpt_key_ptr,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::PACKED_ADDRESS_LEN,
         utils::{convert_u8_to_u32_slice, keccak256, Fieldable, ToFields},
@@ -192,9 +191,11 @@ mod tests {
         {
             assert_eq!(pi.k, child_pi.k);
 
-            let leaf_key: Vec<Vec<u8>> = rlp::decode_list(&node);
-            let exp_ptr = F::from_canonical_usize(mpt_key_ptr(&leaf_key[0]));
-            assert_eq!(pi.t, &exp_ptr);
+            // child pointer - partial key length
+            let keys: Vec<Vec<u8>> = rlp::decode_list(&node);
+            let nibbles = Nibbles::from_compact(&keys[0]);
+            let exp_ptr = *child_pi.t - F::from_canonical_usize(nibbles.nibbles().len());
+            assert_eq!(*pi.t, exp_ptr);
         }
         // Check packed storage root hash
         assert_eq!(pi.s, child_pi.s);

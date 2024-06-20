@@ -1,14 +1,15 @@
 //! Module containing several structure definitions for Ethereum related operations
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
-use anyhow::{bail, Ok, Result};
+use anyhow::{bail, Result};
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethers::{
     providers::{Http, Middleware, Provider},
     types::{
-        Address, Block, BlockId, Bytes, EIP1186ProofResponse, Transaction, TransactionReceipt,
-        H256, U64,
+        Address, Block, BlockId, BlockNumber, Bytes, EIP1186ProofResponse, Transaction,
+        TransactionReceipt, TxHash, H256, U64,
     },
 };
+use log::warn;
 use rlp::{Encodable, Rlp, RlpStream};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "ci")]
@@ -16,6 +17,10 @@ use std::env;
 use std::{array::from_fn as create_array, sync::Arc};
 
 use crate::{mpt_sequential::utils::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
+
+/// Retry number for the RPC request
+const RETRY_NUM: usize = 3;
+
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
 /// bad transactions, so we only compute over valid transactions.
 pub struct TxAndReceipt(Transaction, TransactionReceipt);
@@ -239,6 +244,21 @@ pub fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     }
 }
 
+/// Query the latest block.
+pub async fn query_latest_block<P: Middleware + 'static>(provider: &P) -> Result<Block<TxHash>> {
+    // Query the MPT proof with retries.
+    for i in 0..RETRY_NUM {
+        if let Ok(response) = provider.get_block(BlockNumber::Latest).await {
+            // Has one block at least.
+            return Ok(response.unwrap());
+        } else {
+            warn!("Failed to query the MPT proof at {i} time")
+        }
+    }
+
+    bail!("Failed to query the MPT proof");
+}
+
 pub struct ProofQuery {
     pub contract: Address,
     pub(crate) slot: StorageSlot,
@@ -306,10 +326,19 @@ impl ProofQuery {
         provider: &P,
         block: Option<BlockId>,
     ) -> Result<EIP1186ProofResponse> {
-        let res = provider
-            .get_proof(self.contract, vec![self.slot.location()], block)
-            .await?;
-        Ok(res)
+        // Query the MPT proof with retries.
+        for i in 0..RETRY_NUM {
+            if let Ok(response) = provider
+                .get_proof(self.contract, vec![self.slot.location()], block)
+                .await
+            {
+                return Ok(response);
+            } else {
+                warn!("Failed to query the MPT proof at {i} time")
+            }
+        }
+
+        bail!("Failed to query the MPT proof");
     }
     /// Returns the raw value from the storage proof, not the one "interpreted" by the
     /// JSON RPC so we can see how the encoding is done.

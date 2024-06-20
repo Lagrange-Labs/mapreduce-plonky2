@@ -1,3 +1,6 @@
+use crate::serialization::{
+    deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+};
 use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{
@@ -22,10 +25,6 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use recursion_framework::serialization::deserialize_array;
-use recursion_framework::serialization::deserialize_long_array;
-use recursion_framework::serialization::serialize_array;
-use recursion_framework::serialization::serialize_long_array;
 use serde::{Deserialize, Serialize};
 use utils::bytes_to_nibbles;
 
@@ -42,6 +41,12 @@ const NB_ITEMS_LEAF: usize = 2;
 /// This can later be also be done in a generic way to allow different sizes.
 /// Given we target MPT storage proof, the value is 32 bytes + 1 byte for RLP encoding.
 pub const MAX_LEAF_VALUE_LEN: usize = 33;
+
+/// RLP item size for the extension node
+pub const MPT_EXTENSION_RLP_SIZE: usize = 2;
+
+/// RLP item size for the branch node
+pub const MPT_BRANCH_RLP_SIZE: usize = 17;
 
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics

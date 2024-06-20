@@ -11,6 +11,8 @@ plonky2_crypto.workspace = true
 plonky2_ecgfp5.workspace = true
 serde.workspace = true
 
+mp2_common = { path = "../mp2-common" }
+
 [dev-dependencies]
 bincode.workspace = true
 env_logger.workspace = true

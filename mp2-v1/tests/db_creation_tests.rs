@@ -5,25 +5,33 @@
 
 use common::TestContext;
 use log::info;
-use mp2_common::eth::left_pad32;
+use mp2_common::eth::{left_pad32, StorageSlot};
 use mp2_test::eth::get_mainnet_url;
 use mp2_v1::api::ProofWithVK;
-use serial_test::serial;
 
 mod common;
 
 // Pudgy Penguins contract address for testing
 const PUDGY_PENGUINS_ADDRESS: &str = "0xbd3531da5cf5857e7cfaa92426877b022e612cf8";
 
-/// Test the database creation for single variables.
 #[tokio::test]
-#[serial]
-async fn test_db_creation_for_single_variables() {
+async fn db_creation_integrated_tests() {
+    // we generate the ctx/pparams only once for the whole execution to easy the storage load on CI
+    let rpc_url = get_mainnet_url();
+    let ctx = &mut TestContext::new(&rpc_url).unwrap();
+
+    test_db_creation_for_single_variables(ctx).await;
+    test_db_creation_for_mapping_variables(ctx).await;
+    test_db_creation_for_length_extraction(ctx).await;
+    test_db_creation_for_contract_extraction(ctx).await;
+}
+
+/// Test the database creation for single variables.
+async fn test_db_creation_for_single_variables(ctx: &mut TestContext) {
     info!("Start to test Database Creation for single variables");
 
     // Initialize the test context.
-    let rpc_url = get_mainnet_url();
-    let ctx = TestContext::new(&rpc_url);
+    ctx.set_rpc(&get_mainnet_url());
     info!("Initialized the test context");
 
     // Generate the proof of Values Extraction (C.1).
@@ -36,14 +44,11 @@ async fn test_db_creation_for_single_variables() {
 }
 
 /// Test the database creation for mapping variables.
-#[tokio::test]
-#[serial]
-async fn test_db_creation_for_mapping_variables() {
+async fn test_db_creation_for_mapping_variables(ctx: &mut TestContext) {
     info!("Start to test Database Creation for mapping variables");
 
     // Initialize the test context.
-    let rpc_url = get_mainnet_url();
-    let ctx = TestContext::new(&rpc_url);
+    ctx.set_rpc(&get_mainnet_url());
     info!("Initialized the test context");
 
     // Generate the proof of Values Extraction (C.1).
@@ -53,6 +58,32 @@ async fn test_db_creation_for_mapping_variables() {
     // TODO: add further steps of database creation.
 
     info!("Finish testing Database Creation for single variables");
+}
+
+/// Test the database creation for length extraction.
+async fn test_db_creation_for_length_extraction(ctx: &mut TestContext) {
+    info!("Start to test Database Creation for length extraction");
+
+    // Initialize the test context.
+    ctx.set_rpc(&get_mainnet_url());
+    info!("Initialized the test context");
+
+    // Generate the proof of Values Extraction (C.2).
+    let _proof = prove_length_extraction(&ctx).await;
+    info!("Generated Length Extraction (C.2) proof");
+
+    info!("Finish testing Database Creation for length extraction");
+}
+
+/// Test the database creation for contract extraction (C.3).
+async fn test_db_creation_for_contract_extraction(ctx: &mut TestContext) {
+    info!("Start to test Database Creation for contract extraction");
+
+    // Generate the Contract Extraction (C.3) proofs.
+    let _proof = prove_contract_extraction(&ctx).await;
+    info!("Generated Contract Extraction (C.3) proof");
+
+    info!("Finish testing Database Creation for contract extraction");
 }
 
 /// Generate the Values Extraction (C.1) proof for single variables.
@@ -90,5 +121,27 @@ async fn prove_mapping_values_extraction(ctx: &TestContext) -> ProofWithVK {
         .collect();
 
     ctx.prove_mapping_values_extraction(PUDGY_PENGUINS_ADDRESS, TEST_SLOT, mapping_keys)
+        .await
+}
+
+/// Generate the Length Extraction (C.2) proof.
+async fn prove_length_extraction(ctx: &TestContext) -> ProofWithVK {
+    // Pudgy Penguins simple slots:
+    // slot-8: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/extensions/ERC721Enumerable.sol#L21>
+    const TEST_SLOTS: [u8; 1] = [8];
+    const VARIABLE_SLOT: u8 = 0xfa;
+
+    ctx.prove_length_extraction(PUDGY_PENGUINS_ADDRESS, &TEST_SLOTS, VARIABLE_SLOT)
+        .await
+}
+
+/// Generate the Contract Extraction (C.3) proof.
+async fn prove_contract_extraction(ctx: &TestContext) -> ProofWithVK {
+    // Pudgy Penguins simple slots:
+    // slot-0: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol#L23>
+    const TEST_SLOT: usize = 0;
+
+    let slot = StorageSlot::Simple(TEST_SLOT);
+    ctx.prove_contract_extraction(PUDGY_PENGUINS_ADDRESS, slot)
         .await
 }

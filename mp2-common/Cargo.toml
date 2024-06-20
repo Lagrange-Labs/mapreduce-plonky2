@@ -20,8 +20,6 @@ serde.workspace = true
 sha3.workspace = true
 rand.workspace = true
 
-recursion_framework = { path = "../recursion-framework" }
-
 [dev-dependencies]
 csv.workspace = true
 hex.workspace = true
@@ -32,6 +30,7 @@ serial_test.workspace = true
 tokio.workspace = true
 
 mp2_test = { path = "../mp2-test" }
+rstest.workspace = true
 
 [features]
 ci = ["mp2_test/ci"]

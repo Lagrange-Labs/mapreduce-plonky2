@@ -8,6 +8,7 @@ use mp2_common::{
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
+    serialization::{deserialize, serialize},
     types::{CBuilder, GFp},
     utils::{convert_u8_targets_to_u32, less_than},
     D,
@@ -22,10 +23,7 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
-use recursion_framework::{
-    circuit_builder::CircuitLogicWires,
-    serialization::{deserialize, serialize},
-};
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::array;
 

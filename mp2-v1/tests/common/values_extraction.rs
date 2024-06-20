@@ -29,30 +29,15 @@ impl TestContext {
 
         // Query the slot and add the node path to the trie.
         for slot in slots {
-            info!("Query the simple slot {slot}");
-            let slot = *slot as usize;
-            let query = ProofQuery::new_simple_slot(contract_address, slot);
-            let response = self.query_mpt_proof(&query).await;
-
-            // Get the nodes to prove. Reverse to the sequence from leaf to root.
-            let nodes: Vec<_> = response.storage_proof[0]
-                .proof
-                .iter()
-                .rev()
-                .map(|node| node.to_vec())
-                .collect();
-
-            let slot = StorageSlot::Simple(slot);
-            info!("Save the simple slot {slot:?} to the test storage trie");
-
-            trie.add_slot(slot, nodes);
+            trie.query_proof_and_add_slot(self, contract_address, *slot as usize)
+                .await;
         }
 
         info!("Prove the test storage trie including the simple slots {slots:?}");
-        let proof = trie.prove_all(&contract_address, self.params());
+        let proof_value = trie.prove_value(&contract_address, self.params());
 
         // Check the public inputs.
-        let pi = PublicInputs::new(&proof.proof().public_inputs);
+        let pi = PublicInputs::new(&proof_value.proof().public_inputs);
         assert_eq!(pi.n(), F::from_canonical_usize(slots.len()));
         assert_eq!(pi.root_hash(), trie.root_hash());
         {
@@ -67,7 +52,7 @@ impl TestContext {
             assert_eq!(ptr, F::NEG_ONE);
         }
 
-        proof
+        proof_value
     }
 
     /// Generate the Values Extraction (C.1) proof for mapping variables.
@@ -91,10 +76,10 @@ impl TestContext {
         for mapping_key in mapping_keys {
             info!("Query the mapping slot ({slot}, {mapping_key:?})");
             let query = ProofQuery::new_mapping_slot(contract_address, slot, mapping_key.clone());
-            let response = self.query_mpt_proof(&query).await;
+            let response = self.query_mpt_proof(&query, None).await;
 
             // Get the nodes to prove. Reverse to the sequence from leaf to root.
-            let mut nodes: Vec<_> = response.storage_proof[0]
+            let nodes: Vec<_> = response.storage_proof[0]
                 .proof
                 .iter()
                 .rev()
@@ -108,7 +93,7 @@ impl TestContext {
         }
 
         info!("Prove the test storage trie including the mapping slots ({slot}, ...)");
-        let proof = trie.prove_all(&contract_address, self.params());
+        let proof = trie.prove_value(&contract_address, self.params());
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof.proof().public_inputs);
