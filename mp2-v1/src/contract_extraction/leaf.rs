@@ -59,6 +59,8 @@ where
         let zero = b.zero();
         let ttrue = b._true();
         let contract_address = Array::new(b);
+        // range-check contract address
+        contract_address.assert_bytes(b);
 
         let storage_root_offset = b.add_virtual_target();
 
