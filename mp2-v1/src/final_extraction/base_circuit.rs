@@ -1,3 +1,4 @@
+use mp2_common::group_hashing::CircuitBuilderGroupHashing;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     iop::{target::Target, witness::PartialWitness},
@@ -26,6 +27,9 @@ impl BaseCircuit {
         let minus_one = b.constant(GoldilocksField::NEG_ONE);
         b.connect(value_pi.mpt_key().pointer, minus_one);
         b.connect(contract_pi.mpt_key().pointer, minus_one);
+
+        let metadata =
+            b.add_curve_point(&[value_pi.metadata_digest(), contract_pi.metadata_digest()]);
         BaseWires {}
     }
 

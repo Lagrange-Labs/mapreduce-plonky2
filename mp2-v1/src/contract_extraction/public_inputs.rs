@@ -8,7 +8,7 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
-    utils::{FromFields, ToTargets},
+    utils::{FromFields, FromTargets, ToTargets},
 };
 use plonky2::{
     field::{extension::FieldExtension, types::Field},
@@ -88,6 +88,9 @@ impl<'a> PublicInputs<'a, Target> {
             },
             pointer,
         }
+    }
+    pub fn metadata_digest(&self) -> CurveTarget {
+        CurveTarget::from_targets(&self.dm)
     }
 }
 
