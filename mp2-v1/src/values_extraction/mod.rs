@@ -29,7 +29,7 @@ pub(crate) const VALUE_ID_PREFIX: &[u8] = b"VAL";
 
 /// Calculate `id = Poseidon(slot || contract_address)[0]` for single variable leaf.
 pub fn compute_leaf_single_id(slot: u8, contract_address: &Address) -> u64 {
-    let packed_contract_address: Vec<_> = contract_address.0.pack(Endianness::Little).to_fields();
+    let packed_contract_address: Vec<_> = contract_address.0.pack(Endianness::Big).to_fields();
 
     let inputs: Vec<_> = iter::once(GFp::from_canonical_u8(slot))
         .chain(packed_contract_address)
@@ -57,8 +57,7 @@ fn compute_id_with_prefix(prefix: &[u8], slot: u8, contract_address: &Address) -
         .chain(contract_address.0)
         .collect();
 
-    pack_and_compute_poseidon_value::<GFp>(&inputs, Endianness::Little).elements[0]
-        .to_canonical_u64()
+    pack_and_compute_poseidon_value::<GFp>(&inputs, Endianness::Big).elements[0].to_canonical_u64()
 }
 
 /// Calculate `values_digest = D(D(key_id || key) + D(value_id || value))` for mapping variable leaf.

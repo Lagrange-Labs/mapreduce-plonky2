@@ -70,14 +70,6 @@ pub fn keccak256(data: &[u8]) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
-/// Convert an u32-field slice to an u8 vector.
-pub fn convert_u32_fields_to_u8_vec<F: RichField>(fields: &[F]) -> Vec<u8> {
-    fields
-        .iter()
-        .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
-        .collect()
-}
-
 /// Transform the bits to a number target.
 pub fn bits_to_num<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
