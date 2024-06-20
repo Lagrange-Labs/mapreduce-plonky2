@@ -19,11 +19,28 @@ pub(crate) struct TestContext {
 impl TestContext {
     /// Create the test context.
     pub(crate) fn new(rpc_url: &str) -> anyhow::Result<Self> {
-        let params = match env::var("LAGRANGE_PPARAMS") {
-            Ok(path) => {
+        let mut path = env::var("LPN_PARAMS").ok();
+        let mut rebuild = env::var("LPN_PARAMS_REBUILD").is_ok();
+
+        for arg in env::args() {
+            if arg == "--lpn-params-rebuild" {
+                rebuild = true;
+            }
+
+            let args = &mut arg.split('=');
+            let a = args.next().unwrap_or_default();
+            let b = args.next().unwrap_or_default();
+
+            if a == "--lpn-params" {
+                path.replace(b.to_owned());
+            }
+        }
+
+        let params = match path {
+            Some(path) => {
                 let path = PathBuf::from(path);
 
-                if !path.exists() || env::var("LAGRANGE_PPARAMS_REBUILD").is_ok() {
+                if !path.exists() || rebuild {
                     let params = build_circuits_params();
                     let file = bincode::serialize(&params)?;
 
@@ -36,7 +53,7 @@ impl TestContext {
                     bincode::deserialize(&file)?
                 }
             }
-            _ => build_circuits_params(),
+            None => build_circuits_params(),
         };
 
         let rpc = Provider::<Http>::try_from(rpc_url)?;
