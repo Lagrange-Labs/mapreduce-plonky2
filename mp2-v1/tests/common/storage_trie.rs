@@ -1,11 +1,13 @@
 //! Storage trie for proving tests
 
+use super::TestContext;
 use ethers::{
     prelude::Address,
     utils::rlp::{Prototype, Rlp},
 };
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
+    mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
     utils::{convert_u8_to_u32_slice, keccak256},
 };
 use mp2_v1::{
@@ -13,14 +15,6 @@ use mp2_v1::{
     length_extraction, values_extraction,
 };
 use std::collections::HashMap;
-
-use super::TestContext;
-
-/// RLP item size for the extension node
-const EXTENSION_RLP_SIZE: usize = 2;
-
-/// RLP item size for the branch node
-const BRANCH_RLP_SIZE: usize = 17;
 
 /// Maximum child number of a branch node
 const MAX_BRANCH_CHILDREN: usize = 16;
@@ -99,8 +93,8 @@ impl TrieNode {
 
         let rlp = Rlp::new(&self.raw);
         match rlp.prototype().unwrap() {
-            Prototype::List(EXTENSION_RLP_SIZE) => TrieNodeType::Extension,
-            Prototype::List(BRANCH_RLP_SIZE) => TrieNodeType::Branch,
+            Prototype::List(MPT_EXTENSION_RLP_SIZE) => TrieNodeType::Extension,
+            Prototype::List(MPT_BRANCH_RLP_SIZE) => TrieNodeType::Branch,
             _ => panic!("Invalid RLP size for the storage proof"),
         }
     }
