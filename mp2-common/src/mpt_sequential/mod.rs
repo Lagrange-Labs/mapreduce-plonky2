@@ -1,3 +1,6 @@
+use crate::serialization::{
+    deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+};
 use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{
@@ -22,10 +25,6 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use recursion_framework::serialization::deserialize_array;
-use recursion_framework::serialization::deserialize_long_array;
-use recursion_framework::serialization::serialize_array;
-use recursion_framework::serialization::serialize_long_array;
 use serde::{Deserialize, Serialize};
 use utils::bytes_to_nibbles;
 

@@ -1,5 +1,6 @@
 //! A state tree Merkle opening with internal variable depth.
 
+use crate::serialization::{deserialize, serialize};
 use plonky2::{
     field::extension::Extendable,
     hash::{
@@ -13,7 +14,6 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use recursion_framework::serialization::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 
 use crate::poseidon::hash_maybe_swap;

@@ -3,14 +3,11 @@
 use crate::{C, D, F};
 use anyhow::{anyhow, Result};
 use ethers::types::U256;
+use mp2_common::serialization::{FromBytes, ToBytes};
 use plonky2::plonk::circuit_data::CircuitData;
-use recursion_framework::serialization::circuit_data_serialization::{
-    CustomGateSerializer, CustomGeneratorSerializer,
-};
 use std::{
     fs::{create_dir_all, File},
     io::{Read, Write},
-    marker::PhantomData,
     path::Path,
 };
 
@@ -58,28 +55,15 @@ pub fn write_file<P: AsRef<Path>>(file_path: P, data: &[u8]) -> Result<()> {
 pub fn serialize_circuit_data(circuit_data: &CircuitData<F, C, D>) -> Result<Vec<u8>> {
     // Assume that the circuit data could always be serialized by the custom
     // gate and generator serializers of recursive-framework.
-    circuit_data
-        .to_bytes(
-            &CustomGateSerializer,
-            &CustomGeneratorSerializer::<C, D> {
-                _phantom: PhantomData,
-            },
-        )
-        .map_err(|err| anyhow!("Failed to serialize circuit data: {err:?}"))
+    Ok(ToBytes::to_bytes(circuit_data))
 }
 
 /// Deserialize bytes to the circuit data.
 pub fn deserialize_circuit_data(bytes: &[u8]) -> Result<CircuitData<F, C, D>> {
     // Assume that the circuit data could always be deserialized by the custom
     // gate and generator serializers of recursive-framework.
-    CircuitData::from_bytes(
-        bytes,
-        &CustomGateSerializer,
-        &CustomGeneratorSerializer::<C, D> {
-            _phantom: PhantomData,
-        },
-    )
-    .map_err(|err| anyhow!("Failed to deserialize circuit data: {err:?}"))
+    <CircuitData<F, C, D> as FromBytes>::from_bytes(bytes)
+        .map_err(|err| anyhow::Error::msg(err.to_string()))
 }
 
 /// Serialize reference of circuit data, then deserialize to implement clone.

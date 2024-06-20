@@ -21,6 +21,7 @@ sha3.workspace = true
 gnark-utils = { path = "../gnark-utils" }
 mapreduce-plonky2 = { path = "../mapreduce-plonky2" }
 recursion_framework = { path = "../recursion-framework" }
+mp2_common = { path = "../mp2-common"}
 
 [dev-dependencies]
 env_logger.workspace = true
