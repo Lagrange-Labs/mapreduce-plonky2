@@ -9,7 +9,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     types::{CBuilder, GFp},
-    utils::convert_u8_targets_to_u32_le,
+    utils::{Endianness, PackerTarget},
     D,
 };
 use plonky2::{
@@ -84,11 +84,13 @@ impl BranchLengthCircuit {
         // asserts this is a branch node
         cb.assert_one(is_branch.target);
 
-        for (i, h) in convert_u8_targets_to_u32_le(cb, &hash.arr)
+        for (i, h) in hash
+            .arr
+            .pack(cb, Endianness::Little)
             .into_iter()
             .enumerate()
         {
-            cb.connect(h.0, child_proof.root_hash()[i]);
+            cb.connect(h, child_proof.root_hash()[i]);
         }
 
         let root = KeccakCircuit::<MAX_BRANCH_NODE_LEN_PADDED>::hash_vector(cb, &node);

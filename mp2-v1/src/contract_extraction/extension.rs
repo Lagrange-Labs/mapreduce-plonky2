@@ -9,6 +9,7 @@ use mp2_common::{
     mpt_sequential::{MPTLeafOrExtensionNode, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::CBuilder,
+    utils::Endianness,
     D, F,
 };
 use plonky2::{
@@ -46,7 +47,7 @@ impl ExtensionCircuit {
         let new_mpt_key = wires.key;
 
         // Constrain the extracted hash is the one exposed by the proof.
-        let packed_hash = wires.value.convert_u8_to_u32_le(b);
+        let packed_hash = wires.value.pack(b, Endianness::Little);
         let given_hash = child_proof.root_hash();
         packed_hash.enforce_equal(b, &given_hash);
 

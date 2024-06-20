@@ -13,7 +13,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     storage_key::{MappingSlot, MappingSlotWires},
     types::{CBuilder, GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
-    utils::convert_u8_targets_to_u32_be,
+    utils::{Endianness, PackerTarget},
     D,
 };
 use plonky2::{
@@ -94,12 +94,8 @@ where
         // Compute the values digest - D(D(key_id || key) + D(value_id || value)).
         assert_eq!(slot.mapping_key.arr.len(), MAPPING_KEY_LEN);
         assert_eq!(value.arr.len(), MAPPING_LEAF_VALUE_LEN);
-        let [packed_key, packed_value] = [&slot.mapping_key, &value].map(|arr| {
-            convert_u8_targets_to_u32_be(b, &arr.arr)
-                .into_iter()
-                .map(|t| t.0)
-                .collect::<Vec<_>>()
-        });
+        let [packed_key, packed_value] =
+            [&slot.mapping_key, &value].map(|arr| arr.arr.pack(b, Endianness::Big));
         let inputs: Vec<_> = iter::once(key_id).chain(packed_key).collect();
         let k_digest = b.map_to_curve_point(&inputs);
         let inputs: Vec<_> = iter::once(value_id).chain(packed_value).collect();

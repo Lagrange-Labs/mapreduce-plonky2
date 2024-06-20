@@ -13,6 +13,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp},
+    utils::Endianness,
     D,
 };
 use plonky2::{
@@ -98,7 +99,7 @@ impl LeafLengthCircuit {
         // extract the rlp encoded value
         let length_rlp_encoded =
             left_pad_leaf_value::<GFp, D, MAX_LEAF_VALUE_LEN, 4>(cb, &length_mpt.value)
-                .convert_u8_to_u32_be(cb)[0];
+                .pack(cb, Endianness::Big)[0];
 
         let dm = &cb.map_to_curve_point(&[length_slot.slot, variable_slot]);
         let h = &array::from_fn::<_, PACKED_HASH_LEN, _>(|i| length_mpt.root.output_array.arr[i].0);

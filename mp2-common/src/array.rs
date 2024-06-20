@@ -1,6 +1,6 @@
 use crate::{
     serialization::{deserialize_long_array, serialize_long_array},
-    utils::{convert_u8_targets_to_u32_be, convert_u8_targets_to_u32_le},
+    utils::{Endianness, PackerTarget},
 };
 use anyhow::{anyhow, Result};
 use plonky2::{
@@ -617,30 +617,20 @@ pub const fn L32(a: usize) -> usize {
         a / 4
     }
 }
+
 impl<const SIZE: usize> Array<Target, SIZE> {
     /// Convert an `Array` of `Target`, each assumed to represent a byte, to an `Array` of `U32Target`,
-    /// each epresenting the `u32` value given by packing 4 input byte targets, in little-endian order.
-    pub fn convert_u8_to_u32_le<F: RichField + Extendable<D>, const D: usize>(
+    /// each epresenting the `u32` value given by packing 4 input byte targets, according to the endianness
+    /// specified as input.
+    pub fn pack<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
+        endianness: Endianness,
     ) -> Array<U32Target, { L32(SIZE) }>
     where
         [(); L32(SIZE)]:,
     {
-        let u32_targets = convert_u8_targets_to_u32_le(b, self.arr.as_slice());
-        u32_targets.try_into().expect("cannot fail")
-    }
-
-    /// Convert an `Array` of `Target`, each assumed to represent a byte, to an `Array` of `U32Target`,
-    /// each epresenting the `u32` value given by packing 4 input byte targets, in big-endian order.
-    pub fn convert_u8_to_u32_be<F: RichField + Extendable<D>, const D: usize>(
-        &self,
-        b: &mut CircuitBuilder<F, D>,
-    ) -> Array<U32Target, { L32(SIZE) }>
-    where
-        [(); L32(SIZE)]:,
-    {
-        let u32_targets = convert_u8_targets_to_u32_be(b, self.arr.as_slice());
+        let u32_targets = self.arr.pack(b, endianness);
         u32_targets.try_into().expect("cannot fail")
     }
 }
@@ -763,7 +753,7 @@ mod test {
                 let origin_u8 = Array::<Target, S>::new(c);
 
                 // Verify `to_u32_array`.
-                let to_u32 = origin_u8.convert_u8_to_u32_le(c);
+                let to_u32 = origin_u8.pack(c, Endianness::Little);
                 let exp_u32 = Array::<U32Target, { L32(S) }>::new(c);
                 let is_equal = to_u32.equals(c, &exp_u32);
                 c.connect(is_equal.target, tr.target);

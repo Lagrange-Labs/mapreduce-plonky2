@@ -10,7 +10,7 @@ use mp2_common::{
     mpt_sequential::{MPTKeyWire, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::{AddressTarget, CBuilder, ADDRESS_LEN},
-    utils::less_than,
+    utils::{less_than, Endianness},
     D, F,
 };
 use plonky2::{
@@ -95,9 +95,12 @@ where
         // Register the public inputs.
         let h = root.output_array.to_targets().arr;
         // Compute the metadata digest - `D(pack_u32(contract_address))`.
-        let packed_contract_address = contract_address.convert_u8_to_u32_le(b).to_targets().arr;
+        let packed_contract_address = contract_address
+            .pack(b, Endianness::Little)
+            .to_targets()
+            .arr;
         let dm = b.map_to_curve_point(&packed_contract_address);
-        let s = storage_root.convert_u8_to_u32_le(b).to_targets().arr;
+        let s = storage_root.pack(b, Endianness::Little).to_targets().arr;
         PublicInputs::new(&h, &dm, &new_mpt_key.key.arr, &new_mpt_key.pointer, &s).register(b);
 
         LeafWires {

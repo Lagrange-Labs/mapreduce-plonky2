@@ -3,6 +3,7 @@
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use anyhow::Result;
 use mp2_common::serialization::{deserialize, serialize};
+use mp2_common::utils::{Endianness, PackerTarget};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
@@ -10,7 +11,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     types::{CBuilder, GFp},
-    utils::{convert_u8_targets_to_u32_le, less_than},
+    utils::less_than,
     D,
 };
 use plonky2::{
@@ -145,9 +146,7 @@ where
             // We check the hash is the one exposed by the proof, first convert
             // the extracted hash to packed one to compare.
             let packed_hash = Array::<U32Target, PACKED_HASH_LEN> {
-                arr: convert_u8_targets_to_u32_le(b, &hash.arr)
-                    .try_into()
-                    .unwrap(),
+                arr: hash.arr.pack(b, Endianness::Little).try_into().unwrap(),
             };
             let child_hash = proof_inputs.root_hash();
             packed_hash.enforce_equal(b, &child_hash);

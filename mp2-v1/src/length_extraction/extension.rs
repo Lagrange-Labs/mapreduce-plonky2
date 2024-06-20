@@ -8,6 +8,7 @@ use mp2_common::{
     mpt_sequential::MPTLeafOrExtensionNode,
     public_inputs::PublicInputCommon,
     types::{CBuilder, GFp},
+    utils::Endianness,
     D,
 };
 use plonky2::{
@@ -77,7 +78,7 @@ impl ExtensionLengthCircuit {
         >(cb, &key);
 
         mpt.value
-            .convert_u8_to_u32_le(cb)
+            .pack(cb, Endianness::Little)
             .arr
             .iter()
             .zip(child_proof.root_hash().iter())

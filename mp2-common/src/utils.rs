@@ -70,95 +70,12 @@ pub fn keccak256(data: &[u8]) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
-/// Convert an u8 slice to an u32-field vector.
-pub fn convert_u8_slice_to_u32_fields<F: RichField>(
-    values: &[u8],
-    endianness: Endianness,
-) -> Vec<F> {
-    values.pack(endianness).to_fields()
-}
-
 /// Convert an u32-field slice to an u8 vector.
 pub fn convert_u32_fields_to_u8_vec<F: RichField>(fields: &[F]) -> Vec<u8> {
     fields
         .iter()
         .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
         .collect()
-}
-
-/// Pack a slice of targets assumed to represent byte values into a vector of `U32Target`,
-/// each representing the `u32` value given by packing 4 input byte targets, in little-endian
-/// order.
-pub fn convert_u8_targets_to_u32_le<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    data: &[Target],
-) -> Vec<U32Target> {
-    let zero = b.zero();
-    let mut padded = data.to_vec();
-    if data.len() % 4 != 0 {
-        padded.resize(data.len() + (4 - (data.len() % 4)), zero);
-    }
-
-    // constants to convert [u8; 4] to u32
-    // u32 = u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
-    let two_power_8: Target = b.constant(F::from_canonical_usize(TWO_POWER_8));
-    let two_power_16: Target = b.constant(F::from_canonical_usize(TWO_POWER_16));
-    let two_power_24: Target = b.constant(F::from_canonical_usize(TWO_POWER_24));
-
-    // convert padded node to u32
-    (0..padded.len())
-        .step_by(4)
-        .map(|i| {
-            // u8[0]
-            let mut x = padded[i];
-            // u8[1]
-            let mut y = padded[i + 1];
-            // u8[0] + u8[1] * 2^8
-            x = b.mul_add(y, two_power_8, x);
-            // u8[2]
-            y = padded[i + 2];
-            // u8[0] + u8[1] * 2^8 + u8[2] * 2^16
-            x = b.mul_add(y, two_power_16, x);
-            // u8[3]
-            y = padded[i + 3];
-            // u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
-            x = b.mul_add(y, two_power_24, x);
-
-            U32Target(x)
-        })
-        .collect_vec()
-}
-
-/// Pack a slice of targets assumed to represent byte values into a vector of `U32Target`,
-/// each representing the `u32` value given by packing 4 input byte targets, in big-endian
-/// order.
-pub fn convert_u8_targets_to_u32_be<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    data: &[Target],
-) -> Vec<U32Target> {
-    let zero = b.zero();
-    let pad_len = if data.len() % 4 == 0 {
-        0
-    } else {
-        4 - (data.len() % 4)
-    };
-    let mut d = vec![zero; pad_len];
-    d.extend_from_slice(data);
-    let chunks = d.chunks_exact(4);
-    // check that `d` has no additional data to be packed
-    assert_eq!(chunks.remainder().len(), 0);
-    chunks
-        .map(|chunk| {
-            // big-endian packing in each chunk: we multiply the previously accumulated
-            // targets in the chunk by 256 at each step. Thus, after 4 steps, the first
-            // target has been multiplied by TWO_POWER_24, the second one by TWO_POWER_16,
-            // the third one by TWO_POWER_8 while the last one is never multiplied to a
-            // constant
-            U32Target(chunk.into_iter().fold(zero, |res, el| {
-                b.mul_const_add(F::from_canonical_usize(TWO_POWER_8), res, *el)
-            }))
-        })
-        .collect_vec()
 }
 
 /// Transform the bits to a number target.
@@ -292,20 +209,18 @@ pub fn pack_and_compute_poseidon_value<F: RichField>(
     PoseidonHash::hash_no_pad(&packed)
 }
 
-/// Pack the inputs (in big-endian order) then compute the Poseidon hash target.
-pub fn pack_be_and_compute_poseidon_target<F: RichField + Extendable<D>, const D: usize>(
+/// Pack the inputs (according to endianness) then compute the Poseidon hash target.
+pub fn pack_and_compute_poseidon_target<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     inputs: &[Target],
+    endianness: Endianness,
 ) -> HashOutTarget {
     assert!(
         inputs.len() % 4 == 0,
         "Inputs must be a multiple of 4 bytes"
     );
 
-    let packed: Vec<_> = convert_u8_targets_to_u32_be(b, &inputs)
-        .into_iter()
-        .map(|input| input.0)
-        .collect();
+    let packed = inputs.pack(b, endianness);
 
     b.hash_n_to_hash_no_pad::<PoseidonHash>(packed)
 }
@@ -465,13 +380,124 @@ impl<F: PackableRichField, const N: usize> Packer for [F; N] {
     }
 }
 
+pub trait PackerTarget<F: RichField + Extendable<D>, const D: usize, OutT> {
+    fn pack(&self, b: &mut CircuitBuilder<F, D>, endianness: Endianness) -> Vec<OutT>;
+}
+
+impl<F: RichField + Extendable<D>, const D: usize> PackerTarget<F, D, U32Target> for Vec<Target> {
+    /// Pack a slice of targets assumed to represent byte values into a vector of `U32Target`,
+    /// each representing the `u32` value given by packing 4 input byte targets, employing
+    /// the endianness encoding specified as input.
+    fn pack(&self, b: &mut CircuitBuilder<F, D>, endianness: Endianness) -> Vec<U32Target> {
+        let zero = b.zero();
+        match endianness {
+            Endianness::Big => {
+                let pad_len = if self.len() % 4 == 0 {
+                    0
+                } else {
+                    4 - (self.len() % 4)
+                };
+                let mut d = vec![zero; pad_len + self.len()];
+                d[pad_len..].copy_from_slice(self);
+                let chunks = d.chunks_exact(4);
+                // check that `d` has no additional data to be packed
+                assert_eq!(chunks.remainder().len(), 0);
+                chunks
+                    .map(|chunk| {
+                        // big-endian packing in each chunk: we multiply the previously accumulated
+                        // targets in the chunk by 256 at each step. Thus, after 4 steps, the first
+                        // target has been multiplied by TWO_POWER_24, the second one by TWO_POWER_16,
+                        // the third one by TWO_POWER_8 while the last one is never multiplied to a
+                        // constant
+                        U32Target(chunk.into_iter().fold(zero, |res, el| {
+                            b.mul_const_add(F::from_canonical_usize(TWO_POWER_8), res, *el)
+                        }))
+                    })
+                    .collect_vec()
+            }
+            Endianness::Little => {
+                let mut padded = self.to_vec();
+                if self.len() % 4 != 0 {
+                    padded.resize(self.len() + (4 - (self.len() % 4)), zero);
+                }
+
+                // constants to convert [u8; 4] to u32
+                // u32 = u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
+                let two_power_8: Target = b.constant(F::from_canonical_usize(TWO_POWER_8));
+                let two_power_16: Target = b.constant(F::from_canonical_usize(TWO_POWER_16));
+                let two_power_24: Target = b.constant(F::from_canonical_usize(TWO_POWER_24));
+
+                // convert padded node to u32
+                (0..padded.len())
+                    .step_by(4)
+                    .map(|i| {
+                        // u8[0]
+                        let mut x = padded[i];
+                        // u8[1]
+                        let mut y = padded[i + 1];
+                        // u8[0] + u8[1] * 2^8
+                        x = b.mul_add(y, two_power_8, x);
+                        // u8[2]
+                        y = padded[i + 2];
+                        // u8[0] + u8[1] * 2^8 + u8[2] * 2^16
+                        x = b.mul_add(y, two_power_16, x);
+                        // u8[3]
+                        y = padded[i + 3];
+                        // u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
+                        x = b.mul_add(y, two_power_24, x);
+
+                        U32Target(x)
+                    })
+                    .collect_vec()
+            }
+        }
+    }
+}
+
+impl<F: RichField + Extendable<D>, const D: usize, OutT, PackerT: Clone> PackerTarget<F, D, OutT>
+    for &[PackerT]
+where
+    Vec<PackerT>: PackerTarget<F, D, OutT>,
+{
+    fn pack(&self, b: &mut CircuitBuilder<F, D>, endianness: Endianness) -> Vec<OutT> {
+        self.to_vec().pack(b, endianness)
+    }
+}
+
+impl<F: RichField + Extendable<D>, const D: usize, OutT, PackerT: Clone, const N: usize>
+    PackerTarget<F, D, OutT> for &[PackerT; N]
+where
+    Vec<PackerT>: PackerTarget<F, D, OutT>,
+{
+    fn pack(&self, b: &mut CircuitBuilder<F, D>, endianness: Endianness) -> Vec<OutT> {
+        self.as_slice().pack(b, endianness)
+    }
+}
+
+impl<F: RichField + Extendable<D>, const D: usize, OutT, PackerT: Clone, const N: usize>
+    PackerTarget<F, D, OutT> for [PackerT; N]
+where
+    Vec<PackerT>: PackerTarget<F, D, OutT>,
+{
+    fn pack(&self, b: &mut CircuitBuilder<F, D>, endianness: Endianness) -> Vec<OutT> {
+        self.as_slice().pack(b, endianness)
+    }
+}
+
+impl<F: RichField + Extendable<D>, const D: usize> PackerTarget<F, D, Target> for Vec<Target> {
+    fn pack(&self, b: &mut CircuitBuilder<F, D>, endianness: Endianness) -> Vec<Target> {
+        let packed_targets: Vec<U32Target> = self.pack(b, endianness);
+        packed_targets.into_iter().map(|t| t.0).collect_vec()
+    }
+}
+
 #[cfg(test)]
 mod test {
 
     use super::{bits_to_num, Packer, ToFields};
     use crate::utils::{
-        convert_u8_targets_to_u32_be, convert_u8_targets_to_u32_le, greater_than,
-        greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits, Endianness,
+        greater_than, greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits,
+        Endianness, PackerTarget,
     };
     use anyhow::Result;
     use ethers::types::Address;
@@ -505,14 +531,14 @@ mod test {
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
         let inputs = builder.add_virtual_target_arr::<SIZE>();
-        let le_u32_targets = convert_u8_targets_to_u32_le(&mut builder, inputs.as_slice());
-        let be_u32_targets = convert_u8_targets_to_u32_be(&mut builder, inputs.as_slice());
+        let le_u32_targets = inputs.pack(&mut builder, Endianness::Little);
+        let be_u32_targets = inputs.pack(&mut builder, Endianness::Big);
         le_u32_targets
             .into_iter()
-            .for_each(|t| builder.register_public_input(t.0));
+            .for_each(|t| builder.register_public_input(t));
         be_u32_targets
             .into_iter()
-            .for_each(|t| builder.register_public_input(t.0));
+            .for_each(|t| builder.register_public_input(t));
 
         let cd = builder.build::<C>();
 
