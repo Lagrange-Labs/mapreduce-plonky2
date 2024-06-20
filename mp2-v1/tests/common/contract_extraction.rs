@@ -29,6 +29,9 @@ impl TestContext {
         contract_address: &str,
         slot: StorageSlot,
     ) -> ProofWithVK {
+        // Query the block for checking the block hash.
+        let block = self.query_latest_block().await;
+
         // Query the MPT proof from RPC.
         let contract_address = Address::from_str(contract_address).unwrap();
         let query = match slot {
@@ -37,7 +40,9 @@ impl TestContext {
                 ProofQuery::new_mapping_slot(contract_address, slot, mapping_key)
             }
         };
-        let res = self.query_mpt_proof(&query).await;
+        let res = self
+            .query_mpt_proof(&query, Some(block.number.unwrap().as_u64()))
+            .await;
 
         // Get the storage root hash, and check it with `keccak(storage_root)`,
         let storage_root = res.storage_proof[0].proof[0].to_vec();
@@ -66,7 +71,19 @@ impl TestContext {
             }
         }
 
-        ProofWithVK::deserialize(&proof).unwrap()
+        // Check the exposed public inputs.
+        let proof = ProofWithVK::deserialize(&proof).unwrap();
+        let pi = PublicInputs::from_slice(&proof.proof().public_inputs);
+        // Check the state and storage root hashes.
+        let [exp_state_root_hash, exp_storage_root_hash] =
+            [&block.state_root.0, storage_root.as_slice()]
+                .map(|hash| convert_u8_to_u32_slice(hash).to_fields());
+        assert_eq!(pi.h_raw(), exp_state_root_hash);
+        assert_eq!(pi.s_raw(), exp_storage_root_hash);
+        // Ensure MPT root pointer == -1.
+        assert_eq!(*pi.t_raw(), F::NEG_ONE);
+
+        proof
     }
 }
 

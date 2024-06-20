@@ -1,9 +1,9 @@
 //! Test context used in the test cases
 
 use super::utils::load_or_generate_public_params;
-use ethers::prelude::{EIP1186ProofResponse, Http, Provider};
+use ethers::prelude::{Block, BlockId, EIP1186ProofResponse, Http, Provider, TxHash};
 use log::warn;
-use mp2_common::eth::ProofQuery;
+use mp2_common::eth::{query_latest_block, ProofQuery};
 use mp2_v1::api::PublicParameters;
 
 /// Cached filename of the public parameters
@@ -29,9 +29,19 @@ impl TestContext {
         &self.params
     }
 
+    /// Query the latest block.
+    pub(crate) async fn query_latest_block(&self) -> Block<TxHash> {
+        query_latest_block(&self.rpc).await.unwrap()
+    }
+
     /// Query the MPT proof.
-    pub(crate) async fn query_mpt_proof(&self, query: &ProofQuery) -> EIP1186ProofResponse {
-        query.query_mpt_proof(&self.rpc, None).await.unwrap()
+    pub(crate) async fn query_mpt_proof(
+        &self,
+        query: &ProofQuery,
+        block_number: Option<u64>,
+    ) -> EIP1186ProofResponse {
+        let block_id = block_number.map(|n| BlockId::Number(n.into()));
+        query.query_mpt_proof(&self.rpc, block_id).await.unwrap()
     }
 
     /// Reset the RPC provider. It could be used to query data from the
