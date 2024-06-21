@@ -1,14 +1,15 @@
 //! Main APIs and related structures
 
 use crate::{
+    contract_extraction,
     length_extraction::{self, LengthCircuitInput},
     values_extraction,
 };
 use anyhow::Result;
-use mp2_common::serialization::{
-    circuit_data_serialization::SerializableRichField, deserialize, serialize,
+use mp2_common::{
+    serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize},
+    C, D, F,
 };
-use mp2_common::{C, D, F};
 use plonky2::plonk::{
     circuit_builder::CircuitBuilder,
     circuit_data::{CircuitConfig, VerifierCircuitData, VerifierOnlyCircuitData},
@@ -46,14 +47,18 @@ impl<T> ProofInputSerialized<T> {
 /// Set of inputs necessary to generate proofs for each circuit employed in the
 /// pre-processing stage of LPN
 pub enum CircuitInput {
-    /// Input for circuits extracting the values from MPT storage proofs
+    /// Contract extraction input
+    ContractExtraction(contract_extraction::CircuitInput),
+    /// Length extraction input
     LengthExtraction(LengthCircuitInput),
+    /// Values extraction input
     ValuesExtraction(values_extraction::CircuitInput),
 }
 
 #[derive(Serialize, Deserialize)]
 /// Parameters defining all the circuits employed for the pre-processing stage of LPN
 pub struct PublicParameters {
+    contract_extraction: contract_extraction::PublicParameters,
     length_extraction: length_extraction::PublicParameters,
     values_extraction: values_extraction::PublicParameters,
 }
@@ -61,10 +66,12 @@ pub struct PublicParameters {
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
 pub fn build_circuits_params() -> PublicParameters {
+    let contract_extraction = contract_extraction::build_circuits_params();
     let length_extraction = length_extraction::PublicParameters::build();
     let values_extraction = values_extraction::build_circuits_params();
 
     PublicParameters {
+        contract_extraction,
         values_extraction,
         length_extraction,
     }
@@ -75,6 +82,9 @@ pub fn build_circuits_params() -> PublicParameters {
 /// circuit the proof should be generated
 pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
     match input {
+        CircuitInput::ContractExtraction(input) => {
+            contract_extraction::generate_proof(&params.contract_extraction, input)
+        }
         CircuitInput::LengthExtraction(input) => params.length_extraction.generate_proof(input),
         CircuitInput::ValuesExtraction(input) => {
             values_extraction::generate_proof(&params.values_extraction, input)

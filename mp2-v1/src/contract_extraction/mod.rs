@@ -5,6 +5,7 @@ use mp2_common::{
 };
 use plonky2_ecgfp5::curve::curve::Point as Digest;
 
+mod api;
 mod branch;
 mod extension;
 mod leaf;
@@ -15,3 +16,6 @@ pub fn compute_metadata_digest(contract_addr: Address) -> Digest {
 
     map_to_curve_point(&packed_contract_address)
 }
+
+pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
+pub use public_inputs::PublicInputs;

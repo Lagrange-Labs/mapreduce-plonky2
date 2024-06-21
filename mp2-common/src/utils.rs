@@ -1,5 +1,6 @@
 use anyhow::Result;
 use ethers::types::U256;
+use ethers::types::U256;
 use itertools::Itertools;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::{extension::Extendable, types::Field};

@@ -10,6 +10,7 @@ use mp2_common::{
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
+    serialization::{deserialize, serialize},
     types::{CBuilder, GFp},
     utils::less_than,
     D,

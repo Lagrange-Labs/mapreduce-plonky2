@@ -45,10 +45,10 @@ where
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafCircuit<const NODE_LEN: usize> {
-    contract_address: H160,
+    pub(crate) contract_address: H160,
     /// The offset of storage root hash located in RLP encoded account node
-    storage_root_offset: usize,
-    node: Vec<u8>,
+    pub(crate) storage_root_offset: usize,
+    pub(crate) node: Vec<u8>,
 }
 
 impl<const NODE_LEN: usize> LeafCircuit<NODE_LEN>
