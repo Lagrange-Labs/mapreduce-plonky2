@@ -12,7 +12,6 @@ use crate::values_extraction;
 
 use super::{base_circuit, PublicInputs};
 
-
 /// This circuit contains the logic to prove the final extraction of a simple
 /// variable (like uint256) or a mapping without an associated length slot.
 #[derive(Clone, Debug)]

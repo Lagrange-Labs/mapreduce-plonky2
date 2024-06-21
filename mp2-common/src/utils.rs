@@ -405,20 +405,19 @@ impl<const N: usize> Packer for [u8; N] {
 }
 
 pub trait SliceConnector {
-    fn connect_slice(&mut self,x: &[Target],y: &[Target]);
+    fn connect_slice(&mut self, x: &[Target], y: &[Target]);
 }
 
-impl<F: RichField + Extendable<D>, const D:usize>  SliceConnector for CircuitBuilder<F,D> {
-    fn connect_slice(&mut self,x: &[Target],y: &[Target]){
+impl<F: RichField + Extendable<D>, const D: usize> SliceConnector for CircuitBuilder<F, D> {
+    fn connect_slice(&mut self, x: &[Target], y: &[Target]) {
         if x.len() != y.len() {
             panic!("only call connect_slice with equal length");
         }
-        for (xx,yy) in x.iter().zip(y.iter()) {
-            self.connect(*xx,*yy)
+        for (xx, yy) in x.iter().zip(y.iter()) {
+            self.connect(*xx, *yy)
         }
     }
 }
-
 
 #[cfg(test)]
 mod test {
