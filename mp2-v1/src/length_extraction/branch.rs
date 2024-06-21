@@ -88,7 +88,7 @@ impl BranchLengthCircuit {
             .into_iter()
             .enumerate()
         {
-            cb.connect(h.0, child_proof.root_hash()[i]);
+            cb.connect(h.0, child_proof.root_hash_raw()[i]);
         }
 
         let root = KeccakCircuit::<MAX_BRANCH_NODE_LEN_PADDED>::hash_vector(cb, &node);
@@ -125,7 +125,7 @@ pub mod tests {
         eth::StorageSlot,
         group_hashing::map_to_curve_point,
         types::{CBuilder, GFp},
-        utils::{convert_u8_to_u32_slice, keccak256},
+        utils::{convert_u8_to_u32_slice, keccak256, ToFields},
         D,
     };
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
@@ -192,8 +192,7 @@ pub mod tests {
             .collect();
 
         let mut branch_pi =
-            PublicInputs::from_parts(&child_hash, (&dm.x.0, &dm.y.0, &is_inf), &key, &d, &length)
-                .to_vec();
+            PublicInputs::from_parts(&child_hash, &dm.to_fields(), &key, &d, &length).to_vec();
 
         // traverse from leaf's child to root
         for d in (0..depth - 1).rev() {
@@ -215,7 +214,7 @@ pub mod tests {
                 .collect();
 
             assert_eq!(proof_pi.length(), &length);
-            assert_eq!(proof_pi.root_hash(), &root);
+            assert_eq!(proof_pi.root_hash_raw(), &root);
             assert_eq!(proof_pi.mpt_key(), &key);
             assert_eq!(proof_pi.metadata_point(), dm);
             assert_eq!(proof_pi.mpt_key_pointer(), &t);

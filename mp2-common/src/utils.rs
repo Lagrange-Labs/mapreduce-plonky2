@@ -19,6 +19,7 @@ use rand::{thread_rng, Rng};
 use sha3::Digest;
 use sha3::Keccak256;
 
+use crate::mpt_sequential::Circuit;
 use crate::u256::NUM_LIMBS;
 use crate::{
     group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing, EXTENSION_DEGREE},
@@ -402,6 +403,22 @@ impl<const N: usize> Packer for [u8; N] {
         convert_u8_to_u32_slice(self.as_slice())
     }
 }
+
+pub trait SliceConnector {
+    fn connect_slice(&mut self,x: &[Target],y: &[Target]);
+}
+
+impl<F: RichField + Extendable<D>, const D:usize>  SliceConnector for CircuitBuilder<F,D> {
+    fn connect_slice(&mut self,x: &[Target],y: &[Target]){
+        if x.len() != y.len() {
+            panic!("only call connect_slice with equal length");
+        }
+        for (xx,yy) in x.iter().zip(y.iter()) {
+            self.connect(*xx,*yy)
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod test {

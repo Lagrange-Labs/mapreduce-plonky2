@@ -145,6 +145,15 @@ pub(crate) mod test {
     }
 
     impl ProofsPi {
+        pub(crate) fn contract_inputs(&self) -> contract_extraction::PublicInputs<GFp> {
+            contract_extraction::PublicInputs::from_slice(&self.contract_pi)
+        }
+
+        pub(crate) fn value_inputs(&self) -> values_extraction::PublicInputs<GFp> {
+            values_extraction::PublicInputs::new(&self.values_pi)
+        }
+
+
         pub(crate) fn random() -> Self {
             let value_h = HashOut::<GFp>::rand().to_bytes().pack();
             let key = random_vector(64);

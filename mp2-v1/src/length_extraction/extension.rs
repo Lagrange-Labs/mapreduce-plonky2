@@ -80,7 +80,7 @@ impl ExtensionLengthCircuit {
             .convert_u8_to_u32(cb)
             .arr
             .iter()
-            .zip(child_proof.root_hash().iter())
+            .zip(child_proof.root_hash_raw().iter())
             .for_each(|(v, p)| cb.connect(v.to_target(), *p));
 
         let PublicInputs { dm, k, n, .. } = child_proof;
@@ -208,7 +208,7 @@ pub mod tests {
             - GFp::from_canonical_usize(rlp_nibbles.nibbles().len());
 
         assert_eq!(leaf_pi.length(), &length);
-        assert_eq!(leaf_pi.root_hash(), &root);
+        assert_eq!(leaf_pi.root_hash_raw(), &root);
         assert_eq!(leaf_pi.mpt_key(), &key);
         assert_eq!(leaf_pi.metadata_point(), dm);
         assert_eq!(leaf_pi.mpt_key_pointer(), &t);
@@ -230,7 +230,7 @@ pub mod tests {
             .collect();
 
         assert_eq!(branch_pi.length(), &length);
-        assert_eq!(branch_pi.root_hash(), &root);
+        assert_eq!(branch_pi.root_hash_raw(), &root);
         assert_eq!(branch_pi.mpt_key(), &key);
         assert_eq!(branch_pi.metadata_point(), dm);
         assert_eq!(branch_pi.mpt_key_pointer(), &t);
@@ -252,7 +252,7 @@ pub mod tests {
             .collect();
 
         assert_eq!(ext_pi.length(), &length);
-        assert_eq!(ext_pi.root_hash(), &root);
+        assert_eq!(ext_pi.root_hash_raw(), &root);
         assert_eq!(ext_pi.mpt_key(), &key);
         assert_eq!(ext_pi.metadata_point(), dm);
         assert_eq!(ext_pi.mpt_key_pointer(), &t);
