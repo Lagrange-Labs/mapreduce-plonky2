@@ -8,6 +8,7 @@ use mp2_common::{
     mpt_sequential::MPTLeafOrExtensionNode,
     public_inputs::PublicInputCommon,
     types::{CBuilder, GFp},
+    utils::Endianness,
     D,
 };
 use plonky2::{
@@ -77,7 +78,7 @@ impl ExtensionLengthCircuit {
         >(cb, &key);
 
         mpt.value
-            .convert_u8_to_u32(cb)
+            .pack(cb, Endianness::Little)
             .arr
             .iter()
             .zip(child_proof.root_hash().iter())
@@ -116,10 +117,9 @@ pub mod tests {
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
-        group_hashing::map_to_curve_point,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::{CBuilder, GFp},
-        utils::{convert_u8_to_u32_slice, keccak256},
+        utils::{keccak256, Endianness, Packer, ToFields},
         D,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
@@ -134,7 +134,8 @@ pub mod tests {
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
     use crate::length_extraction::{
-        branch::tests::BranchTestCircuit, BranchLengthCircuit, LeafLengthCircuit, PublicInputs,
+        api::compute_metadata_digest, branch::tests::BranchTestCircuit, BranchLengthCircuit,
+        LeafLengthCircuit, PublicInputs,
     };
 
     use super::{ExtensionLengthCircuit, ExtensionLengthWires};
@@ -184,11 +185,7 @@ pub mod tests {
         }
 
         let length = GFp::from_canonical_u32(value1);
-        let dm = map_to_curve_point(&[
-            GFp::from_canonical_u8(length_slot),
-            GFp::from_canonical_u8(variable_slot),
-        ])
-        .to_weierstrass();
+        let dm = compute_metadata_digest(length_slot, variable_slot).to_weierstrass();
 
         // Leaf extraction
 
@@ -197,10 +194,7 @@ pub mod tests {
         let leaf_proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(leaf_circuit);
         let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
 
-        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         let rlp_headers: Vec<Vec<u8>> = rlp::decode_list(&node);
         let rlp_nibbles = Nibbles::from_compact(&rlp_headers[0]);
@@ -224,10 +218,7 @@ pub mod tests {
         let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
 
         let t = t - GFp::ONE;
-        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         assert_eq!(branch_pi.length(), &length);
         assert_eq!(branch_pi.root_hash(), &root);
@@ -246,10 +237,7 @@ pub mod tests {
         let ext_pi = PublicInputs::<GFp>::from_slice(&ext_proof.public_inputs);
 
         let t = GFp::ZERO - GFp::ONE;
-        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         assert_eq!(ext_pi.length(), &length);
         assert_eq!(ext_pi.root_hash(), &root);

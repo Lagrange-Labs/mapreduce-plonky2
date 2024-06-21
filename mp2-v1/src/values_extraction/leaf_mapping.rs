@@ -13,7 +13,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     storage_key::{MappingSlot, MappingSlotWires},
     types::{CBuilder, GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
-    utils::convert_u8_targets_to_u32,
+    utils::{Endianness, PackerTarget},
     D,
 };
 use plonky2::{
@@ -94,12 +94,8 @@ where
         // Compute the values digest - D(D(key_id || key) + D(value_id || value)).
         assert_eq!(slot.mapping_key.arr.len(), MAPPING_KEY_LEN);
         assert_eq!(value.arr.len(), MAPPING_LEAF_VALUE_LEN);
-        let [packed_key, packed_value] = [&slot.mapping_key, &value].map(|arr| {
-            convert_u8_targets_to_u32(b, &arr.arr)
-                .into_iter()
-                .map(|t| t.0)
-                .collect::<Vec<_>>()
-        });
+        let [packed_key, packed_value] =
+            [&slot.mapping_key, &value].map(|arr| arr.arr.pack(b, Endianness::Big));
         let inputs: Vec<_> = iter::once(key_id).chain(packed_key).collect();
         let k_digest = b.map_to_curve_point(&inputs);
         let inputs: Vec<_> = iter::once(value_id).chain(packed_value).collect();
@@ -183,8 +179,8 @@ impl CircuitLogicWires<GFp, D, 0> for LeafMappingWires<MAX_LEAF_NODE_LEN> {
 mod tests {
     use super::{
         super::{
-            compute_leaf_mapping_key_id, compute_leaf_mapping_value_id,
-            tests::{compute_leaf_mapping_metadata_digest, compute_leaf_mapping_values_digest},
+            compute_leaf_mapping_key_id, compute_leaf_mapping_metadata_digest,
+            compute_leaf_mapping_value_id, compute_leaf_mapping_values_digest,
         },
         *,
     };
@@ -192,11 +188,10 @@ mod tests {
     use ethers::types::Address;
     use mp2_common::{
         array::Array,
-        eth::{left_pad32, StorageSlot},
-        group_hashing::map_to_curve_point,
+        eth::StorageSlot,
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{convert_u8_to_u32_slice, keccak256, pack_and_compute_poseidon_value},
+        utils::{keccak256, Endianness, Packer},
         C, D, F,
     };
     use mp2_test::{
@@ -284,8 +279,7 @@ mod tests {
         let pi = PublicInputs::new(&proof.public_inputs);
 
         {
-            let exp_hash = keccak256(&node);
-            let exp_hash = convert_u8_to_u32_slice(&exp_hash);
+            let exp_hash = keccak256(&node).pack(Endianness::Little);
             assert_eq!(pi.root_hash(), exp_hash);
         }
         {

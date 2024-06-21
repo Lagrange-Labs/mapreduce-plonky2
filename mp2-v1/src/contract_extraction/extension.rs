@@ -9,6 +9,7 @@ use mp2_common::{
     mpt_sequential::{MPTLeafOrExtensionNode, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::CBuilder,
+    utils::Endianness,
     D, F,
 };
 use plonky2::{
@@ -46,7 +47,7 @@ impl ExtensionCircuit {
         let new_mpt_key = wires.key;
 
         // Constrain the extracted hash is the one exposed by the proof.
-        let packed_hash = wires.value.convert_u8_to_u32(b);
+        let packed_hash = wires.value.pack(b, Endianness::Little);
         let given_hash = child_proof.root_hash();
         packed_hash.enforce_equal(b, &given_hash);
 
@@ -100,7 +101,7 @@ mod tests {
         keccak::PACKED_HASH_LEN,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::PACKED_ADDRESS_LEN,
-        utils::{convert_u8_to_u32_slice, keccak256, Fieldable, ToFields},
+        utils::{keccak256, Endianness, Fieldable, Packer, ToFields},
         C,
     };
     use mp2_test::{
@@ -163,7 +164,7 @@ mod tests {
         assert_eq!(root_rlp.len(), 2);
 
         // Prepare the public inputs for the extension node circuit.
-        let h = &convert_u8_to_u32_slice(&keccak256(&proof[1])).to_fields();
+        let h = &keccak256(&proof[1]).pack(Endianness::Little).to_fields();
         let dm = map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
             .to_weierstrass();
         let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
@@ -182,7 +183,7 @@ mod tests {
 
         // Check packed block hash
         {
-            let hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
+            let hash = keccak256(&node).pack(Endianness::Little).to_fields();
             assert_eq!(pi.h, hash);
         }
         // Check metadata digest
