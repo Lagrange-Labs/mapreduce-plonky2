@@ -8,6 +8,8 @@ use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
 use crate::{contract_extraction, values_extraction};
 
+/// This circuit is more like a gadget. This contains the logic of the common part
+/// between all the final extraction circuits. It should not be used on its own.
 #[derive(Debug, Clone)]
 pub struct BaseCircuit {}
 
@@ -152,7 +154,6 @@ pub(crate) mod test {
         pub(crate) fn value_inputs(&self) -> values_extraction::PublicInputs<GFp> {
             values_extraction::PublicInputs::new(&self.values_pi)
         }
-
 
         pub(crate) fn random() -> Self {
             let value_h = HashOut::<GFp>::rand().to_bytes().pack();

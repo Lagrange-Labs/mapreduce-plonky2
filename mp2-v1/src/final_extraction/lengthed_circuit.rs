@@ -15,6 +15,8 @@ use crate::{length_extraction, values_extraction};
 
 use super::{base_circuit, PublicInputs};
 
+/// This circuit contains the logic to prove the final extraction of a mapping
+/// variable associated with a length slot.
 #[derive(Clone, Debug)]
 struct LengthedCircuit {}
 
