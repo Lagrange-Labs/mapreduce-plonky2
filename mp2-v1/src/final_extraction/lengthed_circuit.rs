@@ -1,6 +1,7 @@
 use mp2_common::public_inputs::PublicInputCommon;
 use mp2_common::utils::SliceConnector;
 use mp2_common::{group_hashing::CircuitBuilderGroupHashing, types::GFp, utils::ToTargets};
+use mp2_common::{D, F};
 use plonky2::field::types::Field;
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::WitnessWrite;
@@ -10,6 +11,8 @@ use plonky2::{
 };
 use plonky2_crypto::hash::CircuitBuilderHash;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
 
 use crate::{length_extraction, values_extraction};
 
@@ -18,9 +21,9 @@ use super::{base_circuit, PublicInputs};
 /// This circuit contains the logic to prove the final extraction of a mapping
 /// variable associated with a length slot.
 #[derive(Clone, Debug)]
-struct LengthedCircuit {}
+pub struct LengthedCircuit {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct LengthedWires {}
 
 impl LengthedCircuit {
@@ -61,6 +64,25 @@ impl LengthedCircuit {
     }
 
     fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &LengthedWires) {}
+}
+
+impl CircuitLogicWires<F, D, 0> for LengthedWires {
+    type CircuitBuilderParams = ();
+    type Inputs = LengthedCircuit;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        todo!()
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
+        todo!()
+    }
 }
 
 #[cfg(test)]

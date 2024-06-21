@@ -1,3 +1,4 @@
+mod api;
 mod base_circuit;
 mod lengthed_circuit;
 mod public_inputs;

@@ -1,5 +1,7 @@
 use mp2_common::public_inputs::PublicInputCommon;
+use mp2_common::serialization::{deserialize, serialize};
 use mp2_common::{group_hashing::CircuitBuilderGroupHashing, types::GFp, utils::ToTargets};
+use mp2_common::{D, F};
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::WitnessWrite;
 use plonky2::{
@@ -7,6 +9,8 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use recursion_framework::circuit_builder::CircuitLogicWires;
+use serde::{Deserialize, Serialize};
 
 use crate::values_extraction;
 
@@ -15,7 +19,7 @@ use super::{base_circuit, PublicInputs};
 /// This circuit contains the logic to prove the final extraction of a simple
 /// variable (like uint256) or a mapping without an associated length slot.
 #[derive(Clone, Debug)]
-struct SimpleCircuit {
+pub struct SimpleCircuit {
     /// Set to true for types that
     /// * have multiple entries (like an mapping, unlike a single uin256 for example)
     /// * don't need or have an associated length slot to combine with
@@ -25,8 +29,9 @@ struct SimpleCircuit {
     compound_type: bool,
 }
 
-#[derive(Debug, Clone)]
-struct SimpleWires {
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SimpleWires {
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     compound: BoolTarget,
 }
 
@@ -57,6 +62,25 @@ impl SimpleCircuit {
 
     fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &SimpleWires) {
         pw.set_bool_target(wires.compound, self.compound_type);
+    }
+}
+
+impl CircuitLogicWires<F, D, 0> for SimpleWires {
+    type CircuitBuilderParams = ();
+    type Inputs = SimpleCircuit;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        todo!()
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
+        todo!()
     }
 }
 
