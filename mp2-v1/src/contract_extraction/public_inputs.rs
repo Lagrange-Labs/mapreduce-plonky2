@@ -55,7 +55,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
 impl<'a> PublicInputs<'a, GFp> {
     /// Get the metadata point.
     pub fn metadata_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(&self.dm)
+        WeierstrassPoint::from_fields(self.dm)
     }
 }
 

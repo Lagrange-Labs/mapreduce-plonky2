@@ -31,7 +31,7 @@ pub use curve_add::add_curve_point;
 /// Field-to-curve and curve point addition functions
 pub use field_to_curve::map_to_curve_point;
 
-use crate::utils::{FromBytes, ToTargets};
+use crate::utils::ToTargets;
 use crate::{
     types::{GFp, GFp5},
     utils::{FromFields, FromTargets, ToFields},
@@ -142,17 +142,5 @@ impl ToFields<GoldilocksField> for WeierstrassPoint {
             false => GoldilocksField::ZERO,
         });
         v
-    }
-}
-
-impl FromBytes for WeierstrassPoint {
-    fn from_bytes(value: Vec<u8>) -> Result<Self> {
-        Ok(map_to_curve_point(
-            &value
-                .into_iter()
-                .map(GFp::from_canonical_u8)
-                .collect::<Vec<_>>(),
-        )
-        .to_weierstrass())
     }
 }

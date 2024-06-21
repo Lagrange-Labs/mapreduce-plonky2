@@ -1,9 +1,10 @@
-use mp2_common::group_hashing::CircuitBuilderGroupHashing;
+use mp2_common::{group_hashing::CircuitBuilderGroupHashing, keccak::PACKED_HASH_LEN, u256};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
 use crate::{contract_extraction, values_extraction};
 
@@ -11,10 +12,15 @@ use crate::{contract_extraction, values_extraction};
 pub struct BaseCircuit {}
 
 #[derive(Debug, Clone)]
-pub struct BaseWires {}
+pub struct BaseWires {
+    pub(crate) dm: CurveTarget,
+    pub(crate) bh: [Target; PACKED_HASH_LEN],
+    pub(crate) prev_bh: [Target; PACKED_HASH_LEN],
+    pub(crate) bn: [Target; u256::NUM_LIMBS],
+}
 
 impl BaseCircuit {
-    fn build(
+    pub(crate) fn build(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
         block_pi: &[Target],
         contract_pi: &[Target],
@@ -30,14 +36,20 @@ impl BaseCircuit {
 
         let metadata =
             b.add_curve_point(&[value_pi.metadata_digest(), contract_pi.metadata_digest()]);
-        BaseWires {}
+        BaseWires {
+            dm: metadata,
+            // TODO: replace once block extraction merged
+            bh: [minus_one; PACKED_HASH_LEN],
+            prev_bh: [minus_one; PACKED_HASH_LEN],
+            bn: [minus_one; u256::NUM_LIMBS],
+        }
     }
 
-    fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &BaseWires) {}
+    pub(crate) fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &BaseWires) {}
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use super::*;
     use anyhow::Result;
     use contract_extraction::build_circuits_params;
@@ -46,7 +58,7 @@ mod test {
         mpt_sequential::MPTKeyWire,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::GFp,
-        utils::{FromBytes, IntTargetWriter, Packer, ToFields},
+        utils::{IntTargetWriter, Packer, ToFields},
     };
     use mp2_test::{
         circuit::{run_circuit, setup_circuit, UserCircuit},
@@ -58,7 +70,7 @@ mod test {
         iop::witness::WitnessWrite,
         plonk::config::{GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
     };
-    use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
+    use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use std::array::from_fn as create_array;
     use values_extraction::public_inputs::tests::new_extraction_public_inputs;
 
@@ -68,36 +80,108 @@ mod test {
 
     #[derive(Clone, Debug)]
     struct TestBaseCircuit {
-        values_pi: Vec<GFp>,
-        contract_pi: Vec<GFp>,
+        pis: ProofsPi,
         circuit: BaseCircuit,
     }
 
     struct TestBaseWires {
-        values_pi: Vec<Target>,
-        contract_pi: Vec<Target>,
+        pis: ProofsPiTarget,
         base: BaseWires,
     }
 
     impl UserCircuit<GoldilocksField, 2> for TestBaseCircuit {
         type Wires = TestBaseWires;
         fn build(c: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
-            let block_pi = vec![];
-            let contract_pi =
-                c.add_virtual_targets(contract_extraction::PublicInputs::<Target>::TOTAL_LEN);
-            let values_pi =
-                c.add_virtual_targets(values_extraction::PublicInputs::<Target>::TOTAL_LEN);
-            let base_wires = BaseCircuit::build(c, &block_pi, &contract_pi, &values_pi);
+            let proofs_pi = ProofsPiTarget::new(c);
+            let base_wires = BaseCircuit::build(
+                c,
+                &proofs_pi.blocks_pi,
+                &proofs_pi.contract_pi,
+                &proofs_pi.values_pi,
+            );
             TestBaseWires {
                 base: base_wires,
-                contract_pi,
-                values_pi,
+                pis: proofs_pi,
             }
         }
         fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
-            pw.set_target_arr(&wires.values_pi, self.values_pi.as_ref());
-            pw.set_target_arr(&wires.contract_pi, &self.contract_pi.as_ref());
             self.circuit.assign(pw, &wires.base);
+            wires.pis.assign(pw, &self.pis);
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub(crate) struct ProofsPiTarget {
+        pub(crate) blocks_pi: Vec<Target>,
+        pub(crate) contract_pi: Vec<Target>,
+        pub(crate) values_pi: Vec<Target>,
+    }
+
+    impl ProofsPiTarget {
+        pub(crate) fn new(b: &mut CircuitBuilder<GFp, 2>) -> Self {
+            Self {
+                blocks_pi: vec![],
+                contract_pi: b
+                    .add_virtual_targets(contract_extraction::PublicInputs::<Target>::TOTAL_LEN),
+                values_pi: b
+                    .add_virtual_targets(values_extraction::PublicInputs::<Target>::TOTAL_LEN),
+            }
+        }
+        pub(crate) fn assign(&self, pw: &mut PartialWitness<GFp>, pis: &ProofsPi) {
+            pw.set_target_arr(&self.values_pi, &pis.values_pi.as_ref());
+            pw.set_target_arr(&self.contract_pi, &pis.contract_pi.as_ref());
+            pw.set_target_arr(&self.blocks_pi, &pis.blocks_pi.as_ref());
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub(crate) struct ProofsPi {
+        pub(crate) value_dm: Point,
+        pub(crate) value_dv: Point,
+        pub(crate) contract_dm: Point,
+        pub(crate) blocks_pi: Vec<GFp>,
+        pub(crate) contract_pi: Vec<GFp>,
+        pub(crate) values_pi: Vec<GFp>,
+    }
+
+    impl ProofsPi {
+        pub(crate) fn random() -> Self {
+            let value_h = HashOut::<GFp>::rand().to_bytes().pack();
+            let key = random_vector(64);
+            let ptr = usize::max_value();
+            let value_dv = Point::rand();
+            let value_dm = Point::rand();
+            let n = 10;
+            let values_pi = new_extraction_public_inputs(
+                &value_h,
+                &key,
+                ptr,
+                &value_dv.to_weierstrass(),
+                &value_dm.to_weierstrass(),
+                n,
+            );
+
+            let h = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
+            let contract_dm = Point::rand();
+            let key = &random_vector::<u8>(MAX_KEY_NIBBLE_LEN).to_fields();
+            let ptr = &GFp::NEG_ONE; // simulating end of MPT recursion
+            let s = &value_h.to_fields();
+            let contract_pi = contract_extraction::PublicInputs {
+                h,
+                dm: &contract_dm.to_weierstrass().to_fields(),
+                k: key,
+                t: ptr,
+                s,
+            }
+            .to_vec();
+            ProofsPi {
+                contract_dm,
+                value_dm,
+                value_dv,
+                blocks_pi: vec![],
+                values_pi,
+                contract_pi,
+            }
         }
     }
 
@@ -105,32 +189,9 @@ mod test {
     fn final_simple_value() -> Result<()> {
         //let block_pi = vec![];
         //let contract_pi = vec![];
-
-        let value_h = HashOut::<GFp>::rand().to_bytes().pack();
-        let key = random_vector(64);
-        let ptr = usize::max_value();
-        let dv = WeierstrassPoint::from_random_bytes()?;
-        let dm = WeierstrassPoint::from_random_bytes()?;
-        let n = 10;
-        let values_pi = new_extraction_public_inputs(&value_h, &key, ptr, &dv, &dm, n);
-
-        let h = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
-        let dm = &WeierstrassPoint::from_random_bytes()?.to_fields();
-        let key = &random_vector::<u8>(MAX_KEY_NIBBLE_LEN).to_fields();
-        let ptr = &GFp::NEG_ONE; // simulating end of MPT recursion
-        let s = &value_h.to_fields();
-        let contract_pi = contract_extraction::PublicInputs {
-            h,
-            dm,
-            k: key,
-            t: ptr,
-            s,
-        }
-        .to_vec();
-
+        let pis = ProofsPi::random();
         let test_circuit = TestBaseCircuit {
-            values_pi,
-            contract_pi,
+            pis,
             circuit: BaseCircuit {},
         };
         run_circuit::<F, D, C, _>(test_circuit);
