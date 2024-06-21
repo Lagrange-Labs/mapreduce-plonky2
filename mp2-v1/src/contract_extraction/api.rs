@@ -12,7 +12,10 @@ use crate::{
 };
 use anyhow::Result;
 use ethers::types::Address;
-use mp2_common::{utils::{find_index_subvector, Packer}, C, D, F};
+use mp2_common::{
+    utils::{find_index_subvector, Packer},
+    C, D, F,
+};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
@@ -170,6 +173,7 @@ impl PublicParameters {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::contract_extraction::compute_metadata_digest;
     use eth_trie::Nibbles;
     use ethers::prelude::{Http, Provider};
     use mp2_common::{
@@ -185,7 +189,6 @@ mod tests {
     use rlp::{Prototype, Rlp};
     use serial_test::serial;
     use std::str::FromStr;
-    use crate::contract_extraction::compute_metadata_digest;
 
     /// Pudgy Penguins contract address for testing
     const PUDGY_PENGUINS_ADDRESS: &str = "0xbd3531da5cf5857e7cfaa92426877b022e612cf8";
