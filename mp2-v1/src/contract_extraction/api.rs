@@ -12,7 +12,7 @@ use crate::{
 };
 use anyhow::Result;
 use ethers::types::Address;
-use mp2_common::{utils::find_index_subvector, C, D, F};
+use mp2_common::{utils::{find_index_subvector, Packer}, C, D, F};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
@@ -178,13 +178,14 @@ mod tests {
         mpt_sequential::{
             mpt_key_ptr, utils::bytes_to_nibbles, MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE,
         },
-        utils::{convert_u8_to_u32_slice, keccak256, ToFields},
+        utils::{keccak256, Endianness, ToFields},
     };
     use mp2_test::eth::get_mainnet_url;
     use plonky2::field::types::Field;
     use rlp::{Prototype, Rlp};
     use serial_test::serial;
     use std::str::FromStr;
+    use crate::contract_extraction::compute_metadata_digest;
 
     /// Pudgy Penguins contract address for testing
     const PUDGY_PENGUINS_ADDRESS: &str = "0xbd3531da5cf5857e7cfaa92426877b022e612cf8";
@@ -220,14 +221,12 @@ mod tests {
         let pi = PublicInputs::from_slice(&pi);
         // Check packed block hash
         {
-            let exp_block_hash = keccak256(&node);
-            let exp_block_hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
+            let exp_block_hash = keccak256(&node).pack(Endianness::Little).to_fields();
             assert_eq!(pi.h, exp_block_hash);
         }
         // Check metadata digest
         {
-            let packed_contract_address = convert_u8_to_u32_slice(&contract_address.0).to_fields();
-            let exp_digest = map_to_curve_point(&packed_contract_address);
+            let exp_digest = compute_metadata_digest(contract_address);
             assert_eq!(pi.metadata_point(), exp_digest.to_weierstrass());
         }
         // Check MPT key and pointer
@@ -248,7 +247,7 @@ mod tests {
         }
         // Check packed storage root hash
         {
-            let exp_storage_root_hash: Vec<_> = convert_u8_to_u32_slice(&storage_root).to_fields();
+            let exp_storage_root_hash: Vec<_> = storage_root.pack(Endianness::Little).to_fields();
             assert_eq!(pi.s, exp_storage_root_hash);
         }
 
@@ -272,7 +271,7 @@ mod tests {
                     let child_pi = PublicInputs::from_slice(&child_pi);
                     // Check packed block hash
                     {
-                        let hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
+                        let hash = keccak256(&node).pack(Endianness::Little).to_fields();
                         assert_eq!(pi.h, hash);
                     }
                     // Check metadata digest
@@ -305,7 +304,7 @@ mod tests {
                     let child_pi = PublicInputs::from_slice(&child_pi);
                     // Check packed block hash
                     {
-                        let hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
+                        let hash = keccak256(&node).pack(Endianness::Little).to_fields();
                         assert_eq!(pi.h, hash);
                     }
                     // Check metadata digest

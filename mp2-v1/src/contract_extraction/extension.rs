@@ -95,7 +95,7 @@ impl CircuitLogicWires<F, D, 1> for ExtensionWires {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eth_trie::{EthTrie, MemoryDB, Trie};
+    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,

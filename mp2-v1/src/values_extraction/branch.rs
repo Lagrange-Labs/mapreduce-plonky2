@@ -2,7 +2,6 @@
 
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use anyhow::Result;
-use mp2_common::serialization::{deserialize, serialize};
 use mp2_common::utils::{Endianness, PackerTarget};
 use mp2_common::{
     array::{Array, Vector, VectorWire},

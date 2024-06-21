@@ -10,13 +10,12 @@ use mp2_common::{
     mpt_sequential::{
         mpt_key_ptr, utils::bytes_to_nibbles, MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE,
     },
-    utils::{convert_u8_to_u32_slice, keccak256, ToFields},
+    utils::{keccak256, Endianness, Packer, ToFields},
     F,
 };
 use mp2_v1::{
     api::{generate_proof, CircuitInput, ProofWithVK, PublicParameters},
-    contract_extraction,
-    contract_extraction::PublicInputs,
+    contract_extraction::{self, compute_metadata_digest, PublicInputs},
 };
 use plonky2::field::types::Field;
 use rlp::{Prototype, Rlp};
@@ -77,7 +76,7 @@ impl TestContext {
         // Check the state and storage root hashes.
         let [exp_state_root_hash, exp_storage_root_hash] =
             [&block.state_root.0, storage_root.as_slice()]
-                .map(|hash| convert_u8_to_u32_slice(hash).to_fields());
+                .map(|hash| hash.pack(Endianness::Little).to_fields());
         assert_eq!(pi.h_raw(), exp_state_root_hash);
         assert_eq!(pi.s_raw(), exp_storage_root_hash);
         // Ensure MPT root pointer == -1.
@@ -106,13 +105,12 @@ fn prove_leaf(
     // Check packed block hash
     {
         let exp_block_hash = keccak256(&node);
-        let exp_block_hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
+        let exp_block_hash = keccak256(&node).pack(Endianness::Little).to_fields();
         assert_eq!(pi.h_raw(), exp_block_hash);
     }
     // Check metadata digest
     {
-        let packed_contract_address = convert_u8_to_u32_slice(&contract_address.0).to_fields();
-        let exp_digest = map_to_curve_point(&packed_contract_address);
+        let exp_digest = compute_metadata_digest(contract_address);
         assert_eq!(pi.metadata_point(), exp_digest.to_weierstrass());
     }
     // Check MPT key and pointer
@@ -133,7 +131,7 @@ fn prove_leaf(
     }
     // Check packed storage root hash
     {
-        let exp_storage_root_hash: Vec<_> = convert_u8_to_u32_slice(&storage_root).to_fields();
+        let exp_storage_root_hash: Vec<_> = storage_root.pack(Endianness::Little).to_fields();
         assert_eq!(pi.s_raw(), exp_storage_root_hash);
     }
 
@@ -154,7 +152,7 @@ fn prove_extension(params: &PublicParameters, node: Vec<u8>, child_proof: Vec<u8
     let child_pi = PublicInputs::from_slice(&child_proof_with_vk.proof().public_inputs);
     // Check packed block hash
     {
-        let hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
+        let hash = keccak256(&node).pack(Endianness::Little).to_fields();
         assert_eq!(pi.h_raw(), hash);
     }
     // Check metadata digest
@@ -189,7 +187,7 @@ fn prove_branch(params: &PublicParameters, node: Vec<u8>, child_proof: Vec<u8>) 
     let child_pi = PublicInputs::from_slice(&child_proof_with_vk.proof().public_inputs);
     // Check packed block hash
     {
-        let hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
+        let hash = keccak256(&node).pack(Endianness::Little).to_fields();
         assert_eq!(pi.h_raw(), hash);
     }
     // Check metadata digest
