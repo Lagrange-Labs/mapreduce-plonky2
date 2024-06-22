@@ -1,12 +1,18 @@
-use mp2_common::{group_hashing::CircuitBuilderGroupHashing, keccak::PACKED_HASH_LEN, u256};
+use mp2_common::{
+    group_hashing::CircuitBuilderGroupHashing,
+    keccak::PACKED_HASH_LEN,
+    serialization::{deserialize, serialize},
+    u256,
+};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
+use serde::{Deserialize, Serialize};
 
-use crate::{contract_extraction, values_extraction};
+use crate::{api::default_config, contract_extraction, values_extraction};
 
 /// This circuit is more like a gadget. This contains the logic of the common part
 /// between all the final extraction circuits. It should not be used on its own.
@@ -48,6 +54,53 @@ impl BaseCircuit {
     }
 
     pub(crate) fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &BaseWires) {}
+}
+
+/// This parameter struct is not intended to be built on its own
+/// but rather as a sub-component of the two final extraction parameters set.
+/// This parameter contains the common logic of verifying a block, contract and
+/// value proof automatically from the right verification keys / circuit set.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) struct BasePublicParameters {
+    /// single circuit proof extracting block hash, block number, previous hash
+    /// and state root
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    block_proof: ProofWithPublicInputsTarget<D>,
+    /// circuit set extracting contract leaf from state trie
+    contract_proof: RecursiveCircuitsVerifierTarget<D>,
+    /// circuit set extracting the values from storage trie of the contract
+    value_proof: RecursiveCircuitsVerifierTarget<D>,
+}
+
+const CONTRACT_SET_NUM_IO: usize = contract_extraction::PublicInputs::<F>::TOTAL_LEN;
+const VALUE_SET_NUM_IO: usize = values_extraction::PublicInputs::<F>::TOTAL_LEN;
+
+impl BasePublicParameters {
+    pub(crate) fn new(
+        cb: &mut CircuitBuilder<F, D>,
+        block_vk: &VerifierCircuitData<F, C, D>,
+        contract_circuit_set: &RecursiveCircuit<F, C, D>,
+        value_circuit_set: &RecursiveCircuit<F, C, D>,
+    ) -> Self {
+        let config = default_config();
+        let contract_verifier =
+            RecursiveCircuitsVerifierGagdet::<F, C, D, CONTRACT_SET_NUM_IO>::new(
+                config.clone(),
+                contract_circuit_set,
+            );
+        let value_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, VALUE_SET_NUM_IO>::new(
+            config.clone(),
+            value_circuit_set,
+        );
+        let contract_proof_wires = contract_verifier.verify_proof_in_circuit_set(&mut cb);
+        let value_proof_wires = value_verifier.verify_proof_in_circuit_set(&mut cb);
+        let block_proof_wires = crate::api::verify_proof_fixed_circuit(&mut cb, &block_vk);
+        Self {
+            block_proof: block_proof_wires,
+            contract_proof: contract_proof_wires,
+            value_proof: value_proof_wires,
+        }
+    }
 }
 
 #[cfg(test)]

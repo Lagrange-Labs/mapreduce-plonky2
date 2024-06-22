@@ -1,3 +1,4 @@
+use ethers::contract::multicall_contract;
 use mp2_common::public_inputs::PublicInputCommon;
 use mp2_common::serialization::{deserialize, serialize};
 use mp2_common::{group_hashing::CircuitBuilderGroupHashing, types::GFp, utils::ToTargets};
@@ -12,8 +13,10 @@ use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
+use crate::api::default_config;
 use crate::values_extraction;
 
+use super::base_circuit::BasePublicParameters;
 use super::{base_circuit, PublicInputs};
 
 /// This circuit contains the logic to prove the final extraction of a simple
@@ -65,22 +68,21 @@ impl SimpleCircuit {
     }
 }
 
-impl CircuitLogicWires<F, D, 0> for SimpleWires {
-    type CircuitBuilderParams = ();
-    type Inputs = SimpleCircuit;
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub(crate) struct SimpleCircuitParams {
+    base: BasePublicParameters,
+    wires: SimpleWires,
+}
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::TOTAL_LEN;
-
-    fn circuit_logic(
-        builder: &mut CircuitBuilder<F, D>,
-        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
-        builder_parameters: Self::CircuitBuilderParams,
+impl SimpleCircuitParams {
+    pub(crate) fn build(
+        block_vk: &VerifierCircuitData<F, C, D>,
+        contract_circuit_set: &RecursiveCircuit<F, C, D>,
+        value_circuit_set: &RecursiveCircuit<F, C, D>,
     ) -> Self {
-        todo!()
-    }
-
-    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
-        todo!()
+        let mut cb = CircuitBuilder::<F, D>::new(default_config());
+        let base =
+            BasePublicParameters::new(&mut cb, block_vk, contract_circuit_set, value_circuit_set);
     }
 }
 
