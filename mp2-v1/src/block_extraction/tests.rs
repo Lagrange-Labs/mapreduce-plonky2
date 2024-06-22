@@ -1,7 +1,7 @@
 use ethers::utils::keccak256;
 use mp2_common::{
     types::{CBuilder, GFp},
-    utils::convert_u8_to_u32_slice,
+    utils::{Endianness, Packer},
     D,
 };
 use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
@@ -139,17 +139,20 @@ impl SepoliaBlockHeader {
             0x6b, 0x30, 0x17, 0x7a, 0x0f, 0x12, 0x83, 0x0b, 0xee, 0x00, 0x61, 0xba, 0x85,
         ];
 
-        let prev_block_hash = convert_u8_to_u32_slice(&prev_block_hash)
+        let prev_block_hash = prev_block_hash
+            .pack(Endianness::Little)
             .into_iter()
             .map(GFp::from_canonical_u32)
             .collect();
 
-        let block_hash = convert_u8_to_u32_slice(&block_hash)
+        let block_hash = block_hash
+            .pack(Endianness::Little)
             .into_iter()
             .map(GFp::from_canonical_u32)
             .collect();
 
-        let state_root = convert_u8_to_u32_slice(&state_root)
+        let state_root = state_root
+            .pack(Endianness::Little)
             .into_iter()
             .map(GFp::from_canonical_u32)
             .collect();

@@ -6,12 +6,12 @@ mod tests;
 use std::array;
 
 use mp2_common::{
-    array::{Array, Vector, VectorWire},
+    array::{Array, Vector, VectorWire, L32},
     keccak::{InputData, KeccakCircuit, KeccakWires, OutputHash, HASH_LEN, PACKED_HASH_LEN},
     public_inputs::PublicInputCommon,
     rlp::extract_be_value,
     types::{CBuilder, GFp},
-    utils::{convert_u8_targets_to_u32, less_than},
+    utils::{less_than, Endianness, PackerTarget},
     D,
 };
 use plonky2::{
@@ -42,13 +42,6 @@ pub struct BlockWires<const BLOCK_HEADER_MAX_LEN: usize> {
     /// Block hash.
     pub(crate) bh: KeccakWires<BLOCK_HEADER_MAX_LEN>,
 
-    /// Previous block hash.
-    pub(crate) prev_bh: OutputHash,
-
-    /// Block number.
-    /// TODO: should be u256 once #222 is merged
-    pub(crate) bn: Target,
-
     /// RLP encoded bytes of block header.
     pub(crate) rlp_headers: VectorWire<Target, BLOCK_HEADER_MAX_LEN>,
 }
@@ -69,7 +62,10 @@ impl<const BLOCK_HEADER_MAX_LEN: usize> BlockCircuit<BLOCK_HEADER_MAX_LEN> {
     }
 
     /// Build the circuit, assigning the public inputs and returning the internal wires.
-    pub fn build(cb: &mut CBuilder) -> BlockWires<BLOCK_HEADER_MAX_LEN> {
+    pub fn build(cb: &mut CBuilder) -> BlockWires<BLOCK_HEADER_MAX_LEN>
+    where
+        [(); L32(HASH_LEN)]:,
+    {
         let zero = cb.zero();
         let one = cb.one();
 
@@ -81,13 +77,20 @@ impl<const BLOCK_HEADER_MAX_LEN: usize> BlockCircuit<BLOCK_HEADER_MAX_LEN> {
         // extract the previous block hash from the RLP header
         let prev_bh =
             &rlp_headers.arr.arr[HEADER_PARENT_HASH_OFFSET..HEADER_PARENT_HASH_OFFSET + HASH_LEN];
-        let prev_bh = OutputHash::pack_u32_from_slice(cb, prev_bh);
-        let prev_bh_targets: Vec<_> = prev_bh.arr.iter().copied().map(|t| t.0).collect();
+        let prev_bh: Vec<U32Target> = Array::<_, HASH_LEN>::try_from(prev_bh)
+            .unwrap()
+            .arr
+            .pack(cb, Endianness::Little);
+        let prev_bh_targets: Vec<_> = prev_bh.iter().copied().map(|t| t.0).collect();
 
         // extract the state root of the block
         let sh =
             &rlp_headers.arr.arr[HEADER_STATE_ROOT_OFFSET..HEADER_STATE_ROOT_OFFSET + HASH_LEN];
-        let sh = OutputHash::pack_u32_from_slice(cb, sh).to_u32_targets();
+        let sh: Vec<U32Target> = Array::<_, HASH_LEN>::try_from(sh)
+            .unwrap()
+            .arr
+            .pack(cb, Endianness::Little);
+        let sh: Vec<_> = sh.iter().copied().map(|t| t.0).collect();
 
         // compute the block hash
         let bh_wires = KeccakCircuit::hash_vector(cb, &rlp_headers);
@@ -96,12 +99,10 @@ impl<const BLOCK_HEADER_MAX_LEN: usize> BlockCircuit<BLOCK_HEADER_MAX_LEN> {
         // extract the block number from the RLP header
         let bn = extract_be_value::<_, D, 4>(cb, &rlp_headers.arr.arr, HEADER_BLOCK_NUMBER_LEN);
 
-        PublicInputs::new(&bh, &prev_bh_targets, &bn, &sh.arr).register(cb);
+        PublicInputs::new(&bh, &prev_bh_targets, &bn, &sh).register(cb);
 
         BlockWires {
             bh: bh_wires,
-            prev_bh,
-            bn,
             rlp_headers,
         }
     }
