@@ -9,6 +9,7 @@ use mp2_common::{
     mpt_sequential::{MPTLeafOrExtensionNode, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::CBuilder,
+    utils::Endianness,
     D, F,
 };
 use plonky2::{
@@ -46,7 +47,7 @@ impl ExtensionCircuit {
         let new_mpt_key = wires.key;
 
         // Constrain the extracted hash is the one exposed by the proof.
-        let packed_hash = wires.value.convert_u8_to_u32(b);
+        let packed_hash = wires.value.pack(b, Endianness::Little);
         let given_hash = child_proof.root_hash();
         packed_hash.enforce_equal(b, &given_hash);
 
@@ -98,10 +99,9 @@ mod tests {
     use mp2_common::{
         group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,
-        mpt_sequential::mpt_key_ptr,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::PACKED_ADDRESS_LEN,
-        utils::{convert_u8_to_u32_slice, keccak256, Fieldable, ToFields},
+        utils::{keccak256, Endianness, Fieldable, Packer, ToFields},
         C,
     };
     use mp2_test::{
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(root_rlp.len(), 2);
 
         // Prepare the public inputs for the extension node circuit.
-        let h = &convert_u8_to_u32_slice(&keccak256(&proof[1])).to_fields();
+        let h = &keccak256(&proof[1]).pack(Endianness::Little).to_fields();
         let dm = map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
             .to_weierstrass();
         let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
@@ -183,7 +183,7 @@ mod tests {
 
         // Check packed block hash
         {
-            let hash = convert_u8_to_u32_slice(&keccak256(&node)).to_fields();
+            let hash = keccak256(&node).pack(Endianness::Little).to_fields();
             assert_eq!(pi.h, hash);
         }
         // Check metadata digest
@@ -192,9 +192,11 @@ mod tests {
         {
             assert_eq!(pi.k, child_pi.k);
 
-            let leaf_key: Vec<Vec<u8>> = rlp::decode_list(&node);
-            let exp_ptr = F::from_canonical_usize(mpt_key_ptr(&leaf_key[0]));
-            assert_eq!(pi.t, &exp_ptr);
+            // child pointer - partial key length
+            let keys: Vec<Vec<u8>> = rlp::decode_list(&node);
+            let nibbles = Nibbles::from_compact(&keys[0]);
+            let exp_ptr = *child_pi.t - F::from_canonical_usize(nibbles.nibbles().len());
+            assert_eq!(*pi.t, exp_ptr);
         }
         // Check packed storage root hash
         assert_eq!(pi.s, child_pi.s);

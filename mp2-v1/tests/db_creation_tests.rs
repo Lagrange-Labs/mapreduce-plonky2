@@ -5,10 +5,9 @@
 
 use common::TestContext;
 use log::info;
-use mp2_common::eth::left_pad32;
+use mp2_common::eth::{left_pad32, StorageSlot};
 use mp2_test::eth::get_mainnet_url;
 use mp2_v1::api::ProofWithVK;
-use serial_test::serial;
 
 mod common;
 
@@ -24,6 +23,7 @@ async fn db_creation_integrated_tests() {
     test_db_creation_for_single_variables(ctx).await;
     test_db_creation_for_mapping_variables(ctx).await;
     test_db_creation_for_length_extraction(ctx).await;
+    test_db_creation_for_contract_extraction(ctx).await;
 }
 
 /// Test the database creation for single variables.
@@ -60,19 +60,6 @@ async fn test_db_creation_for_mapping_variables(ctx: &mut TestContext) {
     info!("Finish testing Database Creation for single variables");
 }
 
-/// Generate the Values Extraction (C.1) proof for single variables.
-async fn prove_single_values_extraction(ctx: &TestContext) -> ProofWithVK {
-    // Pudgy Penguins simple slots:
-    // slot-0: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol#L23>
-    // slot-1: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol#L26>
-    // slot-8: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/extensions/ERC721Enumerable.sol#L21>
-    // slot-10: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/access/Ownable.sol#L21>
-    const TEST_SLOTS: [u8; 4] = [0, 1, 8, 10];
-
-    ctx.prove_single_values_extraction(PUDGY_PENGUINS_ADDRESS, &TEST_SLOTS)
-        .await
-}
-
 /// Test the database creation for length extraction.
 async fn test_db_creation_for_length_extraction(ctx: &mut TestContext) {
     info!("Start to test Database Creation for length extraction");
@@ -86,6 +73,30 @@ async fn test_db_creation_for_length_extraction(ctx: &mut TestContext) {
     info!("Generated Length Extraction (C.2) proof");
 
     info!("Finish testing Database Creation for length extraction");
+}
+
+/// Test the database creation for contract extraction (C.3).
+async fn test_db_creation_for_contract_extraction(ctx: &mut TestContext) {
+    info!("Start to test Database Creation for contract extraction");
+
+    // Generate the Contract Extraction (C.3) proofs.
+    let _proof = prove_contract_extraction(&ctx).await;
+    info!("Generated Contract Extraction (C.3) proof");
+
+    info!("Finish testing Database Creation for contract extraction");
+}
+
+/// Generate the Values Extraction (C.1) proof for single variables.
+async fn prove_single_values_extraction(ctx: &TestContext) -> ProofWithVK {
+    // Pudgy Penguins simple slots:
+    // slot-0: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol#L23>
+    // slot-1: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol#L26>
+    // slot-8: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/extensions/ERC721Enumerable.sol#L21>
+    // slot-10: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/access/Ownable.sol#L21>
+    const TEST_SLOTS: [u8; 4] = [0, 1, 8, 10];
+
+    ctx.prove_single_values_extraction(PUDGY_PENGUINS_ADDRESS, &TEST_SLOTS)
+        .await
 }
 
 /// Generate the Values Extraction (C.1) proof for mapping variables.
@@ -121,5 +132,16 @@ async fn prove_length_extraction(ctx: &TestContext) -> ProofWithVK {
     const VARIABLE_SLOT: u8 = 0xfa;
 
     ctx.prove_length_extraction(PUDGY_PENGUINS_ADDRESS, &TEST_SLOTS, VARIABLE_SLOT)
+        .await
+}
+
+/// Generate the Contract Extraction (C.3) proof.
+async fn prove_contract_extraction(ctx: &TestContext) -> ProofWithVK {
+    // Pudgy Penguins simple slots:
+    // slot-0: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol#L23>
+    const TEST_SLOT: usize = 0;
+
+    let slot = StorageSlot::Simple(TEST_SLOT);
+    ctx.prove_contract_extraction(PUDGY_PENGUINS_ADDRESS, slot)
         .await
 }

@@ -1,26 +1,20 @@
 //! Storage trie for proving tests
 
+use super::TestContext;
 use ethers::{
     prelude::Address,
     utils::rlp::{Prototype, Rlp},
 };
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
-    utils::{convert_u8_to_u32_slice, keccak256},
+    mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
+    utils::{keccak256, Endianness, Packer},
 };
 use mp2_v1::{
     api::{generate_proof, CircuitInput, ProofWithVK, PublicParameters},
     length_extraction, values_extraction,
 };
 use std::collections::HashMap;
-
-use super::TestContext;
-
-/// RLP item size for the extension node
-const EXTENSION_RLP_SIZE: usize = 2;
-
-/// RLP item size for the branch node
-const BRANCH_RLP_SIZE: usize = 17;
 
 /// Maximum child number of a branch node
 const MAX_BRANCH_CHILDREN: usize = 16;
@@ -99,16 +93,15 @@ impl TrieNode {
 
         let rlp = Rlp::new(&self.raw);
         match rlp.prototype().unwrap() {
-            Prototype::List(EXTENSION_RLP_SIZE) => TrieNodeType::Extension,
-            Prototype::List(BRANCH_RLP_SIZE) => TrieNodeType::Branch,
+            Prototype::List(MPT_EXTENSION_RLP_SIZE) => TrieNodeType::Extension,
+            Prototype::List(MPT_BRANCH_RLP_SIZE) => TrieNodeType::Branch,
             _ => panic!("Invalid RLP size for the storage proof"),
         }
     }
 
     /// Calculate the hash of this node.
     fn hash(&self) -> Vec<u32> {
-        let hash = keccak256(&self.raw);
-        convert_u8_to_u32_slice(&hash)
+        keccak256(&self.raw).pack(Endianness::Little)
     }
 
     /// Find or add the child node path recursively. The path is arranged in the reverse order,
@@ -353,7 +346,7 @@ impl TestStorageTrie {
         log::info!("Querying the simple slot `{slot:?}` of the contract `{contract_address}` from the test context's RPC");
 
         let query = ProofQuery::new_simple_slot(contract_address, slot);
-        let response = ctx.query_mpt_proof(&query).await;
+        let response = ctx.query_mpt_proof(&query, None).await;
 
         // Get the nodes to prove. Reverse to the sequence from leaf to root.
         let nodes: Vec<_> = response.storage_proof[0]

@@ -1,14 +1,15 @@
 //! Module containing several structure definitions for Ethereum related operations
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
-use anyhow::{bail, Ok, Result};
+use anyhow::{bail, Result};
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethers::{
     providers::{Http, Middleware, Provider},
     types::{
-        Address, Block, BlockId, Bytes, EIP1186ProofResponse, Transaction, TransactionReceipt,
-        H256, U64,
+        Address, Block, BlockId, BlockNumber, Bytes, EIP1186ProofResponse, Transaction,
+        TransactionReceipt, TxHash, H256, U64,
     },
 };
+use log::warn;
 use rlp::{Encodable, Rlp, RlpStream};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "ci")]
@@ -16,6 +17,10 @@ use std::env;
 use std::{array::from_fn as create_array, sync::Arc};
 
 use crate::{mpt_sequential::utils::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
+
+/// Retry number for the RPC request
+const RETRY_NUM: usize = 3;
+
 /// A wrapper around a transaction and its receipt. The receipt is used to filter
 /// bad transactions, so we only compute over valid transactions.
 pub struct TxAndReceipt(Transaction, TransactionReceipt);
@@ -239,6 +244,21 @@ pub fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     }
 }
 
+/// Query the latest block.
+pub async fn query_latest_block<P: Middleware + 'static>(provider: &P) -> Result<Block<TxHash>> {
+    // Query the MPT proof with retries.
+    for i in 0..RETRY_NUM {
+        if let Ok(response) = provider.get_block(BlockNumber::Latest).await {
+            // Has one block at least.
+            return Ok(response.unwrap());
+        } else {
+            warn!("Failed to query the MPT proof at {i} time")
+        }
+    }
+
+    bail!("Failed to query the MPT proof");
+}
+
 pub struct ProofQuery {
     pub contract: Address,
     pub(crate) slot: StorageSlot,
@@ -306,10 +326,19 @@ impl ProofQuery {
         provider: &P,
         block: Option<BlockId>,
     ) -> Result<EIP1186ProofResponse> {
-        let res = provider
-            .get_proof(self.contract, vec![self.slot.location()], block)
-            .await?;
-        Ok(res)
+        // Query the MPT proof with retries.
+        for i in 0..RETRY_NUM {
+            if let Ok(response) = provider
+                .get_proof(self.contract, vec![self.slot.location()], block)
+                .await
+            {
+                return Ok(response);
+            } else {
+                warn!("Failed to query the MPT proof at {i} time")
+            }
+        }
+
+        bail!("Failed to query the MPT proof");
     }
     /// Returns the raw value from the storage proof, not the one "interpreted" by the
     /// JSON RPC so we can see how the encoding is done.
@@ -380,7 +409,7 @@ mod test {
 
     use crate::{
         types::MAX_BLOCK_LEN,
-        utils::{convert_u8_to_u32_slice, find_index_subvector},
+        utils::{find_index_subvector, Endianness, Packer},
     };
 
     #[tokio::test]
@@ -436,7 +465,11 @@ mod test {
         .to_vec();
         let slice = left_pad::<4>(&slice); // what happens in circuit effectively
                                            // we have to reverse since encoding is big endian on EVM and our function is little endian based
-        let length = convert_u8_to_u32_slice(&slice.into_iter().rev().collect::<Vec<u8>>())[0];
+        let length = slice
+            .into_iter()
+            .rev()
+            .collect::<Vec<u8>>()
+            .pack(Endianness::Little)[0];
         println!("length extracted = {}", length);
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);
         assert_eq!(length, 2); // custom value that may change if we update contract!
@@ -483,9 +516,13 @@ mod test {
         let mut n = sliced.to_vec();
         n.resize(4, 0); // what happens in circuit effectively
         println!("sliced: {:?} - hex {}", sliced, hex::encode(&sliced));
-        let length = convert_u8_to_u32_slice(&n)[0];
-        let length2 =
-            convert_u8_to_u32_slice(&sliced.iter().cloned().rev().collect::<Vec<u8>>())[0];
+        let length = n.pack(Endianness::Little)[0];
+        let length2 = sliced
+            .iter()
+            .cloned()
+            .rev()
+            .collect::<Vec<u8>>()
+            .pack(Endianness::Little)[0];
         println!("length extracted = {}", length);
         println!("length 2 extracted = {}", length2);
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);

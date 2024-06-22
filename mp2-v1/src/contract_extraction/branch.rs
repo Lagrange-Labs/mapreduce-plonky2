@@ -9,7 +9,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     types::{CBuilder, GFp},
-    utils::convert_u8_targets_to_u32,
+    utils::{Endianness, PackerTarget},
     D, F,
 };
 use plonky2::{
@@ -67,7 +67,7 @@ where
         // We check the hash is the one exposed by the proof, first convert
         // the extracted hash to packed one to compare.
         let packed_hash = Array::<U32Target, PACKED_HASH_LEN> {
-            arr: convert_u8_targets_to_u32(b, &hash.arr).try_into().unwrap(),
+            arr: hash.arr.pack(b, Endianness::Little).try_into().unwrap(),
         };
         let child_hash = child_proof.root_hash();
         packed_hash.enforce_equal(b, &child_hash);
@@ -123,15 +123,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use eth_trie::{EthTrie, MemoryDB, Trie};
     use mp2_common::{
         array::ToField,
         group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,
         mpt_sequential::{mpt_key_ptr, utils::bytes_to_nibbles},
-        rlp::MAX_KEY_NIBBLE_LEN,
         types::PACKED_ADDRESS_LEN,
-        utils::{convert_u8_to_u32_slice, keccak256, Fieldable, ToFields},
+        utils::{keccak256, Endianness, Packer, ToFields},
         C,
     };
     use mp2_test::{
@@ -182,7 +181,7 @@ mod tests {
         // two leaves (we only prove one at a time)
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
-        let mut key1 = random_vector::<u8>(32);
+        let key1 = random_vector::<u8>(32);
         let mut key2 = key1.clone();
         key2[31] = key2[31]
             .checked_sub(thread_rng().gen_range(1..10))
@@ -202,7 +201,7 @@ mod tests {
         assert!(rlp::decode_list::<Vec<u8>>(&branch).len() == 17);
 
         // Prepare the public inputs for the branch node circuit.
-        let h = &convert_u8_to_u32_slice(&keccak256(leaf)).to_fields();
+        let h = &keccak256(leaf).pack(Endianness::Little).to_fields();
         let dm = map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
             .to_weierstrass();
         let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
@@ -224,7 +223,7 @@ mod tests {
 
         // Check packed block hash
         {
-            let hash = convert_u8_to_u32_slice(&keccak256(&branch)).to_fields();
+            let hash = keccak256(&branch).pack(Endianness::Little).to_fields();
             assert_eq!(pi.h, hash);
         }
         // Check metadata digest

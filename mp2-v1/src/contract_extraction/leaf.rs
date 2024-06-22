@@ -10,7 +10,7 @@ use mp2_common::{
     mpt_sequential::{MPTKeyWire, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::{AddressTarget, CBuilder, ADDRESS_LEN},
-    utils::less_than,
+    utils::{less_than, Endianness},
     D, F,
 };
 use plonky2::{
@@ -45,10 +45,10 @@ where
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafCircuit<const NODE_LEN: usize> {
-    contract_address: H160,
+    pub(crate) contract_address: H160,
     /// The offset of storage root hash located in RLP encoded account node
-    storage_root_offset: usize,
-    node: Vec<u8>,
+    pub(crate) storage_root_offset: usize,
+    pub(crate) node: Vec<u8>,
 }
 
 impl<const NODE_LEN: usize> LeafCircuit<NODE_LEN>
@@ -59,6 +59,8 @@ where
         let zero = b.zero();
         let ttrue = b._true();
         let contract_address = Array::new(b);
+        // range-check contract address
+        contract_address.assert_bytes(b);
 
         let storage_root_offset = b.add_virtual_target();
 
@@ -94,10 +96,10 @@ where
 
         // Register the public inputs.
         let h = root.output_array.to_targets().arr;
-        // Compute the metadata digest - `D(pack_u32(contract_address))`.
-        let packed_contract_address = contract_address.convert_u8_to_u32(b).to_targets().arr;
+        // Compute the metadata digest - `D(pack_u32_be(contract_address))`.
+        let packed_contract_address = contract_address.pack(b, Endianness::Big).to_targets().arr;
         let dm = b.map_to_curve_point(&packed_contract_address);
-        let s = storage_root.convert_u8_to_u32(b).to_targets().arr;
+        let s = storage_root.pack(b, Endianness::Little).to_targets().arr;
         PublicInputs::new(&h, &dm, &new_mpt_key.key.arr, &new_mpt_key.pointer, &s).register(b);
 
         LeafWires {
@@ -167,16 +169,16 @@ impl CircuitLogicWires<F, D, 0> for LeafWires<MAX_LEAF_NODE_LEN> {
 
 #[cfg(test)]
 mod tests {
+    use crate::contract_extraction::compute_metadata_digest;
+
     use super::*;
-    use eth_trie::{Nibbles, Trie};
+    use eth_trie::Trie;
     use ethers::types::Address;
     use mp2_common::{
-        group_hashing::map_to_curve_point,
         keccak::HASH_LEN,
         mpt_sequential::{mpt_key_ptr, utils::bytes_to_nibbles},
-        rlp::MAX_KEY_NIBBLE_LEN,
         types::MAPPING_LEAF_VALUE_LEN,
-        utils::{convert_u8_to_u32_slice, keccak256},
+        utils::{keccak256, Endianness, Packer, ToFields},
         C,
     };
     use mp2_test::{
@@ -234,22 +236,12 @@ mod tests {
 
         // Check packed block hash
         {
-            let exp_block_hash = keccak256(&node);
-            let exp_block_hash: Vec<_> = convert_u8_to_u32_slice(&exp_block_hash)
-                .into_iter()
-                .map(F::from_canonical_u32)
-                .collect();
-
+            let exp_block_hash = keccak256(&node).pack(Endianness::Little).to_fields();
             assert_eq!(pi.h, exp_block_hash);
         }
         // Check metadata digest
         {
-            let packed_contract_address: Vec<_> = convert_u8_to_u32_slice(&contract_address.0)
-                .into_iter()
-                .map(F::from_canonical_u32)
-                .collect();
-
-            let exp_digest = map_to_curve_point(&packed_contract_address);
+            let exp_digest = compute_metadata_digest(contract_address);
             assert_eq!(pi.metadata_point(), exp_digest.to_weierstrass());
         }
         // Check MPT key and pointer
@@ -269,10 +261,7 @@ mod tests {
         }
         // Check packed storage root hash
         {
-            let exp_storage_root_hash: Vec<_> = convert_u8_to_u32_slice(storage_root)
-                .into_iter()
-                .map(F::from_canonical_u32)
-                .collect();
+            let exp_storage_root_hash: Vec<_> = storage_root.pack(Endianness::Little).to_fields();
 
             assert_eq!(pi.s, exp_storage_root_hash);
         }

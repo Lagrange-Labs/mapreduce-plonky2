@@ -1,14 +1,10 @@
 //! Test context used in the test cases
 
-use std::{env, fs, path::PathBuf};
-
-use ethers::prelude::{EIP1186ProofResponse, Http, Provider};
+use ethers::prelude::{Block, BlockId, EIP1186ProofResponse, Http, Provider, TxHash};
 use log::warn;
-use mp2_common::eth::ProofQuery;
+use mp2_common::eth::{query_latest_block, ProofQuery};
 use mp2_v1::api::{build_circuits_params, PublicParameters};
-
-/// Retry number for the RPC request
-const RETRY_NUM: usize = 3;
+use std::{env, fs, path::PathBuf};
 
 /// Test context
 pub(crate) struct TestContext {
@@ -66,18 +62,19 @@ impl TestContext {
         &self.params
     }
 
-    /// Query the MPT proof.
-    pub(crate) async fn query_mpt_proof(&self, query: &ProofQuery) -> EIP1186ProofResponse {
-        // Query the MPT proof with retries.
-        for i in 0..RETRY_NUM {
-            if let Ok(response) = query.query_mpt_proof(&self.rpc, None).await {
-                return response;
-            } else {
-                warn!("Failed to query the MPT proof at {i} time")
-            }
-        }
+    /// Query the latest block.
+    pub(crate) async fn query_latest_block(&self) -> Block<TxHash> {
+        query_latest_block(&self.rpc).await.unwrap()
+    }
 
-        panic!("Failed to query the MPT proof");
+    /// Query the MPT proof.
+    pub(crate) async fn query_mpt_proof(
+        &self,
+        query: &ProofQuery,
+        block_number: Option<u64>,
+    ) -> EIP1186ProofResponse {
+        let block_id = block_number.map(|n| BlockId::Number(n.into()));
+        query.query_mpt_proof(&self.rpc, block_id).await.unwrap()
     }
 
     /// Reset the RPC provider. It could be used to query data from the

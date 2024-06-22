@@ -2,15 +2,16 @@
 
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use anyhow::Result;
-use mp2_common::serialization::{deserialize, serialize};
+use mp2_common::utils::{Endianness, PackerTarget};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
+    serialization::{deserialize, serialize},
     types::{CBuilder, GFp},
-    utils::{convert_u8_targets_to_u32, less_than},
+    utils::less_than,
     D,
 };
 use plonky2::{
@@ -145,7 +146,7 @@ where
             // We check the hash is the one exposed by the proof, first convert
             // the extracted hash to packed one to compare.
             let packed_hash = Array::<U32Target, PACKED_HASH_LEN> {
-                arr: convert_u8_targets_to_u32(b, &hash.arr).try_into().unwrap(),
+                arr: hash.arr.pack(b, Endianness::Little).try_into().unwrap(),
             };
             let child_hash = proof_inputs.root_hash();
             packed_hash.enforce_equal(b, &child_hash);
@@ -236,7 +237,7 @@ mod tests {
         group_hashing::map_to_curve_point,
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{convert_u8_to_u32_slice, keccak256},
+        utils::{keccak256, Endianness, Packer},
         C, D, F,
     };
     use mp2_test::{
@@ -244,7 +245,7 @@ mod tests {
         utils::random_vector,
     };
     use plonky2::{
-        field::{goldilocks_field::GoldilocksField, types::Field},
+        field::types::Field,
         iop::{target::Target, witness::WitnessWrite},
         plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
@@ -354,7 +355,7 @@ mod tests {
             )
         };
         let compute_pi = |ptr: usize, key: &[u8], value: &[u8], leaf: &[u8], metadata: &[u8]| {
-            let h = convert_u8_to_u32_slice(&keccak256(leaf));
+            let h = keccak256(leaf).pack(Endianness::Little);
             let [values_digest, metadata_digest] =
                 [value, metadata].map(|arr| compute_digest(arr.to_vec()).to_weierstrass());
 
@@ -440,8 +441,7 @@ mod tests {
         let pi = PublicInputs::<F>::new(&proof.public_inputs);
 
         {
-            let exp_hash = keccak256(&node);
-            let exp_hash = convert_u8_to_u32_slice(&exp_hash);
+            let exp_hash = keccak256(&node).pack(Endianness::Little);
             assert_eq!(pi.root_hash(), exp_hash);
         }
         {

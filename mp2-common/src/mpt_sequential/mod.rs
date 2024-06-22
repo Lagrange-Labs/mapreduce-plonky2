@@ -1,6 +1,7 @@
 use crate::serialization::{
     deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
 };
+use crate::utils::{Endianness, PackerTarget};
 use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{
@@ -11,7 +12,7 @@ use crate::{
         decode_compact_encoding, decode_fixed_list, RlpHeader, RlpList, MAX_ITEMS_IN_LIST,
         MAX_KEY_NIBBLE_LEN,
     },
-    utils::{convert_u8_targets_to_u32, find_index_subvector, keccak256},
+    utils::{find_index_subvector, keccak256},
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
@@ -41,6 +42,12 @@ const NB_ITEMS_LEAF: usize = 2;
 /// This can later be also be done in a generic way to allow different sizes.
 /// Given we target MPT storage proof, the value is 32 bytes + 1 byte for RLP encoding.
 pub const MAX_LEAF_VALUE_LEN: usize = 33;
+
+/// RLP item size for the extension node
+pub const MPT_EXTENSION_RLP_SIZE: usize = 2;
+
+/// RLP item size for the branch node
+pub const MPT_BRANCH_RLP_SIZE: usize = 17;
 
 /// a simple alias to keccak::compute_size_with_padding to make the code a bit
 /// more tiny with all these const generics
@@ -189,7 +196,7 @@ where
             let (new_key, extracted_child_hash, valid_node) =
                 Self::advance_key(b, &inputs.nodes[i].arr, &iterative_key);
             // transform hash from bytes to u32 targets (since this is the hash output format)
-            let extracted_hash_u32 = convert_u8_targets_to_u32(b, &extracted_child_hash.arr);
+            let extracted_hash_u32 = extracted_child_hash.arr.pack(b, Endianness::Little);
             let found_hash_in_parent = last_hash_output.equals(
                 b,
                 &Array::<U32Target, PACKED_HASH_LEN> {
@@ -426,7 +433,7 @@ mod test {
     use crate::keccak::{HASH_LEN, PACKED_HASH_LEN};
     use crate::rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN};
     use crate::types::MAPPING_LEAF_VALUE_LEN;
-    use crate::utils::convert_u8_targets_to_u32;
+    use crate::utils::{Endianness, PackerTarget};
     use crate::{
         array::Array,
         utils::{find_index_subvector, keccak256},
@@ -469,9 +476,12 @@ mod test {
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let expected_root = Array::<Target, HASH_LEN>::new(c);
-            let packed_exp_root = convert_u8_targets_to_u32(c, &expected_root.arr);
             let arr = Array::<U32Target, PACKED_HASH_LEN>::from_array(
-                packed_exp_root.try_into().unwrap(),
+                expected_root
+                    .arr
+                    .pack(c, Endianness::Little)
+                    .try_into()
+                    .unwrap(),
             );
             let input_wires = Circuit::create_input_wires(c, None);
             let output_wires = Circuit::verify_mpt_proof(c, &input_wires);
@@ -981,12 +991,7 @@ mod test {
         let mut b = CircuitBuilder::<F, D>::new(config);
         let tt = b._true();
         let key_bytes = Array::<Target, HASH_LEN>::new(&mut b);
-        let key_u32: Array<U32Target, PACKED_HASH_LEN> =
-            convert_u8_targets_to_u32(&mut b, &key_bytes.arr)
-                .into_iter()
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
+        let key_u32: Array<U32Target, PACKED_HASH_LEN> = key_bytes.pack(&mut b, Endianness::Little);
         let key_nibbles = MPTKeyWire::init_from_u32_targets(&mut b, &key_u32);
         let exp_nibbles = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(&mut b);
         let eq = key_nibbles.key.equals(&mut b, &exp_nibbles);

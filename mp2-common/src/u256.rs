@@ -10,7 +10,7 @@ use crate::{
     serialization::{
         circuit_data_serialization::SerializableRichField, FromBytes, SerializationError, ToBytes,
     },
-    utils::convert_u8_to_u32_slice,
+    utils::{Endianness, Packer, ToFields},
 };
 use anyhow::{ensure, Result};
 use ethers::types::U256;
@@ -130,6 +130,7 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
         target
             .0
             .iter()
+            .rev() // register in big-endian order
             .for_each(|t| self.register_public_input(t.0));
     }
 
@@ -354,15 +355,12 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
 
 impl<T: WitnessWrite<F>, F: RichField> WitnessWriteU256<F> for T {
     fn set_u256_target(&mut self, target: &UInt256Target, value: U256) {
-        let mut bytes = [0u8; 32];
-        value.to_little_endian(&mut bytes);
-        let limbs = convert_u8_to_u32_slice(&bytes);
-        assert_eq!(limbs.len(), NUM_LIMBS);
+        let limbs = value.to_fields();
         target
             .0
             .iter()
-            .zip(limbs.iter())
-            .for_each(|(t, v)| self.set_target(t.0, F::from_canonical_u32(*v)));
+            .zip(limbs.into_iter().rev()) // reverse since targets are in little-endian order
+            .for_each(|(t, v)| self.set_target(t.0, v));
     }
 }
 
@@ -382,20 +380,49 @@ impl<T: WitnessU32<F>, F: RichField> WitnessReadU256<F> for T {
 }
 
 impl UInt256Target {
-    /// Build a new `UInt256Target` from its limbs, provided in little-endian order
-    pub fn new_from_limbs(limbs: &[U32Target]) -> Result<Self> {
-        Ok(UInt256Target(limbs.try_into()?))
+    /// Build a new `UInt256Target` from its limbs, provided in big-endian order
+    pub fn new_from_be_limbs(limbs: &[U32Target]) -> Result<Self> {
+        Ok(UInt256Target(
+            limbs
+                .iter()
+                .rev()
+                .map(|t| *t)
+                .collect_vec()
+                .try_into()
+                .map_err(|_| {
+                    anyhow::Error::msg(format!(
+                        "invalid number of input limbs provided, expected {}, got {}",
+                        NUM_LIMBS,
+                        limbs.len()
+                    ))
+                })?,
+        ))
     }
 
-    /// Build a new `UInt256Target` from its limbs in target, provided in little-endian order
-    pub fn new_from_target_limbs(limbs: &[Target]) -> Result<Self> {
-        ensure!(limbs.len() == 8, "limbs len size != 8");
-        Ok(UInt256Target(create_array(|i| U32Target(limbs[i]))))
+    /// Build a new `UInt256Target` from its limbs in target, provided in big-endian order
+    pub fn new_from_be_target_limbs(limbs: &[Target]) -> Result<Self> {
+        ensure!(limbs.len() == NUM_LIMBS, "limbs len size != {}", NUM_LIMBS);
+        Ok(UInt256Target(
+            limbs
+                .iter()
+                .rev()
+                .map(|t| U32Target(*t))
+                .collect_vec()
+                .try_into()
+                .map_err(|_| {
+                    anyhow::Error::msg(format!(
+                        "invalid number of input limbs provided, expected {}, got {}",
+                        NUM_LIMBS,
+                        limbs.len()
+                    ))
+                })?,
+        ))
     }
 
     /// Utility function for serialization of UInt256Target
     fn write_to_bytes(&self, buffer: &mut Vec<u8>) {
-        for i in 0..NUM_LIMBS {
+        // write targets in big-endian order
+        for i in (0..NUM_LIMBS).rev() {
             buffer
                 .write_target(self.0[i].0)
                 .expect("Writing to a byte-vector cannot fail.");
@@ -406,20 +433,17 @@ impl UInt256Target {
         Ok(UInt256Target(
             (0..NUM_LIMBS)
                 .map(|_| buffer.read_target().map(|t| U32Target(t)))
+                .rev() // targets are serialized in big-endian order, so we need to reverse them to get little-endian
                 .collect::<Result<Vec<_>, _>>()?
                 .try_into()
                 .unwrap(),
         ))
     }
-
-    pub fn to_big_endian_targets(&self) -> Vec<Target> {
-        self.0.iter().map(|u32_t| u32_t.0).rev().collect_vec()
-    }
 }
 
-impl<'a> Into<Vec<Target>> for &'a UInt256Target {
-    fn into(self) -> Vec<Target> {
-        self.0.iter().map(|u32_t| u32_t.0).collect_vec()
+impl<'a> From<&'a UInt256Target> for Vec<Target> {
+    fn from(value: &'a UInt256Target) -> Self {
+        value.0.iter().map(|u32_t| u32_t.0).rev().collect_vec()
     }
 }
 
@@ -438,20 +462,41 @@ impl FromBytes for UInt256Target {
     }
 }
 
-trait ToFields {
-    fn to_targets<F: RichField>(&self) -> Vec<F>;
-}
-
 impl ToFields for U256 {
-    fn to_targets<F: RichField>(&self) -> Vec<F> {
+    /// Return the 32-bit limbs representing a u256 as field elements, in big-endian order    
+    fn to_fields<F: RichField>(&self) -> Vec<F> {
         let mut bytes = [0u8; 32];
-        self.to_little_endian(&mut bytes);
-        let limbs = convert_u8_to_u32_slice(&bytes);
+        self.to_big_endian(&mut bytes);
+        let limbs = bytes.pack(Endianness::Big).to_fields();
         assert_eq!(limbs.len(), NUM_LIMBS);
         limbs
-            .into_iter()
-            .map(|l| F::from_canonical_u32(l))
-            .collect()
+    }
+}
+/// Struct to wrap a set of public inputs representing a single U256
+pub struct U256PubInputs<'a, F: RichField>(&'a [F]);
+
+impl<'a, F: RichField> TryFrom<&'a [F]> for U256PubInputs<'a, F> {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &'a [F]) -> std::result::Result<Self, Self::Error> {
+        ensure!(
+            value.len() == NUM_LIMBS,
+            "invalid number of limbs provided as input, expected {}, got {}",
+            NUM_LIMBS,
+            value.len()
+        );
+        Ok(U256PubInputs(value))
+    }
+}
+
+impl<'a, F: RichField> From<U256PubInputs<'a, F>> for U256 {
+    fn from(value: U256PubInputs<'a, F>) -> Self {
+        let bytes = value
+            .0
+            .iter()
+            .flat_map(|f| (f.to_canonical_u64() as u32).to_be_bytes())
+            .collect_vec();
+        U256::from_big_endian(&bytes)
     }
 }
 
@@ -538,8 +583,7 @@ mod tests {
     use crate::{
         serialization::{deserialize, serialize},
         types::GFp,
-        u256::NUM_LIMBS,
-        utils::convert_u32_fields_to_u256,
+        u256::{U256PubInputs, NUM_LIMBS},
     };
 
     use super::{CircuitBuilderU256, UInt256Target, WitnessWriteU256};
@@ -706,7 +750,8 @@ mod tests {
         proof: &ProofWithPublicInputs<F, C, D>,
         test_case: &str,
     ) {
-        let proven_res = convert_u32_fields_to_u256(&proof.public_inputs[..NUM_LIMBS]);
+        let proven_res =
+            U256::from(U256PubInputs::try_from(&proof.public_inputs[..NUM_LIMBS]).unwrap());
         // check that result is the same as the one exposed by the proof
         assert_eq!(
             result, proven_res,
@@ -854,15 +899,17 @@ mod tests {
                                 proof: &ProofWithPublicInputs<F, C, D>,
                                 test_case: &str| {
             // check that quotient is the same as the one exposed by the proof
-            let proven_quotient = convert_u32_fields_to_u256(&proof.public_inputs[..NUM_LIMBS]);
+            let proven_quotient =
+                U256::from(U256PubInputs::try_from(&proof.public_inputs[..NUM_LIMBS]).unwrap());
             assert_eq!(
                 quotient, proven_quotient,
                 "quotient not correct for test: {}",
                 test_case
             );
             // check that remainder is the same as the one exposed by the proof
-            let proven_remainder =
-                convert_u32_fields_to_u256(&proof.public_inputs[NUM_LIMBS..2 * NUM_LIMBS]);
+            let proven_remainder = U256::from(
+                U256PubInputs::try_from(&proof.public_inputs[NUM_LIMBS..2 * NUM_LIMBS]).unwrap(),
+            );
             assert_eq!(
                 remainder, proven_remainder,
                 "remainder not correct for test: {}",

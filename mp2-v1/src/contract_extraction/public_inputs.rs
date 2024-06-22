@@ -144,6 +144,26 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             .cloned()
             .collect()
     }
+
+    pub fn h_raw(&self) -> &'a [T] {
+        self.h
+    }
+
+    pub fn dm_raw(&self) -> (&'a [T], &'a [T], &'a T) {
+        self.dm
+    }
+
+    pub fn k_raw(&self) -> &'a [T] {
+        self.k
+    }
+
+    pub fn t_raw(&self) -> &'a T {
+        self.t
+    }
+
+    pub fn s_raw(&self) -> &'a [T] {
+        self.s
+    }
 }
 
 #[cfg(test)]
