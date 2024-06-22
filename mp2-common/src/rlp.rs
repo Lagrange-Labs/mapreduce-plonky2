@@ -1,6 +1,6 @@
 use crate::array::{Array, VectorWire};
 
-use crate::utils::{greater_than, greater_than_or_equal_to, less_than, num_to_bits};
+use crate::utils::{greater_than_or_equal_to, less_than, num_to_bits};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
@@ -374,7 +374,8 @@ pub fn extract_be_value<F: RichField + Extendable<D>, const D: usize, const MAX_
     let mut nq = b.not(nq);
 
     for i in 1..MAX_LEN {
-        let qq = greater_than(b, value_len, zero, 8);
+        let qq = b.is_equal(value_len, zero);
+        let qq = b.not(qq);
 
         value_len = b.sub(value_len, nq.target);
         nq = b.is_equal(value_len, zero);
