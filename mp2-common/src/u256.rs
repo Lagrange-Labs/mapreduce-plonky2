@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::{
+    array::{Array, Targetable},
     serialization::{
         circuit_data_serialization::SerializableRichField, FromBytes, SerializationError, ToBytes,
     },
@@ -438,6 +439,22 @@ impl UInt256Target {
                 .try_into()
                 .unwrap(),
         ))
+    }
+}
+
+// TODO: change that to trait within feat/c51
+impl UInt256Target {
+    pub fn to_targets(&self) -> Vec<Target> {
+        self.0.map(|v| v.0).to_vec()
+    }
+    pub fn from_targets(targets: &[Target]) -> UInt256Target {
+        UInt256Target(create_array(|i| U32Target(targets[i])))
+    }
+}
+
+impl From<Array<U32Target, NUM_LIMBS>> for UInt256Target {
+    fn from(value: Array<U32Target, NUM_LIMBS>) -> Self {
+        UInt256Target(value.arr)
     }
 }
 

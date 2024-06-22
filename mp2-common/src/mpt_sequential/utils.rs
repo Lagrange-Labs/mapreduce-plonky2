@@ -32,7 +32,9 @@ pub fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
     bytes
 }
 
-/// Left pad the leaf value and return as big-endian.
+/// Decodes the RLP header (assuming it's a value < 0x80 or less than 55 bytes)
+/// Left pad the leaf value 
+/// return as big-endian.
 pub fn left_pad_leaf_value<
     F: RichField + Extendable<D>,
     const D: usize,
