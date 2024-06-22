@@ -1,10 +1,11 @@
 use crate::array::{Array, VectorWire};
 
-use crate::utils::{greater_than_or_equal_to, less_than, num_to_bits};
+use crate::utils::{greater_than, greater_than_or_equal_to, less_than, num_to_bits};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 /// The maximum number of bytes the length of data can take.
 /// NOTE: However, this is set arbitrarily because there can be up 7 bytes
@@ -334,6 +335,61 @@ pub fn quin_selector<F: RichField + Extendable<D>, const D: usize>(
     // SUM_i (i == n (idx) ) * element
     // -> sum = element
     calculate_total(b, &nums)
+}
+
+/// Extracts a big-endian serialized number from the RLP.
+///
+/// Will scan up to `MAX_LEN`.
+pub fn extract_be_value<F: RichField + Extendable<D>, const D: usize, const MAX_LEN: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    rlp: &[Target],
+    base_offset: usize,
+) -> Target {
+    assert!(MAX_LEN <= u8::MAX as usize);
+
+    let byte_80 = b.constant(F::from_canonical_usize(0x80));
+    let zero = b.zero();
+    let one = b.one();
+    let two = b.two();
+    let eight = b.constant(F::from_canonical_usize(8));
+
+    let prefix = rlp[base_offset];
+    let is_single_byte = less_than(b, prefix, byte_80, 8);
+    let value_len_80 = b.sub(prefix, byte_80);
+    let value_len = b.select(is_single_byte, one, value_len_80);
+    let offset = b.select(is_single_byte, zero, one);
+    let n_offset = BoolTarget::new_unsafe(offset);
+    let n_offset = b.not(n_offset).target;
+
+    let fx = b.sub(value_len, one);
+    let fx = b.mul(fx, eight);
+    let xx = prefix;
+    let yy = b.exp(two, fx, 8);
+    let zz = b.sub(xx, byte_80);
+
+    let val = b.mul(zz, yy);
+    let mut val = b.mul(val, n_offset);
+    let mut value_len = b.sub(value_len, n_offset);
+    let nq = b.is_equal(value_len, zero);
+    let mut nq = b.not(nq);
+
+    for i in 1..MAX_LEN {
+        let qq = greater_than(b, value_len, zero, 8);
+
+        value_len = b.sub(value_len, nq.target);
+        nq = b.is_equal(value_len, zero);
+        nq = b.not(nq);
+
+        let xx = rlp[base_offset + i];
+        let fx = b.mul(value_len, eight);
+        let pp = b.exp(two, fx, 8);
+        let pp = b.mul(pp, xx);
+        let pp = b.mul(pp, qq.target);
+
+        val = b.add(val, pp);
+    }
+
+    val
 }
 
 fn calculate_total<F: RichField + Extendable<D>, const D: usize>(

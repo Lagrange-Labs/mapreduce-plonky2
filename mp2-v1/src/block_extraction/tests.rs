@@ -10,14 +10,11 @@ use plonky2::{
 };
 
 use super::{
-    block::{BlockCircuit, BlockWires},
     public_inputs::PublicInputs,
+    {BlockCircuit, BlockWires},
 };
 
-pub type SepoliaBlockCircuit = BlockCircuit<
-    { SepoliaBlockHeader::BLOCK_HEADER_RLP_MAX_LEN },
-    { SepoliaBlockHeader::BLOCK_NUMBER_PAD },
->;
+pub type SepoliaBlockCircuit = BlockCircuit<{ SepoliaBlockHeader::BLOCK_HEADER_RLP_MAX_LEN }>;
 
 #[test]
 fn prove_and_verify_block_extraction_circuit() {
@@ -33,8 +30,8 @@ fn prove_and_verify_block_extraction_circuit() {
     assert_eq!(pi.block_number(), &block.block_number);
 }
 
-impl<const BLOCK_HEADER_RLP_MAX_LEN: usize, const BLOCK_NUMBER_PAD: usize> UserCircuit<GFp, D>
-    for BlockCircuit<BLOCK_HEADER_RLP_MAX_LEN, BLOCK_NUMBER_PAD>
+impl<const BLOCK_HEADER_RLP_MAX_LEN: usize> UserCircuit<GFp, D>
+    for BlockCircuit<BLOCK_HEADER_RLP_MAX_LEN>
 {
     type Wires = BlockWires<BLOCK_HEADER_RLP_MAX_LEN>;
 
@@ -58,7 +55,6 @@ pub struct SepoliaBlockHeader {
 }
 
 impl SepoliaBlockHeader {
-    pub const BLOCK_NUMBER_PAD: usize = 3;
     pub const BLOCK_HEADER_RLP_MAX_LEN: usize = 680;
 
     /// Returns the block header data for the block 6139788 (random arbitrary block).
