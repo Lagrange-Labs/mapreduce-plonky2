@@ -2,7 +2,6 @@
 
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use anyhow::Result;
-use mp2_common::utils::{Endianness, PackerTarget};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
@@ -11,7 +10,7 @@ use mp2_common::{
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     serialization::{deserialize, serialize},
     types::{CBuilder, GFp},
-    utils::less_than,
+    utils::{less_than, Endianness, PackerTarget},
     D,
 };
 use plonky2::{

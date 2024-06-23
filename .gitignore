@@ -1,6 +1,9 @@
 *.csv
 .DS_Store
-/target
 /.direnv/
 /.idea/
+/cache
 /mp2-v1/mp2.params
+/mp2-v1/test-contracts/broadcast
+/mp2-v1/test-contracts/out
+/target

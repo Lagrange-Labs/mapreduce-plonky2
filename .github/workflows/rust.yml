@@ -70,6 +70,10 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+      - name: Install foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          cache: false
       - uses: actions/cache@v4
         with:
           path: |
@@ -79,6 +83,15 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Start anvil
+        run: anvil --silent --block-time 3 &
+      - name: Init contract
+        run: |
+          cd mp2-v1
+          make integration_init
+          make integration_deploy
+          make integration_import
+          cd ..
       - name: Run cargo test
         run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo test --all --release -- --test-threads 16"
         env:
