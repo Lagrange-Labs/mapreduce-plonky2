@@ -14,7 +14,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     rlp::extract_be_value,
     types::{CBuilder, GFp, MAX_BLOCK_LEN},
-    u256::{self, UInt256Target},
+    u256::{self, CircuitBuilderU256, UInt256Target},
     utils::{less_than, Endianness, PackerTarget},
     D,
 };
@@ -34,12 +34,10 @@ const HEADER_PARENT_HASH_OFFSET: usize = 4;
 const HEADER_STATE_ROOT_OFFSET: usize = 91;
 
 /// Block number offset in RLP encoded header.
-const HEADER_BLOCK_NUMBER_OFFSET: usize = 450;
+const HEADER_BLOCK_NUMBER_OFFSET: usize = 449;
 /// We define u64 as the maximum block mnumber ever to be reached
-const MAX_BLOCK_NUMBER_LEN: usize = 8;
-
-/// RLP header offset for the block number length.
-const HEADER_BLOCK_NUMBER_LENGTH_OFFSET: usize = 128;
+/// +1 to include the RLP header when we read from the buffer - technical detail.
+const MAX_BLOCK_NUMBER_LEN: usize = 8 + 1;
 
 /// NOTE: Fixing the header len here since problem with const generics
 /// prevents to use methods like `pack()`. It doesn't really change the
@@ -103,7 +101,8 @@ impl BlockCircuit {
             rlp_headers.arr.arr[HEADER_BLOCK_NUMBER_OFFSET + i]
         }));
         // TODO: put that in array
-        let bn_u256 = left_pad_leaf_value::<_, D, MAX_BLOCK_NUMBER_LEN, 32>(cb, &block_number);
+
+        let bn_u256: Array<Target, 32> = left_pad_leaf_value(cb, &block_number);
         let bn_u256 = bn_u256.pack(cb, Endianness::Big);
         let bn_u256: UInt256Target = bn_u256.into();
 
