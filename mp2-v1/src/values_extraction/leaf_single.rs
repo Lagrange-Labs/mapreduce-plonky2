@@ -230,6 +230,9 @@ mod tests {
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);
         let encoded_value: Vec<u8> = rlp::encode(&value).to_vec();
+        // assert we added one byte of RLP header
+        assert_eq!(encoded_value.len(), MAPPING_LEAF_VALUE_LEN + 1);
+        println!("encoded value {:?}", encoded_value);
         trie.insert(&slot.mpt_key(), &encoded_value).unwrap();
         trie.root_hash().unwrap();
 

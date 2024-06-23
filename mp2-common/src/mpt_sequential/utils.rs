@@ -39,7 +39,6 @@ pub fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
 /// NOTE: WARNING: RLP_VALUE_LEN MUST include an additional byte for a potential
 /// RLP header. For example, in EVM, every value can be up to 32 bytes. One must
 /// input 33 in this function because the RLP header might take a full additional byte.
-/// This function "skips" that potential header and returns the value padded of the right len.
 pub fn left_pad_leaf_value<
     F: RichField + Extendable<D>,
     const D: usize,
@@ -59,15 +58,12 @@ pub fn left_pad_leaf_value<
     let value_len_80 = b.sub(value[0], byte_80);
     let value_len = b.select(is_single_byte, one, value_len_80);
     let offset = b.select(is_single_byte, zero, one);
-    // the value is RLP encoded so length includes a potential RLP header byte
-    // NOTE: limitation of const generics. Ideally would do
-    // `.extract_array::<F, _, {RLP_VALUE_LEN - 1}>(b, offset)`
-    // but that is forcing to change all callers of this function to
-    // including the `[(); {RLP_VALUE_LEN-1}]:` in their definition
-    // which is annoying. Passing via an external const does the trick.
-    const DECODED_LEN: usize = VALUE_LEN - 1;
+    b.connect(offset, one);
     value
-        .extract_array::<F, _, DECODED_LEN>(b, offset)
+        // WARNING: this is a hack to avoid another const generic but
+        // what we should really do here is extract RLP_VALUE_LEN-1 because we
+        // consider 1 extra byte for the RLP header always (which may or may not exist)
+        .extract_array::<F, _, RLP_VALUE_LEN>(b, offset)
         .into_vec(value_len)
         .normalize_left::<_, _, PADDED_LEN>(b)
 }
