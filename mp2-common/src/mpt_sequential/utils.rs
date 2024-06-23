@@ -58,7 +58,6 @@ pub fn left_pad_leaf_value<
     let value_len_80 = b.sub(value[0], byte_80);
     let value_len = b.select(is_single_byte, one, value_len_80);
     let offset = b.select(is_single_byte, zero, one);
-    b.connect(offset, one);
     value
         // WARNING: this is a hack to avoid another const generic but
         // what we should really do here is extract RLP_VALUE_LEN-1 because we
