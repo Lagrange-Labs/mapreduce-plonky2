@@ -69,10 +69,15 @@ pub struct PublicParameters {
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
 pub fn build_circuits_params() -> PublicParameters {
+    log::info!("Building contract_extraction parameters...");
     let contract_extraction = contract_extraction::build_circuits_params();
+    log::info!("Building length_extraction parameters...");
     let length_extraction = length_extraction::PublicParameters::build();
+    log::info!("Building values_extraction parameters...");
     let values_extraction = values_extraction::build_circuits_params();
+    log::info!("Building block_extraction parameters...");
     let block_extraction = block_extraction::build_circuits_params();
+    log::info!("All parameters built!");
 
     PublicParameters {
         contract_extraction,

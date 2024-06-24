@@ -6,7 +6,7 @@
 use common::TestContext;
 use log::info;
 use mp2_common::eth::{left_pad32, StorageSlot};
-use mp2_test::eth::get_mainnet_url;
+use mp2_test::{eth::get_mainnet_url, log::init_logging};
 use mp2_v1::api::ProofWithVK;
 
 mod common;
@@ -16,6 +16,7 @@ const PUDGY_PENGUINS_ADDRESS: &str = "0xbd3531da5cf5857e7cfaa92426877b022e612cf8
 
 #[tokio::test]
 async fn db_creation_integrated_tests() {
+    env_logger::init();
     // we generate the ctx/pparams only once for the whole execution to easy the storage load on CI
     let rpc_url = get_mainnet_url();
     let ctx = &mut TestContext::new(&rpc_url).await.unwrap();

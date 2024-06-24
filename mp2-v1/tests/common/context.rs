@@ -42,13 +42,16 @@ impl TestContext {
                 let path = PathBuf::from(path);
 
                 if !path.exists() || rebuild {
+                    log::info!("Rebuilding the parameters");
                     let params = build_circuits_params();
+                    log::info!("Writing the parameters");
                     let file = bincode::serialize(&params)?;
 
                     fs::write(path, file)?;
 
                     params
                 } else {
+                    log::info!("Reading the parameters");
                     let file = fs::read(path)?;
 
                     bincode::deserialize(&file)?
