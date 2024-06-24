@@ -23,7 +23,7 @@ async fn db_creation_integrated_tests() {
     test_db_creation_for_single_variables(ctx).await;
     test_db_creation_for_mapping_variables(ctx).await;
     test_db_creation_for_length_extraction(ctx).await;
-    test_db_creation_for_contract_extraction(ctx).await;
+    test_contract_and_block_extraction(ctx).await;
 }
 
 /// Test the database creation for single variables.
@@ -76,14 +76,16 @@ async fn test_db_creation_for_length_extraction(ctx: &mut TestContext) {
 }
 
 /// Test the database creation for contract extraction (C.3).
-async fn test_db_creation_for_contract_extraction(ctx: &mut TestContext) {
+async fn test_contract_and_block_extraction(ctx: &mut TestContext) {
     info!("Start to test Database Creation for contract extraction");
 
     // Generate the Contract Extraction (C.3) proofs.
     let _proof = prove_contract_extraction(&ctx).await;
     info!("Generated Contract Extraction (C.3) proof");
-
-    info!("Finish testing Database Creation for contract extraction");
+    let block_proof = ctx.prove_block_extraction().await.unwrap();
+    info!("Generated Block Extraction (C.4) proof");
+    // TODO: check both proofs match (or do it at subsequent step)
+    info!("Finish testing Database Creation for contract + block extraction");
 }
 
 /// Generate the Values Extraction (C.1) proof for single variables.
