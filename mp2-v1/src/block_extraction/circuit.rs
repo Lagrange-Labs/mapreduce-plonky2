@@ -101,7 +101,7 @@ impl BlockCircuit {
         let bn_u256: Array<Target, 32> = left_pad_leaf_value(cb, &block_number);
         let bn_u256 = bn_u256.pack(cb, Endianness::Big);
         // safe to unwrap because packing 32 bytes gives 8 u32 limbs
-        let bn_u256: UInt256Target = UInt256Target::new_from_be_limbs(&bn_u256.arr).unwrap();
+        let bn_u256: UInt256Target = bn_u256.into();
 
         PublicInputs::new(
             &bh_wires.output_array.to_targets().arr,
