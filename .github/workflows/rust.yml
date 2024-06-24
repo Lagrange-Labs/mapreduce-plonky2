@@ -72,11 +72,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Install foundry
         run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo install --git https://github.com/foundry-rs/foundry --profile local --locked forge anvil"
-      # TODO: only test if anvil could work, need to delete.
       - name: Put cargo in PATH
         run: echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
-      - name: Test anvil
-        run: anvil --silent &
       - uses: actions/cache@v4
         with:
           path: |
