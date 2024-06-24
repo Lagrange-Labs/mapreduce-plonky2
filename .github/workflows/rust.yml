@@ -74,6 +74,9 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           cache: false
+      # TODO: only test if anvil could work, need to delete.
+      - name: Test anvil
+        run: anvil --silent &
       - uses: actions/cache@v4
         with:
           path: |
