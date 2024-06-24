@@ -54,10 +54,18 @@ mod test {
         providers::{Http, Middleware, Provider},
         types::{BlockNumber, U256, U64},
     };
-    use mp2_common::{eth::BlockUtil, u256::U256PubInputs, utils::{Endianness, Packer, ToFields}, C, D, F};
+    use mp2_common::{
+        eth::BlockUtil,
+        u256::U256PubInputs,
+        utils::{Endianness, Packer, ToFields},
+        C, D, F,
+    };
     use mp2_test::eth::get_sepolia_url;
 
-    use crate::{api::deserialize_proof, block_extraction::{public_inputs::PublicInputs, Parameters}};
+    use crate::{
+        api::deserialize_proof,
+        block_extraction::{public_inputs::PublicInputs, Parameters},
+    };
     #[tokio::test]
     async fn test_api() -> Result<()> {
         let params = Parameters::build();
@@ -70,15 +78,23 @@ mod test {
         let proof = params.generate_proof(rlp_headers)?;
         // check public inputs
         let proof = deserialize_proof::<F, C, D>(&proof)?;
-        let pi = PublicInputs::from_slice(
-            &proof.public_inputs);
+        let pi = PublicInputs::from_slice(&proof.public_inputs);
         assert_eq!(
             pi.block_hash_raw(),
-            block.hash.unwrap().as_bytes().pack(Endianness::Little).to_fields(),
+            block
+                .hash
+                .unwrap()
+                .as_bytes()
+                .pack(Endianness::Little)
+                .to_fields(),
         );
         assert_eq!(
             pi.prev_block_hash_raw(),
-            block.parent_hash.as_bytes().pack(Endianness::Little).to_fields(),
+            block
+                .parent_hash
+                .as_bytes()
+                .pack(Endianness::Little)
+                .to_fields(),
         );
         assert_eq!(
             U256::from(U256PubInputs::try_from(pi.block_number_raw())?),
@@ -86,7 +102,11 @@ mod test {
         );
         assert_eq!(
             pi.state_root_raw(),
-            block.state_root.as_bytes().pack(Endianness::Little).to_fields(),
+            block
+                .state_root
+                .as_bytes()
+                .pack(Endianness::Little)
+                .to_fields(),
         );
         Ok(())
     }
