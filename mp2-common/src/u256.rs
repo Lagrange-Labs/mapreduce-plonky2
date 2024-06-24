@@ -448,7 +448,6 @@ impl UInt256Target {
         Into::<Vec<Target>>::into(self)
     }
     pub fn from_targets(targets: &[Target]) -> Result<UInt256Target> {
-        assert!(targets.len() == NUM_LIMBS);
         Self::new_from_be_target_limbs(&targets)
     }
 }
