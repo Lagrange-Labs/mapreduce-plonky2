@@ -296,7 +296,7 @@ mod test {
         keccak::{HASH_LEN, PACKED_HASH_LEN},
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{convert_u8_slice_to_u32_fields, keccak256},
+        utils::{keccak256, Endianness, Packer, ToFields},
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
@@ -375,7 +375,9 @@ mod test {
             let exp_mpt_key_bytes = keccak256(&self.exp_keccak_location);
             wires.3.assign(
                 pw,
-                &convert_u8_slice_to_u32_fields(&exp_mpt_key_bytes)
+                &exp_mpt_key_bytes
+                    .pack(Endianness::Little)
+                    .to_fields()
                     .try_into()
                     .unwrap(),
             );

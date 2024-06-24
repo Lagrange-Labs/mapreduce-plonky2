@@ -1,4 +1,6 @@
-use mp2_common::{types::GFp, C, D, F};
+use mp2_common::{group_hashing::map_to_curve_point, types::GFp, C, D, F};
+use plonky2::field::types::Field;
+use plonky2_ecgfp5::curve::curve::Point as Digest;
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
@@ -13,6 +15,14 @@ use crate::{
 use super::{
     BranchLengthWires, ExtensionLengthWires, LeafLengthCircuit, LeafLengthWires, PublicInputs,
 };
+
+/// Compute metadata digest D(length_slot || variable_slot)
+pub fn compute_metadata_digest(length_slot: u8, variable_slot: u8) -> Digest {
+    map_to_curve_point(&[
+        GFp::from_canonical_u8(length_slot),
+        GFp::from_canonical_u8(variable_slot),
+    ])
+}
 
 type ExtensionInput = ProofInputSerialized<InputNode>;
 type BranchInput = ProofInputSerialized<InputNode>;
@@ -173,17 +183,16 @@ mod tests {
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
-        group_hashing::map_to_curve_point,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::GFp,
-        utils::{convert_u8_to_u32_slice, keccak256},
+        utils::{keccak256, Endianness, Packer, ToFields},
     };
     use plonky2::field::types::Field;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
     use crate::{
         api::ProofWithVK,
-        length_extraction::{tests::PudgyState, PublicInputs},
+        length_extraction::{api::compute_metadata_digest, tests::PudgyState, PublicInputs},
     };
 
     use super::{LengthCircuitInput, PublicParameters};
@@ -212,10 +221,7 @@ mod tests {
         let pis = lp.proof.public_inputs;
         let pi = PublicInputs::from_slice(&pis[..PublicInputs::<GFp>::TOTAL_LEN]);
 
-        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         assert_eq!(pi.length(), &GFp::from_canonical_u32(length));
         assert_eq!(pi.root_hash_raw(), &root);
@@ -228,10 +234,7 @@ mod tests {
         while let Some(node) = proof.pop() {
             pointer -= GFp::ONE;
 
-            let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-                .into_iter()
-                .map(GFp::from_canonical_u32)
-                .collect();
+            let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
             let branch_circuit = LengthCircuitInput::new_branch(node, child_proof);
 
@@ -295,11 +298,7 @@ mod tests {
         }
 
         let length = GFp::from_canonical_u32(value1);
-        let dm = map_to_curve_point(&[
-            GFp::from_canonical_u8(length_slot),
-            GFp::from_canonical_u8(variable_slot),
-        ])
-        .to_weierstrass();
+        let dm = compute_metadata_digest(length_slot, variable_slot).to_weierstrass();
 
         // Leaf extraction
 
@@ -316,10 +315,7 @@ mod tests {
         let pointer = GFp::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)
             - GFp::from_canonical_usize(rlp_nibbles.nibbles().len());
 
-        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         assert_eq!(pi.length(), &length);
         assert_eq!(pi.root_hash_raw(), &root);
@@ -332,10 +328,7 @@ mod tests {
         let pointer = pointer - GFp::ONE;
         let node = proof.pop().unwrap();
 
-        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         let branch_circuit = LengthCircuitInput::new_branch(node, child_proof);
         let child_proof = params.generate_proof(branch_circuit).unwrap();
@@ -355,11 +348,7 @@ mod tests {
         let pointer = GFp::ZERO - GFp::ONE;
         let node = proof.pop().unwrap();
 
-        let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
-
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
         let ext_circuit = LengthCircuitInput::new_extension(node, child_proof);
         let child_proof = params.generate_proof(ext_circuit).unwrap();
 

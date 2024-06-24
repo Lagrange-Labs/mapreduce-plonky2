@@ -8,7 +8,7 @@ use ethers::{
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
-    utils::{convert_u8_to_u32_slice, keccak256},
+    utils::{keccak256, Endianness, Packer},
 };
 use mp2_v1::{
     api::{generate_proof, CircuitInput, ProofWithVK, PublicParameters},
@@ -101,8 +101,7 @@ impl TrieNode {
 
     /// Calculate the hash of this node.
     fn hash(&self) -> Vec<u32> {
-        let hash = keccak256(&self.raw);
-        convert_u8_to_u32_slice(&hash)
+        keccak256(&self.raw).pack(Endianness::Little)
     }
 
     /// Find or add the child node path recursively. The path is arranged in the reverse order,

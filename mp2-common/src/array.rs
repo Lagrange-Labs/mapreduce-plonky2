@@ -1,4 +1,7 @@
-use crate::serialization::{deserialize_long_array, serialize_long_array};
+use crate::{
+    serialization::{deserialize_long_array, serialize_long_array},
+    utils::{Endianness, PackerTarget},
+};
 use anyhow::{anyhow, Result};
 use plonky2::{
     field::{extension::Extendable, types::Field},
@@ -181,10 +184,12 @@ impl<const MAX_LEN: usize> VectorWire<Target, MAX_LEN> {
         let pad_t = b.constant(F::from_canonical_usize(PAD_LEN));
         Array {
             arr: create_array(|i| {
+                // ((pad_len - i) < real_len) * vec[real_len - (pad_len-i)]
+                // i.e. reading value backwards and inserting in order
                 let it = b.constant(F::from_canonical_usize(i));
                 let jt = b.sub(pad_t, it);
                 let is_lt =
-                    less_than_or_equal_to(b, jt, self.real_len, (MAX_LEN.ilog2() + 1) as usize);
+                    less_than_or_equal_to(b, jt, self.real_len, (PAD_LEN.ilog2() + 1) as usize);
                 let idx = b.sub(self.real_len, jt);
                 let val = self.arr.value_at_failover(b, idx);
                 b.select(is_lt, val, zero)
@@ -614,40 +619,21 @@ pub const fn L32(a: usize) -> usize {
         a / 4
     }
 }
+
 impl<const SIZE: usize> Array<Target, SIZE> {
-    pub fn convert_u8_to_u32<F: RichField + Extendable<D>, const D: usize>(
+    /// Convert an `Array` of `Target`, each assumed to represent a byte, to an `Array` of `U32Target`,
+    /// each epresenting the `u32` value given by packing 4 input byte targets, according to the endianness
+    /// specified as input.
+    pub fn pack<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
+        endianness: Endianness,
     ) -> Array<U32Target, { L32(SIZE) }>
     where
         [(); L32(SIZE)]:,
     {
-        const TWO_POWER_8: usize = 256;
-        const TWO_POWER_16: usize = 65536;
-        const TWO_POWER_24: usize = 16777216;
-
-        // constants to convert [u8; 4] to u32
-        // u32 = u8[0] + u8[1] * 2^8 + u8[2] * 2^16 + u8[3] * 2^24
-        let two_power_8: Target = b.constant(F::from_canonical_usize(TWO_POWER_8));
-        let two_power_16: Target = b.constant(F::from_canonical_usize(TWO_POWER_16));
-        let two_power_24: Target = b.constant(F::from_canonical_usize(TWO_POWER_24));
-        let powers = [two_power_8, two_power_16, two_power_24];
-
-        // convert padded node to u32
-        Array {
-            arr: (0..SIZE)
-                .step_by(4)
-                .map(|i| {
-                    let mut x = self.arr[i];
-                    for (i, v) in self.arr[i..].iter().skip(1).take(3).enumerate() {
-                        x = b.mul_add(*v, powers[i], x);
-                    }
-                    U32Target(x)
-                })
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        }
+        let u32_targets = self.arr.pack(b, endianness);
+        u32_targets.try_into().expect("cannot fail")
     }
 }
 
@@ -681,7 +667,7 @@ mod test {
     use crate::{
         array::{Array, ToField, Vector, VectorWire, L32},
         eth::left_pad,
-        utils::{convert_u8_to_u32_slice, find_index_subvector},
+        utils::{find_index_subvector, Endianness, Packer, ToFields},
     };
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -769,7 +755,7 @@ mod test {
                 let origin_u8 = Array::<Target, S>::new(c);
 
                 // Verify `to_u32_array`.
-                let to_u32 = origin_u8.convert_u8_to_u32(c);
+                let to_u32 = origin_u8.pack(c, Endianness::Little);
                 let exp_u32 = Array::<U32Target, { L32(S) }>::new(c);
                 let is_equal = to_u32.equals(c, &exp_u32);
                 c.connect(is_equal.target, tr.target);
@@ -780,10 +766,10 @@ mod test {
                 wires
                     .0
                     .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
-                let u32arr: [F; L32(S)] = convert_u8_to_u32_slice(&self.arr)
-                    .iter()
-                    .map(|x| F::from_canonical_u32(*x))
-                    .collect::<Vec<_>>()
+                let u32arr: [F; L32(S)] = self
+                    .arr
+                    .pack(Endianness::Little)
+                    .to_fields()
                     .try_into()
                     .unwrap();
                 wires.1.assign(pw, &u32arr);

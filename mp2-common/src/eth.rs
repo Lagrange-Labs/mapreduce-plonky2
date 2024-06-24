@@ -227,6 +227,22 @@ pub fn left_pad32(slice: &[u8]) -> [u8; 32] {
     left_pad::<32>(slice)
 }
 
+pub fn left_pad_generic<T: Default + Copy, const N: usize>(slice: &[T]) -> [T; N] {
+    match slice.len() {
+        a if a > N => panic!(
+            "left_pad{} must not be called with higher slice len than {} (given{})",
+            N,
+            N,
+            slice.len()
+        ),
+        a if a == N => slice.try_into().unwrap(),
+        a => {
+            let mut output = [T::default(); N];
+            output[N - a..].copy_from_slice(slice);
+            output
+        }
+    }
+}
 pub fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     match slice.len() {
         a if a > N => panic!(
@@ -409,7 +425,7 @@ mod test {
 
     use crate::{
         types::MAX_BLOCK_LEN,
-        utils::{convert_u8_to_u32_slice, find_index_subvector},
+        utils::{find_index_subvector, Endianness, Packer},
     };
 
     #[tokio::test]
@@ -465,7 +481,11 @@ mod test {
         .to_vec();
         let slice = left_pad::<4>(&slice); // what happens in circuit effectively
                                            // we have to reverse since encoding is big endian on EVM and our function is little endian based
-        let length = convert_u8_to_u32_slice(&slice.into_iter().rev().collect::<Vec<u8>>())[0];
+        let length = slice
+            .into_iter()
+            .rev()
+            .collect::<Vec<u8>>()
+            .pack(Endianness::Little)[0];
         println!("length extracted = {}", length);
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);
         assert_eq!(length, 2); // custom value that may change if we update contract!
@@ -512,9 +532,13 @@ mod test {
         let mut n = sliced.to_vec();
         n.resize(4, 0); // what happens in circuit effectively
         println!("sliced: {:?} - hex {}", sliced, hex::encode(&sliced));
-        let length = convert_u8_to_u32_slice(&n)[0];
-        let length2 =
-            convert_u8_to_u32_slice(&sliced.iter().cloned().rev().collect::<Vec<u8>>())[0];
+        let length = n.pack(Endianness::Little)[0];
+        let length2 = sliced
+            .iter()
+            .cloned()
+            .rev()
+            .collect::<Vec<u8>>()
+            .pack(Endianness::Little)[0];
         println!("length extracted = {}", length);
         println!("length 2 extracted = {}", length2);
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);

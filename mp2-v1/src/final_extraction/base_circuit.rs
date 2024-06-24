@@ -2,12 +2,12 @@ use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     keccak::PACKED_HASH_LEN,
     serialization::{deserialize, serialize},
-    u256,
+    u256, D,
 };
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     iop::{target::Target, witness::PartialWitness},
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 use serde::{Deserialize, Serialize};

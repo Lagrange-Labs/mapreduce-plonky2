@@ -1,10 +1,10 @@
-use ethers::contract::multicall_contract;
 use mp2_common::public_inputs::PublicInputCommon;
 use mp2_common::serialization::{deserialize, serialize};
 use mp2_common::{group_hashing::CircuitBuilderGroupHashing, types::GFp, utils::ToTargets};
-use mp2_common::{D, F};
+use mp2_common::{C, D, F};
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::WitnessWrite;
+use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,

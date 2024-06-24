@@ -9,7 +9,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     types::{CBuilder, GFp},
-    utils::convert_u8_targets_to_u32,
+    utils::{Endianness, PackerTarget},
     D,
 };
 use plonky2::{
@@ -84,11 +84,13 @@ impl BranchLengthCircuit {
         // asserts this is a branch node
         cb.assert_one(is_branch.target);
 
-        for (i, h) in convert_u8_targets_to_u32(cb, &hash.arr)
+        for (i, h) in hash
+            .arr
+            .pack(cb, Endianness::Little)
             .into_iter()
             .enumerate()
         {
-            cb.connect(h.0, child_proof.root_hash_raw()[i]);
+            cb.connect(h, child_proof.root_hash_raw()[i]);
         }
 
         let root = KeccakCircuit::<MAX_BRANCH_NODE_LEN_PADDED>::hash_vector(cb, &node);
@@ -123,9 +125,8 @@ pub mod tests {
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use mp2_common::{
         eth::StorageSlot,
-        group_hashing::map_to_curve_point,
         types::{CBuilder, GFp},
-        utils::{convert_u8_to_u32_slice, keccak256, ToFields},
+        utils::{keccak256, Endianness, Packer, ToFields},
         D,
     };
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
@@ -139,7 +140,7 @@ pub mod tests {
     };
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
-    use crate::length_extraction::PublicInputs;
+    use crate::length_extraction::{api::compute_metadata_digest, PublicInputs};
 
     use super::{BranchLengthCircuit, BranchLengthWires};
 
@@ -175,21 +176,14 @@ pub mod tests {
             key.push(GFp::from_canonical_u8(k & 0x0f));
         }
         let length = GFp::from_canonical_u32(value);
-        let dm = map_to_curve_point(&[
-            GFp::from_canonical_u8(length_slot),
-            GFp::from_canonical_u8(variable_slot),
-        ])
-        .to_weierstrass();
+        let dm = compute_metadata_digest(length_slot, variable_slot).to_weierstrass();
         let is_inf = GFp::from_bool(dm.is_inf);
 
         // compute the public inputs for the first iteration
 
         let child = &proof[depth - 1];
         let d = GFp::from_canonical_usize(depth - 2);
-        let child_hash: Vec<_> = convert_u8_to_u32_slice(&keccak256(child))
-            .into_iter()
-            .map(GFp::from_canonical_u32)
-            .collect();
+        let child_hash: Vec<_> = keccak256(child).pack(Endianness::Little).to_fields();
 
         let mut branch_pi =
             PublicInputs::from_parts(&child_hash, &dm.to_fields(), &key, &d, &length).to_vec();
@@ -208,10 +202,7 @@ pub mod tests {
             let proof_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
 
             branch_pi = proof_pi.to_vec();
-            let root: Vec<_> = convert_u8_to_u32_slice(&keccak256(&node))
-                .into_iter()
-                .map(GFp::from_canonical_u32)
-                .collect();
+            let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
             assert_eq!(proof_pi.length(), &length);
             assert_eq!(proof_pi.root_hash_raw(), &root);

@@ -3,6 +3,7 @@
 use crate::{
     array::Array,
     rlp::short_string_len,
+    types::VALUE_LEN,
     utils::{find_index_subvector, keccak256, less_than},
 };
 use eth_trie::Nibbles;
@@ -32,15 +33,20 @@ pub fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
     bytes
 }
 
-/// Left pad the leaf value and return as big-endian.
+/// Decodes the RLP header (assuming it's a value < 0x80 or less than 55 bytes)
+/// Left pad the leaf value
+/// return as big-endian.
+/// NOTE: WARNING: RLP_VALUE_LEN MUST include an additional byte for a potential
+/// RLP header. For example, in EVM, every value can be up to 32 bytes. One must
+/// input 33 in this function because the RLP header might take a full additional byte.
 pub fn left_pad_leaf_value<
     F: RichField + Extendable<D>,
     const D: usize,
-    const VALUE_LEN: usize,
+    const RLP_VALUE_LEN: usize,
     const PADDED_LEN: usize,
 >(
     b: &mut CircuitBuilder<F, D>,
-    value: &Array<Target, VALUE_LEN>,
+    value: &Array<Target, RLP_VALUE_LEN>,
 ) -> Array<Target, PADDED_LEN> {
     // Read the length of the relevant data (RLP header - 0x80)
     let zero = b.zero();
@@ -53,7 +59,10 @@ pub fn left_pad_leaf_value<
     let value_len = b.select(is_single_byte, one, value_len_80);
     let offset = b.select(is_single_byte, zero, one);
     value
-        .extract_array::<F, _, PADDED_LEN>(b, offset)
+        // WARNING: this is a hack to avoid another const generic but
+        // what we should really do here is extract RLP_VALUE_LEN-1 because we
+        // consider 1 extra byte for the RLP header always (which may or may not exist)
+        .extract_array::<F, _, RLP_VALUE_LEN>(b, offset)
         .into_vec(value_len)
         .normalize_left::<_, _, PADDED_LEN>(b)
 }

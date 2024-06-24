@@ -13,7 +13,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
-    utils::convert_u8_targets_to_u32,
+    utils::{Endianness, PackerTarget},
     D,
 };
 use plonky2::{
@@ -85,10 +85,7 @@ where
 
         // Compute the values digest - D(identifier || value).
         assert_eq!(value.arr.len(), MAPPING_LEAF_VALUE_LEN);
-        let packed_value: Vec<_> = convert_u8_targets_to_u32(b, &value.arr)
-            .into_iter()
-            .map(|t| t.0)
-            .collect();
+        let packed_value = value.arr.pack(b, Endianness::Big);
         let inputs: Vec<_> = iter::once(id).chain(packed_value).collect();
         let values_digest = b.map_to_curve_point(&inputs);
 
@@ -156,10 +153,11 @@ impl CircuitLogicWires<GFp, D, 0> for LeafSingleWires<MAX_LEAF_NODE_LEN> {
 
 #[cfg(test)]
 mod tests {
+
     use super::{
         super::{
-            compute_leaf_single_id,
-            tests::{compute_leaf_single_metadata_digest, compute_leaf_single_values_digest},
+            compute_leaf_single_id, compute_leaf_single_metadata_digest,
+            compute_leaf_single_values_digest,
         },
         *,
     };
@@ -167,11 +165,10 @@ mod tests {
     use ethers::types::Address;
     use mp2_common::{
         array::Array,
-        eth::{left_pad32, StorageSlot},
-        group_hashing::map_to_curve_point,
+        eth::StorageSlot,
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{convert_u8_to_u32_slice, keccak256},
+        utils::{keccak256, Endianness, Packer},
         C, D, F,
     };
     use mp2_test::{
@@ -182,10 +179,7 @@ mod tests {
     use plonky2::{
         field::types::Field,
         iop::{target::Target, witness::PartialWitness},
-        plonk::{
-            circuit_builder::CircuitBuilder,
-            config::{GenericConfig, Hasher, PoseidonGoldilocksConfig},
-        },
+        plonk::circuit_builder::CircuitBuilder,
     };
     use std::str::FromStr;
 
@@ -236,6 +230,9 @@ mod tests {
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);
         let encoded_value: Vec<u8> = rlp::encode(&value).to_vec();
+        // assert we added one byte of RLP header
+        assert_eq!(encoded_value.len(), MAPPING_LEAF_VALUE_LEN + 1);
+        println!("encoded value {:?}", encoded_value);
         trie.insert(&slot.mpt_key(), &encoded_value).unwrap();
         trie.root_hash().unwrap();
 
@@ -256,8 +253,7 @@ mod tests {
         let pi = PublicInputs::new(&proof.public_inputs);
 
         {
-            let exp_hash = keccak256(&node);
-            let exp_hash = convert_u8_to_u32_slice(&exp_hash);
+            let exp_hash = keccak256(&node).pack(Endianness::Little);
             assert_eq!(pi.root_hash(), exp_hash);
         }
         {
