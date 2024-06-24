@@ -1,134 +1,73 @@
-mod public_inputs;
-use anyhow::{ensure, Result};
-use std::array::from_fn as create_array;
-
-#[cfg(test)]
-mod tests;
-
-use std::array;
-
-use mp2_common::{
-    array::{Array, Vector, VectorWire, L32},
-    keccak::{InputData, KeccakCircuit, KeccakWires, OutputHash, HASH_LEN, PACKED_HASH_LEN},
-    mpt_sequential::{utils::left_pad_leaf_value, PAD_LEN},
-    public_inputs::PublicInputCommon,
-    rlp::extract_be_value,
-    types::{CBuilder, GFp, MAX_BLOCK_LEN},
-    u256::{self, CircuitBuilderU256, UInt256Target},
-    utils::{less_than, Endianness, PackerTarget},
-    D,
-};
 use plonky2::{
-    field::types::Field,
-    iop::{target::Target, witness::PartialWitness},
+    iop::witness::PartialWitness,
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitData, VerifierCircuitData},
+    },
+    util::serialization::gate_serialization::default,
 };
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
+
+mod circuit;
+mod public_inputs;
+
+use anyhow::Result;
+use mp2_common::{
+    serialization::{deserialize, serialize},
+    C, D, F,
+};
 use serde::{Deserialize, Serialize};
 
-use public_inputs::PublicInputs;
+use crate::api::{default_config, serialize_proof};
 
-/// Parent hash offset in RLP encoded header.
-const HEADER_PARENT_HASH_OFFSET: usize = 4;
-
-/// State root offset in RLP encoded header.
-const HEADER_STATE_ROOT_OFFSET: usize = 91;
-
-/// Block number offset in RLP encoded header.
-const HEADER_BLOCK_NUMBER_OFFSET: usize = 449;
-/// We define u64 as the maximum block mnumber ever to be reached
-/// +1 to include the RLP header when we read from the buffer - technical detail.
-const MAX_BLOCK_NUMBER_LEN: usize = 8 + 1;
-
-/// NOTE: Fixing the header len here since problem with const generics
-/// prevents to use methods like `pack()`. It doesn't really change the
-/// semantics since changing a const generic or a const is the same.
-/// TODO: solve that.
-const PADDED_HEADER_LEN: usize = PAD_LEN(MAX_BLOCK_LEN);
-
-/// The wires structure for the block extraction.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BlockWires {
-    /// Block hash.
-    pub(crate) bh: KeccakWires<PADDED_HEADER_LEN>,
-    /// RLP encoded bytes of block header. Padded by circuit.
-    pub(crate) rlp_headers: VectorWire<Target, PADDED_HEADER_LEN>,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Parameters {
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    circuit_data: CircuitData<F, C, D>,
+    wires: circuit::BlockWires,
 }
 
-/// The circuit definition for the block extraction.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BlockCircuit {
-    /// RLP encoded bytes of block header.
-    pub rlp_headers: Vec<u8>,
-}
-
-impl BlockCircuit {
-    /// Creates a new instance of the circuit.
-    pub fn new(rlp_headers: &[u8]) -> Result<Self> {
-        ensure!(
-            rlp_headers.len() <= MAX_BLOCK_LEN,
-            "block rlp headers too long"
-        );
-        Ok(Self {
-            rlp_headers: rlp_headers.to_vec(),
-        })
-    }
-
-    /// Build the circuit, assigning the public inputs and returning the internal wires.
-    pub fn build(cb: &mut CBuilder) -> BlockWires {
-        // already right padded to right size for keccak
-        let rlp_headers = VectorWire::new(cb);
-
-        // header must be bytes
-        rlp_headers.assert_bytes(cb);
-
-        // extract the previous block hash from the RLP header
-        let prev_bh = Array::<Target, HASH_LEN>::from_array(create_array(|i| {
-            rlp_headers.arr.arr[HEADER_PARENT_HASH_OFFSET + i]
-        }));
-        let packed_prev_bh = prev_bh.pack(cb, Endianness::Little).to_targets();
-
-        // extract the state root of the block
-        let state_root = Array::<Target, HASH_LEN>::from_array(create_array(|i| {
-            rlp_headers.arr.arr[HEADER_STATE_ROOT_OFFSET + i]
-        }));
-        let state_root_packed = state_root.pack(cb, Endianness::Little);
-
-        // compute the block hash
-        let bh_wires = KeccakCircuit::hash_vector(cb, &rlp_headers);
-
-        // extract the block number from the RLP header
-        let block_number = Array::<Target, MAX_BLOCK_NUMBER_LEN>::from_array(create_array(|i| {
-            rlp_headers.arr.arr[HEADER_BLOCK_NUMBER_OFFSET + i]
-        }));
-        // TODO: put that in array
-
-        let bn_u256: Array<Target, 32> = left_pad_leaf_value(cb, &block_number);
-        let bn_u256 = bn_u256.pack(cb, Endianness::Big);
-        let bn_u256: UInt256Target = bn_u256.into();
-
-        PublicInputs::new(
-            &bh_wires.output_array.to_targets().arr,
-            &packed_prev_bh.to_targets().arr,
-            &bn_u256.to_targets(),
-            &state_root_packed.to_targets().arr,
-        )
-        .register(cb);
-
-        BlockWires {
-            bh: bh_wires,
-            rlp_headers,
+impl Parameters {
+    pub fn build() -> Self {
+        let config = default_config();
+        let mut cb = CircuitBuilder::new(config);
+        let wires = circuit::BlockCircuit::build(&mut cb);
+        let cd = cb.build();
+        Self {
+            circuit_data: cd,
+            wires,
         }
     }
 
-    /// Assigns the values of this instance into the provided partial witness, using the generated
-    /// circuit wires.
-    pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &BlockWires) {
-        // this already pads the rlp header to the right size for keccak
-        let rlp =
-            Vector::from_vec(&self.rlp_headers).expect("the length of the bh rlp is validated");
+    pub fn generate_proof(&self, block_header: Vec<u8>) -> Result<Vec<u8>> {
+        let input = circuit::BlockCircuit::new(block_header)?;
+        let mut pw = PartialWitness::new();
+        input.assign(&mut pw, &self.wires);
+        let proof = self.circuit_data.prove(pw)?;
+        serialize_proof(&proof)
+    }
+}
 
-        wires.rlp_headers.assign(pw, &rlp);
+#[cfg(test)]
+mod test {
+    use anyhow::Result;
+    use ethers::{
+        providers::{Http, Middleware, Provider},
+        types::BlockNumber,
+    };
+    use mp2_common::eth::BlockUtil;
+    use mp2_test::eth::get_sepolia_url;
 
-        KeccakCircuit::assign(pw, &wires.bh, &InputData::Assigned(&rlp));
+    use crate::block_extraction::Parameters;
+    #[tokio::test]
+    async fn test_api() -> Result<()> {
+        let params = Parameters::build();
+        let url = get_sepolia_url();
+        let provider = Provider::<Http>::try_from(url).unwrap();
+        let block_number = BlockNumber::Latest;
+        let block = provider.get_block(block_number).await.unwrap().unwrap();
+
+        let rlp_headers = block.rlp();
+        params.generate_proof(rlp_headers).unwrap();
+        Ok(())
     }
 }
