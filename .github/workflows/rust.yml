@@ -70,6 +70,10 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+      - name: Install foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          cache: false
       - uses: actions/cache@v4
         with:
           path: |

@@ -21,7 +21,7 @@ const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
 const MAPPING_SLOT: u8 = 4;
 
 /// Test mapping addresses (keys) for mapping values extraction
-const MAPPING_ADDRESSES: [&str; 2] = [
+pub(crate) const MAPPING_ADDRESSES: [&str; 2] = [
     "0x3bf5733f695b2527acc7bd4c5350e57acfd9fbb5",
     "0x6cac7190535f4908d0524e7d55b3750376ea1ef7",
 ];

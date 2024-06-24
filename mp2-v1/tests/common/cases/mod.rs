@@ -2,8 +2,8 @@
 
 use mp2_common::eth::StorageSlot;
 
-mod local_simple;
-mod pudgy_penguins;
+pub(crate) mod local_simple;
+pub(crate) mod pudgy_penguins;
 
 /// Storage mapping key
 type MappingKey = Vec<u8>;

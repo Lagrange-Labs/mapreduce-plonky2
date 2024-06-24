@@ -6,6 +6,7 @@ script = "script"
 libs = ["lib"]
 optimizer = true
 optimizer_runs = 200
+# The highest solidity version supported on MAC for now
 solc-version = "0.8.24"
 evm_version = "cancun"
 verbosity = 4
