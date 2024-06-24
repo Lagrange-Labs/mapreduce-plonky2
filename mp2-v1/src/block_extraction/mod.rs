@@ -86,7 +86,7 @@ mod test {
         let block_number = BlockNumber::Latest;
         let block = provider.get_block(block_number).await.unwrap().unwrap();
 
-        let rlp_headers = CircuitInput::from_block_header(block.rlp());
+        let rlp_headers = super::CircuitInput::from_block_header(block.rlp());
         let proof = params.generate_proof(rlp_headers)?;
         // check public inputs
         let proof = deserialize_proof::<F, C, D>(&proof)?;
