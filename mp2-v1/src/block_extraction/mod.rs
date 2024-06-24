@@ -8,7 +8,7 @@ use plonky2::{
 };
 
 mod circuit;
-mod public_inputs;
+pub(crate) mod public_inputs;
 
 use anyhow::Result;
 use mp2_common::{
@@ -44,6 +44,10 @@ impl Parameters {
         input.assign(&mut pw, &self.wires);
         let proof = self.circuit_data.prove(pw)?;
         serialize_proof(&proof)
+    }
+
+    pub fn circuit_data(&self) -> &CircuitData<F, C, D> {
+        &self.circuit_data
     }
 }
 

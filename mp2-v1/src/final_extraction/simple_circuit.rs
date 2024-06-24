@@ -11,12 +11,14 @@ use plonky2::{
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
+use recursion_framework::framework::RecursiveCircuits;
 use serde::{Deserialize, Serialize};
 
 use crate::api::default_config;
 use crate::values_extraction;
 
-use super::base_circuit::BasePublicParameters;
+use super::api::{FinalExtractionBuilderParams, NUM_IO};
+use super::base_circuit::{BaseCircuitProofInputs, BaseCircuitProofWires};
 use super::{base_circuit, PublicInputs};
 
 /// This circuit contains the logic to prove the final extraction of a simple
@@ -57,7 +59,7 @@ impl SimpleCircuit {
             &base_wires.prev_bh,
             &final_dv.to_targets(),
             &base_wires.dm.to_targets(),
-            &base_wires.bn,
+            &base_wires.bn.to_targets(),
         )
         .register_args(b);
         SimpleWires { compound }
@@ -69,26 +71,66 @@ impl SimpleCircuit {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub(crate) struct SimpleCircuitParams {
-    base: BasePublicParameters,
-    wires: SimpleWires,
+pub(crate) struct SimpleCircuitRecursiveWires {
+    base: BaseCircuitProofWires,
+    simple_wires: SimpleWires,
 }
 
-impl SimpleCircuitParams {
-    pub(crate) fn build(
-        block_vk: &VerifierCircuitData<F, C, D>,
-        contract_circuit_set: &RecursiveCircuit<F, C, D>,
-        value_circuit_set: &RecursiveCircuit<F, C, D>,
+pub struct SimpleCircuitInput {
+    base: BaseCircuitProofInputs,
+    simple: SimpleCircuit,
+}
+
+impl SimpleCircuitInput {
+    pub(crate) fn new(
+        base: BaseCircuitProofInputs,
+        compound: bool,
     ) -> Self {
-        let mut cb = CircuitBuilder::<F, D>::new(default_config());
+        let simple =  SimpleCircuit {
+            compound_type: compound,
+        };
+        Self {
+            base,
+            simple,
+        }
+    }
+}
+
+impl CircuitLogicWires<F, D, 0> for SimpleCircuitRecursiveWires {
+    type CircuitBuilderParams = FinalExtractionBuilderParams;
+
+    type Inputs = SimpleCircuitInput;
+
+    const NUM_PUBLIC_INPUTS: usize = NUM_IO;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
         let base =
-            BasePublicParameters::new(&mut cb, block_vk, contract_circuit_set, value_circuit_set);
+        BaseCircuitProofInputs::build(builder, &builder_parameters);
+        let wires = SimpleCircuit::build(
+            builder, 
+            base.get_block_public_inputs(), 
+            base.get_contract_public_inputs(), 
+            base.get_value_public_inputs(),
+            );
+        Self {
+            base,
+            simple_wires: wires,
+        }
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
+        inputs.base.assign_proof_targets(pw, &self.base)?;
+        Ok(inputs.simple.assign(pw, &self.simple_wires))
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::contract_extraction;
+    use crate::{block_extraction, contract_extraction};
 
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
@@ -137,10 +179,10 @@ mod test {
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let proof_pis = PublicInputs::from_slice(&proof.public_inputs);
-        // TODO once block extraction done
-        //assert_eq!(proof_pis.bn, pis.blocks_pi.bn);
-        //assert_eq!(proof_pis.bh, pis.blocks_pi.bh);
-        //assert_eq!(proof_pis.prev_bh, pis.blocks_pi.ph);
+        let block_pi = block_extraction::public_inputs::PublicInputs::from_slice(&pis.blocks_pi);
+        assert_eq!(proof_pis.bn, block_pi.bn);
+        assert_eq!(proof_pis.h, block_pi.bh);
+        assert_eq!(proof_pis.ph, block_pi.prev_bh);
 
         // check digests
         let value_pi = values_extraction::PublicInputs::new(&pis.values_pi);

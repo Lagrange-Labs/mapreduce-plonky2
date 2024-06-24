@@ -1,12 +1,11 @@
 use core::iter;
+use std::array;
 
 use mp2_common::{
-    keccak::PACKED_HASH_LEN,
-    public_inputs::{PublicInputCommon, PublicInputRange},
-    types::CBuilder,
-    u256::{self, U256PubInputs, UInt256Target},
+    array::Array, keccak::{OutputHash, PACKED_HASH_LEN}, public_inputs::{PublicInputCommon, PublicInputRange}, types::CBuilder, u256::{self, U256PubInputs, UInt256Target}
 };
 use plonky2::iop::target::Target;
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 // Block extraction public inputs:
 // - `BH : [8]F` packed Keccak hash of the block
@@ -64,6 +63,16 @@ impl<'a> PublicInputs<'a, Target> {
 
     pub fn block_number(&self) -> UInt256Target {
         UInt256Target::from_targets(self.bn).unwrap()
+    }
+
+    pub fn block_hash(&self) -> OutputHash {
+        let hash = self.bh;
+        Array::<U32Target, PACKED_HASH_LEN>::from_array(array::from_fn(|i| U32Target(hash[i])))
+    }
+
+    pub fn state_root(&self) -> OutputHash {
+        let hash = self.sh;
+        Array::<U32Target, PACKED_HASH_LEN>::from_array(array::from_fn(|i| U32Target(hash[i])))
     }
 }
 

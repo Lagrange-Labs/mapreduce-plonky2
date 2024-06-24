@@ -174,6 +174,10 @@ impl PublicParameters {
 
         Ok(proof)
     }
+
+    pub fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.set
+    }
 }
 
 #[cfg(test)]

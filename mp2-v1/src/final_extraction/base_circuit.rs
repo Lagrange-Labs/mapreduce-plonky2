@@ -1,30 +1,33 @@
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing,
-    keccak::PACKED_HASH_LEN,
-    serialization::{deserialize, serialize},
-    u256, D,
+    group_hashing::CircuitBuilderGroupHashing, keccak::PACKED_HASH_LEN, serialization::{deserialize, serialize}, u256::{self, UInt256Target}, C, D, F
 };
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
-    iop::{target::Target, witness::PartialWitness},
-    plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
+    iop::{target::Target, witness::{PartialWitness, WitnessWrite}},
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::VerifierCircuitData, proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget}},
 };
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
+use recursion_framework::framework::{RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget};
 use serde::{Deserialize, Serialize};
 
-use crate::{api::default_config, contract_extraction, values_extraction};
+use crate::{api::{default_config, deserialize_proof, ProofWithVK}, block_extraction, contract_extraction, values_extraction};
+
+use super::api::FinalExtractionBuilderParams;
+
+use anyhow::Result;
 
 /// This circuit is more like a gadget. This contains the logic of the common part
 /// between all the final extraction circuits. It should not be used on its own.
 #[derive(Debug, Clone)]
 pub struct BaseCircuit {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseWires {
+    #[serde(serialize_with="serialize", deserialize_with="deserialize")]
     pub(crate) dm: CurveTarget,
     pub(crate) bh: [Target; PACKED_HASH_LEN],
     pub(crate) prev_bh: [Target; PACKED_HASH_LEN],
-    pub(crate) bn: [Target; u256::NUM_LIMBS],
+    pub(crate) bn: UInt256Target,
 }
 
 impl BaseCircuit {
@@ -35,6 +38,7 @@ impl BaseCircuit {
         value_pi: &[Target],
     ) -> BaseWires {
         // TODO: homogeinize the public inputs structs
+        let block_pi = block_extraction::public_inputs::PublicInputs::<Target>::from_slice(block_pi);
         let value_pi = values_extraction::PublicInputs::<Target>::new(value_pi);
         let contract_pi = contract_extraction::PublicInputs::<Target>::from_slice(contract_pi);
 
@@ -44,12 +48,16 @@ impl BaseCircuit {
 
         let metadata =
             b.add_curve_point(&[value_pi.metadata_digest(), contract_pi.metadata_digest()]);
+
+        // enforce contract_pi.storage_root == value_pi.storage_root
+        contract_pi.storage_root().enforce_equal(b, &value_pi.root_hash());
+        // enforce block_pi.state_root == contract_pi.state_root
+        block_pi.state_root().enforce_equal(b, &contract_pi.root_hash());
         BaseWires {
             dm: metadata,
-            // TODO: replace once block extraction merged
-            bh: [minus_one; PACKED_HASH_LEN],
-            prev_bh: [minus_one; PACKED_HASH_LEN],
-            bn: [minus_one; u256::NUM_LIMBS],
+            bh: block_pi.block_hash_raw().try_into().unwrap(), // safe to unwrap as we give as input the slice of the expected length
+            prev_bh: block_pi.prev_block_hash_raw().try_into().unwrap(), // safe to unwrap as we give as input the slice of the expected length
+            bn: block_pi.block_number(),
         }
     }
 
@@ -61,7 +69,7 @@ impl BaseCircuit {
 /// This parameter contains the common logic of verifying a block, contract and
 /// value proof automatically from the right verification keys / circuit set.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct BasePublicParameters {
+pub(crate) struct BaseCircuitProofWires {
     /// single circuit proof extracting block hash, block number, previous hash
     /// and state root
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
@@ -75,52 +83,129 @@ pub(crate) struct BasePublicParameters {
 const CONTRACT_SET_NUM_IO: usize = contract_extraction::PublicInputs::<F>::TOTAL_LEN;
 const VALUE_SET_NUM_IO: usize = values_extraction::PublicInputs::<F>::TOTAL_LEN;
 
-impl BasePublicParameters {
-    pub(crate) fn new(
-        cb: &mut CircuitBuilder<F, D>,
-        block_vk: &VerifierCircuitData<F, C, D>,
-        contract_circuit_set: &RecursiveCircuit<F, C, D>,
-        value_circuit_set: &RecursiveCircuit<F, C, D>,
+#[derive(Clone, Debug)]
+pub(super) struct BaseCircuitInput {
+    block_proof: ProofWithPublicInputs<F, C, D>,
+    contract_proof: ProofWithVK,
+    value_proof: ProofWithVK,
+}
+
+impl BaseCircuitInput {
+    pub(super) fn new(
+        block_proof: Vec<u8>,
+        contract_proof: Vec<u8>,
+        value_proof: Vec<u8>,
+    ) -> Result<Self> {
+       Ok(
+        Self {
+            block_proof: deserialize_proof(&block_proof)?,
+            contract_proof: ProofWithVK::deserialize(&contract_proof)?,
+            value_proof: ProofWithVK::deserialize(&value_proof)?,
+        }
+       ) 
+    }
+}
+#[derive(Clone, Debug)]
+pub(crate) struct BaseCircuitProofInputs {
+    proofs: BaseCircuitInput,
+    contract_circuit_set: RecursiveCircuits<F, C, D>,
+    value_circuit_set: RecursiveCircuits<F, C, D>,
+}
+
+impl BaseCircuitProofInputs {
+    pub(crate) fn new_from_proofs(
+        proofs: BaseCircuitInput,
+        contract_circuit_set: RecursiveCircuits<F, C, D>,
+        value_circuit_set: RecursiveCircuits<F, C, D>,
     ) -> Self {
+        Self {
+            proofs,
+            contract_circuit_set,
+            value_circuit_set,
+        }
+    }
+
+    pub(crate) fn build(
+        cb: &mut CircuitBuilder<F, D>,
+        params: &FinalExtractionBuilderParams,
+    ) -> BaseCircuitProofWires {
         let config = default_config();
         let contract_verifier =
             RecursiveCircuitsVerifierGagdet::<F, C, D, CONTRACT_SET_NUM_IO>::new(
                 config.clone(),
-                contract_circuit_set,
+                &params.contract_circuit_set,
             );
         let value_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, VALUE_SET_NUM_IO>::new(
             config.clone(),
-            value_circuit_set,
+            &params.value_circuit_set,
         );
-        let contract_proof_wires = contract_verifier.verify_proof_in_circuit_set(&mut cb);
-        let value_proof_wires = value_verifier.verify_proof_in_circuit_set(&mut cb);
-        let block_proof_wires = crate::api::verify_proof_fixed_circuit(&mut cb, &block_vk);
-        Self {
+        let contract_proof_wires = contract_verifier.verify_proof_in_circuit_set(cb);
+        let value_proof_wires = value_verifier.verify_proof_in_circuit_set(cb);
+        let block_proof_wires = crate::api::verify_proof_fixed_circuit(cb, &params.block_vk);
+        BaseCircuitProofWires {
             block_proof: block_proof_wires,
             contract_proof: contract_proof_wires,
             value_proof: value_proof_wires,
         }
     }
+
+    pub(crate) fn assign_proof_targets(&self,
+        pw: &mut PartialWitness<F>, 
+        wires: &BaseCircuitProofWires
+    ) -> anyhow::Result<()> {
+        pw.set_proof_with_pis_target(&wires.block_proof, &self.proofs.block_proof);
+        let (proof, vd) = (&self.proofs.contract_proof).into();
+        wires.contract_proof.set_target(
+            pw, 
+            &self.contract_circuit_set, 
+            proof, 
+            vd,
+        )?;
+        let (proof, vd) = (&self.proofs.value_proof).into();
+        wires.value_proof.set_target(
+            pw, 
+            &self.value_circuit_set, 
+            proof, 
+            vd
+        )
+    }
 }
+
+impl BaseCircuitProofWires {
+    pub(crate) fn get_block_public_inputs(&self) -> &[Target] {
+        self.block_proof.public_inputs.as_slice()
+    }
+
+    pub(crate) fn get_contract_public_inputs(&self) -> &[Target] {
+        self.contract_proof.get_public_input_targets::<F, CONTRACT_SET_NUM_IO>()
+    }
+
+    pub(crate) fn get_value_public_inputs(&self) -> &[Target] {
+        self.value_proof.get_public_input_targets::<F, VALUE_SET_NUM_IO>()
+    }
+}
+
+
 
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
     use anyhow::Result;
     use contract_extraction::build_circuits_params;
+    use ethers::types::U256;
     use mp2_common::{
         keccak::PACKED_HASH_LEN,
         mpt_sequential::MPTKeyWire,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::GFp,
-        utils::{IntTargetWriter, Packer, ToFields},
+        utils::{Endianness, IntTargetWriter, Packer, ToFields},
     };
     use mp2_test::{
         circuit::{run_circuit, setup_circuit, UserCircuit},
         utils::random_vector,
     };
     use plonky2::{
-        field::types::Sample,
+        field::types::{PrimeField64, Sample},
         hash::hash_types::HashOut,
         iop::witness::WitnessWrite,
         plonk::config::{GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
@@ -175,7 +260,8 @@ pub(crate) mod test {
     impl ProofsPiTarget {
         pub(crate) fn new(b: &mut CircuitBuilder<GFp, 2>) -> Self {
             Self {
-                blocks_pi: vec![],
+                blocks_pi: b.add_virtual_targets(
+                    block_extraction::public_inputs::PublicInputs::<Target>::TOTAL_LEN),
                 contract_pi: b
                     .add_virtual_targets(contract_extraction::PublicInputs::<Target>::TOTAL_LEN),
                 values_pi: b
@@ -209,7 +295,7 @@ pub(crate) mod test {
         }
 
         pub(crate) fn random() -> Self {
-            let value_h = HashOut::<GFp>::rand().to_bytes().pack();
+            let value_h = HashOut::<GFp>::rand().to_bytes().pack(Endianness::Little);
             let key = random_vector(64);
             let ptr = usize::max_value();
             let value_dv = Point::rand();
@@ -237,11 +323,20 @@ pub(crate) mod test {
                 s,
             }
             .to_vec();
+            let block_number = U256::from(F::rand().to_canonical_u64()).to_fields();
+            let block_hash = HashOut::<GFp>::rand().to_bytes().pack(Endianness::Little).to_fields();
+            let parent_block_hash = HashOut::<GFp>::rand().to_bytes().pack(Endianness::Little).to_fields();
+            let blocks_pi = block_extraction::public_inputs::PublicInputs {
+                bh: &block_hash,
+                prev_bh: &parent_block_hash,
+                bn: &block_number,
+                sh: h,
+            }.to_vec();
             ProofsPi {
                 contract_dm,
                 value_dm,
                 value_dv,
-                blocks_pi: vec![],
+                blocks_pi,
                 values_pi,
                 contract_pi,
             }
@@ -250,8 +345,6 @@ pub(crate) mod test {
 
     #[test]
     fn final_simple_value() -> Result<()> {
-        //let block_pi = vec![];
-        //let contract_pi = vec![];
         let pis = ProofsPi::random();
         let test_circuit = TestBaseCircuit {
             pis,

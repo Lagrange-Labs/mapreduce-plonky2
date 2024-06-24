@@ -92,6 +92,11 @@ impl<'a> PublicInputs<'a, Target> {
     pub fn metadata_digest(&self) -> CurveTarget {
         CurveTarget::from_targets(&self.dm)
     }
+
+    pub fn storage_root(&self) -> OutputHash {
+        let hash = self.s;
+        Array::<U32Target, PACKED_HASH_LEN>::from_array(array::from_fn(|i| U32Target(hash[i])))
+    }
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {

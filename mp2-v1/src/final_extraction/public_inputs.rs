@@ -2,14 +2,7 @@
 
 use ethers::core::k256::elliptic_curve::Curve;
 use mp2_common::{
-    array::Array,
-    group_hashing::EXTENSION_DEGREE,
-    keccak::{OutputHash, PACKED_HASH_LEN},
-    mpt_sequential::MPTKeyWire,
-    public_inputs::{PublicInputCommon, PublicInputRange},
-    rlp::MAX_KEY_NIBBLE_LEN,
-    types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
-    utils::{FromFields, FromTargets, ToTargets},
+    array::Array, group_hashing::EXTENSION_DEGREE, keccak::{OutputHash, PACKED_HASH_LEN}, mpt_sequential::MPTKeyWire, public_inputs::{PublicInputCommon, PublicInputRange}, rlp::MAX_KEY_NIBBLE_LEN, types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN}, u256, utils::{FromFields, FromTargets, ToTargets}
 };
 use plonky2::{
     field::{extension::FieldExtension, types::Field},
@@ -30,7 +23,7 @@ const PH_RANGE: PublicInputRange = PACKED_HASH_LEN..H_RANGE.end + PACKED_HASH_LE
 const DV_RANGE: PublicInputRange = PH_RANGE.end..PH_RANGE.end + CURVE_TARGET_LEN;
 const DM_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + CURVE_TARGET_LEN;
 // TODO : replace by uint256 constant
-const BN_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + 8;
+const BN_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + u256::NUM_LIMBS;
 
 /// Public inputs for contract extraction
 #[derive(Clone, Debug)]

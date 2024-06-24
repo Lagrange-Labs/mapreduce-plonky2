@@ -1,7 +1,7 @@
 use mp2_common::public_inputs::PublicInputCommon;
 use mp2_common::utils::SliceConnector;
 use mp2_common::{group_hashing::CircuitBuilderGroupHashing, types::GFp, utils::ToTargets};
-use mp2_common::{D, F};
+use mp2_common::{C, D, F};
 use plonky2::field::types::Field;
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::WitnessWrite;
@@ -12,10 +12,14 @@ use plonky2::{
 use plonky2_crypto::hash::CircuitBuilderHash;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
+use recursion_framework::framework::{RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget};
 use serde::{Deserialize, Serialize};
 
+use crate::api::{default_config, ProofWithVK};
 use crate::{length_extraction, values_extraction};
 
+use super::api::{FinalExtractionBuilderParams, NUM_IO};
+use super::base_circuit::{BaseCircuitProofInputs, BaseCircuitProofWires};
 use super::{base_circuit, PublicInputs};
 
 /// This circuit contains the logic to prove the final extraction of a mapping
@@ -57,7 +61,7 @@ impl LengthedCircuit {
             &base_wires.prev_bh,
             &dv,
             &final_dm.to_targets(),
-            &base_wires.bn,
+            &base_wires.bn.to_targets(),
         )
         .register_args(b);
         LengthedWires {}
@@ -66,22 +70,79 @@ impl LengthedCircuit {
     fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &LengthedWires) {}
 }
 
-impl CircuitLogicWires<F, D, 0> for LengthedWires {
-    type CircuitBuilderParams = ();
-    type Inputs = LengthedCircuit;
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct LengthedRecursiveWires {
+    base: BaseCircuitProofWires,
+    length_proof_wires: RecursiveCircuitsVerifierTarget<D>,
+    wires: LengthedWires,
+}
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::TOTAL_LEN;
+pub(crate) struct LengthedCircuitInput {
+    base: BaseCircuitProofInputs,
+    length_proof: ProofWithVK,
+    length_circuit_set: RecursiveCircuits<F, C, D>,
+    lengthed: LengthedCircuit,
+}
+
+impl LengthedCircuitInput {
+    pub(crate) fn new(
+        base_proofs: BaseCircuitProofInputs,
+        length_proof: ProofWithVK,
+        length_circuit_set: RecursiveCircuits<F, C, D>,
+    ) -> Self {
+        Self {
+            base: base_proofs,
+            length_proof,
+            length_circuit_set,
+            lengthed: LengthedCircuit {  },
+        }
+    }
+}
+
+const LENGTH_NUM_IO: usize = length_extraction::PublicInputs::<Target>::TOTAL_LEN;
+
+impl CircuitLogicWires<F, D, 0> for LengthedRecursiveWires {
+    type CircuitBuilderParams = FinalExtractionBuilderParams;
+    type Inputs = LengthedCircuitInput;
+
+    const NUM_PUBLIC_INPUTS: usize = NUM_IO;
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
-        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
+        _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        todo!()
+        let base = BaseCircuitProofInputs::build(builder, &builder_parameters);
+        let verifier_gadget = RecursiveCircuitsVerifierGagdet::<_, _, D, LENGTH_NUM_IO>::new(
+            default_config(),
+            &builder_parameters.length_circuit_set,
+        );
+        let length_proof_wires = verifier_gadget.verify_proof_in_circuit_set(builder);
+        let length_pi = length_proof_wires.get_public_input_targets::<F, LENGTH_NUM_IO>();
+        let wires = LengthedCircuit::build(
+            builder, 
+            base.get_block_public_inputs(), 
+            base.get_contract_public_inputs(), 
+            base.get_value_public_inputs(), 
+            length_pi
+        );
+        Self {
+            base,
+            length_proof_wires,
+            wires,
+        }
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
-        todo!()
+        inputs.base.assign_proof_targets(pw, &self.base)?;
+        let (proof, vd) = (&inputs.length_proof).into();
+        self.length_proof_wires.set_target(
+            pw, 
+            &inputs.length_circuit_set, 
+            proof, 
+            vd,
+        )?;
+        Ok(inputs.lengthed.assign(pw, &self.wires))
     }
 }
 
@@ -89,7 +150,7 @@ impl CircuitLogicWires<F, D, 0> for LengthedWires {
 mod test {
     use std::ops::Add;
 
-    use crate::contract_extraction;
+    use crate::{block_extraction, contract_extraction};
 
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
@@ -109,20 +170,20 @@ mod test {
     pub type F = <C as GenericConfig<D>>::F;
 
     #[derive(Clone, Debug)]
-    struct TestSimpleCircuit {
+    struct TestLengthedCircuit {
         circuit: LengthedCircuit,
         pis: ProofsPi,
         len_pi: Vec<GFp>,
     }
 
-    struct TestSimpleWires {
+    struct TestLengthedWires {
         circuit: LengthedWires,
         pis: ProofsPiTarget,
         len_pi: Vec<Target>,
     }
 
-    impl UserCircuit<GFp, 2> for TestSimpleCircuit {
-        type Wires = TestSimpleWires;
+    impl UserCircuit<GFp, 2> for TestLengthedCircuit {
+        type Wires = TestLengthedWires;
         fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<GFp, 2>) -> Self::Wires {
             let pis = ProofsPiTarget::new(c);
             let len_pi =
@@ -134,7 +195,7 @@ mod test {
                 &pis.values_pi,
                 &len_pi,
             );
-            TestSimpleWires {
+            TestLengthedWires {
                 circuit: wires,
                 pis,
                 len_pi,
@@ -163,17 +224,17 @@ mod test {
         let len_dm_fields = len_dm.to_weierstrass().to_fields();
         let len_pi =
             length_extraction::PublicInputs::<GFp>::from_parts(h, &len_dm_fields, &key, &ptr, &n);
-        let test_circuit = TestSimpleCircuit {
+        let test_circuit = TestLengthedCircuit {
             pis: pis.clone(),
             circuit: LengthedCircuit {},
             len_pi: len_pi.to_vec(),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let proof_pis = PublicInputs::from_slice(&proof.public_inputs);
-        // TODO once block extraction done
-        //assert_eq!(proof_pis.bn, pis.blocks_pi.bn);
-        //assert_eq!(proof_pis.bh, pis.blocks_pi.bh);
-        //assert_eq!(proof_pis.prev_bh, pis.blocks_pi.ph);
+        let block_pi = block_extraction::public_inputs::PublicInputs::from_slice(&pis.blocks_pi);
+        assert_eq!(proof_pis.bn, block_pi.bn);
+        assert_eq!(proof_pis.h, block_pi.bh);
+        assert_eq!(proof_pis.ph, block_pi.prev_bh);
 
         // check digests
         // metadata is addition of value and length and contract

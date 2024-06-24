@@ -7,6 +7,9 @@ use plonky2::{
     plonk::{circuit_data::VerifierCircuitTarget, proof::ProofWithPublicInputsTarget},
     util::serialization::{Buffer, Read, Write},
 };
+use plonky2_ecgfp5::gadgets::curve::CurveTarget;
+
+use crate::{types::CURVE_TARGET_LEN, utils::{FromTargets, ToTargets}};
 
 use super::{FromBytes, SerializationError, ToBytes};
 
@@ -146,6 +149,24 @@ impl FromBytes for HashOutTarget {
     fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
         let mut buffer = Buffer::new(bytes);
         Ok(buffer.read_target_hash()?)
+    }
+}
+
+
+impl ToBytes for CurveTarget {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        let targets: [Target; CURVE_TARGET_LEN] = self.to_targets().try_into().unwrap();
+        buffer.write_target_array(&targets).expect("Writing to a byte-vector cannot fail.");
+        buffer
+    }
+}
+
+impl FromBytes for CurveTarget {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
+        let mut buffer = Buffer::new(bytes);
+        let targets = buffer.read_target_array::<CURVE_TARGET_LEN>()?;
+        Ok(CurveTarget::from_targets(targets.as_slice()))
     }
 }
 
