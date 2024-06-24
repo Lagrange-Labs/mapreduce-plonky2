@@ -5,5 +5,6 @@ mod contract_extraction;
 mod length_extraction;
 mod storage_trie;
 mod values_extraction;
+mod block_extraction;
 
 pub(crate) use context::TestContext;

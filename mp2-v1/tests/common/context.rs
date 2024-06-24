@@ -1,6 +1,10 @@
 //! Test context used in the test cases
 
-use ethers::prelude::{Block, BlockId, EIP1186ProofResponse, Http, Provider, TxHash};
+use ethers::{
+    prelude::{Block, BlockId, EIP1186ProofResponse, Http, Provider, TxHash},
+    providers::Middleware,
+    types::BlockNumber,
+};
 use log::warn;
 use mp2_common::eth::{query_latest_block, ProofQuery};
 use mp2_v1::api::{build_circuits_params, PublicParameters};
@@ -10,11 +14,12 @@ use std::{env, fs, path::PathBuf};
 pub(crate) struct TestContext {
     params: PublicParameters,
     rpc: Provider<Http>,
+    block_number: BlockNumber,
 }
 
 impl TestContext {
     /// Create the test context.
-    pub(crate) fn new(rpc_url: &str) -> anyhow::Result<Self> {
+    pub(crate) async fn new(rpc_url: &str) -> anyhow::Result<Self> {
         let mut path = env::var("LPN_PARAMS").ok();
         let mut rebuild = env::var("LPN_PARAMS_REBUILD").is_ok();
 
@@ -53,8 +58,12 @@ impl TestContext {
         };
 
         let rpc = Provider::<Http>::try_from(rpc_url)?;
-
-        Ok(Self { params, rpc })
+        let bn = rpc.get_block_number().await.unwrap();
+        Ok(Self {
+            params,
+            rpc,
+            block_number: BlockNumber::Number(bn),
+        })
     }
 
     /// Get the public parameters.
@@ -62,7 +71,19 @@ impl TestContext {
         &self.params
     }
 
+    /// Returns the block for which this test context is set
+    pub(crate) async fn query_block(&self) -> Block<TxHash> {
+        // assume there is always a block so None.unwrap() should not occur
+        // and it's still a test...
+        self.rpc
+            .get_block(self.block_number)
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
     /// Query the latest block.
+    /// TODO: DEPRECATED: we need to use a single block number for all our proofs
     pub(crate) async fn query_latest_block(&self) -> Block<TxHash> {
         query_latest_block(&self.rpc).await.unwrap()
     }

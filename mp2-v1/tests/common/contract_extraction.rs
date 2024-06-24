@@ -2,7 +2,7 @@
 
 use super::TestContext;
 use eth_trie::Nibbles;
-use ethers::prelude::Address;
+use ethers::{prelude::Address, providers::Middleware, types::BlockNumber};
 use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
@@ -29,7 +29,7 @@ impl TestContext {
         slot: StorageSlot,
     ) -> ProofWithVK {
         // Query the block for checking the block hash.
-        let block = self.query_latest_block().await;
+        let block = self.query_block().await;
 
         // Query the MPT proof from RPC.
         let contract_address = Address::from_str(contract_address).unwrap();
