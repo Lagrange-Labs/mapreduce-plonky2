@@ -447,6 +447,7 @@ impl UInt256Target {
     pub fn to_targets(&self) -> Vec<Target> {
         Into::<Vec<Target>>::into(self)
     }
+    // Expects big endian limbs as the standard format for IO
     pub fn from_targets(targets: &[Target]) -> Result<UInt256Target> {
         Self::new_from_be_target_limbs(&targets)
     }
