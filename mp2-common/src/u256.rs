@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::{
+    array::{Array, Targetable},
     serialization::{
         circuit_data_serialization::SerializableRichField, FromBytes, SerializationError, ToBytes,
     },
@@ -438,6 +439,23 @@ impl UInt256Target {
                 .try_into()
                 .unwrap(),
         ))
+    }
+}
+
+// TODO: change that to trait within feat/c51
+impl UInt256Target {
+    pub fn to_targets(&self) -> Vec<Target> {
+        Into::<Vec<Target>>::into(self)
+    }
+    // Expects big endian limbs as the standard format for IO
+    pub fn from_targets(targets: &[Target]) -> Result<UInt256Target> {
+        Self::new_from_be_target_limbs(&targets)
+    }
+}
+
+impl From<Array<U32Target, NUM_LIMBS>> for UInt256Target {
+    fn from(value: Array<U32Target, NUM_LIMBS>) -> Self {
+        UInt256Target::new_from_be_limbs(value.arr.as_slice()).unwrap()
     }
 }
 

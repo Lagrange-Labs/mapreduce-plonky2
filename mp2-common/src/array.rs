@@ -184,10 +184,12 @@ impl<const MAX_LEN: usize> VectorWire<Target, MAX_LEN> {
         let pad_t = b.constant(F::from_canonical_usize(PAD_LEN));
         Array {
             arr: create_array(|i| {
+                // ((pad_len - i) < real_len) * vec[real_len - (pad_len-i)]
+                // i.e. reading value backwards and inserting in order
                 let it = b.constant(F::from_canonical_usize(i));
                 let jt = b.sub(pad_t, it);
                 let is_lt =
-                    less_than_or_equal_to(b, jt, self.real_len, (MAX_LEN.ilog2() + 1) as usize);
+                    less_than_or_equal_to(b, jt, self.real_len, (PAD_LEN.ilog2() + 1) as usize);
                 let idx = b.sub(self.real_len, jt);
                 let val = self.arr.value_at_failover(b, idx);
                 b.select(is_lt, val, zero)
