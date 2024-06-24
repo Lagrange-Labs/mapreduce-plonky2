@@ -10,12 +10,15 @@ mod common;
 
 #[tokio::test]
 async fn db_creation_integrated_tests() {
-    // Create the test case, for Simple local contract or Pudgy Penguins mainnet contract.
+    // Create the test case and test context for the remote node (Penguins mainnet contract).
     // let t = TestCase::pudgy_penguins_test_case();
-    let t = TestCase::local_simple_test_case();
+    // let ctx = &mut TestContext::new_with_remote_node(&t.rpc_url);
 
-    // Create the test context.
-    let mut ctx = &mut TestContext::new_with_local_node().await;
+    // Create the test case and test context for the local node (local Simple contract).
+    let t = TestCase::local_simple_test_case();
+    let ctx = &mut TestContext::new_with_local_node().await;
+
+    // Build the parameters.
     ctx.build_params();
 
     // Run the proving steps.
