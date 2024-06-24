@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 /// Local Simple contract address
 /// Must fix when updating and deploying the new Simple contract.
-const LOCAL_SIMPLE_ADDRESS: &str = "0xc7994C8FF4EA625359236cE5f9aEEE01881b29fb";
+const LOCAL_SIMPLE_ADDRESS: &str = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
 
 /// Test slots for single values extraction
 const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];

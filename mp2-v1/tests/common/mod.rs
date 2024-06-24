@@ -1,9 +1,11 @@
 //! Utility structs and functions used for integration tests
 
+mod bindings;
 mod cases;
 mod context;
 mod contract_extraction;
 mod length_extraction;
+mod local_node;
 mod storage_trie;
 mod values_extraction;
 

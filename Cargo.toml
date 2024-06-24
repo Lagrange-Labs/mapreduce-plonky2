@@ -10,6 +10,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+alloy = { version = "0.1", default-features = false, features = ["contract", "node-bindings", "providers", "network", "signer-local", "sol-types"] }
 anyhow = "1.0"
 base64 = "0.22"
 bincode = "1.3"

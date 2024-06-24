@@ -1,9 +1,9 @@
 [profile.default]
-src = "mp2-v1/test-contracts/src"
-out = "mp2-v1/test-contracts/out"
-broadcast = "mp2-v1/test-contracts/broadcast"
-script = "mp2-v1/test-contracts/script"
-libs = ["mp2-v1/test-contracts/lib"]
+src = "src"
+out = "out"
+broadcast = "broadcast"
+script = "script"
+libs = ["lib"]
 optimizer = true
 optimizer_runs = 200
 solc-version = "0.8.24"
@@ -12,6 +12,3 @@ verbosity = 4
 
 [fmt]
 line_length = 80
-
-[rpc_endpoints]
-local = "http://localhost:8545"

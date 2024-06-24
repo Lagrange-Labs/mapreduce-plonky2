@@ -15,7 +15,8 @@ async fn db_creation_integrated_tests() {
     let t = TestCase::local_simple_test_case();
 
     // Create the test context.
-    let ctx = &mut TestContext::new(&t.rpc_url).unwrap();
+    let mut ctx = &mut TestContext::new_with_local_node().await;
+    ctx.build_params();
 
     // Run the proving steps.
 

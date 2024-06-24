@@ -1,29 +1,31 @@
-# Foundry configuration file path
-FOUNDRY_CONFIG=test-contracts/foundry.toml
+# Integration test contract path
+TEST_CONTRACT_PATH=test-contracts
 
-# Anvil local RPC URL
-ANVIL_RPC_URL=http://0.0.0.0:8545
+# Integration Simple contract name
+TEST_SIMPLE_CONTRACT_NAME=Simple
 
-# Anvil testing private key for signing the transcations
-ANVIL_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+# Integration test bindings folder
+TEST_BINDINGS_FOLDER=bindings
 
-# Deployment arguments for the test contracts
-TEST_CONTRACT_DEPLOY_ARGS=--broadcast --rpc-url ${ANVIL_RPC_URL} --private-key ${ANVIL_PRIVATE_KEY}
+# Integration test bindings module path
+TEST_BINDINGS_MOD_PATH=tests/common/$(TEST_BINDINGS_FOLDER)
 
-fmt:
-	cargo fmt
-	FOUNDRY_CONFIG=${FOUNDRY_CONFIG} forge fmt
+# Integration test bindings out path
+TEST_BINDINGS_OUT_PATH=$(TEST_CONTRACT_PATH)/out/$(TEST_BINDINGS_FOLDER)
 
-integration_init:
-	FOUNDRY_CONFIG=${FOUNDRY_CONFIG} forge clean
-	FOUNDRY_CONFIG=${FOUNDRY_CONFIG} forge install
-	FOUNDRY_CONFIG=${FOUNDRY_CONFIG} forge build
+# Generate the integration contract bindings.
+int_bind:
+	rm -rf $(TEST_BINDINGS_MOD_PATH) $(TEST_BINDINGS_OUT_PATH)
 
-integration_start:
-	anvil
+# Generate new bindings.
+	forge bind --alloy --module --root $(TEST_CONTRACT_PATH) --select ${TEST_SIMPLE_CONTRACT_NAME}
 
-integration_deploy:
-	FOUNDRY_CONFIG=${FOUNDRY_CONFIG} forge script DeploySimple ${TEST_CONTRACT_DEPLOY_ARGS}
+# Move the bindings module to the integration test location.
+	mv -f $(TEST_BINDINGS_OUT_PATH) $(TEST_BINDINGS_MOD_PATH)
 
-integration_import:
-	sh test-contracts/data/init_simple.sh
+# Install forge dependencies
+int_setup:
+	forge install --root $(TEST_CONTRACT_PATH)
+
+# Declare phony targets
+.PHONY: int_bind int_setup
