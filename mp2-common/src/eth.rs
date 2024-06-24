@@ -344,17 +344,16 @@ impl ProofQuery {
     ) -> Result<EIP1186ProofResponse> {
         // Query the MPT proof with retries.
         for i in 0..RETRY_NUM {
-            if let Ok(response) = provider
+            match provider
                 .get_proof(self.contract, vec![self.slot.location()], block)
                 .await
             {
-                return Ok(response);
-            } else {
-                warn!("Failed to query the MPT proof at {i} time")
+                Ok(response) => return Ok(response),
+                Err(e) => warn!("Failed to query the MPT proof at {i} time: {e:?}"),
             }
         }
 
-        bail!("Failed to query the MPT proof");
+        bail!("Failed to query the MPT proof {RETRY_NUM} in total");
     }
     /// Returns the raw value from the storage proof, not the one "interpreted" by the
     /// JSON RPC so we can see how the encoding is done.
