@@ -455,7 +455,7 @@ impl UInt256Target {
 
 impl From<Array<U32Target, NUM_LIMBS>> for UInt256Target {
     fn from(value: Array<U32Target, NUM_LIMBS>) -> Self {
-        UInt256Target(value.arr)
+        UInt256Target::new_from_be_limbs(value.arr.as_slice()).unwrap()
     }
 }
 
