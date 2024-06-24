@@ -2,7 +2,15 @@
 
 use ethers::core::k256::elliptic_curve::Curve;
 use mp2_common::{
-    array::Array, group_hashing::EXTENSION_DEGREE, keccak::{OutputHash, PACKED_HASH_LEN}, mpt_sequential::MPTKeyWire, public_inputs::{PublicInputCommon, PublicInputRange}, rlp::MAX_KEY_NIBBLE_LEN, types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN}, u256, utils::{FromFields, FromTargets, ToTargets}
+    array::Array,
+    group_hashing::EXTENSION_DEGREE,
+    keccak::{OutputHash, PACKED_HASH_LEN},
+    mpt_sequential::MPTKeyWire,
+    public_inputs::{PublicInputCommon, PublicInputRange},
+    rlp::MAX_KEY_NIBBLE_LEN,
+    types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
+    u256,
+    utils::{FromFields, FromTargets, ToTargets},
 };
 use plonky2::{
     field::{extension::FieldExtension, types::Field},

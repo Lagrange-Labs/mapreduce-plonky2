@@ -1,16 +1,32 @@
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing, keccak::PACKED_HASH_LEN, serialization::{deserialize, serialize}, u256::{self, UInt256Target}, C, D, F
+    group_hashing::CircuitBuilderGroupHashing,
+    keccak::PACKED_HASH_LEN,
+    serialization::{deserialize, serialize},
+    u256::{self, UInt256Target},
+    C, D, F,
 };
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
-    iop::{target::Target, witness::{PartialWitness, WitnessWrite}},
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::VerifierCircuitData, proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget}},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::VerifierCircuitData,
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+    },
 };
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
-use recursion_framework::framework::{RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget};
+use recursion_framework::framework::{
+    RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::{api::{default_config, deserialize_proof, ProofWithVK}, block_extraction, contract_extraction, values_extraction};
+use crate::{
+    api::{default_config, deserialize_proof, ProofWithVK},
+    block_extraction, contract_extraction, values_extraction,
+};
 
 use super::api::FinalExtractionBuilderParams;
 
@@ -23,7 +39,7 @@ pub struct BaseCircuit {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseWires {
-    #[serde(serialize_with="serialize", deserialize_with="deserialize")]
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub(crate) dm: CurveTarget,
     pub(crate) bh: [Target; PACKED_HASH_LEN],
     pub(crate) prev_bh: [Target; PACKED_HASH_LEN],
@@ -38,7 +54,8 @@ impl BaseCircuit {
         value_pi: &[Target],
     ) -> BaseWires {
         // TODO: homogeinize the public inputs structs
-        let block_pi = block_extraction::public_inputs::PublicInputs::<Target>::from_slice(block_pi);
+        let block_pi =
+            block_extraction::public_inputs::PublicInputs::<Target>::from_slice(block_pi);
         let value_pi = values_extraction::PublicInputs::<Target>::new(value_pi);
         let contract_pi = contract_extraction::PublicInputs::<Target>::from_slice(contract_pi);
 
@@ -50,9 +67,13 @@ impl BaseCircuit {
             b.add_curve_point(&[value_pi.metadata_digest(), contract_pi.metadata_digest()]);
 
         // enforce contract_pi.storage_root == value_pi.storage_root
-        contract_pi.storage_root().enforce_equal(b, &value_pi.root_hash());
+        contract_pi
+            .storage_root()
+            .enforce_equal(b, &value_pi.root_hash());
         // enforce block_pi.state_root == contract_pi.state_root
-        block_pi.state_root().enforce_equal(b, &contract_pi.root_hash());
+        block_pi
+            .state_root()
+            .enforce_equal(b, &contract_pi.root_hash());
         BaseWires {
             dm: metadata,
             bh: block_pi.block_hash_raw().try_into().unwrap(), // safe to unwrap as we give as input the slice of the expected length
@@ -96,13 +117,11 @@ impl BaseCircuitInput {
         contract_proof: Vec<u8>,
         value_proof: Vec<u8>,
     ) -> Result<Self> {
-       Ok(
-        Self {
+        Ok(Self {
             block_proof: deserialize_proof(&block_proof)?,
             contract_proof: ProofWithVK::deserialize(&contract_proof)?,
             value_proof: ProofWithVK::deserialize(&value_proof)?,
-        }
-       ) 
+        })
     }
 }
 #[derive(Clone, Debug)]
@@ -149,25 +168,20 @@ impl BaseCircuitProofInputs {
         }
     }
 
-    pub(crate) fn assign_proof_targets(&self,
-        pw: &mut PartialWitness<F>, 
-        wires: &BaseCircuitProofWires
+    pub(crate) fn assign_proof_targets(
+        &self,
+        pw: &mut PartialWitness<F>,
+        wires: &BaseCircuitProofWires,
     ) -> anyhow::Result<()> {
         pw.set_proof_with_pis_target(&wires.block_proof, &self.proofs.block_proof);
         let (proof, vd) = (&self.proofs.contract_proof).into();
-        wires.contract_proof.set_target(
-            pw, 
-            &self.contract_circuit_set, 
-            proof, 
-            vd,
-        )?;
+        wires
+            .contract_proof
+            .set_target(pw, &self.contract_circuit_set, proof, vd)?;
         let (proof, vd) = (&self.proofs.value_proof).into();
-        wires.value_proof.set_target(
-            pw, 
-            &self.value_circuit_set, 
-            proof, 
-            vd
-        )
+        wires
+            .value_proof
+            .set_target(pw, &self.value_circuit_set, proof, vd)
     }
 }
 
@@ -177,15 +191,15 @@ impl BaseCircuitProofWires {
     }
 
     pub(crate) fn get_contract_public_inputs(&self) -> &[Target] {
-        self.contract_proof.get_public_input_targets::<F, CONTRACT_SET_NUM_IO>()
+        self.contract_proof
+            .get_public_input_targets::<F, CONTRACT_SET_NUM_IO>()
     }
 
     pub(crate) fn get_value_public_inputs(&self) -> &[Target] {
-        self.value_proof.get_public_input_targets::<F, VALUE_SET_NUM_IO>()
+        self.value_proof
+            .get_public_input_targets::<F, VALUE_SET_NUM_IO>()
     }
 }
-
-
 
 #[cfg(test)]
 pub(crate) mod test {
@@ -261,7 +275,8 @@ pub(crate) mod test {
         pub(crate) fn new(b: &mut CircuitBuilder<GFp, 2>) -> Self {
             Self {
                 blocks_pi: b.add_virtual_targets(
-                    block_extraction::public_inputs::PublicInputs::<Target>::TOTAL_LEN),
+                    block_extraction::public_inputs::PublicInputs::<Target>::TOTAL_LEN,
+                ),
                 contract_pi: b
                     .add_virtual_targets(contract_extraction::PublicInputs::<Target>::TOTAL_LEN),
                 values_pi: b
@@ -324,14 +339,21 @@ pub(crate) mod test {
             }
             .to_vec();
             let block_number = U256::from(F::rand().to_canonical_u64()).to_fields();
-            let block_hash = HashOut::<GFp>::rand().to_bytes().pack(Endianness::Little).to_fields();
-            let parent_block_hash = HashOut::<GFp>::rand().to_bytes().pack(Endianness::Little).to_fields();
+            let block_hash = HashOut::<GFp>::rand()
+                .to_bytes()
+                .pack(Endianness::Little)
+                .to_fields();
+            let parent_block_hash = HashOut::<GFp>::rand()
+                .to_bytes()
+                .pack(Endianness::Little)
+                .to_fields();
             let blocks_pi = block_extraction::public_inputs::PublicInputs {
                 bh: &block_hash,
                 prev_bh: &parent_block_hash,
                 bn: &block_number,
                 sh: h,
-            }.to_vec();
+            }
+            .to_vec();
             ProofsPi {
                 contract_dm,
                 value_dm,

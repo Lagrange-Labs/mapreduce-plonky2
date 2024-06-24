@@ -9,7 +9,10 @@ use plonky2::{
 };
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 
-use crate::{types::CURVE_TARGET_LEN, utils::{FromTargets, ToTargets}};
+use crate::{
+    types::CURVE_TARGET_LEN,
+    utils::{FromTargets, ToTargets},
+};
 
 use super::{FromBytes, SerializationError, ToBytes};
 
@@ -152,12 +155,13 @@ impl FromBytes for HashOutTarget {
     }
 }
 
-
 impl ToBytes for CurveTarget {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         let targets: [Target; CURVE_TARGET_LEN] = self.to_targets().try_into().unwrap();
-        buffer.write_target_array(&targets).expect("Writing to a byte-vector cannot fail.");
+        buffer
+            .write_target_array(&targets)
+            .expect("Writing to a byte-vector cannot fail.");
         buffer
     }
 }

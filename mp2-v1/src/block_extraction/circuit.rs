@@ -11,7 +11,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     types::{CBuilder, GFp, MAX_BLOCK_LEN},
     u256::{self, CircuitBuilderU256, UInt256Target},
-    utils::{less_than, Endianness, PackerTarget},
+    utils::{less_than, Endianness, PackerTarget, ToTargets},
     D,
 };
 use plonky2::{

@@ -11,7 +11,7 @@ use crate::{
     serialization::{
         circuit_data_serialization::SerializableRichField, FromBytes, SerializationError, ToBytes,
     },
-    utils::{Endianness, Packer, ToFields},
+    utils::{Endianness, FromTargets, Packer, ToFields, ToTargets},
 };
 use anyhow::{ensure, Result};
 use ethers::types::U256;
@@ -442,14 +442,16 @@ impl UInt256Target {
     }
 }
 
-// TODO: change that to trait within feat/c51
-impl UInt256Target {
-    pub fn to_targets(&self) -> Vec<Target> {
+impl ToTargets for UInt256Target {
+    fn to_targets(&self) -> Vec<Target> {
         Into::<Vec<Target>>::into(self)
     }
+}
+
+impl FromTargets for UInt256Target {
     // Expects big endian limbs as the standard format for IO
-    pub fn from_targets(targets: &[Target]) -> Result<UInt256Target> {
-        Self::new_from_be_target_limbs(&targets)
+    fn from_targets(t: &[Target]) -> Self {
+        Self::new_from_be_target_limbs(&t[..NUM_LIMBS]).unwrap()
     }
 }
 

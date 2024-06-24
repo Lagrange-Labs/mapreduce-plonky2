@@ -12,7 +12,9 @@ use plonky2::{
 use plonky2_crypto::hash::CircuitBuilderHash;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
-use recursion_framework::framework::{RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget};
+use recursion_framework::framework::{
+    RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{default_config, ProofWithVK};
@@ -94,7 +96,7 @@ impl LengthedCircuitInput {
             base: base_proofs,
             length_proof,
             length_circuit_set,
-            lengthed: LengthedCircuit {  },
+            lengthed: LengthedCircuit {},
         }
     }
 }
@@ -120,11 +122,11 @@ impl CircuitLogicWires<F, D, 0> for LengthedRecursiveWires {
         let length_proof_wires = verifier_gadget.verify_proof_in_circuit_set(builder);
         let length_pi = length_proof_wires.get_public_input_targets::<F, LENGTH_NUM_IO>();
         let wires = LengthedCircuit::build(
-            builder, 
-            base.get_block_public_inputs(), 
-            base.get_contract_public_inputs(), 
-            base.get_value_public_inputs(), 
-            length_pi
+            builder,
+            base.get_block_public_inputs(),
+            base.get_contract_public_inputs(),
+            base.get_value_public_inputs(),
+            length_pi,
         );
         Self {
             base,
@@ -136,12 +138,8 @@ impl CircuitLogicWires<F, D, 0> for LengthedRecursiveWires {
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
         inputs.base.assign_proof_targets(pw, &self.base)?;
         let (proof, vd) = (&inputs.length_proof).into();
-        self.length_proof_wires.set_target(
-            pw, 
-            &inputs.length_circuit_set, 
-            proof, 
-            vd,
-        )?;
+        self.length_proof_wires
+            .set_target(pw, &inputs.length_circuit_set, proof, vd)?;
         Ok(inputs.lengthed.assign(pw, &self.wires))
     }
 }

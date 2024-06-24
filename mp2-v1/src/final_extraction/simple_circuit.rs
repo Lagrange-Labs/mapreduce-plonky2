@@ -82,17 +82,11 @@ pub struct SimpleCircuitInput {
 }
 
 impl SimpleCircuitInput {
-    pub(crate) fn new(
-        base: BaseCircuitProofInputs,
-        compound: bool,
-    ) -> Self {
-        let simple =  SimpleCircuit {
+    pub(crate) fn new(base: BaseCircuitProofInputs, compound: bool) -> Self {
+        let simple = SimpleCircuit {
             compound_type: compound,
         };
-        Self {
-            base,
-            simple,
-        }
+        Self { base, simple }
     }
 }
 
@@ -108,14 +102,13 @@ impl CircuitLogicWires<F, D, 0> for SimpleCircuitRecursiveWires {
         _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let base =
-        BaseCircuitProofInputs::build(builder, &builder_parameters);
+        let base = BaseCircuitProofInputs::build(builder, &builder_parameters);
         let wires = SimpleCircuit::build(
-            builder, 
-            base.get_block_public_inputs(), 
-            base.get_contract_public_inputs(), 
+            builder,
+            base.get_block_public_inputs(),
+            base.get_contract_public_inputs(),
             base.get_value_public_inputs(),
-            );
+        );
         Self {
             base,
             simple_wires: wires,

@@ -1,7 +1,10 @@
 //! Main APIs and related structures
 
 use crate::{
-    block_extraction, contract_extraction, final_extraction::{self, BaseCircuitProofInputs, SimpleCircuit}, length_extraction::{self, LengthCircuitInput}, values_extraction
+    block_extraction, contract_extraction,
+    final_extraction::{self, BaseCircuitProofInputs, SimpleCircuit},
+    length_extraction::{self, LengthCircuitInput},
+    values_extraction,
 };
 use anyhow::Result;
 use ethers::core::k256::elliptic_curve::rand_core::block;
@@ -56,7 +59,6 @@ pub enum CircuitInput {
     BlockExtraction(Vec<u8>),
     /// Final extraction input
     FinalExtraction(final_extraction::CircuitInput),
-
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,9 +79,9 @@ pub fn build_circuits_params() -> PublicParameters {
     let values_extraction = values_extraction::build_circuits_params();
     let block_extraction = block_extraction::Parameters::build();
     let final_extraction = final_extraction::PublicParameters::build(
-        block_extraction.circuit_data().verifier_data(), 
-        contract_extraction.get_circuit_set(), 
-        values_extraction.get_mapping_circuit_set(), 
+        block_extraction.circuit_data().verifier_data(),
+        contract_extraction.get_circuit_set(),
+        values_extraction.get_mapping_circuit_set(),
         length_extraction.get_circuit_set(),
     );
 
@@ -103,30 +105,24 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
         CircuitInput::LengthExtraction(input) => params.length_extraction.generate_proof(input),
         CircuitInput::ValuesExtraction(input) => {
             values_extraction::generate_proof(&params.values_extraction, input)
-        },
-        CircuitInput::BlockExtraction(input) => {
-            params.block_extraction.generate_proof(input)
-        },
+        }
+        CircuitInput::BlockExtraction(input) => params.block_extraction.generate_proof(input),
         CircuitInput::FinalExtraction(input) => {
             let contract_circuit_set = params.contract_extraction.get_circuit_set();
             let value_circuit_set = params.values_extraction.get_mapping_circuit_set();
             match input {
-                final_extraction::CircuitInput::Simple(input) => {
-                    params.final_extraction.generate_simple_proof(
-                        input,
-                        contract_circuit_set,
-                        value_circuit_set,
-                    )
-                },
+                final_extraction::CircuitInput::Simple(input) => params
+                    .final_extraction
+                    .generate_simple_proof(input, contract_circuit_set, value_circuit_set),
                 final_extraction::CircuitInput::Lengthed(input) => {
                     let length_circuit_set = params.length_extraction.get_circuit_set();
                     params.final_extraction.generate_lengthed_proof(
-                        input, 
-                        contract_circuit_set, 
-                        value_circuit_set, 
-                        length_circuit_set
-                )
-                },
+                        input,
+                        contract_circuit_set,
+                        value_circuit_set,
+                        length_circuit_set,
+                    )
+                }
             }
         }
     }

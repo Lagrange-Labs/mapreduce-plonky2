@@ -10,7 +10,9 @@ use mp2_common::{
     mpt_sequential::{MPTKeyWire, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::{AddressTarget, CBuilder, ADDRESS_LEN},
-    utils::{{less_than, ToTargets}, Endianness},
+    utils::{
+        Endianness, {less_than, ToTargets},
+    },
     D, F,
 };
 use plonky2::{
