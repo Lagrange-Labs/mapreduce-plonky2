@@ -445,10 +445,11 @@ impl UInt256Target {
 // TODO: change that to trait within feat/c51
 impl UInt256Target {
     pub fn to_targets(&self) -> Vec<Target> {
-        self.0.map(|v| v.0).to_vec()
+        Into::<Vec<Target>>::into(self)
     }
-    pub fn from_targets(targets: &[Target]) -> UInt256Target {
-        UInt256Target(create_array(|i| U32Target(targets[i])))
+    pub fn from_targets(targets: &[Target]) -> Result<UInt256Target> {
+        assert!(targets.len() == NUM_LIMBS);
+        Self::new_from_be_target_limbs(&targets)
     }
 }
 

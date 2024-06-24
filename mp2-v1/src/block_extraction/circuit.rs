@@ -9,7 +9,6 @@ use mp2_common::{
     keccak::{InputData, KeccakCircuit, KeccakWires, OutputHash, HASH_LEN, PACKED_HASH_LEN},
     mpt_sequential::{utils::left_pad_leaf_value, PAD_LEN},
     public_inputs::PublicInputCommon,
-    rlp::extract_be_value,
     types::{CBuilder, GFp, MAX_BLOCK_LEN},
     u256::{self, CircuitBuilderU256, UInt256Target},
     utils::{less_than, Endianness, PackerTarget},
@@ -101,12 +100,13 @@ impl BlockCircuit {
 
         let bn_u256: Array<Target, 32> = left_pad_leaf_value(cb, &block_number);
         let bn_u256 = bn_u256.pack(cb, Endianness::Big);
-        let bn_u256: UInt256Target = bn_u256.into();
+        // safe to unwrap because packing 32 bytes gives 8 u32 limbs
+        let bn_u256: UInt256Target = UInt256Target::new_from_be_limbs(&bn_u256.arr).unwrap();
 
         PublicInputs::new(
             &bh_wires.output_array.to_targets().arr,
             &packed_prev_bh.to_targets().arr,
-            &bn_u256.to_targets(),
+            &Into::<Vec<Target>>::into(&bn_u256),
             &state_root_packed.to_targets().arr,
         )
         .register(cb);

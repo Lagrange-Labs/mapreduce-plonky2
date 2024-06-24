@@ -59,7 +59,7 @@ pub type OutputByteHash = Array<Target, HASH_LEN>;
 /// of the array + padding to hash.
 #[derive(Clone, Debug)]
 pub struct KeccakCircuit<const N: usize> {
-    pub data: Vec<u8>,
+    data: Vec<u8>,
 }
 /// Wires containing the output of the hash function as well as the intermediate
 /// wires created. It requires assigning during proving time because of a small
@@ -78,15 +78,14 @@ pub struct ByteKeccakWires<const N: usize> {
 }
 
 impl<const N: usize> KeccakCircuit<N> {
-    /// Creates a new Keccak circuit.
-    ///
-    /// Assumes `data` to be padded.
     pub fn new(data: Vec<u8>) -> Result<Self> {
+        let total = compute_size_with_padding(data.len());
         ensure!(
-            data.len() <= N,
-            "{} bytes can't fit in {} bytes with padding",
-            data.len(),
+            total <= N,
+            "{} bytes can't fit in {} bytes with padding (data len {})",
+            total,
             N,
+            data.len(),
         );
         // NOTE we don't pad anymore because we enforce that the resulting length is already a multiple
         // of 4 so it will fit the conversion to u32 and circuit vk would stay the same for different

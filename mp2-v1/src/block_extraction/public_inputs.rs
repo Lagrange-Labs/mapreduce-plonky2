@@ -50,6 +50,10 @@ impl<'a> PublicInputs<'a, Target> {
         bn: &'a [Target],
         sh: &'a [Target],
     ) -> Self {
+        assert!(bh.len() == PACKED_HASH_LEN);
+        assert!(prev_bh.len() == PACKED_HASH_LEN);
+        assert!(sh.len() == PACKED_HASH_LEN);
+        assert!(bn.len() == u256::NUM_LIMBS);
         Self {
             bh,
             prev_bh,
@@ -59,7 +63,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     pub fn block_number(&self) -> UInt256Target {
-        UInt256Target::from_targets(self.bn)
+        UInt256Target::from_targets(self.bn).unwrap()
     }
 }
 
