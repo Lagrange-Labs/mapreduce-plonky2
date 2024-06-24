@@ -106,7 +106,7 @@ impl BlockCircuit {
         PublicInputs::new(
             &bh_wires.output_array.to_targets().arr,
             &packed_prev_bh.to_targets().arr,
-            &Into::<Vec<Target>>::into(&bn_u256),
+            &bn_u256.to_targets(),
             &state_root_packed.to_targets().arr,
         )
         .register(cb);
