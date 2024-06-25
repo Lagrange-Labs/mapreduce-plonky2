@@ -62,10 +62,6 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - run: rustup component add rustfmt
-      - name: Test contract bindings
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
       - uses: actions-rs/cargo@v1
         with:
           command: fmt
@@ -90,12 +86,6 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Test contract bindings
-        run: |
-          cd mp2-v1
-          forge bind --alloy --module --root test-contracts
-          mv -f test-contracts/out/bindings tests/common/bindings
-          cd ..
       - name: Run cargo test
         run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo test --all --release -- --test-threads 16"
         env:
