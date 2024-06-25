@@ -1,0 +1,9 @@
+[package]
+name = "verifiable-db"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+plonky2.workspace = true
