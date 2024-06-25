@@ -93,7 +93,7 @@ jobs:
       - name: Test contract bindings
         run: |
           cd mp2-v1
-          nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "forge bind --alloy --module --root test-contracts"
+          forge bind --alloy --module --root test-contracts
           mv -f test-contracts/out/bindings tests/common/bindings
           cd ..
       - name: Run cargo test
