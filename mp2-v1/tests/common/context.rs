@@ -2,7 +2,11 @@
 
 use super::TestCase;
 use alloy::node_bindings::AnvilInstance;
-use ethers::prelude::{Block, BlockId, EIP1186ProofResponse, Http, Provider, TxHash};
+use ethers::{
+    prelude::{Block, BlockId, EIP1186ProofResponse, Http, Provider, TxHash},
+    providers::Middleware,
+    types::BlockNumber,
+};
 use log::warn;
 use mp2_common::eth::{query_latest_block, ProofQuery};
 use mp2_v1::api::{build_circuits_params, PublicParameters};
@@ -13,6 +17,7 @@ pub(crate) struct TestContext {
     /// HTTP provider
     /// TODO: fix to use alloy provider.
     pub(crate) rpc: Provider<Http>,
+    pub(crate) block_number: BlockNumber,
     /// Local node
     /// Should release after finishing the all tests.
     pub(crate) local_node: Option<AnvilInstance>,
@@ -25,7 +30,7 @@ pub(crate) struct TestContext {
 impl TestContext {
     /// Build the parameters.
     /// NOTE: It could avoid `runtime stack overflow`, otherwise needs to set `export RUST_MIN_STACK=100000000`.
-    pub(crate) fn build_params(&mut self) {
+    pub(crate) fn build_params(&mut self) -> anyhow::Result<()> {
         let mut path = env::var("LPN_PARAMS").ok();
         let mut rebuild = env::var("LPN_PARAMS_REBUILD").is_ok();
 
@@ -48,14 +53,17 @@ impl TestContext {
                 let path = PathBuf::from(path);
 
                 if !path.exists() || rebuild {
+                    log::info!("Rebuilding the parameters");
                     let params = build_circuits_params();
-                    let file = bincode::serialize(&params).unwrap();
+                    log::info!("Writing the parameters");
+                    let file = bincode::serialize(&params)?;
 
                     fs::write(path, file).unwrap();
 
                     params
                 } else {
-                    let file = fs::read(path).unwrap();
+                    log::info!("Reading the parameters");
+                    let file = fs::read(path)?;
 
                     bincode::deserialize(&file).unwrap()
                 }
@@ -64,6 +72,7 @@ impl TestContext {
         };
 
         self.params = Some(params);
+        Ok(())
     }
 
     /// Get the public parameters.
@@ -71,7 +80,19 @@ impl TestContext {
         self.params.as_ref().unwrap()
     }
 
+    /// Returns the block for which this test context is set
+    pub(crate) async fn query_block(&self) -> Block<TxHash> {
+        // assume there is always a block so None.unwrap() should not occur
+        // and it's still a test...
+        self.rpc
+            .get_block(self.block_number)
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
     /// Query the latest block.
+    /// TODO: DEPRECATED: we need to use a single block number for all our proofs
     pub(crate) async fn query_latest_block(&self) -> Block<TxHash> {
         query_latest_block(&self.rpc).await.unwrap()
     }

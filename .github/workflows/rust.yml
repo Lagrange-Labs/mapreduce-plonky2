@@ -84,7 +84,7 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Run cargo test
-        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo test --all --release -- --test-threads 16"
+        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo test --features ci --release -- --test-threads 16"
         env:
           RUST_LOG: "info"
           RUST_MIN_STACK: 10485760

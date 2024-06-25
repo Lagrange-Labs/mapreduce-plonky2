@@ -55,8 +55,8 @@ pub enum CircuitInput {
     LengthExtraction(LengthCircuitInput),
     /// Values extraction input
     ValuesExtraction(values_extraction::CircuitInput),
-    /// Block extraction input
-    BlockExtraction(Vec<u8>),
+    /// Block extraction necessary input
+    BlockExtraction(block_extraction::CircuitInput),
     /// Final extraction input
     FinalExtraction(final_extraction::CircuitInput),
 }
@@ -67,23 +67,29 @@ pub struct PublicParameters {
     contract_extraction: contract_extraction::PublicParameters,
     length_extraction: length_extraction::PublicParameters,
     values_extraction: values_extraction::PublicParameters,
-    block_extraction: block_extraction::Parameters,
+    block_extraction: block_extraction::PublicParameters,
     final_extraction: final_extraction::PublicParameters,
 }
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
 pub fn build_circuits_params() -> PublicParameters {
+    log::info!("Building contract_extraction parameters...");
     let contract_extraction = contract_extraction::build_circuits_params();
+    log::info!("Building length_extraction parameters...");
     let length_extraction = length_extraction::PublicParameters::build();
+    log::info!("Building values_extraction parameters...");
     let values_extraction = values_extraction::build_circuits_params();
-    let block_extraction = block_extraction::Parameters::build();
+    log::info!("Building block_extraction parameters...");
+    let block_extraction = block_extraction::build_circuits_params();
+    log::info!("Building final_extraction parameters...");
     let final_extraction = final_extraction::PublicParameters::build(
         block_extraction.circuit_data().verifier_data(),
         contract_extraction.get_circuit_set(),
         values_extraction.get_mapping_circuit_set(),
         length_extraction.get_circuit_set(),
     );
+    log::info!("All parameters built!");
 
     PublicParameters {
         contract_extraction,
