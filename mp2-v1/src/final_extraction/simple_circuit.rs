@@ -4,17 +4,14 @@ use mp2_common::{group_hashing::CircuitBuilderGroupHashing, types::GFp, utils::T
 use mp2_common::{C, D, F};
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::WitnessWrite;
-use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
-use recursion_framework::framework::RecursiveCircuits;
 use serde::{Deserialize, Serialize};
 
-use crate::api::default_config;
 use crate::values_extraction;
 
 use super::api::{FinalExtractionBuilderParams, NUM_IO};
