@@ -1,15 +1,9 @@
-use mp2_common::public_inputs::PublicInputCommon;
-use mp2_common::utils::SliceConnector;
-use mp2_common::{group_hashing::CircuitBuilderGroupHashing, types::GFp, utils::ToTargets};
-use mp2_common::{C, D, F};
-use plonky2::field::types::Field;
-use plonky2::iop::target::BoolTarget;
-use plonky2::iop::witness::WitnessWrite;
+use mp2_common::{public_inputs::PublicInputCommon, types::GFp, utils::ToTargets, C, D, F};
 use plonky2::{
+    field::types::Field,
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_crypto::hash::CircuitBuilderHash;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use recursion_framework::framework::{
@@ -69,7 +63,7 @@ impl LengthedCircuit {
         LengthedWires {}
     }
 
-    fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &LengthedWires) {}
+    fn assign(&self, _pw: &mut PartialWitness<GFp>, _wires: &LengthedWires) {}
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -146,20 +140,12 @@ impl CircuitLogicWires<F, D, 0> for LengthedRecursiveWires {
 
 #[cfg(test)]
 mod test {
-    use std::ops::Add;
-
-    use crate::{block_extraction, contract_extraction};
 
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
-    use itertools::Itertools;
-    use mp2_common::{group_hashing::map_to_curve_point, utils::ToFields};
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
-        field::types::Sample,
+        iop::witness::WitnessWrite,
         plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
     pub const D: usize = 2;
