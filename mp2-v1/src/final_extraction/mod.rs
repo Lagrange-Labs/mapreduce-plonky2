@@ -4,13 +4,9 @@ mod lengthed_circuit;
 mod public_inputs;
 mod simple_circuit;
 
-pub use {
-    api::{CircuitInput, PublicParameters},
-    public_inputs::PublicInputs,
-};
+pub use api::{CircuitInput, PublicParameters};
+pub use public_inputs::PublicInputs;
 
-pub(crate) use {
-    base_circuit::BaseCircuitProofInputs,
-    lengthed_circuit::LengthedCircuitInput as LengthedCircuit,
-    simple_circuit::SimpleCircuitInput as SimpleCircuit,
-};
+pub(crate) use base_circuit::BaseCircuitProofInputs;
+pub(crate) use lengthed_circuit::LengthedCircuitInput as LengthedCircuit;
+pub(crate) use simple_circuit::SimpleCircuitInput as SimpleCircuit;

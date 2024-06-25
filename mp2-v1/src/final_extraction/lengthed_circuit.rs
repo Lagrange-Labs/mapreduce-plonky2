@@ -5,18 +5,25 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
-use recursion_framework::circuit_builder::CircuitLogicWires;
-use recursion_framework::framework::{
-    RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+use recursion_framework::{
+    circuit_builder::CircuitLogicWires,
+    framework::{
+        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+    },
 };
 use serde::{Deserialize, Serialize};
 
-use crate::api::{default_config, ProofWithVK};
-use crate::{length_extraction, values_extraction};
+use crate::{
+    api::{default_config, ProofWithVK},
+    length_extraction, values_extraction,
+};
 
-use super::api::{FinalExtractionBuilderParams, NUM_IO};
-use super::base_circuit::{BaseCircuitProofInputs, BaseCircuitProofWires};
-use super::{base_circuit, PublicInputs};
+use super::{
+    api::{FinalExtractionBuilderParams, NUM_IO},
+    base_circuit,
+    base_circuit::{BaseCircuitProofInputs, BaseCircuitProofWires},
+    PublicInputs,
+};
 
 /// This circuit contains the logic to prove the final extraction of a mapping
 /// variable associated with a length slot.

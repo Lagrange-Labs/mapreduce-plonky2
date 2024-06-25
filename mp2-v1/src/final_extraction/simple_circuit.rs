@@ -1,11 +1,16 @@
-use mp2_common::public_inputs::PublicInputCommon;
-use mp2_common::serialization::{deserialize, serialize};
-use mp2_common::{group_hashing::CircuitBuilderGroupHashing, types::GFp, utils::ToTargets};
-use mp2_common::{C, D, F};
-use plonky2::iop::target::BoolTarget;
-use plonky2::iop::witness::WitnessWrite;
+use mp2_common::{
+    group_hashing::CircuitBuilderGroupHashing,
+    public_inputs::PublicInputCommon,
+    serialization::{deserialize, serialize},
+    types::GFp,
+    utils::ToTargets,
+    C, D, F,
+};
 use plonky2::{
-    iop::{target::Target, witness::PartialWitness},
+    iop::{
+        target::{BoolTarget, Target},
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
@@ -14,9 +19,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::values_extraction;
 
-use super::api::{FinalExtractionBuilderParams, NUM_IO};
-use super::base_circuit::{BaseCircuitProofInputs, BaseCircuitProofWires};
-use super::{base_circuit, PublicInputs};
+use super::{
+    api::{FinalExtractionBuilderParams, NUM_IO},
+    base_circuit,
+    base_circuit::{BaseCircuitProofInputs, BaseCircuitProofWires},
+    PublicInputs,
+};
 
 /// This circuit contains the logic to prove the final extraction of a simple
 /// variable (like uint256) or a mapping without an associated length slot.
