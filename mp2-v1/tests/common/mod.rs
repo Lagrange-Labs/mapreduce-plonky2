@@ -5,7 +5,7 @@ mod cases;
 mod context;
 mod contract_extraction;
 mod length_extraction;
-mod local_node;
+mod nodes;
 mod storage_trie;
 mod values_extraction;
 

@@ -1,4 +1,4 @@
-//! Pudgy Penguins test case
+//! Pudgy Penguins mainnet test case
 
 use super::{
     ContractExtractionArgs, LengthExtractionArgs, MappingKey, MappingValuesExtractionArgs,
@@ -48,7 +48,6 @@ impl TestCase {
     /// Create a test case for Pudgy Penguins contract.
     pub(crate) fn pudgy_penguins_test_case() -> Self {
         Self {
-            rpc_url: get_mainnet_url(),
             contract_address: PUDGY_PENGUINS_ADDRESS.to_string(),
             values_extraction_single: SingleValuesExtractionArgs {
                 slots: SINGLE_SLOTS.to_vec(),

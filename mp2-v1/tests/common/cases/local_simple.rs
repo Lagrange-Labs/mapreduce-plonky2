@@ -2,17 +2,17 @@
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
 use super::{
-    ContractExtractionArgs, LengthExtractionArgs, MappingKey, MappingValuesExtractionArgs,
-    SingleValuesExtractionArgs, TestCase,
+    super::bindings::simple::Simple::SimpleInstance, ContractExtractionArgs, LengthExtractionArgs,
+    MappingKey, MappingValuesExtractionArgs, SingleValuesExtractionArgs, TestCase,
 };
-use ethers::prelude::Address;
+use alloy::{
+    contract::private::{Network, Provider, Transport},
+    primitives::{Address, U256},
+};
+use ethers::prelude::Address as EthAddress;
 use mp2_common::eth::{left_pad32, StorageSlot};
-use mp2_test::eth::get_local_rpc_url;
+use rand::{thread_rng, Rng};
 use std::str::FromStr;
-
-/// Local Simple contract address
-/// Must fix when updating and deploying the new Simple contract.
-const LOCAL_SIMPLE_ADDRESS: &str = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
 
 /// Test slots for single values extraction
 const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
@@ -21,7 +21,7 @@ const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
 const MAPPING_SLOT: u8 = 4;
 
 /// Test mapping addresses (keys) for mapping values extraction
-pub(crate) const MAPPING_ADDRESSES: [&str; 2] = [
+const MAPPING_ADDRESSES: [&str; 2] = [
     "0x3bf5733f695b2527acc7bd4c5350e57acfd9fbb5",
     "0x6cac7190535f4908d0524e7d55b3750376ea1ef7",
 ];
@@ -37,10 +37,20 @@ const CONTRACT_SLOT: usize = 1;
 
 impl TestCase {
     /// Create a test case for local Simple contract.
-    pub(crate) fn local_simple_test_case() -> Self {
+    pub(crate) async fn local_simple_test_case<
+        T: Transport + Clone,
+        P: Provider<T, N>,
+        N: Network,
+    >(
+        contract: SimpleInstance<T, P, N>,
+    ) -> Self {
+        let contract_address = contract.address().to_string();
+
+        // Call the contract function to set the test data.
+        set_contract_data(contract).await;
+
         Self {
-            rpc_url: get_local_rpc_url(),
-            contract_address: LOCAL_SIMPLE_ADDRESS.to_string(),
+            contract_address,
             values_extraction_single: SingleValuesExtractionArgs {
                 slots: SINGLE_SLOTS.to_vec(),
             },
@@ -59,12 +69,42 @@ impl TestCase {
     }
 }
 
+/// Call the contract function to set the test data.
+async fn set_contract_data<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+    contract: SimpleInstance<T, P, N>,
+) {
+    // setSimples(bool newS1, uint256 newS2, string memory newS3, address newS4)
+    let b = contract.setSimples(
+        true,
+        U256::from(100),
+        "test".to_string(),
+        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
+    );
+    b.send().await.unwrap().watch().await.unwrap();
+
+    // setMapping(address key, uint256 value)
+    let mut rng = thread_rng();
+    for addr in MAPPING_ADDRESSES {
+        let b = contract.setMapping(
+            Address::from_str(addr).unwrap(),
+            U256::from(rng.gen::<u64>()),
+        );
+        b.send().await.unwrap().watch().await.unwrap();
+    }
+
+    // addToArray(uint256 value)
+    for _ in 0..=LENGTH_VALUE {
+        let b = contract.addToArray(U256::from(rng.gen::<u64>()));
+        b.send().await.unwrap().watch().await.unwrap();
+    }
+}
+
 /// Convert the test mapping addresses to mapping keys.
 fn test_mapping_keys() -> Vec<MappingKey> {
     MAPPING_ADDRESSES
         .iter()
         .map(|address| {
-            let address = Address::from_str(address).unwrap();
+            let address = EthAddress::from_str(address).unwrap();
             left_pad32(&address.to_fixed_bytes()).to_vec()
         })
         .collect()

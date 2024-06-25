@@ -1,10 +1,5 @@
 use std::env;
 
-/// Get the local test RPC URL.
-pub fn get_local_rpc_url() -> String {
-    "http://localhost:8545".to_string()
-}
-
 /// Get the Sepolia test URL.
 pub fn get_sepolia_url() -> String {
     #[cfg(feature = "ci")]

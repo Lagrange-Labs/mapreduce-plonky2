@@ -11,8 +11,6 @@ type MappingKey = Vec<u8>;
 /// Test case definition
 #[derive(Debug)]
 pub(crate) struct TestCase {
-    /// Test RPC URL
-    pub(crate) rpc_url: String,
     /// Test contract address
     pub(crate) contract_address: String,
     /// Test arguments for single values extraction (C.1)

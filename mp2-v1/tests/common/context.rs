@@ -1,5 +1,6 @@
 //! Test context used in the test cases
 
+use super::TestCase;
 use alloy::node_bindings::AnvilInstance;
 use ethers::prelude::{Block, BlockId, EIP1186ProofResponse, Http, Provider, TxHash};
 use log::warn;
@@ -17,20 +18,11 @@ pub(crate) struct TestContext {
     pub(crate) local_node: Option<AnvilInstance>,
     /// Parameters
     pub(crate) params: Option<PublicParameters>,
+    /// Supported test cases
+    pub(crate) cases: Vec<TestCase>,
 }
 
 impl TestContext {
-    /// Create the test context with a RPC URL of a remote node.
-    pub(crate) fn new_with_remote_node(rpc_url: &str) -> Self {
-        let rpc = Provider::<Http>::try_from(rpc_url).unwrap();
-
-        Self {
-            rpc,
-            local_node: None,
-            params: None,
-        }
-    }
-
     /// Build the parameters.
     /// NOTE: It could avoid `runtime stack overflow`, otherwise needs to set `export RUST_MIN_STACK=100000000`.
     pub(crate) fn build_params(&mut self) {
