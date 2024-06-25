@@ -2874,7 +2874,6 @@ dependencies = [
  "env_logger",
  "eth_trie",
  "ethers",
- "glob",
  "hashbrown 0.14.5",
  "hex",
  "itertools 0.12.1",
