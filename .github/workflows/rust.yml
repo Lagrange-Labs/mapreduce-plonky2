@@ -91,7 +91,7 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Test contract bindings
-        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo build --all --release"
+        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo build"
       - name: Run cargo test
         run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo test --all --release -- --test-threads 16"
         env:
