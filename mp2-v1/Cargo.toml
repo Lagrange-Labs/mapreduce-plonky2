@@ -26,6 +26,7 @@ mp2_common = { path = "../mp2-common" }
 recursion_framework = { path = "../recursion-framework" }
 
 [dev-dependencies]
+alloy.workspace = true
 csv.workspace = true
 hex.workspace = true
 rmp-serde.workspace = true

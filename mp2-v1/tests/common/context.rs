@@ -1,5 +1,7 @@
 //! Test context used in the test cases
 
+use super::TestCase;
+use alloy::node_bindings::AnvilInstance;
 use ethers::{
     prelude::{Block, BlockId, EIP1186ProofResponse, Http, Provider, TxHash},
     providers::Middleware,
@@ -12,14 +14,23 @@ use std::{env, fs, path::PathBuf};
 
 /// Test context
 pub(crate) struct TestContext {
-    params: PublicParameters,
-    rpc: Provider<Http>,
-    block_number: BlockNumber,
+    /// HTTP provider
+    /// TODO: fix to use alloy provider.
+    pub(crate) rpc: Provider<Http>,
+    pub(crate) block_number: BlockNumber,
+    /// Local node
+    /// Should release after finishing the all tests.
+    pub(crate) local_node: Option<AnvilInstance>,
+    /// Parameters
+    pub(crate) params: Option<PublicParameters>,
+    /// Supported test cases
+    pub(crate) cases: Vec<TestCase>,
 }
 
 impl TestContext {
-    /// Create the test context.
-    pub(crate) async fn new(rpc_url: &str) -> anyhow::Result<Self> {
+    /// Build the parameters.
+    /// NOTE: It could avoid `runtime stack overflow`, otherwise needs to set `export RUST_MIN_STACK=100000000`.
+    pub(crate) fn build_params(&mut self) -> anyhow::Result<()> {
         let mut path = env::var("LPN_PARAMS").ok();
         let mut rebuild = env::var("LPN_PARAMS_REBUILD").is_ok();
 
@@ -47,31 +58,26 @@ impl TestContext {
                     log::info!("Writing the parameters");
                     let file = bincode::serialize(&params)?;
 
-                    fs::write(path, file)?;
+                    fs::write(path, file).unwrap();
 
                     params
                 } else {
                     log::info!("Reading the parameters");
                     let file = fs::read(path)?;
 
-                    bincode::deserialize(&file)?
+                    bincode::deserialize(&file).unwrap()
                 }
             }
             None => build_circuits_params(),
         };
 
-        let rpc = Provider::<Http>::try_from(rpc_url)?;
-        let bn = rpc.get_block_number().await.unwrap();
-        Ok(Self {
-            params,
-            rpc,
-            block_number: BlockNumber::Number(bn),
-        })
+        self.params = Some(params);
+        Ok(())
     }
 
     /// Get the public parameters.
     pub(crate) fn params(&self) -> &PublicParameters {
-        &self.params
+        self.params.as_ref().unwrap()
     }
 
     /// Returns the block for which this test context is set
