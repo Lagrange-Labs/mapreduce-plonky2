@@ -6,6 +6,7 @@ members = [
     "mp2-test",
     "mp2-v1",
     "recursion-framework",
+    "verifiable-db",
 ]
 resolver = "2"
 
@@ -20,7 +21,9 @@ env_logger = "0.11"
 # to fetch proof with "node" instead of already encoded struct
 eth_trie = { git = "https://github.com/nikkolasg/eth-trie.rs" }
 ethereum-types = "0.14"
-ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features = false, features = ["rustls"], branch = "get-proof-0x" }
+ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features = false, features = [
+    "rustls",
+], branch = "get-proof-0x" }
 glob = "0.3"
 gobuild = "0.1.0-alpha.1"
 hashbrown = "0.14"
@@ -33,7 +36,7 @@ plonky2 = "0.2.2"
 plonky2_crypto = { git = "https://github.com/Lagrange-Labs/plonky2-crypto" }
 plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
 plonky2_monolith = "0.1.0"
-plonky2x = { git = "https://github.com/Lagrange-Labs/succinctx" , branch = "fix-build" }
+plonky2x = { git = "https://github.com/Lagrange-Labs/succinctx", branch = "fix-build" }
 rand = "0.8"
 revm = { version = "3.5", default-features = false }
 rlp = "0.5"
@@ -54,6 +57,6 @@ incremental = true
 opt-level = 3
 
 [patch.crates-io]
-plonky2 = { git = "https://github.com/Lagrange-Labs/plonky2", branch = "upstream"  }
+plonky2 = { git = "https://github.com/Lagrange-Labs/plonky2", branch = "upstream" }
 plonky2_monolith = { git = "https://github.com/Lagrange-Labs/monolith" }
-plonky2_field = { git = "https://github.com/Lagrange-Labs/plonky2", branch = "upstream"  }
+plonky2_field = { git = "https://github.com/Lagrange-Labs/plonky2", branch = "upstream" }
