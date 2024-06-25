@@ -3,6 +3,9 @@ name = "mp2_v1" # TODO: fix the name to a meaningful one.
 version = "0.1.0"
 edition = "2021"
 
+[build-dependencies]
+glob.workspace = true
+
 [dependencies]
 anyhow.workspace = true
 bincode.workspace = true
