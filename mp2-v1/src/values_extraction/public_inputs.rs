@@ -215,7 +215,7 @@ pub(crate) mod tests {
         arr.push(match ptr {
             // hack to be able to construct a _final_ pointer value
             usize::MAX => GFp::NEG_ONE,
-            _ => GFp::from_canonical_usize(n as usize),
+            _ => GFp::from_canonical_usize(ptr),
         });
         arr.extend_from_slice(
             &dv.x
