@@ -227,6 +227,22 @@ pub fn left_pad32(slice: &[u8]) -> [u8; 32] {
     left_pad::<32>(slice)
 }
 
+pub fn left_pad_generic<T: Default + Copy, const N: usize>(slice: &[T]) -> [T; N] {
+    match slice.len() {
+        a if a > N => panic!(
+            "left_pad{} must not be called with higher slice len than {} (given{})",
+            N,
+            N,
+            slice.len()
+        ),
+        a if a == N => slice.try_into().unwrap(),
+        a => {
+            let mut output = [T::default(); N];
+            output[N - a..].copy_from_slice(slice);
+            output
+        }
+    }
+}
 pub fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     match slice.len() {
         a if a > N => panic!(
