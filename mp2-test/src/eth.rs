@@ -13,9 +13,10 @@ pub fn get_sepolia_url() -> String {
 /// Get the Mainnet test URL.
 pub fn get_mainnet_url() -> String {
     #[cfg(feature = "ci")]
-    let url = env::var("CI_ETH").expect("CI_ETH env var not set");
+    let url = std::env::var("CI_ETH").expect("CI_ETH env var not set");
     #[cfg(not(feature = "ci"))]
     let url = "https://eth.llamarpc.com";
+    log::info!("Using mainnet url {url}");
     url.to_string()
 }
 

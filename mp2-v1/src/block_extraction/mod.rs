@@ -18,15 +18,27 @@ use mp2_common::{
 use serde::{Deserialize, Serialize};
 
 use crate::api::{default_config, serialize_proof};
+pub use public_inputs::PublicInputs;
+pub struct CircuitInput(Vec<u8>);
+impl CircuitInput {
+    pub fn from_block_header(rlp_header: Vec<u8>) -> Self {
+        Self(rlp_header)
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Parameters {
+pub struct PublicParameters {
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     circuit_data: CircuitData<F, C, D>,
     wires: circuit::BlockWires,
 }
 
-impl Parameters {
+/// Returns the parameters necessary to prove block extraction circuits
+pub fn build_circuits_params() -> PublicParameters {
+    PublicParameters::build()
+}
+
+impl PublicParameters {
     pub fn build() -> Self {
         let config = default_config();
         let mut cb = CircuitBuilder::new(config);
@@ -38,8 +50,8 @@ impl Parameters {
         }
     }
 
-    pub fn generate_proof(&self, block_header: Vec<u8>) -> Result<Vec<u8>> {
-        let input = circuit::BlockCircuit::new(block_header)?;
+    pub fn generate_proof(&self, block_header: CircuitInput) -> Result<Vec<u8>> {
+        let input = circuit::BlockCircuit::new(block_header.0)?;
         let mut pw = PartialWitness::new();
         input.assign(&mut pw, &self.wires);
         let proof = self.circuit_data.prove(pw)?;
@@ -64,17 +76,17 @@ mod test {
 
     use crate::{
         api::deserialize_proof,
-        block_extraction::{public_inputs::PublicInputs, Parameters},
+        block_extraction::{public_inputs::PublicInputs, PublicParameters},
     };
     #[tokio::test]
     async fn test_api() -> Result<()> {
-        let params = Parameters::build();
+        let params = PublicParameters::build();
         let url = get_sepolia_url();
         let provider = Provider::<Http>::try_from(url).unwrap();
         let block_number = BlockNumber::Latest;
         let block = provider.get_block(block_number).await.unwrap().unwrap();
 
-        let rlp_headers = block.rlp();
+        let rlp_headers = super::CircuitInput::from_block_header(block.rlp());
         let proof = params.generate_proof(rlp_headers)?;
         // check public inputs
         let proof = deserialize_proof::<F, C, D>(&proof)?;

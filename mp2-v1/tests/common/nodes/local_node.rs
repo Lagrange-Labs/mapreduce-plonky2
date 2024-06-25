@@ -8,7 +8,11 @@ use alloy::{
     providers::ProviderBuilder,
     signers::local::PrivateKeySigner,
 };
-use ethers::prelude::{Http, Provider as EthProvider};
+use ethers::{
+    prelude::{Http, Provider as EthProvider},
+    providers::Middleware,
+    types::BlockNumber,
+};
 use log::info;
 use rand::{thread_rng, Rng};
 use std::str::FromStr;
@@ -35,9 +39,11 @@ impl TestContext {
         let simple_case = init_simple_contract(&provider).await;
 
         let rpc = EthProvider::<Http>::try_from(rpc_url).unwrap();
+        let bn = rpc.get_block_number().await.unwrap();
 
         Self {
             rpc,
+            block_number: BlockNumber::Number(bn),
             local_node: Some(anvil),
             params: None,
             cases: vec![simple_case],

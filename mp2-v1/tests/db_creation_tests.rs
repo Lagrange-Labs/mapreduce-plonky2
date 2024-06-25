@@ -17,7 +17,7 @@ async fn db_creation_integrated_tests() {
     let ctx = &mut TestContext::new_local_node().await;
 
     // Build the parameters.
-    ctx.build_params();
+    ctx.build_params().unwrap();
 
     // Prove for each test case.
     for t in &ctx.cases {
@@ -48,5 +48,10 @@ async fn db_creation_integrated_tests() {
             .prove_contract_extraction(&t.contract_address, t.contract_extraction.slot.clone())
             .await;
         info!("Generated Contract Extraction (C.3) proof");
+
+        let _proof = ctx.prove_block_extraction().await.unwrap();
+        info!("Generated Block Extraction (C.4) proof");
+        // TODO: check both proofs match (or do it at subsequent step)
+        info!("Finish testing Database Creation for contract + block extraction");
     }
 }

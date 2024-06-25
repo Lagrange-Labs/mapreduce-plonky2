@@ -1,7 +1,7 @@
 //! Main APIs and related structures
 
 use crate::{
-    contract_extraction,
+    block_extraction, contract_extraction,
     length_extraction::{self, LengthCircuitInput},
     values_extraction,
 };
@@ -53,6 +53,8 @@ pub enum CircuitInput {
     LengthExtraction(LengthCircuitInput),
     /// Values extraction input
     ValuesExtraction(values_extraction::CircuitInput),
+    /// Block extraction necessary input
+    BlockExtraction(block_extraction::CircuitInput),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -61,19 +63,27 @@ pub struct PublicParameters {
     contract_extraction: contract_extraction::PublicParameters,
     length_extraction: length_extraction::PublicParameters,
     values_extraction: values_extraction::PublicParameters,
+    block_extraction: block_extraction::PublicParameters,
 }
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
 pub fn build_circuits_params() -> PublicParameters {
+    log::info!("Building contract_extraction parameters...");
     let contract_extraction = contract_extraction::build_circuits_params();
+    log::info!("Building length_extraction parameters...");
     let length_extraction = length_extraction::PublicParameters::build();
+    log::info!("Building values_extraction parameters...");
     let values_extraction = values_extraction::build_circuits_params();
+    log::info!("Building block_extraction parameters...");
+    let block_extraction = block_extraction::build_circuits_params();
+    log::info!("All parameters built!");
 
     PublicParameters {
         contract_extraction,
         values_extraction,
         length_extraction,
+        block_extraction,
     }
 }
 
@@ -89,6 +99,7 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
         CircuitInput::ValuesExtraction(input) => {
             values_extraction::generate_proof(&params.values_extraction, input)
         }
+        CircuitInput::BlockExtraction(input) => params.block_extraction.generate_proof(input),
     }
 }
 

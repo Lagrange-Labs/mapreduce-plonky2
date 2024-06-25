@@ -521,7 +521,7 @@ mod test {
     async fn test_kashish_contract_simple_slot() -> Result<()> {
         // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
         #[cfg(feature = "ci")]
-        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
+        let url = std::env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
         #[cfg(not(feature = "ci"))]
         let url = "https://ethereum-sepolia-rpc.publicnode.com";
 
