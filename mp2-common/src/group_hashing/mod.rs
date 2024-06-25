@@ -119,7 +119,6 @@ impl ToTargets for CurveTarget {
 
 impl FromFields<GFp> for WeierstrassPoint {
     fn from_fields(t: &[GFp]) -> Self {
-        let q = GoldilocksField::from_canonical_u16(14);
         let x = std::array::from_fn::<_, EXTENSION_DEGREE, _>(|i| t[i]);
         let y = std::array::from_fn::<_, EXTENSION_DEGREE, _>(|i| t[i + EXTENSION_DEGREE]);
         let is_inf = t[EXTENSION_DEGREE * 2] == GFp::ONE;

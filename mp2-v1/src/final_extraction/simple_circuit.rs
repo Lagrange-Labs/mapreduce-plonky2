@@ -171,18 +171,7 @@ mod test {
             },
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        let proof_pis = PublicInputs::from_slice(&proof.public_inputs);
-        let block_pi = block_extraction::public_inputs::PublicInputs::from_slice(&pis.blocks_pi);
-        assert_eq!(proof_pis.bn, block_pi.bn);
-        assert_eq!(proof_pis.h, block_pi.bh);
-        assert_eq!(proof_pis.ph, block_pi.prev_bh);
-
-        // check digests
-        let value_pi = values_extraction::PublicInputs::new(&pis.values_pi);
-        assert_eq!(proof_pis.value_point(), value_pi.values_digest());
-        // metadata is addition of contract and value
-        let expected_dm = pis.contract_dm + pis.value_dm;
-        assert_eq!(proof_pis.metadata_point(), expected_dm.to_weierstrass());
+        pis.check_proof_public_inputs(&proof, true, None);
 
         let test_circuit = TestSimpleCircuit {
             pis: pis.clone(),
@@ -191,9 +180,6 @@ mod test {
             },
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        let proof_pis = PublicInputs::from_slice(&proof.public_inputs);
-        // in this case, dv is D(value_dv)
-        let exp_dv = map_to_curve_point(&pis.value_dv.to_weierstrass().to_fields());
-        assert_eq!(proof_pis.value_point(), exp_dv.to_weierstrass());
+        pis.check_proof_public_inputs(&proof, false, None);
     }
 }

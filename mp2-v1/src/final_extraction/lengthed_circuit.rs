@@ -101,7 +101,7 @@ impl LengthedCircuitInput {
     }
 }
 
-const LENGTH_NUM_IO: usize = length_extraction::PublicInputs::<Target>::TOTAL_LEN;
+pub(crate) const LENGTH_SET_NUM_IO: usize = length_extraction::PublicInputs::<Target>::TOTAL_LEN;
 
 impl CircuitLogicWires<F, D, 0> for LengthedRecursiveWires {
     type CircuitBuilderParams = FinalExtractionBuilderParams;
@@ -115,12 +115,12 @@ impl CircuitLogicWires<F, D, 0> for LengthedRecursiveWires {
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         let base = BaseCircuitProofInputs::build(builder, &builder_parameters);
-        let verifier_gadget = RecursiveCircuitsVerifierGagdet::<_, _, D, LENGTH_NUM_IO>::new(
+        let verifier_gadget = RecursiveCircuitsVerifierGagdet::<_, _, D, LENGTH_SET_NUM_IO>::new(
             default_config(),
             &builder_parameters.length_circuit_set,
         );
         let length_proof_wires = verifier_gadget.verify_proof_in_circuit_set(builder);
-        let length_pi = length_proof_wires.get_public_input_targets::<F, LENGTH_NUM_IO>();
+        let length_pi = length_proof_wires.get_public_input_targets::<F, LENGTH_SET_NUM_IO>();
         let wires = LengthedCircuit::build(
             builder,
             base.get_block_public_inputs(),
@@ -162,7 +162,6 @@ mod test {
         field::types::Sample,
         plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
-    use plonky2_ecgfp5::curve::curve::Point;
     pub const D: usize = 2;
     pub type C = PoseidonGoldilocksConfig;
     pub type F = <C as GenericConfig<D>>::F;
@@ -209,34 +208,15 @@ mod test {
     #[test]
     fn test_final_lengthed_circuit() {
         let pis = ProofsPi::random();
-        let value_pi = pis.value_inputs();
-        // construction of length extract public inputs
-        let h = value_pi.root_hash_info(); // same hash as value root
-        let len_dm = Point::rand();
-        let key = random_vector(64)
-            .into_iter()
-            .map(GFp::from_canonical_u8)
-            .collect_vec();
-        let ptr = GFp::NEG_ONE; // final proof
-        let n = value_pi.n(); // give same length
-        let len_dm_fields = len_dm.to_weierstrass().to_fields();
-        let len_pi =
-            length_extraction::PublicInputs::<GFp>::from_parts(h, &len_dm_fields, &key, &ptr, &n);
+        let len_pi = pis.length_inputs();
         let test_circuit = TestLengthedCircuit {
             pis: pis.clone(),
             circuit: LengthedCircuit {},
-            len_pi: len_pi.to_vec(),
+            len_pi: len_pi,
         };
+        let len_pi = length_extraction::PublicInputs::<F>::from_slice(&test_circuit.len_pi);
+        let len_dm = len_pi.metadata_point();
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        let proof_pis = PublicInputs::from_slice(&proof.public_inputs);
-        let block_pi = block_extraction::public_inputs::PublicInputs::from_slice(&pis.blocks_pi);
-        assert_eq!(proof_pis.bn, block_pi.bn);
-        assert_eq!(proof_pis.h, block_pi.bh);
-        assert_eq!(proof_pis.ph, block_pi.prev_bh);
-
-        // check digests
-        // metadata is addition of value and length and contract
-        let expected_dm = pis.contract_dm + pis.value_dm + len_dm;
-        assert_eq!(proof_pis.metadata_point(), expected_dm.to_weierstrass());
+        pis.check_proof_public_inputs(&proof, true, Some(len_dm));
     }
 }

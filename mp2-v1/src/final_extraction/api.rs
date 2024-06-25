@@ -148,6 +148,7 @@ pub enum CircuitInput {
 }
 
 impl CircuitInput {
+    /// Instantiate inputs for simple variables circuit
     pub fn new_simple_input(
         block_proof: Vec<u8>,
         contract_proof: Vec<u8>,
@@ -157,7 +158,7 @@ impl CircuitInput {
         let base = BaseCircuitInput::new(block_proof, contract_proof, value_proof)?;
         Ok(Self::Simple(SimpleCircuitInput { base, compound }))
     }
-
+    /// Instantiate inputs for circuit dealing with compound types with a length slot
     pub fn new_lengthed_input(
         block_proof: Vec<u8>,
         contract_proof: Vec<u8>,
@@ -167,5 +168,119 @@ impl CircuitInput {
         let base = BaseCircuitInput::new(block_proof, contract_proof, value_proof)?;
         let length_proof = ProofWithVK::deserialize(&length_proof)?;
         Ok(Self::Lengthed(LengthedCircuitInput { base, length_proof }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mp2_common::{C, D, F};
+    use plonky2_ecgfp5::curve::curve::Point;
+    use recursion_framework::framework_testing::TestingRecursiveCircuits;
+
+    use crate::{
+        api::{serialize_proof, tests::TestDummyCircuit, ProofWithVK},
+        final_extraction::{
+            base_circuit::{
+                test::ProofsPi, BLOCK_SET_NUM_IO, CONTRACT_SET_NUM_IO, VALUE_SET_NUM_IO,
+            },
+            lengthed_circuit::LENGTH_SET_NUM_IO,
+        },
+        length_extraction,
+    };
+
+    use super::{CircuitInput, PublicParameters};
+
+    #[test]
+    fn test_final_extraction_api() {
+        let block_circuit = TestDummyCircuit::<BLOCK_SET_NUM_IO>::build();
+        let values_params = TestingRecursiveCircuits::<F, C, D, VALUE_SET_NUM_IO>::default();
+        let contract_params = TestingRecursiveCircuits::<F, C, D, CONTRACT_SET_NUM_IO>::default();
+        let length_params = TestingRecursiveCircuits::<F, C, D, LENGTH_SET_NUM_IO>::default();
+        let params = PublicParameters::build(
+            block_circuit.circuit_data().verifier_data(),
+            contract_params.get_recursive_circuit_set(),
+            values_params.get_recursive_circuit_set(),
+            length_params.get_recursive_circuit_set(),
+        );
+
+        let proof_pis = ProofsPi::random();
+        let length_pis = proof_pis.length_inputs();
+        let len_dm = length_extraction::PublicInputs::<F>::from_slice(&length_pis).metadata_point();
+        let block_proof = block_circuit
+            .generate_proof(proof_pis.blocks_pi.clone().try_into().unwrap())
+            .unwrap();
+        let value_proof = &values_params
+            .generate_input_proofs::<1>([proof_pis.values_pi.clone().try_into().unwrap()])
+            .unwrap()[0];
+        let contract_proof = &contract_params
+            .generate_input_proofs::<1>([proof_pis.contract_pi.clone().try_into().unwrap()])
+            .unwrap()[0];
+        let length_proof = &length_params
+            .generate_input_proofs::<1>([length_pis.try_into().unwrap()])
+            .unwrap()[0];
+
+        let contract_proof: ProofWithVK = (
+            contract_proof.clone(),
+            contract_params.verifier_data_for_input_proofs::<1>()[0].clone(),
+        )
+            .into();
+        let value_proof: ProofWithVK = (
+            value_proof.clone(),
+            values_params.verifier_data_for_input_proofs::<1>()[0].clone(),
+        )
+            .into();
+        // test generation of proof for simple circuit for both compound and simple types
+        for compound in [false, true] {
+            let circuit_input = CircuitInput::new_simple_input(
+                serialize_proof(&block_proof).unwrap(),
+                contract_proof.serialize().unwrap(),
+                value_proof.serialize().unwrap(),
+                compound,
+            )
+            .unwrap();
+
+            let proof = ProofWithVK::deserialize(
+                &params
+                    .generate_simple_proof(
+                        match circuit_input {
+                            CircuitInput::Simple(input) => input,
+                            _ => unreachable!(),
+                        },
+                        contract_params.get_recursive_circuit_set(),
+                        values_params.get_recursive_circuit_set(),
+                    )
+                    .unwrap(),
+            )
+            .unwrap();
+            proof_pis.check_proof_public_inputs(proof.proof(), compound, None);
+        }
+        // test proof generation for types with length circuit
+        let length_proof: ProofWithVK = (
+            length_proof.clone(),
+            length_params.verifier_data_for_input_proofs::<1>()[0].clone(),
+        )
+            .into();
+        let circuit_input = CircuitInput::new_lengthed_input(
+            serialize_proof(&block_proof).unwrap(),
+            contract_proof.serialize().unwrap(),
+            value_proof.serialize().unwrap(),
+            length_proof.serialize().unwrap(),
+        )
+        .unwrap();
+        let proof = ProofWithVK::deserialize(
+            &params
+                .generate_lengthed_proof(
+                    match circuit_input {
+                        CircuitInput::Lengthed(input) => input,
+                        _ => unreachable!(),
+                    },
+                    contract_params.get_recursive_circuit_set(),
+                    values_params.get_recursive_circuit_set(),
+                    length_params.get_recursive_circuit_set(),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        proof_pis.check_proof_public_inputs(proof.proof(), true, Some(len_dm));
     }
 }

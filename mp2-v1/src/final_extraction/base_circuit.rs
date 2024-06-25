@@ -101,8 +101,10 @@ pub(crate) struct BaseCircuitProofWires {
     value_proof: RecursiveCircuitsVerifierTarget<D>,
 }
 
-const CONTRACT_SET_NUM_IO: usize = contract_extraction::PublicInputs::<F>::TOTAL_LEN;
-const VALUE_SET_NUM_IO: usize = values_extraction::PublicInputs::<F>::TOTAL_LEN;
+pub(crate) const CONTRACT_SET_NUM_IO: usize = contract_extraction::PublicInputs::<F>::TOTAL_LEN;
+pub(crate) const VALUE_SET_NUM_IO: usize = values_extraction::PublicInputs::<F>::TOTAL_LEN;
+pub(crate) const BLOCK_SET_NUM_IO: usize =
+    block_extraction::public_inputs::PublicInputs::<F>::TOTAL_LEN;
 
 #[derive(Clone, Debug)]
 pub(super) struct BaseCircuitInput {
@@ -203,11 +205,15 @@ impl BaseCircuitProofWires {
 
 #[cfg(test)]
 pub(crate) mod test {
+    use crate::{final_extraction::PublicInputs, length_extraction};
+
     use super::*;
     use anyhow::Result;
     use contract_extraction::build_circuits_params;
     use ethers::types::U256;
+    use itertools::Itertools;
     use mp2_common::{
+        group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,
         mpt_sequential::MPTKeyWire,
         rlp::MAX_KEY_NIBBLE_LEN,
@@ -292,9 +298,6 @@ pub(crate) mod test {
 
     #[derive(Clone, Debug)]
     pub(crate) struct ProofsPi {
-        pub(crate) value_dm: Point,
-        pub(crate) value_dv: Point,
-        pub(crate) contract_dm: Point,
         pub(crate) blocks_pi: Vec<GFp>,
         pub(crate) contract_pi: Vec<GFp>,
         pub(crate) values_pi: Vec<GFp>,
@@ -307,6 +310,68 @@ pub(crate) mod test {
 
         pub(crate) fn value_inputs(&self) -> values_extraction::PublicInputs<GFp> {
             values_extraction::PublicInputs::new(&self.values_pi)
+        }
+
+        pub(crate) fn length_inputs(&self) -> Vec<F> {
+            let value_pi = self.value_inputs();
+            // construction of length extract public inputs
+            let h = value_pi.root_hash_info(); // same hash as value root
+            let len_dm = Point::rand();
+            let key = random_vector(64)
+                .into_iter()
+                .map(F::from_canonical_u8)
+                .collect_vec();
+            let ptr = F::NEG_ONE;
+            let n = value_pi.n(); // give same length
+            let len_dm_fields = len_dm.to_weierstrass().to_fields();
+            length_extraction::PublicInputs::<F>::from_parts(h, &len_dm_fields, &key, &ptr, &n)
+                .to_vec()
+        }
+        /// check public inputs of the proof match with the ones in `self`.
+        /// `compound_type` is a flag to specify whether `proof` is generated for a simple or compound type
+        /// `length_dm` is the metadata digest of a length proof, which is provided only for proofs related
+        /// to a compound type with a length slot
+        pub(crate) fn check_proof_public_inputs(
+            &self,
+            proof: &ProofWithPublicInputs<F, C, D>,
+            compound_type: bool,
+            length_dm: Option<WeierstrassPoint>,
+        ) {
+            let proof_pis = PublicInputs::from_slice(&proof.public_inputs);
+            let block_pi =
+                block_extraction::public_inputs::PublicInputs::from_slice(&self.blocks_pi);
+            assert_eq!(proof_pis.bn, block_pi.bn);
+            assert_eq!(proof_pis.h, block_pi.bh);
+            assert_eq!(proof_pis.ph, block_pi.prev_bh);
+
+            // check digests
+            let value_pi = values_extraction::PublicInputs::new(&self.values_pi);
+            if compound_type {
+                assert_eq!(proof_pis.value_point(), value_pi.values_digest());
+            } else {
+                // in this case, dv is D(value_dv)
+                let exp_dv = map_to_curve_point(&value_pi.values_digest().to_fields());
+                assert_eq!(proof_pis.value_point(), exp_dv.to_weierstrass());
+            }
+            // metadata is addition of contract and value
+            // ToDo: make it a trait once we understand it's sound
+            let weierstrass_to_point = |wp: WeierstrassPoint| {
+                Point::decode(wp.encode()).map(|p| {
+                    // safety-check
+                    assert_eq!(p.to_weierstrass(), wp);
+                    p
+                })
+            };
+            let contract_pi = contract_extraction::PublicInputs::from_slice(&self.contract_pi);
+            let contract_dm = weierstrass_to_point(contract_pi.metadata_point()).unwrap();
+            let value_dm = weierstrass_to_point(value_pi.metadata_digest()).unwrap();
+            let expected_dm = if let Some(len_dm) = length_dm {
+                let len_dm = weierstrass_to_point(len_dm).unwrap();
+                contract_dm + value_dm + len_dm
+            } else {
+                contract_dm + value_dm
+            };
+            assert_eq!(proof_pis.metadata_point(), expected_dm.to_weierstrass());
         }
 
         pub(crate) fn random() -> Self {
@@ -355,9 +420,6 @@ pub(crate) mod test {
             }
             .to_vec();
             ProofsPi {
-                contract_dm,
-                value_dm,
-                value_dv,
                 blocks_pi,
                 values_pi,
                 contract_pi,
