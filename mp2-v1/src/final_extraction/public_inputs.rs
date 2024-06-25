@@ -1,6 +1,9 @@
 //! Public inputs for Contract Extraction circuits
 
-use ethers::core::k256::elliptic_curve::Curve;
+use ethers::{
+    core::k256::elliptic_curve::Curve,
+    types::{U256, U64},
+};
 use mp2_common::{
     array::Array,
     group_hashing::EXTENSION_DEGREE,
@@ -9,7 +12,7 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
-    u256,
+    u256::{self, U256PubInputs},
     utils::{FromFields, FromTargets, ToTargets},
 };
 use plonky2::{
@@ -64,6 +67,13 @@ impl<'a> PublicInputs<'a, GFp> {
     pub fn value_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(&self.dv)
     }
+    /// Get block number as U256
+    pub fn block_number(&self) -> U64 {
+        let mut bytes = vec![0u8; 32];
+        let number = U256::from(U256PubInputs::try_from(self.bn).unwrap());
+        number.to_little_endian(&mut bytes);
+        U64::from_little_endian(&bytes[..8])
+    }
 }
 
 impl<'a, T> PublicInputs<'a, T> {
@@ -117,6 +127,18 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             .chain(self.bn)
             .cloned()
             .collect()
+    }
+
+    pub fn block_hash_raw(&self) -> &[T] {
+        &self.h
+    }
+
+    pub fn prev_block_hash_raw(&self) -> &[T] {
+        &self.ph
+    }
+
+    pub fn block_number_raw(&self) -> &[T] {
+        &self.bn
     }
 }
 

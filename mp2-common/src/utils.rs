@@ -184,8 +184,8 @@ pub fn hash_two_to_one<F: RichField, H: Hasher<F>>(
     left: HashOutput,
     right: HashOutput,
 ) -> HashOutput {
-    let [left, right] = [left, right].map(|bytes| H::Hash::from_bytes(&bytes));
-    H::two_to_one(left, right).to_bytes().try_into().unwrap()
+    let [left, right] = [left, right].map(|bytes| H::Hash::from_bytes(&bytes.0));
+    HashOutput(H::two_to_one(left, right).to_bytes().try_into().unwrap())
 }
 
 /// Pack the inputs (according to endianness) then compute the Poseidon hash value.
@@ -251,6 +251,12 @@ impl<F: RichField, T: Fieldable<F>> ToFields<F> for Vec<T> {
 impl<F: RichField, const N: usize, T: Fieldable<F>> ToFields<F> for [T; N] {
     fn to_fields(&self) -> Vec<F> {
         self.iter().map(|x| x.to_field()).collect()
+    }
+}
+
+impl<F: RichField> ToFields<F> for HashOutput {
+    fn to_fields(&self) -> Vec<F> {
+        self.0.pack(Endianness::Little).to_fields()
     }
 }
 

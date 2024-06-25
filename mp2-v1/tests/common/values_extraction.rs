@@ -2,9 +2,10 @@
 
 use super::{storage_trie::TestStorageTrie, TestContext};
 use ethers::prelude::Address;
+use itertools::Itertools;
 use log::info;
 use mp2_common::{
-    eth::{ProofQuery, StorageSlot},
+    eth::{left_pad32, ProofQuery, StorageSlot},
     mpt_sequential::utils::bytes_to_nibbles,
     F,
 };

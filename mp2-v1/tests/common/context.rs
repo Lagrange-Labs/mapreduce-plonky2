@@ -91,12 +91,6 @@ impl TestContext {
             .unwrap()
     }
 
-    /// Query the latest block.
-    /// TODO: DEPRECATED: we need to use a single block number for all our proofs
-    pub(crate) async fn query_latest_block(&self) -> Block<TxHash> {
-        query_latest_block(&self.rpc).await.unwrap()
-    }
-
     /// Query the MPT proof.
     pub(crate) async fn query_mpt_proof(
         &self,
