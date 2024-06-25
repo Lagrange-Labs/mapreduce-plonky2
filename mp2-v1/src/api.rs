@@ -1,14 +1,14 @@
 //! Main APIs and related structures
 
 use crate::{
-    block_extraction, contract_extraction,
+    block_extraction, cells_tree, contract_extraction,
     length_extraction::{self, LengthCircuitInput},
     values_extraction,
 };
 use anyhow::Result;
 use mp2_common::{
     serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize},
-    C, D, F,
+    u256, C, D, F,
 };
 use plonky2::plonk::{
     circuit_builder::CircuitBuilder,
@@ -22,6 +22,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InputNode {
     pub node: Vec<u8>,
+}
+
+/// Struct containing the expected input of the Cells Tree node
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CellNode {
+    pub identifier: F,
+    pub packed_value: [F; u256::NUM_LIMBS],
 }
 
 /// This data structure allows to specify the inputs for a circuit that needs to
@@ -55,6 +62,8 @@ pub enum CircuitInput {
     ValuesExtraction(values_extraction::CircuitInput),
     /// Block extraction necessary input
     BlockExtraction(block_extraction::CircuitInput),
+    /// Cells tree construction input
+    CellsTree(cells_tree::CircuitInput),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -64,6 +73,7 @@ pub struct PublicParameters {
     length_extraction: length_extraction::PublicParameters,
     values_extraction: values_extraction::PublicParameters,
     block_extraction: block_extraction::PublicParameters,
+    cells_tree: cells_tree::PublicParameters,
 }
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
@@ -77,6 +87,8 @@ pub fn build_circuits_params() -> PublicParameters {
     let values_extraction = values_extraction::build_circuits_params();
     log::info!("Building block_extraction parameters...");
     let block_extraction = block_extraction::build_circuits_params();
+    log::info!("Building cells_tree parameters...");
+    let cells_tree = cells_tree::build_circuits_params();
     log::info!("All parameters built!");
 
     PublicParameters {
@@ -84,6 +96,7 @@ pub fn build_circuits_params() -> PublicParameters {
         values_extraction,
         length_extraction,
         block_extraction,
+        cells_tree,
     }
 }
 
@@ -100,6 +113,7 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
             values_extraction::generate_proof(&params.values_extraction, input)
         }
         CircuitInput::BlockExtraction(input) => params.block_extraction.generate_proof(input),
+        CircuitInput::CellsTree(input) => params.cells_tree.generate_proof(input),
     }
 }
 

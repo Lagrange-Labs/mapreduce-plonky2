@@ -17,6 +17,7 @@ pub const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
 
 pub mod api;
 pub mod block_extraction;
+pub mod cells_tree;
 pub mod contract_extraction;
 pub mod length_extraction;
 pub mod values_extraction;
