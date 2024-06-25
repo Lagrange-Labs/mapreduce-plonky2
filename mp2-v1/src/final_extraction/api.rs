@@ -148,7 +148,10 @@ pub enum CircuitInput {
 }
 
 impl CircuitInput {
-    /// Instantiate inputs for simple variables circuit
+    /// Instantiate inputs for simple variables circuit. Coumpound must be set to true
+    /// if the proof is for extracting values for a variable type with dynamic length (like a mapping)
+    /// but that does not require a length_proof (maybe because there is no way to get the length
+    /// of the type from the onchain information, i.e. no length slot).
     pub fn new_simple_input(
         block_proof: Vec<u8>,
         contract_proof: Vec<u8>,
