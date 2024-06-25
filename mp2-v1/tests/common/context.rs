@@ -1,5 +1,7 @@
 //! Test context used in the test cases
 
+use super::TestCase;
+use alloy::node_bindings::AnvilInstance;
 use ethers::prelude::{Block, BlockId, EIP1186ProofResponse, Http, Provider, TxHash};
 use log::warn;
 use mp2_common::eth::{query_latest_block, ProofQuery};
@@ -8,13 +10,22 @@ use std::{env, fs, path::PathBuf};
 
 /// Test context
 pub(crate) struct TestContext {
-    params: PublicParameters,
-    rpc: Provider<Http>,
+    /// HTTP provider
+    /// TODO: fix to use alloy provider.
+    pub(crate) rpc: Provider<Http>,
+    /// Local node
+    /// Should release after finishing the all tests.
+    pub(crate) local_node: Option<AnvilInstance>,
+    /// Parameters
+    pub(crate) params: Option<PublicParameters>,
+    /// Supported test cases
+    pub(crate) cases: Vec<TestCase>,
 }
 
 impl TestContext {
-    /// Create the test context.
-    pub(crate) fn new(rpc_url: &str) -> anyhow::Result<Self> {
+    /// Build the parameters.
+    /// NOTE: It could avoid `runtime stack overflow`, otherwise needs to set `export RUST_MIN_STACK=100000000`.
+    pub(crate) fn build_params(&mut self) {
         let mut path = env::var("LPN_PARAMS").ok();
         let mut rebuild = env::var("LPN_PARAMS_REBUILD").is_ok();
 
@@ -38,28 +49,26 @@ impl TestContext {
 
                 if !path.exists() || rebuild {
                     let params = build_circuits_params();
-                    let file = bincode::serialize(&params)?;
+                    let file = bincode::serialize(&params).unwrap();
 
-                    fs::write(path, file)?;
+                    fs::write(path, file).unwrap();
 
                     params
                 } else {
-                    let file = fs::read(path)?;
+                    let file = fs::read(path).unwrap();
 
-                    bincode::deserialize(&file)?
+                    bincode::deserialize(&file).unwrap()
                 }
             }
             None => build_circuits_params(),
         };
 
-        let rpc = Provider::<Http>::try_from(rpc_url)?;
-
-        Ok(Self { params, rpc })
+        self.params = Some(params);
     }
 
     /// Get the public parameters.
     pub(crate) fn params(&self) -> &PublicParameters {
-        &self.params
+        self.params.as_ref().unwrap()
     }
 
     /// Query the latest block.

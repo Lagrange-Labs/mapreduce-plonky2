@@ -162,10 +162,7 @@ mod test {
 
     use super::MAX_BLOCK_NUMBER_LEN;
 
-    use super::{
-        public_inputs::PublicInputs,
-        {BlockCircuit, BlockWires},
-    };
+    use super::{public_inputs::PublicInputs, BlockCircuit, BlockWires};
     use anyhow::Result;
 
     pub type SepoliaBlockCircuit = BlockCircuit;

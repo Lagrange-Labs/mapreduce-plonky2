@@ -15,8 +15,8 @@ impl TestContext {
     pub(crate) async fn prove_length_extraction(
         &self,
         contract_address: &str,
-        slots: &[u8],
-        variable_slot: u8,
+        slot: u8,
+        value: u8,
     ) -> ProofWithVK {
         let contract_address = Address::from_str(contract_address).unwrap();
 
@@ -25,13 +25,9 @@ impl TestContext {
         info!("Initialized the test storage trie");
 
         // Query the slot and add the node path to the trie.
-        for slot in slots {
-            trie.query_proof_and_add_slot(self, contract_address, *slot as usize)
-                .await;
-        }
-
-        info!("Prove the test storage trie including the simple slots {slots:?}");
-        let proof = trie.prove_length(&contract_address, variable_slot, self.params());
+        trie.query_proof_and_add_slot(self, contract_address, slot as usize)
+            .await;
+        let proof = trie.prove_length(&contract_address, value, self.params());
 
         // Check the public inputs.
         let pi = PublicInputs::from_slice(&proof.proof().public_inputs);
@@ -44,7 +40,7 @@ impl TestContext {
         assert_eq!(pi.root_hash(), &root, "root of the trie should match");
 
         {
-            let exp_key = StorageSlot::Simple(slots[0] as usize).mpt_key_vec();
+            let exp_key = StorageSlot::Simple(slot as usize).mpt_key_vec();
             let exp_key: Vec<_> = bytes_to_nibbles(&exp_key)
                 .into_iter()
                 .map(GFp::from_canonical_u8)
