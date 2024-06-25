@@ -73,8 +73,7 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// Get the merkle hash of the subtree this proof has processed.
     pub fn root_hash(&self) -> OutputHash {
-        let hash = self.h;
-        Array::<U32Target, PACKED_HASH_LEN>::from_array(array::from_fn(|i| U32Target(hash[i])))
+        OutputHash::from_targets(self.h)
     }
 
     /// Get the MPT key defined over the public inputs.
@@ -94,8 +93,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     pub fn storage_root(&self) -> OutputHash {
-        let hash = self.s;
-        Array::<U32Target, PACKED_HASH_LEN>::from_array(array::from_fn(|i| U32Target(hash[i])))
+        OutputHash::from_targets(self.s)
     }
 }
 

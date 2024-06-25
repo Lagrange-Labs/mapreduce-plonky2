@@ -383,7 +383,7 @@ mod tests {
         let key = random_vector(32);
         for i in 0..N_REAL {
             let mut key = key.clone();
-            key[31] = thread_rng().gen();
+            key[31] = key[31] + i as u8;
             let value = random_vector(32);
             trie.insert(&key, &value).unwrap();
 

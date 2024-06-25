@@ -76,14 +76,12 @@ impl<'a, T> PublicInputs<'a, T> {
 impl<'a> PublicInputs<'a, Target> {
     /// Get the blockchain block hash corresponding to the values extracted
     pub fn block_hash(&self) -> OutputHash {
-        let hash = self.h;
-        Array::<U32Target, PACKED_HASH_LEN>::from_array(array::from_fn(|i| U32Target(hash[i])))
+        OutputHash::from_targets(self.h)
     }
 
     /// Get the predecessor block hash
     pub fn previous_block_hash(&self) -> OutputHash {
-        let hash = self.ph;
-        Array::<U32Target, PACKED_HASH_LEN>::from_array(array::from_fn(|i| U32Target(hash[i])))
+        OutputHash::from_targets(&self.ph)
     }
 
     pub fn digest_value(&self) -> CurveTarget {

@@ -3,7 +3,7 @@ use core::{array, iter};
 use mp2_common::{
     array::Array,
     group_hashing::EXTENSION_DEGREE,
-    keccak::PACKED_HASH_LEN,
+    keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::MPTKeyWire,
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
@@ -77,8 +77,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     pub fn root_hash(&self) -> Array<U32Target, PACKED_HASH_LEN> {
-        let hash = self.root_hash_raw();
-        Array::<U32Target, PACKED_HASH_LEN>::from_array(array::from_fn(|i| U32Target(hash[i])))
+        OutputHash::from_targets(self.root_hash_raw())
     }
 
     /// value is RLP encoded.

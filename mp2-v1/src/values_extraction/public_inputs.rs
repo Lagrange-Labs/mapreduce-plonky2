@@ -7,7 +7,7 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
-    utils::{convert_point_to_curve_target, convert_slice_to_curve_point},
+    utils::{convert_point_to_curve_target, convert_slice_to_curve_point, FromTargets},
 };
 use plonky2::{
     field::{extension::FieldExtension, types::Field},
@@ -70,8 +70,7 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// Get the merkle hash of the subtree this proof has processed.
     pub fn root_hash(&self) -> OutputHash {
-        let hash = self.root_hash_info();
-        Array::<U32Target, PACKED_HASH_LEN>::from_array(array::from_fn(|i| U32Target(hash[i])))
+        OutputHash::from_targets(self.root_hash_info())
     }
 
     /// Get the MPT key defined over the public inputs.

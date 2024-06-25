@@ -86,7 +86,7 @@ pub fn build_circuits_params() -> PublicParameters {
     let final_extraction = final_extraction::PublicParameters::build(
         block_extraction.circuit_data().verifier_data(),
         contract_extraction.get_circuit_set(),
-        values_extraction.get_mapping_circuit_set(),
+        values_extraction.get_circuit_set(),
         length_extraction.get_circuit_set(),
     );
     log::info!("All parameters built!");
@@ -115,7 +115,7 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
         CircuitInput::BlockExtraction(input) => params.block_extraction.generate_proof(input),
         CircuitInput::FinalExtraction(input) => {
             let contract_circuit_set = params.contract_extraction.get_circuit_set();
-            let value_circuit_set = params.values_extraction.get_mapping_circuit_set();
+            let value_circuit_set = params.values_extraction.get_circuit_set();
             match input {
                 final_extraction::CircuitInput::Simple(input) => params
                     .final_extraction
