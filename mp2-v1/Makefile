@@ -11,7 +11,7 @@ TEST_BINDINGS_MOD_PATH=tests/common/$(TEST_BINDINGS_FOLDER)
 TEST_BINDINGS_OUT_PATH=$(TEST_CONTRACT_PATH)/out/$(TEST_BINDINGS_FOLDER)
 
 # Generate the integration test contract bindings.
-int_bind:
+bindings:
 	rm -rf $(TEST_BINDINGS_MOD_PATH) $(TEST_BINDINGS_OUT_PATH)
 
 # Generate new bindings.
@@ -23,4 +23,4 @@ int_bind:
 	cargo fmt
 
 # Declare phony targets
-.PHONY: int_bind
+.PHONY: bindings
