@@ -93,7 +93,7 @@ jobs:
       - name: Test contract bindings
         run: |
           cd mp2-v1
-          make int_bind
+          nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "make int_bind"
           cd ..
       - name: Run cargo test
         run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo test --all --release -- --test-threads 16"
