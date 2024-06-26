@@ -38,8 +38,6 @@ async fn db_creation_integrated_tests() {
             .await;
         info!("Generated Values Extraction (C.1) proof for mapping variable");
 
-        info!("Generated Values Extraction (C.1) proof for array variable");
-
         let length_proof = ctx
             .prove_length_extraction(
                 &t.contract_address,

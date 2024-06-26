@@ -5,7 +5,7 @@ use ethers::prelude::Address;
 use itertools::Itertools;
 use log::info;
 use mp2_common::{
-    eth::{left_pad32, ProofQuery, StorageSlot},
+    eth::{ProofQuery, StorageSlot},
     mpt_sequential::utils::bytes_to_nibbles,
     F,
 };
