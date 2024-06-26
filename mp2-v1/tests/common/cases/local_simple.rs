@@ -21,16 +21,16 @@ const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
 const MAPPING_SLOT: u8 = 4;
 
 /// Test mapping addresses (keys) for mapping values extraction
-const MAPPING_ADDRESSES: [&str; 2] = [
+const MAPPING_ADDRESSES: [&str; LENGTH_VALUE as usize] = [
     "0x3bf5733f695b2527acc7bd4c5350e57acfd9fbb5",
     "0x6cac7190535f4908d0524e7d55b3750376ea1ef7",
 ];
 
 /// Test slot for length extraction
-const LENGTH_SLOT: u8 = 5;
+const LENGTH_SLOT: u8 = 1;
 
 /// Test length value for length extraction
-const LENGTH_VALUE: u8 = 4;
+const LENGTH_VALUE: u8 = 2;
 
 /// Test slot for contract extraction
 const CONTRACT_SLOT: usize = 1;
@@ -76,7 +76,7 @@ async fn set_contract_data<T: Transport + Clone, P: Provider<T, N>, N: Network>(
     // setSimples(bool newS1, uint256 newS2, string memory newS3, address newS4)
     let b = contract.setSimples(
         true,
-        U256::from(100),
+        U256::from(LENGTH_VALUE), // use this variable as the length slot for the mapping
         "test".to_string(),
         Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
     );
