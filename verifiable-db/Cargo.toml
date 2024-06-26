@@ -12,3 +12,4 @@ mp2_test = { path = "../mp2-test" }
 plonky2_ecgfp5.workspace = true
 rand.workspace = true
 ethers.workspace = true
+serde.workspace = true

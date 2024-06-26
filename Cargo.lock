@@ -5002,6 +5002,7 @@ dependencies = [
  "plonky2",
  "plonky2_ecgfp5",
  "rand",
+ "serde",
 ]
 
 [[package]]
