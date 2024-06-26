@@ -1,6 +1,7 @@
 //! Custom types
 
 use crate::{array::Array, D};
+use anyhow::ensure;
 use plonky2::{
     field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},
     iop::target::Target,
@@ -54,7 +55,7 @@ pub type PackedMappingKeyTarget = Array<U32Target, PACKED_MAPPING_KEY_LEN>;
 
 /// Regular hash output function - it can be generated from field elements using
 /// poseidon with the output serialized or via regular hash functions.
-pub struct HashOutput(pub [u8; 32]);
+pub struct HashOutput([u8; 32]);
 
 /// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
 /// since it still has to do 5 rounds in 622 or 650.
@@ -64,3 +65,30 @@ pub const MAX_BLOCK_LEN: usize = 650;
 /// It is different than the `MAX_LEAF_VALUE_LEN` constant because it represents the
 /// value **not** RLP encoded,i.e. without the 1-byte RLP header.
 pub const MAPPING_LEAF_VALUE_LEN: usize = 32;
+
+impl From<[u8; 32]> for HashOutput {
+    fn from(value: [u8; 32]) -> Self {
+        Self(value)
+    }
+}
+
+impl TryFrom<Vec<u8>> for HashOutput {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        ensure!(value.len() == 32, "invalid length of the vector");
+        Ok(Self(value.try_into().unwrap()))
+    }
+}
+
+impl<'a> From<&'a HashOutput> for &'a [u8] {
+    fn from(value: &'a HashOutput) -> Self {
+        value.0.as_slice()
+    }
+}
+
+impl<'a> From<&'a HashOutput> for Vec<u8> {
+    fn from(value: &'a HashOutput) -> Self {
+        value.0.to_vec()
+    }
+}
