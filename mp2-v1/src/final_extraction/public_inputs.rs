@@ -67,7 +67,7 @@ impl<'a> PublicInputs<'a, GFp> {
     pub fn value_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(&self.dv)
     }
-    /// Get block number as U256
+    /// Get block number as U64
     pub fn block_number(&self) -> U64 {
         let mut bytes = vec![0u8; 32];
         let number = U256::from(U256PubInputs::try_from(self.bn).unwrap());
