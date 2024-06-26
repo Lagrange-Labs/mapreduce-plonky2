@@ -4995,8 +4995,13 @@ name = "verifiable-db"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ethers",
  "log",
+ "mp2_common",
+ "mp2_test",
  "plonky2",
+ "plonky2_ecgfp5",
+ "rand",
 ]
 
 [[package]]
