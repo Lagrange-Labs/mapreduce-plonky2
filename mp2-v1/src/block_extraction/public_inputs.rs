@@ -71,13 +71,11 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     pub fn block_hash(&self) -> OutputHash {
-        let hash = self.bh;
-        Array::<U32Target, PACKED_HASH_LEN>::from_array(array::from_fn(|i| U32Target(hash[i])))
+        OutputHash::from_targets(&self.bh)
     }
 
     pub fn state_root(&self) -> OutputHash {
-        let hash = self.sh;
-        Array::<U32Target, PACKED_HASH_LEN>::from_array(array::from_fn(|i| U32Target(hash[i])))
+        OutputHash::from_targets(&self.sh)
     }
 }
 
