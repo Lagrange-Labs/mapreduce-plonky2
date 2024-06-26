@@ -90,7 +90,7 @@ impl BranchLengthCircuit {
             .into_iter()
             .enumerate()
         {
-            cb.connect(h, child_proof.root_hash()[i]);
+            cb.connect(h, child_proof.root_hash_raw()[i]);
         }
 
         let root = KeccakCircuit::<MAX_BRANCH_NODE_LEN_PADDED>::hash_vector(cb, &node);
@@ -186,8 +186,7 @@ pub mod tests {
         let child_hash: Vec<_> = keccak256(child).pack(Endianness::Little).to_fields();
 
         let mut branch_pi =
-            PublicInputs::from_parts(&child_hash, (&dm.x.0, &dm.y.0, &is_inf), &key, &d, &length)
-                .to_vec();
+            PublicInputs::from_parts(&child_hash, &dm.to_fields(), &key, &d, &length).to_vec();
 
         // traverse from leaf's child to root
         for d in (0..depth - 1).rev() {
@@ -206,7 +205,7 @@ pub mod tests {
             let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
             assert_eq!(proof_pi.length(), &length);
-            assert_eq!(proof_pi.root_hash(), &root);
+            assert_eq!(proof_pi.root_hash_raw(), &root);
             assert_eq!(proof_pi.mpt_key(), &key);
             assert_eq!(proof_pi.metadata_point(), dm);
             assert_eq!(proof_pi.mpt_key_pointer(), &t);

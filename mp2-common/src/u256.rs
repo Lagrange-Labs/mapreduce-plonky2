@@ -7,11 +7,11 @@ use std::{
 };
 
 use crate::{
-    array::{Array, Targetable},
+    array::Array,
     serialization::{
         circuit_data_serialization::SerializableRichField, FromBytes, SerializationError, ToBytes,
     },
-    utils::{Endianness, Packer, ToFields},
+    utils::{Endianness, FromTargets, Packer, ToFields, ToTargets},
 };
 use anyhow::{ensure, Result};
 use ethers::types::U256;
@@ -442,14 +442,16 @@ impl UInt256Target {
     }
 }
 
-// TODO: change that to trait within feat/c51
-impl UInt256Target {
-    pub fn to_targets(&self) -> Vec<Target> {
+impl ToTargets for UInt256Target {
+    fn to_targets(&self) -> Vec<Target> {
         Into::<Vec<Target>>::into(self)
     }
+}
+
+impl FromTargets for UInt256Target {
     // Expects big endian limbs as the standard format for IO
-    pub fn from_targets(targets: &[Target]) -> Result<UInt256Target> {
-        Self::new_from_be_target_limbs(&targets)
+    fn from_targets(t: &[Target]) -> Self {
+        Self::new_from_be_target_limbs(&t[..NUM_LIMBS]).unwrap()
     }
 }
 
@@ -480,9 +482,9 @@ impl FromBytes for UInt256Target {
     }
 }
 
-impl ToFields for U256 {
+impl<F: RichField> ToFields<F> for U256 {
     /// Return the 32-bit limbs representing a u256 as field elements, in big-endian order    
-    fn to_fields<F: RichField>(&self) -> Vec<F> {
+    fn to_fields(&self) -> Vec<F> {
         let mut bytes = [0u8; 32];
         self.to_big_endian(&mut bytes);
         let limbs = bytes.pack(Endianness::Big).to_fields();

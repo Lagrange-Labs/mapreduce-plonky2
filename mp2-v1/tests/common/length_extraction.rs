@@ -37,7 +37,7 @@ impl TestContext {
             .map(GFp::from_canonical_u32)
             .collect();
 
-        assert_eq!(pi.root_hash(), &root, "root of the trie should match");
+        assert_eq!(pi.root_hash_raw(), &root, "root of the trie should match");
 
         {
             let exp_key = StorageSlot::Simple(slot as usize).mpt_key_vec();

@@ -47,7 +47,7 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
     let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
     assert_eq!(leaf_pi.length(), &length);
-    assert_eq!(leaf_pi.root_hash(), &root);
+    assert_eq!(leaf_pi.root_hash_raw(), &root);
     assert_eq!(leaf_pi.metadata_point(), dm);
     assert_eq!(leaf_pi.mpt_key(), &key);
     assert_eq!(leaf_pi.mpt_key_pointer(), &pointer);
@@ -67,7 +67,7 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
         let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
         let root: Vec<_> = keccak256(node).pack(Endianness::Little).to_fields();
         assert_eq!(branch_pi.length(), &length);
-        assert_eq!(branch_pi.root_hash(), &root);
+        assert_eq!(branch_pi.root_hash_raw(), &root);
         assert_eq!(branch_pi.metadata_point(), dm);
         assert_eq!(branch_pi.mpt_key(), &key);
         assert_eq!(branch_pi.mpt_key_pointer(), &pointer);

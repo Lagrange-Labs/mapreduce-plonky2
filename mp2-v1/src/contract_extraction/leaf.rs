@@ -10,7 +10,7 @@ use mp2_common::{
     mpt_sequential::{MPTKeyWire, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::{AddressTarget, CBuilder, ADDRESS_LEN},
-    utils::{less_than, Endianness},
+    utils::{less_than, Endianness, ToTargets},
     D, F,
 };
 use plonky2::{
@@ -98,7 +98,7 @@ where
         let h = root.output_array.to_targets().arr;
         // Compute the metadata digest - `D(pack_u32_be(contract_address))`.
         let packed_contract_address = contract_address.pack(b, Endianness::Big).to_targets().arr;
-        let dm = b.map_to_curve_point(&packed_contract_address);
+        let dm = b.map_to_curve_point(&packed_contract_address).to_targets();
         let s = storage_root.pack(b, Endianness::Little).to_targets().arr;
         PublicInputs::new(&h, &dm, &new_mpt_key.key.arr, &new_mpt_key.pointer, &s).register(b);
 

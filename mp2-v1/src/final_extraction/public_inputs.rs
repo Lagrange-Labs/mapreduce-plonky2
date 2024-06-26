@@ -1,5 +1,9 @@
 //! Public inputs for Contract Extraction circuits
 
+use ethers::{
+    core::k256::elliptic_curve::Curve,
+    types::{U256, U64},
+};
 use mp2_common::{
     array::Array,
     group_hashing::EXTENSION_DEGREE,
@@ -8,6 +12,7 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
+    u256::{self, U256PubInputs},
     utils::{FromFields, FromTargets, ToTargets},
 };
 use plonky2::{
@@ -20,86 +25,84 @@ use std::{array, iter};
 
 // Contract extraction public Inputs:
 // - `H : [8]F` : packed block hash
+// - `PH : [8]F` : *previous* packed block hash
+// - `DV : Digest[F]` : value digest of all rows to extract
 // - `DM : Digest[F]` : metadata digest to extract
-// - `K : [64]F` : MPT key derived for this contract
-// - `T : F` : pointer of the MPT key
-// - `S : [8]F` : packed hash of the storage trie root of this contract
+// - `BN : Uint256` : block number
 const H_RANGE: PublicInputRange = 0..PACKED_HASH_LEN;
-const DM_RANGE: PublicInputRange = H_RANGE.end..H_RANGE.end + CURVE_TARGET_LEN;
-const K_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + MAX_KEY_NIBBLE_LEN;
-const T_RANGE: PublicInputRange = K_RANGE.end..K_RANGE.end + 1;
-const S_RANGE: PublicInputRange = T_RANGE.end..T_RANGE.end + PACKED_HASH_LEN;
+const PH_RANGE: PublicInputRange = PACKED_HASH_LEN..H_RANGE.end + PACKED_HASH_LEN;
+const DV_RANGE: PublicInputRange = PH_RANGE.end..PH_RANGE.end + CURVE_TARGET_LEN;
+const DM_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + CURVE_TARGET_LEN;
+// TODO : replace by uint256 constant
+const BN_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + u256::NUM_LIMBS;
 
 /// Public inputs for contract extraction
 #[derive(Clone, Debug)]
 pub struct PublicInputs<'a, T> {
     pub(crate) h: &'a [T],
-    pub(crate) dm: &'a [T],
-    pub(crate) k: &'a [T],
-    pub(crate) t: &'a T,
-    pub(crate) s: &'a [T],
+    pub(crate) ph: &'a [T],
+    pub(crate) dv: (&'a [T]),
+    pub(crate) dm: (&'a [T]),
+    pub(crate) bn: &'a [T],
 }
 
 impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
-    const RANGES: &'static [PublicInputRange] = &[H_RANGE, DM_RANGE, K_RANGE, T_RANGE, S_RANGE];
+    const RANGES: &'static [PublicInputRange] = &[H_RANGE, PH_RANGE, DV_RANGE, DM_RANGE, BN_RANGE];
 
     fn register_args(&self, cb: &mut CBuilder) {
         cb.register_public_inputs(self.h);
+        cb.register_public_inputs(self.ph);
+        cb.register_public_inputs(self.dv);
         cb.register_public_inputs(self.dm);
-        cb.register_public_inputs(self.k);
-        cb.register_public_input(*self.t);
-        cb.register_public_inputs(self.s);
+        cb.register_public_inputs(self.bn);
     }
 }
 
 impl<'a> PublicInputs<'a, GFp> {
     /// Get the metadata point.
     pub fn metadata_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(self.dm)
+        WeierstrassPoint::from_fields(&self.dm)
+    }
+    /// Get the digest holding the values .
+    pub fn value_point(&self) -> WeierstrassPoint {
+        WeierstrassPoint::from_fields(&self.dv)
+    }
+    /// Get block number as U64
+    pub fn block_number(&self) -> U64 {
+        let mut bytes = vec![0u8; 32];
+        let number = U256::from(U256PubInputs::try_from(self.bn).unwrap());
+        number.to_little_endian(&mut bytes);
+        U64::from_little_endian(&bytes[..8])
+    }
+}
+
+impl<'a, T> PublicInputs<'a, T> {
+    /// Create a new public inputs.
+    pub fn new(h: &'a [T], ph: &'a [T], dv: &'a [T], dm: &'a [T], bn: &'a [T]) -> Self {
+        Self { h, ph, dv, dm, bn }
     }
 }
 
 impl<'a> PublicInputs<'a, Target> {
-    /// Create a new public inputs.
-    pub fn new(
-        h: &'a [Target],
-        dm: &'a [Target],
-        k: &'a [Target],
-        t: &'a Target,
-        s: &'a [Target],
-    ) -> Self {
-        Self { h, dm, k, t, s }
-    }
-
-    /// Get the merkle hash of the subtree this proof has processed.
-    pub fn root_hash(&self) -> OutputHash {
+    /// Get the blockchain block hash corresponding to the values extracted
+    pub fn block_hash(&self) -> OutputHash {
         OutputHash::from_targets(self.h)
     }
 
-    /// Get the MPT key defined over the public inputs.
-    pub fn mpt_key(&self) -> MPTKeyWire {
-        let key = self.k;
-        let pointer = *self.t;
-
-        MPTKeyWire {
-            key: Array {
-                arr: array::from_fn(|i| key[i]),
-            },
-            pointer,
-        }
-    }
-    pub fn metadata_digest(&self) -> CurveTarget {
-        CurveTarget::from_targets(&self.dm)
+    /// Get the predecessor block hash
+    pub fn previous_block_hash(&self) -> OutputHash {
+        OutputHash::from_targets(&self.ph)
     }
 
-    pub fn storage_root(&self) -> OutputHash {
-        OutputHash::from_targets(self.s)
+    pub fn digest_value(&self) -> CurveTarget {
+        let dv = self.dv;
+        CurveTarget::from_targets(dv)
     }
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
     /// Total length of the public inputs
-    pub(crate) const TOTAL_LEN: usize = S_RANGE.end;
+    pub(crate) const TOTAL_LEN: usize = BN_RANGE.end;
 
     /// Create from a slice.
     pub fn from_slice(pi: &'a [T]) -> Self {
@@ -107,10 +110,10 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
         Self {
             h: &pi[H_RANGE],
+            ph: &pi[PH_RANGE],
             dm: &pi[DM_RANGE],
-            k: &pi[K_RANGE],
-            t: &pi[T_RANGE.start],
-            s: &pi[S_RANGE],
+            dv: &pi[DV_RANGE],
+            bn: &pi[BN_RANGE],
         }
     }
 
@@ -118,32 +121,24 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     pub fn to_vec(&self) -> Vec<T> {
         self.h
             .iter()
+            .chain(self.ph)
             .chain(self.dm)
-            .chain(self.k)
-            .chain(iter::once(self.t))
-            .chain(self.s)
+            .chain(self.dv)
+            .chain(self.bn)
             .cloned()
             .collect()
     }
 
-    pub fn h_raw(&self) -> &'a [T] {
-        self.h
+    pub fn block_hash_raw(&self) -> &[T] {
+        &self.h
     }
 
-    pub fn dm_raw(&self) -> &'a [T] {
-        self.dm
+    pub fn prev_block_hash_raw(&self) -> &[T] {
+        &self.ph
     }
 
-    pub fn k_raw(&self) -> &'a [T] {
-        self.k
-    }
-
-    pub fn t_raw(&self) -> &'a T {
-        self.t
-    }
-
-    pub fn s_raw(&self) -> &'a [T] {
-        self.s
+    pub fn block_number_raw(&self) -> &[T] {
+        &self.bn
     }
 }
 
@@ -159,7 +154,7 @@ mod tests {
         utils::random_vector,
     };
     use plonky2::{
-        field::types::Sample,
+        field::{goldilocks_field::GoldilocksField, types::Sample},
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
@@ -192,14 +187,17 @@ mod tests {
     fn test_contract_extraction_public_inputs() {
         let mut rng = thread_rng();
 
+        let o = GFp::ONE;
         // Prepare the public inputs.
-        let h = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
-        let dm = &Point::sample(&mut rng).to_weierstrass().to_fields();
-        let k = &random_vector::<u8>(MAX_KEY_NIBBLE_LEN).to_fields();
-        let t = &2_u8.to_field();
-        let s = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
-        let exp_pi = PublicInputs { h, dm, k, t, s };
+        let h = random_vector::<u32>(PACKED_HASH_LEN).to_fields();
+        let ph = random_vector::<u32>(PACKED_HASH_LEN).to_fields();
+        let dm = Point::sample(&mut rng).to_weierstrass().to_fields();
+        let dv = Point::sample(&mut rng).to_weierstrass().to_fields();
+        // block number as u256
+        let bn = &random_vector::<u32>(8).to_fields();
+        let exp_pi = PublicInputs::new(&h, &ph, &dv, &dm, &bn);
         let exp_pi = &exp_pi.to_vec();
+        assert_eq!(exp_pi.len(), PublicInputs::<Target>::TOTAL_LEN);
 
         let test_circuit = TestPICircuit { exp_pi };
         let proof = run_circuit::<F, D, C, _>(test_circuit);

@@ -2,6 +2,7 @@
 
 use super::{storage_trie::TestStorageTrie, TestContext};
 use ethers::prelude::Address;
+use itertools::Itertools;
 use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
@@ -76,7 +77,7 @@ impl TestContext {
         for mapping_key in mapping_keys {
             info!("Query the mapping slot ({slot}, {mapping_key:?})");
             let query = ProofQuery::new_mapping_slot(contract_address, slot, mapping_key.clone());
-            let response = self.query_mpt_proof(&query, None).await;
+            let response = self.query_mpt_proof(&query, self.get_block_number()).await;
 
             // Get the nodes to prove. Reverse to the sequence from leaf to root.
             let nodes: Vec<_> = response.storage_proof[0]

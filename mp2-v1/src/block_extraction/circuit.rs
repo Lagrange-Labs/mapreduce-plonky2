@@ -6,12 +6,12 @@ use std::array;
 
 use mp2_common::{
     array::{Array, Vector, VectorWire, L32},
-    keccak::{InputData, KeccakCircuit, KeccakWires, OutputHash, HASH_LEN, PACKED_HASH_LEN},
+    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     mpt_sequential::{utils::left_pad_leaf_value, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::{CBuilder, GFp, MAX_BLOCK_LEN},
     u256::{self, CircuitBuilderU256, UInt256Target},
-    utils::{less_than, Endianness, PackerTarget},
+    utils::{less_than, Endianness, PackerTarget, ToTargets},
     D,
 };
 use plonky2::{

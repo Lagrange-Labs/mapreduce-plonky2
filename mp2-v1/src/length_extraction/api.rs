@@ -174,6 +174,10 @@ impl PublicParameters {
 
         Ok(proof)
     }
+
+    pub fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.set
+    }
 }
 
 #[cfg(test)]
@@ -224,7 +228,7 @@ mod tests {
         let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         assert_eq!(pi.length(), &GFp::from_canonical_u32(length));
-        assert_eq!(pi.root_hash(), &root);
+        assert_eq!(pi.root_hash_raw(), &root);
         assert_eq!(pi.mpt_key(), &key);
         assert_eq!(pi.metadata_point(), dm);
         assert_eq!(pi.mpt_key_pointer(), &pointer);
@@ -245,7 +249,7 @@ mod tests {
             let pi = PublicInputs::from_slice(&pis[..PublicInputs::<GFp>::TOTAL_LEN]);
 
             assert_eq!(pi.length(), &GFp::from_canonical_u32(length));
-            assert_eq!(pi.root_hash(), &root);
+            assert_eq!(pi.root_hash_raw(), &root);
             assert_eq!(pi.mpt_key(), &key);
             assert_eq!(pi.metadata_point(), dm);
             assert_eq!(pi.mpt_key_pointer(), &pointer);
@@ -318,7 +322,7 @@ mod tests {
         let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
 
         assert_eq!(pi.length(), &length);
-        assert_eq!(pi.root_hash(), &root);
+        assert_eq!(pi.root_hash_raw(), &root);
         assert_eq!(pi.mpt_key(), &key);
         assert_eq!(pi.metadata_point(), dm);
         assert_eq!(pi.mpt_key_pointer(), &pointer);
@@ -338,7 +342,7 @@ mod tests {
         let pi = PublicInputs::from_slice(&pis[..PublicInputs::<GFp>::TOTAL_LEN]);
 
         assert_eq!(pi.length(), &length);
-        assert_eq!(pi.root_hash(), &root);
+        assert_eq!(pi.root_hash_raw(), &root);
         assert_eq!(pi.mpt_key(), &key);
         assert_eq!(pi.metadata_point(), dm);
         assert_eq!(pi.mpt_key_pointer(), &pointer);
@@ -357,7 +361,7 @@ mod tests {
         let pi = PublicInputs::from_slice(&pis[..PublicInputs::<GFp>::TOTAL_LEN]);
 
         assert_eq!(pi.length(), &length);
-        assert_eq!(pi.root_hash(), &root);
+        assert_eq!(pi.root_hash_raw(), &root);
         assert_eq!(pi.mpt_key(), &key);
         assert_eq!(pi.metadata_point(), dm);
         assert_eq!(pi.mpt_key_pointer(), &pointer);

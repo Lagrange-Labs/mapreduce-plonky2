@@ -1088,7 +1088,7 @@ mod test {
         const N: usize = 45;
         let arr: [u8; N] = random_vector(N).try_into().unwrap();
         let mut arr2: [u8; N] = random_vector(N).try_into().unwrap();
-        let pointer = thread_rng().gen_range(0..N);
+        let pointer = thread_rng().gen_range(1..N);
         arr2[0..pointer].copy_from_slice(&arr[0..pointer]);
         let circuit = TestSliceEqual {
             arr,
@@ -1097,6 +1097,7 @@ mod test {
         };
         run_circuit::<F, D, C, _>(circuit);
 
+        arr2[0] = arr2[0] + 1; // ensure arr2 is different from arr
         let res = panic::catch_unwind(|| {
             let circuit = TestSliceEqual {
                 arr,

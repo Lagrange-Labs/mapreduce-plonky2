@@ -80,6 +80,14 @@ impl TestContext {
         self.params.as_ref().unwrap()
     }
 
+    pub(crate) fn get_block_number(&self) -> Option<u64> {
+        self.block_number.as_number().map(|bn| {
+            let mut bytes = [0u8; 8];
+            bn.to_big_endian(&mut bytes);
+            u64::from_be_bytes(bytes)
+        })
+    }
+
     /// Returns the block for which this test context is set
     pub(crate) async fn query_block(&self) -> Block<TxHash> {
         // assume there is always a block so None.unwrap() should not occur
@@ -89,12 +97,6 @@ impl TestContext {
             .await
             .unwrap()
             .unwrap()
-    }
-
-    /// Query the latest block.
-    /// TODO: DEPRECATED: we need to use a single block number for all our proofs
-    pub(crate) async fn query_latest_block(&self) -> Block<TxHash> {
-        query_latest_block(&self.rpc).await.unwrap()
     }
 
     /// Query the MPT proof.

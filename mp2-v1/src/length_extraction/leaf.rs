@@ -13,7 +13,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp},
-    utils::Endianness,
+    utils::{Endianness, ToTargets},
     D,
 };
 use plonky2::{
@@ -107,7 +107,7 @@ impl LeafLengthCircuit {
         let t = &length_mpt.key.pointer;
         let n = &length_rlp_encoded.0;
 
-        PublicInputs::new(h, dm, k, t, n).register(cb);
+        PublicInputs::new(h, &dm.to_targets(), k, t, n).register(cb);
 
         LeafLengthWires {
             length_slot,
@@ -224,7 +224,7 @@ pub mod tests {
                 - GFp::from_canonical_usize(rlp_nibbles.nibbles().len());
 
             assert_eq!(leaf_pi.length(), &length);
-            assert_eq!(leaf_pi.root_hash(), &root);
+            assert_eq!(leaf_pi.root_hash_raw(), &root);
             assert_eq!(leaf_pi.mpt_key(), &key);
             assert_eq!(leaf_pi.metadata_point(), dm);
             assert_eq!(leaf_pi.mpt_key_pointer(), &t);
