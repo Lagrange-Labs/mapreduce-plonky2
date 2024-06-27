@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 mod full_node;
 mod leaf;
+mod partial_node;
 mod public_inputs;
 
 /// The value to give at each node of the row tree

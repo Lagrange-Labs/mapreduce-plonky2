@@ -75,7 +75,7 @@ impl FullNodeCircuit {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use std::hash::Hash;
 
     use ethers::abi::ethereum_types::Public;
@@ -126,7 +126,7 @@ mod test {
         }
     }
 
-    fn generate_random_pi(min: usize, max: usize) -> Vec<F> {
+    pub(crate) fn generate_random_pi(min: usize, max: usize) -> Vec<F> {
         let hash = HashOut::rand();
         let digest = Point::rand();
         let min = U256::from(min);

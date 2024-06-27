@@ -9,8 +9,8 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, config::AlgebraicHasher},
 };
 
-type H = PoseidonHash;
-type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
+pub type H = PoseidonHash;
+pub type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
 
 /// Hash the concatenation of the two provided 4-wide inputs, swapping them if specified.
 pub fn hash_maybe_swap<F, const D: usize>(
