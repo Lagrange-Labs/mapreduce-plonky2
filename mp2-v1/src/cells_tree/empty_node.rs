@@ -3,7 +3,8 @@
 use super::public_inputs::PublicInputs;
 use anyhow::Result;
 use mp2_common::{
-    poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, types::CBuilder, D, F,
+    poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, types::CBuilder,
+    utils::ToTargets, D, F,
 };
 use plonky2::{iop::witness::PartialWitness, plonk::proof::ProofWithPublicInputsTarget};
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
@@ -23,7 +24,7 @@ impl EmptyNodeCircuit {
         let h = b.constant_hash(*empty_hash).elements;
 
         // dc = CURVE_ZERO
-        let dc = b.curve_zero();
+        let dc = b.curve_zero().to_targets();
 
         // Register the public inputs.
         PublicInputs::new(&h, &dc).register(b);
@@ -82,7 +83,7 @@ mod tests {
         }
         // Check the cells digest
         {
-            assert_eq!(pi.cells_point(), WeierstrassPoint::NEUTRAL);
+            assert_eq!(pi.digest_point(), WeierstrassPoint::NEUTRAL);
         }
     }
 }

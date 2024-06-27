@@ -57,8 +57,8 @@ impl FullNodeCircuit {
         // dc = p1.DC + p2.DC + D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
         let dc = b.map_to_curve_point(&inputs);
-        let [p1_dc, p2_dc] = [0, 1].map(|i| child_proofs[i].cells_target());
-        let dc = b.add_curve_point(&[p1_dc, p2_dc, dc]);
+        let [p1_dc, p2_dc] = [0, 1].map(|i| child_proofs[i].digest_target());
+        let dc = b.add_curve_point(&[p1_dc, p2_dc, dc]).to_targets();
 
         // Register the public inputs.
         PublicInputs::new(&h, &dc).register(b);
@@ -163,10 +163,7 @@ mod tests {
         let child_digests = [0; 2].map(|_| Point::sample(&mut rng));
         let child_pis = &array::from_fn(|i| {
             let h = &child_hashs[i];
-
-            let dc = child_digests[i].to_weierstrass();
-            let dc_is_inf = if dc.is_inf { F::ONE } else { F::ZERO };
-            let dc = (dc.x.0.as_slice(), dc.y.0.as_slice(), &dc_is_inf);
+            let dc = &child_digests[i].to_weierstrass().to_fields();
 
             PublicInputs { h, dc }.to_vec()
         });
@@ -197,7 +194,7 @@ mod tests {
             let exp_digest =
                 add_curve_point(&[exp_digest, child_digests[0], child_digests[1]]).to_weierstrass();
 
-            assert_eq!(pi.cells_point(), exp_digest);
+            assert_eq!(pi.digest_point(), exp_digest);
         }
     }
 }

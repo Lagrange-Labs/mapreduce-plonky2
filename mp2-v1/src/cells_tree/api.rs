@@ -246,7 +246,7 @@ mod tests {
             let inputs: Vec<_> = iter::once(identifier).chain(packed_value).collect();
             let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
 
-            assert_eq!(pi.cells_point(), exp_digest);
+            assert_eq!(pi.digest_point(), exp_digest);
         }
 
         proof
@@ -269,7 +269,7 @@ mod tests {
             assert_eq!(pi.h, empty_hash.elements);
         }
         {
-            assert_eq!(pi.cells_point(), WeierstrassPoint::NEUTRAL);
+            assert_eq!(pi.digest_point(), WeierstrassPoint::NEUTRAL);
         }
 
         proof
@@ -323,14 +323,14 @@ mod tests {
         {
             let child_digests: Vec<_> = child_pis
                 .iter()
-                .map(|pi| Point::decode(pi.cells_point().encode()).unwrap())
+                .map(|pi| Point::decode(pi.digest_point().encode()).unwrap())
                 .collect();
             let inputs: Vec<_> = iter::once(identifier).chain(packed_value).collect();
             let exp_digest = map_to_curve_point(&inputs);
             let exp_digest =
                 add_curve_point(&[exp_digest, child_digests[0], child_digests[1]]).to_weierstrass();
 
-            assert_eq!(pi.cells_point(), exp_digest);
+            assert_eq!(pi.digest_point(), exp_digest);
         }
 
         proof
@@ -375,12 +375,12 @@ mod tests {
             assert_eq!(pi.h, exp_hash.elements);
         }
         {
-            let child_digest = Point::decode(child_pi.cells_point().encode()).unwrap();
+            let child_digest = Point::decode(child_pi.digest_point().encode()).unwrap();
             let inputs: Vec<_> = iter::once(identifier).chain(packed_value).collect();
             let exp_digest = map_to_curve_point(&inputs);
             let exp_digest = add_curve_point(&[exp_digest, child_digest]).to_weierstrass();
 
-            assert_eq!(pi.cells_point(), exp_digest);
+            assert_eq!(pi.digest_point(), exp_digest);
         }
 
         proof

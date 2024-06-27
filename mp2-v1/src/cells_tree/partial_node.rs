@@ -60,8 +60,8 @@ impl PartialNodeCircuit {
         // dc = p.DC + D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
         let dc = b.map_to_curve_point(&inputs);
-        let child_digest = child_proof.cells_target();
-        let dc = b.add_curve_point(&[child_digest, dc]);
+        let child_digest = child_proof.digest_target();
+        let dc = b.add_curve_point(&[child_digest, dc]).to_targets();
 
         // Register the public inputs.
         PublicInputs::new(&h, &dc).register(b);
@@ -155,9 +155,7 @@ mod tests {
         // Create the child public inputs.
         let child_hash = random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields();
         let child_digest = Point::sample(&mut rng);
-        let dc = child_digest.to_weierstrass();
-        let dc_is_inf = if dc.is_inf { F::ONE } else { F::ZERO };
-        let dc = (dc.x.0.as_slice(), dc.y.0.as_slice(), &dc_is_inf);
+        let dc = &child_digest.to_weierstrass().to_fields();
         let child_pi = &PublicInputs { h: &child_hash, dc }.to_vec();
 
         let test_circuit = TestPartialNodeCircuit {
@@ -185,7 +183,7 @@ mod tests {
             let exp_digest = map_to_curve_point(&inputs);
             let exp_digest = add_curve_point(&[exp_digest, child_digest]).to_weierstrass();
 
-            assert_eq!(pi.cells_point(), exp_digest);
+            assert_eq!(pi.digest_point(), exp_digest);
         }
     }
 }

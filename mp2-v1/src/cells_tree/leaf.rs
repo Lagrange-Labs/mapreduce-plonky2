@@ -3,7 +3,6 @@
 use super::public_inputs::PublicInputs;
 use ethers::prelude::U256;
 use mp2_common::{
-    array::Array,
     group_hashing::CircuitBuilderGroupHashing,
     poseidon::empty_poseidon_hash,
     public_inputs::PublicInputCommon,
@@ -58,7 +57,7 @@ impl LeafCircuit {
 
         // dc = D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
-        let dc = b.map_to_curve_point(&inputs);
+        let dc = b.map_to_curve_point(&inputs).to_targets();
 
         // Register the public inputs.
         PublicInputs::new(&h, &dc).register(b);
@@ -154,7 +153,7 @@ mod tests {
             let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
             let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
 
-            assert_eq!(pi.cells_point(), exp_digest);
+            assert_eq!(pi.digest_point(), exp_digest);
         }
     }
 }
