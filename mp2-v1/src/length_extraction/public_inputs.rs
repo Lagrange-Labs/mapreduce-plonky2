@@ -3,16 +3,18 @@ use core::{array, iter};
 use mp2_common::{
     array::Array,
     group_hashing::EXTENSION_DEGREE,
-    keccak::PACKED_HASH_LEN,
+    keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::MPTKeyWire,
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
+    utils::{FromFields, FromTargets, ToTargets},
 };
 use plonky2::{
     field::{extension::FieldExtension, types::Field},
     iop::target::Target,
 };
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 
 // Length extraction public inputs:
@@ -31,7 +33,7 @@ const N_RANGE: PublicInputRange = T_RANGE.end..T_RANGE.end + 1;
 #[derive(Clone, Debug)]
 pub struct PublicInputs<'a, T> {
     pub(crate) h: &'a [T],
-    pub(crate) dm: (&'a [T], &'a [T], &'a T),
+    pub(crate) dm: &'a [T],
     pub(crate) k: &'a [T],
     pub(crate) t: &'a T,
     pub(crate) n: &'a T,
@@ -42,9 +44,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
 
     fn register_args(&self, cb: &mut CBuilder) {
         cb.register_public_inputs(self.h);
-        cb.register_public_inputs(self.dm.0);
-        cb.register_public_inputs(self.dm.1);
-        cb.register_public_input(*self.dm.2);
+        cb.register_public_inputs(self.dm);
         cb.register_public_inputs(self.k);
         cb.register_public_input(*self.t);
         cb.register_public_input(*self.n);
@@ -55,22 +55,12 @@ impl<'a> PublicInputs<'a, Target> {
     /// Creates a new instance of the public inputs from its logical components.
     pub fn new(
         h: &'a [Target],
-        dm: &'a CurveTarget,
+        dm: &'a [Target],
         k: &'a [Target],
         t: &'a Target,
         n: &'a Target,
     ) -> Self {
-        let dm_x = &dm.0 .0[0].0[..];
-        let dm_y = &dm.0 .0[1].0[..];
-        let dm_is_inf = &dm.0 .1.target;
-
-        Self {
-            h,
-            dm: (dm_x, dm_y, dm_is_inf),
-            k,
-            t,
-            n,
-        }
+        Self { h, dm, k, t, n }
     }
 
     /// MPT key wires corresponding to the slot holding the length.
@@ -85,6 +75,15 @@ impl<'a> PublicInputs<'a, Target> {
             pointer,
         }
     }
+
+    pub fn root_hash(&self) -> Array<U32Target, PACKED_HASH_LEN> {
+        OutputHash::from_targets(self.root_hash_raw())
+    }
+
+    /// value is RLP encoded.
+    pub fn metadata_digest(&self) -> CurveTarget {
+        CurveTarget::from_targets(self.dm)
+    }
 }
 
 impl<'a, T: Clone> PublicInputs<'a, T> {
@@ -92,9 +91,7 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
     pub fn to_vec(&self) -> Vec<T> {
         self.h
             .iter()
-            .chain(self.dm.0.iter())
-            .chain(self.dm.1.iter())
-            .chain(iter::once(self.dm.2))
+            .chain(self.dm.iter())
             .chain(self.k.iter())
             .chain(iter::once(self.t))
             .chain(iter::once(self.n))
@@ -108,16 +105,10 @@ impl<'a, T> PublicInputs<'a, T> {
     pub const TOTAL_LEN: usize = N_RANGE.end;
 
     /// Creates a new instance from its internal parts.
-    pub fn from_parts(
-        h: &'a [T],
-        dm: (&'a [T], &'a [T], &'a T),
-        k: &'a [T],
-        t: &'a T,
-        n: &'a T,
-    ) -> Self {
-        assert_eq!(h.len(), H_RANGE.end - H_RANGE.start);
-        assert_eq!(dm.0.len() + dm.1.len() + 1, DM_RANGE.end - DM_RANGE.start);
-        assert_eq!(k.len(), K_RANGE.end - K_RANGE.start);
+    pub fn from_parts(h: &'a [T], dm: &'a [T], k: &'a [T], t: &'a T, n: &'a T) -> Self {
+        assert_eq!(h.len(), H_RANGE.len());
+        assert_eq!(dm.len(), DM_RANGE.len());
+        assert_eq!(k.len(), K_RANGE.len());
 
         Self { h, dm, k, t, n }
     }
@@ -126,11 +117,7 @@ impl<'a, T> PublicInputs<'a, T> {
     pub fn from_slice(pi: &'a [T]) -> Self {
         Self {
             h: &pi[H_RANGE],
-            dm: (
-                &pi[DM_RANGE.start..DM_RANGE.start + CURVE_TARGET_LEN / 2],
-                &pi[DM_RANGE.start + CURVE_TARGET_LEN / 2..DM_RANGE.end - 1],
-                &pi[DM_RANGE.end - 1],
-            ),
+            dm: &pi[DM_RANGE],
             k: &pi[K_RANGE],
             t: &pi[T_RANGE.start],
             n: &pi[N_RANGE.start],
@@ -138,7 +125,7 @@ impl<'a, T> PublicInputs<'a, T> {
     }
 
     /// Returns the packed block hash.
-    pub const fn root_hash(&self) -> &[T] {
+    pub const fn root_hash_raw(&self) -> &[T] {
         self.h
     }
 
@@ -146,7 +133,7 @@ impl<'a, T> PublicInputs<'a, T> {
     ///
     /// It holds the length slot, along with other pertinent details such as whether or not the
     /// value is RLP encoded.
-    pub const fn metadata(&self) -> (&'a [T], &'a [T], &'a T) {
+    pub const fn metadata(&self) -> &'a [T] {
         self.dm
     }
 
@@ -162,21 +149,13 @@ impl<'a, T> PublicInputs<'a, T> {
 
     /// Length of the dynamic length variable.
     pub const fn length(&self) -> &T {
-        &self.n
+        self.n
     }
 }
 
 impl<'a> PublicInputs<'a, GFp> {
     /// Creates a [WeierstrassPoint] from the metadata.
     pub fn metadata_point(&self) -> WeierstrassPoint {
-        let y = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| self.metadata().1[i]);
-        let x = array::from_fn::<_, EXTENSION_DEGREE, _>(|i| self.metadata().0[i]);
-        let is_inf = self.metadata().2 == &GFp::ONE;
-
-        WeierstrassPoint {
-            x: GFp5::from_basefield_array(x),
-            y: GFp5::from_basefield_array(y),
-            is_inf,
-        }
+        WeierstrassPoint::from_fields(&self.dm)
     }
 }

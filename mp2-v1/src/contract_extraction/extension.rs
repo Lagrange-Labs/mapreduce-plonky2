@@ -165,10 +165,9 @@ mod tests {
 
         // Prepare the public inputs for the extension node circuit.
         let h = &keccak256(&proof[1]).pack(Endianness::Little).to_fields();
-        let dm = map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
-            .to_weierstrass();
-        let dm_is_inf = if dm.is_inf { F::ONE } else { F::ZERO };
-        let dm = (dm.x.0.as_slice(), dm.y.0.as_slice(), &dm_is_inf);
+        let dm = &map_to_curve_point(&random_vector::<u32>(PACKED_ADDRESS_LEN).to_fields())
+            .to_weierstrass()
+            .to_fields();
         let k = &random_vector::<u32>(MAX_KEY_NIBBLE_LEN).to_fields();
         let t = &63_u8.to_field();
         let s = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();

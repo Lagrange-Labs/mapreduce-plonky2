@@ -2,11 +2,12 @@
 
 use crate::{
     block_extraction, cells_tree, contract_extraction,
+    final_extraction::{self, BaseCircuitProofInputs, SimpleCircuit},
     length_extraction::{self, LengthCircuitInput},
     values_extraction,
 };
 use anyhow::Result;
-use ethers::prelude::U256;
+use ethers::{core::k256::elliptic_curve::rand_core::block, prelude::U256};
 use mp2_common::{
     serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize},
     C, D, F,
@@ -63,6 +64,8 @@ pub enum CircuitInput {
     ValuesExtraction(values_extraction::CircuitInput),
     /// Block extraction necessary input
     BlockExtraction(block_extraction::CircuitInput),
+    /// Final extraction input
+    FinalExtraction(final_extraction::CircuitInput),
     /// Cells tree construction input
     CellsTree(cells_tree::CircuitInput),
 }
@@ -74,6 +77,7 @@ pub struct PublicParameters {
     length_extraction: length_extraction::PublicParameters,
     values_extraction: values_extraction::PublicParameters,
     block_extraction: block_extraction::PublicParameters,
+    final_extraction: final_extraction::PublicParameters,
     cells_tree: cells_tree::PublicParameters,
 }
 
@@ -88,6 +92,13 @@ pub fn build_circuits_params() -> PublicParameters {
     let values_extraction = values_extraction::build_circuits_params();
     log::info!("Building block_extraction parameters...");
     let block_extraction = block_extraction::build_circuits_params();
+    log::info!("Building final_extraction parameters...");
+    let final_extraction = final_extraction::PublicParameters::build(
+        block_extraction.circuit_data().verifier_data(),
+        contract_extraction.get_circuit_set(),
+        values_extraction.get_circuit_set(),
+        length_extraction.get_circuit_set(),
+    );
     log::info!("Building cells_tree parameters...");
     let cells_tree = cells_tree::build_circuits_params();
     log::info!("All parameters built!");
@@ -97,6 +108,7 @@ pub fn build_circuits_params() -> PublicParameters {
         values_extraction,
         length_extraction,
         block_extraction,
+        final_extraction,
         cells_tree,
     }
 }
@@ -114,6 +126,24 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
             values_extraction::generate_proof(&params.values_extraction, input)
         }
         CircuitInput::BlockExtraction(input) => params.block_extraction.generate_proof(input),
+        CircuitInput::FinalExtraction(input) => {
+            let contract_circuit_set = params.contract_extraction.get_circuit_set();
+            let value_circuit_set = params.values_extraction.get_circuit_set();
+            match input {
+                final_extraction::CircuitInput::Simple(input) => params
+                    .final_extraction
+                    .generate_simple_proof(input, contract_circuit_set, value_circuit_set),
+                final_extraction::CircuitInput::Lengthed(input) => {
+                    let length_circuit_set = params.length_extraction.get_circuit_set();
+                    params.final_extraction.generate_lengthed_proof(
+                        input,
+                        contract_circuit_set,
+                        value_circuit_set,
+                        length_circuit_set,
+                    )
+                }
+            }
+        }
         CircuitInput::CellsTree(input) => params.cells_tree.generate_proof(input),
     }
 }

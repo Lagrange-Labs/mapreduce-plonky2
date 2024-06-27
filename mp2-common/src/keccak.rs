@@ -1,3 +1,5 @@
+use std::array;
+
 use anyhow::{ensure, Result};
 use plonky2::{
     field::extension::Extendable,
@@ -21,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     array::{Array, Vector, VectorWire},
-    utils::{keccak256, less_than, Endianness, PackerTarget},
+    utils::{keccak256, less_than, Endianness, FromTargets, PackerTarget, ToTargets},
 };
 
 /// Length of a hash in bytes.
@@ -53,6 +55,18 @@ pub type OutputHash = Array<U32Target, PACKED_HASH_LEN>;
 /// Represents the output of the keccak hash function. This output
 /// is in a byte representation.
 pub type OutputByteHash = Array<Target, HASH_LEN>;
+
+impl FromTargets for OutputHash {
+    fn from_targets(t: &[Target]) -> Self {
+        OutputHash::from_array(array::from_fn(|i| U32Target(t[i])))
+    }
+}
+
+impl ToTargets for OutputHash {
+    fn to_targets(&self) -> Vec<Target> {
+        self.to_targets().arr.to_vec()
+    }
+}
 
 /// Circuit able to hash any arrays of bytes of dynamic sizes as long as its
 /// padded version length is less than N. In other words, N is the maximal size

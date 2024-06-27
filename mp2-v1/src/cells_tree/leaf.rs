@@ -9,6 +9,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    utils::ToTargets,
     D, F,
 };
 use plonky2::{

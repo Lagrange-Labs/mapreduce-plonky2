@@ -16,9 +16,11 @@ use plonky2_ecgfp5::{
     curve::curve::Point,
     gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget},
 };
+use rand::{thread_rng, Rng};
 use sha3::Digest;
 use sha3::Keccak256;
 
+use crate::mpt_sequential::Circuit;
 use crate::u256::NUM_LIMBS;
 use crate::{
     group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing, EXTENSION_DEGREE},
@@ -182,8 +184,8 @@ pub fn hash_two_to_one<F: RichField, H: Hasher<F>>(
     left: HashOutput,
     right: HashOutput,
 ) -> HashOutput {
-    let [left, right] = [left, right].map(|bytes| H::Hash::from_bytes(&bytes));
-    H::two_to_one(left, right).to_bytes().try_into().unwrap()
+    let [left, right] = [left, right].map(|bytes| H::Hash::from_bytes((&bytes).into()));
+    HashOutput::try_from(H::two_to_one(left, right).to_bytes()).unwrap()
 }
 
 /// Pack the inputs (according to endianness) then compute the Poseidon hash value.
@@ -217,46 +219,62 @@ pub fn pack_and_compute_poseidon_target<F: RichField + Extendable<D>, const D: u
     b.hash_n_to_hash_no_pad::<PoseidonHash>(packed)
 }
 
-// TODO move that to a vec/array specific module?
-pub trait ToFields {
-    fn to_fields<F: RichField>(&self) -> Vec<F>;
+pub trait ToFields<F: RichField> {
+    fn to_fields(&self) -> Vec<F>;
 }
 
-impl ToFields for &[u8] {
-    fn to_fields<F: RichField>(&self) -> Vec<F> {
+impl<F: RichField> ToFields<F> for &[u8] {
+    fn to_fields(&self) -> Vec<F> {
         self.iter().map(|x| F::from_canonical_u8(*x)).collect()
     }
 }
-impl ToFields for &[u32] {
-    fn to_fields<F: RichField>(&self) -> Vec<F> {
+impl<F: RichField> ToFields<F> for &[u32] {
+    fn to_fields(&self) -> Vec<F> {
         self.iter().map(|x| F::from_canonical_u32(*x)).collect()
     }
 }
-pub trait Fieldable {
-    fn to_field<F: RichField>(&self) -> F;
+pub trait Fieldable<F: RichField> {
+    fn to_field(&self) -> F;
 }
 
-impl Fieldable for u8 {
-    fn to_field<F: RichField>(&self) -> F {
+impl<F: RichField> Fieldable<F> for u8 {
+    fn to_field(&self) -> F {
         F::from_canonical_u8(*self)
     }
 }
-impl<T: Fieldable> ToFields for Vec<T> {
-    fn to_fields<F: RichField>(&self) -> Vec<F> {
+impl<F: RichField, T: Fieldable<F>> ToFields<F> for Vec<T> {
+    fn to_fields(&self) -> Vec<F> {
         self.iter().map(|x| x.to_field()).collect()
     }
 }
 
-impl<const N: usize, T: Fieldable> ToFields for [T; N] {
-    fn to_fields<F: RichField>(&self) -> Vec<F> {
+impl<F: RichField, const N: usize, T: Fieldable<F>> ToFields<F> for [T; N] {
+    fn to_fields(&self) -> Vec<F> {
         self.iter().map(|x| x.to_field()).collect()
     }
 }
 
-impl Fieldable for u32 {
-    fn to_field<F: RichField>(&self) -> F {
+impl<F: RichField> ToFields<F> for HashOutput {
+    fn to_fields(&self) -> Vec<F> {
+        Vec::<u8>::from(self).pack(Endianness::Little).to_fields()
+    }
+}
+
+impl<F: RichField> Fieldable<F> for u32 {
+    fn to_field(&self) -> F {
         F::from_canonical_u32(*self)
     }
+}
+pub trait FromTargets {
+    fn from_targets(t: &[Target]) -> Self;
+}
+
+pub trait ToTargets {
+    fn to_targets(&self) -> Vec<Target>;
+}
+
+pub trait FromFields<F> {
+    fn from_fields(t: &[F]) -> Self;
 }
 /// Trait alias defined to implement `Packer` trait for `RichField`
 /// Fields that want to be packed with `Packer` have to implement
@@ -480,6 +498,21 @@ impl<F: RichField + Extendable<D>, const D: usize> PackerTarget<F, D, Target> fo
     fn pack(&self, b: &mut CircuitBuilder<F, D>, endianness: Endianness) -> Vec<Target> {
         let packed_targets: Vec<U32Target> = self.pack(b, endianness);
         packed_targets.into_iter().map(|t| t.0).collect_vec()
+    }
+}
+
+pub trait SliceConnector {
+    fn connect_slice(&mut self, x: &[Target], y: &[Target]);
+}
+
+impl<F: RichField + Extendable<D>, const D: usize> SliceConnector for CircuitBuilder<F, D> {
+    fn connect_slice(&mut self, x: &[Target], y: &[Target]) {
+        if x.len() != y.len() {
+            panic!("only call connect_slice with equal length");
+        }
+        for (xx, yy) in x.iter().zip(y.iter()) {
+            self.connect(*xx, *yy)
+        }
     }
 }
 
