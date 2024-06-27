@@ -13,7 +13,7 @@ use plonky2::{
 };
 use std::sync::OnceLock;
 
-type H = PoseidonHash;
+pub type H = PoseidonHash;
 type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
 
 /// The static variable of Empty Poseidon hash

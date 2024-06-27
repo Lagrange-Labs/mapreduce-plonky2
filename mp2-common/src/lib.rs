@@ -40,6 +40,7 @@ pub mod utils;
 pub const D: usize = 2;
 pub type C = PoseidonGoldilocksConfig;
 pub type F = <C as GenericConfig<D>>::F;
+pub type CHasher = <C as GenericConfig<D>>::Hasher;
 
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.

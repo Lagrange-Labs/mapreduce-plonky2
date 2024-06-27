@@ -9,10 +9,9 @@ use mp2_common::{
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
-    D, F,
+    CHasher, D, F,
 };
 use plonky2::{
-    hash::poseidon::PoseidonHash,
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
@@ -53,7 +52,7 @@ impl LeafCircuit {
             .chain(iter::once(identifier))
             .chain(value.to_targets())
             .collect();
-        let h = b.hash_n_to_hash_no_pad::<PoseidonHash>(inputs).elements;
+        let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
         // dc = D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
@@ -99,6 +98,7 @@ mod tests {
     use super::*;
     use mp2_common::{
         group_hashing::map_to_curve_point,
+        poseidon::H,
         utils::{Fieldable, Packer, ToFields},
         C,
     };
@@ -144,7 +144,7 @@ mod tests {
                 .chain(iter::once(identifier))
                 .chain(value_fields.clone())
                 .collect();
-            let exp_hash = PoseidonHash::hash_no_pad(&inputs);
+            let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
         }

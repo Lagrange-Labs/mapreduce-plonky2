@@ -183,10 +183,10 @@ mod tests {
     use super::*;
     use mp2_common::{
         group_hashing::{add_curve_point, map_to_curve_point},
-        poseidon::empty_poseidon_hash,
+        poseidon::{empty_poseidon_hash, H},
         utils::{Endianness, Fieldable},
     };
-    use plonky2::{hash::poseidon::PoseidonHash, plonk::config::Hasher};
+    use plonky2::plonk::config::Hasher;
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use rand::{thread_rng, Rng};
     use serial_test::serial;
@@ -238,7 +238,7 @@ mod tests {
                 .chain(iter::once(identifier))
                 .chain(packed_value.clone())
                 .collect();
-            let exp_hash = PoseidonHash::hash_no_pad(&inputs);
+            let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
         }
@@ -316,7 +316,7 @@ mod tests {
                 .chain(iter::once(identifier))
                 .chain(packed_value.clone())
                 .collect();
-            let exp_hash = PoseidonHash::hash_no_pad(&inputs);
+            let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
         }
@@ -370,7 +370,7 @@ mod tests {
                 .chain(iter::once(identifier))
                 .chain(packed_value.clone())
                 .collect();
-            let exp_hash = PoseidonHash::hash_no_pad(&inputs);
+            let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
         }
