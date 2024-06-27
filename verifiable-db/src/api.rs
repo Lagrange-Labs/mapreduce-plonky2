@@ -1,11 +1,8 @@
 //! Main APIs and related structures
 
-use crate::{
-    block_extraction, contract_extraction, final_extraction,
-    length_extraction::{self, LengthCircuitInput},
-    values_extraction,
-};
+use crate::cells_tree;
 use anyhow::Result;
+use ethers::prelude::U256;
 use mp2_common::{
     serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize},
     C, D, F,
@@ -18,10 +15,11 @@ use plonky2::plonk::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Struct containing the expected input MPT Extension/Branch node
+/// Struct containing the expected input of the Tree node
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InputNode {
-    pub node: Vec<u8>,
+    pub identifier: F,
+    pub value: U256,
 }
 
 // TODO: move to mp2-common.
@@ -45,97 +43,38 @@ impl<T> ProofInputSerialized<T> {
     }
 }
 
-/// Set of inputs necessary to generate proofs for each circuit employed in the
-/// pre-processing stage of LPN
+/// Set of inputs necessary to generate proofs for each circuit employed in the verifiable DB stage of LPN
 pub enum CircuitInput {
-    /// Contract extraction input
-    ContractExtraction(contract_extraction::CircuitInput),
-    /// Length extraction input
-    LengthExtraction(LengthCircuitInput),
-    /// Values extraction input
-    ValuesExtraction(values_extraction::CircuitInput),
-    /// Block extraction necessary input
-    BlockExtraction(block_extraction::CircuitInput),
-    /// Final extraction input
-    FinalExtraction(final_extraction::CircuitInput),
+    /// Cells tree construction input
+    CellsTree(cells_tree::CircuitInput),
 }
 
+/// Parameters defining all the circuits employed for the verifiable DB stage of LPN
 #[derive(Serialize, Deserialize)]
-/// Parameters defining all the circuits employed for the pre-processing stage of LPN
 pub struct PublicParameters {
-    contract_extraction: contract_extraction::PublicParameters,
-    length_extraction: length_extraction::PublicParameters,
-    values_extraction: values_extraction::PublicParameters,
-    block_extraction: block_extraction::PublicParameters,
-    final_extraction: final_extraction::PublicParameters,
+    cells_tree: cells_tree::PublicParameters,
 }
 
-/// Instantiate the circuits employed for the pre-processing stage of LPN,
-/// returning their corresponding parameters
+/// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.
 pub fn build_circuits_params() -> PublicParameters {
-    log::info!("Building contract_extraction parameters...");
-    let contract_extraction = contract_extraction::build_circuits_params();
-    log::info!("Building length_extraction parameters...");
-    let length_extraction = length_extraction::PublicParameters::build();
-    log::info!("Building values_extraction parameters...");
-    let values_extraction = values_extraction::build_circuits_params();
-    log::info!("Building block_extraction parameters...");
-    let block_extraction = block_extraction::build_circuits_params();
-    log::info!("Building final_extraction parameters...");
-    let final_extraction = final_extraction::PublicParameters::build(
-        block_extraction.circuit_data().verifier_data(),
-        contract_extraction.get_circuit_set(),
-        values_extraction.get_circuit_set(),
-        length_extraction.get_circuit_set(),
-    );
+    log::info!("Building cells_tree parameters...");
+    let cells_tree = cells_tree::build_circuits_params();
     log::info!("All parameters built!");
 
-    PublicParameters {
-        contract_extraction,
-        values_extraction,
-        length_extraction,
-        block_extraction,
-        final_extraction,
-    }
+    PublicParameters { cells_tree }
 }
 
 /// Generate a proof for a circuit in the set of circuits employed in the
-/// pre-processing stage of LPN, employing `CircuitInput` to specify for which
-/// circuit the proof should be generated
+/// verifiable DB stage of LPN, employing `CircuitInput` to specify for which
+/// circuit the proof should be generated.
 pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
     match input {
-        CircuitInput::ContractExtraction(input) => {
-            contract_extraction::generate_proof(&params.contract_extraction, input)
-        }
-        CircuitInput::LengthExtraction(input) => params.length_extraction.generate_proof(input),
-        CircuitInput::ValuesExtraction(input) => {
-            values_extraction::generate_proof(&params.values_extraction, input)
-        }
-        CircuitInput::BlockExtraction(input) => params.block_extraction.generate_proof(input),
-        CircuitInput::FinalExtraction(input) => {
-            let contract_circuit_set = params.contract_extraction.get_circuit_set();
-            let value_circuit_set = params.values_extraction.get_circuit_set();
-            match input {
-                final_extraction::CircuitInput::Simple(input) => params
-                    .final_extraction
-                    .generate_simple_proof(input, contract_circuit_set, value_circuit_set),
-                final_extraction::CircuitInput::Lengthed(input) => {
-                    let length_circuit_set = params.length_extraction.get_circuit_set();
-                    params.final_extraction.generate_lengthed_proof(
-                        input,
-                        contract_circuit_set,
-                        value_circuit_set,
-                        length_circuit_set,
-                    )
-                }
-            }
-        }
+        CircuitInput::CellsTree(input) => params.cells_tree.generate_proof(input),
     }
 }
 
 // TODO: move to mp2-common.
-/// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits
-/// employed for the pre-processing statge of LPN
+/// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits.
 pub(crate) fn default_config() -> CircuitConfig {
     CircuitConfig::standard_recursion_config()
 }
