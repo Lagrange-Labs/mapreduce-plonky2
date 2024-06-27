@@ -7,7 +7,7 @@ use super::{
     partial_node::{PartialNodeCircuit, PartialNodeWires},
     public_inputs::PublicInputs,
 };
-use crate::api::InputNode;
+use crate::api::CellNode;
 use anyhow::Result;
 use ethers::prelude::U256;
 use mp2_common::{
@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use std::array;
 
 type LeafInput = LeafCircuit;
-type ChildInput = ProofInputSerialized<InputNode>;
+type ChildInput = ProofInputSerialized<CellNode>;
 
 /// CircuitInput is a wrapper around the different specialized circuits that can
 /// be used to prove a node recursively.
@@ -58,7 +58,7 @@ fn new_child_input(
     serialized_child_proofs: Vec<Vec<u8>>,
 ) -> ChildInput {
     ChildInput {
-        input: InputNode { identifier, value },
+        input: CellNode { identifier, value },
         serialized_child_proofs,
     }
 }

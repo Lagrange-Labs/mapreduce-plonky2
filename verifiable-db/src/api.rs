@@ -4,11 +4,12 @@ use crate::cells_tree;
 use anyhow::Result;
 use ethers::prelude::U256;
 use mp2_common::F;
+use plonky2::hash::hash_types::HashOut;
 use serde::{Deserialize, Serialize};
 
-/// Struct containing the expected input of the Tree node
+/// Struct containing the expected input of the Cell Tree node
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct InputNode {
+pub struct CellNode {
     pub identifier: F,
     pub value: U256,
 }

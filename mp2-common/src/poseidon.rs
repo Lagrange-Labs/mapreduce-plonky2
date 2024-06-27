@@ -1,3 +1,7 @@
+use crate::types::CBuilder;
+use crate::F;
+use num::BigUint;
+use plonky2::field::types::PrimeField64;
 use plonky2::{
     field::{extension::Extendable, goldilocks_field::GoldilocksField},
     hash::{
@@ -11,6 +15,8 @@ use plonky2::{
         config::{AlgebraicHasher, Hasher},
     },
 };
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use plonky2_ecdsa::gadgets::biguint::BigUintTarget;
 use std::sync::OnceLock;
 
 pub type H = PoseidonHash;
@@ -22,6 +28,35 @@ static EMPTY_POSEIDON_HASH: OnceLock<HashOut<GoldilocksField>> = OnceLock::new()
 /// Get the static empty Poseidon hash.
 pub fn empty_poseidon_hash() -> &'static HashOut<GoldilocksField> {
     EMPTY_POSEIDON_HASH.get_or_init(|| H::hash_no_pad(&[]))
+}
+
+/// Convert the hash target into a big integer target.
+pub fn hash_to_int_target(b: &mut CBuilder, h: HashOutTarget) -> BigUintTarget {
+    let limbs = h
+        .elements
+        .into_iter()
+        .flat_map(|t| {
+            // Split the hash element into low and high of Uint32. The `split_low_high`
+            // function handles the range check in internal.
+            let (low, high) = b.split_low_high(t, 32, 64);
+            [low, high].map(U32Target)
+        })
+        .collect();
+
+    BigUintTarget { limbs }
+}
+
+/// Convert the hash value into a big integer.
+pub fn hash_to_int_value(h: HashOut<F>) -> BigUint {
+    BigUint::from_slice(
+        &h.elements
+            .iter()
+            .flat_map(|f| {
+                let u = f.to_canonical_u64();
+                [u & u32::MAX as u64, u >> 32].map(|u| u as u32)
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// Hash the concatenation of the two provided 4-wide inputs, swapping them if specified.
@@ -65,15 +100,44 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::default_config;
+    use crate::utils::ToFields;
+    use crate::C;
     use mp2_test::circuit::{run_circuit, UserCircuit};
+    use mp2_test::utils::random_vector;
     use plonky2::{
         field::types::Field,
         hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::config::PoseidonGoldilocksConfig,
     };
+    use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 
     use super::*;
+
+    #[test]
+    fn test_hash_to_int() {
+        // Generate the test hash.
+        let hash = HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
+
+        // Convert to an integer.
+        let exp_int = hash_to_int_value(hash);
+
+        let config = default_config();
+        let mut b = CBuilder::new(config);
+
+        // Convert the hash target to an integer target.
+        let hash = b.constant_hash(hash);
+        let int = hash_to_int_target(&mut b, hash);
+
+        // Check if the integer is the expected one.
+        let exp_int = b.constant_biguint(&exp_int);
+        b.connect_biguint(&int, &exp_int);
+
+        let cd = b.build::<C>();
+        let mut pw = PartialWitness::new();
+        cd.prove(pw).unwrap();
+    }
 
     #[test]
     fn hash_maybe_swap_is_equivalent_to_hash_n_false() {

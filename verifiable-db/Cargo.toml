@@ -9,10 +9,13 @@ bincode.workspace = true
 ethers.workspace = true
 log.workspace = true
 plonky2.workspace = true
+plonky2_ecdsa.workspace = true
 plonky2_ecgfp5.workspace = true
+rand.workspace = true
 serde.workspace = true
 
 mp2_common = { path = "../mp2-common" }
+mp2_v1 = { path = "../mp2-v1" }
 recursion_framework = { path = "../recursion-framework" }
 
 [dev-dependencies]

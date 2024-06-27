@@ -102,7 +102,7 @@ impl<'a> PublicInputs<'a, Target> {
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
     /// Total length of the public inputs
-    pub(crate) const TOTAL_LEN: usize = BN_RANGE.end;
+    pub const TOTAL_LEN: usize = BN_RANGE.end;
 
     /// Create from a slice.
     pub fn from_slice(pi: &'a [T]) -> Self {
@@ -139,6 +139,10 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     pub fn block_number_raw(&self) -> &[T] {
         &self.bn
+    }
+
+    pub fn digest_metadata_raw(&self) -> &[T] {
+        &self.dm
     }
 }
 

@@ -1,0 +1,236 @@
+//! Public inputs for Block Insertion circuits
+
+use mp2_common::{
+    keccak::PACKED_HASH_LEN,
+    public_inputs::{PublicInputCommon, PublicInputRange},
+    types::{CBuilder, CURVE_TARGET_LEN},
+    u256,
+    utils::{FromFields, FromTargets},
+    F,
+};
+use plonky2::{
+    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
+    iop::target::Target,
+};
+use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
+
+// Block Insertion public inputs:
+// `H_new : [4]F` - Hash of the tree after insertion of the current block
+// `H_old : [4]F` - Hash of the tree constructed so far
+// `min : F[8]` - Minimum block number found among the nodes in the subtree rooted in the current node
+// `max : F[8]` - Maximum block number found among the nodes in the subtree rooted in the current node
+// `block_number : [8]F` - Block number being inserted, represented as a u256 with 8 32-bit limbs in big-endian order
+// `block_hash : [8]F` - Block header of the block being inserted
+// `prev_block_hash : [8]F` - Block header of the last inserted block in the old tree
+// `M : [4]F` - Metadata hash for the data related to this block extracted from the blockchain; this is the same as the metadata digest computed by extraction circuits, but wrapped in a hash since it is more efficient to be propagated as a public input
+// `new_node_digest : Digest[F]` - Order-agnostic digest of the new inserted node, to be employed in case we want to later build a generic index tree with a different index than the block number
+const H_NEW_RANGE: PublicInputRange = 0..NUM_HASH_OUT_ELTS;
+const H_OLD_RANGE: PublicInputRange = H_NEW_RANGE.end..H_NEW_RANGE.end + NUM_HASH_OUT_ELTS;
+const MIN_RANGE: PublicInputRange = H_OLD_RANGE.end..H_OLD_RANGE.end + u256::NUM_LIMBS;
+const MAX_RANGE: PublicInputRange = MIN_RANGE.end..MIN_RANGE.end + u256::NUM_LIMBS;
+const BLOCK_NUMBER_RANGE: PublicInputRange = MAX_RANGE.end..MAX_RANGE.end + u256::NUM_LIMBS;
+const BLOCK_HASH_RANGE: PublicInputRange =
+    BLOCK_NUMBER_RANGE.end..BLOCK_NUMBER_RANGE.end + PACKED_HASH_LEN;
+const PREV_BLOCK_HASH_RANGE: PublicInputRange =
+    BLOCK_HASH_RANGE.end..BLOCK_HASH_RANGE.end + PACKED_HASH_LEN;
+const M_RANGE: PublicInputRange =
+    PREV_BLOCK_HASH_RANGE.end..PREV_BLOCK_HASH_RANGE.end + NUM_HASH_OUT_ELTS;
+const NEW_NODE_DIGEST_RANGE: PublicInputRange = M_RANGE.end..M_RANGE.end + CURVE_TARGET_LEN;
+
+/// Public inputs for Cells Tree Construction
+#[derive(Clone, Debug)]
+pub struct PublicInputs<'a, T> {
+    pub(crate) h_new: &'a [T],
+    pub(crate) h_old: &'a [T],
+    pub(crate) min: &'a [T],
+    pub(crate) max: &'a [T],
+    pub(crate) block_number: &'a [T],
+    pub(crate) block_hash: &'a [T],
+    pub(crate) prev_block_hash: &'a [T],
+    pub(crate) m: &'a [T],
+    pub(crate) new_node_digest: &'a [T],
+}
+
+impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+    const RANGES: &'static [PublicInputRange] = &[
+        H_NEW_RANGE,
+        H_OLD_RANGE,
+        MIN_RANGE,
+        MAX_RANGE,
+        BLOCK_NUMBER_RANGE,
+        BLOCK_HASH_RANGE,
+        PREV_BLOCK_HASH_RANGE,
+        M_RANGE,
+        NEW_NODE_DIGEST_RANGE,
+    ];
+
+    fn register_args(&self, cb: &mut CBuilder) {
+        cb.register_public_inputs(self.h_new);
+        cb.register_public_inputs(self.h_old);
+        cb.register_public_inputs(self.min);
+        cb.register_public_inputs(self.max);
+        cb.register_public_inputs(self.block_number);
+        cb.register_public_inputs(self.block_hash);
+        cb.register_public_inputs(self.prev_block_hash);
+        cb.register_public_inputs(self.m);
+        cb.register_public_inputs(self.new_node_digest);
+    }
+}
+
+impl<'a> PublicInputs<'a, F> {
+    /// Get the new hash value.
+    pub fn new_hash_value(&self) -> HashOut<F> {
+        self.h_new.try_into().unwrap()
+    }
+
+    /// Get the new node digest point.
+    pub fn new_node_digest_point(&self) -> WeierstrassPoint {
+        WeierstrassPoint::from_fields(&self.new_node_digest)
+    }
+}
+
+impl<'a> PublicInputs<'a, Target> {
+    /// Get the new hash target.
+    pub fn new_hash_target(&self) -> HashOutTarget {
+        self.h_new.try_into().unwrap()
+    }
+
+    /// Get the new node digest target.
+    pub fn new_node_digest_target(&self) -> CurveTarget {
+        CurveTarget::from_targets(self.new_node_digest)
+    }
+}
+
+impl<'a, T: Copy> PublicInputs<'a, T> {
+    /// Total length of the public inputs
+    pub(crate) const TOTAL_LEN: usize = NEW_NODE_DIGEST_RANGE.end;
+
+    /// Create a new public inputs.
+    pub fn new(
+        h_new: &'a [T],
+        h_old: &'a [T],
+        min: &'a [T],
+        max: &'a [T],
+        block_number: &'a [T],
+        block_hash: &'a [T],
+        prev_block_hash: &'a [T],
+        m: &'a [T],
+        new_node_digest: &'a [T],
+    ) -> Self {
+        Self {
+            h_new,
+            h_old,
+            min,
+            max,
+            block_number,
+            block_hash,
+            prev_block_hash,
+            m,
+            new_node_digest,
+        }
+    }
+    /// Create from a slice.
+    pub fn from_slice(pi: &'a [T]) -> Self {
+        assert!(pi.len() >= Self::TOTAL_LEN);
+
+        Self {
+            h_new: &pi[H_NEW_RANGE],
+            h_old: &pi[H_OLD_RANGE],
+            min: &pi[MIN_RANGE],
+            max: &pi[MAX_RANGE],
+            block_number: &pi[BLOCK_NUMBER_RANGE],
+            block_hash: &pi[BLOCK_HASH_RANGE],
+            prev_block_hash: &pi[PREV_BLOCK_HASH_RANGE],
+            m: &pi[M_RANGE],
+            new_node_digest: &pi[NEW_NODE_DIGEST_RANGE],
+        }
+    }
+
+    /// Combine to a vector.
+    pub fn to_vec(&self) -> Vec<T> {
+        self.h_new
+            .iter()
+            .chain(self.h_old)
+            .chain(self.min)
+            .chain(self.max)
+            .chain(self.block_number)
+            .chain(self.block_hash)
+            .chain(self.prev_block_hash)
+            .chain(self.m)
+            .chain(self.new_node_digest)
+            .cloned()
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ethers::prelude::U256;
+    use mp2_common::{
+        utils::{Fieldable, ToFields},
+        C, D, F,
+    };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
+    use plonky2::{
+        field::types::{Field, Sample},
+        iop::{
+            target::Target,
+            witness::{PartialWitness, WitnessWrite},
+        },
+    };
+    use plonky2_ecgfp5::curve::curve::Point;
+    use rand::{thread_rng, Rng};
+
+    #[derive(Clone, Debug)]
+    struct TestPICircuit<'a> {
+        exp_pi: &'a [F],
+    }
+
+    impl<'a> UserCircuit<F, D> for TestPICircuit<'a> {
+        type Wires = Vec<Target>;
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let pi = b.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
+            PublicInputs::from_slice(&pi).register(b);
+
+            pi
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            pw.set_target_arr(&wires, self.exp_pi);
+        }
+    }
+
+    #[test]
+    fn test_block_insertion_public_inputs() {
+        let mut rng = thread_rng();
+
+        // Prepare the public inputs.
+        let [h_new, h_old, m] = [0; 3].map(|_| random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
+        let [min, max, block_number] = [0; 3].map(|_| U256(rng.gen::<[u64; 4]>()).to_fields());
+        let [block_hash, prev_block_hash] =
+            [0; 2].map(|_| random_vector::<u32>(PACKED_HASH_LEN).to_fields());
+        let new_node_digest = &Point::sample(&mut rng).to_weierstrass().to_fields();
+        let exp_pi = PublicInputs::<F>::new(
+            &h_new,
+            &h_old,
+            &min,
+            &max,
+            &block_number,
+            &block_hash,
+            &prev_block_hash,
+            &m,
+            &new_node_digest,
+        );
+        let exp_pi = &exp_pi.to_vec();
+
+        let test_circuit = TestPICircuit { exp_pi };
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
+
+        assert_eq!(&proof.public_inputs, exp_pi);
+    }
+}
