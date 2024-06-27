@@ -10,7 +10,7 @@ use super::{
 use crate::api::{default_config, CellNode, ProofInputSerialized, ProofWithVK};
 use anyhow::Result;
 use ethers::prelude::U256;
-use mp2_common::{u256, utils::ToFields, C, D, F};
+use mp2_common::{C, D, F};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
@@ -28,7 +28,6 @@ pub enum CircuitInput {
     Leaf(LeafInput),
     FullNode(ChildInput),
     PartialNode(ChildInput),
-    EmptyNode,
 }
 
 impl CircuitInput {
@@ -45,11 +44,6 @@ impl CircuitInput {
     /// Create a circuit input for proving a partial node of 1 child.
     pub fn new_partial_node(identifier: F, value: U256, child_proof: Vec<u8>) -> Self {
         CircuitInput::PartialNode(new_child_input(identifier, value, vec![child_proof]))
-    }
-
-    /// Create a circuit input for proving an empty node.
-    pub fn new_empty_node() -> Self {
-        CircuitInput::EmptyNode
     }
 }
 
@@ -169,10 +163,14 @@ impl PublicParameters {
                 )?;
                 (proof, self.partial_node.get_verifier_data().clone())
             }
-            CircuitInput::EmptyNode => return self.empty_node_proof.serialize(),
         };
 
         ProofWithVK::from(proof_with_vk).serialize()
+    }
+
+    /// Get the proof of an empty node.
+    pub fn empty_node_proof(&self) -> Result<Vec<u8>> {
+        self.empty_node_proof.serialize()
     }
 }
 
@@ -182,7 +180,7 @@ mod tests {
     use mp2_common::{
         group_hashing::{add_curve_point, map_to_curve_point},
         poseidon::{empty_poseidon_hash, H},
-        utils::{Endianness, Fieldable},
+        utils::{Endianness, Fieldable, ToFields},
     };
     use plonky2::plonk::config::Hasher;
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
@@ -252,10 +250,8 @@ mod tests {
     }
 
     fn generate_empty_node_proof(params: &PublicParameters) -> Vec<u8> {
-        let input = CircuitInput::new_empty_node();
-
-        // Generate proof.
-        let proof = params.generate_proof(input).unwrap();
+        // Get the proof.
+        let proof = params.empty_node_proof().unwrap();
 
         // Check the public inputs.
         let pi = ProofWithVK::deserialize(&proof)
