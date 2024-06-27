@@ -73,7 +73,7 @@ pub struct PublicParameters {
     partial_node: CircuitWithUniversalVerifier<F, C, D, 1, PartialNodeWires>,
     empty_node: CircuitWithUniversalVerifier<F, C, D, 0, EmptyNodeWires>,
     set: RecursiveCircuits<F, C, D>,
-    empty_node_proof: Vec<u8>,
+    empty_node_proof: ProofWithVK,
 }
 
 /// Public API employed to build the circuits, which are returned in serialized form.
@@ -110,9 +110,7 @@ impl PublicParameters {
         let proof = set
             .generate_proof(&empty_node, [], [], EmptyNodeCircuit)
             .unwrap();
-        let empty_node_proof = ProofWithVK::from((proof, empty_node.get_verifier_data().clone()))
-            .serialize()
-            .unwrap();
+        let empty_node_proof = ProofWithVK::from((proof, empty_node.get_verifier_data().clone()));
 
         PublicParameters {
             leaf,
@@ -171,7 +169,7 @@ impl PublicParameters {
                 )?;
                 (proof, self.partial_node.get_verifier_data().clone())
             }
-            CircuitInput::EmptyNode => return Ok(self.empty_node_proof.clone()),
+            CircuitInput::EmptyNode => return self.empty_node_proof.serialize(),
         };
 
         ProofWithVK::from(proof_with_vk).serialize()
