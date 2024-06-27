@@ -2,14 +2,12 @@ use anyhow::Result;
 use ethers::types::U64;
 use mp2_common::{
     eth::{left_pad_generic, BlockUtil},
+    proof::deserialize_proof,
     u256,
     utils::{Endianness, Packer, ToFields},
     C, D, F,
 };
-use mp2_v1::{
-    api::{self, deserialize_proof},
-    block_extraction,
-};
+use mp2_v1::{api, block_extraction};
 use plonky2::plonk::proof::ProofWithPublicInputs;
 
 use super::TestContext;

@@ -12,12 +12,13 @@ pub(crate) mod public_inputs;
 
 use anyhow::Result;
 use mp2_common::{
+    default_config,
+    proof::serialize_proof,
     serialization::{deserialize, serialize},
     C, D, F,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::api::{default_config, serialize_proof};
 pub use public_inputs::PublicInputs;
 pub struct CircuitInput(Vec<u8>);
 impl CircuitInput {
@@ -72,16 +73,14 @@ mod test {
     };
     use mp2_common::{
         eth::BlockUtil,
+        proof::deserialize_proof,
         u256::U256PubInputs,
         utils::{Endianness, Packer, ToFields},
         C, D, F,
     };
     use mp2_test::eth::get_sepolia_url;
 
-    use crate::{
-        api::deserialize_proof,
-        block_extraction::{public_inputs::PublicInputs, PublicParameters},
-    };
+    use crate::block_extraction::{public_inputs::PublicInputs, PublicParameters};
     #[tokio::test]
     async fn test_api() -> Result<()> {
         let params = PublicParameters::build();

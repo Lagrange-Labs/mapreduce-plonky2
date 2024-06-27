@@ -10,12 +10,13 @@ use mp2_common::{
     mpt_sequential::{
         mpt_key_ptr, utils::bytes_to_nibbles, MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE,
     },
+    proof::ProofWithVK,
     types::HashOutput,
     utils::{keccak256, ToFields},
     F,
 };
 use mp2_v1::{
-    api::{generate_proof, CircuitInput, ProofWithVK, PublicParameters},
+    api::{generate_proof, CircuitInput, PublicParameters},
     contract_extraction::{self, compute_metadata_digest, PublicInputs},
 };
 use plonky2::field::types::Field;

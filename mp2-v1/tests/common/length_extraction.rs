@@ -2,8 +2,10 @@ use std::str::FromStr;
 
 use ethers::prelude::Address;
 use log::info;
-use mp2_common::{eth::StorageSlot, mpt_sequential::utils::bytes_to_nibbles, types::GFp};
-use mp2_v1::{api::ProofWithVK, length_extraction::PublicInputs};
+use mp2_common::{
+    eth::StorageSlot, mpt_sequential::utils::bytes_to_nibbles, proof::ProofWithVK, types::GFp,
+};
+use mp2_v1::length_extraction::PublicInputs;
 use plonky2::field::types::Field;
 
 use crate::common::storage_trie::TestStorageTrie;

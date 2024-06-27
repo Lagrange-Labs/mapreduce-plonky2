@@ -7,10 +7,14 @@ use super::{
     partial_node::{PartialNodeCircuit, PartialNodeWires},
     public_inputs::PublicInputs,
 };
-use crate::api::{default_config, InputNode, ProofInputSerialized, ProofWithVK};
+use crate::api::InputNode;
 use anyhow::Result;
 use ethers::prelude::U256;
-use mp2_common::{C, D, F};
+use mp2_common::{
+    default_config,
+    proof::{ProofInputSerialized, ProofWithVK},
+    C, D, F,
+};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
