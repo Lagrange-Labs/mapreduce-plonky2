@@ -2840,7 +2840,6 @@ dependencies = [
  "plonky2_crypto",
  "plonky2_ecgfp5",
  "rand",
- "recursion_framework",
  "rlp",
  "rmp-serde",
  "rstest",

@@ -25,13 +25,12 @@ csv.workspace = true
 hex.workspace = true
 rand.workspace = true
 rmp-serde.workspace = true
-rstest.workspace = true
 serde_json.workspace = true
 serial_test.workspace = true
 tokio.workspace = true
 
 mp2_test = { path = "../mp2-test" }
-recursion_framework = { path = "../recursion-framework" }
+rstest.workspace = true
 
 [features]
 ci = ["mp2_test/ci"]
