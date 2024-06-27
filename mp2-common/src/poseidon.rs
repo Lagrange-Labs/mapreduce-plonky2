@@ -21,7 +21,7 @@ static EMPTY_POSEIDON_HASH: OnceLock<HashOut<GoldilocksField>> = OnceLock::new()
 
 /// Get the static empty Poseidon hash.
 pub fn empty_poseidon_hash() -> &'static HashOut<GoldilocksField> {
-    EMPTY_POSEIDON_HASH.get_or_init(|| PoseidonHash::hash_no_pad(&[]))
+    EMPTY_POSEIDON_HASH.get_or_init(|| H::hash_no_pad(&[]))
 }
 
 /// Hash the concatenation of the two provided 4-wide inputs, swapping them if specified.
