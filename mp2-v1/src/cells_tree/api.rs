@@ -236,6 +236,7 @@ mod tests {
                 .chain(iter::once(identifier))
                 .chain(packed_value.clone())
                 .collect();
+            // TODO: Fix to employ the same hash method in the ryhope tree library.
             let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
@@ -314,6 +315,7 @@ mod tests {
                 .chain(iter::once(identifier))
                 .chain(packed_value.clone())
                 .collect();
+            // TODO: Fix to employ the same hash method in the ryhope tree library.
             let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
@@ -368,6 +370,7 @@ mod tests {
                 .chain(iter::once(identifier))
                 .chain(packed_value.clone())
                 .collect();
+            // TODO: Fix to employ the same hash method in the ryhope tree library.
             let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
