@@ -80,6 +80,7 @@ pub(crate) mod test {
 
     use ethers::abi::ethereum_types::Public;
     use ethers::types::U256;
+    use mp2_common::group_hashing::map_to_curve_point;
     use mp2_common::H;
     use mp2_common::{utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
@@ -89,7 +90,7 @@ pub(crate) mod test {
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::{field::types::Sample, iop::target::Target};
-    use plonky2_ecgfp5::curve::curve::Point;
+    use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use rand::Rng;
 
     use crate::row_tree::public_inputs::PublicInputs;
@@ -140,13 +141,18 @@ pub(crate) mod test {
         .to_vec()
     }
 
+    fn weierstrass_to_point(w: &WeierstrassPoint) -> Point {
+        Point::decode(w.encode()).unwrap()
+    }
+
     #[test]
     fn test_row_tree_leaf_circuit() {
         let (left_min, left_max) = (10, 15);
         let (right_min, right_max) = (23, 30);
         let value = U256::from(18); // 15 < 18 < 23
         let identifier = F::rand();
-        let node_circuit = FullNodeCircuit::from(IndexTuple::new(identifier, value));
+        let tuple = IndexTuple::new(identifier, value);
+        let node_circuit = FullNodeCircuit::from(tuple.clone());
         let left_pi = generate_random_pi(left_min, left_max);
         let right_pi = generate_random_pi(right_min, right_max);
         let test_circuit = TestFullNodeCircuit {
@@ -175,5 +181,13 @@ pub(crate) mod test {
         // TODO: replace by common H
         let hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&inputs);
         assert_eq!(hash, pi.root_hash_hashout());
+
+        // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
+        let inner = map_to_curve_point(&tuple.to_fields());
+        let outer = map_to_curve_point(&inner.to_weierstrass().to_fields());
+        let p1dr = weierstrass_to_point(&PublicInputs::from_slice(&left_pi).rows_digest_field());
+        let p2dr = weierstrass_to_point(&PublicInputs::from_slice(&right_pi).rows_digest_field());
+        let result_digest = p1dr + p2dr + outer;
+        assert_eq!(result_digest.to_weierstrass(), pi.rows_digest_field());
     }
 }
