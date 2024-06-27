@@ -1,9 +1,15 @@
 //! Module handling the leaf node inside a cells tree
 
 use super::public_inputs::PublicInputs;
+use ethers::prelude::U256;
 use mp2_common::{
-    array::Array, group_hashing::CircuitBuilderGroupHashing, poseidon::empty_poseidon_hash,
-    public_inputs::PublicInputCommon, types::CBuilder, u256, D, F,
+    array::Array,
+    group_hashing::CircuitBuilderGroupHashing,
+    poseidon::empty_poseidon_hash,
+    public_inputs::PublicInputCommon,
+    types::CBuilder,
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    D, F,
 };
 use plonky2::{
     hash::poseidon::PoseidonHash,
@@ -17,26 +23,26 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafWires {
     identifier: Target,
-    packed_value: Array<Target, { u256::NUM_LIMBS }>,
+    value: UInt256Target,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafCircuit {
     /// The same identifier derived from the MPT extraction
     pub(crate) identifier: F,
-    /// Packed Uint256 value
-    pub(crate) packed_value: [F; u256::NUM_LIMBS],
+    /// Uint256 value
+    pub(crate) value: U256,
 }
 
 impl LeafCircuit {
     fn build(b: &mut CBuilder) -> LeafWires {
         let identifier = b.add_virtual_target();
-        let packed_value = Array::new(b);
+        let value = b.add_virtual_u256();
 
-        // h = Poseidon(Poseidon("") || Poseidon("") || identifier || packed_value)
+        // h = Poseidon(Poseidon("") || Poseidon("") || identifier || value)
         let empty_hash = empty_poseidon_hash();
         let empty_hash = b.constant_hash(*empty_hash);
         let inputs: Vec<_> = empty_hash
@@ -45,27 +51,24 @@ impl LeafCircuit {
             .cloned()
             .chain(empty_hash.elements)
             .chain(iter::once(identifier))
-            .chain(packed_value.arr)
+            .chain(value.to_targets())
             .collect();
         let h = b.hash_n_to_hash_no_pad::<PoseidonHash>(inputs).elements;
 
-        // dc = D(identifier || packed_value)
-        let inputs: Vec<_> = iter::once(identifier).chain(packed_value.arr).collect();
+        // dc = D(identifier || value)
+        let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
         let dc = b.map_to_curve_point(&inputs);
 
         // Register the public inputs.
         PublicInputs::new(&h, &dc).register(b);
 
-        LeafWires {
-            identifier,
-            packed_value,
-        }
+        LeafWires { identifier, value }
     }
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
         pw.set_target(wires.identifier, self.identifier);
-        wires.packed_value.assign(pw, &self.packed_value);
+        pw.set_u256_target(&wires.value, self.value);
     }
 }
 
@@ -120,16 +123,13 @@ mod tests {
 
     #[test]
     fn test_cells_tree_leaf_circuit() {
-        let identifier = thread_rng().gen::<u32>().to_field();
-        let packed_value: [_; u256::NUM_LIMBS] = random_vector::<u32>(u256::NUM_LIMBS)
-            .to_fields()
-            .try_into()
-            .unwrap();
+        let mut rng = thread_rng();
 
-        let test_circuit = LeafCircuit {
-            identifier,
-            packed_value,
-        };
+        let identifier = rng.gen::<u32>().to_field();
+        let value = U256(rng.gen::<[u64; 4]>());
+        let value_fields = value.to_fields();
+
+        let test_circuit = LeafCircuit { identifier, value };
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
@@ -142,7 +142,7 @@ mod tests {
                 .cloned()
                 .chain(empty_hash.elements)
                 .chain(iter::once(identifier))
-                .chain(packed_value.clone())
+                .chain(value_fields.clone())
                 .collect();
             let exp_hash = PoseidonHash::hash_no_pad(&inputs);
 
@@ -150,7 +150,7 @@ mod tests {
         }
         // Check the cells digest
         {
-            let inputs: Vec<_> = iter::once(identifier).chain(packed_value).collect();
+            let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
             let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
 
             assert_eq!(pi.cells_point(), exp_digest);

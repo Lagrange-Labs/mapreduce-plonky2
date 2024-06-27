@@ -2,9 +2,14 @@
 
 use super::public_inputs::PublicInputs;
 use anyhow::Result;
+use ethers::prelude::U256;
 use mp2_common::{
-    array::Array, group_hashing::CircuitBuilderGroupHashing, poseidon::empty_poseidon_hash,
-    public_inputs::PublicInputCommon, types::CBuilder, u256, D, F,
+    group_hashing::CircuitBuilderGroupHashing,
+    poseidon::empty_poseidon_hash,
+    public_inputs::PublicInputCommon,
+    types::CBuilder,
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    D, F,
 };
 use plonky2::{
     hash::poseidon::PoseidonHash,
@@ -18,24 +23,24 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PartialNodeWires {
     identifier: Target,
-    packed_value: Array<Target, { u256::NUM_LIMBS }>,
+    value: UInt256Target,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PartialNodeCircuit {
     /// The same identifier derived from the MPT extraction
     pub(crate) identifier: F,
-    /// Packed Uint256 value
-    pub(crate) packed_value: [F; u256::NUM_LIMBS],
+    /// Uint256 value
+    pub(crate) value: U256,
 }
 
 impl PartialNodeCircuit {
     pub fn build(b: &mut CBuilder, child_proof: PublicInputs<Target>) -> PartialNodeWires {
         let identifier = b.add_virtual_target();
-        let packed_value = Array::new(b);
+        let value = b.add_virtual_u256();
 
         // h = Poseidon(p.H || Poseidon("") || identifier || value)
         let child_hash = child_proof.node_hash();
@@ -47,12 +52,12 @@ impl PartialNodeCircuit {
             .cloned()
             .chain(empty_hash.elements)
             .chain(iter::once(identifier))
-            .chain(packed_value.arr)
+            .chain(value.to_targets())
             .collect();
         let h = b.hash_n_to_hash_no_pad::<PoseidonHash>(inputs).elements;
 
         // dc = p.DC + D(identifier || value)
-        let inputs: Vec<_> = iter::once(identifier).chain(packed_value.arr).collect();
+        let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
         let dc = b.map_to_curve_point(&inputs);
         let child_digest = child_proof.cells_target();
         let dc = b.add_curve_point(&[child_digest, dc]);
@@ -60,16 +65,13 @@ impl PartialNodeCircuit {
         // Register the public inputs.
         PublicInputs::new(&h, &dc).register(b);
 
-        PartialNodeWires {
-            identifier,
-            packed_value,
-        }
+        PartialNodeWires { identifier, value }
     }
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &PartialNodeWires) {
         pw.set_target(wires.identifier, self.identifier);
-        wires.packed_value.assign(pw, &self.packed_value);
+        pw.set_u256_target(&wires.value, self.value);
     }
 }
 
@@ -145,11 +147,9 @@ mod tests {
     fn test_cells_tree_partial_node_circuit() {
         let mut rng = thread_rng();
 
-        let identifier = thread_rng().gen::<u32>().to_field();
-        let packed_value: [_; u256::NUM_LIMBS] = random_vector::<u32>(u256::NUM_LIMBS)
-            .to_fields()
-            .try_into()
-            .unwrap();
+        let identifier = rng.gen::<u32>().to_field();
+        let value = U256(rng.gen::<[u64; 4]>());
+        let value_fields = value.to_fields();
 
         // Create the child public inputs.
         let child_hash = random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields();
@@ -160,10 +160,7 @@ mod tests {
         let child_pi = &PublicInputs { h: &child_hash, dc }.to_vec();
 
         let test_circuit = TestPartialNodeCircuit {
-            c: PartialNodeCircuit {
-                identifier,
-                packed_value,
-            },
+            c: PartialNodeCircuit { identifier, value },
             child_pi,
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
@@ -175,7 +172,7 @@ mod tests {
                 .into_iter()
                 .chain(empty_hash.elements)
                 .chain(iter::once(identifier))
-                .chain(packed_value.clone())
+                .chain(value_fields.clone())
                 .collect();
             let exp_hash = PoseidonHash::hash_no_pad(&inputs);
 
@@ -183,7 +180,7 @@ mod tests {
         }
         // Check the cells digest
         {
-            let inputs: Vec<_> = iter::once(identifier).chain(packed_value).collect();
+            let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
             let exp_digest = map_to_curve_point(&inputs);
             let exp_digest = add_curve_point(&[exp_digest, child_digest]).to_weierstrass();
 

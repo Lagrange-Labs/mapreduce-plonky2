@@ -34,30 +34,17 @@ pub enum CircuitInput {
 impl CircuitInput {
     /// Create a circuit input for proving a leaf node.
     pub fn new_leaf(identifier: F, value: U256) -> Self {
-        let packed_value = value.to_fields().try_into().unwrap();
-
-        CircuitInput::Leaf(LeafCircuit {
-            identifier,
-            packed_value,
-        })
+        CircuitInput::Leaf(LeafCircuit { identifier, value })
     }
 
     /// Create a circuit input for proving a full node of 2 children.
     pub fn new_full_node(identifier: F, value: U256, child_proofs: [Vec<u8>; 2]) -> Self {
-        let packed_value = value.to_fields().try_into().unwrap();
-
-        CircuitInput::FullNode(new_child_input(
-            identifier,
-            packed_value,
-            child_proofs.to_vec(),
-        ))
+        CircuitInput::FullNode(new_child_input(identifier, value, child_proofs.to_vec()))
     }
 
     /// Create a circuit input for proving a partial node of 1 child.
     pub fn new_partial_node(identifier: F, value: U256, child_proof: Vec<u8>) -> Self {
-        let packed_value = value.to_fields().try_into().unwrap();
-
-        CircuitInput::PartialNode(new_child_input(identifier, packed_value, vec![child_proof]))
+        CircuitInput::PartialNode(new_child_input(identifier, value, vec![child_proof]))
     }
 
     /// Create a circuit input for proving an empty node.
@@ -69,20 +56,17 @@ impl CircuitInput {
 /// Create a new child input.
 fn new_child_input(
     identifier: F,
-    packed_value: [F; u256::NUM_LIMBS],
+    value: U256,
     serialized_child_proofs: Vec<Vec<u8>>,
 ) -> ChildInput {
     ChildInput {
-        input: CellNode {
-            identifier,
-            packed_value,
-        },
+        input: CellNode { identifier, value },
         serialized_child_proofs,
     }
 }
 
 /// Main struct holding the different circuit parameters for each of the circuits defined here.
-#[derive(Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct PublicParameters {
     leaf: CircuitWithUniversalVerifier<F, C, D, 0, LeafWires>,
     full_node: CircuitWithUniversalVerifier<F, C, D, 2, FullNodeWires>,
@@ -163,7 +147,7 @@ impl PublicParameters {
                     array::from_fn(|i| &child_vks[i]),
                     FullNodeCircuit {
                         identifier: node.input.identifier,
-                        packed_value: node.input.packed_value,
+                        value: node.input.value,
                     },
                 )?;
                 (proof, self.full_node.get_verifier_data().clone())
@@ -182,7 +166,7 @@ impl PublicParameters {
                     [&child_vk],
                     PartialNodeCircuit {
                         identifier: node.input.identifier,
-                        packed_value: node.input.packed_value,
+                        value: node.input.value,
                     },
                 )?;
                 (proof, self.partial_node.get_verifier_data().clone())

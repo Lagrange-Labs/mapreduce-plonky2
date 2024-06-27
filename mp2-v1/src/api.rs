@@ -6,9 +6,10 @@ use crate::{
     values_extraction,
 };
 use anyhow::Result;
+use ethers::prelude::U256;
 use mp2_common::{
     serialization::{circuit_data_serialization::SerializableRichField, deserialize, serialize},
-    u256, C, D, F,
+    C, D, F,
 };
 use plonky2::plonk::{
     circuit_builder::CircuitBuilder,
@@ -28,7 +29,7 @@ pub struct InputNode {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CellNode {
     pub identifier: F,
-    pub packed_value: [F; u256::NUM_LIMBS],
+    pub value: U256,
 }
 
 /// This data structure allows to specify the inputs for a circuit that needs to
