@@ -2,7 +2,7 @@ use mp2_common::{
     default_config,
     group_hashing::CircuitBuilderGroupHashing,
     keccak::PACKED_HASH_LEN,
-    proof::{deserialize_proof, ProofWithVK},
+    proof::{deserialize_proof, verify_proof_fixed_circuit, ProofWithVK},
     serialization::{deserialize, serialize},
     u256::{self, UInt256Target},
     C, D, F,
@@ -25,9 +25,7 @@ use recursion_framework::framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    api::verify_proof_fixed_circuit, block_extraction, contract_extraction, values_extraction,
-};
+use crate::{block_extraction, contract_extraction, values_extraction};
 
 use super::api::FinalExtractionBuilderParams;
 

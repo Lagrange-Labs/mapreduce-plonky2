@@ -2861,6 +2861,7 @@ dependencies = [
  "log",
  "plonky2",
  "rand",
+ "recursion_framework",
 ]
 
 [[package]]

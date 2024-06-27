@@ -182,11 +182,11 @@ mod tests {
         proof::{serialize_proof, ProofWithVK},
         C, D, F,
     };
+    use mp2_test::circuit::TestDummyCircuit;
     use plonky2_ecgfp5::curve::curve::Point;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
 
     use crate::{
-        api::tests::TestDummyCircuit,
         final_extraction::{
             base_circuit::{
                 test::ProofsPi, BLOCK_SET_NUM_IO, CONTRACT_SET_NUM_IO, VALUE_SET_NUM_IO,
