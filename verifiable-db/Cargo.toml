@@ -13,3 +13,4 @@ plonky2_ecgfp5.workspace = true
 rand.workspace = true
 ethers.workspace = true
 serde.workspace = true
+derive_more = "0.99.18"

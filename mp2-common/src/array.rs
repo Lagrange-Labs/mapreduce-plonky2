@@ -1,6 +1,6 @@
 use crate::{
     serialization::{deserialize_long_array, serialize_long_array},
-    utils::{Endianness, PackerTarget},
+    utils::{Endianness, PackerTarget, ToTargets},
 };
 use anyhow::{anyhow, Result};
 use plonky2::{
@@ -356,7 +356,7 @@ where
         }
     }
 
-    pub fn to_targets(&self) -> Array<Target, SIZE> {
+    pub fn downcast_to_targets(&self) -> Array<Target, SIZE> {
         Array {
             arr: create_array(|i| self.arr[i].to_target()),
         }

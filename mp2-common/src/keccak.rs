@@ -64,7 +64,7 @@ impl FromTargets for OutputHash {
 
 impl ToTargets for OutputHash {
     fn to_targets(&self) -> Vec<Target> {
-        self.to_targets().arr.to_vec()
+        self.downcast_to_targets().arr.to_vec()
     }
 }
 

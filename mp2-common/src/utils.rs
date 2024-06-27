@@ -1,3 +1,5 @@
+use std::array::from_fn as create_array;
+
 use anyhow::Result;
 use ethers::types::U256;
 use itertools::Itertools;
@@ -20,6 +22,7 @@ use rand::{thread_rng, Rng};
 use sha3::Digest;
 use sha3::Keccak256;
 
+use crate::array::Targetable;
 use crate::mpt_sequential::Circuit;
 use crate::u256::NUM_LIMBS;
 use crate::{
@@ -233,6 +236,12 @@ impl<F: RichField> ToFields<F> for &[u32] {
         self.iter().map(|x| F::from_canonical_u32(*x)).collect()
     }
 }
+
+impl<F: RichField> ToFields<F> for HashOut<F> {
+    fn to_fields(&self) -> Vec<F> {
+        self.elements.to_vec()
+    }
+}
 pub trait Fieldable<F: RichField> {
     fn to_field(&self) -> F;
 }
@@ -269,8 +278,28 @@ pub trait FromTargets {
     fn from_targets(t: &[Target]) -> Self;
 }
 
+impl FromTargets for HashOutTarget {
+    fn from_targets(t: &[Target]) -> Self {
+        HashOutTarget {
+            elements: create_array(|i| t[i]),
+        }
+    }
+}
+
 pub trait ToTargets {
     fn to_targets(&self) -> Vec<Target>;
+}
+
+impl<T: Targetable> ToTargets for T {
+    fn to_targets(&self) -> Vec<Target> {
+        vec![self.to_target()]
+    }
+}
+
+impl ToTargets for HashOutTarget {
+    fn to_targets(&self) -> Vec<Target> {
+        self.elements.to_vec()
+    }
 }
 
 pub trait FromFields<F> {

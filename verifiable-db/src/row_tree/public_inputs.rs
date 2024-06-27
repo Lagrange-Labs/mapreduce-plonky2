@@ -9,7 +9,7 @@ use mp2_common::{
     utils::{FromFields, FromTargets},
     D, F,
 };
-use plonky2::iop::target::Target;
+use plonky2::{hash::hash_types::HashOutTarget, iop::target::Target};
 use plonky2::{
     hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
     plonk::circuit_builder::CircuitBuilder,
@@ -55,15 +55,15 @@ impl<'a> PublicInputs<'a, F> {
         WeierstrassPoint::from_fields(&self.dr)
     }
     /// minimum index value
-    pub fn min_value_field(&self) -> U256 {
+    pub fn min_value_u256(&self) -> U256 {
         U256::from(U256PubInputs::try_from(self.min).unwrap())
     }
     /// maximum index value
-    pub fn max_value_field(&self) -> U256 {
+    pub fn max_value_u256(&self) -> U256 {
         U256::from(U256PubInputs::try_from(self.max).unwrap())
     }
     /// hash of the subtree at this node
-    pub fn root_hash_field(&self) -> HashOut<F> {
+    pub fn root_hash_hashout(&self) -> HashOut<F> {
         HashOut {
             elements: create_array(|i| self.h[i]),
         }
@@ -72,8 +72,8 @@ impl<'a> PublicInputs<'a, F> {
 
 impl<'a> PublicInputs<'a, Target> {
     /// Get the hash corresponding to the root of the subtree of this node
-    pub fn root_hash(&self) -> OutputHash {
-        OutputHash::from_targets(self.h)
+    pub fn root_hash(&self) -> HashOutTarget {
+        HashOutTarget::from_targets(&self.h)
     }
 
     pub fn rows_digest(&self) -> CurveTarget {
@@ -83,6 +83,9 @@ impl<'a> PublicInputs<'a, Target> {
 
     pub fn min_value(&self) -> UInt256Target {
         UInt256Target::from_targets(&self.min)
+    }
+    pub fn max_value(&self) -> UInt256Target {
+        UInt256Target::from_targets(&self.max)
     }
 }
 
