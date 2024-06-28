@@ -8,9 +8,12 @@ use mp2_common::{C, H};
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::plonk::config::GenericConfig;
+use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
 use plonky2::{hash::hash_types::HashOutTarget, plonk::circuit_builder::CircuitBuilder};
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::array::from_fn as create_array;
 
@@ -70,6 +73,31 @@ impl LeafCircuit {
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
         self.0.assign_wires(pw, wires);
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct RecursiveLeafWires(
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    ProofWithPublicInputsTarget<D>,
+);
+
+impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
+    type CircuitBuilderParams = VerifierCircuitData<F, C, D>;
+
+    type Inputs = ProofWithPublicInputs<F, C, D>;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
+        todo!()
     }
 }
 
