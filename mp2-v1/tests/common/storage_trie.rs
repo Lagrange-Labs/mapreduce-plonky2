@@ -8,10 +8,11 @@ use ethers::{
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
+    proof::ProofWithVK,
     utils::{keccak256, Endianness, Packer},
 };
 use mp2_v1::{
-    api::{generate_proof, CircuitInput, ProofWithVK, PublicParameters},
+    api::{generate_proof, CircuitInput, PublicParameters},
     length_extraction, values_extraction,
 };
 use std::collections::HashMap;

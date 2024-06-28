@@ -1,7 +1,7 @@
 use derive_more::{Deref, From};
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing, public_inputs::PublicInputCommon,
-    u256::CircuitBuilderU256, utils::ToTargets, D, F, H,
+    group_hashing::CircuitBuilderGroupHashing, poseidon::H, public_inputs::PublicInputCommon,
+    u256::CircuitBuilderU256, utils::ToTargets, D, F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -15,7 +15,7 @@ use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
 // easily down the line with less recursion. Best to provide code which is easily
 // amenable to a different arity rather than hardcoding binary tree only
 #[derive(Clone, Debug, From, Deref)]
-pub struct FullNodeCircuit(IndexTuple);
+pub(crate) struct FullNodeCircuit(IndexTuple);
 
 #[derive(Clone, Serialize, Deserialize, From, Deref)]
 struct FullNodeWires(IndexTupleWire);
@@ -78,23 +78,26 @@ impl FullNodeCircuit {
 pub(crate) mod test {
     use std::hash::Hash;
 
-    use ethers::abi::ethereum_types::Public;
-    use ethers::types::U256;
-    use mp2_common::group_hashing::map_to_curve_point;
-    use mp2_common::H;
-    use mp2_common::{utils::ToFields, C, D, F};
+    use ethers::{abi::ethereum_types::Public, types::U256};
+    use mp2_common::{group_hashing::map_to_curve_point, poseidon::H, utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::hash::hash_types::HashOut;
-    use plonky2::hash::hashing::hash_n_to_hash_no_pad;
-    use plonky2::hash::poseidon::{self, PoseidonHash, PoseidonPermutation};
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::{field::types::Sample, iop::target::Target};
+    use plonky2::{
+        field::types::Sample,
+        hash::{
+            hash_types::HashOut,
+            hashing::hash_n_to_hash_no_pad,
+            poseidon::{self, PoseidonHash, PoseidonPermutation},
+        },
+        iop::{
+            target::Target,
+            witness::{PartialWitness, WitnessWrite},
+        },
+        plonk::circuit_builder::CircuitBuilder,
+    };
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use rand::Rng;
 
-    use crate::row_tree::public_inputs::PublicInputs;
-    use crate::row_tree::IndexTuple;
+    use crate::row_tree::{public_inputs::PublicInputs, IndexTuple};
 
     use super::{FullNodeCircuit, FullNodeWires};
 

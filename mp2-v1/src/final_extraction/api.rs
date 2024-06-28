@@ -1,5 +1,9 @@
 use ethers::core::k256::elliptic_curve::rand_core::block;
-use mp2_common::{C, D, F};
+use mp2_common::{
+    default_config,
+    proof::{deserialize_proof, ProofWithVK},
+    C, D, F,
+};
 use plonky2::{
     iop::target::Target,
     plonk::{circuit_data::VerifierCircuitData, proof::ProofWithPublicInputs},
@@ -9,8 +13,6 @@ use recursion_framework::{
     framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
 };
 use serde::{Deserialize, Serialize};
-
-use crate::api::{default_config, deserialize_proof, ProofWithVK};
 
 use super::{
     base_circuit::BaseCircuitInput, lengthed_circuit::LengthedRecursiveWires,
@@ -176,12 +178,15 @@ impl CircuitInput {
 
 #[cfg(test)]
 mod tests {
-    use mp2_common::{C, D, F};
+    use mp2_common::{
+        proof::{serialize_proof, ProofWithVK},
+        C, D, F,
+    };
+    use mp2_test::circuit::TestDummyCircuit;
     use plonky2_ecgfp5::curve::curve::Point;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
 
     use crate::{
-        api::{serialize_proof, tests::TestDummyCircuit, ProofWithVK},
         final_extraction::{
             base_circuit::{
                 test::ProofsPi, BLOCK_SET_NUM_IO, CONTRACT_SET_NUM_IO, VALUE_SET_NUM_IO,

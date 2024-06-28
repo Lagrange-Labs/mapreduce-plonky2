@@ -18,10 +18,17 @@ use plonky2::{
             CircuitData, CommonCircuitData, VerifierCircuitData, VerifierCircuitTarget,
             VerifierOnlyCircuitData,
         },
-        config::{AlgebraicHasher, GenericConfig},
+        config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig},
     },
 };
+use recursion_framework::{
+    circuit_builder::CircuitLogicWires, framework_testing::DummyCircuitWires,
+};
 use std::fmt::Debug;
+
+const D: usize = 2;
+type C = PoseidonGoldilocksConfig;
+type F = <C as GenericConfig<D>>::F;
 
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.
@@ -31,6 +38,40 @@ type ProofTuple<F, C, const D: usize> = (
     VerifierOnlyCircuitData<C, D>,
     CommonCircuitData<F, D>,
 );
+
+/// Circuit that does nothing but can be passed as a children proof to some circuit when testing the aggregation
+/// logic.
+pub struct TestDummyCircuit<const NUM_PUBLIC_INPUTS: usize> {
+    data: CircuitData<F, C, D>,
+    wires: DummyCircuitWires<NUM_PUBLIC_INPUTS>,
+}
+
+impl<const NUM_PUBLIC_INPUTS: usize> TestDummyCircuit<NUM_PUBLIC_INPUTS> {
+    pub fn build() -> Self {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut cb = CircuitBuilder::<F, D>::new(config);
+        let wires = DummyCircuitWires::circuit_logic(&mut cb, [], ());
+        let data = cb.build::<C>();
+        Self { data, wires }
+    }
+
+    pub fn generate_proof(
+        &self,
+        public_inputs: [F; NUM_PUBLIC_INPUTS],
+    ) -> Result<ProofWithPublicInputs<F, C, D>> {
+        let mut pw = PartialWitness::<F>::new();
+        <DummyCircuitWires<NUM_PUBLIC_INPUTS> as CircuitLogicWires<F, D, 0>>::assign_input(
+            &self.wires,
+            public_inputs,
+            &mut pw,
+        )?;
+        self.data.prove(pw)
+    }
+
+    pub fn circuit_data(&self) -> &CircuitData<F, C, D> {
+        &self.data
+    }
+}
 
 /// Simple trait defining the main utilities method to define circuits almost
 /// as gadgets / library calls.

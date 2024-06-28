@@ -25,7 +25,7 @@ mod public_inputs;
 
 /// The value to give at each node of the row tree
 #[derive(Clone, Debug, Constructor)]
-struct IndexTuple {
+pub(crate) struct IndexTuple {
     /// identifier of the column for the secondary index
     index_identifier: F,
     /// secondary index value
@@ -43,14 +43,14 @@ impl ToFields<F> for IndexTuple {
     fn to_fields(&self) -> Vec<F> {
         [self.index_identifier]
             .into_iter()
-            .chain(self.index_value.to_fields().into_iter())
+            .chain(self.index_value.to_fields())
             .collect()
     }
 }
 
 /// The basic wires generated for each circuit of the row tree
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct IndexTupleWire {
+pub(crate) struct IndexTupleWire {
     index_value: UInt256Target,
     index_identifier: Target,
 }
@@ -72,7 +72,7 @@ impl ToTargets for IndexTupleWire {
         self.index_identifier
             .to_targets()
             .into_iter()
-            .chain(self.index_value.to_targets().into_iter())
+            .chain(self.index_value.to_targets())
             .collect::<Vec<_>>()
     }
 }

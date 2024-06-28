@@ -2,12 +2,12 @@ use std::{array::from_fn as create_array, io::empty};
 
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
-    poseidon::P,
+    poseidon::{H, P},
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
     u256::CircuitBuilderU256,
     utils::ToTargets,
-    D, F, H,
+    D, F,
 };
 use plonky2::{
     hash::{
@@ -112,8 +112,7 @@ impl PartialNodeCircuit {
     }
 }
 
-use plonky2::hash::poseidon::PoseidonHash;
-use plonky2::plonk::config::AlgebraicHasher;
+use plonky2::{hash::poseidon::PoseidonHash, plonk::config::AlgebraicHasher};
 
 pub fn hash_maybe_first(
     c: &mut CircuitBuilder<F, D>,
@@ -149,18 +148,16 @@ pub fn hash_maybe_first(
 
 #[cfg(test)]
 mod test {
-    use mp2_common::group_hashing::map_to_curve_point;
-    use mp2_common::utils::ToFields;
-    use plonky2::field::types::Field;
-    use plonky2::hash::hash_types::HashOut;
+    use mp2_common::{group_hashing::map_to_curve_point, utils::ToFields};
+    use plonky2::{field::types::Field, hash::hash_types::HashOut};
     use plonky2_ecgfp5::curve::curve::Point;
     use std::array::from_fn as create_array;
 
     use ethers::types::U256;
     use mp2_common::{C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::field::types::Sample;
     use plonky2::{
+        field::types::Sample,
         hash::{
             hash_types::NUM_HASH_OUT_ELTS, hashing::hash_n_to_hash_no_pad,
             poseidon::PoseidonPermutation,
@@ -172,10 +169,10 @@ mod test {
         plonk::circuit_builder::CircuitBuilder,
     };
 
-    use crate::row_tree::full_node::test::generate_random_pi;
-    use crate::row_tree::partial_node::PartialNodeCircuit;
-    use crate::row_tree::public_inputs::PublicInputs;
-    use crate::row_tree::IndexTuple;
+    use crate::row_tree::{
+        full_node::test::generate_random_pi, partial_node::PartialNodeCircuit,
+        public_inputs::PublicInputs, IndexTuple,
+    };
 
     use super::{hash_maybe_first, PartialNodeWires};
 

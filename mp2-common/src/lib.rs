@@ -9,7 +9,7 @@ use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
     plonk::{
-        circuit_data::{CommonCircuitData, VerifierOnlyCircuitData},
+        circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
         config::{GenericConfig, PoseidonGoldilocksConfig},
         proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs},
     },
@@ -27,6 +27,7 @@ pub mod keccak;
 pub mod merkle_tree;
 pub mod mpt_sequential;
 pub mod poseidon;
+pub mod proof;
 pub mod public_inputs;
 pub mod rlp;
 /// This module contains data strcutures and traits employed to serialize the data strcutures found in the
@@ -40,7 +41,12 @@ pub mod utils;
 pub const D: usize = 2;
 pub type C = PoseidonGoldilocksConfig;
 pub type F = <C as GenericConfig<D>>::F;
-pub type H = <C as GenericConfig<D>>::Hasher;
+pub type CHasher = <C as GenericConfig<D>>::Hasher;
+
+/// Retrieve a common `CircuitConfig` to be employed to generate the parameters for the circuits
+pub fn default_config() -> CircuitConfig {
+    CircuitConfig::standard_recursion_config()
+}
 
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.

@@ -9,13 +9,12 @@ use mp2_common::{
     utils::{FromFields, FromTargets},
     D, F,
 };
-use plonky2::{hash::hash_types::HashOutTarget, iop::target::Target};
 use plonky2::{
-    hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
+    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
+    iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
-use plonky2_ecgfp5::gadgets::curve::CurveTarget;
+use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 use std::array::from_fn as create_array;
 
 // Contract extraction public Inputs:
@@ -89,6 +88,8 @@ impl<'a> PublicInputs<'a, Target> {
     }
 }
 
+pub const TOTAL_LEN: usize = PublicInputs::<Target>::TOTAL_LEN;
+
 impl<'a, T: Copy> PublicInputs<'a, T> {
     /// Total length of the public inputs
     pub(crate) const TOTAL_LEN: usize = MAX_RANGE.end;
@@ -130,8 +131,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 mod tests {
     use super::*;
     use ethers::types::U256;
-    use mp2_common::public_inputs::PublicInputCommon;
-    use mp2_common::{utils::ToFields, C, D, F};
+    use mp2_common::{public_inputs::PublicInputCommon, utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Sample,

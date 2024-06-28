@@ -1,4 +1,10 @@
-use mp2_common::{group_hashing::map_to_curve_point, types::GFp, C, D, F};
+use mp2_common::{
+    default_config,
+    group_hashing::map_to_curve_point,
+    proof::{ProofInputSerialized, ProofWithVK},
+    types::GFp,
+    C, D, F,
+};
 use plonky2::field::types::Field;
 use plonky2_ecgfp5::curve::curve::Point as Digest;
 use recursion_framework::{
@@ -8,7 +14,7 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    api::{default_config, InputNode, ProofInputSerialized, ProofWithVK},
+    api::InputNode,
     length_extraction::{BranchLengthCircuit, ExtensionLengthCircuit},
 };
 
@@ -187,6 +193,7 @@ mod tests {
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
+        proof::ProofWithVK,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::GFp,
         utils::{keccak256, Endianness, Packer, ToFields},
@@ -194,10 +201,7 @@ mod tests {
     use plonky2::field::types::Field;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
-    use crate::{
-        api::ProofWithVK,
-        length_extraction::{api::compute_metadata_digest, tests::PudgyState, PublicInputs},
-    };
+    use crate::length_extraction::{api::compute_metadata_digest, tests::PudgyState, PublicInputs};
 
     use super::{LengthCircuitInput, PublicParameters};
 
