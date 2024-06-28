@@ -147,9 +147,17 @@ pub struct PartialNodeInput {
 
 #[cfg(test)]
 mod test {
+    use crate::row_tree::public_inputs::PublicInputs;
+
     use super::*;
-    use mp2_common::F;
-    use plonky2::field::types::Sample;
+    use mp2_common::{
+        group_hashing::map_to_curve_point,
+        poseidon::{empty_poseidon_hash, H},
+        utils::ToFields,
+        F,
+    };
+    use plonky2::{field::types::Sample, hash::hash_types::HashOut, plonk::config::Hasher};
+    use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
 
@@ -164,14 +172,17 @@ mod test {
         let identifier = F::rand();
 
         // generate cells tree input and fake proof
-        let cells_pi = (0..CELL_IO_LEN).map(|_| F::rand()).collect::<Vec<_>>();
+        let cells_hash = HashOut::rand().to_fields();
+        let cells_digest = Point::rand().to_weierstrass().to_fields();
+        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest).to_vec();
 
         let cells_proof =
-            testing_framework.generate_input_proofs::<1>([cells_pi.try_into().unwrap()])?;
+            testing_framework.generate_input_proofs::<1>([cells_pi.clone().try_into().unwrap()])?;
         let cells_proof_vk = ProofWithVK::new(
             cells_proof[0].clone(),
             testing_framework.verifier_data_for_input_proofs::<1>()[0].clone(),
         );
+        let cells_pi = cells_tree::PublicInputs::from_slice(&cells_pi);
         //  generate row leaf proof
         let input = CircuitInput::leaf(
             identifier,
@@ -181,6 +192,39 @@ mod test {
         )?;
 
         let proof = params.generate_proof(input)?;
+        let pi = ProofWithVK::deserialize(&proof)
+            .unwrap()
+            .proof
+            .public_inputs;
+        let pi = PublicInputs::from_slice(&pi);
+        let tuple = IndexTuple::new(identifier, value);
+        {
+            let empty_hash = empty_poseidon_hash();
+            // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
+            let inputs: Vec<_> = empty_hash
+                .to_fields()
+                .iter()
+                .chain(empty_hash.to_fields().iter())
+                .chain(tuple.index_value.to_fields().iter())
+                .chain(tuple.index_value.to_fields().iter())
+                .chain(tuple.to_fields().iter())
+                .chain(cells_pi.h_raw().iter())
+                .cloned()
+                .collect();
+            let exp_hash = H::hash_no_pad(&inputs);
+            assert_eq!(pi.root_hash_hashout(), exp_hash);
+        }
+        {
+            let inner = map_to_curve_point(&tuple.to_fields());
+            let cells_point = Point::decode(cells_pi.digest_point().encode()).unwrap();
+            assert_eq!(
+                cells_point.to_weierstrass().to_fields(),
+                cells_pi.digest_point().to_fields()
+            );
+            let result_inner = inner + cells_point;
+            let result = map_to_curve_point(&result_inner.to_weierstrass().to_fields());
+            assert_eq!(pi.rows_digest_field(), result.to_weierstrass());
+        }
         Ok(())
     }
 }

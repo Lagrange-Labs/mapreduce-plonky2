@@ -58,6 +58,7 @@ impl LeafCircuit {
             .to_targets();
         // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
         // in our case, min == max == index_value
+        // left_child_hash == right_child_hash == empty_hash since there is not children
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
         let inputs = empty_hash
             .to_targets()

@@ -216,7 +216,7 @@ mod tests {
         let mut rng = thread_rng();
         let identifier = rng.gen::<u32>().to_field();
         let value = U256(rng.gen::<[u64; 4]>());
-        let packed_value = value.to_fields();
+        let value_fields = value.to_fields();
         let input = CircuitInput::new_leaf(identifier, value);
 
         // Generate proof.
@@ -236,7 +236,7 @@ mod tests {
                 .cloned()
                 .chain(empty_hash.elements)
                 .chain(iter::once(identifier))
-                .chain(packed_value.clone())
+                .chain(value_fields.clone())
                 .collect();
             // TODO: Fix to employ the same hash method in the ryhope tree library.
             let exp_hash = H::hash_no_pad(&inputs);
@@ -244,7 +244,7 @@ mod tests {
             assert_eq!(pi.h, exp_hash.elements);
         }
         {
-            let inputs: Vec<_> = iter::once(identifier).chain(packed_value).collect();
+            let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
             let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
 
             assert_eq!(pi.digest_point(), exp_digest);
