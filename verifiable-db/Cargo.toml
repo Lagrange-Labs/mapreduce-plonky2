@@ -14,3 +14,4 @@ rand.workspace = true
 ethers.workspace = true
 serde.workspace = true
 derive_more = "0.99.18"
+mp2_v1 = { path = "../mp2-v1" }

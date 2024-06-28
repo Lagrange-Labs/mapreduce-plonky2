@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
 
 #[derive(Clone, Debug)]
-struct PartialNodeCircuit {
+pub struct PartialNodeCircuit {
     tuple: IndexTuple,
     is_child_at_left: bool,
 }
@@ -39,7 +39,7 @@ struct PartialNodeWires {
 }
 
 impl PartialNodeCircuit {
-    fn new(tuple: IndexTuple, is_child_at_left: bool) -> Self {
+    pub(crate) fn new(tuple: IndexTuple, is_child_at_left: bool) -> Self {
         Self {
             tuple,
             is_child_at_left,

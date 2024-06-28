@@ -15,7 +15,7 @@ use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
 // easily down the line with less recursion. Best to provide code which is easily
 // amenable to a different arity rather than hardcoding binary tree only
 #[derive(Clone, Debug, From, Deref)]
-struct FullNodeCircuit(IndexTuple);
+pub struct FullNodeCircuit(IndexTuple);
 
 #[derive(Clone, Serialize, Deserialize, From, Deref)]
 struct FullNodeWires(IndexTupleWire);

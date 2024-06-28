@@ -21,7 +21,7 @@ use derive_more::{Constructor, Deref, From};
 // new type to implement the circuit logic on each differently
 // deref to access directly the same members - read only so it's ok
 #[derive(Clone, Debug, Deref, From, Constructor)]
-struct LeafCircuit(IndexTuple);
+pub struct LeafCircuit(IndexTuple);
 
 #[derive(Clone, Serialize, Deserialize, Deref, From)]
 struct LeafWires(IndexTupleWire);

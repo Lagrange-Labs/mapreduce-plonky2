@@ -17,6 +17,7 @@ use plonky2::{
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 use serde::{Deserialize, Serialize};
 
+mod api;
 mod full_node;
 mod leaf;
 mod partial_node;
