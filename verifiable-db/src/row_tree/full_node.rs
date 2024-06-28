@@ -10,6 +10,8 @@ use plonky2::{
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use serde::{Deserialize, Serialize};
 
+use crate::cells_tree;
+
 use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
 // Arity not strictly needed now but may be an easy way to increase performance
 // easily down the line with less recursion. Best to provide code which is easily
@@ -25,8 +27,9 @@ impl FullNodeCircuit {
         b: &mut CircuitBuilder<F, D>,
         left_pi: &[Target],
         right_pi: &[Target],
-        _cells_pi: &[Target],
+        cells_pi: &[Target],
     ) -> FullNodeWires {
+        let cells_pi = cells_tree::PublicInputs::from_slice(cells_pi);
         let min_child = PublicInputs::from_slice(left_pi);
         let max_child = PublicInputs::from_slice(right_pi);
         let tuple = IndexTupleWire::new(b);
@@ -48,16 +51,14 @@ impl FullNodeCircuit {
             .chain(node_min.to_targets().iter())
             .chain(node_max.to_targets().iter())
             .chain(tuple.to_targets().iter())
+            .chain(cells_pi.node_hash().to_targets().iter())
             .cloned()
-            // TODO: hash of cell proof when merged
-            //.chain(vec![])
             .collect::<Vec<_>>();
         let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
         // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
         let inner = tuple.digest(b);
-        // TODO once cell proof merged
-        //let inner = inner + cells_pis.digest();
-        let row_digest = b.map_to_curve_point(&inner.to_targets());
+        let inner2 = b.curve_add(inner, cells_pi.digest_target());
+        let row_digest = b.map_to_curve_point(&inner2.to_targets());
         let final_digest = b.curve_add(min_child.rows_digest(), max_child.rows_digest());
         let final_digest = b.curve_add(final_digest, row_digest);
         PublicInputs::new(
@@ -97,7 +98,10 @@ pub(crate) mod test {
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use rand::Rng;
 
-    use crate::row_tree::{public_inputs::PublicInputs, IndexTuple};
+    use crate::{
+        cells_tree,
+        row_tree::{public_inputs::PublicInputs, IndexTuple},
+    };
 
     use super::{FullNodeCircuit, FullNodeWires};
 
@@ -106,20 +110,21 @@ pub(crate) mod test {
         circuit: FullNodeCircuit,
         left_pi: Vec<F>,
         right_pi: Vec<F>,
+        cells_pi: Vec<F>,
     }
 
     impl UserCircuit<F, D> for TestFullNodeCircuit {
-        type Wires = (FullNodeWires, Vec<Target>, Vec<Target>);
+        type Wires = (FullNodeWires, Vec<Target>, Vec<Target>, Vec<Target>);
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            // TODO: change that once cells tree merged
-            let cells_pi = [c.add_virtual_target()];
+            let cells_pi = c.add_virtual_targets(cells_tree::PublicInputs::<Target>::TOTAL_LEN);
             let left_pi = c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
             let right_pi = c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
             (
                 FullNodeCircuit::build(c, &left_pi, &right_pi, &cells_pi),
                 left_pi,
                 right_pi,
+                cells_pi,
             )
         }
 
@@ -127,6 +132,7 @@ pub(crate) mod test {
             self.circuit.assign(pw, &wires.0);
             pw.set_target_arr(&wires.1, &self.left_pi);
             pw.set_target_arr(&wires.2, &self.right_pi);
+            pw.set_target_arr(&wires.3, &self.cells_pi);
         }
     }
 
@@ -150,6 +156,11 @@ pub(crate) mod test {
 
     #[test]
     fn test_row_tree_leaf_circuit() {
+        let cells_point = Point::rand();
+        let cells_digest = cells_point.to_weierstrass().to_fields();
+        let cells_hash = HashOut::rand().to_fields();
+        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest).to_vec();
+
         let (left_min, left_max) = (10, 15);
         let (right_min, right_max) = (23, 30);
         let value = U256::from(18); // 15 < 18 < 23
@@ -162,12 +173,12 @@ pub(crate) mod test {
             circuit: node_circuit,
             left_pi: left_pi.clone(),
             right_pi: right_pi.clone(),
+            cells_pi,
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
         assert_eq!(U256::from(left_min), pi.min_value_u256());
         assert_eq!(U256::from(right_max), pi.max_value_u256());
-        // TODO replace by singler Hasher implementation for cells
         // Poseidon(p1.H || p2.H || node_min || node_max || index_id || index_value ||p.H)) as H
         let left_hash = PublicInputs::from_slice(&left_pi).root_hash_hashout();
         let right_hash = PublicInputs::from_slice(&right_pi).root_hash_hashout();
@@ -178,16 +189,16 @@ pub(crate) mod test {
             .chain(pi.min_value_u256().to_fields().iter())
             .chain(pi.max_value_u256().to_fields().iter())
             .chain(IndexTuple::new(identifier, value).to_fields().iter())
+            .chain(cells_hash.iter())
             .cloned()
             .collect::<Vec<_>>();
-        // TODO add cells tree hash once ready
-        // TODO: replace by common H
         let hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&inputs);
         assert_eq!(hash, pi.root_hash_hashout());
 
         // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
         let inner = map_to_curve_point(&tuple.to_fields());
-        let outer = map_to_curve_point(&inner.to_weierstrass().to_fields());
+        let inner2 = inner + cells_point;
+        let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
         let p1dr = weierstrass_to_point(&PublicInputs::from_slice(&left_pi).rows_digest_field());
         let p2dr = weierstrass_to_point(&PublicInputs::from_slice(&right_pi).rows_digest_field());
         let result_digest = p1dr + p2dr + outer;
