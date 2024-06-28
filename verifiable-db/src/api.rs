@@ -26,6 +26,16 @@ pub struct PublicParameters {
     cells_tree: cells_tree::PublicParameters,
     rows_tree: row_tree::PublicParameters,
 }
+impl PublicParameters {
+    /// Generate a proof for a circuit in the set of circuits employed in the
+    /// verifiable DB stage of LPN, employing `CircuitInput` to specify for which
+    /// circuit the proof should be generated.
+    pub fn generate_proof(&self, input: CircuitInput) -> Result<Vec<u8>> {
+        match input {
+            CircuitInput::CellsTree(input) => self.cells_tree.generate_proof(input),
+        }
+    }
+}
 
 /// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.
 pub fn build_circuits_params() -> PublicParameters {

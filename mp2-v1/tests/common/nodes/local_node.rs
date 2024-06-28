@@ -14,8 +14,6 @@ use ethers::{
     types::BlockNumber,
 };
 use log::info;
-use rand::{thread_rng, Rng};
-use std::str::FromStr;
 
 impl TestContext {
     /// Create the test context with the custom contracts of a local node.
