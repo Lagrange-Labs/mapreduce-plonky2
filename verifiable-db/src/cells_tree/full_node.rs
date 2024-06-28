@@ -30,9 +30,9 @@ pub struct FullNodeWires {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FullNodeCircuit {
-    /// The same identifier derived from the MPT extraction
+    /// The identifier of the column
     pub(crate) identifier: F,
-    /// Uint256 value
+    /// Value of the column
     pub(crate) value: U256,
 }
 
@@ -53,7 +53,7 @@ impl FullNodeCircuit {
             .collect();
         let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
-        // dc = p1.DC + p2.DC + D(identifier || value)
+        // digest_cell = p1.digest_cell + p2.digest_cell + D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
         let dc = b.map_to_curve_point(&inputs);
         let [p1_dc, p2_dc] = [0, 1].map(|i| child_proofs[i].digest_target());

@@ -54,7 +54,7 @@ impl LeafCircuit {
             .collect();
         let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
-        // dc = D(identifier || value)
+        // digest_cell = D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
         let dc = b.map_to_curve_point(&inputs).to_targets();
 
