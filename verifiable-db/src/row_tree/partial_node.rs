@@ -1,8 +1,8 @@
-use std::{array::from_fn as create_array, io::empty};
+use std::array::from_fn as create_array;
 
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
-    poseidon::{H, P},
+    poseidon::{empty_poseidon_hash, H, P},
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
     u256::CircuitBuilderU256,
@@ -11,7 +11,7 @@ use mp2_common::{
 };
 use plonky2::{
     hash::{
-        hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
         hashing::PlonkyPermutation,
     },
     iop::{
@@ -22,6 +22,8 @@ use plonky2::{
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use serde::{Deserialize, Serialize};
+
+use crate::cells_tree;
 
 use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
 
@@ -48,8 +50,9 @@ impl PartialNodeCircuit {
     fn build(
         b: &mut CircuitBuilder<F, D>,
         child_pi: &[Target],
-        _cells_pi: &[Target],
+        cells_pi: &[Target],
     ) -> PartialNodeWires {
+        let cells_pi = cells_tree::PublicInputs::from_slice(&cells_pi);
         let tuple = IndexTupleWire::new(b);
         let is_child_at_left = b.add_virtual_bool_target_safe();
         let child_pi = PublicInputs::from_slice(child_pi);
@@ -64,11 +67,8 @@ impl PartialNodeCircuit {
         // node_max = left ? index_value : child_proof.max
         let node_min = b.select_u256(is_child_at_left, &child_pi.min_value(), &tuple.index_value);
         let node_max = b.select_u256(is_child_at_left, &tuple.index_value, &child_pi.max_value());
-        // TODO: replace via zero hash from cells tree PR
-        let zero = b.zero();
-        let empty_hash = HashOutTarget {
-            elements: create_array(|_| zero),
-        };
+
+        let empty_hash = b.constant_hash(*empty_poseidon_hash());
         // left_hash = left ? child_proof.H : H("")
         // right_hash = left ? H("") : child_proof.H
         // Note this is equal to swap_if_condition_true(is_left, H(""),child_proof.H)
@@ -79,6 +79,7 @@ impl PartialNodeCircuit {
             .iter()
             .chain(node_max.to_targets().iter())
             .chain(tuple.to_targets().iter())
+            .chain(cells_pi.node_hash().to_targets().iter())
             .cloned()
             .collect::<Vec<_>>();
         let node_hash = hash_maybe_first(
@@ -90,8 +91,8 @@ impl PartialNodeCircuit {
         );
         // child_proof.DR + D(cells_proof.DC + D(index_id || index_value))
         let inner = tuple.digest(b);
-        // TODO: add with cells proof
-        let outer = b.map_to_curve_point(&inner.to_targets());
+        let inner2 = b.curve_add(inner, cells_pi.digest_target());
+        let outer = b.map_to_curve_point(&inner2.to_targets());
         let result = b.curve_add(child_pi.rows_digest(), outer);
         PublicInputs::new(
             &node_hash,
@@ -148,10 +149,12 @@ pub fn hash_maybe_first(
 
 #[cfg(test)]
 mod test {
-    use mp2_common::{group_hashing::map_to_curve_point, utils::ToFields};
+    use mp2_common::{
+        group_hashing::map_to_curve_point, poseidon::empty_poseidon_hash, utils::ToFields,
+    };
     use plonky2::{field::types::Field, hash::hash_types::HashOut};
     use plonky2_ecgfp5::curve::curve::Point;
-    use std::array::from_fn as create_array;
+    use std::{array::from_fn as create_array, cell};
 
     use ethers::types::U256;
     use mp2_common::{C, D, F};
@@ -169,9 +172,12 @@ mod test {
         plonk::circuit_builder::CircuitBuilder,
     };
 
-    use crate::row_tree::{
-        full_node::test::generate_random_pi, partial_node::PartialNodeCircuit,
-        public_inputs::PublicInputs, IndexTuple,
+    use crate::{
+        cells_tree,
+        row_tree::{
+            full_node::test::generate_random_pi, partial_node::PartialNodeCircuit,
+            public_inputs::PublicInputs, IndexTuple,
+        },
     };
 
     use super::{hash_maybe_first, PartialNodeWires};
@@ -244,21 +250,23 @@ mod test {
     #[derive(Clone, Debug)]
     struct TestPartialNodeCircuit {
         child_pi: Vec<F>,
+        cells_pi: Vec<F>,
         circuit: PartialNodeCircuit,
     }
 
     impl UserCircuit<F, D> for TestPartialNodeCircuit {
-        type Wires = (PartialNodeWires, Vec<Target>);
+        type Wires = (PartialNodeWires, Vec<Target>, Vec<Target>);
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let child_pi = c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
-            let cells_pi = vec![];
+            let cells_pi = c.add_virtual_targets(cells_tree::PublicInputs::<Target>::TOTAL_LEN);
             let wires = PartialNodeCircuit::build(c, &child_pi, &cells_pi);
-            (wires, child_pi)
+            (wires, child_pi, cells_pi)
         }
 
         fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<F>, wires: &Self::Wires) {
             pw.set_target_arr(&wires.1, &self.child_pi);
+            pw.set_target_arr(&wires.2, &self.cells_pi);
             self.circuit.assign(pw, &wires.0);
         }
     }
@@ -272,8 +280,13 @@ mod test {
         let tuple = IndexTuple::new(identifier, value);
         let node_circuit = PartialNodeCircuit::new(tuple.clone(), child_at_left);
         let child_pi = generate_random_pi(child_min, child_max);
+        let cells_point = Point::rand();
+        let cells_digest = cells_point.to_weierstrass().to_fields();
+        let cells_hash = HashOut::rand().to_fields();
+        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest).to_vec();
         let test_circuit = TestPartialNodeCircuit {
             circuit: node_circuit,
+            cells_pi: cells_pi.clone(),
             child_pi: child_pi.clone(),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
@@ -290,12 +303,9 @@ mod test {
                 (value, pi.min_value_u256())
             }
         };
-        // TODO replace by singler Hasher implementation for cells
         // Poseidon(p1.H || p2.H || node_min || node_max || index_id || index_value ||p.H)) as H
         let child_hash = PublicInputs::from_slice(&child_pi).root_hash_hashout();
-        let empty_hash = HashOut {
-            elements: create_array(|_| F::ZERO),
-        };
+        let empty_hash = empty_poseidon_hash();
         let input_hash = match child_at_left {
             true => [child_hash.to_fields(), empty_hash.to_fields()].concat(),
             false => [empty_hash.to_fields(), child_hash.to_fields()].concat(),
@@ -305,13 +315,15 @@ mod test {
             .chain(min.to_fields().iter())
             .chain(max.to_fields().iter())
             .chain(tuple.to_fields().iter())
+            .chain(cells_hash.iter())
             .cloned()
             .collect::<Vec<_>>();
         let hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&inputs);
         assert_eq!(hash, pi.root_hash_hashout());
         // child_proof.DR + D(cells_proof.DC + D(index_id || index_value)) as DR
         let inner = map_to_curve_point(&tuple.to_fields());
-        let outer = map_to_curve_point(&inner.to_weierstrass().to_fields());
+        let inner2 = inner + cells_point;
+        let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
         let res = Point::decode(
             PublicInputs::from_slice(&child_pi)
                 .rows_digest_field()
