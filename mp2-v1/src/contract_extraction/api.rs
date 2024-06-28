@@ -6,13 +6,12 @@ use super::{
     leaf::{self, LeafCircuit},
     public_inputs::PublicInputs,
 };
-use crate::{
-    api::{default_config, InputNode, ProofInputSerialized, ProofWithVK},
-    MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN,
-};
+use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
 use anyhow::Result;
 use ethers::types::Address;
 use mp2_common::{
+    default_config,
+    proof::{ProofInputSerialized, ProofWithVK},
     utils::{find_index_subvector, Packer},
     C, D, F,
 };

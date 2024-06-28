@@ -2861,6 +2861,7 @@ dependencies = [
  "log",
  "plonky2",
  "rand",
+ "recursion_framework",
 ]
 
 [[package]]
@@ -4995,8 +4996,17 @@ name = "verifiable-db"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode",
+ "ethers",
  "log",
+ "mp2_common",
+ "mp2_test",
  "plonky2",
+ "plonky2_ecgfp5",
+ "rand",
+ "recursion_framework",
+ "serde",
+ "serial_test",
 ]
 
 [[package]]

@@ -5,5 +5,18 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
+bincode.workspace = true
+ethers.workspace = true
 log.workspace = true
 plonky2.workspace = true
+plonky2_ecgfp5.workspace = true
+serde.workspace = true
+
+mp2_common = { path = "../mp2-common" }
+recursion_framework = { path = "../recursion-framework" }
+
+[dev-dependencies]
+rand.workspace = true
+serial_test.workspace = true
+
+mp2_test = { path = "../mp2-test" }

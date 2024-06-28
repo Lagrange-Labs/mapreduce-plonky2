@@ -5,7 +5,7 @@
 
 use common::{TestCase, TestContext};
 use log::info;
-use mp2_v1::api::serialize_proof;
+use mp2_common::proof::serialize_proof;
 
 mod common;
 

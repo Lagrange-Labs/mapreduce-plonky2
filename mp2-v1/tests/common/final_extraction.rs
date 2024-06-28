@@ -1,6 +1,6 @@
-use mp2_common::{types::HashOutput, utils::ToFields};
+use mp2_common::{proof::ProofWithVK, types::HashOutput, utils::ToFields};
 use mp2_v1::{
-    api::{self, ProofWithVK},
+    api,
     final_extraction::{CircuitInput, PublicInputs},
 };
 
