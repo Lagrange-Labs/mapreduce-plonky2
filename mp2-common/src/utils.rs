@@ -302,6 +302,12 @@ impl ToTargets for HashOutTarget {
     }
 }
 
+impl<'a> ToTargets for &'a HashOutTarget {
+    fn to_targets(&self) -> Vec<Target> {
+        self.elements.to_vec()
+    }
+}
+
 pub trait FromFields<F> {
     fn from_fields(t: &[F]) -> Self;
 }
