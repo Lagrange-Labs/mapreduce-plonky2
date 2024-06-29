@@ -74,9 +74,8 @@ impl Parameters {
             CircuitInput::Partial {
                 witness,
                 child_proof,
-                is_child_left,
                 cells_proof,
-            } => self.generate_partial_proof(witness, child_proof, is_child_left, cells_proof),
+            } => self.generate_partial_proof(witness, child_proof, cells_proof),
         }
     }
 
@@ -125,7 +124,6 @@ impl Parameters {
         &self,
         witness: PartialNodeCircuit,
         child_proof: Vec<u8>,
-        is_child_left: bool,
         cells_proof: CellsProof,
     ) -> Result<Vec<u8>> {
         let (p, cells_set) = cells_proof;
@@ -163,7 +161,6 @@ enum CircuitInput {
     Partial {
         witness: partial_node::PartialNodeCircuit,
         child_proof: Vec<u8>,
-        is_child_left: bool,
         cells_proof: CellsProof,
     },
 }
@@ -210,7 +207,6 @@ impl CircuitInput {
         Ok(CircuitInput::Partial {
             witness,
             child_proof,
-            is_child_left,
             cells_proof: (cells_proof, cells_set.clone()),
         })
     }
@@ -339,7 +335,7 @@ mod test {
         let input = CircuitInput::partial(
             tuple.index_identifier,
             tuple.index_value,
-            !is_left,
+            is_left,
             child_proof_buff.clone(),
             p.cells_proof_vk().serialize()?,
             p.cells_test.get_recursive_circuit_set(),
