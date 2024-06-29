@@ -1,14 +1,23 @@
 use derive_more::{Deref, From};
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing, poseidon::H, public_inputs::PublicInputCommon,
-    u256::CircuitBuilderU256, utils::ToTargets, D, F,
+    default_config, group_hashing::CircuitBuilderGroupHashing, poseidon::H, proof::ProofWithVK,
+    public_inputs::PublicInputCommon, u256::CircuitBuilderU256, utils::ToTargets, C, D, F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
-    plonk::{circuit_builder::CircuitBuilder, config::GenericConfig},
+    plonk::{
+        circuit_builder::CircuitBuilder, config::GenericConfig, proof::ProofWithPublicInputsTarget,
+    },
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use recursion_framework::{
+    circuit_builder::CircuitLogicWires,
+    framework::{
+        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+    },
+};
 use serde::{Deserialize, Serialize};
+use std::array::from_fn as create_array;
 
 use crate::cells_tree;
 
@@ -75,19 +84,67 @@ impl FullNodeCircuit {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct RecursiveFullWires {
+    cells_verifier: RecursiveCircuitsVerifierTarget<D>,
+    full_wires: FullNodeWires,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RecursiveFullInput {
+    pub(crate) witness: FullNodeCircuit,
+    pub(crate) cells_proof: ProofWithVK,
+    pub(crate) cells_set: RecursiveCircuits<F, C, D>,
+}
+
+pub(crate) const NUM_CHILDREN: usize = 2;
+impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
+    type CircuitBuilderParams = RecursiveCircuits<F, C, D>;
+
+    type Inputs = RecursiveFullInput;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_CHILDREN],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::TOTAL_LEN;
+        const ROWS_IO: usize = super::public_inputs::PublicInputs::<Target>::TOTAL_LEN;
+        let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, CELLS_IO>::new(
+            default_config(),
+            &builder_parameters,
+        );
+        let cells_verifier_gadget = verifier_gadget.verify_proof_in_circuit_set(builder);
+        let cells_pi = cells_verifier_gadget.get_public_input_targets::<F, CELLS_IO>();
+        let children_pi: [&[Target]; 2] =
+            create_array(|i| verified_proofs[i].public_inputs.as_slice());
+        RecursiveFullWires {
+            // run the row leaf circuit just with the public inputs of the cells proof
+            full_wires: FullNodeCircuit::build(builder, children_pi[0], children_pi[1], cells_pi),
+            cells_verifier: cells_verifier_gadget,
+        }
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
+        inputs.witness.assign(pw, &self.full_wires);
+        let (proof, vd) = inputs.cells_proof.into();
+        self.cells_verifier
+            .set_target(pw, &inputs.cells_set, &proof, &vd)
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod test {
-    use std::hash::Hash;
 
     use ethers::{abi::ethereum_types::Public, types::U256};
-    use mp2_common::{group_hashing::map_to_curve_point, poseidon::H, utils::ToFields, C, D, F};
+    use mp2_common::{group_hashing::map_to_curve_point, utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Sample,
         hash::{
-            hash_types::HashOut,
-            hashing::hash_n_to_hash_no_pad,
-            poseidon::{self, PoseidonHash, PoseidonPermutation},
+            hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation,
         },
         iop::{
             target::Target,
