@@ -7,3 +7,8 @@ edition = "2021"
 anyhow.workspace = true
 log.workspace = true
 plonky2.workspace = true
+itertools.workspace = true
+mp2_common = { path = "../mp2-common" }
+
+[dev-dependencies]
+mp2_test = { path = "../mp2-test" }

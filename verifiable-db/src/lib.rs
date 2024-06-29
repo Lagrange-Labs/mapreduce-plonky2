@@ -1,3 +1,8 @@
+// Add this to allow generic const expressions, e.g. `PAD_LEN(NODE_LEN)`.
+#![feature(generic_const_exprs)]
+/// Module for circuits for simple queries
+pub mod simple_query_circuits;
+
 use anyhow::Result;
 use plonky2::field::types::Field;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
