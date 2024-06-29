@@ -46,6 +46,7 @@ impl FullNodeCircuit {
         let node_max = max_child.max_value();
         // enforcing BST property
         let _true = b._true();
+        // TODO: should be <=  and >= comparison
         let left_comparison = b.is_less_than_u256(&min_child.max_value(), &tuple.index_value);
         let right_comparison = b.is_less_than_u256(&tuple.index_value, &max_child.min_value());
         b.connect(left_comparison.target, _true.target);
@@ -139,7 +140,7 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
 pub(crate) mod test {
 
     use ethers::{abi::ethereum_types::Public, types::U256};
-    use mp2_common::{group_hashing::map_to_curve_point, utils::ToFields, C, D, F};
+    use mp2_common::{group_hashing::map_to_curve_point, poseidon::H, utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Sample,
@@ -150,7 +151,7 @@ pub(crate) mod test {
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
-        plonk::circuit_builder::CircuitBuilder,
+        plonk::{circuit_builder::CircuitBuilder, config::Hasher},
     };
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use rand::Rng;
@@ -207,12 +208,14 @@ pub(crate) mod test {
         .to_vec()
     }
 
-    fn weierstrass_to_point(w: &WeierstrassPoint) -> Point {
-        Point::decode(w.encode()).unwrap()
+    pub fn weierstrass_to_point(w: &WeierstrassPoint) -> Point {
+        let p = Point::decode(w.encode()).unwrap();
+        assert_eq!(&p.to_weierstrass(), w);
+        p
     }
 
     #[test]
-    fn test_row_tree_leaf_circuit() {
+    fn full_circuit() {
         let cells_point = Point::rand();
         let cells_digest = cells_point.to_weierstrass().to_fields();
         let cells_hash = HashOut::rand().to_fields();
@@ -234,6 +237,9 @@ pub(crate) mod test {
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
+        let left_pis = PublicInputs::from_slice(&left_pi);
+        let right_pis = PublicInputs::from_slice(&right_pi);
+
         assert_eq!(U256::from(left_min), pi.min_value_u256());
         assert_eq!(U256::from(right_max), pi.max_value_u256());
         // Poseidon(p1.H || p2.H || node_min || node_max || index_id || index_value ||p.H)) as H
@@ -243,13 +249,13 @@ pub(crate) mod test {
             .to_fields()
             .iter()
             .chain(right_hash.to_fields().iter())
-            .chain(pi.min_value_u256().to_fields().iter())
-            .chain(pi.max_value_u256().to_fields().iter())
+            .chain(left_pis.min_value_u256().to_fields().iter())
+            .chain(right_pis.max_value_u256().to_fields().iter())
             .chain(IndexTuple::new(identifier, value).to_fields().iter())
             .chain(cells_hash.iter())
             .cloned()
             .collect::<Vec<_>>();
-        let hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&inputs);
+        let hash = H::hash_no_pad(&inputs);
         assert_eq!(hash, pi.root_hash_hashout());
 
         // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR

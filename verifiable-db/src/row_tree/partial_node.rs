@@ -1,13 +1,18 @@
-use std::array::from_fn as create_array;
+use plonky2::{
+    hash::poseidon::PoseidonHash,
+    plonk::{config::AlgebraicHasher, proof::ProofWithPublicInputsTarget},
+};
 
 use mp2_common::{
+    default_config,
     group_hashing::CircuitBuilderGroupHashing,
     poseidon::{empty_poseidon_hash, H, P},
+    proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
     u256::CircuitBuilderU256,
     utils::ToTargets,
-    D, F,
+    C, D, F,
 };
 use plonky2::{
     hash::{
@@ -21,6 +26,12 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use recursion_framework::{
+    circuit_builder::CircuitLogicWires,
+    framework::{
+        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+    },
+};
 use serde::{Deserialize, Serialize};
 
 use crate::cells_tree;
@@ -113,9 +124,57 @@ impl PartialNodeCircuit {
     }
 }
 
-use plonky2::{hash::poseidon::PoseidonHash, plonk::config::AlgebraicHasher};
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct RecursivePartialWires {
+    cells_verifier: RecursiveCircuitsVerifierTarget<D>,
+    partial_wires: PartialNodeWires,
+}
 
-pub fn hash_maybe_first(
+pub(crate) struct RecursivePartialInput {
+    pub(crate) witness: PartialNodeCircuit,
+    pub(crate) cells_proof: ProofWithVK,
+    pub(crate) cells_set: RecursiveCircuits<F, C, D>,
+}
+
+pub(crate) const NUM_CHILDREN: usize = 1;
+impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursivePartialWires {
+    type CircuitBuilderParams = RecursiveCircuits<F, C, D>;
+
+    type Inputs = RecursivePartialInput;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_CHILDREN],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::TOTAL_LEN;
+        const ROWS_IO: usize = super::public_inputs::PublicInputs::<Target>::TOTAL_LEN;
+        let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, CELLS_IO>::new(
+            default_config(),
+            &builder_parameters,
+        );
+        let cells_verifier_gadget = verifier_gadget.verify_proof_in_circuit_set(builder);
+        let cells_pi = cells_verifier_gadget.get_public_input_targets::<F, CELLS_IO>();
+        let child_pi = verified_proofs[0].public_inputs.as_slice();
+        RecursivePartialWires {
+            // run the row leaf circuit just with the public inputs of the cells proof
+            partial_wires: PartialNodeCircuit::build(builder, child_pi, cells_pi),
+            cells_verifier: cells_verifier_gadget,
+        }
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
+        inputs.witness.assign(pw, &self.partial_wires);
+        let (proof, vd) = inputs.cells_proof.into();
+        self.cells_verifier
+            .set_target(pw, &inputs.cells_set, &proof, &vd)
+    }
+}
+
+// maybe swap the first two elements and hashes the rest after with it
+fn hash_maybe_first(
     c: &mut CircuitBuilder<F, D>,
     should_swap: BoolTarget,
     elem1: [Target; NUM_HASH_OUT_ELTS],

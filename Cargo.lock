@@ -4995,6 +4995,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "derive_more",
+ "env_logger",
  "ethers",
  "log",
  "mp2_common",
