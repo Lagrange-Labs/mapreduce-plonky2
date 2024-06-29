@@ -1,12 +1,19 @@
 use std::iter::once;
 
+use ethers::types::U256;
 use itertools::Itertools;
 use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::CBuilder,
-    u256::NUM_LIMBS,
+    u256::{U256PubInputs, UInt256Target, NUM_LIMBS},
+    utils::FromTargets,
+    F,
 };
-use plonky2::{hash::hash_types::NUM_HASH_OUT_ELTS, iop::target::Target};
+use plonky2::field::types::Field;
+use plonky2::{
+    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
+    iop::target::{BoolTarget, Target},
+};
 
 /// Query circuits public inputs
 pub enum QueryPublicInputs {
@@ -196,6 +203,38 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         }
     }
 
+    pub fn new(
+        h: &'a [T],
+        v: &'a [T],
+        count: &'a [T],
+        ops: &'a [T],
+        i: &'a [T],
+        min: &'a [T],
+        max: &'a [T],
+        ids: &'a [T],
+        min_q: &'a [T],
+        max_q: &'a [T],
+        overflow: &'a [T],
+        ch: &'a [T],
+        ph: &'a [T],
+    ) -> Self {
+        Self {
+            h,
+            v,
+            count: &count[0],
+            ops,
+            i,
+            min,
+            max,
+            ids,
+            min_q,
+            max_q,
+            overflow: &overflow[0],
+            ch,
+            ph,
+        }
+    }
+
     pub fn to_vec(&self) -> Vec<T> {
         self.h
             .iter()
@@ -233,6 +272,132 @@ impl<'a, const S: usize> PublicInputCommon for PublicInputs<'a, Target, S> {
         cb.register_public_input(*self.overflow);
         cb.register_public_inputs(self.ch);
         cb.register_public_inputs(self.ph);
+    }
+}
+
+impl<'a, const S: usize> PublicInputs<'a, Target, S> {
+    pub fn tree_hash_target(&self) -> HashOutTarget {
+        HashOutTarget::try_from(self.to_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
+    }
+
+    pub fn values_target(&self) -> [UInt256Target; S] {
+        let targets = self.to_values_raw();
+        targets
+            .chunks(NUM_LIMBS)
+            .map(|chunk| UInt256Target::from_targets(chunk))
+            .collect_vec()
+            .try_into()
+            .unwrap()
+    }
+
+    pub fn num_matching_rows_target(&self) -> Target {
+        *self.to_count_raw()
+    }
+
+    pub fn operation_ids_target(&self) -> [Target; S] {
+        self.to_ops_raw().try_into().unwrap()
+    }
+
+    pub fn index_value_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_index_value_raw())
+    }
+
+    pub fn min_value_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_min_value_raw())
+    }
+
+    pub fn max_value_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_max_value_raw())
+    }
+
+    pub fn index_ids_target(&self) -> [Target; 2] {
+        self.to_index_ids_raw().try_into().unwrap()
+    }
+
+    pub fn min_query_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_min_query_raw())
+    }
+
+    pub fn max_query_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_max_query_raw())
+    }
+
+    pub fn overflow_flag_target(&self) -> BoolTarget {
+        BoolTarget::new_unsafe(*self.to_overflow_raw())
+    }
+
+    pub fn computational_hash_target(&self) -> HashOutTarget {
+        HashOutTarget::try_from(self.to_computational_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
+    }
+
+    pub fn placeholder_hash_target(&self) -> HashOutTarget {
+        HashOutTarget::try_from(self.to_placeholder_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
+    }
+}
+
+impl<'a, const S: usize> PublicInputs<'a, F, S> {
+    pub fn tree_hash(&self) -> HashOut<F> {
+        HashOut::try_from(self.to_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
+    }
+
+    pub fn values(&self) -> [U256; S] {
+        self.to_values_raw()
+            .chunks(NUM_LIMBS)
+            .map(|chunk| U256::from(U256PubInputs::try_from(chunk).unwrap()))
+            .collect_vec()
+            .try_into()
+            .unwrap()
+    }
+
+    pub fn num_matching_rows(&self) -> F {
+        *self.to_count_raw()
+    }
+
+    pub fn operation_ids(&self) -> [F; S] {
+        self.to_ops_raw().try_into().unwrap()
+    }
+
+    pub fn index_value(&self) -> U256 {
+        U256::from(U256PubInputs::try_from(self.to_index_value_raw()).unwrap())
+    }
+
+    pub fn min_value(&self) -> U256 {
+        U256::from(U256PubInputs::try_from(self.to_min_value_raw()).unwrap())
+    }
+
+    pub fn max_value(&self) -> U256 {
+        U256::from(U256PubInputs::try_from(self.to_max_value_raw()).unwrap())
+    }
+
+    pub fn index_ids(&self) -> [F; 2] {
+        self.to_index_ids_raw().try_into().unwrap()
+    }
+
+    pub fn min_query_value(&self) -> U256 {
+        U256::from(U256PubInputs::try_from(self.to_min_query_raw()).unwrap())
+    }
+
+    pub fn max_query_value(&self) -> U256 {
+        U256::from(U256PubInputs::try_from(self.to_max_query_raw()).unwrap())
+    }
+
+    pub fn overflow_flag(&self) -> bool {
+        let overflow = *self.to_overflow_raw();
+        if overflow == F::ONE {
+            return true;
+        }
+        if overflow == F::ZERO {
+            return false;
+        }
+        unreachable!("overflow flag public input different from 0 or 1")
+    }
+
+    pub fn computational_hash(&self) -> HashOut<F> {
+        HashOut::try_from(self.to_computational_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
+    }
+
+    pub fn placeholder_hash(&self) -> HashOut<F> {
+        HashOut::try_from(self.to_placeholder_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
     }
 }
 

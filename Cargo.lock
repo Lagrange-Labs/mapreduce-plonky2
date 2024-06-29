@@ -4995,6 +4995,7 @@ name = "verifiable-db"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ethers",
  "itertools 0.12.1",
  "log",
  "mp2_common",
