@@ -228,6 +228,7 @@ mod test {
         utils::ToFields,
         F,
     };
+    use partial_node::test::partial_safety_check;
     use plonky2::{
         field::types::Sample,
         hash::{
@@ -265,11 +266,17 @@ mod test {
             //  leaf1 - leaf2  =>  full_node => partial_node
             let mut rng = thread_rng();
             let identifier = F::rand();
-            let v1 = U256::from(rng.gen::<[u8; 32]>());
+            //let v1 = U256::from(rng.gen::<[u8; 32]>());
+            let v1 = U256::from(10);
             let v_full = v1 + U256::from(10);
             let v2 = v_full + U256::from(10);
             let v_partial = v2 + U256::from(10); // full is left child of partial
 
+            //           40  (partial)
+            //          /
+            //        20 (full)
+            //      /   \
+            //  10        30  (leaves)
             Ok(TestParams {
                 cells_test,
                 params,
@@ -310,6 +317,9 @@ mod test {
         let children_proof = [leaf1.clone(), leaf2.clone()];
         log::info!("Generating full proof (from leaf 1 and leaf 2)");
         let full_proof = generate_full_proof(&params, children_proof)?;
+        log::info!("Generating partial proof (from full proof)");
+        let _ = generate_partial_proof(&params, params.partial.clone(), true, full_proof)?;
+        log::info!("Test done");
         Ok(())
     }
 
@@ -317,35 +327,32 @@ mod test {
         p: &TestParams,
         tuple: IndexTuple,
         is_left: bool,
-        child_proof: Vec<u8>,
+        child_proof_buff: Vec<u8>,
     ) -> Result<Vec<u8>> {
+        let child_proof = ProofWithVK::deserialize(&child_proof_buff)?;
+        let child_pi = PublicInputs::from_slice(&child_proof.proof.public_inputs);
+        let child_min = child_pi.min_value_u256();
+        let child_max = child_pi.max_value_u256();
+
+        partial_safety_check(child_min, child_max, tuple.index_value, is_left);
+
         let input = CircuitInput::partial(
             tuple.index_identifier,
             tuple.index_value,
-            is_left,
-            child_proof.clone(),
+            !is_left,
+            child_proof_buff.clone(),
             p.cells_proof_vk().serialize()?,
             p.cells_test.get_recursive_circuit_set(),
         )?;
         let proof = p.params.generate_proof(input)?;
         let pi = ProofWithVK::deserialize(&proof)?.proof.public_inputs;
         let pi = PublicInputs::from_slice(&pi);
-        let child_proof = ProofWithVK::deserialize(&child_proof)?;
-        let child_pi = PublicInputs::from_slice(&child_proof.proof.public_inputs);
         {
-            let child_min = child_pi.min_value_u256();
-            let child_max = child_pi.max_value_u256();
-            let (min, max) = match is_left {
-                true => {
-                    assert_eq!(U256::from(child_min), pi.min_value_u256());
-                    assert_eq!(tuple.index_value, pi.max_value_u256());
-                    (pi.min_value_u256(), tuple.index_value)
-                }
-                false => {
-                    assert_eq!(tuple.index_value, pi.min_value_u256());
-                    assert_eq!(U256::from(child_min), pi.max_value_u256());
-                    (tuple.index_value, pi.min_value_u256())
-                }
+            // node_min = left ? child_proof.min : index_value
+            // node_max = left ? index_value : child_proof.max
+            let (node_min, node_max) = match is_left {
+                true => (pi.min_value_u256(), tuple.index_value),
+                false => (tuple.index_value, pi.max_value_u256()),
             };
 
             let child_hash = child_pi.root_hash_hashout();
@@ -356,8 +363,8 @@ mod test {
             };
             let inputs = input_hash
                 .iter()
-                .chain(min.to_fields().iter())
-                .chain(max.to_fields().iter())
+                .chain(node_min.to_fields().iter())
+                .chain(node_max.to_fields().iter())
                 .chain(tuple.to_fields().iter())
                 .chain(p.cells_pi().h_raw().iter())
                 .cloned()

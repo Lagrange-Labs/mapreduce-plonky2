@@ -63,7 +63,7 @@ impl PartialNodeCircuit {
         child_pi: &[Target],
         cells_pi: &[Target],
     ) -> PartialNodeWires {
-        let cells_pi = cells_tree::PublicInputs::from_slice(&cells_pi);
+        let cells_pi = cells_tree::PublicInputs::from_slice(cells_pi);
         let tuple = IndexTupleWire::new(b);
         let is_child_at_left = b.add_virtual_bool_target_safe();
         let child_pi = PublicInputs::from_slice(child_pi);
@@ -93,6 +93,8 @@ impl PartialNodeCircuit {
             .chain(cells_pi.node_hash().to_targets().iter())
             .cloned()
             .collect::<Vec<_>>();
+        //  if child at left, then hash should be child_proof.H || H("") || rest
+        //  if child at right, then hash should be H("") || child_proof.H || rest
         let node_hash = hash_maybe_first(
             b,
             is_child_at_left,
@@ -207,7 +209,7 @@ fn hash_maybe_first(
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use mp2_common::{
         group_hashing::map_to_curve_point, poseidon::empty_poseidon_hash, utils::ToFields,
     };
@@ -331,12 +333,35 @@ mod test {
     }
 
     #[test]
-    fn test_partial_node_circuit() {
-        let (child_min, child_max) = (10, 15);
-        let value = U256::from(18); // 15 < 18 < 23
-        let identifier = F::rand();
-        let child_at_left = true; // because node value is less than max of left child
-        let tuple = IndexTuple::new(identifier, value);
+    fn partial_node_child_left() {
+        partial_node_circuit(true)
+    }
+    #[test]
+    fn partial_node_child_right() {
+        partial_node_circuit(false)
+    }
+
+    pub fn partial_safety_check<T: Into<U256>>(
+        child_min: T,
+        child_max: T,
+        node_value: U256,
+        child_at_left: bool,
+    ) {
+        // max_left = left ? child_proof.max : index_value
+        // min_right = left ? index_value : child_proof.min
+        let (max_left, min_right) = match child_at_left {
+            true => (child_max.into(), node_value),
+            false => (node_value, child_min.into()),
+        };
+        assert!(max_left <= min_right);
+    }
+
+    fn partial_node_circuit(child_at_left: bool) {
+        let ((child_min, child_max), tuple) = match child_at_left {
+            true => ((10, 15), IndexTuple::new(F::rand(), U256::from(18))),
+            false => ((20, 25), IndexTuple::new(F::rand(), U256::from(18))),
+        };
+        partial_safety_check(child_min, child_max, tuple.index_value, child_at_left);
         let node_circuit = PartialNodeCircuit::new(tuple.clone(), child_at_left);
         let child_pi = generate_random_pi(child_min, child_max);
         let cells_point = Point::rand();
@@ -350,17 +375,11 @@ mod test {
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        let (min, max) = match child_at_left {
-            true => {
-                assert_eq!(U256::from(child_min), pi.min_value_u256());
-                assert_eq!(value, pi.max_value_u256());
-                (pi.min_value_u256(), value)
-            }
-            false => {
-                assert_eq!(value, pi.min_value_u256());
-                assert_eq!(U256::from(child_min), pi.max_value_u256());
-                (value, pi.min_value_u256())
-            }
+        // node_min = left ? child_proof.min : index_value
+        // node_max = left ? index_value : child_proof.max
+        let (node_min, node_max) = match child_at_left {
+            true => (pi.min_value_u256(), tuple.index_value),
+            false => (tuple.index_value, pi.max_value_u256()),
         };
         // Poseidon(p1.H || p2.H || node_min || node_max || index_id || index_value ||p.H)) as H
         let child_hash = PublicInputs::from_slice(&child_pi).root_hash_hashout();
@@ -371,8 +390,8 @@ mod test {
         };
         let inputs = input_hash
             .iter()
-            .chain(min.to_fields().iter())
-            .chain(max.to_fields().iter())
+            .chain(node_min.to_fields().iter())
+            .chain(node_max.to_fields().iter())
             .chain(tuple.to_fields().iter())
             .chain(cells_hash.iter())
             .cloned()
