@@ -15,6 +15,7 @@ use super::{
     IndexTuple,
 };
 
+/// Parameters holding the circuits for the row tree creation
 pub struct Parameters {
     leaf: CircuitWithUniversalVerifier<F, C, D, 0, leaf::RecursiveLeafWires>,
     full: CircuitWithUniversalVerifier<
@@ -117,7 +118,7 @@ impl Parameters {
             [&left_vd, &right_vd],
             full,
         )?;
-        ProofWithVK::new(proof, self.leaf.circuit_data().verifier_only.clone()).serialize()
+        ProofWithVK::new(proof, self.full.circuit_data().verifier_only.clone()).serialize()
     }
 
     fn generate_partial_proof(
@@ -137,7 +138,7 @@ impl Parameters {
         let proof =
             self.row_set
                 .generate_proof(&self.partial, [child_proof], [&child_vd], partial)?;
-        ProofWithVK::new(proof, self.leaf.circuit_data().verifier_only.clone()).serialize()
+        ProofWithVK::new(proof, self.partial.circuit_data().verifier_only.clone()).serialize()
     }
 }
 

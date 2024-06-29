@@ -39,9 +39,9 @@ use crate::cells_tree;
 use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
 
 #[derive(Clone, Debug)]
-pub struct PartialNodeCircuit {
-    tuple: IndexTuple,
-    is_child_at_left: bool,
+pub(crate) struct PartialNodeCircuit {
+    pub(crate) tuple: IndexTuple,
+    pub(crate) is_child_at_left: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -357,9 +357,10 @@ pub mod test {
     }
 
     fn partial_node_circuit(child_at_left: bool) {
-        let ((child_min, child_max), tuple) = match child_at_left {
-            true => ((10, 15), IndexTuple::new(F::rand(), U256::from(18))),
-            false => ((20, 25), IndexTuple::new(F::rand(), U256::from(18))),
+        let tuple = IndexTuple::new(F::rand(), U256::from(18));
+        let (child_min, child_max) = match child_at_left {
+            true => (10, 15),
+            false => (20, 25),
         };
         partial_safety_check(child_min, child_max, tuple.index_value, child_at_left);
         let node_circuit = PartialNodeCircuit::new(tuple.clone(), child_at_left);

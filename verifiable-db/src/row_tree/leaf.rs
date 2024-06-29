@@ -96,7 +96,7 @@ pub(crate) struct RecursiveLeafWires {
 ///  Circuit input that contains the  local witness value
 ///  as well as the cells proof to verify
 #[derive(Clone, Debug)]
-pub struct RecursiveLeafInput {
+pub(crate) struct RecursiveLeafInput {
     pub(crate) witness: LeafCircuit,
     pub(crate) cells_proof: ProofWithVK,
     // given here as well so it's not saved in the parameters
