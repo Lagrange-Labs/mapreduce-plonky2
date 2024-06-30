@@ -262,7 +262,7 @@ impl CircuitLogicWires<F, D, 0> for RecursiveParentWires {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block::index::tests::{random_extraction_pi, random_rows_tree_pi};
+    use crate::index_tree::tests::{random_extraction_pi, random_rows_tree_pi};
     use mp2_common::{
         poseidon::{hash_to_int_value, H},
         utils::{Fieldable, ToFields},

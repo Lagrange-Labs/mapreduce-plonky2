@@ -172,7 +172,7 @@ impl CircuitLogicWires<F, D, 1> for MembershipWires {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block::index::tests::{
+    use crate::index_tree::tests::{
         random_block_index_pi, random_extraction_pi, random_rows_tree_pi,
     };
     use mp2_common::{

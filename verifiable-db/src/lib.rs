@@ -10,8 +10,8 @@ use plonky2::{
 };
 
 pub mod api;
-pub mod block;
 pub mod cells_tree;
+pub mod index_tree;
 pub mod row_tree;
 
 /// An example of using Plonky2 to prove a statement of the form
