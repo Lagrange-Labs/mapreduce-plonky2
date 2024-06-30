@@ -71,7 +71,7 @@ impl PartialNodeCircuit {
         // min_right = left ? index_value : child_proof.min
         let max_left = b.select_u256(is_child_at_left, &child_pi.max_value(), &tuple.index_value);
         let min_right = b.select_u256(is_child_at_left, &tuple.index_value, &child_pi.min_value());
-        let bst_enforced = b.is_less_than_u256(&max_left, &min_right);
+        let bst_enforced = b.is_less_or_equal_than_u256(&max_left, &min_right);
         let _true = b._true();
         b.connect(bst_enforced.target, _true.target);
         // node_min = left ? child_proof.min : index_value

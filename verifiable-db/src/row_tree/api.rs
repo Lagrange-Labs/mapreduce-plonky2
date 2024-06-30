@@ -5,6 +5,7 @@ use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set as p, RecursiveCircuits},
 };
+use serde::{Deserialize, Serialize};
 
 use crate::cells_tree;
 
@@ -16,6 +17,7 @@ use super::{
 };
 
 /// Parameters holding the circuits for the row tree creation
+#[derive(Serialize, Deserialize)]
 pub struct Parameters {
     leaf: CircuitWithUniversalVerifier<F, C, D, 0, leaf::RecursiveLeafWires>,
     full: CircuitWithUniversalVerifier<
@@ -148,7 +150,7 @@ type CellsProof = (Vec<u8>, RecursiveCircuits<F, C, D>);
 
 /// Enum holding all the inputs necessary to generate
 /// rows tree related proofs
-enum CircuitInput {
+pub enum CircuitInput {
     Leaf {
         witness: leaf::LeafCircuit,
         cells_proof: CellsProof,
@@ -167,7 +169,7 @@ enum CircuitInput {
 }
 
 impl CircuitInput {
-    fn leaf(
+    pub fn leaf(
         identifier: F,
         value: U256,
         cells_proof: Vec<u8>,

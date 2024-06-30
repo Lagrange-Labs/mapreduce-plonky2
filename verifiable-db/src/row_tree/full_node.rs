@@ -46,9 +46,10 @@ impl FullNodeCircuit {
         let node_max = max_child.max_value();
         // enforcing BST property
         let _true = b._true();
-        // TODO: should be <=  and >= comparison
-        let left_comparison = b.is_less_than_u256(&min_child.max_value(), &tuple.index_value);
-        let right_comparison = b.is_less_than_u256(&tuple.index_value, &max_child.min_value());
+        let left_comparison =
+            b.is_less_or_equal_than_u256(&min_child.max_value(), &tuple.index_value);
+        let right_comparison =
+            b.is_less_or_equal_than_u256(&tuple.index_value, &max_child.min_value());
         b.connect(left_comparison.target, _true.target);
         b.connect(right_comparison.target, _true.target);
 
@@ -222,7 +223,8 @@ pub(crate) mod test {
         let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest).to_vec();
 
         let (left_min, left_max) = (10, 15);
-        let (right_min, right_max) = (23, 30);
+        // this should work since we allow multipleicities of indexes in the row tree
+        let (right_min, right_max) = (18, 30);
         let value = U256::from(18); // 15 < 18 < 23
         let identifier = F::rand();
         let tuple = IndexTuple::new(identifier, value);

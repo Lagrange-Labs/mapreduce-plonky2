@@ -23,6 +23,8 @@ mod leaf;
 mod partial_node;
 mod public_inputs;
 
+pub use api::{CircuitInput, Parameters};
+
 /// The value to give at each node of the row tree
 #[derive(Clone, Debug, Constructor)]
 pub(crate) struct IndexTuple {

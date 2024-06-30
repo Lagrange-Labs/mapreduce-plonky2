@@ -120,6 +120,9 @@ impl PublicParameters {
         }
     }
 
+    pub fn vk_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.set
+    }
     pub fn generate_proof(&self, circuit_type: CircuitInput) -> Result<Vec<u8>> {
         let set = &self.set;
 

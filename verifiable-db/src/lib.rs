@@ -11,7 +11,7 @@ use plonky2::{
 
 pub mod api;
 pub mod cells_tree;
-mod row_tree;
+pub mod row_tree;
 
 /// An example of using Plonky2 to prove a statement of the form
 /// "I know two know numbers A and B such that A + B = C"
