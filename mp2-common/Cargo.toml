@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 bincode.workspace = true
+derive_more = "0.99.18"
 eth_trie.workspace = true
 ethers.workspace = true
 hashbrown.workspace = true

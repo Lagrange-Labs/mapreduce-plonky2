@@ -36,7 +36,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
 impl<'a> PublicInputs<'a, GFp> {
     /// Get the cells digest point.
     pub fn digest_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(&self.dc)
+        WeierstrassPoint::from_fields(self.dc)
     }
 }
 

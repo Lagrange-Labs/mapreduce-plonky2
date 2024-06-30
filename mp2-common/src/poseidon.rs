@@ -1,4 +1,5 @@
 use crate::types::CBuilder;
+use crate::utils::ToTargets;
 use crate::F;
 use num::BigUint;
 use plonky2::field::types::PrimeField64;
@@ -20,7 +21,7 @@ use plonky2_ecdsa::gadgets::biguint::BigUintTarget;
 use std::sync::OnceLock;
 
 pub type H = PoseidonHash;
-type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
+pub type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
 
 /// The static variable of Empty Poseidon hash
 static EMPTY_POSEIDON_HASH: OnceLock<HashOut<GoldilocksField>> = OnceLock::new();
@@ -33,7 +34,7 @@ pub fn empty_poseidon_hash() -> &'static HashOut<GoldilocksField> {
 /// Convert the hash target into a big integer target.
 pub fn hash_to_int_target(b: &mut CBuilder, h: HashOutTarget) -> BigUintTarget {
     let limbs = h
-        .elements
+        .to_targets()
         .into_iter()
         .flat_map(|t| {
             // Split the hash element into low and high of Uint32. The `split_low_high`

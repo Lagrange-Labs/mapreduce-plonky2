@@ -74,7 +74,7 @@ where
 
         // Register the public inputs.
         let PublicInputs { dm, s, .. } = child_proof;
-        let h = &root.output_array.to_targets().arr;
+        let h = &root.output_array.downcast_to_targets().arr;
         let k = &new_mpt_key.key.arr;
         let t = &new_mpt_key.pointer;
         PublicInputs { h, dm, k, t, s }.register(b);

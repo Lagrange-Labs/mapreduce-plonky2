@@ -36,13 +36,13 @@ use std::iter;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafWires {
-    block_id: Target,
+    index_identifier: Target,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafCircuit {
     /// Identifier of the block number column
-    pub(crate) block_id: F,
+    pub(crate) index_identifier: F,
 }
 
 impl LeafCircuit {
@@ -87,8 +87,7 @@ impl LeafCircuit {
         // node_min = block_number
         // node_max = block_number
         // H_new = H(H("") || H("") || node_min || node_max || block_id || block_number || rows_tree_proof.H)
-        let empty_hash = empty_poseidon_hash();
-        let empty_hash = b.constant_hash(*empty_hash).elements;
+        let empty_hash = b.constant_hash(*empty_poseidon_hash()).to_targets();
         let inputs = empty_hash
             .iter()
             .chain(empty_hash.iter())
@@ -99,7 +98,7 @@ impl LeafCircuit {
             .chain(rows_tree_pi.h)
             .cloned()
             .collect();
-        let h_new = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
+        let h_new = b.hash_n_to_hash_no_pad::<CHasher>(inputs).to_targets();
 
         // Register the public inputs.
         PublicInputs::new(
@@ -115,14 +114,12 @@ impl LeafCircuit {
         )
         .register(b);
 
-        LeafWires {
-            block_id: index_identifier,
-        }
+        LeafWires { index_identifier }
     }
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
-        pw.set_target(wires.block_id, self.block_id);
+        pw.set_target(wires.index_identifier, self.index_identifier);
     }
 }
 
@@ -258,7 +255,9 @@ mod tests {
         let rows_tree_pi = &random_rows_tree_pi(&mut rng, &row_digest);
 
         let test_circuit = TestLeafCircuit {
-            c: LeafCircuit { block_id },
+            c: LeafCircuit {
+                index_identifier: block_id,
+            },
             extraction_pi,
             rows_tree_pi,
         };

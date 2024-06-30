@@ -28,7 +28,7 @@ use std::iter;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct MembershipWires {
     block_id: Target,
-    block_number: UInt256Target,
+    index_value: UInt256Target,
     old_min: UInt256Target,
     old_max: UInt256Target,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
@@ -40,9 +40,9 @@ pub(crate) struct MembershipWires {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct MembershipCircuit {
     /// Identifier of the block number column
-    pub(crate) block_id: F,
+    pub(crate) index_identifier: F,
     /// Block number of the current node
-    pub(crate) block_number: U256,
+    pub(crate) index_value: U256,
     /// Minimum block number found in the subtree rooted in the current node in the old tree
     pub(crate) old_min: U256,
     /// Maximum block number found in the subtree rooted in the current node in the old tree
@@ -57,8 +57,8 @@ impl MembershipCircuit {
     fn build(b: &mut CBuilder, child_pi: &[Target]) -> MembershipWires {
         let ttrue = b._true();
 
-        let block_id = b.add_virtual_target();
-        let [block_number, old_min, old_max] = [0; 3].map(|_| b.add_virtual_u256());
+        let index_identifier = b.add_virtual_target();
+        let [index_value, old_min, old_max] = [0; 3].map(|_| b.add_virtual_u256());
         let [left_child, rows_tree_hash] = [0; 2].map(|_| b.add_virtual_hash());
 
         let child_pi = PublicInputs::<Target>::from_slice(child_pi);
@@ -66,15 +66,15 @@ impl MembershipCircuit {
         // Compute the hash of the node in the old tree.
         // H_old = H(left_child || p.H_old || old_min || old_max || block_id || block_number || rows_tree_hash)
         let inputs = left_child
-            .elements
+            .to_targets()
             .iter()
             .chain(child_pi.h_old)
             .cloned()
             .chain(old_min.to_targets())
             .chain(old_max.to_targets())
-            .chain(iter::once(block_id))
-            .chain(block_number.to_targets())
-            .chain(rows_tree_hash.elements)
+            .chain(iter::once(index_identifier))
+            .chain(index_value.to_targets())
+            .chain(rows_tree_hash.to_targets())
             .collect();
         let h_old = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
@@ -82,7 +82,7 @@ impl MembershipCircuit {
         // remember we only append to the right so the right children minimum should
         // always be superior to the parent minimum.
         let child_min = UInt256Target::from_targets(child_pi.min);
-        let block_num_lt_child_min = b.is_less_than_u256(&block_number, &child_min);
+        let block_num_lt_child_min = b.is_less_than_u256(&index_value, &child_min);
         b.connect(block_num_lt_child_min.target, ttrue.target);
 
         // Compute the hash of the node in the new tree.
@@ -91,15 +91,15 @@ impl MembershipCircuit {
         // node_max = p.max
         // H_new = H(left_child || p.H_new || node_min || node_max || block_id || block_number || rows_tree_hash)
         let inputs = left_child
-            .elements
+            .to_targets()
             .iter()
             .chain(child_pi.h_new)
             .cloned()
             .chain(old_min.to_targets()) // node_min
             .chain(child_pi.max.iter().cloned()) // node_max
-            .chain(iter::once(block_id))
-            .chain(block_number.to_targets())
-            .chain(rows_tree_hash.elements)
+            .chain(iter::once(index_identifier))
+            .chain(index_value.to_targets())
+            .chain(rows_tree_hash.to_targets())
             .collect();
         let h_new = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
@@ -118,8 +118,8 @@ impl MembershipCircuit {
         .register(b);
 
         MembershipWires {
-            block_id,
-            block_number,
+            block_id: index_identifier,
+            index_value,
             old_min,
             old_max,
             left_child,
@@ -129,14 +129,14 @@ impl MembershipCircuit {
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &MembershipWires) {
-        pw.set_target(wires.block_id, self.block_id);
+        pw.set_target(wires.block_id, self.index_identifier);
         [
-            (&wires.block_number, self.block_number),
+            (&wires.index_value, self.index_value),
             (&wires.old_min, self.old_min),
             (&wires.old_max, self.old_max),
         ]
         .into_iter()
-        .for_each(|(t, v)| pw.set_u256_target(&t, v));
+        .for_each(|(t, v)| pw.set_u256_target(t, v));
         [
             (wires.left_child, self.left_child),
             (wires.rows_tree_hash, self.rows_tree_hash),
@@ -172,11 +172,9 @@ impl CircuitLogicWires<F, D, 1> for MembershipWires {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index_tree::tests::{
-        random_block_index_pi, random_extraction_pi, random_rows_tree_pi,
-    };
+    use crate::index_tree::tests::random_block_index_pi;
     use mp2_common::{
-        poseidon::{hash_to_int_value, H},
+        poseidon::H,
         utils::{Fieldable, ToFields},
         C,
     };
@@ -184,12 +182,7 @@ mod tests {
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
-    use plonky2::{
-        field::types::{Field, Sample},
-        hash::hash_types::NUM_HASH_OUT_ELTS,
-        plonk::config::Hasher,
-    };
-    use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
+    use plonky2::{hash::hash_types::NUM_HASH_OUT_ELTS, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
 
     #[derive(Clone, Debug)]
@@ -205,9 +198,9 @@ mod tests {
         fn build(b: &mut CBuilder) -> Self::Wires {
             let child_pi = b.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
 
-            let Membership_wires = MembershipCircuit::build(b, &child_pi);
+            let membership_wires = MembershipCircuit::build(b, &child_pi);
 
-            (Membership_wires, child_pi)
+            (membership_wires, child_pi)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -222,22 +215,18 @@ mod tests {
     fn test_block_index_membership_circuit() {
         let mut rng = thread_rng();
 
-        let block_id = rng.gen::<u32>().to_field();
-        let [block_number, old_min, old_max] = [0; 3].map(|_| U256(rng.gen::<[u64; 4]>()));
+        let index_identifier = rng.gen::<u32>().to_field();
+        let [index_value, old_min, old_max] = [0; 3].map(|_| U256(rng.gen::<[u64; 4]>()));
         let [left_child, rows_tree_hash] =
             [0; 2].map(|_| HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields()));
 
-        let child_pi = &random_block_index_pi(
-            &mut rng,
-            block_number + 1,
-            block_number + 2,
-            block_number + 2,
-        );
+        let child_pi =
+            &random_block_index_pi(&mut rng, index_value + 1, index_value + 2, index_value + 2);
 
         let test_circuit = TestMembershipCircuit {
             c: MembershipCircuit {
-                block_id,
-                block_number,
+                index_identifier,
+                index_value,
                 old_min,
                 old_max,
                 left_child,
@@ -248,20 +237,20 @@ mod tests {
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        let child_pi = PublicInputs::from_slice(&child_pi);
+        let child_pi = PublicInputs::from_slice(child_pi);
 
         // Check old hash
         {
             let inputs: Vec<_> = left_child
-                .elements
+                .to_fields()
                 .iter()
                 .chain(child_pi.h_old)
                 .cloned()
                 .chain(old_min.to_fields())
                 .chain(old_max.to_fields())
-                .chain(iter::once(block_id))
-                .chain(block_number.to_fields())
-                .chain(rows_tree_hash.elements)
+                .chain(iter::once(index_identifier))
+                .chain(index_value.to_fields())
+                .chain(rows_tree_hash.to_fields())
                 .collect();
             let exp_hash = H::hash_no_pad(&inputs).elements;
 
@@ -272,15 +261,15 @@ mod tests {
         // Check new hash
         {
             let inputs: Vec<_> = left_child
-                .elements
+                .to_fields()
                 .iter()
                 .chain(child_pi.h_new)
                 .cloned()
                 .chain(old_min.to_fields())
                 .chain(child_pi.max.iter().cloned())
-                .chain(iter::once(block_id))
-                .chain(block_number.to_fields())
-                .chain(rows_tree_hash.elements)
+                .chain(iter::once(index_identifier))
+                .chain(index_value.to_fields())
+                .chain(rows_tree_hash.to_fields())
                 .collect();
             let exp_hash = H::hash_no_pad(&inputs);
 

@@ -70,6 +70,11 @@ impl<'a> PublicInputs<'a, F> {
 }
 
 impl<'a> PublicInputs<'a, Target> {
+    /// Get the hash corresponding to the root of the subtree of this node
+    pub fn root_hash(&self) -> HashOutTarget {
+        HashOutTarget::from_targets(&self.h)
+    }
+
     pub fn rows_digest(&self) -> CurveTarget {
         let dv = self.dr;
         CurveTarget::from_targets(dv)

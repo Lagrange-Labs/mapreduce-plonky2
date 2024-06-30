@@ -8,17 +8,12 @@ pub use public_inputs::PublicInputs;
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
     use ethers::prelude::U256;
     use mp2_common::{keccak::PACKED_HASH_LEN, utils::ToFields, F};
     use mp2_test::utils::random_vector;
-    use plonky2::{
-        field::types::{Field, Sample},
-        hash::hash_types::NUM_HASH_OUT_ELTS,
-        plonk::config::Hasher,
-    };
+    use plonky2::{field::types::Sample, hash::hash_types::NUM_HASH_OUT_ELTS};
     use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{rngs::ThreadRng, thread_rng, Rng};
+    use rand::{rngs::ThreadRng, Rng};
 
     /// Generate a random block index public inputs (of current module).
     pub(crate) fn random_block_index_pi(
@@ -43,7 +38,7 @@ pub(crate) mod tests {
             .chain(block_hash)
             .chain(prev_block_hash)
             .chain(metadata_hash)
-            .chain(new_node_digest.into_iter())
+            .chain(new_node_digest)
             .collect()
     }
 

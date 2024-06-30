@@ -49,7 +49,9 @@ impl CircuitInput {
         rows_tree_circuit_set: &RecursiveCircuits<F, C, D>,
     ) -> Self {
         Self::Leaf {
-            witness: LeafCircuit { block_id },
+            witness: LeafCircuit {
+                index_identifier: block_id,
+            },
             extraction_proof: (extraction_proof, extraction_circuit_set.clone()),
             rows_tree_proof: (rows_tree_proof, rows_tree_circuit_set.clone()),
         }
@@ -71,8 +73,8 @@ impl CircuitInput {
     ) -> Self {
         CircuitInput::Parent {
             witness: ParentCircuit {
-                block_id,
-                old_block_number,
+                index_identifier: block_id,
+                old_index_value: old_block_number,
                 old_min,
                 old_max,
                 left_child,
@@ -86,8 +88,8 @@ impl CircuitInput {
 
     /// Create a circuit input for proving a membership node of 1 child.
     pub fn new_membership(
-        block_id: F,
-        block_number: U256,
+        index_identifier: F,
+        index_value: U256,
         old_min: U256,
         old_max: U256,
         left_child: HashOut<F>,
@@ -96,8 +98,8 @@ impl CircuitInput {
     ) -> Self {
         CircuitInput::Membership {
             witness: MembershipCircuit {
-                block_id,
-                block_number,
+                index_identifier,
+                index_value,
                 old_min,
                 old_max,
                 left_child,
@@ -252,9 +254,7 @@ mod tests {
     use plonky2::{
         field::types::{Field, Sample},
         hash::hash_types::NUM_HASH_OUT_ELTS,
-        plonk::{
-            circuit_data::VerifierOnlyCircuitData, config::Hasher, proof::ProofWithPublicInputs,
-        },
+        plonk::config::Hasher,
     };
     use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
     use rand::{rngs::ThreadRng, thread_rng, Rng};
@@ -292,7 +292,7 @@ mod tests {
             block_number: U256,
             value_digest: &[F],
         ) -> Result<ProofWithVK> {
-            let pi = random_extraction_pi(rng, block_number, &value_digest);
+            let pi = random_extraction_pi(rng, block_number, value_digest);
 
             let proof = self
                 .extraction_set
@@ -306,7 +306,7 @@ mod tests {
             rng: &mut ThreadRng,
             row_digest: &[F],
         ) -> Result<ProofWithVK> {
-            let pi = random_rows_tree_pi(rng, &row_digest);
+            let pi = random_rows_tree_pi(rng, row_digest);
 
             let proof = self
                 .rows_tree_set
@@ -351,7 +351,6 @@ mod tests {
         log::info!("Generating the membership proof");
         generate_membership_proof(
             &b,
-            &mut rng,
             block_id,
             block_number - 1,
             block_number,
@@ -462,6 +461,7 @@ mod tests {
         Ok(proof)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn generate_parent_proof(
         b: &TestBuilder,
         rng: &mut ThreadRng,
@@ -589,9 +589,8 @@ mod tests {
 
     fn generate_membership_proof(
         b: &TestBuilder,
-        rng: &mut ThreadRng,
-        block_id: F,
-        block_number: U256,
+        index_identifier: F,
+        index_number: U256,
         old_min: U256,
         old_max: U256,
         left_child: HashOut<F>,
@@ -600,10 +599,10 @@ mod tests {
         let child_pi = PublicInputs::from_slice(&right_child_proof.proof.public_inputs);
         let right_child_proof = right_child_proof.serialize()?;
 
-        let rows_tree_hash = HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
+        let rows_tree_hash = HashOut::rand();
         let input = CircuitInput::new_membership(
-            block_id,
-            block_number,
+            index_identifier,
+            index_number,
             old_min,
             old_max,
             left_child,
@@ -618,15 +617,15 @@ mod tests {
         // Check old hash
         {
             let inputs: Vec<_> = left_child
-                .elements
+                .to_fields()
                 .iter()
                 .chain(child_pi.h_old)
                 .cloned()
                 .chain(old_min.to_fields())
                 .chain(old_max.to_fields())
-                .chain(iter::once(block_id))
-                .chain(block_number.to_fields())
-                .chain(rows_tree_hash.elements)
+                .chain(iter::once(index_identifier))
+                .chain(index_number.to_fields())
+                .chain(rows_tree_hash.to_fields())
                 .collect();
             let exp_hash = H::hash_no_pad(&inputs).elements;
 
@@ -637,15 +636,15 @@ mod tests {
         // Check new hash
         {
             let inputs: Vec<_> = left_child
-                .elements
+                .to_fields()
                 .iter()
                 .chain(child_pi.h_new)
                 .cloned()
                 .chain(old_min.to_fields())
                 .chain(child_pi.max.iter().cloned())
-                .chain(iter::once(block_id))
-                .chain(block_number.to_fields())
-                .chain(rows_tree_hash.elements)
+                .chain(iter::once(index_identifier))
+                .chain(index_number.to_fields())
+                .chain(rows_tree_hash.to_fields())
                 .collect();
             let exp_hash = H::hash_no_pad(&inputs);
 

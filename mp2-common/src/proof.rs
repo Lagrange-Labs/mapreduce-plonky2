@@ -5,6 +5,7 @@ use crate::{
     C, D, F,
 };
 use anyhow::Result;
+use derive_more::Constructor;
 use plonky2::plonk::{
     circuit_builder::CircuitBuilder, circuit_data::VerifierCircuitData, config::AlgebraicHasher,
     proof::ProofWithPublicInputsTarget,
@@ -35,7 +36,7 @@ impl<T> ProofInputSerialized<T> {
 }
 
 /// ProofWithVK is a generic struct holding a child proof and its associated verification key.
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Constructor)]
 pub struct ProofWithVK {
     pub proof: ProofWithPublicInputs<F, C, D>,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]

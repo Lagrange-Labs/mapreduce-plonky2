@@ -39,8 +39,8 @@ use std::iter;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ParentWires {
-    block_id: Target,
-    old_block_number: UInt256Target,
+    index_identifier: Target,
+    old_index_value: UInt256Target,
     old_min: UInt256Target,
     old_max: UInt256Target,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
@@ -54,9 +54,9 @@ pub(crate) struct ParentWires {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ParentCircuit {
     /// Identifier of the block number column
-    pub(crate) block_id: F,
+    pub(crate) index_identifier: F,
     /// Block number stored in the old node
-    pub(crate) old_block_number: U256,
+    pub(crate) old_index_value: U256,
     /// Minimum block number stored in the subtree rooted in the old node
     pub(crate) old_min: U256,
     /// Maximum block number stored in the subtree rooted in the old node
@@ -73,8 +73,8 @@ impl ParentCircuit {
     fn build(b: &mut CBuilder, extraction_pi: &[Target], rows_tree_pi: &[Target]) -> ParentWires {
         let ttrue = b._true();
 
-        let block_id = b.add_virtual_target();
-        let [old_block_number, old_min, old_max] = [0; 3].map(|_| b.add_virtual_u256());
+        let index_identifier = b.add_virtual_target();
+        let [old_index_value, old_min, old_max] = [0; 3].map(|_| b.add_virtual_u256());
         let [left_child, right_child, old_rows_tree_hash] = [0; 3].map(|_| b.add_virtual_hash());
 
         let extraction_pi = final_extraction::PublicInputs::<Target>::from_slice(extraction_pi);
@@ -95,13 +95,13 @@ impl ParentCircuit {
             .digest_metadata_raw()
             .iter()
             .cloned()
-            .chain(iter::once(block_id))
+            .chain(iter::once(index_identifier))
             .collect();
         let metadata_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
         // Compute the order-agnostic digest of this node of the block tree.
         // node_digest = HashToInt(H(block_id || block_number)) * rows_tree_proof.DR
-        let inputs = iter::once(block_id)
+        let inputs = iter::once(index_identifier)
             .chain(block_number.iter().cloned())
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
@@ -113,14 +113,14 @@ impl ParentCircuit {
         // values to the hash of the old tree.
         // H_old = H(left_child || right_child || old_min || old_max || block_id || old_block_number || old_rows_tree_hash)
         let inputs = left_child
-            .elements
+            .to_targets()
             .into_iter()
-            .chain(right_child.elements)
+            .chain(right_child.to_targets())
             .chain(old_min.to_targets())
             .chain(old_max.to_targets())
-            .chain(iter::once(block_id))
-            .chain(old_block_number.to_targets())
-            .chain(old_rows_tree_hash.elements)
+            .chain(iter::once(index_identifier))
+            .chain(old_index_value.to_targets())
+            .chain(old_rows_tree_hash.to_targets())
             .collect();
         let h_old = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
@@ -133,15 +133,17 @@ impl ParentCircuit {
         // Compute hash of the new node
         // node_min = old_min
         // node_max = block_number
+        // Since in the index tree for block, the previous node is always a left child, we can
+        // hardcode this in the node hash. This is due to the construction  of sbbst, see
+        // https://github.com/Lagrange-Labs/ryhope for more information about the  type of tree.
         // H_new = H(H_old || H("") || node_min || node_max || block_id || block_number || rows_tree_proof.H)
-        let empty_hash = empty_poseidon_hash();
-        let empty_hash = b.constant_hash(*empty_hash).elements;
+        let empty_hash = b.constant_hash(*empty_poseidon_hash()).to_targets();
         let inputs = h_old
             .into_iter()
             .chain(empty_hash)
             .chain(old_min.to_targets()) // node_min
             .chain(block_number.iter().cloned()) // node_max
-            .chain(iter::once(block_id))
+            .chain(iter::once(index_identifier))
             .chain(block_number.iter().cloned())
             .chain(rows_tree_pi.h.iter().cloned())
             .collect();
@@ -162,8 +164,8 @@ impl ParentCircuit {
         .register(b);
 
         ParentWires {
-            block_id,
-            old_block_number,
+            index_identifier,
+            old_index_value,
             old_min,
             old_max,
             left_child,
@@ -174,14 +176,14 @@ impl ParentCircuit {
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &ParentWires) {
-        pw.set_target(wires.block_id, self.block_id);
+        pw.set_target(wires.index_identifier, self.index_identifier);
         [
-            (&wires.old_block_number, self.old_block_number),
+            (&wires.old_index_value, self.old_index_value),
             (&wires.old_min, self.old_min),
             (&wires.old_max, self.old_max),
         ]
         .into_iter()
-        .for_each(|(t, v)| pw.set_u256_target(&t, v));
+        .for_each(|(t, v)| pw.set_u256_target(t, v));
         [
             (wires.left_child, self.left_child),
             (wires.right_child, self.right_child),
@@ -269,7 +271,7 @@ mod tests {
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
+        utils::{random_vector, weierstrass_to_point},
     };
     use plonky2::{
         field::types::{Field, Sample},
@@ -318,8 +320,8 @@ mod tests {
     fn test_block_index_parent_circuit() {
         let mut rng = thread_rng();
 
-        let block_id = rng.gen::<u32>().to_field();
-        let [old_block_number, old_min, old_max] = [0; 3].map(|_| U256(rng.gen::<[u64; 4]>()));
+        let index_identifier = rng.gen::<u32>().to_field();
+        let [old_index_value, old_min, old_max] = [0; 3].map(|_| U256(rng.gen::<[u64; 4]>()));
         let [left_child, right_child, old_rows_tree_hash] =
             [0; 3].map(|_| HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields()));
 
@@ -329,8 +331,8 @@ mod tests {
 
         let test_circuit = TestParentCircuit {
             c: ParentCircuit {
-                block_id,
-                old_block_number,
+                index_identifier,
+                old_index_value,
                 old_min,
                 old_max,
                 left_child,
@@ -343,8 +345,8 @@ mod tests {
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        let extraction_pi = final_extraction::PublicInputs::from_slice(&extraction_pi);
-        let rows_tree_pi = row_tree::PublicInputs::from_slice(&rows_tree_pi);
+        let extraction_pi = final_extraction::PublicInputs::from_slice(extraction_pi);
+        let rows_tree_pi = row_tree::PublicInputs::from_slice(rows_tree_pi);
 
         let empty_hash = empty_poseidon_hash().elements;
         let block_number = extraction_pi.block_number_raw();
@@ -352,14 +354,14 @@ mod tests {
         // Check old hash
         let h_old = {
             let inputs: Vec<_> = left_child
-                .elements
+                .to_fields()
                 .into_iter()
-                .chain(right_child.elements)
+                .chain(right_child.to_fields())
                 .chain(old_min.to_fields())
                 .chain(old_max.to_fields())
-                .chain(iter::once(block_id))
-                .chain(old_block_number.to_fields())
-                .chain(old_rows_tree_hash.elements)
+                .chain(iter::once(index_identifier))
+                .chain(old_index_value.to_fields())
+                .chain(old_rows_tree_hash.to_fields())
                 .collect();
             let exp_hash = H::hash_no_pad(&inputs).elements;
 
@@ -375,7 +377,7 @@ mod tests {
                 .chain(empty_hash)
                 .chain(old_min.to_fields())
                 .chain(block_number.iter().cloned())
-                .chain(iter::once(block_id))
+                .chain(iter::once(index_identifier))
                 .chain(block_number.iter().cloned())
                 .chain(rows_tree_pi.h.iter().cloned())
                 .collect();
@@ -409,7 +411,7 @@ mod tests {
                 .digest_metadata_raw()
                 .iter()
                 .cloned()
-                .chain(iter::once(block_id))
+                .chain(iter::once(index_identifier))
                 .collect();
             let exp_hash = H::hash_no_pad(&inputs);
 
@@ -417,14 +419,13 @@ mod tests {
         }
         // Check new node digest
         {
-            let inputs: Vec<_> = iter::once(block_id)
+            let inputs: Vec<_> = iter::once(index_identifier)
                 .chain(block_number.iter().cloned())
                 .collect();
             let hash = H::hash_no_pad(&inputs);
             let int = hash_to_int_value(hash);
             let scalar = Scalar::from_noncanonical_biguint(int);
-            let point = rows_tree_pi.rows_digest_field();
-            let point = Point::decode(point.encode()).unwrap();
+            let point = weierstrass_to_point(&rows_tree_pi.rows_digest_field());
             let exp_digest = point * scalar;
 
             assert_eq!(pi.new_node_digest_point(), exp_digest.to_weierstrass());

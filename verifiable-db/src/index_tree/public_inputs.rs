@@ -85,7 +85,7 @@ impl<'a> PublicInputs<'a, F> {
 
     /// Get the new node digest point.
     pub fn new_node_digest_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(&self.new_node_digest)
+        WeierstrassPoint::from_fields(self.new_node_digest)
     }
 }
 
@@ -106,6 +106,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     pub(crate) const TOTAL_LEN: usize = NEW_NODE_DIGEST_RANGE.end;
 
     /// Create a new public inputs.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         h_new: &'a [T],
         h_old: &'a [T],
@@ -167,16 +168,13 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 mod tests {
     use super::*;
     use ethers::prelude::U256;
-    use mp2_common::{
-        utils::{Fieldable, ToFields},
-        C, D, F,
-    };
+    use mp2_common::{utils::ToFields, C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
     use plonky2::{
-        field::types::{Field, Sample},
+        field::types::Sample,
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
@@ -201,7 +199,7 @@ mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_target_arr(&wires, self.exp_pi);
+            pw.set_target_arr(wires, self.exp_pi);
         }
     }
 
@@ -224,7 +222,7 @@ mod tests {
             &block_hash,
             &prev_block_hash,
             &m,
-            &new_node_digest,
+            new_node_digest,
         );
         let exp_pi = &exp_pi.to_vec();
 

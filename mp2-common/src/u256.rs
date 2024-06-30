@@ -88,6 +88,13 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
     /// Compute a `BoolTarget` being true if and only the 2 input UInt256Target are equal
     fn is_equal_u256(&mut self, left: &UInt256Target, right: &UInt256Target) -> BoolTarget;
 
+    /// Return  true iif  `left <= right`
+    fn is_less_or_equal_than_u256(
+        &mut self,
+        left: &UInt256Target,
+        right: &UInt256Target,
+    ) -> BoolTarget;
+
     /// Compute a `BoolTarget` being true if and only if the input UInt256Target is zero
     fn is_zero(&mut self, target: &UInt256Target) -> BoolTarget;
 
@@ -324,6 +331,16 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
                 let is_limb_equal = self.is_equal(left_limb.0, right_limb.0);
                 self.or(is_eq, is_limb_equal)
             })
+    }
+
+    fn is_less_or_equal_than_u256(
+        &mut self,
+        left: &UInt256Target,
+        right: &UInt256Target,
+    ) -> BoolTarget {
+        let a = self.is_less_than_u256(left, right);
+        let b = self.is_equal_u256(left, right);
+        self.or(a, b)
     }
 
     fn is_zero(&mut self, target: &UInt256Target) -> BoolTarget {
@@ -747,6 +764,24 @@ mod tests {
     }
 
     #[derive(Clone, Debug)]
+    struct TestLessOrEqualThanCircuit(TestOperationsCircuit);
+
+    impl UserCircuit<F, D> for TestLessOrEqualThanCircuit {
+        type Wires = <TestOperationsCircuit as UserCircuit<F, D>>::Wires;
+
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let (left, right) = TestOperationsCircuit::build(c);
+            let is_eq = c.is_less_or_equal_than_u256(&left, &right);
+            c.register_public_input(is_eq.target);
+            (left, right)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.0.prove(pw, wires)
+        }
+    }
+
+    #[derive(Clone, Debug)]
     struct TestIsZeroCircuit(U256);
 
     impl UserCircuit<F, D> for TestIsZeroCircuit {
@@ -1048,6 +1083,26 @@ mod tests {
         });
         let proof = run_circuit::<F, D, C, _>(circuit);
         assert_eq!(F::ZERO, proof.public_inputs[0]);
+    }
+
+    #[test]
+    fn test_u256_is_less_or_equal_than() {
+        let rng = &mut thread_rng();
+        // generate left and right operand for less than
+        let left = gen_random_u256(rng);
+        let right = gen_random_u256(rng);
+        let circuit = TestLessOrEqualThanCircuit(TestOperationsCircuit { left, right });
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        if left <= right {
+            assert_eq!(F::ONE, proof.public_inputs[0]);
+        } else {
+            assert_eq!(F::ZERO, proof.public_inputs[0]);
+        }
+
+        // test left == right
+        let circuit = TestLessOrEqualThanCircuit(TestOperationsCircuit { left, right: left });
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        assert_eq!(F::ONE, proof.public_inputs[0]);
     }
 
     #[test]
