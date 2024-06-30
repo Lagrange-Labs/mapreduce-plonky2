@@ -47,12 +47,14 @@ pub(crate) struct LeafCircuit {
 
 impl LeafCircuit {
     fn build(b: &mut CBuilder, extraction_pi: &[Target], rows_tree_pi: &[Target]) -> LeafWires {
-        let block_id = b.add_virtual_target();
+        let index_identifier = b.add_virtual_target();
 
         let extraction_pi = final_extraction::PublicInputs::<Target>::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
 
-        let block_number = extraction_pi.block_number_raw();
+        // in our case, the extraction proofs extracts from the blockchain and sets
+        // the block number as the primary index
+        let index_value = extraction_pi.block_number_raw();
 
         // Enforce that the data extracted from the blockchain is the same as the data
         // employed to build the rows tree for this node.
@@ -67,14 +69,14 @@ impl LeafCircuit {
             .digest_metadata_raw()
             .iter()
             .cloned()
-            .chain(iter::once(block_id))
+            .chain(iter::once(index_identifier))
             .collect();
         let metadata_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
         // Compute the order-agnostic digest of this node of the block tree.
-        // node_digest = HashToInt(H(block_id || block_number)) * rows_tree_proof.DR
-        let inputs = iter::once(block_id)
-            .chain(block_number.iter().cloned())
+        // node_digest = HashToInt(H(index_identifier || index_value)) * rows_tree_proof.DR
+        let inputs = iter::once(index_identifier)
+            .chain(index_value.iter().cloned())
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
         let int = hash_to_int_target(b, hash);
@@ -90,10 +92,10 @@ impl LeafCircuit {
         let inputs = empty_hash
             .iter()
             .chain(empty_hash.iter())
-            .chain(block_number) // node_min
-            .chain(block_number) // node_max
-            .chain(iter::once(&block_id))
-            .chain(block_number)
+            .chain(index_value) // node_min
+            .chain(index_value) // node_max
+            .chain(iter::once(&index_identifier))
+            .chain(index_value)
             .chain(rows_tree_pi.h)
             .cloned()
             .collect();
@@ -103,9 +105,9 @@ impl LeafCircuit {
         PublicInputs::new(
             &h_new,
             &empty_hash,
-            block_number, // node_min
-            block_number, // node_max
-            block_number,
+            index_value, // node_min
+            index_value, // node_max
+            index_value,
             extraction_pi.block_hash_raw(),
             extraction_pi.prev_block_hash_raw(),
             &metadata_hash,
@@ -113,7 +115,9 @@ impl LeafCircuit {
         )
         .register(b);
 
-        LeafWires { block_id }
+        LeafWires {
+            block_id: index_identifier,
+        }
     }
 
     /// Assign the wires.
@@ -261,8 +265,8 @@ mod tests {
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        let extraction_pi = final_extraction::PublicInputs::from_slice(&extraction_pi);
-        let rows_tree_pi = row_tree::PublicInputs::from_slice(&rows_tree_pi);
+        let extraction_pi = final_extraction::PublicInputs::from_slice(extraction_pi);
+        let rows_tree_pi = row_tree::PublicInputs::from_slice(rows_tree_pi);
 
         let empty_hash = empty_poseidon_hash();
         let block_number = extraction_pi.block_number_raw();
