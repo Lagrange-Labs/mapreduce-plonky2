@@ -51,7 +51,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
 impl<'a> PublicInputs<'a, F> {
     /// Get the metadata point.
     pub fn rows_digest_field(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(&self.dr)
+        WeierstrassPoint::from_fields(self.dr)
     }
     /// minimum index value
     pub fn min_value_u256(&self) -> U256 {
@@ -72,7 +72,7 @@ impl<'a> PublicInputs<'a, F> {
 impl<'a> PublicInputs<'a, Target> {
     /// Get the hash corresponding to the root of the subtree of this node
     pub fn root_hash(&self) -> HashOutTarget {
-        HashOutTarget::from_targets(&self.h)
+        HashOutTarget::from_targets(self.h)
     }
 
     pub fn rows_digest(&self) -> CurveTarget {
@@ -81,10 +81,10 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     pub fn min_value(&self) -> UInt256Target {
-        UInt256Target::from_targets(&self.min)
+        UInt256Target::from_targets(self.min)
     }
     pub fn max_value(&self) -> UInt256Target {
-        UInt256Target::from_targets(&self.max)
+        UInt256Target::from_targets(self.max)
     }
 }
 

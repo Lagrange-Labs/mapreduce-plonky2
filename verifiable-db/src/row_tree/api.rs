@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use ethers::types::U256;
 use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
 use recursion_framework::{
@@ -18,7 +18,7 @@ use super::{
 
 /// Parameters holding the circuits for the row tree creation
 #[derive(Serialize, Deserialize)]
-pub struct Parameters {
+pub struct PublicParameters {
     leaf: CircuitWithUniversalVerifier<F, C, D, 0, leaf::RecursiveLeafWires>,
     full: CircuitWithUniversalVerifier<
         F,
@@ -40,7 +40,7 @@ pub struct Parameters {
 const ROW_IO_LEN: usize = super::public_inputs::TOTAL_LEN;
 const CELL_IO_LEN: usize = cells_tree::PublicInputs::<F>::TOTAL_LEN;
 
-impl Parameters {
+impl PublicParameters {
     pub fn build(cells_set: &RecursiveCircuits<F, C, D>) -> Self {
         const ROW_CIRCUIT_SET_SIZE: usize = 3;
         let builder = CircuitWithUniversalVerifierBuilder::<F, D, ROW_IO_LEN>::new::<C>(
@@ -62,23 +62,33 @@ impl Parameters {
         }
     }
 
-    pub fn generate_proof(&self, input: CircuitInput) -> Result<Vec<u8>> {
+    pub fn set_vk(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.row_set
+    }
+
+    pub fn generate_proof(
+        &self,
+        input: CircuitInput,
+        cells_vk: RecursiveCircuits<F, C, D>,
+    ) -> Result<Vec<u8>> {
         match input {
             CircuitInput::Leaf {
                 witness,
                 cells_proof,
-            } => self.generate_leaf_proof(witness, cells_proof),
+            } => self.generate_leaf_proof(witness, (cells_proof, cells_vk)),
             CircuitInput::Full {
                 witness,
                 left_proof,
                 right_proof,
                 cells_proof,
-            } => self.generate_full_proof(witness, left_proof, right_proof, cells_proof),
+            } => {
+                self.generate_full_proof(witness, left_proof, right_proof, (cells_proof, cells_vk))
+            }
             CircuitInput::Partial {
                 witness,
                 child_proof,
                 cells_proof,
-            } => self.generate_partial_proof(witness, child_proof, cells_proof),
+            } => self.generate_partial_proof(witness, child_proof, (cells_proof, cells_vk)),
         }
     }
 
@@ -153,32 +163,27 @@ type CellsProof = (Vec<u8>, RecursiveCircuits<F, C, D>);
 pub enum CircuitInput {
     Leaf {
         witness: leaf::LeafCircuit,
-        cells_proof: CellsProof,
+        cells_proof: Vec<u8>,
     },
     Full {
         witness: full_node::FullNodeCircuit,
         left_proof: Vec<u8>,
         right_proof: Vec<u8>,
-        cells_proof: CellsProof,
+        cells_proof: Vec<u8>,
     },
     Partial {
         witness: partial_node::PartialNodeCircuit,
         child_proof: Vec<u8>,
-        cells_proof: CellsProof,
+        cells_proof: Vec<u8>,
     },
 }
 
 impl CircuitInput {
-    pub fn leaf(
-        identifier: F,
-        value: U256,
-        cells_proof: Vec<u8>,
-        cells_set: &RecursiveCircuits<F, C, D>,
-    ) -> Result<Self> {
+    pub fn leaf(identifier: F, value: U256, cells_proof: Vec<u8>) -> Result<Self> {
         let circuit = LeafCircuit::new(IndexTuple::new(identifier, value));
         Ok(CircuitInput::Leaf {
             witness: circuit,
-            cells_proof: (cells_proof, cells_set.clone()),
+            cells_proof,
         })
     }
     pub fn full(
@@ -187,14 +192,13 @@ impl CircuitInput {
         left_proof: Vec<u8>,
         right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
-        cells_set: &RecursiveCircuits<F, C, D>,
     ) -> Result<Self> {
         let circuit = FullNodeCircuit::from(IndexTuple::new(identifier, value));
         Ok(CircuitInput::Full {
             witness: circuit,
             left_proof,
             right_proof,
-            cells_proof: (cells_proof, cells_set.clone()),
+            cells_proof,
         })
     }
     pub fn partial(
@@ -203,14 +207,13 @@ impl CircuitInput {
         is_child_left: bool,
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
-        cells_set: &RecursiveCircuits<F, C, D>,
     ) -> Result<Self> {
         let tuple = IndexTuple::new(identifier, value);
         let witness = PartialNodeCircuit::new(tuple, is_child_left);
         Ok(CircuitInput::Partial {
             witness,
             child_proof,
-            cells_proof: (cells_proof, cells_set.clone()),
+            cells_proof,
         })
     }
 }
@@ -230,20 +233,17 @@ mod test {
     use partial_node::test::partial_safety_check;
     use plonky2::{
         field::types::Sample,
-        hash::{
-            hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation,
-        },
+        hash::hash_types::HashOut,
         plonk::{
             circuit_data::VerifierOnlyCircuitData, config::Hasher, proof::ProofWithPublicInputs,
         },
     };
     use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
 
     struct TestParams {
         cells_test: TestingRecursiveCircuits<F, C, D, CELL_IO_LEN>,
-        params: Parameters,
+        params: PublicParameters,
         // always using the same cells_proof at each  row node
         // to save on test time
         cells_proof: ProofWithPublicInputs<F, C, D>,
@@ -257,13 +257,12 @@ mod test {
     impl TestParams {
         fn build() -> Result<Self> {
             let cells_test = TestingRecursiveCircuits::<F, C, D, CELL_IO_LEN>::default();
-            let params = Parameters::build(cells_test.get_recursive_circuit_set());
+            let params = PublicParameters::build(cells_test.get_recursive_circuit_set());
             let cells_pi = Self::rand_cells_pi();
             let cells_proof =
                 cells_test.generate_input_proofs::<1>([cells_pi.clone().try_into().unwrap()])?;
             let cells_vk = cells_test.verifier_data_for_input_proofs::<1>()[0].clone();
             //  leaf1 - leaf2  =>  full_node => partial_node
-            let mut rng = thread_rng();
             let identifier = F::rand();
             //let v1 = U256::from(rng.gen::<[u8; 32]>());
             let v1 = U256::from(10);
@@ -341,9 +340,10 @@ mod test {
             is_left,
             child_proof_buff.clone(),
             p.cells_proof_vk().serialize()?,
-            p.cells_test.get_recursive_circuit_set(),
         )?;
-        let proof = p.params.generate_proof(input)?;
+        let proof = p
+            .params
+            .generate_proof(input, p.cells_test.get_recursive_circuit_set().clone())?;
         let pi = ProofWithVK::deserialize(&proof)?.proof.public_inputs;
         let pi = PublicInputs::from_slice(&pi);
         {
@@ -390,7 +390,6 @@ mod test {
             child_proof[0].to_vec(),
             child_proof[1].to_vec(),
             p.cells_proof_vk().serialize()?,
-            p.cells_test.get_recursive_circuit_set(),
         )?;
         let left_proof = ProofWithVK::deserialize(&child_proof[0])?;
         let left_pi = PublicInputs::from_slice(&left_proof.proof.public_inputs);
@@ -398,7 +397,9 @@ mod test {
         let right_pi = PublicInputs::from_slice(&right_proof.proof.public_inputs);
         assert!(left_pi.max_value_u256() < tuple.index_value);
         assert!(tuple.index_value < right_pi.min_value_u256());
-        let proof = p.params.generate_proof(input)?;
+        let proof = p
+            .params
+            .generate_proof(input, p.cells_test.get_recursive_circuit_set().clone())?;
         let pi = ProofWithVK::deserialize(&proof)?.proof.public_inputs;
         let pi = PublicInputs::from_slice(&pi);
         {
@@ -441,10 +442,11 @@ mod test {
             tuple.index_identifier,
             tuple.index_value,
             p.cells_proof_vk().serialize()?,
-            p.cells_test.get_recursive_circuit_set(),
         )?;
 
-        let proof = p.params.generate_proof(input)?;
+        let proof = p
+            .params
+            .generate_proof(input, p.cells_test.get_recursive_circuit_set().clone())?;
         let pi = ProofWithVK::deserialize(&proof)
             .unwrap()
             .proof

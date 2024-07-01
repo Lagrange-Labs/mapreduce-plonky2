@@ -25,13 +25,13 @@ type ProofWithCircuitSet = (Vec<u8>, RecursiveCircuits<F, C, D>);
 pub enum CircuitInput {
     Leaf {
         witness: LeafCircuit,
-        extraction_proof: ProofWithCircuitSet,
-        rows_tree_proof: ProofWithCircuitSet,
+        extraction_proof: Vec<u8>,
+        rows_tree_proof: Vec<u8>,
     },
     Parent {
         witness: ParentCircuit,
-        extraction_proof: ProofWithCircuitSet,
-        rows_tree_proof: ProofWithCircuitSet,
+        extraction_proof: Vec<u8>,
+        rows_tree_proof: Vec<u8>,
     },
     Membership {
         witness: MembershipCircuit,
@@ -41,19 +41,13 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     /// Create a circuit input for proving a leaf node.
-    pub fn new_leaf(
-        block_id: F,
-        extraction_proof: Vec<u8>,
-        rows_tree_proof: Vec<u8>,
-        extraction_circuit_set: &RecursiveCircuits<F, C, D>,
-        rows_tree_circuit_set: &RecursiveCircuits<F, C, D>,
-    ) -> Self {
+    pub fn new_leaf(block_id: F, extraction_proof: Vec<u8>, rows_tree_proof: Vec<u8>) -> Self {
         Self::Leaf {
             witness: LeafCircuit {
                 index_identifier: block_id,
             },
-            extraction_proof: (extraction_proof, extraction_circuit_set.clone()),
-            rows_tree_proof: (rows_tree_proof, rows_tree_circuit_set.clone()),
+            extraction_proof,
+            rows_tree_proof,
         }
     }
 
@@ -68,8 +62,6 @@ impl CircuitInput {
         old_rows_tree_hash: HashOut<F>,
         extraction_proof: Vec<u8>,
         rows_tree_proof: Vec<u8>,
-        extraction_circuit_set: &RecursiveCircuits<F, C, D>,
-        rows_tree_circuit_set: &RecursiveCircuits<F, C, D>,
     ) -> Self {
         CircuitInput::Parent {
             witness: ParentCircuit {
@@ -81,8 +73,8 @@ impl CircuitInput {
                 right_child,
                 old_rows_tree_hash,
             },
-            extraction_proof: (extraction_proof, extraction_circuit_set.clone()),
-            rows_tree_proof: (rows_tree_proof, rows_tree_circuit_set.clone()),
+            extraction_proof,
+            rows_tree_proof,
         }
     }
 
@@ -159,18 +151,35 @@ impl PublicParameters {
     }
 
     /// Generate the proof by the circuit input.
-    pub fn generate_proof(&self, input: CircuitInput) -> Result<Vec<u8>> {
+    pub fn generate_proof(
+        &self,
+        input: CircuitInput,
+        extraction_set: &RecursiveCircuits<F, C, D>,
+        rows_set: &RecursiveCircuits<F, C, D>,
+    ) -> Result<Vec<u8>> {
         match input {
             CircuitInput::Leaf {
                 witness,
                 extraction_proof,
                 rows_tree_proof,
-            } => self.generate_leaf_proof(witness, extraction_proof, rows_tree_proof),
+            } => self.generate_leaf_proof(
+                witness,
+                extraction_proof,
+                rows_tree_proof,
+                extraction_set,
+                rows_set,
+            ),
             CircuitInput::Parent {
                 witness,
                 extraction_proof,
                 rows_tree_proof,
-            } => self.generate_parent_proof(witness, extraction_proof, rows_tree_proof),
+            } => self.generate_parent_proof(
+                witness,
+                extraction_proof,
+                rows_tree_proof,
+                extraction_set,
+                rows_set,
+            ),
             CircuitInput::Membership {
                 witness,
                 right_child_proof,
@@ -181,20 +190,20 @@ impl PublicParameters {
     fn generate_leaf_proof(
         &self,
         witness: LeafCircuit,
-        extraction_proof: ProofWithCircuitSet,
-        rows_tree_proof: ProofWithCircuitSet,
+        extraction_proof: Vec<u8>,
+        rows_tree_proof: Vec<u8>,
+        extraction_set: &RecursiveCircuits<F, C, D>,
+        rows_set: &RecursiveCircuits<F, C, D>,
     ) -> Result<Vec<u8>> {
-        let (proof, extraction_set) = extraction_proof;
-        let extraction_proof = ProofWithVK::deserialize(&proof)?;
-        let (proof, rows_tree_set) = rows_tree_proof;
-        let rows_tree_proof = ProofWithVK::deserialize(&proof)?;
+        let extraction_proof = ProofWithVK::deserialize(&extraction_proof)?;
+        let rows_tree_proof = ProofWithVK::deserialize(&rows_tree_proof)?;
 
         let leaf = RecursiveLeafInput {
             witness,
             extraction_proof,
             rows_tree_proof,
-            extraction_set,
-            rows_tree_set,
+            extraction_set: extraction_set.clone(),
+            rows_tree_set: rows_set.clone(),
         };
         let proof = self.set.generate_proof(&self.leaf, [], [], leaf)?;
         ProofWithVK::from((proof, self.leaf.circuit_data().verifier_only.clone())).serialize()
@@ -203,20 +212,20 @@ impl PublicParameters {
     fn generate_parent_proof(
         &self,
         witness: ParentCircuit,
-        extraction_proof: ProofWithCircuitSet,
-        rows_tree_proof: ProofWithCircuitSet,
+        extraction_proof: Vec<u8>,
+        rows_tree_proof: Vec<u8>,
+        extraction_set: &RecursiveCircuits<F, C, D>,
+        rows_tree_set: &RecursiveCircuits<F, C, D>,
     ) -> Result<Vec<u8>> {
-        let (proof, extraction_set) = extraction_proof;
-        let extraction_proof = ProofWithVK::deserialize(&proof)?;
-        let (proof, rows_tree_set) = rows_tree_proof;
-        let rows_tree_proof = ProofWithVK::deserialize(&proof)?;
+        let extraction_proof = ProofWithVK::deserialize(&extraction_proof)?;
+        let rows_tree_proof = ProofWithVK::deserialize(&rows_tree_proof)?;
 
         let parent = RecursiveParentInput {
             witness,
             extraction_proof,
             rows_tree_proof,
-            extraction_set,
-            rows_tree_set,
+            extraction_set: extraction_set.clone(),
+            rows_tree_set: rows_tree_set.clone(),
         };
         let proof = self.set.generate_proof(&self.parent, [], [], parent)?;
         ProofWithVK::from((proof, self.parent.circuit_data().verifier_only.clone())).serialize()
@@ -379,11 +388,13 @@ mod tests {
             block_id,
             extraction_proof.serialize()?,
             rows_tree_proof.serialize()?,
-            b.extraction_set.get_recursive_circuit_set(),
-            b.rows_tree_set.get_recursive_circuit_set(),
         );
 
-        let proof = b.params.generate_proof(input)?;
+        let proof = b.params.generate_proof(
+            input,
+            &b.extraction_set.get_recursive_circuit_set(),
+            &b.rows_tree_set.get_recursive_circuit_set(),
+        )?;
         let proof = ProofWithVK::deserialize(&proof).unwrap();
         let pi = PublicInputs::from_slice(&proof.proof.public_inputs);
 
@@ -492,11 +503,13 @@ mod tests {
             old_rows_tree_hash,
             extraction_proof.serialize()?,
             rows_tree_proof.serialize()?,
-            b.extraction_set.get_recursive_circuit_set(),
-            b.rows_tree_set.get_recursive_circuit_set(),
         );
 
-        let proof = b.params.generate_proof(input)?;
+        let proof = b.params.generate_proof(
+            input,
+            b.extraction_set.get_recursive_circuit_set(),
+            b.rows_tree_set.get_recursive_circuit_set(),
+        )?;
         let proof = ProofWithVK::deserialize(&proof).unwrap();
         let pi = PublicInputs::from_slice(&proof.proof.public_inputs);
 
@@ -610,7 +623,11 @@ mod tests {
             right_child_proof,
         );
 
-        let proof = b.params.generate_proof(input)?;
+        let proof = b.params.generate_proof(
+            input,
+            b.extraction_set.get_recursive_circuit_set(),
+            b.rows_tree_set.get_recursive_circuit_set(),
+        )?;
         let proof = ProofWithVK::deserialize(&proof).unwrap();
         let pi = PublicInputs::from_slice(&proof.proof.public_inputs);
 

@@ -36,6 +36,9 @@ pub fn hash_to_int_target(b: &mut CBuilder, h: HashOutTarget) -> BigUintTarget {
     let limbs = h
         .to_targets()
         .into_iter()
+        // reason to take 2 is because 128 bit  width scalar is enough
+        // when it comes from a random oracle to do scalar mul
+        .take(2)
         .flat_map(|t| {
             // Split the hash element into low and high of Uint32. The `split_low_high`
             // function handles the range check in internal.
@@ -50,7 +53,10 @@ pub fn hash_to_int_target(b: &mut CBuilder, h: HashOutTarget) -> BigUintTarget {
 /// Convert the hash value into a big integer.
 pub fn hash_to_int_value(h: HashOut<F>) -> BigUint {
     BigUint::from_slice(
-        &h.elements
+        // We only consider two field elements to get a 128 bit witdth scalar
+        // since this is sufficient for the purpose of scalar multiplication by
+        // random vector , i.e. dlog is still secure at that level.
+        &h.elements[0..2]
             .iter()
             .flat_map(|f| {
                 let u = f.to_canonical_u64();
