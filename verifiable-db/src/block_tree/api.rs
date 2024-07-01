@@ -256,7 +256,10 @@ mod tests {
         },
         *,
     };
-    use crate::row_tree;
+    use crate::{
+        block_tree::leaf::tests::{compute_expected_hash, compute_expected_set_digest},
+        row_tree,
+    };
     use mp2_common::{
         poseidon::{empty_poseidon_hash, hash_to_int_value, H},
         utils::{Fieldable, ToFields},
@@ -447,28 +450,13 @@ mod tests {
         }
         // Check metadata hash
         {
-            let inputs: Vec<_> = extraction_pi
-                .digest_metadata_raw()
-                .iter()
-                .cloned()
-                .chain(iter::once(block_id))
-                .collect();
-            let exp_hash = H::hash_no_pad(&inputs);
-
+            let exp_hash = compute_expected_hash(&extraction_pi, block_id);
             assert_eq!(pi.m, exp_hash.elements);
         }
         // Check new node digest
         {
-            let inputs: Vec<_> = iter::once(block_id)
-                .chain(block_number.iter().cloned())
-                .collect();
-            let hash = H::hash_no_pad(&inputs);
-            let int = hash_to_int_value(hash);
-            let scalar = Scalar::from_noncanonical_biguint(int);
-            let point = rows_tree_pi.rows_digest_field();
-            let point = Point::decode(point.encode()).unwrap();
-            let exp_digest = point * scalar;
-
+            let exp_digest =
+                compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
             assert_eq!(pi.new_node_digest_point(), exp_digest.to_weierstrass());
         }
 
@@ -575,28 +563,13 @@ mod tests {
         }
         // Check metadata hash
         {
-            let inputs: Vec<_> = extraction_pi
-                .digest_metadata_raw()
-                .iter()
-                .cloned()
-                .chain(iter::once(block_id))
-                .collect();
-            let exp_hash = H::hash_no_pad(&inputs);
-
+            let exp_hash = compute_expected_hash(&extraction_pi, block_id);
             assert_eq!(pi.m, exp_hash.elements);
         }
         // Check new node digest
         {
-            let inputs: Vec<_> = iter::once(block_id)
-                .chain(block_number.iter().cloned())
-                .collect();
-            let hash = H::hash_no_pad(&inputs);
-            let int = hash_to_int_value(hash);
-            let scalar = Scalar::from_noncanonical_biguint(int);
-            let point = rows_tree_pi.rows_digest_field();
-            let point = Point::decode(point.encode()).unwrap();
-            let exp_digest = point * scalar;
-
+            let exp_digest =
+                compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
             assert_eq!(pi.new_node_digest_point(), exp_digest.to_weierstrass());
         }
 

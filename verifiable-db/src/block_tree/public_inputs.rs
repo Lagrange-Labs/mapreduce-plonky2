@@ -166,6 +166,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
 #[cfg(test)]
 mod tests {
+    use crate::block_tree::tests::random_block_index_pi;
+
     use super::*;
     use ethers::prelude::U256;
     use mp2_common::{utils::ToFields, C, D, F};
@@ -207,28 +209,12 @@ mod tests {
     fn test_block_insertion_public_inputs() {
         let mut rng = thread_rng();
 
-        // Prepare the public inputs.
-        let [h_new, h_old, m] = [0; 3].map(|_| random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
-        let [min, max, block_number] = [0; 3].map(|_| U256(rng.gen::<[u64; 4]>()).to_fields());
-        let [block_hash, prev_block_hash] =
-            [0; 2].map(|_| random_vector::<u32>(PACKED_HASH_LEN).to_fields());
-        let new_node_digest = &Point::sample(&mut rng).to_weierstrass().to_fields();
-        let exp_pi = PublicInputs::<F>::new(
-            &h_new,
-            &h_old,
-            &min,
-            &max,
-            &block_number,
-            &block_hash,
-            &prev_block_hash,
-            &m,
-            new_node_digest,
-        );
-        let exp_pi = &exp_pi.to_vec();
+        let [min, max, block_number] = [0; 3].map(|_| U256(rng.gen::<[u64; 4]>()));
+        let exp_pi = random_block_index_pi(&mut rng, min, max, block_number).to_vec();
 
-        let test_circuit = TestPICircuit { exp_pi };
+        let test_circuit = TestPICircuit { exp_pi: &exp_pi };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
 
-        assert_eq!(&proof.public_inputs, exp_pi);
+        assert_eq!(&proof.public_inputs, &exp_pi);
     }
 }

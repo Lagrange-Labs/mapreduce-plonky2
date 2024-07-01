@@ -1,7 +1,7 @@
 //! This circuit is employed when the new node is inserted as parent of an existing node,
 //! referred to as old node.
 
-use super::public_inputs::PublicInputs;
+use super::{compute_index_digest, public_inputs::PublicInputs};
 use crate::row_tree;
 use anyhow::Result;
 use ethers::prelude::U256;
@@ -104,10 +104,7 @@ impl ParentCircuit {
         let inputs = iter::once(index_identifier)
             .chain(block_number.iter().cloned())
             .collect();
-        let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
-        let int = hash_to_int_target(b, hash);
-        let scalar = b.biguint_to_nonnative(&int);
-        let node_digest = b.curve_scalar_mul(rows_tree_pi.rows_digest(), &scalar);
+        let node_digest = compute_index_digest(b, inputs, rows_tree_pi.rows_digest());
 
         // We recompute the hash of the old node to bind the `old_min` and `old_max`
         // values to the hash of the old tree.
@@ -263,6 +260,8 @@ impl CircuitLogicWires<F, D, 0> for RecursiveParentWires {
 
 #[cfg(test)]
 mod tests {
+    use crate::block_tree::leaf::tests::{compute_expected_hash, compute_expected_set_digest};
+
     use super::{
         super::tests::{random_extraction_pi, random_rows_tree_pi},
         *,
@@ -409,26 +408,14 @@ mod tests {
         }
         // Check metadata hash
         {
-            let inputs: Vec<_> = extraction_pi
-                .digest_metadata_raw()
-                .iter()
-                .cloned()
-                .chain(iter::once(index_identifier))
-                .collect();
-            let exp_hash = H::hash_no_pad(&inputs);
+            let exp_hash = compute_expected_hash(&extraction_pi, index_identifier);
 
             assert_eq!(pi.m, exp_hash.elements);
         }
         // Check new node digest
         {
-            let inputs: Vec<_> = iter::once(index_identifier)
-                .chain(block_number.iter().cloned())
-                .collect();
-            let hash = H::hash_no_pad(&inputs);
-            let int = hash_to_int_value(hash);
-            let scalar = Scalar::from_noncanonical_biguint(int);
-            let point = weierstrass_to_point(&rows_tree_pi.rows_digest_field());
-            let exp_digest = point * scalar;
+            let exp_digest =
+                compute_expected_set_digest(index_identifier, block_number.to_vec(), rows_tree_pi);
 
             assert_eq!(pi.new_node_digest_point(), exp_digest.to_weierstrass());
         }

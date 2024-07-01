@@ -2,7 +2,7 @@
 //! an existing node (or if there is no existing node, which happens for the
 //! first block number).
 
-use super::public_inputs::PublicInputs;
+use super::{compute_index_digest, public_inputs::PublicInputs};
 use crate::row_tree;
 use anyhow::Result;
 use mp2_common::{
@@ -78,10 +78,7 @@ impl LeafCircuit {
         let inputs = iter::once(index_identifier)
             .chain(index_value.iter().cloned())
             .collect();
-        let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
-        let int = hash_to_int_target(b, hash);
-        let scalar = b.biguint_to_nonnative(&int);
-        let node_digest = b.curve_scalar_mul(rows_tree_pi.rows_digest(), &scalar);
+        let node_digest = compute_index_digest(b, inputs, rows_tree_pi.rows_digest());
 
         // Compute hash of the inserted node
         // node_min = block_number
@@ -192,7 +189,7 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{
         super::tests::{random_extraction_pi, random_rows_tree_pi},
         *,
@@ -202,13 +199,46 @@ mod tests {
         poseidon::{hash_to_int_value, H},
         utils::{Fieldable, ToFields},
     };
-    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::weierstrass_to_point,
+    };
     use plonky2::{
         field::types::{Field, Sample},
+        hash::hash_types::HashOut,
         plonk::config::Hasher,
     };
     use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
     use rand::{thread_rng, Rng};
+
+    pub fn compute_expected_hash(
+        extraction_pi: &final_extraction::PublicInputs<F>,
+        identifier: F,
+    ) -> HashOut<F> {
+        let inputs: Vec<_> = extraction_pi
+            .digest_metadata_raw()
+            .iter()
+            .cloned()
+            .chain(iter::once(identifier))
+            .collect();
+        H::hash_no_pad(&inputs)
+    }
+
+    pub fn compute_expected_set_digest(
+        identifier: F,
+        value: Vec<F>,
+        rows_tree_pi: row_tree::PublicInputs<F>,
+    ) -> Point {
+        let inputs: Vec<_> = iter::once(identifier)
+            .chain(value.iter().cloned())
+            .collect();
+        let hash = H::hash_no_pad(&inputs);
+        let int = hash_to_int_value(hash);
+        let scalar = Scalar::from_noncanonical_biguint(int);
+        let point = rows_tree_pi.rows_digest_field();
+        let point = weierstrass_to_point(&point);
+        point * scalar
+    }
 
     #[derive(Clone, Debug)]
     struct TestLeafCircuit<'a> {
@@ -315,28 +345,13 @@ mod tests {
         }
         // Check metadata hash
         {
-            let inputs: Vec<_> = extraction_pi
-                .digest_metadata_raw()
-                .iter()
-                .cloned()
-                .chain(iter::once(block_id))
-                .collect();
-            let exp_hash = H::hash_no_pad(&inputs);
-
+            let exp_hash = compute_expected_hash(&extraction_pi, block_id);
             assert_eq!(pi.m, exp_hash.elements);
         }
         // Check new node digest
         {
-            let inputs: Vec<_> = iter::once(block_id)
-                .chain(block_number.iter().cloned())
-                .collect();
-            let hash = H::hash_no_pad(&inputs);
-            let int = hash_to_int_value(hash);
-            let scalar = Scalar::from_noncanonical_biguint(int);
-            let point = rows_tree_pi.rows_digest_field();
-            let point = Point::decode(point.encode()).unwrap();
-            let exp_digest = point * scalar;
-
+            let exp_digest =
+                compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
             assert_eq!(pi.new_node_digest_point(), exp_digest.to_weierstrass());
         }
     }
