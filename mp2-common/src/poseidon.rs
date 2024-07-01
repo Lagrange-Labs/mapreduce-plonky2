@@ -14,7 +14,7 @@ use plonky2::{
 use std::sync::OnceLock;
 
 pub type H = PoseidonHash;
-type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
+pub type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
 
 /// The static variable of Empty Poseidon hash
 static EMPTY_POSEIDON_HASH: OnceLock<HashOut<GoldilocksField>> = OnceLock::new();

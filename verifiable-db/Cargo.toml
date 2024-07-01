@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+mp2_common = { path = "../mp2-common" }
+recursion_framework = { path = "../recursion-framework" }
 anyhow.workspace = true
 bincode.workspace = true
 ethers.workspace = true
@@ -11,12 +13,11 @@ log.workspace = true
 plonky2.workspace = true
 plonky2_ecgfp5.workspace = true
 serde.workspace = true
+derive_more = "0.99.18"
 
-mp2_common = { path = "../mp2-common" }
-recursion_framework = { path = "../recursion-framework" }
 
 [dev-dependencies]
 rand.workspace = true
 serial_test.workspace = true
-
 mp2_test = { path = "../mp2-test" }
+env_logger.workspace = true

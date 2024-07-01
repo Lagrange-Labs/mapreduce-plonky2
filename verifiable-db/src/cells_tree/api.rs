@@ -89,13 +89,13 @@ impl PublicParameters {
     /// Generates the circuit parameters for the circuits.
     fn build() -> Self {
         let config = default_config();
-        let circuit_builder =
+        let builder =
             CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(config, CIRCUIT_SET_SIZE);
 
-        let leaf = circuit_builder.build_circuit(());
-        let full_node = circuit_builder.build_circuit(());
-        let partial_node = circuit_builder.build_circuit(());
-        let empty_node = circuit_builder.build_circuit(());
+        let leaf = builder.build_circuit(());
+        let full_node = builder.build_circuit(());
+        let partial_node = builder.build_circuit(());
+        let empty_node = builder.build_circuit(());
 
         let set = RecursiveCircuits::new_from_circuit_digests(vec![
             leaf.get_verifier_data().circuit_digest,
@@ -120,6 +120,9 @@ impl PublicParameters {
         }
     }
 
+    pub fn vk_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.set
+    }
     pub fn generate_proof(&self, circuit_type: CircuitInput) -> Result<Vec<u8>> {
         let set = &self.set;
 
@@ -216,7 +219,7 @@ mod tests {
         let mut rng = thread_rng();
         let identifier = rng.gen::<u32>().to_field();
         let value = U256(rng.gen::<[u64; 4]>());
-        let packed_value = value.to_fields();
+        let value_fields = value.to_fields();
         let input = CircuitInput::new_leaf(identifier, value);
 
         // Generate proof.
@@ -236,7 +239,7 @@ mod tests {
                 .cloned()
                 .chain(empty_hash.elements)
                 .chain(iter::once(identifier))
-                .chain(packed_value.clone())
+                .chain(value_fields.clone())
                 .collect();
             // TODO: Fix to employ the same hash method in the ryhope tree library.
             let exp_hash = H::hash_no_pad(&inputs);
@@ -244,7 +247,7 @@ mod tests {
             assert_eq!(pi.h, exp_hash.elements);
         }
         {
-            let inputs: Vec<_> = iter::once(identifier).chain(packed_value).collect();
+            let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
             let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
 
             assert_eq!(pi.digest_point(), exp_digest);
