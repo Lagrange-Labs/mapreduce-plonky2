@@ -89,13 +89,13 @@ impl PublicParameters {
     /// Generates the circuit parameters for the circuits.
     fn build() -> Self {
         let config = default_config();
-        let circuit_builder =
+        let builder =
             CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(config, CIRCUIT_SET_SIZE);
 
-        let leaf = circuit_builder.build_circuit(());
-        let full_node = circuit_builder.build_circuit(());
-        let partial_node = circuit_builder.build_circuit(());
-        let empty_node = circuit_builder.build_circuit(());
+        let leaf = builder.build_circuit(());
+        let full_node = builder.build_circuit(());
+        let partial_node = builder.build_circuit(());
+        let empty_node = builder.build_circuit(());
 
         let set = RecursiveCircuits::new_from_circuit_digests(vec![
             leaf.get_verifier_data().circuit_digest,

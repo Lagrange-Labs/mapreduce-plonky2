@@ -24,7 +24,7 @@ pub enum CircuitInput {
 #[derive(Serialize, Deserialize)]
 pub struct PublicParameters {
     cells_tree: cells_tree::PublicParameters,
-    rows_tree: row_tree::Parameters,
+    rows_tree: row_tree::PublicParameters,
 }
 
 /// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.
@@ -32,7 +32,7 @@ pub fn build_circuits_params() -> PublicParameters {
     log::info!("Building cells_tree parameters...");
     let cells_tree = cells_tree::build_circuits_params();
     log::info!("Building row tree parameters...");
-    let rows_tree = row_tree::Parameters::build(cells_tree.vk_set());
+    let rows_tree = row_tree::PublicParameters::build(cells_tree.vk_set());
     log::info!("All parameters built!");
 
     PublicParameters {
@@ -47,6 +47,8 @@ pub fn build_circuits_params() -> PublicParameters {
 pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
     match input {
         CircuitInput::CellsTree(input) => params.cells_tree.generate_proof(input),
-        CircuitInput::RowsTree(input) => params.rows_tree.generate_proof(input),
+        CircuitInput::RowsTree(input) => params
+            .rows_tree
+            .generate_proof(input, params.cells_tree.vk_set().clone()),
     }
 }

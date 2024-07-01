@@ -1,26 +1,15 @@
 use mp2_common::{
     default_config,
     group_hashing::CircuitBuilderGroupHashing,
-    poseidon::{empty_poseidon_hash, H, P},
+    poseidon::{empty_poseidon_hash, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
-    serialization::{deserialize, serialize},
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
     C, D, F,
 };
 use plonky2::{
-    hash::{hash_types::HashOutTarget, poseidon::PoseidonHash},
-    iop::{
-        target::Target,
-        witness::{PartialWitness, WitnessWrite},
-    },
-    plonk::{
-        circuit_builder::CircuitBuilder,
-        circuit_data::VerifierCircuitData,
-        config::GenericConfig,
-        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
-    },
+    iop::{target::Target, witness::PartialWitness},
+    plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::{
@@ -39,7 +28,7 @@ use derive_more::{Constructor, Deref, From};
 // new type to implement the circuit logic on each differently
 // deref to access directly the same members - read only so it's ok
 #[derive(Clone, Debug, Deref, From, Constructor)]
-pub(crate) struct LeafCircuit(IndexTuple);
+pub struct LeafCircuit(IndexTuple);
 
 #[derive(Clone, Serialize, Deserialize, Deref, From)]
 pub(crate) struct LeafWires(IndexTupleWire);
@@ -117,7 +106,6 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::TOTAL_LEN;
-        const ROWS_IO: usize = super::public_inputs::PublicInputs::<Target>::TOTAL_LEN;
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, CELLS_IO>::new(
             default_config(),
             &builder_parameters,
@@ -141,20 +129,18 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
 
 #[cfg(test)]
 mod test {
-    use std::array::from_fn as create_array;
 
     use ethers::types::U256;
     use mp2_common::{
-        group_hashing::map_to_curve_point, poseidon::empty_poseidon_hash, utils::ToFields, C, D, F,
+        group_hashing::map_to_curve_point, poseidon::empty_poseidon_hash, utils::ToFields, CHasher,
+        C, D, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
-        field::types::{Field, Sample},
-        hash::{
-            hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation,
-        },
+        field::types::Sample,
+        hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
         iop::{target::Target, witness::WitnessWrite},
-        plonk::circuit_builder::CircuitBuilder,
+        plonk::{circuit_builder::CircuitBuilder, config::Hasher},
     };
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
@@ -213,7 +199,7 @@ mod test {
             .chain(cells_hash.iter())
             .cloned()
             .collect::<Vec<_>>();
-        let row_hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&inputs);
+        let row_hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&inputs);
         assert_eq!(row_hash, pi.root_hash_hashout());
         // D(proof.DC + D(index_id||pack_u32(index_value)))
         let inner = map_to_curve_point(&tuple.to_fields());

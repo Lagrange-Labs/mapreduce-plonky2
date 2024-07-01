@@ -1,12 +1,10 @@
-use plonky2::{
-    hash::poseidon::PoseidonHash,
-    plonk::{config::AlgebraicHasher, proof::ProofWithPublicInputsTarget},
-};
+use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 
 use mp2_common::{
     default_config,
     group_hashing::CircuitBuilderGroupHashing,
-    poseidon::{empty_poseidon_hash, H, P},
+    hash::hash_maybe_first,
+    poseidon::empty_poseidon_hash,
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
@@ -15,10 +13,7 @@ use mp2_common::{
     C, D, F,
 };
 use plonky2::{
-    hash::{
-        hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
-        hashing::PlonkyPermutation,
-    },
+    self,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -39,7 +34,7 @@ use crate::cells_tree;
 use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
 
 #[derive(Clone, Debug)]
-pub(crate) struct PartialNodeCircuit {
+pub struct PartialNodeCircuit {
     pub(crate) tuple: IndexTuple,
     pub(crate) is_child_at_left: bool,
 }
@@ -65,7 +60,8 @@ impl PartialNodeCircuit {
     ) -> PartialNodeWires {
         let cells_pi = cells_tree::PublicInputs::from_slice(cells_pi);
         let tuple = IndexTupleWire::new(b);
-        let is_child_at_left = b.add_virtual_bool_target_safe();
+        // bool target range checked in poseidon gate
+        let is_child_at_left = b.add_virtual_bool_target_unsafe();
         let child_pi = PublicInputs::from_slice(child_pi);
         // max_left = left ? child_proof.max : index_value
         // min_right = left ? index_value : child_proof.min
@@ -152,14 +148,13 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursivePartialWires {
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::TOTAL_LEN;
-        const ROWS_IO: usize = super::public_inputs::PublicInputs::<Target>::TOTAL_LEN;
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, CELLS_IO>::new(
             default_config(),
             &builder_parameters,
         );
         let cells_verifier_gadget = verifier_gadget.verify_proof_in_circuit_set(builder);
         let cells_pi = cells_verifier_gadget.get_public_input_targets::<F, CELLS_IO>();
-        let child_pi = verified_proofs[0].public_inputs.as_slice();
+        let child_pi = Self::public_input_targets(verified_proofs[0]);
         RecursivePartialWires {
             // run the row leaf circuit just with the public inputs of the cells proof
             partial_wires: PartialNodeCircuit::build(builder, child_pi, cells_pi),
@@ -175,138 +170,35 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursivePartialWires {
     }
 }
 
-// maybe swap the first two elements and hashes the rest after with it
-fn hash_maybe_first(
-    c: &mut CircuitBuilder<F, D>,
-    should_swap: BoolTarget,
-    elem1: [Target; NUM_HASH_OUT_ELTS],
-    elem2: [Target; NUM_HASH_OUT_ELTS],
-    rest: &[Target],
-) -> Vec<Target> {
-    let zero = c.zero();
-    let mut state = P::new(core::iter::repeat(zero));
-    // absorb the first two inputs and do the swap
-    state.set_from_slice(&[elem1, elem2].concat(), 0);
-    state = H::permute_swapped(state, should_swap, c);
-    // Absorb all the rest of the input chunks.
-    let t = c._false();
-    for input_chunk in rest.chunks(P::RATE) {
-        state.set_from_slice(input_chunk, 0);
-        state = H::permute_swapped(state, t, c);
-    }
-
-    // Squeeze until we have the desired number of outputs.
-    let mut outputs = Vec::new();
-    loop {
-        for &item in state.squeeze() {
-            outputs.push(item);
-            if outputs.len() == NUM_HASH_OUT_ELTS {
-                return outputs;
-            }
-        }
-        state.permute();
-    }
-}
-
 #[cfg(test)]
 pub mod test {
     use mp2_common::{
-        group_hashing::map_to_curve_point, poseidon::empty_poseidon_hash, utils::ToFields,
+        group_hashing::map_to_curve_point, poseidon::empty_poseidon_hash, utils::ToFields, CHasher,
     };
-    use plonky2::{field::types::Field, hash::hash_types::HashOut};
+    use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::curve::Point;
-    use std::{array::from_fn as create_array, cell};
 
     use ethers::types::U256;
     use mp2_common::{C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Sample,
-        hash::{
-            hash_types::NUM_HASH_OUT_ELTS, hashing::hash_n_to_hash_no_pad,
-            poseidon::PoseidonPermutation,
-        },
-        iop::{
-            target::{BoolTarget, Target},
-            witness::WitnessWrite,
-        },
+        hash::hashing::hash_n_to_hash_no_pad,
+        iop::{target::Target, witness::WitnessWrite},
         plonk::circuit_builder::CircuitBuilder,
     };
 
     use crate::{
         cells_tree,
         row_tree::{
-            full_node::test::generate_random_pi, partial_node::PartialNodeCircuit,
-            public_inputs::PublicInputs, IndexTuple,
+            full_node::test::{generate_random_pi, weierstrass_to_point},
+            partial_node::PartialNodeCircuit,
+            public_inputs::PublicInputs,
+            IndexTuple,
         },
     };
 
-    use super::{hash_maybe_first, PartialNodeWires};
-
-    const REST: usize = 7;
-    #[derive(Debug, Clone)]
-    struct TestPartialSwap {
-        elem1: Vec<F>,
-        elem2: Vec<F>,
-        should_swap: bool,
-        rest: Vec<F>,
-    }
-
-    impl UserCircuit<F, D> for TestPartialSwap {
-        type Wires = (Vec<Target>, Vec<Target>, BoolTarget, Vec<Target>);
-
-        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let elem1 = c.add_virtual_targets(NUM_HASH_OUT_ELTS);
-            let elem2 = c.add_virtual_targets(NUM_HASH_OUT_ELTS);
-            let cond = c.add_virtual_bool_target_safe();
-            let rest = c.add_virtual_targets(REST);
-            let hash = hash_maybe_first(
-                c,
-                cond,
-                elem1.clone().try_into().unwrap(),
-                elem2.clone().try_into().unwrap(),
-                &rest,
-            );
-            c.register_public_inputs(&hash);
-            (elem1, elem2, cond, rest)
-        }
-
-        fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_target_arr(&wires.0, &self.elem1);
-            pw.set_target_arr(&wires.1, &self.elem2);
-            pw.set_bool_target(wires.2, self.should_swap);
-            pw.set_target_arr(&wires.3, &self.rest);
-        }
-    }
-
-    #[test]
-    fn test_partial_swap() {
-        let elem1 = (0..NUM_HASH_OUT_ELTS)
-            .map(|_| F::rand())
-            .collect::<Vec<_>>();
-        let elem2 = (0..NUM_HASH_OUT_ELTS)
-            .map(|_| F::rand())
-            .collect::<Vec<_>>();
-        let rest = (0..REST).map(|_| F::rand()).collect::<Vec<_>>();
-        for should_swap in [true, false] {
-            let circuit = TestPartialSwap {
-                elem1: elem1.clone(),
-                elem2: elem2.clone(),
-                should_swap,
-                rest: rest.clone(),
-            };
-            let proof = run_circuit::<F, D, C, _>(circuit);
-            let pi = proof.public_inputs;
-            // do it outside circuit
-            let tuple = match should_swap {
-                false => [elem1.clone(), elem2.clone()].concat(),
-                true => [elem2.clone(), elem1.clone()].concat(),
-            };
-            let inputs = tuple.iter().chain(rest.iter()).cloned().collect::<Vec<_>>();
-            let hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&inputs);
-            assert_eq!(&hash.elements.as_slice(), &pi.as_slice());
-        }
-    }
+    use super::PartialNodeWires;
 
     #[derive(Clone, Debug)]
     struct TestPartialNodeCircuit {
@@ -397,19 +289,14 @@ pub mod test {
             .chain(cells_hash.iter())
             .cloned()
             .collect::<Vec<_>>();
-        let hash = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&inputs);
+        let hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&inputs);
         assert_eq!(hash, pi.root_hash_hashout());
         // child_proof.DR + D(cells_proof.DC + D(index_id || index_value)) as DR
         let inner = map_to_curve_point(&tuple.to_fields());
         let inner2 = inner + cells_point;
         let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
-        let res = Point::decode(
-            PublicInputs::from_slice(&child_pi)
-                .rows_digest_field()
-                .encode(),
-        )
-        .unwrap()
-            + outer;
+        let res =
+            weierstrass_to_point(&PublicInputs::from_slice(&child_pi).rows_digest_field()) + outer;
         assert_eq!(res.to_weierstrass(), pi.rows_digest_field());
     }
 }
