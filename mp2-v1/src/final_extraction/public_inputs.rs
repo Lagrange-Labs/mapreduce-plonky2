@@ -16,8 +16,13 @@ use mp2_common::{
     utils::{FromFields, FromTargets, ToTargets},
 };
 use plonky2::{
-    field::{extension::FieldExtension, types::Field},
+    field::{
+        extension::{Extendable, FieldExtension},
+        types::Field,
+    },
+    hash::hash_types::RichField,
     iop::target::Target,
+    plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
@@ -50,11 +55,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     const RANGES: &'static [PublicInputRange] = &[H_RANGE, PH_RANGE, DV_RANGE, DM_RANGE, BN_RANGE];
 
     fn register_args(&self, cb: &mut CBuilder) {
-        cb.register_public_inputs(self.h);
-        cb.register_public_inputs(self.ph);
-        cb.register_public_inputs(self.dv);
-        cb.register_public_inputs(self.dm);
-        cb.register_public_inputs(self.bn);
+        self.generic_register_args(cb)
     }
 }
 
@@ -84,6 +85,17 @@ impl<'a, T> PublicInputs<'a, T> {
 }
 
 impl<'a> PublicInputs<'a, Target> {
+    pub fn generic_register_args<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        cb: &mut CircuitBuilder<F, D>,
+    ) {
+        cb.register_public_inputs(self.h);
+        cb.register_public_inputs(self.ph);
+        cb.register_public_inputs(self.dv);
+        cb.register_public_inputs(self.dm);
+        cb.register_public_inputs(self.bn);
+    }
+
     /// Get the blockchain block hash corresponding to the values extracted
     pub fn block_hash(&self) -> OutputHash {
         OutputHash::from_targets(self.h)
@@ -91,19 +103,25 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// Get the predecessor block hash
     pub fn previous_block_hash(&self) -> OutputHash {
-        OutputHash::from_targets(&self.ph)
+        OutputHash::from_targets(self.ph)
     }
 
     pub fn digest_value(&self) -> CurveTarget {
         let dv = self.dv;
         CurveTarget::from_targets(dv)
     }
+    pub fn digest_metadata(&self) -> CurveTarget {
+        let dm = self.dm;
+        CurveTarget::from_targets(dm)
+    }
+    pub fn block_number_targets(&self) -> Vec<Target> {
+        self.bn.to_vec()
+    }
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
     /// Total length of the public inputs
     pub const TOTAL_LEN: usize = BN_RANGE.end;
-
     /// Create from a slice.
     pub fn from_slice(pi: &'a [T]) -> Self {
         assert!(pi.len() >= Self::TOTAL_LEN);

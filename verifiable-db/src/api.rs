@@ -1,6 +1,6 @@
 //! Main APIs and related structures
 
-use crate::{cells_tree, row_tree};
+use crate::{cells_tree, index_tree, row_tree};
 use anyhow::Result;
 use ethers::prelude::U256;
 use mp2_common::F;
@@ -26,6 +26,7 @@ pub enum CircuitInput {
 pub struct PublicParameters {
     cells_tree: cells_tree::PublicParameters,
     rows_tree: row_tree::Parameters,
+    index_tree: index_tree::PublicParameters;
 }
 
 /// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.

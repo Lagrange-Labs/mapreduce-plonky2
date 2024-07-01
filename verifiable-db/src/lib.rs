@@ -11,6 +11,7 @@ use plonky2::{
 
 pub mod api;
 pub mod cells_tree;
+pub mod extraction;
 pub mod index_tree;
 pub mod row_tree;
 
