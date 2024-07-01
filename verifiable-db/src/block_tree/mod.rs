@@ -4,6 +4,7 @@ mod membership;
 mod parent;
 mod public_inputs;
 
+pub use api::{CircuitInput, PublicParameters};
 pub use public_inputs::PublicInputs;
 
 #[cfg(test)]

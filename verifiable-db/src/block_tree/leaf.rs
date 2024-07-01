@@ -193,8 +193,10 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::index_tree::tests::{random_extraction_pi, random_rows_tree_pi};
+    use super::{
+        super::tests::{random_extraction_pi, random_rows_tree_pi},
+        *,
+    };
     use ethers::prelude::U256;
     use mp2_common::{
         poseidon::{hash_to_int_value, H},

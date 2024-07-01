@@ -171,8 +171,7 @@ impl CircuitLogicWires<F, D, 1> for MembershipWires {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::index_tree::tests::random_block_index_pi;
+    use super::{super::tests::random_block_index_pi, *};
     use mp2_common::{
         poseidon::H,
         utils::{Fieldable, ToFields},
