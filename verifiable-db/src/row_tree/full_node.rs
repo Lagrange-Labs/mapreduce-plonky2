@@ -5,9 +5,7 @@ use mp2_common::{
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
-    plonk::{
-        circuit_builder::CircuitBuilder, config::GenericConfig, proof::ProofWithPublicInputsTarget,
-    },
+    plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::{
@@ -26,7 +24,7 @@ use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
 // easily down the line with less recursion. Best to provide code which is easily
 // amenable to a different arity rather than hardcoding binary tree only
 #[derive(Clone, Debug, From, Deref)]
-pub(crate) struct FullNodeCircuit(IndexTuple);
+pub struct FullNodeCircuit(IndexTuple);
 
 #[derive(Clone, Serialize, Deserialize, From, Deref)]
 struct FullNodeWires(IndexTupleWire);
@@ -113,7 +111,6 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::TOTAL_LEN;
-        const ROWS_IO: usize = super::public_inputs::PublicInputs::<Target>::TOTAL_LEN;
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, CELLS_IO>::new(
             default_config(),
             &builder_parameters,
@@ -121,7 +118,7 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
         let cells_verifier_gadget = verifier_gadget.verify_proof_in_circuit_set(builder);
         let cells_pi = cells_verifier_gadget.get_public_input_targets::<F, CELLS_IO>();
         let children_pi: [&[Target]; 2] =
-            create_array(|i| verified_proofs[i].public_inputs.as_slice());
+            create_array(|i| Self::public_input_targets(verified_proofs[i]));
         RecursiveFullWires {
             // run the row leaf circuit just with the public inputs of the cells proof
             full_wires: FullNodeCircuit::build(builder, children_pi[0], children_pi[1], cells_pi),
@@ -140,7 +137,7 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
 #[cfg(test)]
 pub(crate) mod test {
 
-    use ethers::{abi::ethereum_types::Public, types::U256};
+    use ethers::types::U256;
     use mp2_common::{group_hashing::map_to_curve_point, poseidon::H, utils::ToFields, C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
@@ -148,9 +145,7 @@ pub(crate) mod test {
     };
     use plonky2::{
         field::types::Sample,
-        hash::{
-            hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation,
-        },
+        hash::hash_types::HashOut,
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
@@ -158,7 +153,6 @@ pub(crate) mod test {
         plonk::{circuit_builder::CircuitBuilder, config::Hasher},
     };
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
-    use rand::Rng;
 
     use crate::{
         cells_tree,

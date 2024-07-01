@@ -7,7 +7,6 @@ use mp2_common::{
     D, F,
 };
 use plonky2::{
-    hash::hash_types::RichField,
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
@@ -23,12 +22,12 @@ mod leaf;
 mod partial_node;
 mod public_inputs;
 
-pub use api::{CircuitInput, Parameters};
+pub use api::{CircuitInput, PublicParameters};
 pub use public_inputs::PublicInputs;
 
 /// The value to give at each node of the row tree
 #[derive(Clone, Debug, Constructor)]
-pub(crate) struct IndexTuple {
+pub struct IndexTuple {
     /// identifier of the column for the secondary index
     index_identifier: F,
     /// secondary index value
