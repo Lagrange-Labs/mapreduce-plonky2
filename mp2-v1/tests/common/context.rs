@@ -102,7 +102,7 @@ impl TestContext {
                     bincode::deserialize_from(BufReader::new(
                         File::open(&zkdb_filepath).context("while opening {zkdb_filepath:?}")?,
                     ))
-                    .context("while parsing MP2 parameters")?
+                    .context("while parsing verifiable DB parameters")?
                 };
 
                 PublicParameters { mp2, zkdb }

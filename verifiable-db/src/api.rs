@@ -1,10 +1,10 @@
 //! Main APIs and related structures
-
-use crate::{cells_tree, row_tree};
 use anyhow::Result;
 use ethers::prelude::U256;
 use mp2_common::F;
 use serde::{Deserialize, Serialize};
+
+use crate::{cells_tree, row_tree};
 
 /// Struct containing the expected input of the Tree node
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -33,6 +33,9 @@ impl PublicParameters {
     pub fn generate_proof(&self, input: CircuitInput) -> Result<Vec<u8>> {
         match input {
             CircuitInput::CellsTree(input) => self.cells_tree.generate_proof(input),
+            CircuitInput::RowsTree(input) => self
+                .rows_tree
+                .generate_proof(input, self.cells_tree.vk_set().clone()),
         }
     }
 }
@@ -48,17 +51,5 @@ pub fn build_circuits_params() -> PublicParameters {
     PublicParameters {
         cells_tree,
         rows_tree,
-    }
-}
-
-/// Generate a proof for a circuit in the set of circuits employed in the
-/// verifiable DB stage of LPN, employing `CircuitInput` to specify for which
-/// circuit the proof should be generated.
-pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<Vec<u8>> {
-    match input {
-        CircuitInput::CellsTree(input) => params.cells_tree.generate_proof(input),
-        CircuitInput::RowsTree(input) => params
-            .rows_tree
-            .generate_proof(input, params.cells_tree.vk_set().clone()),
     }
 }
