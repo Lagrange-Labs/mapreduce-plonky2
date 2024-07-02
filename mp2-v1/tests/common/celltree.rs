@@ -1,4 +1,6 @@
+use anyhow::*;
 use ethers::types::{Address, U256};
+use hashbrown::HashMap;
 use mp2_common::{
     eth::ProofQuery, poseidon::empty_poseidon_hash, proof::ProofWithVK, utils::ToFields, CHasher, F,
 };
@@ -10,7 +12,7 @@ use plonky2::{
 };
 use ryhope::{
     hasher::TreeHasher,
-    storage::{memory::InMemory, EpochKvStorage, TreeTransactionalStorage},
+    storage::{memory::InMemory, updatetree::UpdateTree, EpochKvStorage, TreeTransactionalStorage},
     tree::{sbbst, TreeTopology},
     MerkleTreeKvDb,
 };
@@ -61,24 +63,25 @@ type CellTree = sbbst::Tree;
 type CellStorage = InMemory<CellTree, Cell, <PoseidonTreeHasher as TreeHasher>::Hashed>;
 pub type MerkleCellTree = MerkleTreeKvDb<CellTree, Cell, CellStorage, PoseidonTreeHasher>;
 
-pub async fn build_cell_tree(row: &Row) -> MerkleCellTree {
+// NOTE: this is not really aync for now, but will be in the future when Ryhope
+// turns async.
+pub async fn build_cell_tree(
+    row: &Row,
+) -> Result<(MerkleCellTree, UpdateTree<<CellTree as TreeTopology>::Key>)> {
     let mut cell_tree = MerkleCellTree::create((0, 0), ()).unwrap();
-    cell_tree
-        .start_transaction()
-        .expect("while opening cell tree");
-    for (i, (identifier, value)) in row.cells.iter().enumerate() {
-        cell_tree
-            // SBBST starts at 1, not 0. Note though this index is not important
-            // since at no point we are looking up value per index in the cells
-            // tree we always look at the entire row at the row tree level.
-            .store(i + 1, (identifier.to_owned(), value.to_owned()))
-            .expect("while inserting nodes in cell tree");
-    }
-    cell_tree
-        .commit_transaction()
-        .expect("while building cell tree");
+    let update_tree = cell_tree
+        .in_transaction(|t| {
+            for (i, (identifier, value)) in row.cells.iter().enumerate() {
+                // SBBST starts at 1, not 0. Note though this index is not important
+                // since at no point we are looking up value per index in the cells
+                // tree we always look at the entire row at the row tree level.
+                t.store(i + 1, (identifier.to_owned(), value.to_owned()))?;
+            }
+            Ok(())
+        })
+        .context("while building tree")?;
 
-    cell_tree
+    Ok((cell_tree, update_tree))
 }
 
 impl TestContext {
@@ -105,58 +108,73 @@ impl TestContext {
     }
 
     /// Given a [`MerkleCellTree`], recursively prove its hash.
-    pub async fn prove_cell_tree(&self, t: &MerkleCellTree) -> HashOut<F> {
-        fn rec_prove(
-            ctx: &TestContext,
-            t: &MerkleCellTree,
-            current: <CellTree as TreeTopology>::Key,
-        ) -> Vec<u8> {
-            let (context, (identifier, value)) = t.fetch_with_context(&current);
+    pub async fn prove_cell_tree(
+        &self,
+        t: &MerkleCellTree,
+        ut: UpdateTree<<CellTree as TreeTopology>::Key>,
+    ) -> HashOut<F> {
+        // Store the proofs here for the tests; will probably be done in S3 for
+        // prod.
+        let mut proofs = HashMap::<<CellTree as TreeTopology>::Key, Vec<u8>>::new();
+        let mut workplan = ut.into_workplan();
 
-            if context.is_leaf() {
-                // Prove a leaf
-                let inputs = CircuitInput::CellsTree(
-                    verifiable_db::cells_tree::CircuitInput::new_leaf(identifier, value),
-                );
-                ctx.params()
-                    .zkdb
-                    .generate_proof(inputs)
-                    .expect("while proving leaf")
-            } else if context.right.is_none() {
-                // Prove a partial node
-                let left_proof = rec_prove(ctx, t, context.left.unwrap());
-                let inputs = CircuitInput::CellsTree(
-                    verifiable_db::cells_tree::CircuitInput::new_partial_node(
-                        identifier, value, left_proof,
-                    ),
-                );
-                ctx.params()
-                    .zkdb
-                    .generate_proof(inputs)
-                    .expect("while proving partial node")
-            } else {
-                // Prove a partial node. Since the tree is SBBST, by
-                // construction, there is only one case possible for the order
-                // of the child when there is onle one: child is always the left
-                // child.
-                let left_proof = rec_prove(ctx, t, context.left.unwrap());
-                let right_proof = rec_prove(ctx, t, context.right.unwrap());
-                let inputs = CircuitInput::CellsTree(
-                    verifiable_db::cells_tree::CircuitInput::new_full_node(
-                        identifier,
-                        value,
-                        [left_proof, right_proof],
-                    ),
-                );
-                ctx.params()
-                    .zkdb
-                    .generate_proof(inputs)
-                    .expect("while proving full node")
+        while let Some(todos) = workplan.next() {
+            for k in todos {
+                let (context, (identifier, value)) = t.fetch_with_context(&k);
+
+                let proof = if context.is_leaf() {
+                    // Prove a leaf
+                    let inputs = CircuitInput::CellsTree(
+                        verifiable_db::cells_tree::CircuitInput::new_leaf(identifier, value),
+                    );
+                    self.params()
+                        .zkdb
+                        .generate_proof(inputs)
+                        .expect("while proving leaf")
+                } else if context.right.is_none() {
+                    // Prove a partial node
+                    let left_proof = proofs
+                        .get(&context.left.unwrap())
+                        .expect("UT guarantees proving in order")
+                        .to_owned();
+                    let inputs = CircuitInput::CellsTree(
+                        verifiable_db::cells_tree::CircuitInput::new_partial_node(
+                            identifier, value, left_proof,
+                        ),
+                    );
+                    self.params()
+                        .zkdb
+                        .generate_proof(inputs)
+                        .expect("while proving partial node")
+                } else {
+                    // Prove a full node.
+                    let left_proof = proofs
+                        .get(&context.left.unwrap())
+                        .expect("UT guarantees proving in order")
+                        .to_vec();
+                    let right_proof = proofs
+                        .get(&context.right.unwrap())
+                        .expect("UT guarantees proving in order")
+                        .to_vec();
+                    let inputs = CircuitInput::CellsTree(
+                        verifiable_db::cells_tree::CircuitInput::new_full_node(
+                            identifier,
+                            value,
+                            [left_proof, right_proof],
+                        ),
+                    );
+                    self.params()
+                        .zkdb
+                        .generate_proof(inputs)
+                        .expect("while proving full node")
+                };
+                proofs.insert(k, proof);
+
+                workplan.done(&k).unwrap();
             }
         }
-
         let root = t.tree().root().unwrap();
-        let root_proof = rec_prove(self, t, root);
+        let root_proof = proofs.get(&root).unwrap().to_vec();
         let root_pi = ProofWithVK::deserialize(&root_proof)
             .expect("while deserializing proof")
             .proof
@@ -173,8 +191,10 @@ impl TestContext {
         slots: &[u8],
     ) -> MerkleCellTree {
         let row = self.build_row(contract_address, slots).await;
-        let cell_tree = build_cell_tree(&row).await;
-        let proved_hash = self.prove_cell_tree(&cell_tree).await;
+        let (cell_tree, cell_tree_ut) = build_cell_tree(&row)
+            .await
+            .expect("failed to create cell tree");
+        let proved_hash = self.prove_cell_tree(&cell_tree, cell_tree_ut).await;
 
         assert_eq!(
             cell_tree.root_hash().unwrap(),

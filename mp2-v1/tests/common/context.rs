@@ -58,6 +58,11 @@ impl TestContext {
             Some(params_path_str) => {
                 info!("attempting to read parameters from {params_path_str}");
                 let params_path = PathBuf::from(params_path_str);
+                if !params_path.exists() {
+                    std::fs::create_dir_all(&params_path)
+                        .context("while creating parameters folder")?;
+                }
+
                 let mut mp2_filepath = params_path.clone();
                 mp2_filepath.push("params_mp2");
 
