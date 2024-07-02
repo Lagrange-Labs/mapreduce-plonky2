@@ -2,6 +2,7 @@ use crate::types::CBuilder;
 use crate::utils::ToTargets;
 use crate::F;
 use num::BigUint;
+use plonky2::field::types::Field;
 use plonky2::field::types::PrimeField64;
 use plonky2::{
     field::{extension::Extendable, goldilocks_field::GoldilocksField},
@@ -33,6 +34,9 @@ pub fn empty_poseidon_hash() -> &'static HashOut<GoldilocksField> {
 
 /// Convert the hash target into a big integer target.
 pub fn hash_to_int_target(b: &mut CBuilder, h: HashOutTarget) -> BigUintTarget {
+    let zero = b.zero();
+    let p1 = b.constant(F::from_canonical_usize((1 << 32) - 1));
+    let _tru = b._true();
     let limbs = h
         .to_targets()
         .into_iter()
@@ -43,6 +47,11 @@ pub fn hash_to_int_target(b: &mut CBuilder, h: HashOutTarget) -> BigUintTarget {
             // Split the hash element into low and high of Uint32. The `split_low_high`
             // function handles the range check in internal.
             let (low, high) = b.split_low_high(t, 32, 64);
+            let low_zero = b.is_equal(low, zero);
+            let high_high = b.is_equal(high, p1);
+            let not_high_high = b.not(high_high);
+            let valid = b.or(low_zero, not_high_high);
+            b.connect(valid.target, _tru.target);
             [low, high].map(U32Target)
         })
         .collect();
@@ -142,7 +151,7 @@ mod tests {
         b.connect_biguint(&int, &exp_int);
 
         let cd = b.build::<C>();
-        let mut pw = PartialWitness::new();
+        let pw = PartialWitness::new();
         cd.prove(pw).unwrap();
     }
 

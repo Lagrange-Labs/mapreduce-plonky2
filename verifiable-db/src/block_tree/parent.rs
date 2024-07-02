@@ -410,7 +410,7 @@ mod tests {
         {
             let exp_hash = compute_expected_hash(&extraction_pi, index_identifier);
 
-            assert_eq!(pi.m, exp_hash.elements);
+            assert_eq!(pi.metadata_digest, exp_hash.elements);
         }
         // Check new node digest
         {

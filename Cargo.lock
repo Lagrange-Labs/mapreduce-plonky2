@@ -5006,6 +5006,7 @@ dependencies = [
  "mp2_test",
  "mp2_v1",
  "plonky2",
+ "plonky2_crypto",
  "plonky2_ecdsa",
  "plonky2_ecgfp5",
  "rand",

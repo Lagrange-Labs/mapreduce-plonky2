@@ -47,7 +47,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) block_number: &'a [T],
     pub(crate) block_hash: &'a [T],
     pub(crate) prev_block_hash: &'a [T],
-    pub(crate) m: &'a [T],
+    pub(crate) metadata_digest: &'a [T],
     pub(crate) new_node_digest: &'a [T],
 }
 
@@ -72,7 +72,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
         cb.register_public_inputs(self.block_number);
         cb.register_public_inputs(self.block_hash);
         cb.register_public_inputs(self.prev_block_hash);
-        cb.register_public_inputs(self.m);
+        cb.register_public_inputs(self.metadata_digest);
         cb.register_public_inputs(self.new_node_digest);
     }
 }
@@ -112,10 +112,10 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         h_old: &'a [T],
         min: &'a [T],
         max: &'a [T],
-        block_number: &'a [T],
-        block_hash: &'a [T],
-        prev_block_hash: &'a [T],
-        m: &'a [T],
+        index_value: &'a [T],
+        commitment: &'a [T],
+        prev_commitment: &'a [T],
+        metadata_digest: &'a [T],
         new_node_digest: &'a [T],
     ) -> Self {
         Self {
@@ -123,10 +123,10 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             h_old,
             min,
             max,
-            block_number,
-            block_hash,
-            prev_block_hash,
-            m,
+            block_number: index_value,
+            block_hash: commitment,
+            prev_block_hash: prev_commitment,
+            metadata_digest,
             new_node_digest,
         }
     }
@@ -142,7 +142,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             block_number: &pi[BLOCK_NUMBER_RANGE],
             block_hash: &pi[BLOCK_HASH_RANGE],
             prev_block_hash: &pi[PREV_BLOCK_HASH_RANGE],
-            m: &pi[M_RANGE],
+            metadata_digest: &pi[M_RANGE],
             new_node_digest: &pi[NEW_NODE_DIGEST_RANGE],
         }
     }
@@ -157,7 +157,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             .chain(self.block_number)
             .chain(self.block_hash)
             .chain(self.prev_block_hash)
-            .chain(self.m)
+            .chain(self.metadata_digest)
             .chain(self.new_node_digest)
             .cloned()
             .collect()

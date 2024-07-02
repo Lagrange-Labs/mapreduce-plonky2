@@ -3,7 +3,7 @@
 //! first block number).
 
 use super::{compute_index_digest, public_inputs::PublicInputs};
-use crate::row_tree;
+use crate::{extraction::ExtractionPI, row_tree};
 use anyhow::Result;
 use mp2_common::{
     default_config,
@@ -12,7 +12,7 @@ use mp2_common::{
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     types::CBuilder,
-    utils::ToTargets,
+    utils::{SliceConnector, ToTargets},
     CHasher, C, D, F,
 };
 use mp2_v1::final_extraction;
@@ -23,16 +23,14 @@ use plonky2::{
     },
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
-use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
     framework::{
         RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
     },
 };
-use serde::{Deserialize, Serialize};
-use std::iter;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::{iter, marker::PhantomData};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafWires {
@@ -46,19 +44,25 @@ pub(crate) struct LeafCircuit {
 }
 
 impl LeafCircuit {
-    fn build(b: &mut CBuilder, extraction_pi: &[Target], rows_tree_pi: &[Target]) -> LeafWires {
+    fn build<E>(b: &mut CBuilder, extraction_pi: &[Target], rows_tree_pi: &[Target]) -> LeafWires
+    where
+        E: ExtractionPI,
+    {
         let index_identifier = b.add_virtual_target();
 
-        let extraction_pi = final_extraction::PublicInputs::<Target>::from_slice(extraction_pi);
+        let extraction_pi = E::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
 
         // in our case, the extraction proofs extracts from the blockchain and sets
         // the block number as the primary index
-        let index_value = extraction_pi.block_number_raw();
+        let index_value = extraction_pi.primary_index_value();
 
         // Enforce that the data extracted from the blockchain is the same as the data
         // employed to build the rows tree for this node.
-        b.connect_curve_points(extraction_pi.digest_value(), rows_tree_pi.rows_digest());
+        b.connect_slice(
+            &extraction_pi.digest_value(),
+            &rows_tree_pi.rows_digest().to_targets(),
+        );
 
         // Compute the hash of table metadata, to be exposed as public input to prove to
         // the verifier that we extracted the correct storage slots and we place the data
@@ -66,9 +70,8 @@ impl LeafCircuit {
         // of the block number column to the table metadata.
         // metadata_hash = H(extraction_proof.DM || block_id)
         let inputs = extraction_pi
-            .digest_metadata_raw()
-            .iter()
-            .cloned()
+            .digest_metadata()
+            .into_iter()
             .chain(iter::once(index_identifier))
             .collect();
         let metadata_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
@@ -88,10 +91,10 @@ impl LeafCircuit {
         let inputs = empty_hash
             .iter()
             .chain(empty_hash.iter())
-            .chain(index_value) // node_min
-            .chain(index_value) // node_max
+            .chain(index_value.iter()) // node_min
+            .chain(index_value.iter()) // node_max
             .chain(iter::once(&index_identifier))
-            .chain(index_value)
+            .chain(index_value.iter())
             .chain(rows_tree_pi.h)
             .cloned()
             .collect();
@@ -101,11 +104,11 @@ impl LeafCircuit {
         PublicInputs::new(
             &h_new,
             &empty_hash,
-            index_value, // node_min
-            index_value, // node_max
-            index_value,
-            extraction_pi.block_hash_raw(),
-            extraction_pi.prev_block_hash_raw(),
+            &index_value, // node_min
+            &index_value, // node_max
+            &index_value,
+            &extraction_pi.commitment(),
+            &extraction_pi.prev_commitment(),
             &metadata_hash,
             &node_digest.to_targets(),
         )
@@ -114,17 +117,21 @@ impl LeafCircuit {
         LeafWires { index_identifier }
     }
 
-    /// Assign the wires.
+    /// Assign the wireswhere E: ExtractionPI.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
         pw.set_target(wires.index_identifier, self.index_identifier);
     }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct RecursiveLeafWires {
+pub(crate) struct RecursiveLeafWires<E>
+where
+    E: ExtractionPI,
+{
     leaf_wires: LeafWires,
     extraction_verifier: RecursiveCircuitsVerifierTarget<D>,
     rows_tree_verifier: RecursiveCircuitsVerifierTarget<D>,
+    _p: PhantomData<E>,
 }
 
 #[derive(Clone, Debug)]
@@ -136,7 +143,10 @@ pub(crate) struct RecursiveLeafInput {
     pub(crate) rows_tree_set: RecursiveCircuits<F, C, D>,
 }
 
-impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
+impl<E> CircuitLogicWires<F, D, 0> for RecursiveLeafWires<E>
+where
+    E: ExtractionPI,
+{
     // Final extraction circuit set + rows tree circuit set
     type CircuitBuilderParams = (RecursiveCircuits<F, C, D>, RecursiveCircuits<F, C, D>);
 
@@ -166,12 +176,13 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
         let rows_tree_verifier = rows_tree_verifier.verify_proof_in_circuit_set(builder);
         let rows_tree_pi = rows_tree_verifier.get_public_input_targets::<F, ROWS_TREE_IO>();
 
-        let leaf_wires = LeafCircuit::build(builder, extraction_pi, rows_tree_pi);
+        let leaf_wires = LeafCircuit::build::<E>(builder, extraction_pi, rows_tree_pi);
 
         RecursiveLeafWires {
             leaf_wires,
             extraction_verifier,
             rows_tree_verifier,
+            _p: PhantomData,
         }
     }
 
@@ -239,7 +250,7 @@ pub mod tests {
         let point = weierstrass_to_point(&point);
         point * scalar
     }
-
+    type TestPI = crate::extraction::test::PublicInputs<Target>;
     #[derive(Clone, Debug)]
     struct TestLeafCircuit<'a> {
         c: LeafCircuit,
@@ -256,7 +267,7 @@ pub mod tests {
                 b.add_virtual_targets(final_extraction::PublicInputs::<Target>::TOTAL_LEN);
             let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::TOTAL_LEN);
 
-            let leaf_wires = LeafCircuit::build(b, &extraction_pi, &rows_tree_pi);
+            let leaf_wires = LeafCircuit::build::<TestPI>(b, &extraction_pi, &rows_tree_pi);
 
             (leaf_wires, extraction_pi, rows_tree_pi)
         }
@@ -346,7 +357,7 @@ pub mod tests {
         // Check metadata hash
         {
             let exp_hash = compute_expected_hash(&extraction_pi, block_id);
-            assert_eq!(pi.m, exp_hash.elements);
+            assert_eq!(pi.metadata_digest, exp_hash.elements);
         }
         // Check new node digest
         {

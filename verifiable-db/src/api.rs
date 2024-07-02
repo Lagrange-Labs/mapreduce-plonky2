@@ -1,10 +1,9 @@
 //! Main APIs and related structures
 
-use crate::{block_tree, cells_tree, row_tree};
+use crate::{block_tree, cells_tree, extraction::ExtractionPI, row_tree};
 use anyhow::Result;
 use ethers::prelude::U256;
 use mp2_common::{C, D, F};
-use plonky2::hash::hash_types::HashOut;
 use recursion_framework::framework::RecursiveCircuits;
 use serde::{Deserialize, Serialize};
 
@@ -25,14 +24,16 @@ pub enum CircuitInput {
 
 /// Parameters defining all the circuits employed for the verifiable DB stage of LPN
 #[derive(Serialize, Deserialize)]
-pub struct PublicParameters {
+pub struct PublicParameters<E: ExtractionPI> {
     cells_tree: cells_tree::PublicParameters,
     rows_tree: row_tree::PublicParameters,
-    block_tree: block_tree::PublicParameters,
+    block_tree: block_tree::PublicParameters<E>,
 }
 
 /// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.
-pub fn build_circuits_params(extraction_set: &RecursiveCircuits<F, C, D>) -> PublicParameters {
+pub fn build_circuits_params<E: ExtractionPI>(
+    extraction_set: &RecursiveCircuits<F, C, D>,
+) -> PublicParameters<E> {
     log::info!("Building cells_tree parameters...");
     let cells_tree = cells_tree::build_circuits_params();
     log::info!("Building row tree parameters...");
@@ -51,8 +52,8 @@ pub fn build_circuits_params(extraction_set: &RecursiveCircuits<F, C, D>) -> Pub
 /// Generate a proof for a circuit in the set of circuits employed in the
 /// verifiable DB stage of LPN, employing `CircuitInput` to specify for which
 /// circuit the proof should be generated.
-pub fn generate_proof(
-    params: &PublicParameters,
+pub fn generate_proof<E: ExtractionPI>(
+    params: &PublicParameters<E>,
     input: CircuitInput,
     extraction_set: &RecursiveCircuits<F, C, D>,
 ) -> Result<Vec<u8>> {

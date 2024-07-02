@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 mp2_v1 = { path = "../mp2-v1" }
 mp2_common = { path = "../mp2-common" }
+plonky2_crypto.workspace = true
 recursion_framework = { path = "../recursion-framework" }
 anyhow.workspace = true
 bincode.workspace = true

@@ -12,7 +12,7 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
-    u256::{self, U256PubInputs},
+    u256::{self, U256PubInputs, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
 };
 use plonky2::{
@@ -41,8 +41,8 @@ const BN_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + u256::NUM_LIMBS;
 pub struct PublicInputs<'a, T> {
     pub(crate) h: &'a [T],
     pub(crate) ph: &'a [T],
-    pub(crate) dv: (&'a [T]),
-    pub(crate) dm: (&'a [T]),
+    pub(crate) dv: &'a [T],
+    pub(crate) dm: &'a [T],
     pub(crate) bn: &'a [T],
 }
 
@@ -50,22 +50,18 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     const RANGES: &'static [PublicInputRange] = &[H_RANGE, PH_RANGE, DV_RANGE, DM_RANGE, BN_RANGE];
 
     fn register_args(&self, cb: &mut CBuilder) {
-        cb.register_public_inputs(self.h);
-        cb.register_public_inputs(self.ph);
-        cb.register_public_inputs(self.dv);
-        cb.register_public_inputs(self.dm);
-        cb.register_public_inputs(self.bn);
+        self.generic_register_args(cb)
     }
 }
 
 impl<'a> PublicInputs<'a, GFp> {
     /// Get the metadata point.
     pub fn metadata_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(&self.dm)
+        WeierstrassPoint::from_fields(self.dm)
     }
     /// Get the digest holding the values .
     pub fn value_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(&self.dv)
+        WeierstrassPoint::from_fields(self.dv)
     }
     /// Get block number as U64
     pub fn block_number(&self) -> U64 {
@@ -84,6 +80,14 @@ impl<'a, T> PublicInputs<'a, T> {
 }
 
 impl<'a> PublicInputs<'a, Target> {
+    pub fn generic_register_args(&self, cb: &mut CBuilder) {
+        cb.register_public_inputs(self.h);
+        cb.register_public_inputs(self.ph);
+        cb.register_public_inputs(self.dv);
+        cb.register_public_inputs(self.dm);
+        cb.register_public_inputs(self.bn);
+    }
+
     /// Get the blockchain block hash corresponding to the values extracted
     pub fn block_hash(&self) -> OutputHash {
         OutputHash::from_targets(self.h)
@@ -91,12 +95,21 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// Get the predecessor block hash
     pub fn previous_block_hash(&self) -> OutputHash {
-        OutputHash::from_targets(&self.ph)
+        OutputHash::from_targets(self.ph)
     }
 
     pub fn digest_value(&self) -> CurveTarget {
         let dv = self.dv;
         CurveTarget::from_targets(dv)
+    }
+
+    pub fn digest_metadata(&self) -> CurveTarget {
+        let dm = self.dm;
+        CurveTarget::from_targets(dm)
+    }
+
+    pub fn block_number(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.bn)
     }
 }
 
