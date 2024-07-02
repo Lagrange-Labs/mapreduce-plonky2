@@ -25,7 +25,7 @@ sha3.workspace = true
 mp2_common = { path = "../mp2-common" }
 verifiable-db = { path = "../verifiable-db" }
 recursion_framework = { path = "../recursion-framework" }
-ryhope = { git = "ssh://git@github.com/Lagrange-Labs/ryhope.git", rev = "c53d04dfe2c1e9f074d050ada2df50e1b87376b1" }
+ryhope = { git = "ssh://git@github.com/Lagrange-Labs/ryhope.git", rev = "3cd45c" }
 
 [dev-dependencies]
 alloy.workspace = true

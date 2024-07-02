@@ -2,7 +2,6 @@
 //!
 use ethers::types::U256;
 use mp2_common::{
-    keccak::OutputHash,
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::CURVE_TARGET_LEN,
     u256::{self, U256PubInputs, UInt256Target},

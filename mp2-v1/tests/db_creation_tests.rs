@@ -1,9 +1,11 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
-use common::{TestCase, TestContext};
+use common::{ProofKey, TestCase, TestContext};
+use ethers::types::Address;
 use log::info;
 use mp2_common::proof::{serialize_proof, ProofWithVK};
+use std::{collections::HashMap, str::FromStr};
 use test_log::test;
 
 pub(crate) mod common;
@@ -13,7 +15,10 @@ async fn prove_scalar_values(
     t: &TestCase,
     contract_proof: &ProofWithVK,
     block_proof: &[u8],
+    proofs: &mut HashMap<ProofKey, Vec<u8>>,
 ) {
+    let contract_address = Address::from_str(&t.contract_address).unwrap();
+
     let single_values_proof = ctx
         .prove_single_values_extraction(&t.contract_address, &t.values_extraction_single.slots)
         .await;
@@ -29,9 +34,18 @@ async fn prove_scalar_values(
     );
     info!("Generated Final Extraction (C.5.1) proof for single variables");
 
-    let _cell_tree = ctx
-        .proven_celltree_for_slots(&t.contract_address, &t.values_extraction_single.slots)
+    let row = ctx
+        .build_and_prove_celltree(
+            &contract_address,
+            // NOTE: the 0th column is assumed to be the secondary index.
+            &t.values_extraction_single.slots,
+            proofs,
+        )
         .await;
+
+    // In the case of the scalars slots, there is a single node in the row tree.
+    let rows = vec![row];
+    let _row_tree_proof = ctx.build_and_prove_rowtree(&rows, proofs).await;
 }
 
 async fn prove_mappings_with_length(
@@ -93,6 +107,9 @@ async fn db_creation_integrated_tests() {
 
     // Prove for each test case.
     for t in &ctx.cases {
+        // NOTE: @andrus this is a naive way of storing peoofs; dist. syst. will use S3 IIRC.
+        // NOTE: @nikolasgg should we compose the proof key with @contract and #block here?
+        let mut proofs = HashMap::new();
         let contract_proof = ctx
             .prove_contract_extraction(&t.contract_address, t.contract_extraction.slot.clone())
             .await;
@@ -100,15 +117,6 @@ async fn db_creation_integrated_tests() {
 
         let block_proof = ctx.prove_block_extraction().await.unwrap();
         info!("Generated Block Extraction (C.4) proof");
-
-        let mapping_values_proof = ctx
-            .prove_mapping_values_extraction(
-                &t.contract_address,
-                t.values_extraction_mapping.slot,
-                t.values_extraction_mapping.mapping_keys.clone(),
-            )
-            .await;
-        info!("Generated Values Extraction (C.1) proof for mapping variable");
 
         //
         // Prove scalar slots
@@ -118,12 +126,23 @@ async fn db_creation_integrated_tests() {
             t,
             &contract_proof,
             &serialize_proof(&block_proof).unwrap(),
+            &mut proofs,
         )
         .await;
 
         //
-        // Prove mappings slots with length check
+        // Prove mapping slots
         //
+        let mapping_values_proof = ctx
+            .prove_mapping_values_extraction(
+                &t.contract_address,
+                t.values_extraction_mapping.slot,
+                t.values_extraction_mapping.mapping_keys.clone(),
+            )
+            .await;
+        info!("Generated Values Extraction (C.1) proof for mapping variable");
+
+        // // Prove mappings slots with length check
         prove_mappings_with_length(
             ctx,
             t,
@@ -133,9 +152,7 @@ async fn db_creation_integrated_tests() {
         )
         .await;
 
-        //
-        // Prove mappings slots without length check
-        //
+        // // Prove mappings slots without length check
         prove_mappings_without_length(
             ctx,
             t,
