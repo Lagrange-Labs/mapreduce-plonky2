@@ -1,11 +1,12 @@
 use ethers::types::{Address, U256};
 use mp2_common::{
-    eth::ProofQuery, poseidon::empty_poseidon_hash, proof::ProofWithVK, utils::ToFields, F,
+    eth::ProofQuery, poseidon::empty_poseidon_hash, proof::ProofWithVK, utils::ToFields, CHasher, F,
 };
 use mp2_v1::values_extraction::compute_leaf_single_id;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
+    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
+    plonk::config::Hasher,
 };
 use ryhope::{
     hasher::TreeHasher,
@@ -46,7 +47,7 @@ impl TreeHasher for PoseidonTreeHasher {
                 .chain(value.to_fields().into_iter())
                 .collect::<Vec<_>>();
 
-        hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&fs)
+        hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&fs)
     }
 }
 
