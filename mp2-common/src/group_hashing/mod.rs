@@ -110,7 +110,7 @@ impl ToTargets for CurveTarget {
     fn to_targets(&self) -> Vec<Target> {
         let mut x = self.0 .0[0].to_targets();
         let mut y = self.0 .0[1].to_targets();
-        let mut is_inf = self.0 .1.target;
+        let is_inf = self.0 .1.target;
         x.append(&mut y);
         x.push(is_inf);
         x

@@ -7,9 +7,10 @@ use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     mpt_sequential::utils::bytes_to_nibbles,
+    proof::ProofWithVK,
     F,
 };
-use mp2_v1::{api::ProofWithVK, values_extraction::public_inputs::PublicInputs};
+use mp2_v1::values_extraction::public_inputs::PublicInputs;
 use plonky2::field::types::Field;
 use std::str::FromStr;
 

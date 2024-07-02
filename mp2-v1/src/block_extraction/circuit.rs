@@ -81,7 +81,7 @@ impl BlockCircuit {
         let prev_bh = Array::<Target, HASH_LEN>::from_array(create_array(|i| {
             rlp_headers.arr.arr[HEADER_PARENT_HASH_OFFSET + i]
         }));
-        let packed_prev_bh = prev_bh.pack(cb, Endianness::Little).to_targets();
+        let packed_prev_bh = prev_bh.pack(cb, Endianness::Little).downcast_to_targets();
 
         // extract the state root of the block
         let state_root = Array::<Target, HASH_LEN>::from_array(create_array(|i| {
@@ -104,10 +104,10 @@ impl BlockCircuit {
         let bn_u256: UInt256Target = bn_u256.into();
 
         PublicInputs::new(
-            &bh_wires.output_array.to_targets().arr,
-            &packed_prev_bh.to_targets().arr,
+            &bh_wires.output_array.downcast_to_targets().arr,
+            &packed_prev_bh.downcast_to_targets().arr,
             &bn_u256.to_targets(),
-            &state_root_packed.to_targets().arr,
+            &state_root_packed.downcast_to_targets().arr,
         )
         .register(cb);
 

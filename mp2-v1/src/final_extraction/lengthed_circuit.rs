@@ -1,4 +1,7 @@
-use mp2_common::{public_inputs::PublicInputCommon, types::GFp, utils::ToTargets, C, D, F};
+use mp2_common::{
+    default_config, proof::ProofWithVK, public_inputs::PublicInputCommon, types::GFp,
+    utils::ToTargets, C, D, F,
+};
 use plonky2::{
     field::types::Field,
     iop::{target::Target, witness::PartialWitness},
@@ -13,10 +16,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    api::{default_config, ProofWithVK},
-    length_extraction, values_extraction,
-};
+use crate::{length_extraction, values_extraction};
 
 use super::{
     api::{FinalExtractionBuilderParams, NUM_IO},

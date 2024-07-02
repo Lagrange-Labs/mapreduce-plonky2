@@ -8,15 +8,14 @@ use super::{
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
 };
-use crate::{
-    api::{default_config, InputNode, ProofInputSerialized, ProofWithVK},
-    MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN,
-};
+use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
 use anyhow::{bail, Result};
 use ethers::types::Address;
 use log::debug;
 use mp2_common::{
+    default_config,
     mpt_sequential::PAD_LEN,
+    proof::{ProofInputSerialized, ProofWithVK},
     storage_key::{MappingSlot, SimpleSlot},
     C, D, F,
 };

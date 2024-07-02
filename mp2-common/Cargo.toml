@@ -19,6 +19,7 @@ rlp.workspace = true
 serde.workspace = true
 sha3.workspace = true
 rand.workspace = true
+derive_more = "0.99.18"
 
 [dev-dependencies]
 csv.workspace = true

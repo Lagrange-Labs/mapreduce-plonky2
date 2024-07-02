@@ -12,5 +12,7 @@ log.workspace = true
 plonky2.workspace = true
 rand.workspace = true
 
+recursion_framework = { path = "../recursion-framework" }
+
 [features]
 ci = []

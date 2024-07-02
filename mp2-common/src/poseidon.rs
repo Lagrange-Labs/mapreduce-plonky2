@@ -1,16 +1,28 @@
 use plonky2::{
     field::{extension::Extendable, goldilocks_field::GoldilocksField},
     hash::{
-        hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+        hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         hashing::PlonkyPermutation,
         poseidon::PoseidonHash,
     },
     iop::target::{BoolTarget, Target},
-    plonk::{circuit_builder::CircuitBuilder, config::AlgebraicHasher},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        config::{AlgebraicHasher, Hasher},
+    },
 };
+use std::sync::OnceLock;
 
-type H = PoseidonHash;
-type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
+pub type H = PoseidonHash;
+pub type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
+
+/// The static variable of Empty Poseidon hash
+static EMPTY_POSEIDON_HASH: OnceLock<HashOut<GoldilocksField>> = OnceLock::new();
+
+/// Get the static empty Poseidon hash.
+pub fn empty_poseidon_hash() -> &'static HashOut<GoldilocksField> {
+    EMPTY_POSEIDON_HASH.get_or_init(|| H::hash_no_pad(&[]))
+}
 
 /// Hash the concatenation of the two provided 4-wide inputs, swapping them if specified.
 pub fn hash_maybe_swap<F, const D: usize>(

@@ -1,6 +1,8 @@
 use mp2_common::{
+    default_config,
     group_hashing::CircuitBuilderGroupHashing,
     keccak::PACKED_HASH_LEN,
+    proof::{deserialize_proof, verify_proof_fixed_circuit, ProofWithVK},
     serialization::{deserialize, serialize},
     u256::{self, UInt256Target},
     C, D, F,
@@ -23,10 +25,7 @@ use recursion_framework::framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    api::{default_config, deserialize_proof, ProofWithVK},
-    block_extraction, contract_extraction, values_extraction,
-};
+use crate::{block_extraction, contract_extraction, values_extraction};
 
 use super::api::FinalExtractionBuilderParams;
 
@@ -162,7 +161,7 @@ impl BaseCircuitProofInputs {
         );
         let contract_proof_wires = contract_verifier.verify_proof_in_circuit_set(cb);
         let value_proof_wires = value_verifier.verify_proof_in_circuit_set(cb);
-        let block_proof_wires = crate::api::verify_proof_fixed_circuit(cb, &params.block_vk);
+        let block_proof_wires = verify_proof_fixed_circuit(cb, &params.block_vk);
         BaseCircuitProofWires {
             block_proof: block_proof_wires,
             contract_proof: contract_proof_wires,
