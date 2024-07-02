@@ -3,6 +3,7 @@
 mod bindings;
 mod block_extraction;
 mod cases;
+mod celltree;
 mod context;
 mod contract_extraction;
 mod final_extraction;
