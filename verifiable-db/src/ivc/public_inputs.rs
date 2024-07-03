@@ -122,7 +122,7 @@ impl PublicInputs<Target> {
 }
 
 impl PublicInputs<F> {
-    pub fn root_hash(&self) -> HashOut<F> {
+    pub fn merkle_root_hash_fields(&self) -> HashOut<F> {
         HashOut {
             elements: self.h.clone().try_into().unwrap(),
         }

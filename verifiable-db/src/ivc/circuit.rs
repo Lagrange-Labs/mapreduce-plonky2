@@ -65,7 +65,7 @@ impl IVCCircuit {
             prev_pi.metadata_set_digest().to_targets(),
             new_value_set_digest.to_targets(),
             prev_pi.z0().to_targets(),
-            block_pi.current_block_hash(),
+            block_pi.block_number.to_vec(),
             block_pi.current_block_hash(),
         )
         .register(c);
@@ -77,7 +77,10 @@ mod test {
     use std::ops::Sub;
 
     use ethers::types::U256;
-    use mp2_common::{utils::ToFields, C, D, F};
+    use mp2_common::{
+        utils::{FromFields, ToFields},
+        C, D, F,
+    };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
@@ -145,10 +148,11 @@ mod test {
         let z0 = min;
         // previous block number
         let zi = block_number.sub(U256::one());
+        let previous_value_set_digest = Point::rand().to_fields();
         let prev_pi = IVCPI::new(
             previous_merkle_root.clone(),
             metadata_set_digest.clone(),
-            value_set_digest.clone(),
+            previous_value_set_digest.clone(),
             z0.to_fields(),
             zi.to_fields(),
             prev_block_hash.to_vec(),
@@ -166,5 +170,22 @@ mod test {
         );
         assert!(tc.prev_pi.len() == super::super::PublicInputs::<F>::TOTAL_LEN);
         let proof = run_circuit::<F, D, C, _>(tc);
+        let pi = super::super::PublicInputs::from_slice(&proof.public_inputs);
+        {
+            assert_eq!(pi.merkle_root_hash_fields().to_fields(), new_merkle_root);
+            assert_eq!(
+                pi.metadata_set_digest_point().to_fields(),
+                metadata_set_digest
+            );
+            let exp_set_digest = Point::from_fields(&previous_value_set_digest)
+                + Point::from_fields(&value_set_digest);
+            assert_eq!(
+                pi.value_set_digest_point().to_fields(),
+                exp_set_digest.to_fields()
+            );
+            assert_eq!(pi.z0_u256(), z0);
+            assert_eq!(pi.zi_u256(), block_number);
+            assert_eq!(pi.original_hash(), block_hash);
+        }
     }
 }
