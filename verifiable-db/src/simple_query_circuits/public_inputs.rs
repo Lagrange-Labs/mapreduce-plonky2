@@ -4,23 +4,26 @@ use ethers::types::U256;
 use itertools::Itertools;
 use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::CBuilder,
+    types::{CBuilder, CURVE_TARGET_LEN},
     u256::{U256PubInputs, UInt256Target, NUM_LIMBS},
-    utils::FromTargets,
+    utils::{FromFields, FromTargets},
     F,
 };
-use plonky2::field::types::Field;
 use plonky2::{
+    field::types::Field,
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::target::{BoolTarget, Target},
 };
+use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 
 /// Query circuits public inputs
 pub enum QueryPublicInputs {
     /// `H`: Hash of the tree
     TreeHash,
-    /// `V`: `[u256; S]` Set of `u256` values representing the cumulative results of the query; `S` is a parameter
-    /// specifying the maximum number of cumulative results we support
+    /// `V`: Set of `S` values representing the cumulative results of the query, where`S` is a parameter
+    /// specifying the maximum number of cumulative results we support;
+    /// the first value coudl be either a `u256` or a `CurveTarget`, depending on the query, and so we always
+    /// represent this value with `CURVE_TARGET_LEN` elements; all the other `S-1` values are always `u256`
     OutputValues,
     /// `count`: `F` Number of matching records in the query
     NumMatching,
@@ -50,19 +53,19 @@ pub enum QueryPublicInputs {
 
 #[derive(Clone, Debug)]
 pub struct PublicInputs<'a, T, const S: usize> {
-    pub(crate) h: &'a [T],
-    pub(crate) v: &'a [T],
-    pub(crate) count: &'a T,
-    pub(crate) ops: &'a [T],
-    pub(crate) i: &'a [T],
-    pub(crate) min: &'a [T],
-    pub(crate) max: &'a [T],
-    pub(crate) ids: &'a [T],
-    pub(crate) min_q: &'a [T],
-    pub(crate) max_q: &'a [T],
-    pub(crate) overflow: &'a T,
-    pub(crate) ch: &'a [T],
-    pub(crate) ph: &'a [T],
+    h: &'a [T],
+    v: &'a [T],
+    ops: &'a [T],
+    count: &'a T,
+    i: &'a [T],
+    min: &'a [T],
+    max: &'a [T],
+    ids: &'a [T],
+    min_q: &'a [T],
+    max_q: &'a [T],
+    overflow: &'a T,
+    ch: &'a [T],
+    ph: &'a [T],
 }
 
 const NUM_PUBLIC_INPUTS: usize = QueryPublicInputs::PlaceholderHash as usize + 1;
@@ -88,7 +91,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         // Tree hash
         NUM_HASH_OUT_ELTS,
         // Output values
-        NUM_LIMBS * S,
+        CURVE_TARGET_LEN + NUM_LIMBS * (S - 1),
         // Number of matching records
         1,
         // Operation identifiers
@@ -178,6 +181,22 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
 
     pub(crate) fn to_placeholder_hash_raw(&self) -> &[T] {
         self.ph
+    }
+
+    /// Pad the input slice `t` to `CURVE_TARGET_LEN`; this method should be employed
+    /// to ensure that the slice representing the first output value has always the
+    /// expected length
+    pub(crate) fn pad_slice_to_curve_len(t: &[T]) -> Vec<T> {
+        let mut result = t.to_vec();
+        assert!(CURVE_TARGET_LEN >= result.len());
+        let diff = CURVE_TARGET_LEN - result.len();
+        result.extend_from_slice(vec![result[0].clone(); diff].as_slice());
+        result
+    }
+
+    /// Remove the padding introduced by `pad_slice_to_curve_len`
+    pub(crate) fn truncate_slice_to_u256_raw(t: &[T]) -> &[T] {
+        &t[..NUM_LIMBS]
     }
 
     pub fn from_slice(input: &'a [T]) -> Self {
@@ -279,9 +298,21 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
     pub fn tree_hash_target(&self) -> HashOutTarget {
         HashOutTarget::try_from(self.to_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
     }
-
-    pub fn values_target(&self) -> [UInt256Target; S] {
+    /// Return the first output value as a `CurveTarget`
+    pub fn first_value_as_curve_target(&self) -> CurveTarget {
         let targets = self.to_values_raw();
+        CurveTarget::from_targets(&targets[..CURVE_TARGET_LEN])
+    }
+
+    /// Return the first output value as a `UInt256Target`
+    pub fn first_value_as_u256_target(&self) -> UInt256Target {
+        let targets = Self::truncate_slice_to_u256_raw(self.to_values_raw());
+        UInt256Target::from_targets(&targets)
+    }
+
+    /// Return the `UInt256` targets for the last `S-1` values
+    pub fn values_target(&self) -> [UInt256Target; S - 1] {
+        let targets = &self.to_values_raw()[CURVE_TARGET_LEN..];
         targets
             .chunks(NUM_LIMBS)
             .map(|chunk| UInt256Target::from_targets(chunk))
@@ -340,8 +371,17 @@ impl<'a, const S: usize> PublicInputs<'a, F, S> {
         HashOut::try_from(self.to_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
     }
 
-    pub fn values(&self) -> [U256; S] {
-        self.to_values_raw()
+    pub fn first_value_as_curve_point(&self) -> WeierstrassPoint {
+        WeierstrassPoint::from_fields(&self.to_values_raw()[..CURVE_TARGET_LEN])
+    }
+
+    pub fn first_value_as_u256(&self) -> U256 {
+        let fields = Self::truncate_slice_to_u256_raw(self.to_values_raw());
+        U256::from(U256PubInputs::try_from(fields).unwrap())
+    }
+
+    pub fn values(&self) -> [U256; S - 1] {
+        self.to_values_raw()[CURVE_TARGET_LEN..]
             .chunks(NUM_LIMBS)
             .map(|chunk| U256::from(U256PubInputs::try_from(chunk).unwrap()))
             .collect_vec()

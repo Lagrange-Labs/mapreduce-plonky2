@@ -222,6 +222,34 @@ pub fn pack_and_compute_poseidon_target<F: RichField + Extendable<D>, const D: u
     b.hash_n_to_hash_no_pad::<PoseidonHash>(packed)
 }
 
+pub trait SelectHashBuilder {
+    /// Select `first_hash` or `second_hash` as output depending on the Boolean `cond`
+    fn select_hash(
+        &mut self,
+        cond: BoolTarget,
+        first_hash: &HashOutTarget,
+        second_hash: &HashOutTarget,
+    ) -> HashOutTarget;
+}
+
+impl<F: RichField + Extendable<D>, const D: usize> SelectHashBuilder for CircuitBuilder<F, D> {
+    fn select_hash(
+        &mut self,
+        cond: BoolTarget,
+        first_hash: &HashOutTarget,
+        second_hash: &HashOutTarget,
+    ) -> HashOutTarget {
+        HashOutTarget::from_vec(
+            first_hash
+                .elements
+                .into_iter()
+                .zip(second_hash.elements.into_iter())
+                .map(|(first, second)| self.select(cond, first, second))
+                .collect_vec(),
+        )
+    }
+}
+
 pub trait ToFields<F: RichField> {
     fn to_fields(&self) -> Vec<F>;
 }
