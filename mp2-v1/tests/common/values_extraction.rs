@@ -2,7 +2,6 @@
 
 use super::{storage_trie::TestStorageTrie, TestContext};
 use ethers::prelude::Address;
-use itertools::Itertools;
 use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
@@ -36,7 +35,7 @@ impl TestContext {
         }
 
         info!("Prove the test storage trie including the simple slots {slots:?}");
-        let proof_value = trie.prove_value(&contract_address, self.params());
+        let proof_value = trie.prove_value(&contract_address, &self.params().mp2);
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof_value.proof().public_inputs);
@@ -95,7 +94,7 @@ impl TestContext {
         }
 
         info!("Prove the test storage trie including the mapping slots ({slot}, ...)");
-        let proof = trie.prove_value(&contract_address, self.params());
+        let proof = trie.prove_value(&contract_address, &self.params().mp2);
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof.proof().public_inputs);
