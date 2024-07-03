@@ -52,6 +52,9 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
     /// Return the constant target representing 0_u256
     fn zero_u256(&mut self) -> UInt256Target;
 
+    /// Returns the constant target representing 1_u256
+    fn one_u256(&mut self) -> UInt256Target;
+
     /// Add 2 UInt256Target, returning the addition modulo 2^256 and the carry
     fn add_u256(
         &mut self,
@@ -172,6 +175,13 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
     fn zero_u256(&mut self) -> UInt256Target {
         let zero = self.zero_u32();
         UInt256Target([zero; NUM_LIMBS])
+    }
+
+    fn one_u256(&mut self) -> UInt256Target {
+        let zero = self.zero_u32();
+        let mut arr = [zero; NUM_LIMBS];
+        arr[0] = U32Target(self.one());
+        UInt256Target(arr)
     }
 
     fn mul_u256(
@@ -628,6 +638,21 @@ mod tests {
     const D: usize = 2;
     type F = GFp;
     type C = PoseidonGoldilocksConfig;
+
+    #[derive(Clone, Debug)]
+    struct TestCreateOne;
+
+    impl UserCircuit<F, D> for TestCreateOne {
+        type Wires = ();
+
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let input = c.one_u256();
+            c.register_public_input_u256(&input);
+            ()
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {}
+    }
 
     #[derive(Clone, Debug)]
     struct TestOperationsCircuit {
@@ -1153,5 +1178,14 @@ mod tests {
         circuit.prove(&mut pw, &wires);
         let proof = params.data.prove(pw).unwrap();
         params.data.verify(proof).unwrap();
+    }
+
+    #[test]
+    fn test_u256_one() {
+        let circuit = TestCreateOne;
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        let found = U256::from(U256PubInputs::try_from(proof.public_inputs.as_slice()).unwrap());
+        let exp = U256::one();
+        assert_eq!(found, exp);
     }
 }

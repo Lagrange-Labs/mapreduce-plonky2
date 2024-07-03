@@ -4,8 +4,8 @@ use mp2_common::{
     keccak::PACKED_HASH_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, CURVE_TARGET_LEN},
-    u256,
-    utils::{FromFields, FromTargets},
+    u256::{self, UInt256Target},
+    utils::{FromFields, FromTargets, ToTargets},
     F,
 };
 use plonky2::{
@@ -33,9 +33,10 @@ const BLOCK_HASH_RANGE: PublicInputRange =
     BLOCK_NUMBER_RANGE.end..BLOCK_NUMBER_RANGE.end + PACKED_HASH_LEN;
 const PREV_BLOCK_HASH_RANGE: PublicInputRange =
     BLOCK_HASH_RANGE.end..BLOCK_HASH_RANGE.end + PACKED_HASH_LEN;
-const M_RANGE: PublicInputRange =
-    PREV_BLOCK_HASH_RANGE.end..PREV_BLOCK_HASH_RANGE.end + NUM_HASH_OUT_ELTS;
-const NEW_NODE_DIGEST_RANGE: PublicInputRange = M_RANGE.end..M_RANGE.end + CURVE_TARGET_LEN;
+const METADATA_SET_DIGEST_RANGE: PublicInputRange =
+    PREV_BLOCK_HASH_RANGE.end..PREV_BLOCK_HASH_RANGE.end + CURVE_TARGET_LEN;
+const NEW_NODE_DIGEST_RANGE: PublicInputRange =
+    METADATA_SET_DIGEST_RANGE.end..METADATA_SET_DIGEST_RANGE.end + CURVE_TARGET_LEN;
 
 /// Public inputs for Cells Tree Construction
 #[derive(Clone, Debug)]
@@ -60,7 +61,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
         BLOCK_NUMBER_RANGE,
         BLOCK_HASH_RANGE,
         PREV_BLOCK_HASH_RANGE,
-        M_RANGE,
+        METADATA_SET_DIGEST_RANGE,
         NEW_NODE_DIGEST_RANGE,
     ];
 
@@ -78,26 +79,50 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
 }
 
 impl<'a> PublicInputs<'a, F> {
-    /// Get the new hash value.
-    pub fn new_hash_value(&self) -> HashOut<F> {
+    /// Get the new Merkle tree root hash value.
+    pub fn new_merkle_hash_field(&self) -> HashOut<F> {
         self.h_new.try_into().unwrap()
     }
 
     /// Get the new node digest point.
-    pub fn new_node_digest_point(&self) -> WeierstrassPoint {
+    pub fn new_value_set_digest_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.new_node_digest)
     }
 }
 
 impl<'a> PublicInputs<'a, Target> {
-    /// Get the new hash target.
-    pub fn new_hash_target(&self) -> HashOutTarget {
+    /// Get the new Merkle root hash target.
+    pub fn new_merkle_hash_target(&self) -> HashOutTarget {
         self.h_new.try_into().unwrap()
     }
 
+    /// Get the previous Merkle root hash target.
+    pub fn old_merkle_hash(&self) -> HashOutTarget {
+        self.h_old.try_into().unwrap()
+    }
+
     /// Get the new node digest target.
-    pub fn new_node_digest_target(&self) -> CurveTarget {
+    pub fn new_value_set_digest(&self) -> CurveTarget {
         CurveTarget::from_targets(self.new_node_digest)
+    }
+
+    pub fn index_value(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.block_number)
+    }
+
+    pub fn min_value(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.min)
+    }
+
+    pub fn metadata_set_digest(&self) -> CurveTarget {
+        CurveTarget::from_targets(self.metadata_digest)
+    }
+
+    pub fn prev_block_hash(&self) -> Vec<Target> {
+        self.prev_block_hash.to_targets()
+    }
+    pub fn current_block_hash(&self) -> Vec<Target> {
+        self.block_hash.to_targets()
     }
 }
 
@@ -118,6 +143,15 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         metadata_digest: &'a [T],
         new_node_digest: &'a [T],
     ) -> Self {
+        assert_eq!(h_new.len(), H_NEW_RANGE.len());
+        assert_eq!(h_old.len(), H_OLD_RANGE.len());
+        assert_eq!(min.len(), MIN_RANGE.len());
+        assert_eq!(max.len(), MAX_RANGE.len());
+        assert_eq!(index_value.len(), BLOCK_NUMBER_RANGE.len());
+        assert_eq!(commitment.len(), BLOCK_HASH_RANGE.len());
+        assert_eq!(prev_commitment.len(), BLOCK_HASH_RANGE.len());
+        assert_eq!(metadata_digest.len(), METADATA_SET_DIGEST_RANGE.len());
+        assert_eq!(metadata_digest.len(), NEW_NODE_DIGEST_RANGE.len());
         Self {
             h_new,
             h_old,
@@ -142,7 +176,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             block_number: &pi[BLOCK_NUMBER_RANGE],
             block_hash: &pi[BLOCK_HASH_RANGE],
             prev_block_hash: &pi[PREV_BLOCK_HASH_RANGE],
-            metadata_digest: &pi[M_RANGE],
+            metadata_digest: &pi[METADATA_SET_DIGEST_RANGE],
             new_node_digest: &pi[NEW_NODE_DIGEST_RANGE],
         }
     }
@@ -170,19 +204,12 @@ mod tests {
 
     use super::*;
     use ethers::prelude::U256;
-    use mp2_common::{utils::ToFields, C, D, F};
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
+    use mp2_common::{C, D, F};
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
     };
-    use plonky2::{
-        field::types::Sample,
-        iop::{
-            target::Target,
-            witness::{PartialWitness, WitnessWrite},
-        },
-    };
-    use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
 
     #[derive(Clone, Debug)]
@@ -216,5 +243,6 @@ mod tests {
         let proof = run_circuit::<F, D, C, _>(test_circuit);
 
         assert_eq!(&proof.public_inputs, &exp_pi);
+        assert_eq!(exp_pi.len(), super::PublicInputs::<Target>::TOTAL_LEN);
     }
 }

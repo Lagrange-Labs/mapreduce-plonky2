@@ -427,7 +427,7 @@ mod tests {
             {
                 let exp_digest =
                     compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
-                assert_eq!(pi.new_node_digest_point(), exp_digest.to_weierstrass());
+                assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
             }
 
             Ok(proof)
@@ -542,7 +542,7 @@ mod tests {
             {
                 let exp_digest =
                     compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
-                assert_eq!(pi.new_node_digest_point(), exp_digest.to_weierstrass());
+                assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
             }
 
             Ok(proof)
@@ -665,6 +665,7 @@ mod tests {
         let block_number = block_number + 1;
         let right_child_proof = b.generate_leaf_proof(&mut rng, block_id, block_number)?;
         let right_child_pi = PublicInputs::from_slice(&right_child_proof.proof.public_inputs);
+        let e = right_child_pi.new_merkle_hash_field();
 
         log::info!("Generating the parent proof");
         b.generate_parent_proof(
@@ -674,8 +675,8 @@ mod tests {
             block_number,
             block_number,
             block_number,
-            left_child_pi.new_hash_value(),
-            right_child_pi.new_hash_value(),
+            left_child_pi.new_merkle_hash_field(),
+            right_child_pi.new_merkle_hash_field(),
         )?;
 
         log::info!("Generating the membership proof");
@@ -684,7 +685,7 @@ mod tests {
             block_number - 1,
             block_number,
             block_number,
-            left_child_pi.new_hash_value(),
+            left_child_pi.new_merkle_hash_field(),
             right_child_proof,
         )?;
 

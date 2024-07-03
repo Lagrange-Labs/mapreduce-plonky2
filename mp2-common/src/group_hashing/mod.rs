@@ -1,6 +1,5 @@
 //! Group hashing arithmetic and circuit functions
 
-use anyhow::Result;
 use plonky2::field::extension::FieldExtension;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
@@ -9,6 +8,7 @@ use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_ecgfp5::curve::curve::Point;
 use plonky2_ecgfp5::gadgets::base_field::QuinticExtensionTarget;
 use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
@@ -31,6 +31,7 @@ pub use curve_add::add_curve_point;
 /// Field-to-curve and curve point addition functions
 pub use field_to_curve::map_to_curve_point;
 
+use crate::types::CURVE_TARGET_LEN;
 use crate::utils::ToTargets;
 use crate::{
     types::{GFp, GFp5},
@@ -95,6 +96,7 @@ impl ToTargets for QuinticExtensionTarget {
 
 impl FromTargets for CurveTarget {
     fn from_targets(t: &[Target]) -> Self {
+        assert!(t.len() >= CURVE_TARGET_LEN);
         let x = QuinticExtensionTarget(t[0..EXTENSION_DEGREE].try_into().unwrap());
         let y = QuinticExtensionTarget(
             t[EXTENSION_DEGREE..EXTENSION_DEGREE * 2]
@@ -142,4 +144,22 @@ impl ToFields<GoldilocksField> for WeierstrassPoint {
         });
         v
     }
+}
+
+impl ToFields<GoldilocksField> for Point {
+    fn to_fields(&self) -> Vec<GoldilocksField> {
+        self.to_weierstrass().to_fields()
+    }
+}
+
+impl FromFields<GoldilocksField> for Point {
+    fn from_fields(t: &[GoldilocksField]) -> Self {
+        let w = &WeierstrassPoint::from_fields(t);
+        weierstrass_to_point(w)
+    }
+}
+pub fn weierstrass_to_point(w: &WeierstrassPoint) -> Point {
+    let p = Point::decode(w.encode()).expect("input weierstrass point invalid");
+    assert_eq!(&p.to_weierstrass(), w);
+    p
 }

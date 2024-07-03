@@ -363,7 +363,7 @@ pub mod tests {
         {
             let exp_digest =
                 compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
-            assert_eq!(pi.new_node_digest_point(), exp_digest.to_weierstrass());
+            assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
         }
     }
 }

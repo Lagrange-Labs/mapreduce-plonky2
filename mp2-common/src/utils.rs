@@ -290,6 +290,39 @@ pub trait ToTargets {
     fn to_targets(&self) -> Vec<Target>;
 }
 
+impl ToTargets for Vec<Target> {
+    fn to_targets(&self) -> Vec<Target> {
+        self.clone()
+    }
+}
+
+impl ToTargets for &[Target] {
+    fn to_targets(&self) -> Vec<Target> {
+        self.to_vec()
+    }
+}
+
+pub trait TargetsConnector {
+    fn connect_targets<T: ToTargets>(&mut self, e1: T, e2: T);
+    fn is_equal_targets<T: ToTargets>(&mut self, e1: T, e2: T) -> BoolTarget;
+}
+
+impl<F: RichField + Extendable<D>, const D: usize> TargetsConnector for CircuitBuilder<F, D> {
+    fn connect_targets<T: ToTargets>(&mut self, e1: T, e2: T) {
+        for (l1, l2) in e1.to_targets().into_iter().zip(e2.to_targets()) {
+            self.connect(l1, l2);
+        }
+    }
+    fn is_equal_targets<T: ToTargets>(&mut self, e1: T, e2: T) -> BoolTarget {
+        let mut cond = self._true();
+        for (l1, l2) in e1.to_targets().into_iter().zip(e2.to_targets()) {
+            let eq = self.is_equal(l1, l2);
+            cond = self.and(cond, eq);
+        }
+        cond
+    }
+}
+
 impl<T: Targetable> ToTargets for T {
     fn to_targets(&self) -> Vec<Target> {
         vec![self.to_target()]
