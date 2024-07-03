@@ -94,7 +94,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
     }
 
     fn get_input_wires(&self) -> Self::InputWires {
-        todo!()
+        self.input_wires.clone()
     }
 }
 
