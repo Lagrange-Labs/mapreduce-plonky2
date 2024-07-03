@@ -266,14 +266,13 @@ mod tests {
     };
     use crate::{
         block_tree::leaf::tests::{compute_expected_hash, compute_expected_set_digest},
-        row_tree,
+        extraction, row_tree,
     };
     use mp2_common::{
         poseidon::{empty_poseidon_hash, hash_to_int_value, H},
         utils::{Fieldable, ToFields},
     };
     use mp2_test::utils::random_vector;
-    use mp2_v1::final_extraction;
     use plonky2::{
         field::types::{Field, Sample},
         hash::hash_types::NUM_HASH_OUT_ELTS,
@@ -285,7 +284,7 @@ mod tests {
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use std::iter;
 
-    const EXTRACTION_IO_LEN: usize = final_extraction::PublicInputs::<F>::TOTAL_LEN;
+    const EXTRACTION_IO_LEN: usize = extraction::test::PublicInputs::<F>::TOTAL_LEN;
     const ROWS_TREE_IO_LEN: usize = row_tree::PublicInputs::<F>::TOTAL_LEN;
 
     struct TestBuilder<E>
@@ -356,7 +355,7 @@ mod tests {
                 self.generate_extraction_proof(rng, block_number, &row_digest)?;
             let rows_tree_proof = self.generate_rows_tree_proof(rng, &row_digest)?;
             let extraction_pi =
-                final_extraction::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
+                extraction::test::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
             let rows_tree_pi =
                 row_tree::PublicInputs::from_slice(&rows_tree_proof.proof.public_inputs);
 
@@ -450,7 +449,7 @@ mod tests {
                 self.generate_extraction_proof(rng, block_number, &row_digest)?;
             let rows_tree_proof = self.generate_rows_tree_proof(rng, &row_digest)?;
             let extraction_pi =
-                final_extraction::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
+                extraction::test::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
             let rows_tree_pi =
                 row_tree::PublicInputs::from_slice(&rows_tree_proof.proof.public_inputs);
 

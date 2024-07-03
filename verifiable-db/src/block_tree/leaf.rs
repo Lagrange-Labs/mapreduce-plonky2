@@ -15,13 +15,16 @@ use mp2_common::{
     utils::{SliceConnector, ToTargets},
     CHasher, C, D, F,
 };
-use mp2_v1::final_extraction;
 use plonky2::{
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        config::{AlgebraicHasher, GenericConfig},
+        proof::ProofWithPublicInputsTarget,
+    },
 };
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
@@ -143,6 +146,8 @@ pub(crate) struct RecursiveLeafInput {
     pub(crate) rows_tree_set: RecursiveCircuits<F, C, D>,
 }
 
+use plonky2::plonk::config::Hasher;
+
 impl<E> CircuitLogicWires<F, D, 0> for RecursiveLeafWires<E>
 where
     E: ExtractionPI,
@@ -158,11 +163,14 @@ where
         builder: &mut CircuitBuilder<F, D>,
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
-    ) -> Self {
-        const EXTRACTION_IO: usize = final_extraction::PublicInputs::<Target>::TOTAL_LEN;
+    ) -> Self
+    where
+        [(); E::TOTAL_LEN]:,
+        [(); <C as GenericConfig<D>>::Hasher::HASH_SIZE]:,
+    {
         const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::TOTAL_LEN;
 
-        let extraction_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, EXTRACTION_IO>::new(
+        let extraction_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, { E::TOTAL_LEN }>::new(
             default_config(),
             &builder_parameters.0,
         );
@@ -264,7 +272,7 @@ pub mod tests {
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let extraction_pi =
-                b.add_virtual_targets(final_extraction::PublicInputs::<Target>::TOTAL_LEN);
+                b.add_virtual_targets(crate::extraction::test::PublicInputs::<Target>::TOTAL_LEN);
             let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::TOTAL_LEN);
 
             let leaf_wires = LeafCircuit::build::<TestPI>(b, &extraction_pi, &rows_tree_pi);
@@ -277,7 +285,7 @@ pub mod tests {
 
             assert_eq!(
                 wires.1.len(),
-                final_extraction::PublicInputs::<Target>::TOTAL_LEN
+                crate::extraction::test::PublicInputs::<Target>::TOTAL_LEN
             );
             pw.set_target_arr(&wires.1, self.extraction_pi);
 

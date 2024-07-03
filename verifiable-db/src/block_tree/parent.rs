@@ -2,7 +2,7 @@
 //! referred to as old node.
 
 use super::{compute_index_digest, public_inputs::PublicInputs};
-use crate::row_tree;
+use crate::{extraction::ExtractionPI, row_tree};
 use anyhow::Result;
 use ethers::prelude::U256;
 use mp2_common::{
@@ -17,7 +17,6 @@ use mp2_common::{
     utils::{FromTargets, ToTargets},
     CHasher, C, D, F,
 };
-use mp2_v1::final_extraction;
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
     iop::{
@@ -26,8 +25,6 @@ use plonky2::{
     },
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
-use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
     framework::{
@@ -70,14 +67,18 @@ pub(crate) struct ParentCircuit {
 }
 
 impl ParentCircuit {
-    fn build(b: &mut CBuilder, extraction_pi: &[Target], rows_tree_pi: &[Target]) -> ParentWires {
+    fn build<E: ExtractionPI>(
+        b: &mut CBuilder,
+        extraction_pi: &[Target],
+        rows_tree_pi: &[Target],
+    ) -> ParentWires {
         let ttrue = b._true();
 
         let index_identifier = b.add_virtual_target();
         let [old_index_value, old_min, old_max] = [0; 3].map(|_| b.add_virtual_u256());
         let [left_child, right_child, old_rows_tree_hash] = [0; 3].map(|_| b.add_virtual_hash());
 
-        let extraction_pi = final_extraction::PublicInputs::<Target>::from_slice(extraction_pi);
+        let extraction_pi = E::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
 
         let block_number = extraction_pi.block_number_raw();
@@ -219,7 +220,7 @@ impl CircuitLogicWires<F, D, 0> for RecursiveParentWires {
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        const EXTRACTION_IO: usize = final_extraction::PublicInputs::<Target>::TOTAL_LEN;
+        const EXTRACTION_IO: usize = extraction::test::PublicInputs::<Target>::TOTAL_LEN;
         const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::TOTAL_LEN;
 
         let extraction_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, EXTRACTION_IO>::new(
@@ -295,7 +296,7 @@ mod tests {
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let extraction_pi =
-                b.add_virtual_targets(final_extraction::PublicInputs::<Target>::TOTAL_LEN);
+                b.add_virtual_targets(crate::extraction::test::PublicInputs::<Target>::TOTAL_LEN);
             let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::TOTAL_LEN);
 
             let parent_wires = ParentCircuit::build(b, &extraction_pi, &rows_tree_pi);
@@ -308,7 +309,7 @@ mod tests {
 
             assert_eq!(
                 wires.1.len(),
-                final_extraction::PublicInputs::<Target>::TOTAL_LEN
+                crate::extraction::test::PublicInputs::<Target>::TOTAL_LEN
             );
             pw.set_target_arr(&wires.1, self.extraction_pi);
 
@@ -346,7 +347,7 @@ mod tests {
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        let extraction_pi = final_extraction::PublicInputs::from_slice(extraction_pi);
+        let extraction_pi = crate::extraction::test::PublicInputs::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::from_slice(rows_tree_pi);
 
         let empty_hash = empty_poseidon_hash().elements;

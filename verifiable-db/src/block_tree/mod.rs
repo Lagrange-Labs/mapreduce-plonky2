@@ -1,10 +1,10 @@
-mod api;
+//mod api;
 mod leaf;
-mod membership;
-mod parent;
+//mod membership;
+//mod parent;
 mod public_inputs;
 
-pub use api::{CircuitInput, PublicParameters};
+//pub use api::{CircuitInput, PublicParameters};
 use mp2_common::{poseidon::hash_to_int_target, CHasher, C, D, F};
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
