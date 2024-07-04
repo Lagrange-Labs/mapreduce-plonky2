@@ -90,7 +90,7 @@ pub fn bits_to_num<F: RichField + Extendable<D>, const D: usize>(
     res
 }
 
-/// Returns the bits of the given number
+/// Returns the bits of the given number. Will panic if `n >= F::BITS`
 pub fn num_to_bits<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     n: usize,
@@ -105,14 +105,17 @@ pub fn num_to_bits<F: RichField + Extendable<D>, const D: usize>(
     panic!("cannot call this method with n > F::BITS");
 }
 
-/// Returns true if a < b in the first n bits. False otherwise.
+/// Returns true if a < b in the first n bits, False otherwise.
+/// Assume that both a < 2^n and b < 2^n, otherwise the result is
+/// not guaranteed to be correct.
+/// Will panic if `n >= F::BITS-1`
 pub fn less_than<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,
     b: Target,
     n: usize,
 ) -> BoolTarget {
-    assert!(n < 64);
+    assert!(n < F::BITS - 1);
 
     let power_of_two = builder.constant(F::from_canonical_u64(1 << n));
     let mut lin_pol = builder.add(a, power_of_two);
@@ -124,7 +127,10 @@ pub fn less_than<F: RichField + Extendable<D>, const D: usize>(
     // 2^n + a - b > 2^n so binary[n] will be set
     builder.not(binary[n])
 }
-
+/// Returns true if a > b in the first n bits. False otherwise.
+/// Assume that both a < 2^n and b < 2^n, otherwise the result is
+/// not guaranteed to be correct.
+/// Will panic if `n >= F::BITS-1`
 pub fn greater_than<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,
@@ -133,7 +139,10 @@ pub fn greater_than<F: RichField + Extendable<D>, const D: usize>(
 ) -> BoolTarget {
     less_than(builder, b, a, n)
 }
-
+/// Returns true if a <= b in the first n bits. False otherwise.
+/// Assume that both a < 2^n and b < 2^n, otherwise the result is
+/// not guaranteed to be correct.
+/// Will panic if `n >= F::BITS-1`
 pub fn less_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,
@@ -144,7 +153,10 @@ pub fn less_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
     let b_plus_1 = builder.add(b, one);
     less_than(builder, a, b_plus_1, n)
 }
-
+/// Returns true if a >= b in the first n bits. False otherwise.
+/// Assume that both a < 2^n and b < 2^n, otherwise the result is
+/// not guaranteed to be correct.
+/// Will panic if `n >= F::BITS-1`
 pub fn greater_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,
@@ -712,12 +724,18 @@ mod test {
         let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let a = builder.constant(F::from_canonical_u64(5u64));
-        let b = builder.constant(F::from_canonical_u64(10u64));
+        let a_val = 5u64;
+        let b_val = 3u64;
+        let a = builder.constant(F::from_canonical_u64(a_val));
+        let b = builder.constant(F::from_canonical_u64(b_val));
         let n = 4;
 
         let result = less_than(&mut builder, a, b, n);
-        let one = builder.one();
+        let one = if a_val % (1 << n) < b_val % (1 << n) {
+            builder.one()
+        } else {
+            builder.zero()
+        };
         builder.connect(result.target, one);
 
         builder.register_public_input(a);
