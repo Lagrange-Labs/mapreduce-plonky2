@@ -78,6 +78,7 @@ mod test {
 
     use ethers::types::U256;
     use mp2_common::{
+        poseidon::empty_poseidon_hash,
         utils::{FromFields, ToFields},
         C, D, F,
     };
@@ -149,6 +150,7 @@ mod test {
         // previous block number
         let zi = block_number.sub(U256::one());
         let previous_value_set_digest = Point::rand().to_fields();
+        // First case where we  construct a ivc pi which is not designated as the dummy first one
         let prev_pi = IVCPI::new(
             previous_merkle_root.clone(),
             metadata_set_digest.clone(),
@@ -160,6 +162,66 @@ mod test {
         let mut prev_pi_field = prev_pi.to_vec();
         // add an extra public input to designate this is not the initial proof
         prev_pi_field.push(F::ONE);
+        let tc = TestCircuit {
+            prev_pi: prev_pi.to_vec(),
+            block_pi: block_pi.to_vec(),
+        };
+        assert_eq!(
+            tc.block_pi.len(),
+            crate::block_tree::PublicInputs::<F>::TOTAL_LEN
+        );
+        assert!(tc.prev_pi.len() == super::super::PublicInputs::<F>::TOTAL_LEN);
+        let proof = run_circuit::<F, D, C, _>(tc);
+        let pi = super::super::PublicInputs::from_slice(&proof.public_inputs);
+        {
+            assert_eq!(pi.merkle_root_hash_fields().to_fields(), new_merkle_root);
+            assert_eq!(
+                pi.metadata_set_digest_point().to_fields(),
+                metadata_set_digest
+            );
+            let exp_set_digest = Point::from_fields(&previous_value_set_digest)
+                + Point::from_fields(&value_set_digest);
+            assert_eq!(
+                pi.value_set_digest_point().to_fields(),
+                exp_set_digest.to_fields()
+            );
+            assert_eq!(pi.z0_u256(), z0);
+            assert_eq!(pi.zi_u256(), block_number);
+            assert_eq!(pi.original_hash(), block_hash);
+        }
+
+        // Second case where we construct a ivc pi which is the dummy proof
+        let empty_hash = empty_poseidon_hash().to_fields();
+        let block_pi = block_tree::PublicInputs::new(
+            &new_merkle_root,
+            &empty_hash,
+            &minf,
+            &maxf,
+            &bnf,
+            &block_hash,
+            &prev_block_hash,
+            &metadata_set_digest,
+            &value_set_digest,
+        );
+
+        // previous ivc_pi
+        let z0 = min;
+        // previous block number
+        let zi = block_number.sub(U256::one());
+        let previous_value_set_digest = Point::NEUTRAL.to_fields();
+        // First case where we  construct a ivc pi which is not designated as the dummy first one
+
+        let prev_pi = IVCPI::new(
+            empty_hash.clone(),
+            metadata_set_digest.clone(),
+            previous_value_set_digest.clone(),
+            z0.to_fields(),
+            zi.to_fields(),
+            prev_block_hash.to_vec(),
+        );
+        let mut prev_pi_field = prev_pi.to_vec();
+        // add an extra public input to designate this is not the initial proof
+        prev_pi_field.push(F::ZERO);
         let tc = TestCircuit {
             prev_pi: prev_pi.to_vec(),
             block_pi: block_pi.to_vec(),
