@@ -72,6 +72,12 @@ impl IVCCircuit {
     }
 }
 
+//impl DummyCircuit {
+//    metadata_set_digest: Point,
+//    z0: Vec<F>,
+//
+//}
+
 #[cfg(test)]
 mod test {
     use std::ops::Sub;
@@ -191,13 +197,14 @@ mod test {
         }
 
         // Second case where we construct a ivc pi which is the dummy proof
+        // we set min = max = block_number
         let empty_hash = empty_poseidon_hash().to_fields();
         let block_pi = block_tree::PublicInputs::new(
             &new_merkle_root,
             &empty_hash,
             &minf,
-            &maxf,
-            &bnf,
+            &minf,
+            &minf,
             &block_hash,
             &prev_block_hash,
             &metadata_set_digest,
@@ -207,7 +214,7 @@ mod test {
         // previous ivc_pi
         let z0 = min;
         // previous block number
-        let zi = block_number.sub(U256::one());
+        let zi = min.sub(U256::one());
         let previous_value_set_digest = Point::NEUTRAL.to_fields();
         // First case where we  construct a ivc pi which is not designated as the dummy first one
 
@@ -246,7 +253,7 @@ mod test {
                 exp_set_digest.to_fields()
             );
             assert_eq!(pi.z0_u256(), z0);
-            assert_eq!(pi.zi_u256(), block_number);
+            assert_eq!(pi.zi_u256(), min);
             assert_eq!(pi.original_hash(), block_hash);
         }
     }
