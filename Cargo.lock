@@ -4147,6 +4147,7 @@ dependencies = [
 [[package]]
 name = "ryhope"
 version = "0.1.0"
+source = "git+ssh://git@github.com/Lagrange-Labs/ryhope.git#c53d04dfe2c1e9f074d050ada2df50e1b87376b1"
 dependencies = [
  "anyhow",
  "delegate",

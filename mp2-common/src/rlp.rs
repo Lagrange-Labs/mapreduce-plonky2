@@ -385,7 +385,7 @@ mod tests {
             let i_plus_n_target = b.add(offset, i_target);
 
             // nikko: ((i + offset) <= n + M)
-            let lt = less_than_or_equal_to(b, i_plus_n_target, upper_bound, 63);
+            let lt = less_than_or_equal_to(b, i_plus_n_target, upper_bound, 32);
             // ((i+n) <= n+M) * (i+n)
             let j = b.mul(lt.target, i_plus_n_target);
 

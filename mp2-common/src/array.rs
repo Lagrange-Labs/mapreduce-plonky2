@@ -541,7 +541,7 @@ where
                 let i_target = b.constant(F::from_canonical_usize(i));
                 let i_plus_n_target = b.add(at, i_target);
                 // ((i + offset) <= n + M)
-                let lt = less_than_or_equal_to(b, i_plus_n_target, upper_bound, 63);
+                let lt = less_than_or_equal_to(b, i_plus_n_target, upper_bound, 32);
                 // ((i+n) <= n+M) * (i+n)
                 let j = b.mul(lt.target, i_plus_n_target);
                 // out_val = arr[((i+n)<=n+M) * (i+n)]

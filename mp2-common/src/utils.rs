@@ -4,6 +4,7 @@ use anyhow::Result;
 use ethers::types::U256;
 use itertools::Itertools;
 use plonky2::field::goldilocks_field::GoldilocksField;
+use plonky2::field::types::Field64;
 use plonky2::field::{extension::Extendable, types::Field};
 use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField};
 use plonky2::hash::poseidon::PoseidonHash;
@@ -89,14 +90,19 @@ pub fn bits_to_num<F: RichField + Extendable<D>, const D: usize>(
     res
 }
 
-/// Returns the bits of the given number.
+/// Returns the bits of the given number
 pub fn num_to_bits<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     n: usize,
     x: Target,
 ) -> Vec<BoolTarget> {
-    builder.range_check(x, n);
-    builder.split_le(x, n)
+    if n < F::BITS {
+        // safe to use `split_le`
+        return builder.split_le(x, n);
+    }
+    // ToDo: handle the conversion if `n == F::BITS` and `F` is Goldilocks field
+
+    panic!("cannot call this method with n > F::BITS");
 }
 
 /// Returns true if a < b in the first n bits. False otherwise.
