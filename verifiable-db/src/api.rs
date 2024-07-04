@@ -24,7 +24,10 @@ pub enum CircuitInput {
 
 /// Parameters defining all the circuits employed for the verifiable DB stage of LPN
 #[derive(Serialize, Deserialize)]
-pub struct PublicParameters<E: ExtractionPI> {
+pub struct PublicParameters<E: ExtractionPI> 
+where 
+    [(); E::TOTAL_LEN]:,
+{
     cells_tree: cells_tree::PublicParameters,
     rows_tree: row_tree::PublicParameters,
     block_tree: block_tree::PublicParameters<E>,
@@ -33,7 +36,10 @@ pub struct PublicParameters<E: ExtractionPI> {
 /// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.
 pub fn build_circuits_params<E: ExtractionPI>(
     extraction_set: &RecursiveCircuits<F, C, D>,
-) -> PublicParameters<E> {
+) -> PublicParameters<E> 
+where 
+    [(); E::TOTAL_LEN]:,
+{
     log::info!("Building cells_tree parameters...");
     let cells_tree = cells_tree::build_circuits_params();
     log::info!("Building row tree parameters...");
@@ -56,7 +62,10 @@ pub fn generate_proof<E: ExtractionPI>(
     params: &PublicParameters<E>,
     input: CircuitInput,
     extraction_set: &RecursiveCircuits<F, C, D>,
-) -> Result<Vec<u8>> {
+) -> Result<Vec<u8>> 
+where 
+    [(); E::TOTAL_LEN]:,
+{
     match input {
         CircuitInput::CellsTree(input) => params.cells_tree.generate_proof(input),
         CircuitInput::RowsTree(input) => params

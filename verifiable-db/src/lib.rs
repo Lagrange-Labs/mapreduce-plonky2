@@ -1,3 +1,4 @@
+#![feature(generic_const_exprs)]
 use anyhow::Result;
 use plonky2::{
     field::types::Field,

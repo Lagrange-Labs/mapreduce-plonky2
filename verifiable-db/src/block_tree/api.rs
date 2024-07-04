@@ -11,7 +11,7 @@ use super::{
 use anyhow::Result;
 use ethers::types::U256;
 use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
-use plonky2::hash::hash_types::HashOut;
+use plonky2::{hash::{hash_types::HashOut, poseidon::PoseidonHash}, plonk::config::Hasher};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
@@ -109,9 +109,10 @@ impl CircuitInput {
 pub struct PublicParameters<E>
 where
     E: ExtractionPI,
+    [(); E::TOTAL_LEN]:,
 {
     leaf: CircuitWithUniversalVerifier<F, C, D, 0, RecursiveLeafWires<E>>,
-    parent: CircuitWithUniversalVerifier<F, C, D, 0, RecursiveParentWires>,
+    parent: CircuitWithUniversalVerifier<F, C, D, 0, RecursiveParentWires<E>>,
     membership: CircuitWithUniversalVerifier<F, C, D, 1, MembershipWires>,
     set: RecursiveCircuits<F, C, D>,
 }
@@ -125,6 +126,8 @@ const CIRCUIT_SET_SIZE: usize = 3;
 impl<E> PublicParameters<E>
 where
     E: ExtractionPI,
+    [(); E::TOTAL_LEN]:,
+    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
 {
     /// Generates the circuit parameters for the circuits.
     pub fn build(
@@ -266,14 +269,13 @@ mod tests {
     };
     use crate::{
         block_tree::leaf::tests::{compute_expected_hash, compute_expected_set_digest},
-        row_tree,
+        extraction, row_tree,
     };
     use mp2_common::{
         poseidon::{empty_poseidon_hash, hash_to_int_value, H},
         utils::{Fieldable, ToFields},
     };
     use mp2_test::utils::random_vector;
-    use mp2_v1::final_extraction;
     use plonky2::{
         field::types::{Field, Sample},
         hash::hash_types::NUM_HASH_OUT_ELTS,
@@ -285,12 +287,13 @@ mod tests {
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use std::iter;
 
-    const EXTRACTION_IO_LEN: usize = final_extraction::PublicInputs::<F>::TOTAL_LEN;
+    const EXTRACTION_IO_LEN: usize = extraction::test::PublicInputs::<F>::TOTAL_LEN;
     const ROWS_TREE_IO_LEN: usize = row_tree::PublicInputs::<F>::TOTAL_LEN;
 
     struct TestBuilder<E>
     where
         E: ExtractionPI,
+        [(); E::TOTAL_LEN]:,
     {
         params: PublicParameters<E>,
         extraction_set: TestingRecursiveCircuits<F, C, D, EXTRACTION_IO_LEN>,
@@ -300,6 +303,8 @@ mod tests {
     impl<E> TestBuilder<E>
     where
         E: ExtractionPI,
+        [(); E::TOTAL_LEN]:,
+        [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
     {
         fn new() -> Result<Self> {
             let extraction_set = TestingRecursiveCircuits::<F, C, D, EXTRACTION_IO_LEN>::default();
@@ -356,7 +361,7 @@ mod tests {
                 self.generate_extraction_proof(rng, block_number, &row_digest)?;
             let rows_tree_proof = self.generate_rows_tree_proof(rng, &row_digest)?;
             let extraction_pi =
-                final_extraction::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
+                extraction::test::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
             let rows_tree_pi =
                 row_tree::PublicInputs::from_slice(&rows_tree_proof.proof.public_inputs);
 
@@ -450,7 +455,7 @@ mod tests {
                 self.generate_extraction_proof(rng, block_number, &row_digest)?;
             let rows_tree_proof = self.generate_rows_tree_proof(rng, &row_digest)?;
             let extraction_pi =
-                final_extraction::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
+                extraction::test::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
             let rows_tree_pi =
                 row_tree::PublicInputs::from_slice(&rows_tree_proof.proof.public_inputs);
 
