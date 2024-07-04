@@ -30,7 +30,7 @@ use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget
 use std::{array, iter};
 
 pub trait ExtractionPI {
-    static TOTAL_LEN: usize;
+    const TOTAL_LEN: usize;
     fn from_slice(s: &[Target]) -> Self;
     fn commitment(&self) -> Vec<Target>;
     fn prev_commitment(&self) -> Vec<Target>;

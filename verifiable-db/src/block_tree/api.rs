@@ -11,7 +11,7 @@ use super::{
 use anyhow::Result;
 use ethers::types::U256;
 use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
-use plonky2::hash::hash_types::HashOut;
+use plonky2::{hash::{hash_types::HashOut, poseidon::PoseidonHash}, plonk::config::Hasher};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
@@ -109,9 +109,10 @@ impl CircuitInput {
 pub struct PublicParameters<E>
 where
     E: ExtractionPI,
+    [(); E::TOTAL_LEN]:,
 {
     leaf: CircuitWithUniversalVerifier<F, C, D, 0, RecursiveLeafWires<E>>,
-    parent: CircuitWithUniversalVerifier<F, C, D, 0, RecursiveParentWires>,
+    parent: CircuitWithUniversalVerifier<F, C, D, 0, RecursiveParentWires<E>>,
     membership: CircuitWithUniversalVerifier<F, C, D, 1, MembershipWires>,
     set: RecursiveCircuits<F, C, D>,
 }
@@ -125,6 +126,8 @@ const CIRCUIT_SET_SIZE: usize = 3;
 impl<E> PublicParameters<E>
 where
     E: ExtractionPI,
+    [(); E::TOTAL_LEN]:,
+    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
 {
     /// Generates the circuit parameters for the circuits.
     pub fn build(
@@ -290,6 +293,7 @@ mod tests {
     struct TestBuilder<E>
     where
         E: ExtractionPI,
+        [(); E::TOTAL_LEN]:,
     {
         params: PublicParameters<E>,
         extraction_set: TestingRecursiveCircuits<F, C, D, EXTRACTION_IO_LEN>,
@@ -299,6 +303,8 @@ mod tests {
     impl<E> TestBuilder<E>
     where
         E: ExtractionPI,
+        [(); E::TOTAL_LEN]:,
+        [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
     {
         fn new() -> Result<Self> {
             let extraction_set = TestingRecursiveCircuits::<F, C, D, EXTRACTION_IO_LEN>::default();

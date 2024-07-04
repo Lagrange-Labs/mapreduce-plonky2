@@ -18,13 +18,14 @@ use mp2_common::{
     CHasher, C, D, F,
 };
 use plonky2::{
-    hash::hash_types::{HashOut, HashOutTarget},
+    hash::{hash_types::{HashOut, HashOutTarget}, poseidon::PoseidonHash},
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
+    plonk::{circuit_builder::CircuitBuilder, config::Hasher, proof::ProofWithPublicInputsTarget},
 };
+use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
     framework::{
@@ -32,7 +33,7 @@ use recursion_framework::{
     },
 };
 use serde::{Deserialize, Serialize};
-use std::iter;
+use std::{iter, marker::PhantomData};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ParentWires {
@@ -81,11 +82,11 @@ impl ParentCircuit {
         let extraction_pi = E::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
 
-        let block_number = extraction_pi.block_number_raw();
+        let block_number = extraction_pi.primary_index_value();
 
         // Enforce that the data extracted from the blockchain is the same as the data
         // employed to build the rows tree for this node.
-        b.connect_curve_points(extraction_pi.digest_value(), rows_tree_pi.rows_digest());
+        b.connect_curve_points(CurveTarget::from_targets(&extraction_pi.digest_value()), rows_tree_pi.rows_digest());
 
         // Compute the hash of table metadata, to be exposed as public input to prove to
         // the verifier that we extracted the correct storage slots and we place the data
@@ -93,7 +94,7 @@ impl ParentCircuit {
         // of the block number column to the table metadata.
         // metadata_hash = H(extraction_proof.DM || block_id)
         let inputs = extraction_pi
-            .digest_metadata_raw()
+            .digest_metadata()
             .iter()
             .cloned()
             .chain(iter::once(index_identifier))
@@ -124,7 +125,7 @@ impl ParentCircuit {
 
         // The old node will be the left child of the new node, so we enforce the BST
         // property over the values stored in the nodes.
-        let new_block_num = UInt256Target::from_targets(block_number);
+        let new_block_num = UInt256Target::from_targets(&block_number);
         let old_max_lt_new_block_num = b.is_less_than_u256(&old_max, &new_block_num);
         b.connect(old_max_lt_new_block_num.target, ttrue.target);
 
@@ -152,10 +153,10 @@ impl ParentCircuit {
             &h_new,
             &h_old,
             &old_min.to_targets(), // node_min
-            block_number,          // node_max
-            block_number,
-            extraction_pi.block_hash_raw(),
-            extraction_pi.prev_block_hash_raw(),
+            &block_number,          // node_max
+            &block_number,
+            &extraction_pi.commitment(),
+            &extraction_pi.prev_commitment(),
             &metadata_hash,
             &node_digest.to_targets(),
         )
@@ -193,10 +194,11 @@ impl ParentCircuit {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct RecursiveParentWires {
+pub(crate) struct RecursiveParentWires<E: ExtractionPI> {
     parent_wires: ParentWires,
     extraction_verifier: RecursiveCircuitsVerifierTarget<D>,
     rows_tree_verifier: RecursiveCircuitsVerifierTarget<D>,
+    _e: PhantomData<E>,
 }
 
 #[derive(Clone, Debug)]
@@ -207,7 +209,11 @@ pub(crate) struct RecursiveParentInput {
     pub(crate) extraction_set: RecursiveCircuits<F, C, D>,
     pub(crate) rows_tree_set: RecursiveCircuits<F, C, D>,
 }
-impl CircuitLogicWires<F, D, 0> for RecursiveParentWires {
+impl<E: ExtractionPI> CircuitLogicWires<F, D, 0> for RecursiveParentWires<E> 
+where
+    [(); E::TOTAL_LEN]:,
+    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+{
     // Final extraction circuit set + rows tree circuit set
     type CircuitBuilderParams = (RecursiveCircuits<F, C, D>, RecursiveCircuits<F, C, D>);
 
@@ -220,15 +226,14 @@ impl CircuitLogicWires<F, D, 0> for RecursiveParentWires {
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        const EXTRACTION_IO: usize = extraction::test::PublicInputs::<Target>::TOTAL_LEN;
         const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::TOTAL_LEN;
 
-        let extraction_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, EXTRACTION_IO>::new(
+        let extraction_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, {E::TOTAL_LEN}>::new(
             default_config(),
             &builder_parameters.0,
         );
         let extraction_verifier = extraction_verifier.verify_proof_in_circuit_set(builder);
-        let extraction_pi = extraction_verifier.get_public_input_targets::<F, EXTRACTION_IO>();
+        let extraction_pi = extraction_verifier.get_public_input_targets::<F, {E::TOTAL_LEN}>();
 
         let rows_tree_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, ROWS_TREE_IO>::new(
             default_config(),
@@ -237,12 +242,13 @@ impl CircuitLogicWires<F, D, 0> for RecursiveParentWires {
         let rows_tree_verifier = rows_tree_verifier.verify_proof_in_circuit_set(builder);
         let rows_tree_pi = rows_tree_verifier.get_public_input_targets::<F, ROWS_TREE_IO>();
 
-        let parent_wires = ParentCircuit::build(builder, extraction_pi, rows_tree_pi);
+        let parent_wires = ParentCircuit::build::<E>(builder, extraction_pi, rows_tree_pi);
 
         RecursiveParentWires {
             parent_wires,
             extraction_verifier,
             rows_tree_verifier,
+            _e: PhantomData,
         }
     }
 
@@ -261,7 +267,7 @@ impl CircuitLogicWires<F, D, 0> for RecursiveParentWires {
 
 #[cfg(test)]
 mod tests {
-    use crate::block_tree::leaf::tests::{compute_expected_hash, compute_expected_set_digest};
+    use crate::{block_tree::leaf::tests::{compute_expected_hash, compute_expected_set_digest}, extraction};
 
     use super::{
         super::tests::{random_extraction_pi, random_rows_tree_pi},
@@ -299,7 +305,9 @@ mod tests {
                 b.add_virtual_targets(crate::extraction::test::PublicInputs::<Target>::TOTAL_LEN);
             let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::TOTAL_LEN);
 
-            let parent_wires = ParentCircuit::build(b, &extraction_pi, &rows_tree_pi);
+            let parent_wires = ParentCircuit::build::<extraction::test::PublicInputs<Target>>(
+                b, &extraction_pi, &rows_tree_pi
+            );
 
             (parent_wires, extraction_pi, rows_tree_pi)
         }

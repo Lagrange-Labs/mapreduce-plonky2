@@ -16,15 +16,14 @@ use mp2_common::{
     CHasher, C, D, F,
 };
 use plonky2::{
-    iop::{
+    hash::poseidon::PoseidonHash, iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
-    },
-    plonk::{
+    }, plonk::{
         circuit_builder::CircuitBuilder,
         config::{AlgebraicHasher, GenericConfig},
         proof::ProofWithPublicInputsTarget,
-    },
+    }
 };
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
@@ -151,6 +150,8 @@ use plonky2::plonk::config::Hasher;
 impl<E> CircuitLogicWires<F, D, 0> for RecursiveLeafWires<E>
 where
     E: ExtractionPI,
+    [(); E::TOTAL_LEN]:,
+    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
 {
     // Final extraction circuit set + rows tree circuit set
     type CircuitBuilderParams = (RecursiveCircuits<F, C, D>, RecursiveCircuits<F, C, D>);
@@ -164,9 +165,6 @@ where
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self
-    where
-        [(); E::TOTAL_LEN]:,
-        [(); <C as GenericConfig<D>>::Hasher::HASH_SIZE]:,
     {
         const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::TOTAL_LEN;
 
@@ -175,7 +173,7 @@ where
             &builder_parameters.0,
         );
         let extraction_verifier = extraction_verifier.verify_proof_in_circuit_set(builder);
-        let extraction_pi = extraction_verifier.get_public_input_targets::<F, EXTRACTION_IO>();
+        let extraction_pi = extraction_verifier.get_public_input_targets::<F, {E::TOTAL_LEN}>();
 
         let rows_tree_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, ROWS_TREE_IO>::new(
             default_config(),
@@ -209,6 +207,8 @@ where
 
 #[cfg(test)]
 pub mod tests {
+    use crate::extraction;
+
     use super::{
         super::tests::{random_extraction_pi, random_rows_tree_pi},
         *,
@@ -231,7 +231,7 @@ pub mod tests {
     use rand::{thread_rng, Rng};
 
     pub fn compute_expected_hash(
-        extraction_pi: &final_extraction::PublicInputs<F>,
+        extraction_pi: &extraction::test::PublicInputs<F>,
         identifier: F,
     ) -> HashOut<F> {
         let inputs: Vec<_> = extraction_pi
@@ -315,7 +315,7 @@ pub mod tests {
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        let extraction_pi = final_extraction::PublicInputs::from_slice(extraction_pi);
+        let extraction_pi = extraction::test::PublicInputs::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::from_slice(rows_tree_pi);
 
         let empty_hash = empty_poseidon_hash();
