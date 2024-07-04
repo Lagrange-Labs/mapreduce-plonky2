@@ -106,8 +106,6 @@ pub fn num_to_bits<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Returns true if a < b in the first n bits, False otherwise.
-/// Assume that both a < 2^n and b < 2^n, otherwise the result is
-/// not guaranteed to be correct.
 /// Will panic if `n >= F::BITS-1`
 pub fn less_than<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
@@ -118,6 +116,10 @@ pub fn less_than<F: RichField + Extendable<D>, const D: usize>(
     assert!(n < F::BITS - 1);
 
     let power_of_two = builder.constant(F::from_canonical_u64(1 << n));
+    // enforce that a < 2^n and b < 2^n
+    builder.range_check(a, n);
+    builder.range_check(b, n);
+
     let mut lin_pol = builder.add(a, power_of_two);
     // 2^n + a - b
     lin_pol = builder.sub(lin_pol, b);
@@ -128,8 +130,6 @@ pub fn less_than<F: RichField + Extendable<D>, const D: usize>(
     builder.not(binary[n])
 }
 /// Returns true if a > b in the first n bits. False otherwise.
-/// Assume that both a < 2^n and b < 2^n, otherwise the result is
-/// not guaranteed to be correct.
 /// Will panic if `n >= F::BITS-1`
 pub fn greater_than<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
@@ -140,8 +140,6 @@ pub fn greater_than<F: RichField + Extendable<D>, const D: usize>(
     less_than(builder, b, a, n)
 }
 /// Returns true if a <= b in the first n bits. False otherwise.
-/// Assume that both a < 2^n and b < 2^n, otherwise the result is
-/// not guaranteed to be correct.
 /// Will panic if `n >= F::BITS-1`
 pub fn less_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
@@ -154,8 +152,6 @@ pub fn less_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
     less_than(builder, a, b_plus_1, n)
 }
 /// Returns true if a >= b in the first n bits. False otherwise.
-/// Assume that both a < 2^n and b < 2^n, otherwise the result is
-/// not guaranteed to be correct.
 /// Will panic if `n >= F::BITS-1`
 pub fn greater_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
@@ -725,18 +721,12 @@ mod test {
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
         let a_val = 5u64;
-        let b_val = 3u64;
+        let b_val = 10u64;
         let a = builder.constant(F::from_canonical_u64(a_val));
         let b = builder.constant(F::from_canonical_u64(b_val));
         let n = 4;
 
         let result = less_than(&mut builder, a, b, n);
-        let one = if a_val % (1 << n) < b_val % (1 << n) {
-            builder.one()
-        } else {
-            builder.zero()
-        };
-        builder.connect(result.target, one);
 
         builder.register_public_input(a);
         builder.register_public_input(b);
@@ -744,6 +734,12 @@ mod test {
 
         let data = builder.build::<C>();
         let proof = data.prove(pw)?;
+        let expected_res = if a_val % (1 << n) < b_val % (1 << n) {
+            F::ONE
+        } else {
+            F::ZERO
+        };
+        assert_eq!(proof.public_inputs[2], expected_res);
         data.verify(proof)
     }
 
