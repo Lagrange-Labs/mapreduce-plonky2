@@ -540,8 +540,6 @@ where
     ) -> Array<T, SUB_SIZE> {
         let m = b.constant(F::from_canonical_usize(SUB_SIZE));
         let upper_bound = b.add(at, m);
-        // we keep a high upper bound for `less_than` to avoid failures when we are invoking
-        // this method with dummy inputs
         let num_bits_size = SIZE.ilog2() + 1;
         Array::<T, SUB_SIZE> {
             arr: core::array::from_fn(|i| {
