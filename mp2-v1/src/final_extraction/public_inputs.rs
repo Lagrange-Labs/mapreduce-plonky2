@@ -21,7 +21,9 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{array, iter};
+use verifiable_db::extraction::{ExtractionPI, ExtractionPIWrap};
 
 // Contract extraction public Inputs:
 // - `H : [8]F` : packed block hash
@@ -37,12 +39,19 @@ const DM_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + CURVE_TARGET_LEN
 const BN_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + u256::NUM_LIMBS;
 
 /// Public inputs for contract extraction
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PublicInputs<'a, T> {
+    // should be ok to skip serialization as this should never contain its own data,
+    // serialization/deserialization should be implemented only to satisfy trait bounds
+    #[serde(skip)]
     pub(crate) h: &'a [T],
+    #[serde(skip)]
     pub(crate) ph: &'a [T],
+    #[serde(skip)]
     pub(crate) dv: &'a [T],
+    #[serde(skip)]
     pub(crate) dm: &'a [T],
+    #[serde(skip)]
     pub(crate) bn: &'a [T],
 }
 
@@ -52,6 +61,42 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     fn register_args(&self, cb: &mut CBuilder) {
         self.generic_register_args(cb)
     }
+}
+
+impl<'a> ExtractionPI<'a> for PublicInputs<'a, Target> {
+    const TOTAL_LEN: usize = Self::TOTAL_LEN;
+
+    fn from_slice(s: &'a [Target]) -> Self {
+        Self::from_slice(s)
+    }
+
+    fn commitment(&self) -> Vec<Target> {
+        self.block_hash().to_targets()
+    }
+
+    fn prev_commitment(&self) -> Vec<Target> {
+        self.previous_block_hash().to_targets()
+    }
+
+    fn digest_value(&self) -> Vec<Target> {
+        self.digest_value().to_targets()
+    }
+
+    fn digest_metadata(&self) -> Vec<Target> {
+        self.digest_metadata().to_targets()
+    }
+
+    fn primary_index_value(&self) -> Vec<Target> {
+        self.block_number().to_targets()
+    }
+
+    fn register_args(&self, cb: &mut CBuilder) {
+        self.generic_register_args(cb)
+    }
+}
+
+impl<'a> ExtractionPIWrap for PublicInputs<'a, Target> {
+    type PI<'b> = PublicInputs<'b, Target>;
 }
 
 impl<'a> PublicInputs<'a, GFp> {

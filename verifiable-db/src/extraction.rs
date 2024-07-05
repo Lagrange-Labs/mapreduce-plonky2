@@ -27,11 +27,12 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
+use serde::{de::DeserializeOwned, Serialize};
 use std::{array, iter};
 
-pub trait ExtractionPI {
+pub trait ExtractionPI<'a> {
     const TOTAL_LEN: usize;
-    fn from_slice(s: &[Target]) -> Self;
+    fn from_slice(s: &'a [Target]) -> Self;
     fn commitment(&self) -> Vec<Target>;
     fn prev_commitment(&self) -> Vec<Target>;
     fn digest_value(&self) -> Vec<Target>;
@@ -40,15 +41,25 @@ pub trait ExtractionPI {
     fn register_args(&self, cb: &mut CircuitBuilder<F, D>);
 }
 
+/// Wrap trait getting rid of the lifetime
+pub trait ExtractionPIWrap: Serialize + DeserializeOwned {
+    type PI<'a>: ExtractionPI<'a>;
+}
+
 #[cfg(test)]
 pub mod test {
+    use serde::Deserialize;
     use u256::UInt256Target;
 
     use super::*;
-    impl ExtractionPI for PublicInputs<Target> {
+    impl<'a> ExtractionPIWrap for PublicInputs<'a, Target> {
+        type PI<'b> = PublicInputs<'b, Target>;
+    }
+
+    impl<'a> ExtractionPI<'a> for PublicInputs<'a, Target> {
         const TOTAL_LEN: usize = Self::TOTAL_LEN;
 
-        fn from_slice(s: &[Target]) -> Self {
+        fn from_slice(s: &'a [Target]) -> Self {
             PublicInputs::from_slice(&s)
         }
 
@@ -91,16 +102,21 @@ pub mod test {
     const BN_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + u256::NUM_LIMBS;
 
     /// Public inputs for contract extraction
-    #[derive(Clone, Debug)]
-    pub struct PublicInputs<T> {
-        pub(crate) h: Vec<T>,
-        pub(crate) ph: Vec<T>,
-        pub(crate) dv: Vec<T>,
-        pub(crate) dm: Vec<T>,
-        pub(crate) bn: Vec<T>,
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct PublicInputs<'a, T> {
+        #[serde(skip)]
+        pub(crate) h: &'a [T],
+        #[serde(skip)]
+        pub(crate) ph: &'a [T],
+        #[serde(skip)]
+        pub(crate) dv: &'a [T],
+        #[serde(skip)]
+        pub(crate) dm: &'a [T],
+        #[serde(skip)]
+        pub(crate) bn: &'a [T],
     }
 
-    impl PublicInputCommon for PublicInputs<Target> {
+    impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
         const RANGES: &'static [PublicInputRange] =
             &[H_RANGE, PH_RANGE, DV_RANGE, DM_RANGE, BN_RANGE];
 
@@ -109,7 +125,7 @@ pub mod test {
         }
     }
 
-    impl PublicInputs<GFp> {
+    impl<'a> PublicInputs<'a, GFp> {
         /// Get the metadata point.
         pub fn metadata_point(&self) -> WeierstrassPoint {
             WeierstrassPoint::from_fields(&self.dm)
@@ -121,26 +137,20 @@ pub mod test {
         /// Get block number as U64
         pub fn block_number(&self) -> U64 {
             let mut bytes = vec![0u8; 32];
-            let number = U256::from(U256PubInputs::try_from(self.bn.as_slice()).unwrap());
+            let number = U256::from(U256PubInputs::try_from(self.bn).unwrap());
             number.to_little_endian(&mut bytes);
             U64::from_little_endian(&bytes[..8])
         }
     }
 
-    impl<T: Clone> PublicInputs<T> {
+    impl<'a, T> PublicInputs<'a, T> {
         /// Create a new public inputs.
-        pub fn new(h: &[T], ph: &[T], dv: &[T], dm: &[T], bn: &[T]) -> Self {
-            Self {
-                h: h.to_vec(),
-                ph: ph.to_vec(),
-                dv: dv.to_vec(),
-                dm: dm.to_vec(),
-                bn: bn.to_vec(),
-            }
+        pub fn new(h: &'a [T], ph: &'a [T], dv: &'a [T], dm: &'a [T], bn: &'a [T]) -> Self {
+            Self { h, ph, dv, dm, bn }
         }
     }
 
-    impl PublicInputs<Target> {
+    impl<'a> PublicInputs<'a, Target> {
         pub fn generic_register_args(&self, cb: &mut CBuilder) {
             cb.register_public_inputs(&self.h);
             cb.register_public_inputs(&self.ph);
@@ -172,20 +182,20 @@ pub mod test {
         }
     }
 
-    impl<T: Copy> PublicInputs<T> {
+    impl<'a, T: Copy> PublicInputs<'a, T> {
         /// Total length of the public inputs
         pub const TOTAL_LEN: usize = BN_RANGE.end;
 
         /// Create from a slice.
-        pub fn from_slice(pi: &[T]) -> Self {
+        pub fn from_slice(pi: &'a [T]) -> Self {
             assert!(pi.len() >= Self::TOTAL_LEN);
 
             Self {
-                h: pi[H_RANGE].to_vec(),
-                ph: pi[PH_RANGE].to_vec(),
-                dm: pi[DM_RANGE].to_vec(),
-                dv: pi[DV_RANGE].to_vec(),
-                bn: pi[BN_RANGE].to_vec(),
+                h: &pi[H_RANGE],
+                ph: &pi[PH_RANGE],
+                dm: &pi[DM_RANGE],
+                dv: &pi[DV_RANGE],
+                bn: &pi[BN_RANGE],
             }
         }
 
@@ -194,8 +204,8 @@ pub mod test {
             self.h
                 .iter()
                 .chain(self.ph.iter())
-                .chain(self.dm.iter())
                 .chain(self.dv.iter())
+                .chain(self.dm.iter())
                 .chain(self.bn.iter())
                 .cloned()
                 .collect()

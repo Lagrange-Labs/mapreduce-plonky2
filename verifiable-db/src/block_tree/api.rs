@@ -1,6 +1,6 @@
 //! Block Index APIs
 
-use crate::extraction::ExtractionPI;
+use crate::extraction::{ExtractionPI, ExtractionPIWrap};
 
 use super::{
     leaf::{LeafCircuit, RecursiveLeafInput, RecursiveLeafWires},
@@ -11,7 +11,10 @@ use super::{
 use anyhow::Result;
 use ethers::types::U256;
 use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
-use plonky2::{hash::{hash_types::HashOut, poseidon::PoseidonHash}, plonk::config::Hasher};
+use plonky2::{
+    hash::{hash_types::HashOut, poseidon::PoseidonHash},
+    plonk::config::Hasher,
+};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
@@ -106,10 +109,10 @@ impl CircuitInput {
 
 /// Main struct holding the different circuit parameters for each of the circuits defined here.
 #[derive(Serialize, Deserialize)]
-pub struct PublicParameters<E>
+#[serde(bound = "")]
+pub struct PublicParameters<E: ExtractionPIWrap>
 where
-    E: ExtractionPI,
-    [(); E::TOTAL_LEN]:,
+    [(); E::PI::TOTAL_LEN]:,
 {
     leaf: CircuitWithUniversalVerifier<F, C, D, 0, RecursiveLeafWires<E>>,
     parent: CircuitWithUniversalVerifier<F, C, D, 0, RecursiveParentWires<E>>,
@@ -125,8 +128,8 @@ const CIRCUIT_SET_SIZE: usize = 3;
 
 impl<E> PublicParameters<E>
 where
-    E: ExtractionPI,
-    [(); E::TOTAL_LEN]:,
+    E: ExtractionPIWrap,
+    [(); E::PI::TOTAL_LEN]:,
     [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
 {
     /// Generates the circuit parameters for the circuits.
@@ -292,8 +295,8 @@ mod tests {
 
     struct TestBuilder<E>
     where
-        E: ExtractionPI,
-        [(); E::TOTAL_LEN]:,
+        E: ExtractionPIWrap,
+        [(); E::PI::TOTAL_LEN]:,
     {
         params: PublicParameters<E>,
         extraction_set: TestingRecursiveCircuits<F, C, D, EXTRACTION_IO_LEN>,
@@ -302,8 +305,8 @@ mod tests {
 
     impl<E> TestBuilder<E>
     where
-        E: ExtractionPI,
-        [(); E::TOTAL_LEN]:,
+        E: ExtractionPIWrap,
+        [(); E::PI::TOTAL_LEN]:,
         [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
     {
         fn new() -> Result<Self> {

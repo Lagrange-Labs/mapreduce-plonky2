@@ -1,13 +1,17 @@
 //! Main APIs and related structures
 
-use crate::{block_tree, cells_tree, extraction::ExtractionPI, row_tree};
+use crate::{
+    block_tree, cells_tree,
+    extraction::{ExtractionPI, ExtractionPIWrap},
+    row_tree,
+};
 use anyhow::Result;
 use ethers::prelude::U256;
 use mp2_common::{C, D, F};
 use recursion_framework::framework::RecursiveCircuits;
 use serde::{Deserialize, Serialize};
 
-/// Struct containing the expected input of the Cell Tree node
+/// Struct containing the expected input of the Tree node
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CellNode {
     pub identifier: F,
@@ -24,9 +28,10 @@ pub enum CircuitInput {
 
 /// Parameters defining all the circuits employed for the verifiable DB stage of LPN
 #[derive(Serialize, Deserialize)]
-pub struct PublicParameters<E: ExtractionPI> 
-where 
-    [(); E::TOTAL_LEN]:,
+#[serde(bound = "")]
+pub struct PublicParameters<E: ExtractionPIWrap>
+where
+    [(); E::PI::TOTAL_LEN]:,
 {
     cells_tree: cells_tree::PublicParameters,
     rows_tree: row_tree::PublicParameters,
@@ -34,11 +39,11 @@ where
 }
 
 /// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.
-pub fn build_circuits_params<E: ExtractionPI>(
+pub fn build_circuits_params<E: ExtractionPIWrap>(
     extraction_set: &RecursiveCircuits<F, C, D>,
-) -> PublicParameters<E> 
-where 
-    [(); E::TOTAL_LEN]:,
+) -> PublicParameters<E>
+where
+    [(); E::PI::TOTAL_LEN]:,
 {
     log::info!("Building cells_tree parameters...");
     let cells_tree = cells_tree::build_circuits_params();
@@ -58,13 +63,13 @@ where
 /// Generate a proof for a circuit in the set of circuits employed in the
 /// verifiable DB stage of LPN, employing `CircuitInput` to specify for which
 /// circuit the proof should be generated.
-pub fn generate_proof<E: ExtractionPI>(
+pub fn generate_proof<E: ExtractionPIWrap>(
     params: &PublicParameters<E>,
     input: CircuitInput,
     extraction_set: &RecursiveCircuits<F, C, D>,
-) -> Result<Vec<u8>> 
-where 
-    [(); E::TOTAL_LEN]:,
+) -> Result<Vec<u8>>
+where
+    [(); E::PI::TOTAL_LEN]:,
 {
     match input {
         CircuitInput::CellsTree(input) => params.cells_tree.generate_proof(input),

@@ -2,7 +2,10 @@
 //! referred to as old node.
 
 use super::{compute_index_digest, public_inputs::PublicInputs};
-use crate::{extraction::ExtractionPI, row_tree};
+use crate::{
+    extraction::{ExtractionPI, ExtractionPIWrap},
+    row_tree,
+};
 use anyhow::Result;
 use ethers::prelude::U256;
 use mp2_common::{
@@ -18,7 +21,10 @@ use mp2_common::{
     CHasher, C, D, F,
 };
 use plonky2::{
-    hash::{hash_types::{HashOut, HashOutTarget}, poseidon::PoseidonHash},
+    hash::{
+        hash_types::{HashOut, HashOutTarget},
+        poseidon::PoseidonHash,
+    },
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
@@ -68,7 +74,7 @@ pub(crate) struct ParentCircuit {
 }
 
 impl ParentCircuit {
-    fn build<E: ExtractionPI>(
+    fn build<E: ExtractionPIWrap>(
         b: &mut CBuilder,
         extraction_pi: &[Target],
         rows_tree_pi: &[Target],
@@ -79,14 +85,17 @@ impl ParentCircuit {
         let [old_index_value, old_min, old_max] = [0; 3].map(|_| b.add_virtual_u256());
         let [left_child, right_child, old_rows_tree_hash] = [0; 3].map(|_| b.add_virtual_hash());
 
-        let extraction_pi = E::from_slice(extraction_pi);
+        let extraction_pi = E::PI::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
 
         let block_number = extraction_pi.primary_index_value();
 
         // Enforce that the data extracted from the blockchain is the same as the data
         // employed to build the rows tree for this node.
-        b.connect_curve_points(CurveTarget::from_targets(&extraction_pi.digest_value()), rows_tree_pi.rows_digest());
+        b.connect_curve_points(
+            CurveTarget::from_targets(&extraction_pi.digest_value()),
+            rows_tree_pi.rows_digest(),
+        );
 
         // Compute the hash of table metadata, to be exposed as public input to prove to
         // the verifier that we extracted the correct storage slots and we place the data
@@ -153,7 +162,7 @@ impl ParentCircuit {
             &h_new,
             &h_old,
             &old_min.to_targets(), // node_min
-            &block_number,          // node_max
+            &block_number,         // node_max
             &block_number,
             &extraction_pi.commitment(),
             &extraction_pi.prev_commitment(),
@@ -194,7 +203,7 @@ impl ParentCircuit {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct RecursiveParentWires<E: ExtractionPI> {
+pub(crate) struct RecursiveParentWires<E: ExtractionPIWrap> {
     parent_wires: ParentWires,
     extraction_verifier: RecursiveCircuitsVerifierTarget<D>,
     rows_tree_verifier: RecursiveCircuitsVerifierTarget<D>,
@@ -209,9 +218,9 @@ pub(crate) struct RecursiveParentInput {
     pub(crate) extraction_set: RecursiveCircuits<F, C, D>,
     pub(crate) rows_tree_set: RecursiveCircuits<F, C, D>,
 }
-impl<E: ExtractionPI> CircuitLogicWires<F, D, 0> for RecursiveParentWires<E> 
+impl<E: ExtractionPIWrap> CircuitLogicWires<F, D, 0> for RecursiveParentWires<E>
 where
-    [(); E::TOTAL_LEN]:,
+    [(); E::PI::TOTAL_LEN]:,
     [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
 {
     // Final extraction circuit set + rows tree circuit set
@@ -228,12 +237,14 @@ where
     ) -> Self {
         const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::TOTAL_LEN;
 
-        let extraction_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, {E::TOTAL_LEN}>::new(
-            default_config(),
-            &builder_parameters.0,
-        );
+        let extraction_verifier =
+            RecursiveCircuitsVerifierGagdet::<F, C, D, { E::PI::TOTAL_LEN }>::new(
+                default_config(),
+                &builder_parameters.0,
+            );
         let extraction_verifier = extraction_verifier.verify_proof_in_circuit_set(builder);
-        let extraction_pi = extraction_verifier.get_public_input_targets::<F, {E::TOTAL_LEN}>();
+        let extraction_pi =
+            extraction_verifier.get_public_input_targets::<F, { E::PI::TOTAL_LEN }>();
 
         let rows_tree_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, ROWS_TREE_IO>::new(
             default_config(),
@@ -267,7 +278,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{block_tree::leaf::tests::{compute_expected_hash, compute_expected_set_digest}, extraction};
+    use crate::{
+        block_tree::{
+            leaf::tests::{compute_expected_hash, compute_expected_set_digest},
+            tests::{TestPIField, TestPITargets},
+        },
+        extraction,
+    };
 
     use super::{
         super::tests::{random_extraction_pi, random_rows_tree_pi},
@@ -301,13 +318,11 @@ mod tests {
         type Wires = (ParentWires, Vec<Target>, Vec<Target>);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let extraction_pi =
-                b.add_virtual_targets(crate::extraction::test::PublicInputs::<Target>::TOTAL_LEN);
+            let extraction_pi = b.add_virtual_targets(TestPITargets::TOTAL_LEN);
             let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::TOTAL_LEN);
 
-            let parent_wires = ParentCircuit::build::<extraction::test::PublicInputs<Target>>(
-                b, &extraction_pi, &rows_tree_pi
-            );
+            let parent_wires =
+                ParentCircuit::build::<TestPITargets>(b, &extraction_pi, &rows_tree_pi);
 
             (parent_wires, extraction_pi, rows_tree_pi)
         }
@@ -315,10 +330,7 @@ mod tests {
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.c.assign(pw, &wires.0);
 
-            assert_eq!(
-                wires.1.len(),
-                crate::extraction::test::PublicInputs::<Target>::TOTAL_LEN
-            );
+            assert_eq!(wires.1.len(), TestPITargets::TOTAL_LEN);
             pw.set_target_arr(&wires.1, self.extraction_pi);
 
             assert_eq!(wires.2.len(), row_tree::PublicInputs::<Target>::TOTAL_LEN);
@@ -355,7 +367,7 @@ mod tests {
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        let extraction_pi = crate::extraction::test::PublicInputs::from_slice(extraction_pi);
+        let extraction_pi = TestPIField::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::from_slice(rows_tree_pi);
 
         let empty_hash = empty_poseidon_hash().elements;

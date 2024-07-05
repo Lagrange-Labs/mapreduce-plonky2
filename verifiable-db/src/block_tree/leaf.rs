@@ -3,7 +3,10 @@
 //! first block number).
 
 use super::{compute_index_digest, public_inputs::PublicInputs};
-use crate::{extraction::ExtractionPI, row_tree};
+use crate::{
+    extraction::{ExtractionPI, ExtractionPIWrap},
+    row_tree,
+};
 use anyhow::Result;
 use mp2_common::{
     default_config,
@@ -16,14 +19,16 @@ use mp2_common::{
     CHasher, C, D, F,
 };
 use plonky2::{
-    hash::poseidon::PoseidonHash, iop::{
+    hash::poseidon::PoseidonHash,
+    iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
-    }, plonk::{
+    },
+    plonk::{
         circuit_builder::CircuitBuilder,
         config::{AlgebraicHasher, GenericConfig},
         proof::ProofWithPublicInputsTarget,
-    }
+    },
 };
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
@@ -32,11 +37,12 @@ use recursion_framework::{
     },
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{iter, marker::PhantomData};
+use std::{fmt::Debug, iter, marker::PhantomData};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct LeafWires {
+pub(crate) struct LeafWires<E> {
     index_identifier: Target,
+    _e: PhantomData<E>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -46,13 +52,13 @@ pub(crate) struct LeafCircuit {
 }
 
 impl LeafCircuit {
-    fn build<E>(b: &mut CBuilder, extraction_pi: &[Target], rows_tree_pi: &[Target]) -> LeafWires
+    fn build<E>(b: &mut CBuilder, extraction_pi: &[Target], rows_tree_pi: &[Target]) -> LeafWires<E>
     where
-        E: ExtractionPI,
+        E: ExtractionPIWrap,
     {
         let index_identifier = b.add_virtual_target();
 
-        let extraction_pi = E::from_slice(extraction_pi);
+        let extraction_pi = E::PI::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
 
         // in our case, the extraction proofs extracts from the blockchain and sets
@@ -116,24 +122,24 @@ impl LeafCircuit {
         )
         .register(b);
 
-        LeafWires { index_identifier }
+        LeafWires {
+            index_identifier,
+            _e: PhantomData,
+        }
     }
 
     /// Assign the wireswhere E: ExtractionPI.
-    fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
+    fn assign<E>(&self, pw: &mut PartialWitness<F>, wires: &LeafWires<E>) {
         pw.set_target(wires.index_identifier, self.index_identifier);
     }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct RecursiveLeafWires<E>
-where
-    E: ExtractionPI,
-{
-    leaf_wires: LeafWires,
+#[serde(bound = "")]
+pub(crate) struct RecursiveLeafWires<E: ExtractionPIWrap> {
+    leaf_wires: LeafWires<E>,
     extraction_verifier: RecursiveCircuitsVerifierTarget<D>,
     rows_tree_verifier: RecursiveCircuitsVerifierTarget<D>,
-    _p: PhantomData<E>,
 }
 
 #[derive(Clone, Debug)]
@@ -149,8 +155,8 @@ use plonky2::plonk::config::Hasher;
 
 impl<E> CircuitLogicWires<F, D, 0> for RecursiveLeafWires<E>
 where
-    E: ExtractionPI,
-    [(); E::TOTAL_LEN]:,
+    E: ExtractionPIWrap + Serialize + DeserializeOwned,
+    [(); E::PI::TOTAL_LEN]:,
     [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
 {
     // Final extraction circuit set + rows tree circuit set
@@ -164,16 +170,17 @@ where
         builder: &mut CircuitBuilder<F, D>,
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
-    ) -> Self
-    {
+    ) -> Self {
         const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::TOTAL_LEN;
 
-        let extraction_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, { E::TOTAL_LEN }>::new(
-            default_config(),
-            &builder_parameters.0,
-        );
+        let extraction_verifier =
+            RecursiveCircuitsVerifierGagdet::<F, C, D, { E::PI::TOTAL_LEN }>::new(
+                default_config(),
+                &builder_parameters.0,
+            );
         let extraction_verifier = extraction_verifier.verify_proof_in_circuit_set(builder);
-        let extraction_pi = extraction_verifier.get_public_input_targets::<F, {E::TOTAL_LEN}>();
+        let extraction_pi =
+            extraction_verifier.get_public_input_targets::<F, { E::PI::TOTAL_LEN }>();
 
         let rows_tree_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, ROWS_TREE_IO>::new(
             default_config(),
@@ -188,7 +195,6 @@ where
             leaf_wires,
             extraction_verifier,
             rows_tree_verifier,
-            _p: PhantomData,
         }
     }
 
@@ -207,7 +213,10 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use crate::extraction;
+    use crate::{
+        block_tree::tests::{TestPIField, TestPITargets},
+        extraction,
+    };
 
     use super::{
         super::tests::{random_extraction_pi, random_rows_tree_pi},
@@ -258,7 +267,7 @@ pub mod tests {
         let point = weierstrass_to_point(&point);
         point * scalar
     }
-    type TestPI = crate::extraction::test::PublicInputs<Target>;
+
     #[derive(Clone, Debug)]
     struct TestLeafCircuit<'a> {
         c: LeafCircuit,
@@ -268,14 +277,13 @@ pub mod tests {
 
     impl<'a> UserCircuit<F, D> for TestLeafCircuit<'a> {
         // Leaf node wires + extraction public inputs + rows tree public inputs
-        type Wires = (LeafWires, Vec<Target>, Vec<Target>);
+        type Wires = (LeafWires<TestPITargets<'a>>, Vec<Target>, Vec<Target>);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let extraction_pi =
-                b.add_virtual_targets(crate::extraction::test::PublicInputs::<Target>::TOTAL_LEN);
+            let extraction_pi = b.add_virtual_targets(TestPITargets::TOTAL_LEN);
             let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::TOTAL_LEN);
 
-            let leaf_wires = LeafCircuit::build::<TestPI>(b, &extraction_pi, &rows_tree_pi);
+            let leaf_wires = LeafCircuit::build::<TestPITargets>(b, &extraction_pi, &rows_tree_pi);
 
             (leaf_wires, extraction_pi, rows_tree_pi)
         }
@@ -283,10 +291,7 @@ pub mod tests {
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.c.assign(pw, &wires.0);
 
-            assert_eq!(
-                wires.1.len(),
-                crate::extraction::test::PublicInputs::<Target>::TOTAL_LEN
-            );
+            assert_eq!(wires.1.len(), TestPITargets::TOTAL_LEN);
             pw.set_target_arr(&wires.1, self.extraction_pi);
 
             assert_eq!(wires.2.len(), row_tree::PublicInputs::<Target>::TOTAL_LEN);
@@ -315,7 +320,7 @@ pub mod tests {
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        let extraction_pi = extraction::test::PublicInputs::from_slice(extraction_pi);
+        let extraction_pi = TestPIField::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::from_slice(rows_tree_pi);
 
         let empty_hash = empty_poseidon_hash();

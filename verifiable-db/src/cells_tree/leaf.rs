@@ -99,14 +99,11 @@ mod tests {
     use mp2_common::{
         group_hashing::map_to_curve_point,
         poseidon::H,
-        utils::{Fieldable, Packer, ToFields},
+        utils::{Fieldable, ToFields},
         C,
     };
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
-    use plonky2::{field::types::Field, plonk::config::Hasher};
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::plonk::config::Hasher;
     use rand::{thread_rng, Rng};
 
     impl UserCircuit<F, D> for LeafCircuit {

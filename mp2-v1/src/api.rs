@@ -6,6 +6,7 @@ use crate::{
     values_extraction,
 };
 use anyhow::Result;
+use plonky2::iop::target::Target;
 use serde::{Deserialize, Serialize};
 
 /// Struct containing the expected input MPT Extension/Branch node
@@ -27,6 +28,8 @@ pub enum CircuitInput {
     BlockExtraction(block_extraction::CircuitInput),
     /// Final extraction input
     FinalExtraction(final_extraction::CircuitInput),
+    /// Tree creation input
+    TreeCreation(verifiable_db::api::CircuitInput),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -37,6 +40,8 @@ pub struct PublicParameters {
     values_extraction: values_extraction::PublicParameters,
     block_extraction: block_extraction::PublicParameters,
     final_extraction: final_extraction::PublicParameters,
+    tree_creation:
+        verifiable_db::api::PublicParameters<final_extraction::PublicInputs<'static, Target>>,
 }
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
@@ -57,6 +62,8 @@ pub fn build_circuits_params() -> PublicParameters {
         values_extraction.get_circuit_set(),
         length_extraction.get_circuit_set(),
     );
+    let tree_creation =
+        verifiable_db::api::build_circuits_params(final_extraction.get_circuit_set());
     log::info!("All parameters built!");
 
     PublicParameters {
@@ -65,6 +72,7 @@ pub fn build_circuits_params() -> PublicParameters {
         length_extraction,
         block_extraction,
         final_extraction,
+        tree_creation,
     }
 }
 
@@ -99,5 +107,10 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
                 }
             }
         }
+        CircuitInput::TreeCreation(input) => verifiable_db::api::generate_proof(
+            &params.tree_creation,
+            input,
+            params.final_extraction.get_circuit_set(),
+        ),
     }
 }

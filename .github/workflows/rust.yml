@@ -8,37 +8,13 @@ on:
 name: Check, Test, and Format
 
 jobs:
-  check:
-    name: Check
-    runs-on: ubuntu-latest
-    steps:
-      - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v3
-        with:
-          go-version: ~1.20
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2024-05-17
-          override: true
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
-
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_RYHOPE }}
       - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v3
@@ -64,6 +40,38 @@ jobs:
           command: fmt
           args: --all -- --check
 
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v3
+        with:
+          go-version: ~1.20
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly-2024-05-17
+          override: true
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_RYHOPE }}
+      - uses: actions-rs/cargo@v1
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        with:
+          command: check
+
   test:
     name: Test Suite
     runs-on: nix-128g
@@ -83,9 +91,13 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_RYHOPE }}
       - name: Run cargo test
-        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo test --features ci --release -- --test-threads 16"
+        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "eval \"$(ssh-agent -s)\" && ssh-add - <<< '${{ secrets.SSH_RYHOPE }}' && cargo test --features ci --release -- --test-threads 16"
         env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
           RUST_LOG: "info"
           RUST_MIN_STACK: 10485760
           CI_RPC_URL: ${{ secrets.CI_RPC_URL }}

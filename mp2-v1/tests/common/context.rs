@@ -1,16 +1,34 @@
 //! Test context used in the test cases
-
-use super::TestCase;
 use alloy::node_bindings::AnvilInstance;
+use anyhow::Context;
+use envconfig::Envconfig;
 use ethers::{
     prelude::{Block, BlockId, EIP1186ProofResponse, Http, Provider, TxHash},
     providers::Middleware,
     types::BlockNumber,
 };
-use log::warn;
-use mp2_common::eth::{query_latest_block, ProofQuery};
-use mp2_v1::api::{build_circuits_params, PublicParameters};
-use std::{env, fs, path::PathBuf};
+use log::info;
+use mp2_common::eth::ProofQuery;
+use std::{
+    fs::File,
+    io::{BufReader, BufWriter},
+    path::PathBuf,
+};
+
+use super::TestCase;
+
+#[derive(Envconfig)]
+struct TestContextConfig {
+    #[envconfig(from = "LPN_PARAMS_DIR")]
+    params_dir: Option<String>,
+
+    #[envconfig(from = "LPN_PARAMS_REBUILD", default = "false")]
+    force_rebuild: bool,
+}
+
+pub(crate) struct PublicParameters {
+    pub(crate) mp2: mp2_v1::api::PublicParameters,
+}
 
 /// Test context
 pub(crate) struct TestContext {
@@ -29,49 +47,55 @@ pub(crate) struct TestContext {
 
 impl TestContext {
     /// Build the parameters.
-    /// NOTE: It could avoid `runtime stack overflow`, otherwise needs to set `export RUST_MIN_STACK=100000000`.
+    ///
+    /// NOTE: It could avoid `runtime stack overflow`, otherwise needs to set
+    /// `export RUST_MIN_STACK=10000000`.
     pub(crate) fn build_params(&mut self) -> anyhow::Result<()> {
-        let mut path = env::var("LPN_PARAMS").ok();
-        let mut rebuild = env::var("LPN_PARAMS_REBUILD").is_ok();
+        let cfg = TestContextConfig::init_from_env().context("while parsing configuration")?;
 
-        for arg in env::args() {
-            if arg == "--lpn-params-rebuild" {
-                rebuild = true;
-            }
+        self.params = Some(match cfg.params_dir {
+            Some(params_path_str) => {
+                info!("attempting to read parameters from {params_path_str}");
+                let params_path = PathBuf::from(params_path_str);
+                if !params_path.exists() {
+                    std::fs::create_dir_all(&params_path)
+                        .context("while creating parameters folder")?;
+                }
 
-            let args = &mut arg.split('=');
-            let a = args.next().unwrap_or_default();
-            let b = args.next().unwrap_or_default();
+                let mut mp2_filepath = params_path.clone();
+                mp2_filepath.push("params_mp2");
 
-            if a == "--lpn-params" {
-                path.replace(b.to_owned());
-            }
-        }
-
-        let params = match path {
-            Some(path) => {
-                let path = PathBuf::from(path);
-
-                if !path.exists() || rebuild {
-                    log::info!("Rebuilding the parameters");
-                    let params = build_circuits_params();
-                    log::info!("Writing the parameters");
-                    let file = bincode::serialize(&params)?;
-
-                    fs::write(path, file).unwrap();
-
-                    params
+                let mp2 = if !mp2_filepath.exists() || cfg.force_rebuild {
+                    info!("rebuilding the mp2 parameters");
+                    let mp2 = mp2_v1::api::build_circuits_params();
+                    info!("writing the mp2-v1 parameters");
+                    bincode::serialize_into(
+                        BufWriter::new(
+                            File::create(&mp2_filepath)
+                                .with_context(|| format!("while creating {mp2_filepath:?}"))?,
+                        ),
+                        &mp2,
+                    )?;
+                    mp2
                 } else {
-                    log::info!("Reading the parameters");
-                    let file = fs::read(path)?;
+                    info!("parsing the mp2-v1 parameters");
+                    bincode::deserialize_from(BufReader::new(
+                        File::open(&mp2_filepath)
+                            .with_context(|| format!("while opening {mp2_filepath:?}"))?,
+                    ))
+                    .context("while parsing MP2 parameters")?
+                };
 
-                    bincode::deserialize(&file).unwrap()
+                PublicParameters { mp2 }
+            }
+            None => {
+                info!("recomputing parameters");
+                PublicParameters {
+                    mp2: mp2_v1::api::build_circuits_params(),
                 }
             }
-            None => build_circuits_params(),
-        };
+        });
 
-        self.params = Some(params);
         Ok(())
     }
 
