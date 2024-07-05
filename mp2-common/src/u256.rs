@@ -142,6 +142,7 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
         let mut num_limbs_per_gate = 0;
         while U32RangeCheckGate::<F, D>::new(num_limbs_per_gate).num_wires()
             <= self.config.num_wires
+            && num_limbs_per_gate <= N * NUM_LIMBS
         {
             num_limbs_per_gate += 1;
         }
