@@ -4,7 +4,10 @@ use hashbrown::HashMap;
 use mp2_common::{
     eth::ProofQuery, poseidon::empty_poseidon_hash, proof::ProofWithVK, utils::ToFields, CHasher, F,
 };
-use mp2_v1::{api::generate_proof, values_extraction::compute_leaf_single_id};
+use mp2_v1::{
+    api::{generate_proof, CircuitInput},
+    values_extraction::compute_leaf_single_id,
+};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
@@ -17,7 +20,6 @@ use ryhope::{
     MerkleTreeKvDb,
 };
 use std::str::FromStr;
-use verifiable_db::api::CircuitInput;
 
 use crate::common::TestContext;
 
@@ -127,11 +129,7 @@ impl TestContext {
                     let inputs = CircuitInput::CellsTree(
                         verifiable_db::cells_tree::CircuitInput::new_leaf(identifier, value),
                     );
-                    generate_proof(
-                        &self.params().mp2,
-                        mp2_v1::api::CircuitInput::TreeCreation(inputs),
-                    )
-                    .expect("while proving leaf")
+                    generate_proof(&self.params(), inputs).expect("while proving leaf")
                 } else if context.right.is_none() {
                     // Prove a partial node
                     let left_proof = proofs
@@ -143,11 +141,7 @@ impl TestContext {
                             identifier, value, left_proof,
                         ),
                     );
-                    generate_proof(
-                        &self.params().mp2,
-                        mp2_v1::api::CircuitInput::TreeCreation(inputs),
-                    )
-                    .expect("while proving partial node")
+                    generate_proof(&self.params(), inputs).expect("while proving partial node")
                 } else {
                     // Prove a full node.
                     let left_proof = proofs
@@ -165,11 +159,7 @@ impl TestContext {
                             [left_proof, right_proof],
                         ),
                     );
-                    generate_proof(
-                        &self.params().mp2,
-                        mp2_v1::api::CircuitInput::TreeCreation(inputs),
-                    )
-                    .expect("while proving full node")
+                    generate_proof(&self.params(), inputs).expect("while proving full node")
                 };
                 proofs.insert(k, proof);
 

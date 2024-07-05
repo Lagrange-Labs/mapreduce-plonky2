@@ -9,6 +9,7 @@ use ethers::{
 };
 use log::info;
 use mp2_common::eth::ProofQuery;
+use mp2_v1::api::{build_circuits_params, PublicParameters};
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
@@ -24,10 +25,6 @@ struct TestContextConfig {
 
     #[envconfig(from = "LPN_PARAMS_REBUILD", default = "false")]
     force_rebuild: bool,
-}
-
-pub(crate) struct PublicParameters {
-    pub(crate) mp2: mp2_v1::api::PublicParameters,
 }
 
 /// Test context
@@ -67,7 +64,7 @@ impl TestContext {
 
                 let mp2 = if !mp2_filepath.exists() || cfg.force_rebuild {
                     info!("rebuilding the mp2 parameters");
-                    let mp2 = mp2_v1::api::build_circuits_params();
+                    let mp2 = build_circuits_params();
                     info!("writing the mp2-v1 parameters");
                     bincode::serialize_into(
                         BufWriter::new(
@@ -86,13 +83,11 @@ impl TestContext {
                     .context("while parsing MP2 parameters")?
                 };
 
-                PublicParameters { mp2 }
+                mp2
             }
             None => {
                 info!("recomputing parameters");
-                PublicParameters {
-                    mp2: mp2_v1::api::build_circuits_params(),
-                }
+                build_circuits_params()
             }
         });
 

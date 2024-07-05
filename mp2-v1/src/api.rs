@@ -28,8 +28,12 @@ pub enum CircuitInput {
     BlockExtraction(block_extraction::CircuitInput),
     /// Final extraction input
     FinalExtraction(final_extraction::CircuitInput),
-    /// Tree creation input
-    TreeCreation(verifiable_db::api::CircuitInput),
+    /// Cells tree creation input
+    CellsTree(verifiable_db::cells_tree::CircuitInput),
+    /// Rows tree creation input
+    RowsTree(verifiable_db::row_tree::CircuitInput),
+    /// Block tree creation input
+    BlockTree(verifiable_db::block_tree::CircuitInput),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -107,9 +111,19 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
                 }
             }
         }
-        CircuitInput::TreeCreation(input) => verifiable_db::api::generate_proof(
+        CircuitInput::CellsTree(input) => verifiable_db::api::generate_proof(
             &params.tree_creation,
-            input,
+            verifiable_db::api::CircuitInput::CellsTree(input),
+            params.final_extraction.get_circuit_set(),
+        ),
+        CircuitInput::RowsTree(input) => verifiable_db::api::generate_proof(
+            &params.tree_creation,
+            verifiable_db::api::CircuitInput::RowsTree(input),
+            params.final_extraction.get_circuit_set(),
+        ),
+        CircuitInput::BlockTree(input) => verifiable_db::api::generate_proof(
+            &params.tree_creation,
+            verifiable_db::api::CircuitInput::BlockTree(input),
             params.final_extraction.get_circuit_set(),
         ),
     }
