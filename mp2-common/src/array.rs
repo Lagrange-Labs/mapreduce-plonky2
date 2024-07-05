@@ -1,8 +1,11 @@
 use crate::{
     serialization::{deserialize_long_array, serialize_long_array},
-    utils::{Endianness, PackerTarget, ToTargets},
+    utils::{
+        less_than_or_equal_to_unsafe, range_check_optimized, Endianness, PackerTarget, ToTargets,
+    },
 };
 use anyhow::{anyhow, Result};
+use core::num;
 use plonky2::{
     field::{extension::Extendable, types::Field},
     hash::hash_types::RichField,
@@ -11,6 +14,7 @@ use plonky2::{
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
+    util::log2_ceil,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use serde::{Deserialize, Serialize};
@@ -320,7 +324,7 @@ impl<const SIZE: usize> Array<Target, SIZE> {
         b: &mut CircuitBuilder<F, D>,
     ) {
         for byte in self.arr {
-            b.range_check(byte, 8)
+            range_check_optimized(b, byte, 8)
         }
     }
 }
@@ -536,12 +540,19 @@ where
     ) -> Array<T, SUB_SIZE> {
         let m = b.constant(F::from_canonical_usize(SUB_SIZE));
         let upper_bound = b.add(at, m);
+        let num_bits_size = SIZE.ilog2() + 1;
         Array::<T, SUB_SIZE> {
             arr: core::array::from_fn(|i| {
                 let i_target = b.constant(F::from_canonical_usize(i));
                 let i_plus_n_target = b.add(at, i_target);
                 // ((i + offset) <= n + M)
-                let lt = less_than_or_equal_to(b, i_plus_n_target, upper_bound, 63);
+                // unsafe should be ok since the function assumes that `at + SUB_SIZE <= SIZE`
+                let lt = less_than_or_equal_to_unsafe(
+                    b,
+                    i_plus_n_target,
+                    upper_bound,
+                    num_bits_size as usize,
+                );
                 // ((i+n) <= n+M) * (i+n)
                 let j = b.mul(lt.target, i_plus_n_target);
                 // out_val = arr[((i+n)<=n+M) * (i+n)]
