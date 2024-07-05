@@ -1,6 +1,9 @@
 use crate::array::{Array, VectorWire};
 
-use crate::utils::{greater_than_or_equal_to, less_than, num_to_bits};
+use crate::utils::{
+    greater_than_or_equal_to, greater_than_or_equal_to_unsafe, less_than, less_than_unsafe,
+    num_to_bits,
+};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
@@ -155,7 +158,7 @@ pub fn data_len<F: RichField + Extendable<D>, const D: usize>(
     for i in 0..MAX_LEN_BYTES {
         let i_tgt = b.constant(F::from_canonical_u8(i as u8));
         // make sure we don't read out more than the actual len
-        let len_of_len_pred = less_than(b, i_tgt, len_of_len, 8);
+        let len_of_len_pred = less_than_unsafe(b, i_tgt, len_of_len, 8);
         // this part offset i to read from the array
         let i_offset = b.add(i_tgt, offset);
         // i+1 because first byte is the RLP type
@@ -241,7 +244,7 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
     let select_3 = b._if(prefix_less_0xb8, short_str_len, select_2);
     let len = b._if(prefix_less_0x80, one, select_3);
 
-    let data_type = greater_than_or_equal_to(b, prefix, byte_c0, 8).target;
+    let data_type = greater_than_or_equal_to_unsafe(b, prefix, byte_c0, 8).target;
 
     let final_offset = b.add(offset, offset_data);
     RlpHeader {
