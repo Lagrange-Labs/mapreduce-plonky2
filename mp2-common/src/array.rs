@@ -538,7 +538,7 @@ where
         b: &mut CircuitBuilder<F, D>,
         at: Target,
     ) -> Array<T, SUB_SIZE> {
-        let m = b.constant(F::from_canonical_usize(SIZE));
+        let m = b.constant(F::from_canonical_usize(SUB_SIZE));
         let upper_bound = b.add(at, m);
         // we keep a high upper bound for `less_than` to avoid failures when we are invoking
         // this method with dummy inputs
