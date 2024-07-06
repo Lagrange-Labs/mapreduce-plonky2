@@ -1,6 +1,6 @@
 //! Main APIs and related structures
 
-use crate::{block_tree, cells_tree, extraction::ExtractionPI, row_tree};
+use crate::{block_tree, cells_tree, extraction::ExtractionPI, ivc, row_tree};
 use anyhow::Result;
 use ethers::prelude::U256;
 use mp2_common::{C, D, F};
@@ -20,6 +20,7 @@ pub enum CircuitInput {
     CellsTree(cells_tree::CircuitInput),
     RowsTree(row_tree::CircuitInput),
     BlockTree(block_tree::CircuitInput),
+    IVC(ivc::CircuitInput),
 }
 
 /// Parameters defining all the circuits employed for the verifiable DB stage of LPN
@@ -28,6 +29,7 @@ pub struct PublicParameters<E: ExtractionPI> {
     cells_tree: cells_tree::PublicParameters,
     rows_tree: row_tree::PublicParameters,
     block_tree: block_tree::PublicParameters<E>,
+    ivc: ivc::PublicParameters,
 }
 
 /// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.
@@ -40,12 +42,15 @@ pub fn build_circuits_params<E: ExtractionPI>(
     let rows_tree = row_tree::PublicParameters::build(cells_tree.vk_set());
     log::info!("Building block tree parameters...");
     let block_tree = block_tree::PublicParameters::build(extraction_set, rows_tree.set_vk());
+    log::info!("Building IVC parameters...");
+    let ivc = ivc::PublicParameters::build(block_tree.set_vk());
     log::info!("All parameters built!");
 
     PublicParameters {
         cells_tree,
         rows_tree,
         block_tree,
+        ivc,
     }
 }
 
@@ -67,5 +72,6 @@ pub fn generate_proof<E: ExtractionPI>(
                 .block_tree
                 .generate_proof(input, extraction_set, params.rows_tree.set_vk())
         }
+        CircuitInput::IVC(input) => params.ivc.generate_proof(input, params.block_tree.set_vk()),
     }
 }

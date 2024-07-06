@@ -2,6 +2,7 @@ mod api;
 mod circuit;
 mod public_inputs;
 
+pub use api::{CircuitInput, PublicParameters};
 use plonky2::iop::target::Target;
 pub use public_inputs::PublicInputs;
 /// Contains the regular outputs defined in the public inputs struct but as well a flag

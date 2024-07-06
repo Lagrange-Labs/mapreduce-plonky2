@@ -158,6 +158,10 @@ where
         }
     }
 
+    pub fn set_vk(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.set
+    }
+
     /// Generate the proof by the circuit input.
     /// The extraction set comes from the parameters of extracting the value, for example from the
     /// blockchain

@@ -130,7 +130,7 @@ impl<'a> PublicInputs<'a, F> {
     }
 
     pub fn value_set_digest_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(&self.dv)
+        WeierstrassPoint::from_fields(self.dv)
     }
     pub fn z0_u256(&self) -> U256 {
         U256::from(U256PubInputs::try_from(self.z0).unwrap())
@@ -155,8 +155,6 @@ impl<'a> PublicInputs<'a, F> {
 #[cfg(test)]
 mod tests {
 
-    use std::os::unix::thread;
-
     use mp2_common::{utils::ToFields, C, D};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
@@ -168,7 +166,6 @@ mod tests {
         plonk::circuit_builder::CircuitBuilder,
     };
     use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{thread_rng, Rng};
 
     use super::*;
 
