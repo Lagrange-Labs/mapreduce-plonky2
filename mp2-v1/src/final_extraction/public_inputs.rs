@@ -12,7 +12,7 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
-    u256::{self, U256PubInputs},
+    u256::{self, U256PubInputs, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
 };
 use plonky2::{
@@ -21,7 +21,9 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{array, iter};
+use verifiable_db::extraction::{ExtractionPI, ExtractionPIWrap};
 
 // Contract extraction public Inputs:
 // - `H : [8]F` : packed block hash
@@ -37,12 +39,19 @@ const DM_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + CURVE_TARGET_LEN
 const BN_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + u256::NUM_LIMBS;
 
 /// Public inputs for contract extraction
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PublicInputs<'a, T> {
+    // should be ok to skip serialization as this should never contain its own data,
+    // serialization/deserialization should be implemented only to satisfy trait bounds
+    #[serde(skip)]
     pub(crate) h: &'a [T],
+    #[serde(skip)]
     pub(crate) ph: &'a [T],
-    pub(crate) dv: (&'a [T]),
-    pub(crate) dm: (&'a [T]),
+    #[serde(skip)]
+    pub(crate) dv: &'a [T],
+    #[serde(skip)]
+    pub(crate) dm: &'a [T],
+    #[serde(skip)]
     pub(crate) bn: &'a [T],
 }
 
@@ -50,22 +59,54 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     const RANGES: &'static [PublicInputRange] = &[H_RANGE, PH_RANGE, DV_RANGE, DM_RANGE, BN_RANGE];
 
     fn register_args(&self, cb: &mut CBuilder) {
-        cb.register_public_inputs(self.h);
-        cb.register_public_inputs(self.ph);
-        cb.register_public_inputs(self.dv);
-        cb.register_public_inputs(self.dm);
-        cb.register_public_inputs(self.bn);
+        self.generic_register_args(cb)
     }
+}
+
+impl<'a> ExtractionPI<'a> for PublicInputs<'a, Target> {
+    const TOTAL_LEN: usize = Self::TOTAL_LEN;
+
+    fn from_slice(s: &'a [Target]) -> Self {
+        Self::from_slice(s)
+    }
+
+    fn commitment(&self) -> Vec<Target> {
+        self.block_hash().to_targets()
+    }
+
+    fn prev_commitment(&self) -> Vec<Target> {
+        self.previous_block_hash().to_targets()
+    }
+
+    fn digest_value(&self) -> Vec<Target> {
+        self.digest_value().to_targets()
+    }
+
+    fn digest_metadata(&self) -> Vec<Target> {
+        self.digest_metadata().to_targets()
+    }
+
+    fn primary_index_value(&self) -> Vec<Target> {
+        self.block_number().to_targets()
+    }
+
+    fn register_args(&self, cb: &mut CBuilder) {
+        self.generic_register_args(cb)
+    }
+}
+
+impl<'a> ExtractionPIWrap for PublicInputs<'a, Target> {
+    type PI<'b> = PublicInputs<'b, Target>;
 }
 
 impl<'a> PublicInputs<'a, GFp> {
     /// Get the metadata point.
     pub fn metadata_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(&self.dm)
+        WeierstrassPoint::from_fields(self.dm)
     }
     /// Get the digest holding the values .
     pub fn value_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(&self.dv)
+        WeierstrassPoint::from_fields(self.dv)
     }
     /// Get block number as U64
     pub fn block_number(&self) -> U64 {
@@ -84,6 +125,14 @@ impl<'a, T> PublicInputs<'a, T> {
 }
 
 impl<'a> PublicInputs<'a, Target> {
+    pub fn generic_register_args(&self, cb: &mut CBuilder) {
+        cb.register_public_inputs(self.h);
+        cb.register_public_inputs(self.ph);
+        cb.register_public_inputs(self.dv);
+        cb.register_public_inputs(self.dm);
+        cb.register_public_inputs(self.bn);
+    }
+
     /// Get the blockchain block hash corresponding to the values extracted
     pub fn block_hash(&self) -> OutputHash {
         OutputHash::from_targets(self.h)
@@ -91,18 +140,27 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// Get the predecessor block hash
     pub fn previous_block_hash(&self) -> OutputHash {
-        OutputHash::from_targets(&self.ph)
+        OutputHash::from_targets(self.ph)
     }
 
     pub fn digest_value(&self) -> CurveTarget {
         let dv = self.dv;
         CurveTarget::from_targets(dv)
     }
+
+    pub fn digest_metadata(&self) -> CurveTarget {
+        let dm = self.dm;
+        CurveTarget::from_targets(dm)
+    }
+
+    pub fn block_number(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.bn)
+    }
 }
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
     /// Total length of the public inputs
-    pub(crate) const TOTAL_LEN: usize = BN_RANGE.end;
+    pub const TOTAL_LEN: usize = BN_RANGE.end;
 
     /// Create from a slice.
     pub fn from_slice(pi: &'a [T]) -> Self {
@@ -139,6 +197,10 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     pub fn block_number_raw(&self) -> &[T] {
         &self.bn
+    }
+
+    pub fn digest_metadata_raw(&self) -> &[T] {
+        &self.dm
     }
 }
 

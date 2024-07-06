@@ -6,20 +6,22 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 bincode.workspace = true
+derive_more = "0.99.18"
 eth_trie.workspace = true
 ethers.workspace = true
 hashbrown.workspace = true
 hex.workspace = true
 itertools.workspace = true
 log.workspace = true
+num.workspace = true
 plonky2.workspace = true
 plonky2_crypto.workspace = true
+plonky2_ecdsa.workspace = true
 plonky2_ecgfp5.workspace = true
+rand.workspace = true
 rlp.workspace = true
 serde.workspace = true
 sha3.workspace = true
-rand.workspace = true
-derive_more = "0.99.18"
 
 [dev-dependencies]
 csv.workspace = true

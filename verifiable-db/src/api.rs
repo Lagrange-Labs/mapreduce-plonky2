@@ -1,14 +1,19 @@
 //! Main APIs and related structures
+
+use crate::{
+    block_tree, cells_tree,
+    extraction::{ExtractionPI, ExtractionPIWrap},
+    row_tree,
+};
 use anyhow::Result;
 use ethers::prelude::U256;
-use mp2_common::F;
+use mp2_common::{C, D, F};
+use recursion_framework::framework::RecursiveCircuits;
 use serde::{Deserialize, Serialize};
-
-use crate::{cells_tree, row_tree};
 
 /// Struct containing the expected input of the Tree node
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct InputNode {
+pub struct CellNode {
     pub identifier: F,
     pub value: U256,
 }
@@ -18,38 +23,63 @@ pub enum CircuitInput {
     /// Cells tree construction input
     CellsTree(cells_tree::CircuitInput),
     RowsTree(row_tree::CircuitInput),
+    BlockTree(block_tree::CircuitInput),
 }
 
 /// Parameters defining all the circuits employed for the verifiable DB stage of LPN
 #[derive(Serialize, Deserialize)]
-pub struct PublicParameters {
+#[serde(bound = "")]
+pub struct PublicParameters<E: ExtractionPIWrap>
+where
+    [(); E::PI::TOTAL_LEN]:,
+{
     cells_tree: cells_tree::PublicParameters,
     rows_tree: row_tree::PublicParameters,
-}
-impl PublicParameters {
-    /// Generate a proof for a circuit in the set of circuits employed in the
-    /// verifiable DB stage of LPN, employing `CircuitInput` to specify for which
-    /// circuit the proof should be generated.
-    pub fn generate_proof(&self, input: CircuitInput) -> Result<Vec<u8>> {
-        match input {
-            CircuitInput::CellsTree(input) => self.cells_tree.generate_proof(input),
-            CircuitInput::RowsTree(input) => self
-                .rows_tree
-                .generate_proof(input, self.cells_tree.vk_set().clone()),
-        }
-    }
+    block_tree: block_tree::PublicParameters<E>,
 }
 
 /// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.
-pub fn build_circuits_params() -> PublicParameters {
+pub fn build_circuits_params<E: ExtractionPIWrap>(
+    extraction_set: &RecursiveCircuits<F, C, D>,
+) -> PublicParameters<E>
+where
+    [(); E::PI::TOTAL_LEN]:,
+{
     log::info!("Building cells_tree parameters...");
     let cells_tree = cells_tree::build_circuits_params();
     log::info!("Building row tree parameters...");
     let rows_tree = row_tree::PublicParameters::build(cells_tree.vk_set());
+    log::info!("Building block tree parameters...");
+    let block_tree = block_tree::PublicParameters::build(extraction_set, rows_tree.set_vk());
     log::info!("All parameters built!");
 
     PublicParameters {
         cells_tree,
         rows_tree,
+        block_tree,
+    }
+}
+
+/// Generate a proof for a circuit in the set of circuits employed in the
+/// verifiable DB stage of LPN, employing `CircuitInput` to specify for which
+/// circuit the proof should be generated.
+pub fn generate_proof<E: ExtractionPIWrap>(
+    params: &PublicParameters<E>,
+    input: CircuitInput,
+    extraction_set: &RecursiveCircuits<F, C, D>,
+) -> Result<Vec<u8>>
+where
+    [(); E::PI::TOTAL_LEN]:,
+{
+    match input {
+        CircuitInput::CellsTree(input) => params.cells_tree.generate_proof(input),
+        CircuitInput::RowsTree(input) => params
+            .rows_tree
+            .generate_proof(input, params.cells_tree.vk_set().clone()),
+        CircuitInput::BlockTree(input) => {
+            params
+                .block_tree
+                .generate_proof(input, extraction_set, params.rows_tree.set_vk())
+        }
     }
 }

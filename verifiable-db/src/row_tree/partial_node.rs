@@ -180,7 +180,10 @@ pub mod test {
 
     use ethers::types::U256;
     use mp2_common::{C, D, F};
-    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::weierstrass_to_point,
+    };
     use plonky2::{
         field::types::Sample,
         hash::hashing::hash_n_to_hash_no_pad,
@@ -191,10 +194,8 @@ pub mod test {
     use crate::{
         cells_tree,
         row_tree::{
-            full_node::test::{generate_random_pi, weierstrass_to_point},
-            partial_node::PartialNodeCircuit,
-            public_inputs::PublicInputs,
-            IndexTuple,
+            full_node::test::generate_random_pi, partial_node::PartialNodeCircuit,
+            public_inputs::PublicInputs, IndexTuple,
         },
     };
 

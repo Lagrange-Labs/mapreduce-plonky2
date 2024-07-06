@@ -1,3 +1,4 @@
+#![feature(generic_const_exprs)]
 use anyhow::Result;
 use plonky2::{
     field::types::Field,
@@ -10,7 +11,9 @@ use plonky2::{
 };
 
 pub mod api;
+pub mod block_tree;
 pub mod cells_tree;
+pub mod extraction;
 pub mod row_tree;
 
 /// An example of using Plonky2 to prove a statement of the form

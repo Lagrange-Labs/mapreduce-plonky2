@@ -23,6 +23,7 @@ mod partial_node;
 mod public_inputs;
 
 pub use api::{CircuitInput, PublicParameters};
+pub use public_inputs::PublicInputs;
 
 /// The value to give at each node of the row tree
 #[derive(Clone, Debug, Constructor)]
