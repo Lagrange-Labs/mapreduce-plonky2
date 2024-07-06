@@ -421,7 +421,7 @@ mod tests {
             // Check metadata hash
             {
                 let exp_hash = compute_expected_hash(&extraction_pi, block_id);
-                assert_eq!(pi.metadata_digest, exp_hash.elements);
+                assert_eq!(pi.metadata_hash, exp_hash.elements);
             }
             // Check new node digest
             {
@@ -536,7 +536,7 @@ mod tests {
             // Check metadata hash
             {
                 let exp_hash = compute_expected_hash(&extraction_pi, block_id);
-                assert_eq!(pi.metadata_digest, exp_hash.elements);
+                assert_eq!(pi.metadata_hash, exp_hash.elements);
             }
             // Check new node digest
             {
@@ -637,7 +637,7 @@ mod tests {
             }
             // Check metadata hash
             {
-                assert_eq!(pi.metadata_digest, child_pi.metadata_digest);
+                assert_eq!(pi.metadata_hash, child_pi.metadata_hash);
             }
             // Check new node digest
             {

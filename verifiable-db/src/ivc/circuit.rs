@@ -1,13 +1,14 @@
 use ethers::types::U256;
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing,
+    default_config,
     keccak::PACKED_HASH_LEN,
     poseidon::empty_poseidon_hash,
+    proof::ProofWithVK,
     public_inputs::PublicInputCommon,
-    types::{HashOutput, CURVE_TARGET_LEN, VALUE_LEN},
+    serialization::{deserialize, serialize},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{FromTargets, TargetsConnector, ToFields, ToTargets},
-    D, F,
+    utils::{TargetsConnector, ToTargets},
+    C, D, F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
@@ -18,25 +19,27 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::CircuitBuilderU32;
-use plonky2_ecgfp5::{
-    curve::curve::Point,
-    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget, PartialWitnessCurve},
+use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use recursion_framework::{
+    circuit_builder::CircuitLogicWires,
+    framework::{
+        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+    },
 };
+use serde::{Deserialize, Serialize};
 
+#[derive(Clone)]
 struct IVCCircuit;
 
 impl IVCCircuit {
     pub(crate) fn build(c: &mut CircuitBuilder<F, D>, block_pi: &[Target], prev_proof: &[Target]) {
-        assert_eq!(
-            prev_proof.len(),
-            super::PublicInputs::<Target>::TOTAL_LEN + 1
-        );
+        assert_eq!(prev_proof.len(), super::EXTENDED_PUBLIC_INPUTS);
         let _true = c._true();
         let block_pi = crate::block_tree::PublicInputs::from_slice(block_pi);
         let prev_pi = super::PublicInputs::from_slice(prev_proof);
 
         // assert prev_proof.BH == new_block_proof.prev_block_hash
-        //c.connect_targets(prev_pi.block_hash(), block_pi.prev_block_hash());
+        c.connect_targets(prev_pi.block_hash(), block_pi.prev_block_hash());
 
         // This is the original blockchain hash
         // assert prev_proof.H_i == new_block_proof.H_old
@@ -51,10 +54,7 @@ impl IVCCircuit {
         // assert prev_proof.z_0 == new_block_proof.min
         c.enforce_equal_u256(&prev_pi.z0(), &block_pi.min_value());
         //assert prev_proof.M == new_block_proof.M
-        c.connect_curve_points(
-            prev_pi.metadata_set_digest(),
-            block_pi.metadata_set_digest(),
-        );
+        c.connect_targets(prev_pi.metadata_hash(), block_pi.metadata_hash());
 
         // last public input is an indicator if this proof is the first one on the IVC module_path!()
         // or not. 1 for the former case and 0 for the latter cases. Only the dummy circuit used
@@ -80,12 +80,12 @@ impl IVCCircuit {
         let new_value_set_digest =
             c.curve_add(prev_pi.value_set_digest(), block_pi.new_value_set_digest());
         super::PublicInputs::new(
-            block_pi.new_merkle_hash_target().to_targets(),
-            prev_pi.metadata_set_digest().to_targets(),
-            new_value_set_digest.to_targets(),
-            prev_pi.z0().to_targets(),
-            block_pi.block_number.to_vec(),
-            block_pi.current_block_hash(),
+            &block_pi.new_merkle_hash_target().to_targets(),
+            prev_pi.metadata_hash(),
+            &new_value_set_digest.to_targets(),
+            &prev_pi.z0().to_targets(),
+            block_pi.block_number,
+            &block_pi.current_block_hash(),
         )
         .register(c);
         // need to register the extra public input as 1 to indicate this is not the dummy proof
@@ -95,25 +95,72 @@ impl IVCCircuit {
     }
 }
 
+pub(crate) const BLOCK_IO: usize = crate::block_tree::PublicInputs::<Target>::TOTAL_LEN;
+#[derive(Serialize, Deserialize)]
+pub struct RecursiveIVCWires {
+    block_verifier: RecursiveCircuitsVerifierTarget<D>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RecursiveIVCInput {
+    pub(crate) block_proof: ProofWithVK,
+    pub(crate) block_set: RecursiveCircuits<F, C, D>,
+}
+
+impl CircuitLogicWires<F, D, 1> for RecursiveIVCWires {
+    // to verify the block proof
+    type CircuitBuilderParams = RecursiveCircuits<F, C, D>;
+
+    type Inputs = RecursiveIVCInput;
+
+    const NUM_PUBLIC_INPUTS: usize = super::EXTENDED_PUBLIC_INPUTS;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 1],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        let block_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, BLOCK_IO>::new(
+            default_config(),
+            &builder_parameters,
+        );
+        let block_verifier = block_verifier.verify_proof_in_circuit_set(builder);
+        let block_pi = block_verifier.get_public_input_targets::<F, BLOCK_IO>();
+
+        let prev_pi = Self::public_input_targets(verified_proofs[0]);
+        IVCCircuit::build(builder, block_pi, prev_pi);
+        RecursiveIVCWires { block_verifier }
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
+        let (proof, vd) = inputs.block_proof.into();
+        self.block_verifier
+            .set_target(pw, &inputs.block_set, &proof, &vd)?;
+        Ok(())
+    }
+}
+
 /// Dummy circuit holding the values that are given to the first block proof created.
 /// The circuit takes care of exporting the right values such that when the proof is verified
 /// inside the regular IVC circuits, the checks matches.
 #[derive(Clone, Debug)]
-struct DummyCircuit {
-    metadata_set_digest: Point,
-    z0: U256,
-    block_hash: [F; PACKED_HASH_LEN],
+pub struct DummyCircuit {
+    pub(crate) metadata_hash: HashOut<F>,
+    pub(crate) z0: U256,
+    pub(crate) block_hash: [F; PACKED_HASH_LEN],
 }
 
-struct DummyWires {
-    md_set_digest: CurveTarget,
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DummyWires {
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    md_set_digest: HashOutTarget,
     z0: UInt256Target,
     block_hash: [Target; PACKED_HASH_LEN],
 }
 
 impl DummyCircuit {
     pub fn build(c: &mut CircuitBuilder<F, D>) -> DummyWires {
-        let md = c.add_virtual_curve_target();
+        let md = c.add_virtual_hash();
         let z0 = c.add_virtual_u256();
         // for first proof, zi = z0- 1
         // such that block_proof.zi = z0 so in circuit the check
@@ -127,12 +174,12 @@ impl DummyCircuit {
         let block_hash = c.add_virtual_target_arr();
         let value_set_digest = c.curve_zero();
         super::PublicInputs::new(
-            empty_hash.to_targets(),
-            md.to_targets(),
-            value_set_digest.to_targets(),
-            z0.to_targets(),
-            zi.to_targets(),
-            block_hash.to_vec(),
+            &empty_hash.to_targets(),
+            &md.to_targets(),
+            &value_set_digest.to_targets(),
+            &z0.to_targets(),
+            &zi.to_targets(),
+            &block_hash,
         )
         .register(c);
         // we also need to register the extra public input indicating this is the "first dummy
@@ -149,40 +196,53 @@ impl DummyCircuit {
         // safety check, since we need to do -1 on it. It is anyway checked in the  main circuit
         // but easier to debug it already now.
         assert!(self.z0 != U256::zero());
-        pw.set_curve_target(
-            wires.md_set_digest,
-            self.metadata_set_digest.to_weierstrass(),
-        );
+        pw.set_hash_target(wires.md_set_digest, self.metadata_hash);
         pw.set_u256_target(&wires.z0, self.z0);
         pw.set_target_arr(&wires.block_hash, &self.block_hash);
     }
 }
 
+impl CircuitLogicWires<F, D, 0> for DummyWires {
+    type CircuitBuilderParams = ();
+
+    type Inputs = DummyCircuit;
+
+    const NUM_PUBLIC_INPUTS: usize = super::EXTENDED_PUBLIC_INPUTS;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
+        _builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        DummyCircuit::build(builder)
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use anyhow::Result;
     use std::ops::Sub;
 
     use ethers::types::U256;
     use mp2_common::{
-        keccak::PACKED_HASH_LEN,
-        poseidon::empty_poseidon_hash,
-        utils::{FromFields, ToFields},
-        C, D, F,
+        group_hashing::weierstrass_to_point, poseidon::empty_poseidon_hash, utils::ToFields, C, D,
+        F,
     };
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
-        field::types::{Field, Sample},
+        field::types::Field,
         hash::hash_types::HashOut,
         iop::{target::Target, witness::WitnessWrite},
     };
-    use plonky2_ecgfp5::curve::curve::Point;
 
     use rand::{thread_rng, Rng};
 
-    use crate::{block_tree, ivc::circuit::DummyCircuit};
+    use crate::{block_tree::tests::random_block_index_pi, ivc::circuit::DummyCircuit};
 
     use super::{super::PublicInputs as IVCPI, DummyWires, IVCCircuit};
 
@@ -223,42 +283,27 @@ mod test {
     }
 
     #[test]
-    fn ivc_circuit() {
+    fn ivc_circuit() -> Result<()> {
         // block_pi
-        let previous_merkle_root = HashOut::rand().to_fields();
-        let new_merkle_root = HashOut::rand().to_fields();
         let [min, max, block_number] = [0; 3].map(|_| U256(thread_rng().gen::<[u64; 4]>()));
-        let (minf, maxf, bnf) = (min.to_fields(), max.to_fields(), block_number.to_fields());
-        let block_hash = [0; PACKED_HASH_LEN].map(|_| F::rand());
-        let prev_block_hash = [0; PACKED_HASH_LEN].map(|_| F::rand());
-        let msd = Point::rand();
-        let metadata_set_digest = msd.to_fields();
-        let value_set_digest = Point::rand().to_fields();
-        let block_pi = block_tree::PublicInputs::new(
-            &new_merkle_root,
-            &previous_merkle_root,
-            &minf,
-            &maxf,
-            &bnf,
-            &block_hash,
-            &prev_block_hash,
-            &metadata_set_digest,
-            &value_set_digest,
-        );
-
+        let minf: Vec<F> = min.to_fields();
+        let block_pi = random_block_index_pi(&mut thread_rng(), min, max, block_number);
+        let block_pi = crate::block_tree::PublicInputs::from_slice(&block_pi);
         // previous ivc_pi
         let z0 = min;
         // previous block number
         let zi = block_number.sub(U256::one());
-        let previous_value_set_digest = Point::rand().to_fields();
+        let (z0f, zif) = (z0.to_fields(), zi.to_fields());
         // First case where we  construct a ivc pi which is not designated as the dummy first one
         let prev_pi = IVCPI::new(
-            previous_merkle_root.clone(),
-            metadata_set_digest.clone(),
-            previous_value_set_digest.clone(),
-            z0.to_fields(),
-            zi.to_fields(),
-            prev_block_hash.to_vec(),
+            // since this is the previous proof, we put the previous merkle root
+            block_pi.h_old,
+            block_pi.metadata_hash(),
+            block_pi.new_node_digest,
+            &z0f,
+            &zif,
+            // since this is the previous proof, we put the previous blockchain hash
+            block_pi.prev_block_hash,
         );
         let mut prev_pi_field = prev_pi.to_vec();
         // add an extra public input to designate this is not the initial proof
@@ -279,20 +324,21 @@ mod test {
         let proof = run_circuit::<F, D, C, _>(tc);
         let pi = super::super::PublicInputs::from_slice(&proof.public_inputs);
         {
-            assert_eq!(pi.merkle_root_hash_fields().to_fields(), new_merkle_root);
             assert_eq!(
-                pi.metadata_set_digest_point().to_fields(),
-                metadata_set_digest
+                pi.merkle_root_hash_fields(),
+                block_pi.new_merkle_hash_field()
             );
-            let exp_set_digest = Point::from_fields(&previous_value_set_digest)
-                + Point::from_fields(&value_set_digest);
+            assert_eq!(pi.metadata_hash(), block_pi.metadata_hash());
+            // adding the previous value digest with the new block proof value digest
+            let exp_set_digest = weierstrass_to_point(&prev_pi.value_set_digest_point())
+                + weierstrass_to_point(&block_pi.new_value_set_digest_point());
             assert_eq!(
                 pi.value_set_digest_point().to_fields(),
                 exp_set_digest.to_fields()
             );
             assert_eq!(pi.z0_u256(), z0);
             assert_eq!(pi.zi_u256(), block_number);
-            assert_eq!(pi.original_hash(), block_hash);
+            assert_eq!(pi.original_hash(), block_pi.block_hash());
         }
 
         //
@@ -302,8 +348,8 @@ mod test {
         // we set min = max = block_number, and hash = empty, and zi = z0-1
         let dummy_circuit = DummyCircuit {
             // we expose the previous block hash, that is not "proved" in our system
-            block_hash: prev_block_hash,
-            metadata_set_digest: msd,
+            block_hash: block_pi.prev_block_hash_fields(),
+            metadata_hash: HashOut::try_from(block_pi.metadata_hash())?,
             z0,
         };
         let proof = run_circuit::<F, D, C, _>(dummy_circuit);
@@ -314,16 +360,16 @@ mod test {
         );
 
         let empty_hash = empty_poseidon_hash().to_fields();
-        let block_pi = block_tree::PublicInputs::new(
-            &new_merkle_root,
+        let block_pi = crate::block_tree::PublicInputs::new(
+            block_pi.h_new,
             &empty_hash,
             &minf,
             &minf,
             &minf,
-            &block_hash,
-            &prev_block_hash,
-            &metadata_set_digest,
-            &value_set_digest,
+            block_pi.block_hash,
+            block_pi.prev_block_hash,
+            block_pi.metadata_hash(),
+            block_pi.new_node_digest,
         );
 
         let tc = TestCircuit {
@@ -341,19 +387,19 @@ mod test {
         let proof = run_circuit::<F, D, C, _>(tc);
         let pi = super::super::PublicInputs::from_slice(&proof.public_inputs);
         {
-            assert_eq!(pi.merkle_root_hash_fields().to_fields(), new_merkle_root);
             assert_eq!(
-                pi.metadata_set_digest_point().to_fields(),
-                metadata_set_digest
+                pi.merkle_root_hash_fields(),
+                block_pi.new_merkle_hash_field()
             );
-            let exp_set_digest = Point::from_fields(&value_set_digest);
+            assert_eq!(pi.metadata_hash(), block_pi.metadata_hash(),);
             assert_eq!(
-                pi.value_set_digest_point().to_fields(),
-                exp_set_digest.to_fields()
+                pi.value_set_digest_point(),
+                block_pi.new_value_set_digest_point()
             );
             assert_eq!(pi.z0_u256(), z0);
             assert_eq!(pi.zi_u256(), min);
-            assert_eq!(pi.original_hash(), block_hash);
+            assert_eq!(pi.original_hash(), block_pi.block_hash());
         }
+        Ok(())
     }
 }

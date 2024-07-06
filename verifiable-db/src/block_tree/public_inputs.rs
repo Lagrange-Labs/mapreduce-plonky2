@@ -1,10 +1,13 @@
 //! Public inputs for Block Insertion circuits
 
+use std::array::from_fn as create_array;
+
+use ethers::types::U256;
 use mp2_common::{
     keccak::PACKED_HASH_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, CURVE_TARGET_LEN},
-    u256::{self, UInt256Target},
+    u256::{self, U256PubInputs, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
     F,
 };
@@ -33,10 +36,10 @@ const BLOCK_HASH_RANGE: PublicInputRange =
     BLOCK_NUMBER_RANGE.end..BLOCK_NUMBER_RANGE.end + PACKED_HASH_LEN;
 const PREV_BLOCK_HASH_RANGE: PublicInputRange =
     BLOCK_HASH_RANGE.end..BLOCK_HASH_RANGE.end + PACKED_HASH_LEN;
-const METADATA_SET_DIGEST_RANGE: PublicInputRange =
-    PREV_BLOCK_HASH_RANGE.end..PREV_BLOCK_HASH_RANGE.end + CURVE_TARGET_LEN;
+const METADATA_HASH: PublicInputRange =
+    PREV_BLOCK_HASH_RANGE.end..PREV_BLOCK_HASH_RANGE.end + NUM_HASH_OUT_ELTS;
 const NEW_NODE_DIGEST_RANGE: PublicInputRange =
-    METADATA_SET_DIGEST_RANGE.end..METADATA_SET_DIGEST_RANGE.end + CURVE_TARGET_LEN;
+    METADATA_HASH.end..METADATA_HASH.end + CURVE_TARGET_LEN;
 
 /// Public inputs for Cells Tree Construction
 #[derive(Clone, Debug)]
@@ -48,7 +51,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) block_number: &'a [T],
     pub(crate) block_hash: &'a [T],
     pub(crate) prev_block_hash: &'a [T],
-    pub(crate) metadata_digest: &'a [T],
+    pub(crate) metadata_hash: &'a [T],
     pub(crate) new_node_digest: &'a [T],
 }
 
@@ -61,7 +64,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
         BLOCK_NUMBER_RANGE,
         BLOCK_HASH_RANGE,
         PREV_BLOCK_HASH_RANGE,
-        METADATA_SET_DIGEST_RANGE,
+        METADATA_HASH,
         NEW_NODE_DIGEST_RANGE,
     ];
 
@@ -73,7 +76,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
         cb.register_public_inputs(self.block_number);
         cb.register_public_inputs(self.block_hash);
         cb.register_public_inputs(self.prev_block_hash);
-        cb.register_public_inputs(self.metadata_digest);
+        cb.register_public_inputs(self.metadata_hash);
         cb.register_public_inputs(self.new_node_digest);
     }
 }
@@ -84,9 +87,25 @@ impl<'a> PublicInputs<'a, F> {
         self.h_new.try_into().unwrap()
     }
 
+    pub fn old_merkle_hash_field(&self) -> HashOut<F> {
+        self.h_old.try_into().unwrap()
+    }
+
+    pub fn block_hash(&self) -> [F; PACKED_HASH_LEN] {
+        create_array(|i| self.block_hash[i])
+    }
+
+    pub fn prev_block_hash_fields(&self) -> [F; PACKED_HASH_LEN] {
+        create_array(|i| self.prev_block_hash[i])
+    }
+
     /// Get the new node digest point.
     pub fn new_value_set_digest_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.new_node_digest)
+    }
+
+    pub fn min_block_number(&self) -> anyhow::Result<U256> {
+        Ok(U256::from(U256PubInputs::try_from(self.min)?))
     }
 }
 
@@ -114,10 +133,6 @@ impl<'a> PublicInputs<'a, Target> {
         UInt256Target::from_targets(self.min)
     }
 
-    pub fn metadata_set_digest(&self) -> CurveTarget {
-        CurveTarget::from_targets(self.metadata_digest)
-    }
-
     pub fn prev_block_hash(&self) -> Vec<Target> {
         self.prev_block_hash.to_targets()
     }
@@ -140,7 +155,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         index_value: &'a [T],
         commitment: &'a [T],
         prev_commitment: &'a [T],
-        metadata_digest: &'a [T],
+        metadata_hash: &'a [T],
         new_node_digest: &'a [T],
     ) -> Self {
         assert_eq!(h_new.len(), H_NEW_RANGE.len());
@@ -150,8 +165,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         assert_eq!(index_value.len(), BLOCK_NUMBER_RANGE.len());
         assert_eq!(commitment.len(), BLOCK_HASH_RANGE.len());
         assert_eq!(prev_commitment.len(), BLOCK_HASH_RANGE.len());
-        assert_eq!(metadata_digest.len(), METADATA_SET_DIGEST_RANGE.len());
-        assert_eq!(metadata_digest.len(), NEW_NODE_DIGEST_RANGE.len());
+        assert_eq!(metadata_hash.len(), METADATA_HASH.len());
+        assert_eq!(new_node_digest.len(), NEW_NODE_DIGEST_RANGE.len());
         Self {
             h_new,
             h_old,
@@ -160,7 +175,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             block_number: index_value,
             block_hash: commitment,
             prev_block_hash: prev_commitment,
-            metadata_digest,
+            metadata_hash,
             new_node_digest,
         }
     }
@@ -176,7 +191,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             block_number: &pi[BLOCK_NUMBER_RANGE],
             block_hash: &pi[BLOCK_HASH_RANGE],
             prev_block_hash: &pi[PREV_BLOCK_HASH_RANGE],
-            metadata_digest: &pi[METADATA_SET_DIGEST_RANGE],
+            metadata_hash: &pi[METADATA_HASH],
             new_node_digest: &pi[NEW_NODE_DIGEST_RANGE],
         }
     }
@@ -191,10 +206,13 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             .chain(self.block_number)
             .chain(self.block_hash)
             .chain(self.prev_block_hash)
-            .chain(self.metadata_digest)
+            .chain(self.metadata_hash)
             .chain(self.new_node_digest)
             .cloned()
             .collect()
+    }
+    pub fn metadata_hash(&self) -> &[T] {
+        &self.metadata_hash
     }
 }
 

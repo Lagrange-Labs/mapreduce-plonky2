@@ -11,7 +11,7 @@ use crate::{
     serialization::{
         circuit_data_serialization::SerializableRichField, FromBytes, SerializationError, ToBytes,
     },
-    utils::{Endianness, FromTargets, Packer, ToFields, ToTargets},
+    utils::{Endianness, FromFields, FromTargets, Packer, ToFields, ToTargets},
 };
 use anyhow::{ensure, Result};
 use ethers::types::U256;
@@ -517,6 +517,12 @@ impl<F: RichField> ToFields<F> for U256 {
         let limbs = bytes.pack(Endianness::Big).to_fields();
         assert_eq!(limbs.len(), NUM_LIMBS);
         limbs
+    }
+}
+
+impl<F: RichField> FromFields<F> for U256 {
+    fn from_fields(t: &[F]) -> Self {
+        U256::from(U256PubInputs::try_from(t).unwrap())
     }
 }
 /// Struct to wrap a set of public inputs representing a single U256

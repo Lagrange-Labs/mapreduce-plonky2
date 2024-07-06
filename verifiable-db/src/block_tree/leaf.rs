@@ -7,8 +7,7 @@ use crate::{extraction::ExtractionPI, row_tree};
 use anyhow::Result;
 use mp2_common::{
     default_config,
-    group_hashing::CircuitBuilderGroupHashing,
-    poseidon::{empty_poseidon_hash, hash_to_int_target},
+    poseidon::empty_poseidon_hash,
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     types::CBuilder,
@@ -357,7 +356,7 @@ pub mod tests {
         // Check metadata hash
         {
             let exp_hash = compute_expected_hash(&extraction_pi, block_id);
-            assert_eq!(pi.metadata_digest, exp_hash.elements);
+            assert_eq!(pi.metadata_hash, exp_hash.elements);
         }
         // Check new node digest
         {

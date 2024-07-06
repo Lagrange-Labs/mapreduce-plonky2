@@ -26,8 +26,6 @@ use plonky2::{
     },
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
-use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
     framework::{
@@ -410,7 +408,7 @@ mod tests {
         {
             let exp_hash = compute_expected_hash(&extraction_pi, index_identifier);
 
-            assert_eq!(pi.metadata_digest, exp_hash.elements);
+            assert_eq!(pi.metadata_hash, exp_hash.elements);
         }
         // Check new node digest
         {

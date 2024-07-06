@@ -112,7 +112,7 @@ impl MembershipCircuit {
             child_pi.block_number,
             child_pi.block_hash,
             child_pi.prev_block_hash,
-            child_pi.metadata_digest,
+            child_pi.metadata_hash,
             child_pi.new_node_digest,
         )
         .register(b);
@@ -296,7 +296,7 @@ mod tests {
         }
         // Check metadata hash
         {
-            assert_eq!(pi.metadata_digest, child_pi.metadata_digest);
+            assert_eq!(pi.metadata_hash, child_pi.metadata_hash);
         }
         // Check new node digest
         {
