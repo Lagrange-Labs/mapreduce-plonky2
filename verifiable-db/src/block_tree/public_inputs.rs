@@ -222,12 +222,19 @@ mod tests {
 
     use super::*;
     use ethers::prelude::U256;
-    use mp2_common::{C, D, F};
-    use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::iop::{
-        target::Target,
-        witness::{PartialWitness, WitnessWrite},
+    use mp2_common::{utils::ToFields, C, D, F};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
     };
+    use plonky2::{
+        field::types::Sample,
+        iop::{
+            target::Target,
+            witness::{PartialWitness, WitnessWrite},
+        },
+    };
+    use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
 
     #[derive(Clone, Debug)]

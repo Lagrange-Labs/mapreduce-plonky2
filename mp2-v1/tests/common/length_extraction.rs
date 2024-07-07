@@ -29,7 +29,7 @@ impl TestContext {
         // Query the slot and add the node path to the trie.
         trie.query_proof_and_add_slot(self, contract_address, slot as usize)
             .await;
-        let proof = trie.prove_length(&contract_address, value, self.params());
+        let proof = trie.prove_length(&contract_address, value, &self.params());
 
         // Check the public inputs.
         let pi = PublicInputs::from_slice(&proof.proof().public_inputs);

@@ -30,11 +30,14 @@ pub(crate) mod tests {
     use ethers::prelude::U256;
     use mp2_common::{keccak::PACKED_HASH_LEN, utils::ToFields, F};
     use mp2_test::utils::random_vector;
-    use plonky2::{field::types::Sample, hash::hash_types::NUM_HASH_OUT_ELTS};
+    use plonky2::{field::types::Sample, hash::hash_types::NUM_HASH_OUT_ELTS, iop::target::Target};
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{rngs::ThreadRng, Rng};
 
     use crate::row_tree;
+
+    pub(crate) type TestPITargets<'a> = crate::extraction::test::PublicInputs<'a, Target>;
+    pub(crate) type TestPIField<'a> = crate::extraction::test::PublicInputs<'a, F>;
 
     /// Generate a random block index public inputs (of current module).
     pub(crate) fn random_block_index_pi(
@@ -79,11 +82,6 @@ pub(crate) mod tests {
         let [h, ph] = [0; 2].map(|_| random_vector::<u32>(PACKED_HASH_LEN).to_fields());
         let dm = Point::sample(rng).to_weierstrass().to_fields();
 
-        h.into_iter()
-            .chain(ph)
-            .chain(value_digest.iter().cloned())
-            .chain(dm)
-            .chain(block_number.to_fields())
-            .collect()
+        TestPIField::new(&h, &ph, value_digest, &dm, &block_number.to_fields()).to_vec()
     }
 }

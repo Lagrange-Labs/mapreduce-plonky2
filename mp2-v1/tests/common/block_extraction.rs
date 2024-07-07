@@ -24,7 +24,7 @@ impl TestContext {
         let block = self.query_block().await;
         let buffer = block.rlp();
         let proof = api::generate_proof(
-            self.params(),
+            &self.params(),
             api::CircuitInput::BlockExtraction(block_extraction::CircuitInput::from_block_header(
                 buffer,
             )),

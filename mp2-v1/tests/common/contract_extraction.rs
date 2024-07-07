@@ -2,11 +2,9 @@
 
 use super::TestContext;
 use eth_trie::Nibbles;
-use ethers::{prelude::Address, providers::Middleware, types::BlockNumber};
-use log::info;
+use ethers::prelude::Address;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
-    group_hashing::map_to_curve_point,
     mpt_sequential::{
         mpt_key_ptr, utils::bytes_to_nibbles, MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE,
     },
@@ -56,17 +54,17 @@ impl TestContext {
 
         // Generate the leaf proof.
         let leaf = nodes[0].to_vec();
-        let mut proof = prove_leaf(self.params(), leaf, &storage_root, contract_address);
+        let mut proof = prove_leaf(&self.params(), leaf, &storage_root, contract_address);
 
         // Prove the all nodes till to the root.
         for node in &nodes[1..] {
             let rlp = Rlp::new(node);
             match rlp.prototype().unwrap() {
                 Prototype::List(MPT_EXTENSION_RLP_SIZE) => {
-                    proof = prove_extension(self.params(), node.to_vec(), proof);
+                    proof = prove_extension(&self.params(), node.to_vec(), proof);
                 }
                 Prototype::List(MPT_BRANCH_RLP_SIZE) => {
-                    proof = prove_branch(self.params(), node.to_vec(), proof);
+                    proof = prove_branch(&self.params(), node.to_vec(), proof);
                 }
                 _ => panic!("Invalid RLP size for the state proof"),
             }

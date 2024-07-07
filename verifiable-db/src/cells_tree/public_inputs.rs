@@ -1,15 +1,16 @@
 //! Public inputs for Cells Tree Construction circuits
-
 use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, GFp, CURVE_TARGET_LEN},
     utils::{FromFields, FromTargets},
+    F,
 };
 use plonky2::{
-    hash::hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
+    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::target::Target,
 };
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
+use std::{array, fmt::Debug};
 
 // Cells Tree Construction public inputs:
 // - `H : [4]F` : Poseidon hash of the subtree at this node
@@ -80,19 +81,24 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 }
 
+impl<'a> PublicInputs<'a, F> {
+    pub fn root_hash_hashout(&self) -> HashOut<F> {
+        HashOut {
+            elements: array::from_fn(|i| self.h[i]),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{
-        utils::{Fieldable, ToFields},
-        C, D, F,
-    };
+    use mp2_common::{utils::ToFields, C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
     use plonky2::{
-        field::types::{Field, Sample},
+        field::types::Sample,
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
