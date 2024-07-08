@@ -5262,6 +5262,7 @@ dependencies = [
  "derive_more",
  "env_logger",
  "ethers",
+ "itertools 0.12.1",
  "log",
  "mp2_common",
  "mp2_test",
