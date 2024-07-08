@@ -31,10 +31,12 @@ hashbrown = "0.14"
 hex = "0.4"
 itertools = "0.12"
 log = "0.4"
+num = "0.4"
 paste = "1.0"
 plonky2 = "0.2.2"
 # supporting latest plonky2
 plonky2_crypto = { git = "https://github.com/Lagrange-Labs/plonky2-crypto" }
+plonky2_ecdsa = { git = "https://github.com/Lagrange-Labs/plonky2-ecdsa" }
 plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
 plonky2_monolith = "0.1.0"
 plonky2x = { git = "https://github.com/Lagrange-Labs/succinctx", branch = "fix-build" }

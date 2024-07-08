@@ -9,6 +9,7 @@ use ethers::{
 };
 use log::info;
 use mp2_common::eth::ProofQuery;
+use mp2_v1::api::{build_circuits_params, PublicParameters};
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
@@ -24,11 +25,6 @@ struct TestContextConfig {
 
     #[envconfig(from = "LPN_PARAMS_REBUILD", default = "false")]
     force_rebuild: bool,
-}
-
-pub(crate) struct PublicParameters {
-    pub(crate) mp2: mp2_v1::api::PublicParameters,
-    pub(crate) zkdb: verifiable_db::api::PublicParameters,
 }
 
 /// Test context
@@ -66,12 +62,9 @@ impl TestContext {
                 let mut mp2_filepath = params_path.clone();
                 mp2_filepath.push("params_mp2");
 
-                let mut zkdb_filepath = params_path.clone();
-                zkdb_filepath.push("params_zkdb");
-
                 let mp2 = if !mp2_filepath.exists() || cfg.force_rebuild {
                     info!("rebuilding the mp2 parameters");
-                    let mp2 = mp2_v1::api::build_circuits_params();
+                    let mp2 = build_circuits_params();
                     info!("writing the mp2-v1 parameters");
                     bincode::serialize_into(
                         BufWriter::new(
@@ -90,34 +83,11 @@ impl TestContext {
                     .context("while parsing MP2 parameters")?
                 };
 
-                let zkdb = if !zkdb_filepath.exists() || cfg.force_rebuild {
-                    log::info!("rebuilding the verifiable DB parameters");
-                    let zkdb = verifiable_db::api::build_circuits_params();
-                    log::info!("writing the verififable DB parameters");
-                    bincode::serialize_into(
-                        BufWriter::new(
-                            File::create(&zkdb_filepath)
-                                .with_context(|| format!("while creating {zkdb_filepath:?}"))?,
-                        ),
-                        &zkdb,
-                    )?;
-                    zkdb
-                } else {
-                    info!("parsing the verifiable DB parameters");
-                    bincode::deserialize_from(BufReader::new(
-                        File::open(&zkdb_filepath).context("while opening {zkdb_filepath:?}")?,
-                    ))
-                    .context("while parsing verifiable DB parameters")?
-                };
-
-                PublicParameters { mp2, zkdb }
+                mp2
             }
             None => {
                 info!("recomputing parameters");
-                PublicParameters {
-                    mp2: mp2_v1::api::build_circuits_params(),
-                    zkdb: verifiable_db::api::build_circuits_params(),
-                }
+                build_circuits_params()
             }
         });
 

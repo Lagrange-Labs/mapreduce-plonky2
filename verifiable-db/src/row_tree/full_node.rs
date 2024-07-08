@@ -139,7 +139,10 @@ pub(crate) mod test {
 
     use ethers::types::U256;
     use mp2_common::{group_hashing::map_to_curve_point, poseidon::H, utils::ToFields, C, D, F};
-    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::weierstrass_to_point,
+    };
     use plonky2::{
         field::types::Sample,
         hash::hash_types::HashOut,
@@ -201,12 +204,6 @@ pub(crate) mod test {
             &max.to_fields(),
         )
         .to_vec()
-    }
-
-    pub fn weierstrass_to_point(w: &WeierstrassPoint) -> Point {
-        let p = Point::decode(w.encode()).unwrap();
-        assert_eq!(&p.to_weierstrass(), w);
-        p
     }
 
     #[test]

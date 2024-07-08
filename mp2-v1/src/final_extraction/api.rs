@@ -132,6 +132,10 @@ impl PublicParameters {
             .generate_proof(&self.lengthed, [], [], lengthed_input)?;
         ProofWithVK::serialize(&(proof, self.lengthed.circuit_data().verifier_only.clone()).into())
     }
+
+    pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.circuit_set
+    }
 }
 
 pub struct SimpleCircuitInput {

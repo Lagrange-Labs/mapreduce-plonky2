@@ -27,7 +27,7 @@ impl TestContext {
             CircuitInput::new_simple_input(block_proof, contract_proof, values_proof, compound_type)
         }?;
         let proof = ProofWithVK::deserialize(&api::generate_proof(
-            &self.params().mp2,
+            &self.params(),
             api::CircuitInput::FinalExtraction(circuit_input),
         )?)?;
 
