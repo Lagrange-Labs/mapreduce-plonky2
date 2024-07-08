@@ -141,8 +141,8 @@ impl<'a> PublicInputs<'a, F> {
         U256::from_fields(self.zi)
     }
 
-    pub fn block_hash_fields(&self) -> HashOut<F> {
-        create_array(|i| self.o[i]).into()
+    pub fn block_hash_fields(&self) -> [F; PACKED_HASH_LEN] {
+        create_array(|i| self.o[i])
     }
 
     pub fn to_vec(&self) -> Vec<F> {

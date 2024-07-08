@@ -293,12 +293,7 @@ mod test {
             block_pi.prev_block_hash,
         );
         let mut prev_pi_field = prev_pi.to_vec();
-        // add an extra public input to designate this is not the initial proof
-        prev_pi_field.push(F::ONE);
-        assert_eq!(
-            prev_pi_field.len(),
-            super::super::PublicInputs::<Target>::TOTAL_LEN + 1
-        );
+        assert_eq!(prev_pi_field.len(), crate::ivc::NUM_IO);
         let tc = TestCircuit {
             prev_pi: prev_pi_field.to_vec(),
             block_pi: block_pi.to_vec(),
@@ -307,7 +302,7 @@ mod test {
             tc.block_pi.len(),
             crate::block_tree::PublicInputs::<F>::TOTAL_LEN
         );
-        assert!(tc.prev_pi.len() == super::super::PublicInputs::<F>::TOTAL_LEN + 1);
+        assert!(tc.prev_pi.len() == crate::ivc::NUM_IO);
         let proof = run_circuit::<F, D, C, _>(tc);
         let pi = super::super::PublicInputs::from_slice(&proof.public_inputs);
         {
@@ -341,7 +336,7 @@ mod test {
         };
         let proof = run_circuit::<F, D, C, _>(dummy_circuit);
         let prev_pi = proof.public_inputs;
-        assert_eq!(prev_pi.len(), super::super::PublicInputs::<F>::TOTAL_LEN);
+        assert_eq!(prev_pi.len(), crate::ivc::NUM_IO);
 
         let empty_hash = empty_poseidon_hash().to_fields();
         let block_pi = crate::block_tree::PublicInputs::new(
@@ -364,7 +359,7 @@ mod test {
             tc.block_pi.len(),
             crate::block_tree::PublicInputs::<F>::TOTAL_LEN
         );
-        assert_eq!(tc.prev_pi.len(), super::super::PublicInputs::<F>::TOTAL_LEN);
+        assert_eq!(tc.prev_pi.len(), crate::ivc::NUM_IO);
         let proof = run_circuit::<F, D, C, _>(tc);
         let pi = super::super::PublicInputs::from_slice(&proof.public_inputs);
         {

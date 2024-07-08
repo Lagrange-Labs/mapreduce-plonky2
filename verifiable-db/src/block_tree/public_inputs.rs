@@ -91,8 +91,8 @@ impl<'a> PublicInputs<'a, F> {
         self.h_old.try_into().unwrap()
     }
 
-    pub fn block_hash(&self) -> HashOut<F> {
-        create_array(|i| self.block_hash[i]).into()
+    pub fn block_hash(&self) -> [F; PACKED_HASH_LEN] {
+        create_array(|i| self.block_hash[i])
     }
 
     pub fn prev_block_hash_fields(&self) -> [F; PACKED_HASH_LEN] {
