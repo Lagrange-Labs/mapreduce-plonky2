@@ -158,6 +158,7 @@ impl FromFields<GoldilocksField> for Point {
         weierstrass_to_point(w)
     }
 }
+/// This function CAN PANIC.
 pub fn weierstrass_to_point(w: &WeierstrassPoint) -> Point {
     let p = Point::decode(w.encode()).expect("input weierstrass point invalid");
     assert_eq!(&p.to_weierstrass(), w);

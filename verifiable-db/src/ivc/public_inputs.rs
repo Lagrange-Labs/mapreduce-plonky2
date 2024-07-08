@@ -12,6 +12,7 @@ use plonky2::{
     iop::target::Target,
 };
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
+use std::array::from_fn as create_array;
 
 /// -  H: new (Merkle) root
 /// - `DM` : metadata hash representing the extraction of the data from storage slots and insertion in the expected columns of the table being built.
@@ -90,7 +91,7 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         }
     }
 
-    pub fn original_hash(&self) -> &[T] {
+    pub fn original_hash_raw(&self) -> &[T] {
         self.o
     }
 
@@ -133,11 +134,15 @@ impl<'a> PublicInputs<'a, F> {
         WeierstrassPoint::from_fields(self.dv)
     }
     pub fn z0_u256(&self) -> U256 {
-        U256::from(U256PubInputs::try_from(self.z0).unwrap())
+        U256::from_fields(self.z0)
     }
 
     pub fn zi_u256(&self) -> U256 {
-        U256::from(U256PubInputs::try_from(self.zi).unwrap())
+        U256::from_fields(self.zi)
+    }
+
+    pub fn block_hash_fields(&self) -> HashOut<F> {
+        create_array(|i| self.o[i]).into()
     }
 
     pub fn to_vec(&self) -> Vec<F> {
@@ -147,7 +152,7 @@ impl<'a> PublicInputs<'a, F> {
         res.extend(self.dv);
         res.extend(self.z0);
         res.extend(self.zi);
-        res.extend(self.original_hash());
+        res.extend(self.original_hash_raw());
         res
     }
 }

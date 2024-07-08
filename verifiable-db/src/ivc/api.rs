@@ -7,10 +7,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::{
-    circuit::{DummyCircuit, DummyWires, RecursiveIVCInput, RecursiveIVCWires},
-    EXTENDED_PUBLIC_INPUTS,
-};
+use super::circuit::{DummyCircuit, DummyWires, RecursiveIVCInput, RecursiveIVCWires};
 
 pub enum CircuitInput {
     FirstProof {
@@ -59,7 +56,8 @@ impl PublicParameters {
     pub fn build(block_set: &RecursiveCircuits<F, C, D>) -> PublicParameters {
         let config = default_config();
         const CIRCUIT_SET_SIZE: usize = 2;
-        let builder = CircuitWithUniversalVerifierBuilder::<F, D, EXTENDED_PUBLIC_INPUTS>::new::<C>(
+        const IVC_NUM_IO: usize = super::NUM_IO;
+        let builder = CircuitWithUniversalVerifierBuilder::<F, D, IVC_NUM_IO>::new::<C>(
             config,
             CIRCUIT_SET_SIZE,
         );
@@ -189,7 +187,7 @@ mod test {
             );
             assert_eq!(ivc_pi.z0_u256(), min);
             assert_eq!(ivc_pi.zi_u256(), min);
-            assert_eq!(ivc_pi.original_hash(), &block_pi.block_hash());
+            assert_eq!(ivc_pi.block_hash_fields(), block_pi.block_hash());
         }
 
         println!("Generating second block proof");
@@ -240,7 +238,7 @@ mod test {
             assert_eq!(ivc_pi.value_set_digest_point(), exp_digest.to_weierstrass(),);
             assert_eq!(ivc_pi.z0_u256(), min);
             assert_eq!(ivc_pi.zi_u256(), U256::from_fields(&next_block_number));
-            assert_eq!(ivc_pi.original_hash(), &block_pi.block_hash());
+            assert_eq!(ivc_pi.block_hash_fields(), block_pi.block_hash());
         }
         Ok(())
     }

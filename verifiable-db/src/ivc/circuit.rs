@@ -33,15 +33,15 @@ struct IVCCircuit;
 
 impl IVCCircuit {
     pub(crate) fn build(c: &mut CircuitBuilder<F, D>, block_pi: &[Target], prev_proof: &[Target]) {
-        assert_eq!(prev_proof.len(), super::EXTENDED_PUBLIC_INPUTS);
+        assert_eq!(prev_proof.len(), super::NUM_IO);
         let _true = c._true();
         let block_pi = crate::block_tree::PublicInputs::from_slice(block_pi);
         let prev_pi = super::PublicInputs::from_slice(prev_proof);
 
+        // This is the original blockchain hash
         // assert prev_proof.BH == new_block_proof.prev_block_hash
         c.connect_targets(prev_pi.block_hash(), block_pi.prev_block_hash());
 
-        // This is the original blockchain hash
         // assert prev_proof.H_i == new_block_proof.H_old
         c.connect_targets(prev_pi.merkle_hash(), block_pi.old_merkle_hash());
         // assert prev_proof.z_i + 1 == new_block_proof.block_number
@@ -56,17 +56,13 @@ impl IVCCircuit {
         //assert prev_proof.M == new_block_proof.M
         c.connect_targets(prev_pi.metadata_hash(), block_pi.metadata_hash());
 
-        // last public input is an indicator if this proof is the first one on the IVC module_path!()
-        // or not. 1 for the former case and 0 for the latter cases. Only the dummy circuit used
-        // for the initial proof outputs 1.
-        let zero = c.zero();
         // if is_dummy(prev_proof):
         //	    assert new_block_proof.H_old == H("")
         //	    assert prev_proof.DT == CURVE_ZERO
-        //	the following should panic if public input is not of the right length
-        let dummy_indicator = prev_proof[super::PublicInputs::<Target>::TOTAL_LEN];
-        let is_this_first_proof = c.is_equal(dummy_indicator, zero);
+        //
+        // Indicator is if the previous proof exposes the empty hash as the merkle hash.
         let empty_hash = c.constant_hash(*empty_poseidon_hash());
+        let is_this_first_proof = c.is_equal_targets(empty_hash, prev_pi.merkle_hash());
         let empty_set_digest = c.curve_zero();
         let cond1 = c.is_equal_targets(block_pi.old_merkle_hash(), empty_hash);
         let cond2 = c.is_equal_targets(prev_pi.value_set_digest(), empty_set_digest);
@@ -88,10 +84,6 @@ impl IVCCircuit {
             &block_pi.current_block_hash(),
         )
         .register(c);
-        // need to register the extra public input as 1 to indicate this is not the dummy proof
-        // anymore
-        let one = c.one();
-        c.register_public_input(one);
     }
 }
 
@@ -113,7 +105,7 @@ impl CircuitLogicWires<F, D, 1> for RecursiveIVCWires {
 
     type Inputs = RecursiveIVCInput;
 
-    const NUM_PUBLIC_INPUTS: usize = super::EXTENDED_PUBLIC_INPUTS;
+    const NUM_PUBLIC_INPUTS: usize = super::NUM_IO;
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -182,10 +174,6 @@ impl DummyCircuit {
             &block_hash,
         )
         .register(c);
-        // we also need to register the extra public input indicating this is the "first dummy
-        // proof"
-        let zero = c.zero();
-        c.register_public_input(zero);
         DummyWires {
             md_set_digest: md,
             z0,
@@ -207,7 +195,7 @@ impl CircuitLogicWires<F, D, 0> for DummyWires {
 
     type Inputs = DummyCircuit;
 
-    const NUM_PUBLIC_INPUTS: usize = super::EXTENDED_PUBLIC_INPUTS;
+    const NUM_PUBLIC_INPUTS: usize = super::NUM_IO;
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -268,8 +256,7 @@ mod test {
         type Wires = (Vec<Target>, Vec<Target>);
 
         fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>) -> Self::Wires {
-            let prev_pi =
-                c.add_virtual_targets(super::super::PublicInputs::<Target>::TOTAL_LEN + 1);
+            let prev_pi = c.add_virtual_targets(super::super::NUM_IO);
             let block_pi =
                 c.add_virtual_targets(crate::block_tree::PublicInputs::<Target>::TOTAL_LEN);
             IVCCircuit::build(c, &block_pi, &prev_pi);
@@ -338,7 +325,7 @@ mod test {
             );
             assert_eq!(pi.z0_u256(), z0);
             assert_eq!(pi.zi_u256(), block_number);
-            assert_eq!(pi.original_hash(), block_pi.block_hash());
+            assert_eq!(pi.block_hash_fields(), block_pi.block_hash());
         }
 
         //
@@ -354,10 +341,7 @@ mod test {
         };
         let proof = run_circuit::<F, D, C, _>(dummy_circuit);
         let prev_pi = proof.public_inputs;
-        assert_eq!(
-            prev_pi.len(),
-            super::super::PublicInputs::<F>::TOTAL_LEN + 1
-        );
+        assert_eq!(prev_pi.len(), super::super::PublicInputs::<F>::TOTAL_LEN);
 
         let empty_hash = empty_poseidon_hash().to_fields();
         let block_pi = crate::block_tree::PublicInputs::new(
@@ -380,10 +364,7 @@ mod test {
             tc.block_pi.len(),
             crate::block_tree::PublicInputs::<F>::TOTAL_LEN
         );
-        assert_eq!(
-            tc.prev_pi.len(),
-            super::super::PublicInputs::<F>::TOTAL_LEN + 1
-        );
+        assert_eq!(tc.prev_pi.len(), super::super::PublicInputs::<F>::TOTAL_LEN);
         let proof = run_circuit::<F, D, C, _>(tc);
         let pi = super::super::PublicInputs::from_slice(&proof.public_inputs);
         {
@@ -398,7 +379,7 @@ mod test {
             );
             assert_eq!(pi.z0_u256(), z0);
             assert_eq!(pi.zi_u256(), min);
-            assert_eq!(pi.original_hash(), block_pi.block_hash());
+            assert_eq!(pi.block_hash_fields(), block_pi.block_hash());
         }
         Ok(())
     }
