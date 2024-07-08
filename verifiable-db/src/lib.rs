@@ -18,6 +18,7 @@ pub mod api;
 pub mod block_tree;
 pub mod cells_tree;
 pub mod extraction;
+pub mod ivc;
 pub mod row_tree;
 
 /// An example of using Plonky2 to prove a statement of the form

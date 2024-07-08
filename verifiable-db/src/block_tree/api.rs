@@ -164,6 +164,10 @@ where
         }
     }
 
+    pub fn set_vk(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.set
+    }
+
     /// Generate the proof by the circuit input.
     /// The extraction set comes from the parameters of extracting the value, for example from the
     /// blockchain
@@ -429,13 +433,13 @@ mod tests {
             // Check metadata hash
             {
                 let exp_hash = compute_expected_hash(&extraction_pi, block_id);
-                assert_eq!(pi.metadata_digest, exp_hash.elements);
+                assert_eq!(pi.metadata_hash, exp_hash.elements);
             }
             // Check new node digest
             {
                 let exp_digest =
                     compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
-                assert_eq!(pi.new_node_digest_point(), exp_digest.to_weierstrass());
+                assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
             }
 
             Ok(proof)
@@ -544,13 +548,13 @@ mod tests {
             // Check metadata hash
             {
                 let exp_hash = compute_expected_hash(&extraction_pi, block_id);
-                assert_eq!(pi.metadata_digest, exp_hash.elements);
+                assert_eq!(pi.metadata_hash, exp_hash.elements);
             }
             // Check new node digest
             {
                 let exp_digest =
                     compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
-                assert_eq!(pi.new_node_digest_point(), exp_digest.to_weierstrass());
+                assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
             }
 
             Ok(proof)
@@ -645,7 +649,7 @@ mod tests {
             }
             // Check metadata hash
             {
-                assert_eq!(pi.metadata_digest, child_pi.metadata_digest);
+                assert_eq!(pi.metadata_hash, child_pi.metadata_hash);
             }
             // Check new node digest
             {
@@ -673,6 +677,7 @@ mod tests {
         let block_number = block_number + 1;
         let right_child_proof = b.generate_leaf_proof(&mut rng, block_id, block_number)?;
         let right_child_pi = PublicInputs::from_slice(&right_child_proof.proof.public_inputs);
+        let e = right_child_pi.new_merkle_hash_field();
 
         log::info!("Generating the parent proof");
         b.generate_parent_proof(
@@ -682,8 +687,8 @@ mod tests {
             block_number,
             block_number,
             block_number,
-            left_child_pi.new_hash_value(),
-            right_child_pi.new_hash_value(),
+            left_child_pi.new_merkle_hash_field(),
+            right_child_pi.new_merkle_hash_field(),
         )?;
 
         log::info!("Generating the membership proof");
@@ -692,7 +697,7 @@ mod tests {
             block_number - 1,
             block_number,
             block_number,
-            left_child_pi.new_hash_value(),
+            left_child_pi.new_merkle_hash_field(),
             right_child_proof,
         )?;
 

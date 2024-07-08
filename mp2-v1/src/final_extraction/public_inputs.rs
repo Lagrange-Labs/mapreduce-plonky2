@@ -78,12 +78,12 @@ impl<'a> ExtractionPI<'a> for PublicInputs<'a, Target> {
         self.previous_block_hash().to_targets()
     }
 
-    fn digest_value(&self) -> Vec<Target> {
-        self.digest_value().to_targets()
+    fn value_set_digest(&self) -> CurveTarget {
+        self.digest_value()
     }
 
-    fn digest_metadata(&self) -> Vec<Target> {
-        self.digest_metadata().to_targets()
+    fn metadata_set_digest(&self) -> CurveTarget {
+        self.digest_metadata()
     }
 
     fn primary_index_value(&self) -> Vec<Target> {

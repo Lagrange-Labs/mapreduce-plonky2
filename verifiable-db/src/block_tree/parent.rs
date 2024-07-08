@@ -92,10 +92,7 @@ impl ParentCircuit {
 
         // Enforce that the data extracted from the blockchain is the same as the data
         // employed to build the rows tree for this node.
-        b.connect_curve_points(
-            CurveTarget::from_targets(&extraction_pi.digest_value()),
-            rows_tree_pi.rows_digest(),
-        );
+        b.connect_curve_points(extraction_pi.value_set_digest(), rows_tree_pi.rows_digest());
 
         // Compute the hash of table metadata, to be exposed as public input to prove to
         // the verifier that we extracted the correct storage slots and we place the data
@@ -103,7 +100,8 @@ impl ParentCircuit {
         // of the block number column to the table metadata.
         // metadata_hash = H(extraction_proof.DM || block_id)
         let inputs = extraction_pi
-            .digest_metadata()
+            .metadata_set_digest()
+            .to_targets()
             .iter()
             .cloned()
             .chain(iter::once(index_identifier))
@@ -431,14 +429,14 @@ mod tests {
         {
             let exp_hash = compute_expected_hash(&extraction_pi, index_identifier);
 
-            assert_eq!(pi.metadata_digest, exp_hash.elements);
+            assert_eq!(pi.metadata_hash, exp_hash.elements);
         }
         // Check new node digest
         {
             let exp_digest =
                 compute_expected_set_digest(index_identifier, block_number.to_vec(), rows_tree_pi);
 
-            assert_eq!(pi.new_node_digest_point(), exp_digest.to_weierstrass());
+            assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
         }
     }
 }

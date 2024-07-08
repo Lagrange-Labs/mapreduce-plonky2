@@ -1,11 +1,14 @@
 //! Public inputs for Block Insertion circuits
 
+use std::array::from_fn as create_array;
+
+use ethers::types::U256;
 use mp2_common::{
     keccak::PACKED_HASH_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, CURVE_TARGET_LEN},
-    u256,
-    utils::{FromFields, FromTargets},
+    u256::{self, U256PubInputs, UInt256Target},
+    utils::{FromFields, FromTargets, ToTargets},
     F,
 };
 use plonky2::{
@@ -33,9 +36,10 @@ const BLOCK_HASH_RANGE: PublicInputRange =
     BLOCK_NUMBER_RANGE.end..BLOCK_NUMBER_RANGE.end + PACKED_HASH_LEN;
 const PREV_BLOCK_HASH_RANGE: PublicInputRange =
     BLOCK_HASH_RANGE.end..BLOCK_HASH_RANGE.end + PACKED_HASH_LEN;
-const M_RANGE: PublicInputRange =
+const METADATA_HASH_RANGE: PublicInputRange =
     PREV_BLOCK_HASH_RANGE.end..PREV_BLOCK_HASH_RANGE.end + NUM_HASH_OUT_ELTS;
-const NEW_NODE_DIGEST_RANGE: PublicInputRange = M_RANGE.end..M_RANGE.end + CURVE_TARGET_LEN;
+const NEW_NODE_DIGEST_RANGE: PublicInputRange =
+    METADATA_HASH_RANGE.end..METADATA_HASH_RANGE.end + CURVE_TARGET_LEN;
 
 /// Public inputs for Cells Tree Construction
 #[derive(Clone, Debug)]
@@ -47,7 +51,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) block_number: &'a [T],
     pub(crate) block_hash: &'a [T],
     pub(crate) prev_block_hash: &'a [T],
-    pub(crate) metadata_digest: &'a [T],
+    pub(crate) metadata_hash: &'a [T],
     pub(crate) new_node_digest: &'a [T],
 }
 
@@ -60,7 +64,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
         BLOCK_NUMBER_RANGE,
         BLOCK_HASH_RANGE,
         PREV_BLOCK_HASH_RANGE,
-        M_RANGE,
+        METADATA_HASH_RANGE,
         NEW_NODE_DIGEST_RANGE,
     ];
 
@@ -72,32 +76,68 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
         cb.register_public_inputs(self.block_number);
         cb.register_public_inputs(self.block_hash);
         cb.register_public_inputs(self.prev_block_hash);
-        cb.register_public_inputs(self.metadata_digest);
+        cb.register_public_inputs(self.metadata_hash);
         cb.register_public_inputs(self.new_node_digest);
     }
 }
 
 impl<'a> PublicInputs<'a, F> {
-    /// Get the new hash value.
-    pub fn new_hash_value(&self) -> HashOut<F> {
+    /// Get the new Merkle tree root hash value.
+    pub fn new_merkle_hash_field(&self) -> HashOut<F> {
         self.h_new.try_into().unwrap()
     }
 
+    pub fn old_merkle_hash_field(&self) -> HashOut<F> {
+        self.h_old.try_into().unwrap()
+    }
+
+    pub fn block_hash(&self) -> [F; PACKED_HASH_LEN] {
+        create_array(|i| self.block_hash[i])
+    }
+
+    pub fn prev_block_hash_fields(&self) -> [F; PACKED_HASH_LEN] {
+        create_array(|i| self.prev_block_hash[i])
+    }
+
     /// Get the new node digest point.
-    pub fn new_node_digest_point(&self) -> WeierstrassPoint {
+    pub fn new_value_set_digest_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.new_node_digest)
+    }
+
+    pub fn min_block_number(&self) -> anyhow::Result<U256> {
+        Ok(U256::from(U256PubInputs::try_from(self.min)?))
     }
 }
 
 impl<'a> PublicInputs<'a, Target> {
-    /// Get the new hash target.
-    pub fn new_hash_target(&self) -> HashOutTarget {
+    /// Get the new Merkle root hash target.
+    pub fn new_merkle_hash_target(&self) -> HashOutTarget {
         self.h_new.try_into().unwrap()
     }
 
+    /// Get the previous Merkle root hash target.
+    pub fn old_merkle_hash(&self) -> HashOutTarget {
+        self.h_old.try_into().unwrap()
+    }
+
     /// Get the new node digest target.
-    pub fn new_node_digest_target(&self) -> CurveTarget {
+    pub fn new_value_set_digest(&self) -> CurveTarget {
         CurveTarget::from_targets(self.new_node_digest)
+    }
+
+    pub fn index_value(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.block_number)
+    }
+
+    pub fn min_value(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.min)
+    }
+
+    pub fn prev_block_hash(&self) -> Vec<Target> {
+        self.prev_block_hash.to_targets()
+    }
+    pub fn current_block_hash(&self) -> Vec<Target> {
+        self.block_hash.to_targets()
     }
 }
 
@@ -115,9 +155,18 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         index_value: &'a [T],
         commitment: &'a [T],
         prev_commitment: &'a [T],
-        metadata_digest: &'a [T],
+        metadata_hash: &'a [T],
         new_node_digest: &'a [T],
     ) -> Self {
+        assert_eq!(h_new.len(), H_NEW_RANGE.len());
+        assert_eq!(h_old.len(), H_OLD_RANGE.len());
+        assert_eq!(min.len(), MIN_RANGE.len());
+        assert_eq!(max.len(), MAX_RANGE.len());
+        assert_eq!(index_value.len(), BLOCK_NUMBER_RANGE.len());
+        assert_eq!(commitment.len(), BLOCK_HASH_RANGE.len());
+        assert_eq!(prev_commitment.len(), BLOCK_HASH_RANGE.len());
+        assert_eq!(metadata_hash.len(), METADATA_HASH_RANGE.len());
+        assert_eq!(new_node_digest.len(), NEW_NODE_DIGEST_RANGE.len());
         Self {
             h_new,
             h_old,
@@ -126,7 +175,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             block_number: index_value,
             block_hash: commitment,
             prev_block_hash: prev_commitment,
-            metadata_digest,
+            metadata_hash,
             new_node_digest,
         }
     }
@@ -142,7 +191,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             block_number: &pi[BLOCK_NUMBER_RANGE],
             block_hash: &pi[BLOCK_HASH_RANGE],
             prev_block_hash: &pi[PREV_BLOCK_HASH_RANGE],
-            metadata_digest: &pi[M_RANGE],
+            metadata_hash: &pi[METADATA_HASH_RANGE],
             new_node_digest: &pi[NEW_NODE_DIGEST_RANGE],
         }
     }
@@ -157,10 +206,13 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             .chain(self.block_number)
             .chain(self.block_hash)
             .chain(self.prev_block_hash)
-            .chain(self.metadata_digest)
+            .chain(self.metadata_hash)
             .chain(self.new_node_digest)
             .cloned()
             .collect()
+    }
+    pub fn metadata_hash(&self) -> &[T] {
+        self.metadata_hash
     }
 }
 
@@ -170,7 +222,7 @@ mod tests {
 
     use super::*;
     use ethers::prelude::U256;
-    use mp2_common::{utils::ToFields, C, D, F};
+    use mp2_common::{C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
@@ -216,5 +268,6 @@ mod tests {
         let proof = run_circuit::<F, D, C, _>(test_circuit);
 
         assert_eq!(&proof.public_inputs, &exp_pi);
+        assert_eq!(exp_pi.len(), super::PublicInputs::<Target>::TOTAL_LEN);
     }
 }
