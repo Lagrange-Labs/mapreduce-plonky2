@@ -27,15 +27,18 @@ pub enum QueryPublicInputs {
     OutputValues,
     /// `count`: `F` Number of matching records in the query
     NumMatching,
-    /// `ops` : `[F; S]` Set of identifiers of the aggregation operations for each of the `S` items found in `V`
+    /// `ops` : `[F; S]` Set of identifiers of the aggregation operations for each of the `S` items found in `V` 
+    /// (like "SUM", "MIN", "MAX", "COUNT" operations)
     OpIds,
     /// `I` : `u256` value of the indexed column for the given node (meaningful only for rows tree nodes)
     IndexValue,
     /// `min` : `u256` Minimum value of the indexed column among all the records stored in the subtree rooted
-    /// in the current node
+    /// in the current node; values of secondary indexed column are employed for rows tree nodes, 
+    /// while values of primary indexed column are employed for index tree nodes 
     MinValue,
     /// `max`` :  Maximum value of the indexed column among all the records stored in the subtree rooted
-    /// in the current node
+    /// in the current node; values of secondary indexed column are employed for rows tree nodes, 
+    /// while values of primary indexed column are employed for index tree nodes
     MaxValue,
     /// `index_ids`` : `[2]F` Identifiers of indexed columns
     IndexIds,

@@ -49,7 +49,9 @@ pub struct InputWires<const MAX_NUM_RESULTS: usize> {
 /// Input + output wires for output component for queries with result aggregation
 pub struct Wires<const MAX_NUM_RESULTS: usize> {
     input_wires: InputWires<MAX_NUM_RESULTS>,
+    /// Output values computed by this component
     output_values: [UInt256Target; MAX_NUM_RESULTS],
+    /// Computational hash representing all the computation done in the query circuit
     output_hash: HashOutTarget,
 }
 /// Input witness values for output component for queries with result aggregation

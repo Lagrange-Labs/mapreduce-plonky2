@@ -90,10 +90,16 @@ pub(crate) trait OutputComponent {
 /// Trait representing the wires that need to be exposed by an `OutputComponent`
 /// employed in query circuits
 pub(crate) trait OutputComponentWires {
+    /// Associated type specifying the type of the first output value computed by this output
+    /// component; this type varies depending on the particular component:
+    /// - It is a `CurveTarget` in the output component for queries without aggregation operations
+    /// - It is a `UInt256Target` in the output for queries with aggregation operations
     type FirstT: ToTargets;
+    /// Input wires of the output component
     type InputWires: Serialize + for<'a> Deserialize<'a> + Clone + Debug;
 
-    /// Get the identifiers of the aggregation operations, returned by the output component
+    /// Get the identifiers of the aggregation operations specified in the query to aggregate the
+    /// results (e.g., `SUM`, `AVG`)
     fn get_ops_ids(&self) -> &[Target];
     /// Get the first output value returned by the output component; this is accessed by an ad-hoc
     /// method since such output value could be a `UInt256Target` or a `CurveTarget`, depending

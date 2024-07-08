@@ -46,10 +46,16 @@ pub struct InputWires<const MAX_NUM_RESULTS: usize> {
 
 /// Input + output wires for output component for queries without results aggregation
 pub struct Wires<const MAX_NUM_RESULTS: usize> {
+    /// input wires of the component
     input_wires: InputWires<MAX_NUM_RESULTS>,
+    /// The first output value computed by this component; it is a `CurveTarget` since
+    /// it corresponds to the accumulator of all the results of the query
     first_output_value: CurveTarget,
+    /// Remaining output values; for this component, they are basically dummy values
     output_values: Vec<UInt256Target>,
+    /// Computational hash representing all the computation done in the query circuit
     output_hash: HashOutTarget,
+    /// Identifiers of the aggregation operations to be returned as public inputs
     ops_ids: [Target; MAX_NUM_RESULTS],
 }
 /// Witness input values for output component for queries without results aggregation
