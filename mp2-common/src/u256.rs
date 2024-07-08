@@ -17,6 +17,7 @@ use anyhow::{ensure, Result};
 use ethers::types::U256;
 use itertools::Itertools;
 use plonky2::{
+    gates::gate::Gate,
     hash::hash_types::RichField,
     iop::{
         generator::{GeneratedValues, SimpleGenerator},
@@ -28,6 +29,8 @@ use plonky2::{
 };
 use plonky2_crypto::u32::{
     arithmetic_u32::{CircuitBuilderU32, U32Target},
+    gates::range_check_u32::U32RangeCheckGate,
+    range_check::range_check_u32_circuit,
     witness::WitnessU32,
 };
 use serde::{Deserialize, Serialize};
@@ -45,6 +48,10 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
 
     /// Add a UInt256Target while enforcing that all the limbs are range-checked
     fn add_virtual_u256(&mut self) -> UInt256Target;
+
+    /// Add `N` `UInt256Target`s while enforcing that all the limbs are range-checked.
+    /// It may require less constraints than allocating each target individually
+    fn add_virtual_u256_arr<const N: usize>(&mut self) -> [UInt256Target; N];
 
     /// Register a UInt256Target as public input
     fn register_public_input_u256(&mut self, target: &UInt256Target);
@@ -125,13 +132,35 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
     }
 
     fn add_virtual_u256(&mut self) -> UInt256Target {
-        //ToDo: make it more efficient by employing lookup-gates
-        let target = self.add_virtual_u256_unsafe();
-        // add range checks for each limb
-        target.0.iter().for_each(|t| {
-            self.range_check(t.0, 32);
-        });
-        target
+        self.add_virtual_u256_arr::<1>()[0].clone()
+    }
+
+    fn add_virtual_u256_arr<const N: usize>(&mut self) -> [UInt256Target; N] {
+        let targets = array::from_fn(|_| self.add_virtual_u256_unsafe());
+        // add range-checks for the targets. First compute how many `u32` limbs we can pack in
+        // a single `U32RangeCheckGate`
+        let mut num_limbs_per_gate = 0;
+        while U32RangeCheckGate::<F, D>::new(num_limbs_per_gate).num_wires()
+            <= self.config.num_wires
+            && num_limbs_per_gate <= N * NUM_LIMBS
+        {
+            num_limbs_per_gate += 1;
+        }
+        if num_limbs_per_gate > 0 {
+            targets
+                .iter()
+                .flat_map(|t| t.0.to_vec())
+                .chunks(num_limbs_per_gate - 1)
+                .into_iter()
+                .for_each(|t_chunk| range_check_u32_circuit(self, t_chunk.collect_vec()));
+        } else {
+            // cannot use range-check u32 gate with current circuit config, fallback to simple Plonky2 range-check
+            targets
+                .iter()
+                .flat_map(|t| t.0.to_vec())
+                .for_each(|t| self.range_check(t.0, 32));
+        }
+        targets
     }
 
     fn register_public_input_u256(&mut self, target: &UInt256Target) {
@@ -602,6 +631,8 @@ impl<F: SerializableRichField<D>, const D: usize> SimpleGenerator<F, D> for UInt
 #[cfg(test)]
 mod tests {
 
+    use core::num;
+
     use ethers::types::U256;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
@@ -618,6 +649,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use crate::{
+        default_config,
         serialization::{deserialize, serialize},
         types::GFp,
         u256::{U256PubInputs, NUM_LIMBS},
@@ -1153,5 +1185,18 @@ mod tests {
         circuit.prove(&mut pw, &wires);
         let proof = params.data.prove(pw).unwrap();
         params.data.verify(proof).unwrap();
+    }
+
+    #[test]
+    fn range_check_cost() {
+        let mut b = CircuitBuilder::<F, D>::new(default_config());
+        let num_gates_pre_range_check = b.num_gates();
+        let _ = b.add_virtual_u256();
+        let num_gates = b.num_gates() - num_gates_pre_range_check;
+        assert_eq!(num_gates, 2);
+        // allocate 2 u256 targets at the same time is cheaper than allocating individually 2 u256 targets
+        let _ = b.add_virtual_u256_arr::<2>();
+        let num_gates = b.num_gates() - num_gates;
+        assert_eq!(num_gates, 3);
     }
 }
