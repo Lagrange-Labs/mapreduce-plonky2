@@ -113,14 +113,15 @@ impl TestContext {
         cells
     }
 
-    /// Given a [`MerkleCellTree`], recursively prove its hash.
+    /// Given a [`MerkleCellTree`], recursively prove its hash and returns the storage key
+    /// associated to the root proof
     pub async fn prove_cell_tree<P: ProofStorage>(
         &self,
         table_id: &TableID,
         t: &MerkleCellTree,
         ut: UpdateTree<<CellTree as TreeTopology>::Key>,
         storage: &mut P,
-    ) -> Vec<u8> {
+    ) -> CellProofIdentifier<BlockPrimaryIndex> {
         // THIS can panic but for block number it should be fine on 64bit platforms...
         // unwrap is safe since we know it is really a block number and not set to Latest or stg
         let block_key: BlockPrimaryIndex =
@@ -201,7 +202,11 @@ impl TestContext {
             tree_key: root,
         };
 
-        storage.get_proof(&ProofKey::Cell(root_proof_key)).unwrap()
+        // just checking the storage is there
+        let _ = storage
+            .get_proof(&ProofKey::Cell(root_proof_key.clone()))
+            .unwrap();
+        root_proof_key
     }
 
     /// Generate and prove a [`MerkleCellTree`] encoding the content of the
@@ -218,12 +223,14 @@ impl TestContext {
         let (cell_tree, cell_tree_ut) = build_cell_tree(&cells[1..])
             .await
             .expect("failed to create cell tree");
-        let cell_tree_proof = self
+        let root_key = self
             .prove_cell_tree(&table_id, &cell_tree, cell_tree_ut, storage)
             .await;
-
+        let cell_root_proof = storage
+            .get_proof(&ProofKey::Cell(root_key.clone()))
+            .unwrap();
         let tree_hash = cell_tree.root_data().unwrap().hash;
-        let proved_hash = cell_tree_proof_to_hash(&cell_tree_proof);
+        let proved_hash = cell_tree_proof_to_hash(&cell_root_proof);
         assert_eq!(
             tree_hash, proved_hash,
             "mismatch between cell tree root hash as computed by ryhope and mp2",
@@ -236,7 +243,8 @@ impl TestContext {
                 // there is always only one row in the scalar slots table
                 id: 0,
             },
-            cell_tree_proof,
+            cell_tree_root_proof_id: root_key,
+            cell_tree_root_hash: tree_hash,
             min: cells[0].value.clone(),
             max: cells[0].value.clone(),
             cells,

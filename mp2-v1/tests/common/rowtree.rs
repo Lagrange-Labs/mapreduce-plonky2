@@ -26,7 +26,9 @@ use crate::common::row_tree_proof_to_hash;
 use super::{
     cell_tree_proof_to_hash,
     celltree::Cell,
-    proof_storage::{BlockPrimaryIndex, ProofKey, ProofStorage, RowProofIdentifier, TableID},
+    proof_storage::{
+        BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier, TableID,
+    },
     TestContext,
 };
 
@@ -48,10 +50,14 @@ pub struct Row {
     /// NOTE: this key is **not** the index as understood in the crypto
     /// formalization.
     pub k: RowTreeKey,
-    /// The cells making this row, safe for the 0th (which is stored in `index`)
     pub cells: Vec<Cell>,
-    /// The root hash of the tree made from the above cells.
-    pub cell_tree_proof: Vec<u8>,
+    /// Storing the full identifier of the cells proof of the root of the cells tree.
+    /// Note this identifier can refer to a proof for older blocks if the cells tree didn't change
+    pub cell_tree_root_proof_id: CellProofIdentifier<BlockPrimaryIndex>,
+    /// Storing the hash of the root of the cells tree. Once could get it as well from the proof
+    /// but it requires loading the proof, so when building the hashing structure it's best
+    /// to keep it at hand directly.
+    pub cell_tree_root_hash: HashOut<F>,
     /// Min sec. index value of the subtree below this node
     pub min: U256,
     /// Max sec. index value "  "   "       "     "    "
@@ -60,12 +66,6 @@ pub struct Row {
     pub hash: HashOut<F>,
 }
 impl Row {
-    /// Extract the numeric hash of the cell tree corresponding to this row from
-    /// the cell tree proof.
-    pub fn cell_tree_hash(&self) -> HashOut<F> {
-        cell_tree_proof_to_hash(&self.cell_tree_proof)
-    }
-
     /// Return the [`Cell`] containing the sec. index of this row.
     pub fn secondary_index(&self) -> &Cell {
         &self.cells[0]
@@ -94,7 +94,7 @@ impl NodePayload for Row {
                     // P(value)
                     .chain(self.secondary_index().value.to_fields().into_iter())
                     // P(cell_tree_hash)
-                    .chain(self.cell_tree_hash().to_fields().into_iter())
+                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
                     .collect::<Vec<_>>();
                 hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
             }
@@ -117,7 +117,7 @@ impl NodePayload for Row {
                     // P(value)
                     .chain(self.secondary_index().value.to_fields().into_iter())
                     // P(cell_tree_hash)
-                    .chain(self.cell_tree_hash().to_fields().into_iter())
+                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
                     .collect::<Vec<_>>();
                 hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
             }
@@ -140,7 +140,7 @@ impl NodePayload for Row {
                     // P(value)
                     .chain(self.secondary_index().value.to_fields().into_iter())
                     // P(cell_tree_hash)
-                    .chain(self.cell_tree_hash().to_fields().into_iter())
+                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
                     .collect::<Vec<_>>();
                 hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
             }
@@ -161,7 +161,7 @@ impl NodePayload for Row {
                     // P(value)
                     .chain(self.secondary_index().value.to_fields().into_iter())
                     // P(cell_tree_hash)
-                    .chain(self.cell_tree_hash().to_fields().into_iter())
+                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
                     .collect::<Vec<_>>();
                 hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
             }
@@ -172,14 +172,6 @@ impl NodePayload for Row {
 pub type RowTree = scapegoat::Tree<RowTreeKey>;
 type RowStorage = InMemory<RowTree, Row>;
 pub type MerkleRowTree = MerkleTreeKvDb<RowTree, Row, RowStorage>;
-
-/// Metadata flowing bottom to top to compute the tree hash
-#[derive(Clone, PartialEq, Eq)]
-pub struct HashAccumulator {
-    min: U256,
-    max: U256,
-    hash: HashOut<F>,
-}
 
 /// Given a list of row, build the Merkle tree of the secondary index and
 /// returns it along its update tree.
@@ -223,15 +215,14 @@ impl TestContext {
             // Sec. index value
             let value = row.secondary_index().value;
 
+            let cell_tree_proof = storage
+                .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
+                .expect("should find cell root proof");
             let proof = if context.is_leaf() {
                 // Prove a leaf
                 let inputs = CircuitInput::RowsTree(
-                    verifiable_db::row_tree::CircuitInput::leaf(
-                        identifier,
-                        value,
-                        row.cell_tree_proof.to_owned(),
-                    )
-                    .unwrap(),
+                    verifiable_db::row_tree::CircuitInput::leaf(identifier, value, cell_tree_proof)
+                        .unwrap(),
                 );
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.is_partial() {
@@ -250,13 +241,16 @@ impl TestContext {
                     .get_proof(&ProofKey::Row(proof_key))
                     .expect("UT guarantees proving in order");
 
+                let cell_tree_proof = storage
+                    .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id))
+                    .expect("should find cells tree root proof");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::partial(
                         identifier,
                         value,
                         context.left.is_some(),
                         child_proof,
-                        row.cell_tree_proof.to_owned(),
+                        cell_tree_proof,
                     )
                     .unwrap(),
                 );
@@ -273,6 +267,9 @@ impl TestContext {
                     primary: block_key,
                     tree_key: context.right.unwrap(),
                 };
+                let cell_tree_proof = storage
+                    .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
+                    .expect("should find cells tree root proof");
 
                 // Prove a full node.
                 let left_proof = storage
@@ -287,7 +284,7 @@ impl TestContext {
                         value,
                         left_proof,
                         right_proof,
-                        row.cell_tree_proof.to_owned(),
+                        cell_tree_proof,
                     )
                     .unwrap(),
                 );
