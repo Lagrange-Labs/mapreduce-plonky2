@@ -23,7 +23,9 @@ use std::collections::HashMap;
 
 use crate::common::row_tree_proof_to_hash;
 
-use super::{cell_tree_proof_to_hash, celltree::Cell, ProofKey, TestContext};
+use super::{
+    cell_tree_proof_to_hash, celltree::Cell, proof_storage::ProofStorage, ProofKey, TestContext,
+};
 
 /// A unique identifier in a row tree
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -197,11 +199,11 @@ pub async fn build_row_tree(rows: &[Row]) -> Result<(MerkleRowTree, UpdateTree<R
 impl TestContext {
     /// Given a row tree (i.e. secondary index tree) and its update tree, prove
     /// it.
-    pub async fn prove_row_tree(
+    pub async fn prove_row_tree<P: ProofStorage>(
         &self,
         t: &MerkleRowTree,
         ut: UpdateTree<<RowTree as TreeTopology>::Key>,
-        proofs: &mut HashMap<ProofKey, Vec<u8>>,
+        storage: &mut P,
     ) -> Vec<u8> {
         let mut workplan = ut.into_workplan();
 
@@ -226,8 +228,8 @@ impl TestContext {
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.is_partial() {
                 // Prove a partial node
-                let child_proof = proofs
-                    .get(&ProofKey::Row(
+                let child_proof = storage
+                    .get_proof(&ProofKey::Row(
                         context
                             .left
                             .as_ref()
@@ -235,8 +237,7 @@ impl TestContext {
                             .cloned()
                             .unwrap(),
                     ))
-                    .expect("UT guarantees proving in order")
-                    .to_owned();
+                    .expect("UT guarantees proving in order");
 
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::partial(
@@ -252,14 +253,12 @@ impl TestContext {
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
                 // Prove a full node.
-                let left_proof = proofs
-                    .get(&ProofKey::Row(context.left.unwrap()))
-                    .expect("UT guarantees proving in order")
-                    .to_vec();
-                let right_proof = proofs
-                    .get(&ProofKey::Row(context.right.unwrap()))
-                    .expect("UT guarantees proving in order")
-                    .to_vec();
+                let left_proof = storage
+                    .get_proof(&ProofKey::Row(context.left.unwrap()))
+                    .expect("UT guarantees proving in order");
+                let right_proof = storage
+                    .get_proof(&ProofKey::Row(context.right.unwrap()))
+                    .expect("UT guarantees proving in order");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::full(
                         identifier,
@@ -272,25 +271,27 @@ impl TestContext {
                 );
                 api::generate_proof(self.params(), inputs).expect("while proving full node")
             };
-            proofs.insert(ProofKey::Row(k.clone()), proof);
+            storage
+                .store_proof(ProofKey::Row(k.clone()), proof)
+                .expect("storing should work");
 
             workplan.done(&k).unwrap();
         }
         let root = t.tree().root().unwrap();
-        proofs.get(&ProofKey::Row(root)).unwrap().to_vec()
+        storage.get_proof(&ProofKey::Row(root)).unwrap()
     }
 
     /// Build and prove the row tree from the [`Row`]s and the secondary index
     /// data (which **must be absent** from the rows), returning its proof.
-    pub async fn build_and_prove_rowtree(
+    pub async fn build_and_prove_rowtree<P: ProofStorage>(
         &self,
         rows: &[Row],
-        proofs: &mut HashMap<ProofKey, Vec<u8>>,
+        storage: &mut P,
     ) -> Vec<u8> {
         let (row_tree, row_tree_ut) = build_row_tree(rows)
             .await
             .expect("failed to create row tree");
-        let row_tree_proof = self.prove_row_tree(&row_tree, row_tree_ut, proofs).await;
+        let row_tree_proof = self.prove_row_tree(&row_tree, row_tree_ut, storage).await;
 
         let tree_hash = row_tree.root_data().unwrap().hash;
         let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
