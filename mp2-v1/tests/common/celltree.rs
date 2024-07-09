@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use anyhow::*;
 use ethers::types::{Address, U256};
 use mp2_common::{eth::ProofQuery, poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
@@ -22,7 +20,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::{cell_tree_proof_to_hash, rowtree::RowTreeKey, TestContext};
 
-use super::{proof_storage::ProofStorage, rowtree::Row, ProofKey};
+use super::{
+    proof_storage::{BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, TableID},
+    rowtree::Row,
+};
 
 /// A cell in one of the zkDB virtual tables.
 #[derive(Clone, Serialize, Deserialize)]
@@ -60,7 +61,6 @@ impl std::fmt::Debug for Cell {
 }
 
 pub type CellTree = sbbst::Tree;
-
 type CellStorage = InMemory<CellTree, Cell>;
 pub type MerkleCellTree = MerkleTreeKvDb<CellTree, Cell, CellStorage>;
 
@@ -116,10 +116,15 @@ impl TestContext {
     /// Given a [`MerkleCellTree`], recursively prove its hash.
     pub async fn prove_cell_tree<P: ProofStorage>(
         &self,
+        table_id: &TableID,
         t: &MerkleCellTree,
         ut: UpdateTree<<CellTree as TreeTopology>::Key>,
         storage: &mut P,
     ) -> Vec<u8> {
+        // THIS can panic but for block number it should be fine on 64bit platforms...
+        // unwrap is safe since we know it is really a block number and not set to Latest or stg
+        let block_key: BlockPrimaryIndex =
+            self.block_number.as_number().unwrap().try_into().unwrap();
         // Store the proofs here for the tests; will probably be done in S3 for
         // prod.
         let mut workplan = ut.into_workplan();
@@ -135,8 +140,13 @@ impl TestContext {
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.right.is_none() {
                 // Prove a partial node
+                let proof_key = CellProofIdentifier {
+                    table: table_id.clone(),
+                    primary: block_key,
+                    tree_key: context.left.unwrap(),
+                };
                 let left_proof = storage
-                    .get_proof(&ProofKey::Cell(context.left.unwrap()))
+                    .get_proof(&ProofKey::Cell(proof_key))
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::partial(
@@ -147,11 +157,22 @@ impl TestContext {
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
                 // Prove a full node.
+                let left_proof_key = CellProofIdentifier {
+                    table: table_id.clone(),
+                    primary: block_key,
+                    tree_key: context.left.unwrap(),
+                };
+                let right_proof_key = CellProofIdentifier {
+                    table: table_id.clone(),
+                    primary: block_key,
+                    tree_key: context.right.unwrap(),
+                };
+
                 let left_proof = storage
-                    .get_proof(&ProofKey::Cell(context.left.unwrap()))
+                    .get_proof(&ProofKey::Cell(left_proof_key))
                     .expect("UT guarantees proving in order");
                 let right_proof = storage
-                    .get_proof(&ProofKey::Cell(context.right.unwrap()))
+                    .get_proof(&ProofKey::Cell(right_proof_key))
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::full(
@@ -161,20 +182,33 @@ impl TestContext {
                     ));
                 api::generate_proof(self.params(), inputs).expect("while proving full node")
             };
+            let generated_proof_key = CellProofIdentifier {
+                table: table_id.clone(),
+                primary: block_key,
+                tree_key: k,
+            };
+
             storage
-                .store_proof(ProofKey::Cell(k), proof)
+                .store_proof(ProofKey::Cell(generated_proof_key), proof)
                 .expect("storing should work");
 
             workplan.done(&k).unwrap();
         }
         let root = t.tree().root().unwrap();
-        storage.get_proof(&ProofKey::Cell(root)).unwrap()
+        let root_proof_key = CellProofIdentifier {
+            table: table_id.clone(),
+            primary: block_key,
+            tree_key: root,
+        };
+
+        storage.get_proof(&ProofKey::Cell(root_proof_key)).unwrap()
     }
 
     /// Generate and prove a [`MerkleCellTree`] encoding the content of the
     /// given slots for the contract located at `contract_address`.
     pub async fn build_and_prove_celltree<P: ProofStorage>(
         &self,
+        table_id: &TableID,
         contract_address: &Address,
         slots: &[u8],
         storage: &mut P,
@@ -185,7 +219,7 @@ impl TestContext {
             .await
             .expect("failed to create cell tree");
         let cell_tree_proof = self
-            .prove_cell_tree(&cell_tree, cell_tree_ut, storage)
+            .prove_cell_tree(&table_id, &cell_tree, cell_tree_ut, storage)
             .await;
 
         let tree_hash = cell_tree.root_data().unwrap().hash;

@@ -37,13 +37,3 @@ fn row_tree_proof_to_hash(proof: &[u8]) -> HashOut<F> {
         .public_inputs;
     verifiable_db::row_tree::PublicInputs::from_slice(&root_pi).root_hash_hashout()
 }
-
-type CellTreeKey = <CellTree as TreeTopology>::Key;
-type RowTreeKey = <RowTree as TreeTopology>::Key;
-
-/// Uniquely identifies a proof in the proof storage backend.
-#[derive(Clone, Hash, PartialEq, Eq)]
-pub enum ProofKey {
-    Cell(CellTreeKey),
-    Row(RowTreeKey),
-}

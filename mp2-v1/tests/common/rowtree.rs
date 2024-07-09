@@ -24,7 +24,10 @@ use std::collections::HashMap;
 use crate::common::row_tree_proof_to_hash;
 
 use super::{
-    cell_tree_proof_to_hash, celltree::Cell, proof_storage::ProofStorage, ProofKey, TestContext,
+    cell_tree_proof_to_hash,
+    celltree::Cell,
+    proof_storage::{BlockPrimaryIndex, ProofKey, ProofStorage, RowProofIdentifier, TableID},
+    TestContext,
 };
 
 /// A unique identifier in a row tree
@@ -201,19 +204,24 @@ impl TestContext {
     /// it.
     pub async fn prove_row_tree<P: ProofStorage>(
         &self,
+        table_id: &TableID,
         t: &MerkleRowTree,
         ut: UpdateTree<<RowTree as TreeTopology>::Key>,
         storage: &mut P,
     ) -> Vec<u8> {
         let mut workplan = ut.into_workplan();
+        // THIS can panic but for block number it should be fine on 64bit platforms...
+        // unwrap is safe since we know it is really a block number and not set to Latest or stg
+        let block_key: BlockPrimaryIndex =
+            self.block_number.as_number().unwrap().try_into().unwrap();
 
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, row) = t.fetch_with_context(&k);
             // NOTE: the sec. index. is assumed to be in the first position
             // Sec. index identifier
-            let identifier = row.secondary_index().identifier.clone();
+            let identifier = row.secondary_index().identifier;
             // Sec. index value
-            let value = row.secondary_index().value.clone();
+            let value = row.secondary_index().value;
 
             let proof = if context.is_leaf() {
                 // Prove a leaf
@@ -227,16 +235,19 @@ impl TestContext {
                 );
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.is_partial() {
+                let proof_key = RowProofIdentifier {
+                    table: table_id.clone(),
+                    primary: block_key,
+                    tree_key: context
+                        .left
+                        .as_ref()
+                        .or(context.right.as_ref())
+                        .cloned()
+                        .unwrap(),
+                };
                 // Prove a partial node
                 let child_proof = storage
-                    .get_proof(&ProofKey::Row(
-                        context
-                            .left
-                            .as_ref()
-                            .or(context.right.as_ref())
-                            .cloned()
-                            .unwrap(),
-                    ))
+                    .get_proof(&ProofKey::Row(proof_key))
                     .expect("UT guarantees proving in order");
 
                 let inputs = CircuitInput::RowsTree(
@@ -252,12 +263,23 @@ impl TestContext {
 
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
+                let left_proof_key = RowProofIdentifier {
+                    table: table_id.clone(),
+                    primary: block_key,
+                    tree_key: context.left.unwrap(),
+                };
+                let right_proof_key = RowProofIdentifier {
+                    table: table_id.clone(),
+                    primary: block_key,
+                    tree_key: context.right.unwrap(),
+                };
+
                 // Prove a full node.
                 let left_proof = storage
-                    .get_proof(&ProofKey::Row(context.left.unwrap()))
+                    .get_proof(&ProofKey::Row(left_proof_key))
                     .expect("UT guarantees proving in order");
                 let right_proof = storage
-                    .get_proof(&ProofKey::Row(context.right.unwrap()))
+                    .get_proof(&ProofKey::Row(right_proof_key))
                     .expect("UT guarantees proving in order");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::full(
@@ -271,27 +293,42 @@ impl TestContext {
                 );
                 api::generate_proof(self.params(), inputs).expect("while proving full node")
             };
+            let new_proof_key = RowProofIdentifier {
+                table: table_id.clone(),
+                primary: block_key,
+                tree_key: k.clone(),
+            };
+
             storage
-                .store_proof(ProofKey::Row(k.clone()), proof)
+                .store_proof(ProofKey::Row(new_proof_key), proof)
                 .expect("storing should work");
 
             workplan.done(&k).unwrap();
         }
         let root = t.tree().root().unwrap();
-        storage.get_proof(&ProofKey::Row(root)).unwrap()
+        let root_proof_key = RowProofIdentifier {
+            table: table_id.clone(),
+            primary: block_key,
+            tree_key: root,
+        };
+
+        storage.get_proof(&ProofKey::Row(root_proof_key)).unwrap()
     }
 
     /// Build and prove the row tree from the [`Row`]s and the secondary index
     /// data (which **must be absent** from the rows), returning its proof.
     pub async fn build_and_prove_rowtree<P: ProofStorage>(
         &self,
+        table_id: &TableID,
         rows: &[Row],
         storage: &mut P,
     ) -> Vec<u8> {
         let (row_tree, row_tree_ut) = build_row_tree(rows)
             .await
             .expect("failed to create row tree");
-        let row_tree_proof = self.prove_row_tree(&row_tree, row_tree_ut, storage).await;
+        let row_tree_proof = self
+            .prove_row_tree(table_id, &row_tree, row_tree_ut, storage)
+            .await;
 
         let tree_hash = row_tree.root_data().unwrap().hash;
         let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
