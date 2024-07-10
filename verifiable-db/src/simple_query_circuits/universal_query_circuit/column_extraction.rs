@@ -206,7 +206,7 @@ fn build_cells_tree<const MAX_NUM_COLUMNS: usize>(
 
             // It may occur at the last of this loop (as `h11` of the above example).
             if item_index >= total_len {
-                nodes[i] = empty_hash;
+                nodes[i] = nodes[i * 2];
                 continue;
             }
 
@@ -222,7 +222,7 @@ fn build_cells_tree<const MAX_NUM_COLUMNS: usize>(
             let parent = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
 
             // Save it to the re-used node vector.
-            nodes[i] = b.select_hash(is_reals[item_index], &parent, &empty_hash);
+            nodes[i] = b.select_hash(is_reals[item_index], &parent, &nodes[i * 2]);
         }
 
         // Calculate the next level and starting index.
@@ -303,6 +303,8 @@ mod tests {
             column_values: [U256; MAX_NUM_COLUMNS],
             column_ids: [F; MAX_NUM_COLUMNS],
         ) -> Self {
+            assert!(real_num_columns >= COLUMN_INDEX_NUM);
+
             let inputs = ColumnExtractionInputs {
                 real_num_columns,
                 column_values,
@@ -349,6 +351,7 @@ mod tests {
         // Exclude the first 2 indexed columns.
         let ids = &input.column_ids[COLUMN_INDEX_NUM..];
         let values = &input.column_values[COLUMN_INDEX_NUM..];
+        let real_num_columns = input.real_num_columns - COLUMN_INDEX_NUM;
         let total_len = ids.len();
 
         // Initialize the leaves (of level-1) by the values in even positions.
@@ -369,7 +372,7 @@ mod tests {
                     .collect();
                 let hash = H::hash_no_pad(&inputs);
 
-                if i < input.real_num_columns {
+                if i < real_num_columns {
                     hash
                 } else {
                     *empty_hash
@@ -396,7 +399,7 @@ mod tests {
 
                 // It may occur at the last of this loop.
                 if item_index >= total_len {
-                    nodes[i] = *empty_hash;
+                    nodes[i] = nodes[i * 2];
                     continue;
                 }
 
@@ -412,10 +415,10 @@ mod tests {
                 let parent = H::hash_no_pad(&inputs);
 
                 // Save it to the re-used node vector.
-                nodes[i] = if item_index < input.real_num_columns {
+                nodes[i] = if item_index < real_num_columns {
                     parent
                 } else {
-                    *empty_hash
+                    nodes[i * 2]
                 };
             }
 
