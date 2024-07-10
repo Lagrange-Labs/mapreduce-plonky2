@@ -2937,7 +2937,7 @@ dependencies = [
  "recursion_framework",
  "rlp",
  "rmp-serde",
- "ryhope",
+ "ryhope 0.1.0 (git+ssh://git@github.com/Lagrange-Labs/ryhope.git?rev=c53d04dfe2c1e9f074d050ada2df50e1b87376b1)",
  "serde",
  "serde_arrays",
  "serde_json",
@@ -4151,6 +4151,18 @@ dependencies = [
 [[package]]
 name = "ryhope"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "delegate",
+ "itertools 0.13.0",
+ "log",
+ "postgres",
+ "serde",
+]
+
+[[package]]
+name = "ryhope"
+version = "0.1.0"
 source = "git+ssh://git@github.com/Lagrange-Labs/ryhope.git?rev=c53d04dfe2c1e9f074d050ada2df50e1b87376b1#c53d04dfe2c1e9f074d050ada2df50e1b87376b1"
 dependencies = [
  "anyhow",
@@ -5272,6 +5284,7 @@ dependencies = [
  "plonky2_ecgfp5",
  "rand",
  "recursion_framework",
+ "ryhope 0.1.0",
  "serde",
  "serial_test",
 ]

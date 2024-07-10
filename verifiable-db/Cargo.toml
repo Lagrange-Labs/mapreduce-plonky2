@@ -21,8 +21,10 @@ itertools.workspace = true
 
 
 [dev-dependencies]
+env_logger.workspace = true
+mp2_test = { path = "../mp2-test" }
 rand.workspace = true
 serial_test.workspace = true
-mp2_test = { path = "../mp2-test" }
-env_logger.workspace = true
-
+# TODO
+# ryhope = { git = "ssh://git@github.com/Lagrange-Labs/ryhope.git", rev = "3cd45c" }
+ryhope = { path = "../../ryhope" }

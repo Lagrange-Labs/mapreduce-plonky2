@@ -1,4 +1,4 @@
-use super::utils::build_cells_tree;
+use super::cells_tree::build_cells_tree;
 use ethers::types::U256;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
@@ -141,12 +141,11 @@ fn build_column_hash<const MAX_NUM_COLUMNS: usize>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use mp2_common::{
-        poseidon::H,
-        utils::{Fieldable, ToFields},
-        C, D,
+    use super::{
+        super::cells_tree::tests::{compute_cell_tree_hash, TestCell},
+        *,
     };
+    use mp2_common::{poseidon::H, utils::Fieldable, C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
@@ -200,22 +199,26 @@ mod tests {
     }
 
     impl<const MAX_NUM_COLUMNS: usize> TestColumnExtractionCircuit<MAX_NUM_COLUMNS> {
-        fn new(
-            real_num_columns: usize,
-            column_values: [U256; MAX_NUM_COLUMNS],
-            column_ids: [F; MAX_NUM_COLUMNS],
-        ) -> Self {
-            assert!(real_num_columns >= COLUMN_INDEX_NUM);
+        fn new(columns: Vec<TestCell>) -> Self {
+            let real_num_columns = columns.len();
+            assert!(real_num_columns <= MAX_NUM_COLUMNS);
 
+            // Compute the expected column hash and tree hash.
+            let column_hash = compute_column_hash(&columns);
+            let tree_hash = compute_cell_tree_hash(&columns[COLUMN_INDEX_NUM..]);
+
+            // Construct the circuit input.
+            let (mut column_ids, mut column_values): (Vec<_>, Vec<_>) =
+                columns.into_iter().map(|col| (col.id, col.value)).unzip();
+            column_ids.resize(MAX_NUM_COLUMNS, F::ZERO);
+            column_values.resize(MAX_NUM_COLUMNS, U256::zero());
+            let column_ids = column_ids.try_into().unwrap();
+            let column_values = column_values.try_into().unwrap();
             let inputs = ColumnExtractionInputs {
                 real_num_columns,
                 column_values,
                 column_ids,
             };
-
-            // Compute the expected column hash and tree hash.
-            let column_hash = compute_column_hash(&inputs);
-            let tree_hash = compute_cells_tree(&inputs);
 
             Self {
                 inputs,
@@ -226,114 +229,15 @@ mod tests {
     }
 
     /// Compute the column hashes.
-    /// It's similar with `build_column_hash` function.
     fn compute_column_hash<const MAX_NUM_COLUMNS: usize>(
-        input: &ColumnExtractionInputs<MAX_NUM_COLUMNS>,
+        columns: &[TestCell],
     ) -> [HashOut<F>; MAX_NUM_COLUMNS] {
         let empty_hash = empty_poseidon_hash();
 
-        array::from_fn(|i| {
-            // H(PREFIX || id)
-            let hash = H::hash_no_pad(&[COLUMN_HASH_PREFIX.to_field(), input.column_ids[i]]);
-            if i < COLUMN_INDEX_NUM || i < input.real_num_columns {
-                hash
-            } else {
-                *empty_hash
-            }
+        array::from_fn(|i| match columns.get(i) {
+            Some(TestCell { id, .. }) => H::hash_no_pad(&[COLUMN_HASH_PREFIX.to_field(), *id]),
+            None => *empty_hash,
         })
-    }
-
-    /// Compute the expected root hash of constructed cells tree.
-    /// It's similar with `build_cells_tree` function.
-    fn compute_cells_tree<const MAX_NUM_COLUMNS: usize>(
-        input: &ColumnExtractionInputs<MAX_NUM_COLUMNS>,
-    ) -> HashOut<F> {
-        let empty_hash = empty_poseidon_hash();
-
-        // Exclude the first 2 indexed columns.
-        let ids = &input.column_ids[COLUMN_INDEX_NUM..];
-        let values = &input.column_values[COLUMN_INDEX_NUM..];
-        let real_num_columns = input.real_num_columns - COLUMN_INDEX_NUM;
-        let total_len = ids.len();
-
-        // Initialize the leaves (of level-1) by the values in even positions.
-        let mut nodes: Vec<_> = ids
-            .iter()
-            .zip(values)
-            .enumerate()
-            .step_by(2)
-            .map(|(i, (id, value))| {
-                // H(H("") || H("") || id || value)
-                let inputs: Vec<_> = empty_hash
-                    .elements
-                    .iter()
-                    .chain(empty_hash.elements.iter())
-                    .chain(iter::once(id))
-                    .cloned()
-                    .chain(value.to_fields())
-                    .collect();
-                let hash = H::hash_no_pad(&inputs);
-
-                if i < real_num_columns {
-                    hash
-                } else {
-                    *empty_hash
-                }
-            })
-            .collect();
-
-        // Accumulate the hashes from leaves up to root, starting from level-2 and
-        // the current leftmost node.
-        let mut starting_index = 1;
-        let mut level = 2;
-
-        // Return the root hash when there's only one node.
-        while nodes.len() > 1 {
-            // Make the node length even by padding an empty hash.
-            if nodes.len() % 2 != 0 {
-                nodes.push(*empty_hash);
-            }
-
-            let new_node_len = nodes.len() >> 1;
-            for i in 0..new_node_len {
-                // Calculate the item index which should be hashed for the current node.
-                let item_index = starting_index + i * (1 << level);
-
-                // It may occur at the last of this loop.
-                if item_index >= total_len {
-                    nodes[i] = nodes[i * 2];
-                    continue;
-                }
-
-                // H(H(left_child) || H(right_child) || id || value)
-                let inputs: Vec<_> = nodes[i * 2]
-                    .elements
-                    .iter()
-                    .chain(nodes[i * 2 + 1].elements.iter())
-                    .chain(iter::once(&ids[item_index]))
-                    .cloned()
-                    .chain(values[item_index].to_fields())
-                    .collect();
-                let parent = H::hash_no_pad(&inputs);
-
-                // Save it to the re-used node vector.
-                nodes[i] = if item_index < real_num_columns {
-                    parent
-                } else {
-                    nodes[i * 2]
-                };
-            }
-
-            // Calculate the next level and starting index.
-            starting_index += 1 << (level - 1);
-            level += 1;
-
-            // Truncate the node vector to the new length.
-            nodes.truncate(new_node_len);
-        }
-
-        // Return the root hash.
-        nodes[0]
     }
 
     #[test]
@@ -343,12 +247,25 @@ mod tests {
 
         // Generate the random column data.
         let mut rng = thread_rng();
-        let column_values = [0; MAX_NUM_COLUMNS].map(|_| U256(rng.gen::<[u64; 4]>()));
-        let column_ids = [0; MAX_NUM_COLUMNS].map(|_| rng.gen::<u32>().to_field());
+        let test_cells = [0; REAL_NUM_COLUMNS]
+            .map(|_| TestCell {
+                id: rng.gen::<u32>().to_field(),
+                value: U256(rng.gen::<[u64; 4]>()),
+                hash: Default::default(),
+            })
+            .to_vec();
+        let test_cells = [0; REAL_NUM_COLUMNS]
+            .iter()
+            .enumerate()
+            .map(|(i, _)| TestCell {
+                id: (i as u32).to_field(),
+                value: (i as u32).into(),
+                hash: Default::default(),
+            })
+            .collect();
 
         // Construct the test circuit.
-        let test_circuit =
-            TestColumnExtractionCircuit::new(REAL_NUM_COLUMNS, column_values, column_ids);
+        let test_circuit = TestColumnExtractionCircuit::<MAX_NUM_COLUMNS>::new(test_cells);
 
         // Prove for the test circuit.
         run_circuit::<F, D, C, _>(test_circuit);
