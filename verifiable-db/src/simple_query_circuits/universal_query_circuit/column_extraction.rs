@@ -62,6 +62,7 @@ pub(crate) struct ColumnExtractionWires<const MAX_NUM_COLUMNS: usize> {
 /// Witness input values for column extraction component
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ColumnExtractionInputs<const MAX_NUM_COLUMNS: usize> {
+    real_num_columns: usize,
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
@@ -72,11 +73,6 @@ pub struct ColumnExtractionInputs<const MAX_NUM_COLUMNS: usize> {
         deserialize_with = "deserialize_long_array"
     )]
     column_ids: [F; MAX_NUM_COLUMNS],
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    is_real_column: [bool; MAX_NUM_COLUMNS],
 }
 
 impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
@@ -110,12 +106,12 @@ impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
             .iter()
             .zip(wires.column_values.iter())
             .for_each(|(v, t)| pw.set_u256_target(t, *v));
-
         pw.set_target_arr(wires.column_ids.as_slice(), self.column_ids.as_slice());
-        self.is_real_column
+        wires
+            .is_real_column
             .iter()
-            .zip(wires.is_real_column.iter())
-            .for_each(|(v, t)| pw.set_bool_target(*t, *v));
+            .enumerate()
+            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.real_num_columns));
     }
 }
 
@@ -303,14 +299,14 @@ mod tests {
 
     impl<const MAX_NUM_COLUMNS: usize> TestColumnExtractionCircuit<MAX_NUM_COLUMNS> {
         fn new(
+            real_num_columns: usize,
             column_values: [U256; MAX_NUM_COLUMNS],
             column_ids: [F; MAX_NUM_COLUMNS],
-            is_real_column: [bool; MAX_NUM_COLUMNS],
         ) -> Self {
             let inputs = ColumnExtractionInputs {
+                real_num_columns,
                 column_values,
                 column_ids,
-                is_real_column,
             };
 
             // Compute the expected column hash and tree hash.
@@ -335,7 +331,7 @@ mod tests {
         array::from_fn(|i| {
             // H(PREFIX || id)
             let hash = H::hash_no_pad(&[COLUMN_HASH_PREFIX.to_field(), input.column_ids[i]]);
-            if i < COLUMN_INDEX_NUM || input.is_real_column[i] {
+            if i < COLUMN_INDEX_NUM || i < input.real_num_columns {
                 hash
             } else {
                 *empty_hash
@@ -353,16 +349,15 @@ mod tests {
         // Exclude the first 2 indexed columns.
         let ids = &input.column_ids[COLUMN_INDEX_NUM..];
         let values = &input.column_values[COLUMN_INDEX_NUM..];
-        let is_reals = &input.is_real_column[COLUMN_INDEX_NUM..];
         let total_len = ids.len();
 
         // Initialize the leaves (of level-1) by the values in even positions.
         let mut nodes: Vec<_> = ids
             .iter()
             .zip(values)
-            .zip(is_reals)
+            .enumerate()
             .step_by(2)
-            .map(|((id, value), is_real)| {
+            .map(|(i, (id, value))| {
                 // H(H("") || H("") || id || value)
                 let inputs: Vec<_> = empty_hash
                     .elements
@@ -374,7 +369,7 @@ mod tests {
                     .collect();
                 let hash = H::hash_no_pad(&inputs);
 
-                if *is_real {
+                if i < input.real_num_columns {
                     hash
                 } else {
                     *empty_hash
@@ -417,7 +412,7 @@ mod tests {
                 let parent = H::hash_no_pad(&inputs);
 
                 // Save it to the re-used node vector.
-                nodes[i] = if is_reals[item_index] {
+                nodes[i] = if item_index < input.real_num_columns {
                     parent
                 } else {
                     *empty_hash
@@ -439,17 +434,16 @@ mod tests {
     #[test]
     fn test_query_column_extraction_component() {
         const MAX_NUM_COLUMNS: usize = 15;
-        const VALID_NUM_COLUMNS: usize = 11;
+        const REAL_NUM_COLUMNS: usize = 11;
 
         // Generate the random column data.
         let mut rng = thread_rng();
         let column_values = [0; MAX_NUM_COLUMNS].map(|_| U256(rng.gen::<[u64; 4]>()));
         let column_ids = [0; MAX_NUM_COLUMNS].map(|_| rng.gen::<u32>().to_field());
-        let is_real_column = array::from_fn(|i| i < VALID_NUM_COLUMNS);
 
         // Construct the test circuit.
         let test_circuit =
-            TestColumnExtractionCircuit::new(column_values, column_ids, is_real_column);
+            TestColumnExtractionCircuit::new(REAL_NUM_COLUMNS, column_values, column_ids);
 
         // Prove for the test circuit.
         run_circuit::<F, D, C, _>(test_circuit);
