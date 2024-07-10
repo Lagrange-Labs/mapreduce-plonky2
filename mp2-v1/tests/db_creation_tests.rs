@@ -1,7 +1,7 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
-use common::{ProofKey, TestCase, TestContext};
+use common::{proof_storage::TableID, TestCase, TestContext};
 use ethers::types::Address;
 use log::info;
 use mp2_common::proof::{serialize_proof, ProofWithVK};
@@ -10,15 +10,15 @@ use test_log::test;
 
 pub(crate) mod common;
 
-async fn prove_scalar_values(
+async fn prove_scalar_values<P: common::proof_storage::ProofStorage>(
     ctx: &TestContext,
     t: &TestCase,
     contract_proof: &ProofWithVK,
     block_proof: &[u8],
-    proofs: &mut HashMap<ProofKey, Vec<u8>>,
+    storage: &mut P,
 ) {
     let contract_address = Address::from_str(&t.contract_address).unwrap();
-
+    let table_id = TableID::new(&contract_address, &t.values_extraction_single.slots);
     let single_values_proof = ctx
         .prove_single_values_extraction(&t.contract_address, &t.values_extraction_single.slots)
         .await;
@@ -36,16 +36,17 @@ async fn prove_scalar_values(
 
     let row = ctx
         .build_and_prove_celltree(
+            &table_id,
             &contract_address,
             // NOTE: the 0th column is assumed to be the secondary index.
             &t.values_extraction_single.slots,
-            proofs,
+            storage,
         )
         .await;
 
     // In the case of the scalars slots, there is a single node in the row tree.
     let rows = vec![row];
-    let _row_tree_proof = ctx.build_and_prove_rowtree(&rows, proofs).await;
+    let _row_tree_proof = ctx.build_and_prove_rowtree(&table_id, &rows, storage).await;
 }
 
 async fn prove_mappings_with_length(
@@ -107,9 +108,6 @@ async fn db_creation_integrated_tests() {
 
     // Prove for each test case.
     for t in &ctx.cases {
-        // NOTE: @andrus this is a naive way of storing peoofs; dist. syst. will use S3 IIRC.
-        // NOTE: @nikolasgg should we compose the proof key with @contract and #block here?
-        let mut proofs = HashMap::new();
         let contract_proof = ctx
             .prove_contract_extraction(&t.contract_address, t.contract_extraction.slot.clone())
             .await;
@@ -121,14 +119,16 @@ async fn db_creation_integrated_tests() {
         //
         // Prove scalar slots
         //
+        let mut scalar_proof_storage = common::proof_storage::MemoryProofStorage::default();
         prove_scalar_values(
             ctx,
             t,
             &contract_proof,
             &serialize_proof(&block_proof).unwrap(),
-            &mut proofs,
+            &mut scalar_proof_storage,
         )
         .await;
+        info!("Generated Single Variables table");
 
         //
         // Prove mapping slots
