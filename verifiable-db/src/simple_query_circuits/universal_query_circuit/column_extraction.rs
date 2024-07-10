@@ -1,3 +1,4 @@
+use super::utils::build_cells_tree;
 use ethers::types::U256;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
@@ -6,7 +7,7 @@ use mp2_common::{
     },
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{SelectHashBuilder, ToTargets},
+    utils::SelectHashBuilder,
     CHasher, F,
 };
 use plonky2::{
@@ -18,7 +19,7 @@ use plonky2::{
     },
 };
 use serde::{Deserialize, Serialize};
-use std::{array, iter};
+use std::array;
 
 /// Column index number (primary and secondary indexes)
 const COLUMN_INDEX_NUM: usize = 2;
@@ -87,8 +88,11 @@ impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
         // Build the column hashes by the input.
         let column_hash = build_column_hash(b, &input_wires);
 
-        // Build the cells tree and compute the root hash.
-        let tree_hash = build_cells_tree(b, &input_wires);
+        // Exclude the first 2 indexed columns to build the cells tree.
+        let input_values = &input_wires.column_values[COLUMN_INDEX_NUM..];
+        let input_ids = &input_wires.column_ids[COLUMN_INDEX_NUM..];
+        let is_real_value = &input_wires.is_real_column[COLUMN_INDEX_NUM..];
+        let tree_hash = build_cells_tree(b, input_values, input_ids, is_real_value);
 
         ColumnExtractionWires {
             tree_hash,
@@ -133,108 +137,6 @@ fn build_column_hash<const MAX_NUM_COLUMNS: usize>(
             b.select_hash(input.is_real_column[i], &hash, &empty_hash)
         }
     })
-}
-
-/// Re-compute the root hash of the cells tree by the column identifiers and values
-/// except the first 2 which correspond to the indexed columns.
-/// The root hash is calculated recursively from the leaves to root by each level as:
-/// node-0    n1    n2    n3    n4    n5    n6    n7    n8    n9    n10
-///   |             |           |           |           |           |
-///   |             |           |           |           |           |
-/// hash-0          h2          h4          h6          h8          h10       <--- level-1 (leaves)
-///     \         /              \         /             \         /
-///      \       /                \       /               \       /
-///     h1 (h0, h2)               h5 (h4, h6)             h9 (h8, h10)        <--- level-2
-///                  \         /                             \
-///                   \       /                               \
-///                  h3 (h1, h5)                         h11 (h9, empty_hash) <--- level-3
-///                                \               /
-///                                 \             /
-///                                  \           /
-///                                   h7 (h3, h11)                            <--- level-4 (root)
-fn build_cells_tree<const MAX_NUM_COLUMNS: usize>(
-    b: &mut CBuilder,
-    input: &ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
-) -> HashOutTarget {
-    let empty_hash = b.constant_hash(*empty_poseidon_hash());
-
-    // Exclude the first 2 indexed columns.
-    let ids = &input.column_ids[COLUMN_INDEX_NUM..];
-    let values = &input.column_values[COLUMN_INDEX_NUM..];
-    let is_reals = &input.is_real_column[COLUMN_INDEX_NUM..];
-
-    let total_len = ids.len();
-
-    // Initialize the leaves (of level-1) by the values in even positions.
-    let mut nodes: Vec<_> = ids
-        .iter()
-        .zip(values)
-        .zip(is_reals)
-        .step_by(2)
-        .map(|((id, value), is_real)| {
-            // H(H("") || H("") || id || value)
-            let inputs: Vec<_> = empty_hash
-                .elements
-                .iter()
-                .chain(empty_hash.elements.iter())
-                .chain(iter::once(id))
-                .cloned()
-                .chain(value.to_targets())
-                .collect();
-            let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
-
-            b.select_hash(*is_real, &hash, &empty_hash)
-        })
-        .collect();
-
-    // Accumulate the hashes from leaves up to root, starting from level-2 and
-    // the current leftmost node.
-    let mut starting_index = 1;
-    let mut level = 2;
-
-    // Return the root hash when there's only one node.
-    while nodes.len() > 1 {
-        // Make the node length even by padding an empty hash.
-        if nodes.len() % 2 != 0 {
-            nodes.push(empty_hash);
-        }
-
-        let new_node_len = nodes.len() >> 1;
-        for i in 0..new_node_len {
-            // Calculate the item index which should be hashed for the current node.
-            let item_index = starting_index + i * (1 << level);
-
-            // It may occur at the last of this loop (as `h11` of the above example).
-            if item_index >= total_len {
-                nodes[i] = nodes[i * 2];
-                continue;
-            }
-
-            // H(H(left_child) || H(right_child) || id || value)
-            let inputs: Vec<_> = nodes[i * 2]
-                .elements
-                .iter()
-                .chain(nodes[i * 2 + 1].elements.iter())
-                .chain(iter::once(&ids[item_index]))
-                .cloned()
-                .chain(values[item_index].to_targets())
-                .collect();
-            let parent = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
-
-            // Save it to the re-used node vector.
-            nodes[i] = b.select_hash(is_reals[item_index], &parent, &nodes[i * 2]);
-        }
-
-        // Calculate the next level and starting index.
-        starting_index += 1 << (level - 1);
-        level += 1;
-
-        // Truncate the node vector to the new length.
-        nodes.truncate(new_node_len);
-    }
-
-    // Return the root hash.
-    nodes[0]
 }
 
 #[cfg(test)]

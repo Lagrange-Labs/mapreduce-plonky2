@@ -15,3 +15,4 @@ mod output_with_aggregation;
 /// https://www.notion.so/lagrangelabs/Queries-Circuits-2695199166a54954bbc44ad9dc398825?pvs=4#5c0d5af8c40f4bf0ae7dd13b20a54dcc
 /// while the detailed specs can be found here https://www.notion.so/lagrangelabs/Queries-Circuits-2695199166a54954bbc44ad9dc398825?pvs=4#22fbb552e11e411e95d426264c94aa46
 mod universal_query_circuit;
+mod utils;
