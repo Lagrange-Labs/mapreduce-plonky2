@@ -178,12 +178,12 @@ mod tests {
     }
 
     impl<const MAX_NUM_CELLS: usize> TestCellsTreeCircuit<MAX_NUM_CELLS> {
-        fn new(mut input_cells: Vec<TestCell>) -> Self {
+        async fn new(mut input_cells: Vec<TestCell>) -> Self {
             let real_num_cells = input_cells.len();
             assert!(real_num_cells <= MAX_NUM_CELLS);
 
             // Compute the expected root hash of cells tree.
-            let exp_root_hash = compute_cells_tree_hash(&input_cells);
+            let exp_root_hash = compute_cells_tree_hash(&input_cells).await;
 
             input_cells.resize(MAX_NUM_CELLS, TestCell::default());
             let input_cells = input_cells.try_into().unwrap();
@@ -196,12 +196,12 @@ mod tests {
         }
     }
 
-    fn test_cells_tree_circuit<const MAX_NUM_CELLS: usize, const REAL_NUM_CELLS: usize>() {
+    async fn test_cells_tree_circuit<const MAX_NUM_CELLS: usize, const REAL_NUM_CELLS: usize>() {
         // Generate the random cell data.
         let test_cells = [0; REAL_NUM_CELLS].map(|_| TestCell::random()).to_vec();
 
         // Construct the test circuit.
-        let test_circuit = TestCellsTreeCircuit::<MAX_NUM_CELLS>::new(test_cells);
+        let test_circuit = TestCellsTreeCircuit::<MAX_NUM_CELLS>::new(test_cells).await;
 
         // Prove for the test circuit.
         run_circuit::<F, D, C, _>(test_circuit);
@@ -214,12 +214,12 @@ mod tests {
     //     \         /
     //      \       /
     //        root (c4)
-    #[test]
-    fn test_query_cells_tree_circuit_saturated() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_saturated() {
         const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 7;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5
@@ -229,12 +229,12 @@ mod tests {
     //     \      /
     //      \    /
     //        root (c4)
-    #[test]
-    fn test_query_cells_tree_circuit_partial_unsaturated() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_partial_unsaturated() {
         const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 5;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5 c6 c7 c8
@@ -250,12 +250,12 @@ mod tests {
     //             \
     //              \
     //                  root (c8), has no right child
-    #[test]
-    fn test_query_cells_tree_circuit_completely_unsaturated() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_completely_unsaturated() {
         const MAX_NUM_CELLS: usize = 15;
         const REAL_NUM_CELLS: usize = 8;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5 c6 c7 c8 c9
@@ -271,12 +271,12 @@ mod tests {
     //             \        /
     //              \      /
     //                  root (c8)
-    #[test]
-    fn test_query_cells_tree_circuit_index_out_of_range() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_index_out_of_range() {
         const MAX_NUM_CELLS: usize = 9;
         const REAL_NUM_CELLS: usize = 9;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5 c6 c7 c8 c9
@@ -292,11 +292,11 @@ mod tests {
     //             \        /
     //              \      /
     //                  root (c8)
-    #[test]
-    fn test_query_cells_tree_circuit_index_dummy_cell() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_index_dummy_cell() {
         const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 9;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 }

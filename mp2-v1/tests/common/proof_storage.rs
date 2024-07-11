@@ -1,7 +1,8 @@
-use super::{celltree::CellTree, rowtree::RowTree};
+use super::rowtree::RowTree;
 use anyhow::{Context, Result};
 use ethers::types::{Address, U256};
 use hashbrown::HashMap;
+use mp2_test::cells_tree::CellTree;
 use rand::{
     distributions::{Alphanumeric, DistString},
     thread_rng,

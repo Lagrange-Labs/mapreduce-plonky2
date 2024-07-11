@@ -198,13 +198,13 @@ mod tests {
     }
 
     impl<const MAX_NUM_COLUMNS: usize> TestColumnExtractionCircuit<MAX_NUM_COLUMNS> {
-        fn new(columns: Vec<TestCell>) -> Self {
+        async fn new(columns: Vec<TestCell>) -> Self {
             let real_num_columns = columns.len();
             assert!(real_num_columns <= MAX_NUM_COLUMNS);
 
             // Compute the expected column hash and tree hash.
             let column_hash = compute_column_hash(&columns);
-            let tree_hash = compute_cells_tree_hash(&columns[COLUMN_INDEX_NUM..]);
+            let tree_hash = compute_cells_tree_hash(&columns[COLUMN_INDEX_NUM..]).await;
 
             // Construct the circuit input.
             let (mut column_ids, mut column_values): (Vec<_>, Vec<_>) =
@@ -239,8 +239,8 @@ mod tests {
         })
     }
 
-    #[test]
-    fn test_query_column_extraction_component() {
+    #[tokio::test]
+    async fn test_query_column_extraction_component() {
         const MAX_NUM_COLUMNS: usize = 15;
         const REAL_NUM_COLUMNS: usize = 11;
 
@@ -248,7 +248,7 @@ mod tests {
         let test_cells = [0; REAL_NUM_COLUMNS].map(|_| TestCell::random()).to_vec();
 
         // Construct the test circuit.
-        let test_circuit = TestColumnExtractionCircuit::<MAX_NUM_COLUMNS>::new(test_cells);
+        let test_circuit = TestColumnExtractionCircuit::<MAX_NUM_COLUMNS>::new(test_cells).await;
 
         // Prove for the test circuit.
         run_circuit::<F, D, C, _>(test_circuit);

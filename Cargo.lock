@@ -5277,6 +5277,7 @@ dependencies = [
  "recursion_framework",
  "serde",
  "serial_test",
+ "tokio",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 //! Cells tree test helper functions
 
+use anyhow::{Context, Result};
 use ethers::types::U256;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
@@ -11,7 +12,7 @@ use mp2_common::{
     F,
 };
 use plonky2::{
-    hash::hash_types::{HashOut, HashOutTarget},
+    hash::hash_types::HashOut,
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
@@ -20,19 +21,19 @@ use plonky2::{
 };
 use rand::{thread_rng, Rng};
 use ryhope::{
-    storage::{memory::InMemory, EpochKvStorage, TreeTransactionalStorage},
-    tree::sbbst,
+    storage::{memory::InMemory, updatetree::UpdateTree, EpochKvStorage, TreeTransactionalStorage},
+    tree::{sbbst, TreeTopology},
     MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
 use std::iter;
 
-type CellTree = sbbst::Tree;
+pub type CellTree = sbbst::Tree;
 type CellStorage = InMemory<CellTree, TestCell>;
-type MerkleCellTree = MerkleTreeKvDb<CellTree, TestCell, CellStorage>;
+pub type MerkleCellTree = MerkleTreeKvDb<CellTree, TestCell, CellStorage>;
 
 /// Test node of the cells tree
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct TestCell {
     /// The unique identifier of the cell, derived from the contract it comes
     /// from and its slot in its storage.
@@ -48,6 +49,12 @@ pub struct TestCell {
 pub struct TestCellTarget {
     pub id: Target,
     pub value: UInt256Target,
+}
+
+impl std::fmt::Debug for TestCell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "C:{} := {}", self.id, self.value)
+    }
 }
 
 impl TestCell {
@@ -94,13 +101,15 @@ impl NodePayload for TestCell {
     }
 }
 
-/// Compute the expected root hash of constructed cell tree.
-pub fn compute_cells_tree_hash(cells: &[TestCell]) -> HashOut<F> {
+// NOTE: this is not really aync for now, but will be in the future when Ryhope
+// turns async.
+pub async fn build_cell_tree(
+    row: &[TestCell],
+) -> Result<(MerkleCellTree, UpdateTree<<CellTree as TreeTopology>::Key>)> {
     let mut cell_tree = MerkleCellTree::create((0, 0), ()).unwrap();
-
-    cell_tree
+    let update_tree = cell_tree
         .in_transaction(|t| {
-            for (i, cell) in cells.iter().enumerate() {
+            for (i, cell) in row.iter().enumerate() {
                 // SBBST starts at 1, not 0. Note though this index is not important
                 // since at no point we are looking up value per index in the cells
                 // tree we always look at the entire row at the row tree level.
@@ -108,7 +117,14 @@ pub fn compute_cells_tree_hash(cells: &[TestCell]) -> HashOut<F> {
             }
             Ok(())
         })
-        .unwrap();
+        .context("while building tree")?;
+
+    Ok((cell_tree, update_tree))
+}
+
+/// Compute the expected root hash of constructed cell tree.
+pub async fn compute_cells_tree_hash(cells: &[TestCell]) -> HashOut<F> {
+    let cell_tree = build_cell_tree(cells).await.unwrap().0;
 
     cell_tree.root_data().unwrap().hash
 }
