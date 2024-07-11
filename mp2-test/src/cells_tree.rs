@@ -1,9 +1,24 @@
 //! Cells tree test helper functions
 
 use ethers::types::U256;
-use mp2_common::poseidon::empty_poseidon_hash;
-use mp2_common::{poseidon::H, utils::ToFields, F};
-use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
+use mp2_common::{
+    poseidon::empty_poseidon_hash,
+    poseidon::H,
+    types::CBuilder,
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    utils::Fieldable,
+    utils::ToFields,
+    F,
+};
+use plonky2::{
+    hash::hash_types::{HashOut, HashOutTarget},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::config::Hasher,
+};
+use rand::{thread_rng, Rng};
 use ryhope::{
     storage::{memory::InMemory, EpochKvStorage, TreeTransactionalStorage},
     tree::sbbst,
@@ -17,7 +32,7 @@ type CellStorage = InMemory<CellTree, TestCell>;
 type MerkleCellTree = MerkleTreeKvDb<CellTree, TestCell, CellStorage>;
 
 /// Test node of the cells tree
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TestCell {
     /// The unique identifier of the cell, derived from the contract it comes
     /// from and its slot in its storage.
@@ -26,6 +41,43 @@ pub struct TestCell {
     pub value: U256,
     /// The hash of this node in the tree
     pub hash: HashOut<F>,
+}
+
+/// The corresponding test cell target
+#[derive(Clone, Debug)]
+pub struct TestCellTarget {
+    pub id: Target,
+    pub value: UInt256Target,
+    pub hash: HashOutTarget,
+}
+
+impl TestCell {
+    /// Create a random test cell.
+    pub fn random() -> Self {
+        let mut rng = thread_rng();
+
+        Self {
+            id: rng.gen::<u32>().to_field(),
+            value: U256(rng.gen::<[u64; 4]>()),
+            hash: Default::default(),
+        }
+    }
+
+    /// Build the test cell target.
+    pub fn build(b: &mut CBuilder) -> TestCellTarget {
+        let id = b.add_virtual_target();
+        let value = b.add_virtual_u256();
+        let hash = b.add_virtual_hash();
+
+        TestCellTarget { id, value, hash }
+    }
+
+    /// Assign the test cell target.
+    pub fn assign(&self, pw: &mut PartialWitness<F>, t: &TestCellTarget) {
+        pw.set_target(t.id, self.id);
+        pw.set_u256_target(&t.value, self.value);
+        pw.set_hash_target(t.hash, self.hash);
+    }
 }
 
 impl NodePayload for TestCell {

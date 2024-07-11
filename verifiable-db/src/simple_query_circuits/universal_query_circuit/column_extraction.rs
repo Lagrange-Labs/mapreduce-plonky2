@@ -148,7 +148,6 @@ mod tests {
         circuit::{run_circuit, UserCircuit},
     };
     use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
-    use rand::{thread_rng, Rng};
 
     #[derive(Clone, Debug)]
     struct TestColumnExtractionCircuit<const MAX_NUM_COLUMNS: usize> {
@@ -246,14 +245,7 @@ mod tests {
         const REAL_NUM_COLUMNS: usize = 11;
 
         // Generate the random column data.
-        let mut rng = thread_rng();
-        let test_cells = [0; REAL_NUM_COLUMNS]
-            .map(|_| TestCell {
-                id: rng.gen::<u32>().to_field(),
-                value: U256(rng.gen::<[u64; 4]>()),
-                hash: Default::default(),
-            })
-            .to_vec();
+        let test_cells = [0; REAL_NUM_COLUMNS].map(|_| TestCell::random()).to_vec();
 
         // Construct the test circuit.
         let test_circuit = TestColumnExtractionCircuit::<MAX_NUM_COLUMNS>::new(test_cells);
