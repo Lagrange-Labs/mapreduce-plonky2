@@ -3,11 +3,12 @@
 
 use std::{
     array::{self, from_fn as create_array},
+    iter::repeat,
     usize,
 };
 
 use crate::{
-    array::Array,
+    array::{Array, Targetable},
     serialization::{
         circuit_data_serialization::SerializableRichField, FromBytes, SerializationError, ToBytes,
     },
@@ -25,7 +26,10 @@ use plonky2::{
         witness::{PartitionWitness, WitnessWrite},
     },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CommonCircuitData},
-    util::serialization::{Buffer, IoResult, Read, Write},
+    util::{
+        log2_ceil,
+        serialization::{Buffer, IoResult, Read, Write},
+    },
 };
 use plonky2_crypto::u32::{
     arithmetic_u32::{CircuitBuilderU32, U32Target},
@@ -116,6 +120,13 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
         cond: BoolTarget,
         left: &UInt256Target,
         right: &UInt256Target,
+    ) -> UInt256Target;
+
+    /// Return the element in the `inputs` array with position `access_index`
+    fn random_access_u256(
+        &mut self,
+        access_index: Target,
+        inputs: &[UInt256Target],
     ) -> UInt256Target;
 }
 
@@ -407,6 +418,25 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
     ) -> UInt256Target {
         let limbs = create_array(|i| U32Target(self.select(cond, left.0[i].0, right.0[i].0)));
         UInt256Target(limbs)
+    }
+
+    fn random_access_u256(
+        &mut self,
+        access_index: Target,
+        inputs: &[UInt256Target],
+    ) -> UInt256Target {
+        // compute padded length of inputs to safely use the
+        // `random_access` gadget (must be a power of 2)
+        let pad_len = 1 << log2_ceil(inputs.len());
+        UInt256Target(create_array(|i| {
+            let ith_limbs = inputs
+                .iter()
+                .map(|u256_t| u256_t.0[i].to_target())
+                .chain(repeat(self.zero()))
+                .take(pad_len)
+                .collect_vec();
+            U32Target(self.random_access(access_index, ith_limbs))
+        }))
     }
 }
 

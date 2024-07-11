@@ -1,4 +1,4 @@
-use super::cells::build_cells_tree;
+use super::{cells::build_cells_tree, COLUMN_INDEX_NUM};
 use ethers::types::U256;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
@@ -20,9 +20,6 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 use std::array;
-
-/// Column index number (primary and secondary indexes)
-const COLUMN_INDEX_NUM: usize = 2;
 
 // The prefix of the column hash
 // TODO: replace with an enum value.
