@@ -25,5 +25,3 @@ env_logger.workspace = true
 mp2_test = { path = "../mp2-test" }
 rand.workspace = true
 serial_test.workspace = true
-# TODO: move into workspace after merging the mp2-v1 integration test PR.
-ryhope = { git = "ssh://git@github.com/Lagrange-Labs/ryhope.git", rev = "8cc9489" }

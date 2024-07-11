@@ -141,12 +141,12 @@ fn build_column_hash<const MAX_NUM_COLUMNS: usize>(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        super::cells_tree::tests::{compute_cell_tree_hash, TestCell},
-        *,
-    };
+    use super::*;
     use mp2_common::{poseidon::H, utils::Fieldable, C, D};
-    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use mp2_test::{
+        cells_tree::{compute_cells_tree_hash, TestCell},
+        circuit::{run_circuit, UserCircuit},
+    };
     use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
 
@@ -205,7 +205,7 @@ mod tests {
 
             // Compute the expected column hash and tree hash.
             let column_hash = compute_column_hash(&columns);
-            let tree_hash = compute_cell_tree_hash(&columns[COLUMN_INDEX_NUM..]);
+            let tree_hash = compute_cells_tree_hash(&columns[COLUMN_INDEX_NUM..]);
 
             // Construct the circuit input.
             let (mut column_ids, mut column_values): (Vec<_>, Vec<_>) =

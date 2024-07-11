@@ -2902,6 +2902,7 @@ dependencies = [
  "anyhow",
  "env_logger",
  "eth_trie",
+ "ethers",
  "hashbrown 0.14.5",
  "log",
  "mp2_common",
@@ -2909,6 +2910,8 @@ dependencies = [
  "plonky2_ecgfp5",
  "rand",
  "recursion_framework",
+ "ryhope 0.1.0 (git+ssh://git@github.com/Lagrange-Labs/ryhope.git?rev=8cc9489)",
+ "serde",
 ]
 
 [[package]]
@@ -5285,7 +5288,6 @@ dependencies = [
  "plonky2_ecgfp5",
  "rand",
  "recursion_framework",
- "ryhope 0.1.0 (git+ssh://git@github.com/Lagrange-Labs/ryhope.git?rev=8cc9489)",
  "serde",
  "serial_test",
 ]
