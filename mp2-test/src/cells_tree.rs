@@ -48,7 +48,6 @@ pub struct TestCell {
 pub struct TestCellTarget {
     pub id: Target,
     pub value: UInt256Target,
-    pub hash: HashOutTarget,
 }
 
 impl TestCell {
@@ -67,16 +66,14 @@ impl TestCell {
     pub fn build(b: &mut CBuilder) -> TestCellTarget {
         let id = b.add_virtual_target();
         let value = b.add_virtual_u256();
-        let hash = b.add_virtual_hash();
 
-        TestCellTarget { id, value, hash }
+        TestCellTarget { id, value }
     }
 
     /// Assign the test cell target.
     pub fn assign(&self, pw: &mut PartialWitness<F>, t: &TestCellTarget) {
         pw.set_target(t.id, self.id);
         pw.set_u256_target(&t.value, self.value);
-        pw.set_hash_target(t.hash, self.hash);
     }
 }
 
