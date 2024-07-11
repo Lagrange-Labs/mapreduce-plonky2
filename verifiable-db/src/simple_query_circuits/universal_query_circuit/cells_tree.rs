@@ -261,8 +261,8 @@ mod tests {
     // c1 c2 c3 c4 c5 c6 c7 c8 c9
     // \     /     \     /     |
     //  \   /       \   /      |
-    //    |           |        | Get c10 to trigger out of range when MAX_NUM = REAL_NUM = 9
-    //     \         /         |
+    //    |           |        | Try to get c10 to trigger out of range for the cell array
+    //     \         /         | (MAX_NUM = REAL_NUM = 9)
     //      \       /          |
     //       \     /           |
     //          |              |
@@ -274,6 +274,27 @@ mod tests {
     #[test]
     fn test_query_cells_tree_circuit_index_out_of_range() {
         const MAX_NUM_CELLS: usize = 9;
+        const REAL_NUM_CELLS: usize = 9;
+
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+    }
+
+    // c1 c2 c3 c4 c5 c6 c7 c8 c9
+    // \     /     \     /     |
+    //  \   /       \   /      |
+    //    |           |        | Try to get c10 which is a dummy cell
+    //     \         /         | (MAX_NUM = 13, REAL_NUM = 9, c10 is padded)
+    //      \       /          |
+    //       \     /           |
+    //          |              |
+    //           \            /
+    //            \          /
+    //             \        /
+    //              \      /
+    //                  root (c8)
+    #[test]
+    fn test_query_cells_tree_circuit_index_dummy_cell() {
+        const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 9;
 
         test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
