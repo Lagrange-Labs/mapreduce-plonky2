@@ -1,4 +1,4 @@
-use super::cells_tree::build_cells_tree;
+use super::cells::build_cells_tree;
 use ethers::types::U256;
 use mp2_common::{
     poseidon::empty_poseidon_hash,

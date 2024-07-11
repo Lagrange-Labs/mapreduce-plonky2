@@ -1,7 +1,7 @@
 /// Component implementing the basic operation supported in the universal query circuit, described here
 /// https://www.notion.so/lagrangelabs/Queries-Circuits-2695199166a54954bbc44ad9dc398825?pvs=4#46985c2eb90f4af8aa0805a9203e9efa
 mod basic_operation;
-mod cells_tree;
+mod cells;
 /// Component binding column values for the given row to the cells tree hash, descibed here
 /// https://www.notion.so/lagrangelabs/Queries-Circuits-2695199166a54954bbc44ad9dc398825?pvs=4#9e7230af7b844b4699a078291591b3eb
 mod column_extraction;
