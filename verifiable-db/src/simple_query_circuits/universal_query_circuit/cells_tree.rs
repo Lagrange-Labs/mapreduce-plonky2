@@ -207,8 +207,6 @@ mod tests {
         run_circuit::<F, D, C, _>(test_circuit);
     }
 
-    const MAX_NUM_CELLS: usize = 16;
-
     // c1 c2 c3 c4 c5 c6 c7
     // \     /     \     /
     //  \   /       \   /
@@ -218,6 +216,7 @@ mod tests {
     //        root (c4)
     #[test]
     fn test_query_cells_tree_circuit_saturated() {
+        const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 7;
 
         test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
@@ -232,6 +231,7 @@ mod tests {
     //        root (c4)
     #[test]
     fn test_query_cells_tree_circuit_partial_unsaturated() {
+        const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 5;
 
         test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
@@ -252,6 +252,7 @@ mod tests {
     //                  root (c8), has no right child
     #[test]
     fn test_query_cells_tree_circuit_completely_unsaturated() {
+        const MAX_NUM_CELLS: usize = 15;
         const REAL_NUM_CELLS: usize = 8;
 
         test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
