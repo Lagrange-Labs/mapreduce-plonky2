@@ -254,15 +254,6 @@ mod tests {
                 hash: Default::default(),
             })
             .to_vec();
-        let test_cells = [0; REAL_NUM_COLUMNS]
-            .iter()
-            .enumerate()
-            .map(|(i, _)| TestCell {
-                id: (i as u32).to_field(),
-                value: (i as u32).into(),
-                hash: Default::default(),
-            })
-            .collect();
 
         // Construct the test circuit.
         let test_circuit = TestColumnExtractionCircuit::<MAX_NUM_COLUMNS>::new(test_cells);
