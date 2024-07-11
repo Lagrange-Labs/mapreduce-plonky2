@@ -38,7 +38,10 @@ pub(crate) fn build_cells_tree(
 ) -> HashOutTarget {
     let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
-    let total_len = input_ids.len();
+    // Get the input length and ensure these array arguments must have the same length.
+    let input_len = input_ids.len();
+    assert_eq!(input_len, input_values.len());
+    assert_eq!(input_len, is_real_value.len());
 
     // Initialize the leaves (of level-1) by the values in even positions.
     let mut nodes: Vec<_> = input_ids
@@ -80,7 +83,7 @@ pub(crate) fn build_cells_tree(
             let item_index = starting_index + i * (1 << level);
 
             // It may occur at the last of this loop (as `h11` of the above example).
-            if item_index >= total_len {
+            if item_index >= input_len {
                 nodes[i] = nodes[i * 2];
                 continue;
             }
