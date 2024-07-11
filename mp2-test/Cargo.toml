@@ -12,6 +12,7 @@ log.workspace = true
 plonky2.workspace = true
 plonky2_ecgfp5.workspace = true
 rand.workspace = true
+ethers.workspace = true
 
 recursion_framework = { path = "../recursion-framework" }
 mp2_common = { path = "../mp2-common" }

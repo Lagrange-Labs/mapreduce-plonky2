@@ -101,7 +101,7 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
     /// Compute a `BoolTarget` being true if and only the 2 input UInt256Target are equal
     fn is_equal_u256(&mut self, left: &UInt256Target, right: &UInt256Target) -> BoolTarget;
 
-    /// Return  true iif  `left <= right`
+    /// Return  true iff  `left <= right`
     fn is_less_or_equal_than_u256(
         &mut self,
         left: &UInt256Target,
@@ -328,9 +328,7 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
         let _true = self._true();
         let _false = self._false();
 
-        let (_, quotient, remainder, _, overflow, is_zero) = left.mul_div_u256(right, self, _true);
-        // ensure no overflow occurred during division
-        self.connect(overflow.target, _false.target);
+        let (_, quotient, remainder, _, is_zero) = left.mul_div_u256(right, self, _true);
 
         (quotient, remainder, is_zero)
     }
@@ -483,8 +481,8 @@ impl UInt256Target {
         target: BoolTarget,
     ) -> Self {
         let limbs = repeat(b.zero_u32())
+            .take(NUM_LIMBS - 1)
             .chain(once(U32Target::from_target(target.target)))
-            .take(NUM_LIMBS)
             .collect_vec();
         Self::new_from_be_limbs(&limbs).unwrap()
     }
@@ -495,19 +493,18 @@ impl UInt256Target {
     /// - The result of the multiplication, if the input flag `is_div == false`, a dummy value otherwise
     /// - The results of the divisions (i.e., quotient and remainder), if the input flag `is_div == true`, dummy values otherwise
     /// - A flag specifying whether an overflow has occurred in the multiplication operations
-    /// - A flag specifying whether an overflow error has occurred in the division operations
     /// - A flag specyifng whether a division by zero was performed
     pub fn mul_div_u256<F: SerializableRichField<D>, const D: usize>(
         &self,
         other: &Self,
         b: &mut CircuitBuilder<F, D>,
         is_div: BoolTarget,
-    ) -> (Self, Self, Self, BoolTarget, BoolTarget, BoolTarget) {
+    ) -> (Self, Self, Self, BoolTarget, BoolTarget) {
         let _true = b._true();
         let _false = b._false();
         let zero = b.zero();
 
-        // enforce that right is not zero
+        // enforce that other is not zero
         let is_zero = b.is_zero(other);
         let quotient = b.add_virtual_u256();
         let remainder = b.add_virtual_u256();
@@ -518,10 +515,28 @@ impl UInt256Target {
             remainder: remainder.clone(),
             is_div,
         });
-        // enforce that remainder < right, if right != 0
+        // enforce that remainder < other, if other != 0 and is_div == true;
+        // this is equivalent to assert_eq!(other == 0 OR (NOT is_div) OR remainder < other, true)
+        // which is equivalent to assert_eq!(other != 0 AND is_div AND remainder >= other, false).
+        // We can compute the left expression with only 2 arithmetic operations as follows.
+        // first, we compute other != 0 AND is_div as is_div * (1 - is_zero) = is_div - is_div*is_zero
+        let antecedent = b.arithmetic(
+            F::NEG_ONE,
+            F::ONE,
+            is_div.target,
+            is_zero.target,
+            is_div.target,
+        );
+        // then, we compute the whole proposition as antecedent AND (NOT remainder < other)
         let is_less_than = b.is_less_than_u256(&remainder, other);
-        let is_not_zero = b.not(is_zero);
-        b.connect(is_less_than.target, is_not_zero.target);
+        let should_be_false = b.arithmetic(
+            F::NEG_ONE,
+            F::ONE,
+            antecedent,
+            is_less_than.target,
+            antecedent,
+        );
+        b.connect(should_be_false, _false.target);
         // compute multiplication: if is_div == false, then prod = self*other;
         // otherwise, prod = quotient*other, as we need to later check that quotient*other + remainder == self
         let mul_input = if let Some(val) = b.target_as_constant(is_div.target) {
@@ -535,21 +550,18 @@ impl UInt256Target {
         };
         let (prod, mul_overflow) = b.mul_u256(mul_input, other);
         let (computed_dividend, carry) = b.add_u256(&prod, &remainder);
-        // accumulate overflow error only if is_div == true
-        let carry = b.mul(is_div.target, carry.0);
         b.enforce_equal_u256(self, &computed_dividend);
 
-        let div_overflow = b.add(mul_overflow.target, carry);
-        let div_overflow = b.is_not_equal(div_overflow, zero);
+        // if is_div == true, enforce both mul_overflow and carry are zero
+        // this is equivalent to enforce that is_div == false OR mul_overflow == 0,
+        // which is equivalent to enforce that NOT(is_div AND mul_overflow != 0),
+        // which is equivalent to enforce that is_div*mul_overflow == 0
+        let enforce_no_mul_overflow = b.and(is_div, mul_overflow);
+        b.connect(enforce_no_mul_overflow.target, _false.target);
+        let enforce_no_add_overflow = b.mul(is_div.target, carry.to_target());
+        b.connect(enforce_no_add_overflow, zero);
 
-        (
-            prod,
-            quotient,
-            remainder,
-            mul_overflow,
-            div_overflow,
-            is_zero,
-        )
+        (prod, quotient, remainder, mul_overflow, is_zero)
     }
 
     /// Utility function for serialization of UInt256Target
@@ -687,13 +699,22 @@ impl<F: SerializableRichField<D>, const D: usize> SimpleGenerator<F, D> for UInt
                 dividend.div_mod(divisor)
             }
         } else {
-            // if is_div == false, then we assing input values to satisfy the
+            // if is_div == false, then we assign input values to satisfy the
             // constraint dividend*divisor + remainder == dividend, which is
             // needed when is_div == true
-            (
-                U256::one(),
-                dividend.overflowing_sub(dividend.mul(divisor)).0,
-            )
+            let remainder = dividend
+                .overflowing_sub(dividend.overflowing_mul(divisor).0)
+                .0;
+            // safety check
+            assert_eq!(
+                dividend
+                    .overflowing_mul(divisor)
+                    .0
+                    .overflowing_add(remainder)
+                    .0,
+                dividend
+            );
+            (U256::one(), remainder)
         };
 
         out_buffer.set_u256_target(&self.quotient, quotient);

@@ -153,7 +153,7 @@ impl BasicOperationInputs {
         let placeholder_id_hash = b.hash_n_to_hash_no_pad::<CHasher>(vec![placeholder_id]);
         // Compute the vector of computational hashes associated to each entry in `possible_input_values`.
         // The vector is padded to the next power of 2 to safely use `random_access_hash` gadget
-        let pad_len = log2_ceil(input_hash.len() + 2); // length of the padded vector of computational hashes
+        let pad_len = 1 << log2_ceil(input_hash.len() + 2); // length of the padded vector of computational hashes
         let empty_poseidon_hash = b.constant_hash(*empty_poseidon_hash()); // employed for padding
         let possible_input_hash = input_hash
             .into_iter()
@@ -187,10 +187,8 @@ impl BasicOperationInputs {
             let prod = b.mul(div_diff, mod_diff);
             b.is_equal(prod, zero)
         };
-        let (mul_res, div_res, mod_res, mul_overflow, div_overflow, div_by_zero) =
+        let (mul_res, div_res, mod_res, mul_overflow, div_by_zero) =
             first_input.mul_div_u256(&second_input, b, is_div_or_mod);
-        // number of errors occurred during division/mod operation
-        let div_error = b.add(div_overflow.target, div_by_zero.target);
 
         // comparison operations
         let lt_res = b.add_virtual_bool_target_unsafe();
@@ -222,10 +220,11 @@ impl BasicOperationInputs {
 
         const NUM_SUPPORTED_OPS: usize = 15;
         let mut possible_output_values = vec![b.zero_u256(); NUM_SUPPORTED_OPS];
-        let mut possible_overflows_occurred = vec![b.zero(); log2_ceil(NUM_SUPPORTED_OPS)]; // pad `possible_overflows_occurred` to next power of 2 to safely use random access gadget
-                                                                                            // fill `possible_output_values` and `possible_overflows_occurred` with the results of all the
-                                                                                            // supported operation, placing such results in the position of the vector corresponding to
-                                                                                            // the given operation
+        // length of `possible_overflows_occurred` must be a power of 2 to safely use random access gadget
+        let mut possible_overflows_occurred = vec![b.zero(); 1 << log2_ceil(NUM_SUPPORTED_OPS)];
+        // fill `possible_output_values` and `possible_overflows_occurred` with the results of all the
+        // supported operation, placing such results in the position of the vector corresponding to
+        // the given operation
         let add_position = Self::compute_op_selector(ComputationalHashIdentifiers::AddOp).unwrap();
         possible_output_values[add_position] = add_res;
         possible_overflows_occurred[add_position] = add_overflow.to_target();
@@ -237,10 +236,10 @@ impl BasicOperationInputs {
         possible_overflows_occurred[mul_position] = mul_overflow.target;
         let div_position = Self::compute_op_selector(ComputationalHashIdentifiers::DivOp).unwrap();
         possible_output_values[div_position] = div_res;
-        possible_overflows_occurred[div_position] = div_error;
+        possible_overflows_occurred[div_position] = div_by_zero.target;
         let mod_position = Self::compute_op_selector(ComputationalHashIdentifiers::ModOp).unwrap();
         possible_output_values[mod_position] = mod_res;
-        possible_overflows_occurred[mod_position] = div_error;
+        possible_overflows_occurred[mod_position] = div_by_zero.target;
         // all other operations have no possible overflow error
         possible_output_values
             [Self::compute_op_selector(ComputationalHashIdentifiers::LessThanOp).unwrap()] =
@@ -313,5 +312,423 @@ impl BasicOperationInputs {
         pw.set_target(wires.first_input_selector, self.first_input_selector);
         pw.set_target(wires.second_input_selector, self.second_input_selector);
         pw.set_target(wires.op_selector, self.op_selector);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{array, iter::once};
+
+    use ethers::types::U256;
+    use itertools::Itertools;
+    use mp2_common::{
+        default_config,
+        u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+        utils::{ToFields, ToTargets},
+        CHasher, C, D, F,
+    };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::{gen_random_field_hash, gen_random_u256, random_vector},
+    };
+    use plonky2::{
+        field::types::{Field, PrimeField64},
+        gadgets::arithmetic,
+        hash::{
+            hash_types::{HashOut, HashOutTarget},
+            hashing::hash_n_to_hash_no_pad,
+        },
+        iop::{
+            target::Target,
+            witness::{PartialWitness, WitnessWrite},
+        },
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            config::{GenericHashOut, Hasher},
+        },
+    };
+    use rand::{thread_rng, Rng};
+
+    use crate::simple_query_circuits::ComputationalHashIdentifiers;
+
+    use super::{BasicOperationInputWires, BasicOperationInputs};
+
+    type HashPermutation = <CHasher as Hasher<F>>::Permutation;
+
+    #[derive(Clone, Debug)]
+    struct TestBasicOperationComponent<const NUM_INPUTS: usize> {
+        input_values: [U256; NUM_INPUTS],
+        input_hash: [HashOut<F>; NUM_INPUTS],
+        component: BasicOperationInputs,
+        expected_result: U256,
+        expected_hash: HashOut<F>,
+        num_errors: usize,
+    }
+
+    struct TestBasicOperationWires<const NUM_INPUTS: usize> {
+        input_values: [UInt256Target; NUM_INPUTS],
+        input_hash: [HashOutTarget; NUM_INPUTS],
+        component_wires: BasicOperationInputWires,
+        expected_result: UInt256Target,
+        expected_hash: HashOutTarget,
+        num_errors: Target,
+    }
+
+    impl<const NUM_INPUTS: usize> UserCircuit<F, D> for TestBasicOperationComponent<NUM_INPUTS> {
+        type Wires = TestBasicOperationWires<NUM_INPUTS>;
+
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let input_values = c.add_virtual_u256_arr::<NUM_INPUTS>();
+            let input_hash = c.add_virtual_hashes(NUM_INPUTS);
+            let num_overflows = c.zero();
+            let wires = BasicOperationInputs::build(
+                c,
+                input_values.as_slice(),
+                input_hash.as_slice(),
+                num_overflows,
+            );
+            let expected_result = c.add_virtual_u256();
+            let expected_hash = c.add_virtual_hash();
+            let num_errors = c.add_virtual_target();
+
+            c.enforce_equal_u256(&expected_result, &wires.output_value);
+            c.connect_hashes(expected_hash, wires.output_hash);
+            c.connect(wires.num_overflows, num_errors);
+
+            Self::Wires {
+                input_values,
+                input_hash: input_hash.try_into().unwrap(),
+                component_wires: wires.input_wires,
+                expected_result,
+                expected_hash,
+                num_errors,
+            }
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.input_values
+                .iter()
+                .zip(wires.input_values.iter())
+                .for_each(|(val, target)| pw.set_u256_target(target, *val));
+
+            self.input_hash
+                .iter()
+                .zip(wires.input_hash.iter())
+                .for_each(|(val, target)| pw.set_hash_target(*target, *val));
+
+            pw.set_target(wires.num_errors, F::from_canonical_usize(self.num_errors));
+            self.component.assign(pw, &wires.component_wires);
+            pw.set_u256_target(&wires.expected_result, self.expected_result);
+            pw.set_hash_target(wires.expected_hash, self.expected_hash);
+        }
+    }
+
+    // Function to test the basic operation identifier by `op_identifier`. The 2 closures `gen_u256_input`
+    // and `compute_result` are employed to compute input values for the operation and to compute the
+    // result from the selected input values, respectively.
+    fn test_basic_operation<
+        const NUM_INPUTS: usize,
+        R: Rng,
+        GenInputFn: Fn(&mut R) -> U256,
+        RFn: Fn(U256, U256) -> (U256, bool),
+    >(
+        gen_u256_input: GenInputFn,
+        rng: &mut R,
+        op_identifier: ComputationalHashIdentifiers,
+        compute_result: RFn,
+    ) {
+        let input_values = array::from_fn(|_| gen_u256_input(rng));
+        let value_operand = gen_u256_input(rng);
+        let placeholder_value = gen_u256_input(rng);
+        let input_hash = array::from_fn(|_| gen_random_field_hash());
+        let placeholder_id = F::from_canonical_u8(rng.gen());
+        let first_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));
+        let second_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));
+        let op_selector = F::from_canonical_usize(
+            BasicOperationInputs::compute_op_selector(op_identifier)
+                .expect("Invalid operation identifier provided as input"),
+        );
+
+        let component = BasicOperationInputs {
+            value_operand,
+            placeholder_value,
+            placeholder_id,
+            first_input_selector,
+            second_input_selector,
+            op_selector,
+        };
+
+        // compute expected outputs
+        let value_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(&value_operand.to_fields());
+        let placeholder_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(&[placeholder_id]);
+        let (first_input, first_hash) = match first_input_selector.to_noncanonical_u64() as usize {
+            a if a < NUM_INPUTS => (input_values[a], input_hash[a]),
+            a if a == NUM_INPUTS => (value_operand, value_hash),
+            a if a == NUM_INPUTS + 1 => (placeholder_value, placeholder_hash),
+            a => panic!(
+                "sampled second input selector too big: max {}, sampled {}",
+                NUM_INPUTS + 2,
+                a
+            ),
+        };
+
+        let (second_input, second_hash) = match second_input_selector.to_noncanonical_u64() as usize
+        {
+            a if a < NUM_INPUTS => (input_values[a], input_hash[a]),
+            a if a == NUM_INPUTS => (value_operand, value_hash),
+            a if a == NUM_INPUTS + 1 => (placeholder_value, placeholder_hash),
+            a => panic!(
+                "sampled second input selector too big: max {}, sampled {}",
+                NUM_INPUTS + 2,
+                a
+            ),
+        };
+
+        let (expected_result, arithmetic_error) = compute_result(first_input, second_input);
+        let expected_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(
+            &once(F::from_canonical_usize(op_identifier as usize))
+                .chain(first_hash.to_vec().into_iter())
+                .chain(second_hash.to_vec().into_iter())
+                .collect_vec(),
+        );
+
+        let test_circuit = TestBasicOperationComponent::<NUM_INPUTS> {
+            input_values,
+            input_hash,
+            component,
+            expected_result,
+            expected_hash,
+            num_errors: arithmetic_error as usize,
+        };
+        run_circuit::<F, D, C, _>(test_circuit);
+    }
+
+    const TEST_NUM_INPUTS: usize = 20;
+
+    #[test]
+    fn test_add() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::AddOp,
+            |a, b| a.overflowing_add(b),
+        )
+    }
+
+    #[test]
+    fn test_sub() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::SubOp,
+            |a, b| a.overflowing_sub(b),
+        )
+    }
+
+    #[test]
+    fn test_mul() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::MulOp,
+            |a, b| a.overflowing_mul(b),
+        )
+    }
+
+    #[test]
+    fn test_div() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::DivOp,
+            |a, b| match a.checked_div(b) {
+                Some(res) => (res, false),
+                None => (U256::zero(), true),
+            },
+        )
+    }
+
+    #[test]
+    fn test_mod() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::ModOp,
+            |a, b| {
+                if b.is_zero() {
+                    (a, true)
+                } else {
+                    (a.div_mod(b).1, false)
+                }
+            },
+        )
+    }
+
+    #[test]
+    fn test_mod_by_zero() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            |_| U256::zero(),
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::ModOp,
+            |a, b| {
+                if b.is_zero() {
+                    (a, true)
+                } else {
+                    (a.div_mod(b).1, false)
+                }
+            },
+        )
+    }
+
+    #[test]
+    fn test_div_by_zero() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            |_| U256::zero(),
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::DivOp,
+            |a, b| match a.checked_div(b) {
+                Some(res) => (res, false),
+                None => (U256::zero(), true),
+            },
+        )
+    }
+
+    #[test]
+    fn test_mul_by_zero() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            |_| U256::zero(),
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::MulOp,
+            |a, b| a.overflowing_mul(b),
+        )
+    }
+
+    #[test]
+    fn test_less_than() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::LessThanOp,
+            |a, b| (U256::from((a < b) as u128), false),
+        )
+    }
+
+    #[test]
+    fn test_less_or_equal_than() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::LessThanOrEqOp,
+            |a, b| (U256::from((a <= b) as u128), false),
+        )
+    }
+
+    #[test]
+    fn test_greater_or_equal_than() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::GreaterThanOrEqOp,
+            |a, b| (U256::from((a >= b) as u128), false),
+        )
+    }
+
+    #[test]
+    fn test_greater_than() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::GreaterThanOp,
+            |a, b| (U256::from((a > b) as u128), false),
+        )
+    }
+
+    #[test]
+    fn test_is_equal() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::EqOp,
+            |a, b| (U256::from((a == b) as u128), false),
+        )
+    }
+
+    #[test]
+    fn test_is_not_equal() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::NeOp,
+            |a, b| (U256::from((a != b) as u128), false),
+        )
+    }
+    // Generate a `U256` representing a random bit
+    fn gen_random_u256_bit<R: Rng>(rng: &mut R) -> U256 {
+        let bit: bool = rng.gen();
+        U256::from(bit as u128)
+    }
+
+    #[test]
+    fn test_and() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256_bit,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::AndOp,
+            |a, b| (a & b, false),
+        )
+    }
+
+    #[test]
+    fn test_or() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256_bit,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::OrOp,
+            |a, b| (a | b, false),
+        )
+    }
+
+    #[test]
+    fn test_not() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256_bit,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::NotOp,
+            |a, b| {
+                (
+                    !a & U256::one(), // b is unused since Not is a unary operation
+                    false,
+                )
+            },
+        )
+    }
+
+    #[test]
+    fn test_xor() {
+        test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
+            gen_random_u256_bit,
+            &mut thread_rng(),
+            ComputationalHashIdentifiers::XorOp,
+            |a, b| (a ^ b, false),
+        )
+    }
+
+    #[test]
+    fn basic_operation_component_cost() {
+        let mut b = CircuitBuilder::<F, D>::new(default_config());
+        const NUM_INPUTS: usize = 50;
+        let input_values = b.add_virtual_u256_arr::<NUM_INPUTS>();
+        let input_hash = b.add_virtual_hashes(NUM_INPUTS);
+        let num_overflows = b.zero();
+        let num_gates_pre_build = b.num_gates();
+        BasicOperationInputs::build(
+            &mut b,
+            input_values.as_slice(),
+            input_hash.as_slice(),
+            num_overflows,
+        );
+        // Change expected cost if there were changes to `BasicOperationInputs::build` that affect the cost
+        let expected_cost = 76;
+        assert_eq!(b.num_gates() - num_gates_pre_build, expected_cost);
     }
 }

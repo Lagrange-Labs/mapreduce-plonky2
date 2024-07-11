@@ -2904,6 +2904,7 @@ dependencies = [
  "anyhow",
  "env_logger",
  "eth_trie",
+ "ethers",
  "hashbrown 0.14.5",
  "log",
  "mp2_common",
