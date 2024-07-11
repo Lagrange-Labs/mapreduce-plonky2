@@ -18,4 +18,5 @@ pub mod api;
 pub mod block_tree;
 pub mod cells_tree;
 pub mod extraction;
+pub mod ivc;
 pub mod row_tree;

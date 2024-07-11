@@ -17,26 +17,19 @@ use mp2_common::{
     D, F,
 };
 use plonky2::{
-    field::{
-        extension::{Extendable, FieldExtension},
-        types::Field,
-    },
-    hash::hash_types::RichField,
     iop::target::Target,
     plonk::{circuit_builder::CircuitBuilder, config::GenericConfig},
 };
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
+use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{array, iter};
 
 pub trait ExtractionPI<'a> {
     const TOTAL_LEN: usize;
     fn from_slice(s: &'a [Target]) -> Self;
     fn commitment(&self) -> Vec<Target>;
     fn prev_commitment(&self) -> Vec<Target>;
-    fn digest_value(&self) -> Vec<Target>;
-    fn digest_metadata(&self) -> Vec<Target>;
+    fn value_set_digest(&self) -> CurveTarget;
+    fn metadata_set_digest(&self) -> CurveTarget;
     fn primary_index_value(&self) -> Vec<Target>;
     fn register_args(&self, cb: &mut CircuitBuilder<F, D>);
 }
@@ -48,6 +41,7 @@ pub trait ExtractionPIWrap: Serialize + DeserializeOwned {
 
 #[cfg(test)]
 pub mod test {
+    use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
     use serde::Deserialize;
     use u256::UInt256Target;
 
@@ -71,13 +65,12 @@ pub mod test {
             self.previous_block_hash().to_targets()
         }
 
-        fn digest_value(&self) -> Vec<Target> {
-            self.digest_value().to_targets()
+        fn value_set_digest(&self) -> CurveTarget {
+            self.digest_value()
         }
 
-        fn digest_metadata(&self) -> Vec<Target> {
-            let dm = self.digest_metadata();
-            dm.to_targets()
+        fn metadata_set_digest(&self) -> CurveTarget {
+            self.digest_metadata()
         }
 
         fn primary_index_value(&self) -> Vec<Target> {
@@ -128,11 +121,11 @@ pub mod test {
     impl<'a> PublicInputs<'a, GFp> {
         /// Get the metadata point.
         pub fn metadata_point(&self) -> WeierstrassPoint {
-            WeierstrassPoint::from_fields(&self.dm)
+            WeierstrassPoint::from_fields(self.dm)
         }
         /// Get the digest holding the values .
         pub fn value_point(&self) -> WeierstrassPoint {
-            WeierstrassPoint::from_fields(&self.dv)
+            WeierstrassPoint::from_fields(self.dv)
         }
         /// Get block number as U64
         pub fn block_number(&self) -> U64 {
