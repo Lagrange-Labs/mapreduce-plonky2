@@ -79,7 +79,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
       - name: Install foundry
-        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo install --git https://github.com/foundry-rs/foundry forge anvil"
+        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo install --git https://github.com/foundry-rs/foundry --rev c4a984f forge anvil"
       - name: Put cargo in PATH
         run: echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
       - uses: actions/cache@v4
