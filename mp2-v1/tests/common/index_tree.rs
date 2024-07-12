@@ -91,21 +91,19 @@ pub type IndexTreeKey = <IndexTree as TreeTopology>::Key;
 type IndexStorage = InMemory<IndexTree, IndexNode>;
 pub type MerkleIndexTree = MerkleTreeKvDb<IndexTree, IndexNode, IndexStorage>;
 
-pub async fn build_index_tree(
+pub async fn build_initial_index_tree(
     block_number: BlockNumber,
-    indexes: &[IndexNode],
+    index: &IndexNode,
 ) -> Result<(MerkleIndexTree, UpdateTree<IndexTreeKey>)> {
     let block_usize: BlockPrimaryIndex = block_number.as_number().unwrap().try_into().unwrap();
 
     // should always be one anyway since we iterate over blocks one by one
     // but in the case of general index we might create multiple nodes
     // at the same time
-    let mut index_tree = MerkleIndexTree::create((block_usize, indexes.len()), ()).unwrap();
+    let mut index_tree = MerkleIndexTree::create((block_usize, 1), ()).unwrap();
     let update_tree = index_tree
         .in_transaction(|t| {
-            for index in indexes {
-                t.store(u256_as_usize(&index.value), index.clone())?;
-            }
+            t.store(u256_as_usize(&index.value), index.clone())?;
             Ok(())
         })
         .context("while filling up index tree")?;
@@ -144,6 +142,8 @@ impl TestContext {
                 api::generate_proof(self.params(), inputs)
                     .expect("error while leaf index proof generation")
             } else if context.is_partial() {
+                // a node that was already there before and is in the path of the added node to the
+                // root should always have two children
                 assert_eq!(
                     added_index, &node.row_tree_root_proof_id.primary,
                     "a changed node should never be a partial node"
