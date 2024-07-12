@@ -21,11 +21,37 @@ use plonky2::{
     util::log2_ceil,
 };
 
+pub enum Identifiers {
+    Operations(Operation),
+    // TODO
+    Extraction(Extraction),
+}
+
+impl Identifiers {
+    pub fn get_position(&self) -> usize {
+        match self {
+            Identifiers::Operations(o) => *o as usize,
+            Identifiers::Extraction(e) => *e as usize + std::mem::variant_count::<Operation>(),
+        }
+    }
+}
+
+impl<F: RichField> ToField<F> for Identifiers {
+    fn to_field(&self) -> F {
+        F::from_canonical_usize(self.get_position())
+    }
+}
+
+#[derive(Clone, Debug, Copy)]
+pub enum Extraction {
+    Column,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Set of constant identifiers employed in the
 /// computational hash, which is a compact representation
 /// of the query being proven by the query circuits
-pub enum ComputationalHashIdentifiers {
+pub enum Operation {
     AddOp,
     SubOp,
     MulOp,
@@ -43,7 +69,7 @@ pub enum ComputationalHashIdentifiers {
     XorOp,
 }
 
-impl<F: RichField> ToField<F> for ComputationalHashIdentifiers {
+impl<F: RichField> ToField<F> for Operation {
     fn to_field(&self) -> F {
         F::from_canonical_usize(*self as usize)
     }
@@ -51,7 +77,7 @@ impl<F: RichField> ToField<F> for ComputationalHashIdentifiers {
 
 type HashPermutation = <CHasher as Hasher<F>>::Permutation;
 
-impl ComputationalHashIdentifiers {
+impl Operation {
     pub(crate) fn basic_operation_hash(
         input_hash: &[HashOut<F>],
         constant_operand: U256,

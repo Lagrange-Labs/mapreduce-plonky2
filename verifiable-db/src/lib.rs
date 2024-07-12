@@ -1,5 +1,6 @@
 // Add this to allow generic const expressions, e.g. `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
+#![feature(variant_count)]
 /// Module for circuits for simple queries
 pub mod simple_query_circuits;
 
