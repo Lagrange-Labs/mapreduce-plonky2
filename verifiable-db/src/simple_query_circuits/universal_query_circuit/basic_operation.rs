@@ -64,9 +64,10 @@ pub struct BasicOperationInputs {
 }
 
 impl BasicOperationInputs {
-    // Return the constant integer identifiers associated to each operation supported
-    // by the basic operation component
-    pub(crate) fn op_identifiers() -> Vec<usize> {
+    // Check that the computational hash identifiers of supported basic operations
+    // match the assumptions needed in the circuit. Return the highest identifier
+    // of supported basic operations
+    pub(crate) fn check_op_identifiers() -> usize {
         let mut op_identifiers = vec![
             ComputationalHashIdentifiers::AddOp as usize,
             ComputationalHashIdentifiers::SubOp as usize,
@@ -85,44 +86,36 @@ impl BasicOperationInputs {
             ComputationalHashIdentifiers::XorOp as usize,
         ];
         op_identifiers.sort();
-        // double-check that the identifiers are all consecutive, as this
-        // is assumed by the circuit for efficiency
+        // double-check that the identifiers are all consecutive and start
+        // from 0, as this is assumed by the circuit for efficiency
         assert_eq!(
-            op_identifiers.last().unwrap() - op_identifiers.first().unwrap(),
+            *op_identifiers.first().unwrap(),
+            0,
+            "ComputationHashIdentifiers of basic operations should be placed at the beginning of the ComputationHashIdentifiers enum"
+        );
+        let highest_identifier = *op_identifiers.last().unwrap();
+        assert_eq!(
+            highest_identifier,
             op_identifiers.len()-1,
             "ComputationalHashIdentifiers of basic operations are not consecutive; please, ensure these variants to be declared consecutively in ComputationalHashIdentifers enum",
         );
-        op_identifiers
+        highest_identifier
     }
 
     /// Compute the selector associated to the input operation `op` to be provided to
     /// the basic operation component; Return an error if `op` is not an identifier
     /// of a basic operation supported in the component
     pub fn compute_op_selector(op: ComputationalHashIdentifiers) -> Result<usize> {
-        let op_identifiers = Self::op_identifiers();
-        op_identifiers
-            .into_iter()
-            .enumerate()
-            .find_map(|(i, id)| {
-                if id == op.clone() as usize {
-                    Some(i)
-                } else {
-                    None
-                }
-            })
-            .ok_or(Error::msg(format!(
+        let highest_identifier = Self::check_op_identifiers();
+        let op_identifier = op as usize;
+        if op_identifier <= highest_identifier {
+            Ok(op_identifier)
+        } else {
+            Err(Error::msg(format!(
                 "{:?} is not a valid identifier of a supported operation",
                 op
-            )))
-    }
-
-    // Compute the integer identifier of the operation being performed
-    // from the `op_selector` input wire of the basic operation component
-    pub(crate) fn op_hash_identifier(op_selector: Target, b: &mut CircuitBuilder<F, D>) -> Target {
-        // assume that the integer identifiers of the operations supported
-        // by the basic operation component are all consecutive integers
-        let op_identifier_offset = b.constant(F::from_canonical_usize(Self::op_identifiers()[0]));
-        b.add(op_selector, op_identifier_offset)
+            )))?
+        }
     }
 
     pub(crate) fn build(
@@ -281,10 +274,9 @@ impl BasicOperationInputs {
         let overflows_occurred = b.random_access(op_selector, possible_overflows_occurred);
 
         // compute identifier of computed operation to be employed in computational hash
-        let op_hash_identifier = Self::op_hash_identifier(op_selector, b);
         // compute computational hash associated to the operation being computed
         let output_hash = b.hash_n_to_hash_no_pad::<CHasher>(
-            once(op_hash_identifier)
+            once(op_selector)
                 .chain(first_input_hash.to_targets().into_iter())
                 .chain(second_input_hash.to_targets().into_iter())
                 .collect(),
