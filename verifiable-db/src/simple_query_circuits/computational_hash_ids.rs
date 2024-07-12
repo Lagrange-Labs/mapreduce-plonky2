@@ -1,4 +1,7 @@
-use std::iter::{once, repeat};
+use std::{
+    iter::{once, repeat},
+    mem::variant_count,
+};
 
 use ethers::types::U256;
 use itertools::Itertools;
@@ -11,7 +14,7 @@ use mp2_common::{
     CHasher, F,
 };
 use plonky2::{
-    field::types::PrimeField64,
+    field::types::{Field, PrimeField64},
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField},
         hashing::hash_n_to_hash_no_pad,
@@ -21,11 +24,50 @@ use plonky2::{
     util::log2_ceil,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Identifiers {
+    Extraction(Extraction),
+    Operations(Operation),
+    // TODO
+}
+
+impl Identifiers {
+    pub fn offset(&self) -> usize {
+        match self {
+            &Identifiers::Extraction(_) => 0,
+            &Identifiers::Operations(_) => {
+                Identifiers::Extraction(Extraction::default()).offset()
+                    + variant_count::<Extraction>()
+            }
+        }
+    }
+    pub fn position(&self) -> usize {
+        let offset = self.offset();
+        offset
+            + match self {
+                Identifiers::Extraction(e) => *e as usize,
+                Identifiers::Operations(o) => *o as usize,
+            }
+    }
+}
+
+impl<F: RichField> ToField<F> for Identifiers {
+    fn to_field(&self) -> F {
+        F::from_canonical_usize(self.position())
+    }
+}
+
+#[derive(Clone, Debug, Copy, Default)]
+pub enum Extraction {
+    #[default]
+    Column,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 /// Set of constant identifiers employed in the
 /// computational hash, which is a compact representation
 /// of the query being proven by the query circuits
-pub enum ComputationalHashIdentifiers {
+pub enum Operation {
+    #[default]
     AddOp,
     SubOp,
     MulOp,
@@ -43,15 +85,22 @@ pub enum ComputationalHashIdentifiers {
     XorOp,
 }
 
-impl<F: RichField> ToField<F> for ComputationalHashIdentifiers {
+impl<F: RichField> ToField<F> for Operation {
     fn to_field(&self) -> F {
-        F::from_canonical_usize(*self as usize)
+        F::from_canonical_usize(self.index())
     }
 }
 
 type HashPermutation = <CHasher as Hasher<F>>::Permutation;
 
-impl ComputationalHashIdentifiers {
+impl Operation {
+    pub fn index(&self) -> usize {
+        *self as usize
+    }
+
+    pub fn offset() -> usize {
+        Identifiers::Operations(Self::default()).offset()
+    }
     pub(crate) fn basic_operation_hash(
         input_hash: &[HashOut<F>],
         constant_operand: U256,
@@ -84,11 +133,11 @@ impl ComputationalHashIdentifiers {
                 a
             ),
         };
-
+        let op_hash_identifier = F::from_canonical_usize(Operation::offset()) + op_selector;
         hash_n_to_hash_no_pad::<_, HashPermutation>(
-            &once(op_selector)
-                .chain(first_hash.to_vec().into_iter())
-                .chain(second_hash.to_vec().into_iter())
+            &once(op_hash_identifier)
+                .chain(first_hash.to_vec())
+                .chain(second_hash.to_vec())
                 .collect_vec(),
         )
     }
@@ -110,8 +159,8 @@ impl ComputationalHashIdentifiers {
         let pad_len = 1 << log2_ceil(input_hash.len() + 2); // length of the padded vector of computational hashes
         let empty_poseidon_hash = b.constant_hash(*empty_poseidon_hash()); // employed for padding
         let possible_input_hash = input_hash
-            .into_iter()
-            .chain([&constant_operand_hash, &placeholder_id_hash].into_iter())
+            .iter()
+            .chain([constant_operand_hash, placeholder_id_hash].iter())
             .cloned()
             .chain(repeat(empty_poseidon_hash))
             .take(pad_len)
@@ -122,11 +171,13 @@ impl ComputationalHashIdentifiers {
         );
         let first_input_hash = b.random_access_hash(first_selector, possible_input_hash.clone());
         let second_input_hash = b.random_access_hash(second_selector, possible_input_hash);
-
+        let op_offset = b.constant(F::from_canonical_usize(Operation::offset()));
+        let operation_identifier = b.add(op_offset, op_selector);
         b.hash_n_to_hash_no_pad::<CHasher>(
-            once(op_selector)
-                .chain(first_input_hash.to_targets().into_iter())
-                .chain(second_input_hash.to_targets().into_iter())
+            // this should be an identifier accross all identifiers
+            once(operation_identifier)
+                .chain(first_input_hash.to_targets())
+                .chain(second_input_hash.to_targets())
                 .collect(),
         )
     }

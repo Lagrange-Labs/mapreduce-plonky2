@@ -1,7 +1,7 @@
 use ethers::types::U256;
 use itertools::Itertools;
 use mp2_common::{
-    array::Targetable,
+    array::{Targetable, ToField},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     D, F,
 };
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use anyhow::{Error, Result};
 
-use crate::simple_query_circuits::computational_hash_ids::ComputationalHashIdentifiers;
+use crate::simple_query_circuits::computational_hash_ids::{Identifiers, Operation};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for basic operation component
@@ -60,59 +60,6 @@ pub struct BasicOperationInputs {
 }
 
 impl BasicOperationInputs {
-    // Check that the computational hash identifiers of supported basic operations
-    // match the assumptions needed in the circuit. Return the highest identifier
-    // of supported basic operations
-    pub(crate) fn check_op_identifiers() -> usize {
-        let op_identifiers = vec![
-            ComputationalHashIdentifiers::AddOp as usize,
-            ComputationalHashIdentifiers::SubOp as usize,
-            ComputationalHashIdentifiers::MulOp as usize,
-            ComputationalHashIdentifiers::DivOp as usize,
-            ComputationalHashIdentifiers::ModOp as usize,
-            ComputationalHashIdentifiers::LessThanOp as usize,
-            ComputationalHashIdentifiers::GreaterThanOp as usize,
-            ComputationalHashIdentifiers::EqOp as usize,
-            ComputationalHashIdentifiers::NeOp as usize,
-            ComputationalHashIdentifiers::LessThanOrEqOp as usize,
-            ComputationalHashIdentifiers::GreaterThanOrEqOp as usize,
-            ComputationalHashIdentifiers::AndOp as usize,
-            ComputationalHashIdentifiers::OrOp as usize,
-            ComputationalHashIdentifiers::NotOp as usize,
-            ComputationalHashIdentifiers::XorOp as usize,
-        ];
-        // double-check that the identifiers are all consecutive and start
-        // from 0, as this is assumed by the circuit for efficiency
-        assert_eq!(
-            *op_identifiers.first().unwrap(),
-            0,
-            "ComputationHashIdentifiers of basic operations should be placed at the beginning of the ComputationHashIdentifiers enum"
-        );
-        let highest_identifier = *op_identifiers.iter().max().unwrap();
-        assert_eq!(
-            highest_identifier,
-            op_identifiers.len()-1,
-            "ComputationalHashIdentifiers of basic operations are not consecutive; please, ensure these variants to be declared consecutively in ComputationalHashIdentifers enum",
-        );
-        highest_identifier
-    }
-
-    /// Compute the selector associated to the input operation `op` to be provided to
-    /// the basic operation component; Return an error if `op` is not an identifier
-    /// of a basic operation supported in the component
-    pub fn compute_op_selector(op: ComputationalHashIdentifiers) -> Result<usize> {
-        let highest_identifier = Self::check_op_identifiers();
-        let op_identifier = op as usize;
-        if op_identifier <= highest_identifier {
-            Ok(op_identifier)
-        } else {
-            Err(Error::msg(format!(
-                "{:?} is not a valid identifier of a supported operation",
-                op
-            )))?
-        }
-    }
-
     pub(crate) fn build(
         b: &mut CircuitBuilder<F, D>,
         input_values: &[UInt256Target],
@@ -145,12 +92,8 @@ impl BasicOperationInputs {
         let (sub_res, sub_overflow) = b.sub_u256(&first_input, &second_input);
         let is_div_or_mod = {
             // determine if the actual operation to be performed is division or modulo.
-            let div_selector = b.constant(F::from_canonical_usize(
-                Self::compute_op_selector(ComputationalHashIdentifiers::DivOp).unwrap(),
-            ));
-            let mod_selector = b.constant(F::from_canonical_usize(
-                Self::compute_op_selector(ComputationalHashIdentifiers::ModOp).unwrap(),
-            ));
+            let div_selector = b.constant(Operation::DivOp.to_field());
+            let mod_selector = b.constant(Operation::ModOp.to_field());
             // Given the `op_selector` for the actual operation, we compute
             // `prod = (op_selector-div_selector)*(op_selector-mod_selector)`.
             // Then, the operation is division or modulo iff `prod == 0``
@@ -183,58 +126,48 @@ impl BasicOperationInputs {
 
         // The number of operations computed by this "gadget" in total. This is required to select
         // the output from all the outputs computed by each operation.
-        const NUM_SUPPORTED_OPS: usize = 15;
+        const NUM_SUPPORTED_OPS: usize = std::mem::variant_count::<Operation>();
         let mut possible_output_values = vec![b.zero_u256(); NUM_SUPPORTED_OPS];
         // length of `possible_overflows_occurred` must be a power of 2 to safely use random access gadget
         let mut possible_overflows_occurred = vec![b.zero(); 1 << log2_ceil(NUM_SUPPORTED_OPS)];
         // fill `possible_output_values` and `possible_overflows_occurred` with the results of all the
         // supported operation, placing such results in the position of the vector corresponding to
         // the given operation
-        let add_position = Self::compute_op_selector(ComputationalHashIdentifiers::AddOp).unwrap();
+        let add_position = Operation::AddOp.index();
         possible_output_values[add_position] = add_res;
         possible_overflows_occurred[add_position] = add_overflow.to_target();
-        let sub_position = Self::compute_op_selector(ComputationalHashIdentifiers::SubOp).unwrap();
+        let sub_position = Operation::SubOp.index();
         possible_output_values[sub_position] = sub_res;
         possible_overflows_occurred[sub_position] = sub_overflow.to_target();
-        let mul_position = Self::compute_op_selector(ComputationalHashIdentifiers::MulOp).unwrap();
+        let mul_position = Operation::MulOp.index();
         possible_output_values[mul_position] = mul_res;
         possible_overflows_occurred[mul_position] = mul_overflow.target;
-        let div_position = Self::compute_op_selector(ComputationalHashIdentifiers::DivOp).unwrap();
+        let div_position = Operation::DivOp.index();
         possible_output_values[div_position] = div_res;
         possible_overflows_occurred[div_position] = div_by_zero.target;
-        let mod_position = Self::compute_op_selector(ComputationalHashIdentifiers::ModOp).unwrap();
+        let mod_position = Operation::ModOp.index();
         possible_output_values[mod_position] = mod_res;
         possible_overflows_occurred[mod_position] = div_by_zero.target;
         // all other operations have no possible overflow error
-        possible_output_values
-            [Self::compute_op_selector(ComputationalHashIdentifiers::LessThanOp).unwrap()] =
+        possible_output_values[Operation::LessThanOp.index()] =
             UInt256Target::new_from_bool_target(b, lt_res);
-        possible_output_values
-            [Self::compute_op_selector(ComputationalHashIdentifiers::LessThanOrEqOp).unwrap()] =
+        possible_output_values[Operation::LessThanOrEqOp.index()] =
             UInt256Target::new_from_bool_target(b, lteq_res);
-        possible_output_values
-            [Self::compute_op_selector(ComputationalHashIdentifiers::GreaterThanOp).unwrap()] =
+        possible_output_values[Operation::GreaterThanOp.index()] =
             UInt256Target::new_from_bool_target(b, gt_res);
-        possible_output_values
-            [Self::compute_op_selector(ComputationalHashIdentifiers::GreaterThanOrEqOp).unwrap()] =
+        possible_output_values[Operation::GreaterThanOrEqOp.index()] =
             UInt256Target::new_from_bool_target(b, gteq_res);
-        possible_output_values
-            [Self::compute_op_selector(ComputationalHashIdentifiers::EqOp).unwrap()] =
+        possible_output_values[Operation::EqOp.index()] =
             UInt256Target::new_from_bool_target(b, eq_res);
-        possible_output_values
-            [Self::compute_op_selector(ComputationalHashIdentifiers::NeOp).unwrap()] =
+        possible_output_values[Operation::NeOp.index()] =
             UInt256Target::new_from_bool_target(b, ne_res);
-        possible_output_values
-            [Self::compute_op_selector(ComputationalHashIdentifiers::AndOp).unwrap()] =
+        possible_output_values[Operation::AndOp.index()] =
             UInt256Target::new_from_bool_target(b, and_res);
-        possible_output_values
-            [Self::compute_op_selector(ComputationalHashIdentifiers::OrOp).unwrap()] =
+        possible_output_values[Operation::OrOp.index()] =
             UInt256Target::new_from_bool_target(b, or_res);
-        possible_output_values
-            [Self::compute_op_selector(ComputationalHashIdentifiers::NotOp).unwrap()] =
+        possible_output_values[Operation::NotOp.index()] =
             UInt256Target::new_from_bool_target(b, not_res);
-        possible_output_values
-            [Self::compute_op_selector(ComputationalHashIdentifiers::XorOp).unwrap()] =
+        possible_output_values[Operation::XorOp.index()] =
             UInt256Target::new_from_bool_target(b, xor_res_bool);
 
         // choose the proper output values and overflows error occurred depending on the
@@ -248,7 +181,7 @@ impl BasicOperationInputs {
         let overflows_occurred = b.random_access(op_selector, possible_overflows_occurred);
 
         // compute computational hash associated to the operation being computed
-        let output_hash = ComputationalHashIdentifiers::basic_operation_hash_circuit(
+        let output_hash = Operation::basic_operation_hash_circuit(
             b,
             input_hash,
             constant_operand,
@@ -291,6 +224,7 @@ mod tests {
 
     use ethers::types::U256;
     use mp2_common::{
+        array::ToField,
         default_config,
         u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
         C, D, F,
@@ -310,7 +244,7 @@ mod tests {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::simple_query_circuits::computational_hash_ids::ComputationalHashIdentifiers;
+    use crate::simple_query_circuits::computational_hash_ids::{Identifiers, Operation};
 
     use super::{BasicOperationInputWires, BasicOperationInputs};
 
@@ -393,7 +327,7 @@ mod tests {
     >(
         gen_u256_input: GenInputFn,
         rng: &mut R,
-        op_identifier: ComputationalHashIdentifiers,
+        op_identifier: Operation,
         compute_result: RFn,
     ) {
         let input_values = array::from_fn(|_| gen_u256_input(rng));
@@ -403,10 +337,7 @@ mod tests {
         let placeholder_id = F::from_canonical_u8(rng.gen());
         let first_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));
         let second_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));
-        let op_selector = F::from_canonical_usize(
-            BasicOperationInputs::compute_op_selector(op_identifier)
-                .expect("Invalid operation identifier provided as input"),
-        );
+        let op_selector = op_identifier.to_field();
 
         let component = BasicOperationInputs {
             constant_operand,
@@ -441,7 +372,7 @@ mod tests {
         };
 
         let (expected_result, arithmetic_error) = compute_result(first_input, second_input);
-        let expected_hash = ComputationalHashIdentifiers::basic_operation_hash(
+        let expected_hash = Operation::basic_operation_hash(
             &input_hash,
             constant_operand,
             placeholder_id,
@@ -468,7 +399,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::AddOp,
+            Operation::AddOp,
             |a, b| a.overflowing_add(b),
         )
     }
@@ -478,7 +409,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::SubOp,
+            Operation::SubOp,
             |a, b| a.overflowing_sub(b),
         )
     }
@@ -488,7 +419,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::MulOp,
+            Operation::MulOp,
             |a, b| a.overflowing_mul(b),
         )
     }
@@ -498,7 +429,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::DivOp,
+            Operation::DivOp,
             |a, b| match a.checked_div(b) {
                 Some(res) => (res, false),
                 None => (U256::zero(), true),
@@ -511,7 +442,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::ModOp,
+            Operation::ModOp,
             |a, b| {
                 if b.is_zero() {
                     (a, true)
@@ -527,7 +458,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             |_| U256::zero(),
             &mut thread_rng(),
-            ComputationalHashIdentifiers::ModOp,
+            Operation::ModOp,
             |a, b| {
                 if b.is_zero() {
                     (a, true)
@@ -543,7 +474,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             |_| U256::zero(),
             &mut thread_rng(),
-            ComputationalHashIdentifiers::DivOp,
+            Operation::DivOp,
             |a, b| match a.checked_div(b) {
                 Some(res) => (res, false),
                 None => (U256::zero(), true),
@@ -556,7 +487,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             |_| U256::zero(),
             &mut thread_rng(),
-            ComputationalHashIdentifiers::MulOp,
+            Operation::MulOp,
             |a, b| a.overflowing_mul(b),
         )
     }
@@ -566,7 +497,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::LessThanOp,
+            Operation::LessThanOp,
             |a, b| (U256::from((a < b) as u128), false),
         )
     }
@@ -576,7 +507,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::LessThanOrEqOp,
+            Operation::LessThanOrEqOp,
             |a, b| (U256::from((a <= b) as u128), false),
         )
     }
@@ -586,7 +517,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::GreaterThanOrEqOp,
+            Operation::GreaterThanOrEqOp,
             |a, b| (U256::from((a >= b) as u128), false),
         )
     }
@@ -596,7 +527,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::GreaterThanOp,
+            Operation::GreaterThanOp,
             |a, b| (U256::from((a > b) as u128), false),
         )
     }
@@ -606,7 +537,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::EqOp,
+            Operation::EqOp,
             |a, b| (U256::from((a == b) as u128), false),
         )
     }
@@ -616,7 +547,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::NeOp,
+            Operation::NeOp,
             |a, b| (U256::from((a != b) as u128), false),
         )
     }
@@ -631,7 +562,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256_bit,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::AndOp,
+            Operation::AndOp,
             |a, b| (a & b, false),
         )
     }
@@ -641,7 +572,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256_bit,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::OrOp,
+            Operation::OrOp,
             |a, b| (a | b, false),
         )
     }
@@ -651,7 +582,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256_bit,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::NotOp,
+            Operation::NotOp,
             |a, b| {
                 (
                     !a & U256::one(), // b is unused since Not is a unary operation
@@ -666,7 +597,7 @@ mod tests {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
             gen_random_u256_bit,
             &mut thread_rng(),
-            ComputationalHashIdentifiers::XorOp,
+            Operation::XorOp,
             |a, b| (a ^ b, false),
         )
     }
