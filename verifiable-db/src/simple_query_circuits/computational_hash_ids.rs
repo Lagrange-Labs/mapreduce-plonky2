@@ -116,8 +116,8 @@ impl Operation {
 
         hash_n_to_hash_no_pad::<_, HashPermutation>(
             &once(op_selector)
-                .chain(first_hash.to_vec().into_iter())
-                .chain(second_hash.to_vec().into_iter())
+                .chain(first_hash.to_vec())
+                .chain(second_hash.to_vec())
                 .collect_vec(),
         )
     }
