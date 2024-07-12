@@ -1,16 +1,14 @@
-use super::{celltree::CellTree, rowtree::RowTree};
+use super::{celltree::CellTree, index_tree::IndexTree, rowtree::RowTree};
 use anyhow::{Context, Result};
-use ethers::types::{Address, U256};
+use ethers::types::{Address, BlockNumber};
 use hashbrown::HashMap;
-use rand::{
-    distributions::{Alphanumeric, DistString},
-    thread_rng,
-};
+use rand::distributions::{Alphanumeric, DistString};
 use ryhope::tree::{sbbst, TreeTopology};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 type CellTreeKey = <CellTree as TreeTopology>::Key;
 type RowTreeKey = <RowTree as TreeTopology>::Key;
+type IndexTreeKey = <IndexTree as TreeTopology>::Key;
 
 #[derive(Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TableID(String);
@@ -57,6 +55,12 @@ where
     pub(crate) tree_key: RowTreeKey,
 }
 
+#[derive(Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub(crate) struct IndexProofIdentifier<PrimaryIndex> {
+    pub(crate) table: TableID,
+    pub(crate) tree_key: PrimaryIndex,
+}
+
 /// block number by default but can be different since we want to support primary index of any
 /// kinds in results tree and in general to build a table.
 /// This is usize in this case for the moment since right now we deal with sbbst tree as index
@@ -68,9 +72,8 @@ pub(crate) type BlockPrimaryIndex = <sbbst::Tree as TreeTopology>::Key;
 pub enum ProofKey {
     Cell(CellProofIdentifier<BlockPrimaryIndex>),
     Row(RowProofIdentifier<BlockPrimaryIndex>),
-    // Not implemented yet but doesn't need to contain block number / primary index because
-    // the tree key is already the primary index
-    // Block((TableID,BlockTreeKey)),
+    Index(IndexProofIdentifier<BlockPrimaryIndex>),
+    Extraction(BlockPrimaryIndex),
 }
 pub trait ProofStorage {
     fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()>;
@@ -82,6 +85,8 @@ pub trait ProofStorage {
 pub struct MemoryProofStorage {
     cells: HashMap<CellProofIdentifier<BlockPrimaryIndex>, Vec<u8>>,
     rows: HashMap<RowProofIdentifier<BlockPrimaryIndex>, Vec<u8>>,
+    index: HashMap<IndexProofIdentifier<BlockPrimaryIndex>, Vec<u8>>,
+    extraction: HashMap<BlockPrimaryIndex, Vec<u8>>,
 }
 
 impl ProofStorage for MemoryProofStorage {
@@ -89,6 +94,8 @@ impl ProofStorage for MemoryProofStorage {
         match key {
             ProofKey::Cell(k) => self.cells.insert(k, proof),
             ProofKey::Row(k) => self.rows.insert(k, proof),
+            ProofKey::Index(k) => self.index.insert(k, proof),
+            ProofKey::Extraction(k) => self.extraction.insert(k, proof),
         };
         Ok(())
     }
@@ -97,6 +104,8 @@ impl ProofStorage for MemoryProofStorage {
         match key {
             ProofKey::Cell(k) => self.cells.get(k),
             ProofKey::Row(k) => self.rows.get(k),
+            ProofKey::Index(k) => self.index.get(k),
+            ProofKey::Extraction(k) => self.extraction.get(k),
         }
         .context("unable to get proof from storage")
         .cloned()

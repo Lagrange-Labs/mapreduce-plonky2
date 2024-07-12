@@ -6,6 +6,7 @@ mod celltree;
 mod context;
 mod contract_extraction;
 mod final_extraction;
+mod index_tree;
 mod length_extraction;
 mod nodes;
 pub(crate) mod proof_storage;
