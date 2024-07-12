@@ -11,7 +11,7 @@ use mp2_common::{
     CHasher, F,
 };
 use plonky2::{
-    field::types::PrimeField64,
+    field::types::{Field, PrimeField64},
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField},
         hashing::hash_n_to_hash_no_pad,
@@ -28,6 +28,10 @@ pub enum Identifiers {
 }
 
 impl Identifiers {
+    pub fn offset(&self) -> usize {
+        // since extraction is before operation
+        std::mem::variant_count::<Extraction>()
+    }
     pub fn position(&self) -> usize {
         match self {
             Identifiers::Extraction(e) => *e as usize,
@@ -47,11 +51,12 @@ pub enum Extraction {
     Column,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 /// Set of constant identifiers employed in the
 /// computational hash, which is a compact representation
 /// of the query being proven by the query circuits
 pub enum Operation {
+    #[default]
     AddOp,
     SubOp,
     MulOp,
@@ -80,6 +85,10 @@ type HashPermutation = <CHasher as Hasher<F>>::Permutation;
 impl Operation {
     pub fn index(&self) -> usize {
         *self as usize
+    }
+
+    pub fn offset() -> usize {
+        Identifiers::Operations(Self::default()).offset()
     }
     pub(crate) fn basic_operation_hash(
         input_hash: &[HashOut<F>],
@@ -114,8 +123,9 @@ impl Operation {
             ),
         };
 
+        let offset = op_selector + F::from_canonical_usize(Operation::offset());
         hash_n_to_hash_no_pad::<_, HashPermutation>(
-            &once(op_selector)
+            &once(offset)
                 .chain(first_hash.to_vec())
                 .chain(second_hash.to_vec())
                 .collect_vec(),
@@ -151,9 +161,11 @@ impl Operation {
         );
         let first_input_hash = b.random_access_hash(first_selector, possible_input_hash.clone());
         let second_input_hash = b.random_access_hash(second_selector, possible_input_hash);
-
+        let op_offset = b.constant(F::from_canonical_usize(Operation::offset()));
+        let operation_identifier = b.add(op_offset, op_selector);
         b.hash_n_to_hash_no_pad::<CHasher>(
-            once(op_selector)
+            // this should be an identifier accross all identifiers
+            once(operation_identifier)
                 .chain(first_input_hash.to_targets())
                 .chain(second_input_hash.to_targets())
                 .collect(),
