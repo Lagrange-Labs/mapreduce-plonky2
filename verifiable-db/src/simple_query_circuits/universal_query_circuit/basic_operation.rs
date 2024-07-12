@@ -349,11 +349,9 @@ mod tests {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::simple_query_circuits::ComputationalHashIdentifiers;
+    use crate::simple_query_circuits::{ComputationalHashIdentifiers, HashPermutation};
 
     use super::{BasicOperationInputWires, BasicOperationInputs};
-
-    type HashPermutation = <CHasher as Hasher<F>>::Permutation;
 
     #[derive(Clone, Debug)]
     struct TestBasicOperationComponent<const NUM_INPUTS: usize> {

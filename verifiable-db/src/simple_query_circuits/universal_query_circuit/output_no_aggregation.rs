@@ -108,7 +108,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
     type Wires = Wires<MAX_NUM_RESULTS>;
 
     fn build(
-        b: &CircuitBuilder<F, D>,
+        b: &mut CircuitBuilder<F, D>,
         column_values: &[UInt256Target],
         column_hash: &[HashOutTarget],
         item_values: &[UInt256Target],

@@ -19,7 +19,7 @@ use anyhow::{ensure, Result};
 use ethers::types::U256;
 use itertools::Itertools;
 use plonky2::{
-    field::extension::Extendable,
+    field::{extension::Extendable, packed::PackedField},
     gates::gate::Gate,
     hash::hash_types::RichField,
     iop::{
@@ -67,6 +67,9 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
 
     /// Returns the constant target representing 1_u256
     fn one_u256(&mut self) -> UInt256Target;
+
+    /// Returns the constant target representing the `U256` `value` provided as input
+    fn constant_u256(&mut self, value: U256) -> UInt256Target;
 
     /// Add 2 UInt256Target, returning the addition modulo 2^256 and the carry
     fn add_u256(
@@ -417,6 +420,13 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
                 .collect_vec();
             U32Target(self.random_access(access_index, ith_limbs))
         }))
+    }
+    
+    fn constant_u256(&mut self, value: U256) -> UInt256Target {
+        let value_be_targets = value.to_fields().into_iter().map(|limb| 
+            self.constant(limb)
+        ).collect_vec();
+        UInt256Target::from_targets(value_be_targets.as_slice())
     }
 }
 

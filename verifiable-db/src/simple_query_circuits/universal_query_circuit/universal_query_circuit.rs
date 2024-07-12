@@ -72,7 +72,7 @@ pub(crate) trait OutputComponent {
     type Wires: OutputComponentWires;
 
     fn build(
-        b: &CircuitBuilder<F, D>,
+        b: &mut CircuitBuilder<F, D>,
         column_values: &[UInt256Target],
         column_hash: &[HashOutTarget],
         item_values: &[UInt256Target],

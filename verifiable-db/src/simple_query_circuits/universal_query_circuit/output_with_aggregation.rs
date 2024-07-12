@@ -1,9 +1,11 @@
+use std::{array, iter::once};
+
+use ethers::types::U256;
+use itertools::Itertools;
 use mp2_common::{
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
-    },
-    u256::UInt256Target,
-    D, F,
+    }, u256::{CircuitBuilderU256, UInt256Target}, D, F
 };
 use plonky2::{
     hash::hash_types::HashOutTarget,
@@ -12,8 +14,11 @@ use plonky2::{
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
+    field::types::Field,
 };
 use serde::{Deserialize, Serialize};
+
+use crate::simple_query_circuits::ComputationalHashIdentifiers;
 
 use super::universal_query_circuit::{OutputComponent, OutputComponentWires};
 
@@ -67,11 +72,7 @@ pub struct Circuit<const MAX_NUM_RESULTS: usize> {
         deserialize_with = "deserialize_long_array"
     )]
     agg_ops: [F; MAX_NUM_RESULTS],
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    is_output_valid: [bool; MAX_NUM_RESULTS],
+    num_valid_outputs: usize,
 }
 
 impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULTS> {
@@ -104,7 +105,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
     type Wires = Wires<MAX_NUM_RESULTS>;
 
     fn build(
-        b: &CircuitBuilder<F, D>,
+        b: &mut CircuitBuilder<F, D>,
         column_values: &[UInt256Target],
         column_hash: &[HashOutTarget],
         item_values: &[UInt256Target],
@@ -112,15 +113,78 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         predicate_value: &BoolTarget,
         predicate_hash: &HashOutTarget,
     ) -> Self::Wires {
-        todo!()
+        let selector = b.add_virtual_target_arr::<MAX_NUM_RESULTS>();
+        let agg_ops = b.add_virtual_target_arr::<MAX_NUM_RESULTS>();
+        let is_output_valid = array::from_fn(|_| 
+            b.add_virtual_bool_target_safe()
+        );
+        let u256_max = b.constant_u256(U256::MAX);
+        let zero = b.zero_u256();
+        let min_op_identifier = b.constant(
+            F::from_canonical_usize(
+                ComputationalHashIdentifiers::MinAggOp as usize,
+            )
+        );
+
+        let mut output_values = vec![];
+
+        for i in 0..MAX_NUM_RESULTS {
+            // choose the value to be returned for the current item among all the possible 
+		    // extracted columns and the i-th item computed by selected item components
+            let possible_output_values = column_values.iter()
+                .chain(once(&item_values[i]))
+                .cloned()
+                .collect_vec();
+            let output_value = b.random_access_u256(selector[i], &possible_output_values);
+            
+            // If `predicate_value` is true, then expose the value to be aggregated;
+            // Otherwise use the identity for the aggregation operation.
+            // The identity is 0 except for "MIN", where the identity is the biggest
+            // possible value in the domain, i.e. 2^256-1.
+            let is_agg_ops_min = b.is_equal(agg_ops[i], min_op_identifier);
+            let identity_value = b.select_u256(
+                is_agg_ops_min, 
+                &u256_max,
+                &zero,
+            );
+            let actual_output_value = b.select_u256(
+                *predicate_value, 
+                &output_value, 
+                &identity_value,
+            );
+            output_values.push(actual_output_value);
+        }
+
+        let output_hash = ComputationalHashIdentifiers::output_with_aggregation_hash_circuit(
+            b, 
+            predicate_hash, 
+            column_hash, 
+            item_hash.try_into().unwrap(), 
+            &selector, 
+            &agg_ops, 
+            &is_output_valid
+        );
+        
+        Wires {
+            input_wires: InputWires {
+                selector,
+                agg_ops,
+                is_output_valid,
+            },
+            output_values: output_values.try_into().unwrap(),
+            output_hash,
+        }
     }
+        
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &InputWires<MAX_NUM_RESULTS>) {
         pw.set_target_arr(wires.selector.as_slice(), self.selector.as_slice());
         pw.set_target_arr(wires.agg_ops.as_slice(), self.agg_ops.as_slice());
-        self.is_output_valid
-            .iter()
-            .zip(wires.is_output_valid.iter())
-            .for_each(|(v, t)| pw.set_bool_target(*t, *v));
+        wires.is_output_valid.iter()
+            .enumerate()
+            .for_each(|(i, t)| pw.set_bool_target(
+                *t, 
+                i < self.num_valid_outputs
+            ));
     }
 }
