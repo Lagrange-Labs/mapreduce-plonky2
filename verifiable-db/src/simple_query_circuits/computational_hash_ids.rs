@@ -28,7 +28,7 @@ pub enum Identifiers {
 }
 
 impl Identifiers {
-    pub fn get_position(&self) -> usize {
+    pub fn position(&self) -> usize {
         match self {
             Identifiers::Operations(o) => *o as usize,
             Identifiers::Extraction(e) => *e as usize + std::mem::variant_count::<Operation>(),
@@ -38,7 +38,7 @@ impl Identifiers {
 
 impl<F: RichField> ToField<F> for Identifiers {
     fn to_field(&self) -> F {
-        F::from_canonical_usize(self.get_position())
+        F::from_canonical_usize(self.position())
     }
 }
 
@@ -71,13 +71,16 @@ pub enum Operation {
 
 impl<F: RichField> ToField<F> for Operation {
     fn to_field(&self) -> F {
-        F::from_canonical_usize(*self as usize)
+        Identifiers::Operations(*self).to_field()
     }
 }
 
 type HashPermutation = <CHasher as Hasher<F>>::Permutation;
 
 impl Operation {
+    pub fn position(&self) -> usize {
+        Identifiers::Operations(*self).position()
+    }
     pub(crate) fn basic_operation_hash(
         input_hash: &[HashOut<F>],
         constant_operand: U256,

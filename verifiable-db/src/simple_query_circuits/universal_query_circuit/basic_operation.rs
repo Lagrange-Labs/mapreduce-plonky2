@@ -92,8 +92,8 @@ impl BasicOperationInputs {
         let (sub_res, sub_overflow) = b.sub_u256(&first_input, &second_input);
         let is_div_or_mod = {
             // determine if the actual operation to be performed is division or modulo.
-            let div_selector = b.constant(Identifiers::Operations(Operation::DivOp).to_field());
-            let mod_selector = b.constant(Identifiers::Operations(Operation::ModOp).to_field());
+            let div_selector = b.constant(Operation::DivOp.to_field());
+            let mod_selector = b.constant(Operation::ModOp.to_field());
             // Given the `op_selector` for the actual operation, we compute
             // `prod = (op_selector-div_selector)*(op_selector-mod_selector)`.
             // Then, the operation is division or modulo iff `prod == 0``
@@ -126,49 +126,48 @@ impl BasicOperationInputs {
 
         // The number of operations computed by this "gadget" in total. This is required to select
         // the output from all the outputs computed by each operation.
-        const NUM_SUPPORTED_OPS: usize = 15;
+        const NUM_SUPPORTED_OPS: usize = std::mem::variant_count::<Operation>();
         let mut possible_output_values = vec![b.zero_u256(); NUM_SUPPORTED_OPS];
         // length of `possible_overflows_occurred` must be a power of 2 to safely use random access gadget
         let mut possible_overflows_occurred = vec![b.zero(); 1 << log2_ceil(NUM_SUPPORTED_OPS)];
         // fill `possible_output_values` and `possible_overflows_occurred` with the results of all the
         // supported operation, placing such results in the position of the vector corresponding to
         // the given operation
-        let add_position = Identifiers::Operations(Operation::AddOp).get_position();
+        let add_position = Operation::AddOp.position();
         possible_output_values[add_position] = add_res;
         possible_overflows_occurred[add_position] = add_overflow.to_target();
-        let sub_position = Identifiers::Operations(Operation::SubOp).get_position();
+        let sub_position = Operation::SubOp.position();
         possible_output_values[sub_position] = sub_res;
         possible_overflows_occurred[sub_position] = sub_overflow.to_target();
-        let mul_position = Identifiers::Operations(Operation::MulOp).get_position();
+        let mul_position = Operation::MulOp.position();
         possible_output_values[mul_position] = mul_res;
         possible_overflows_occurred[mul_position] = mul_overflow.target;
-        let div_position = Identifiers::Operations(Operation::DivOp).get_position();
+        let div_position = Operation::DivOp.position();
         possible_output_values[div_position] = div_res;
         possible_overflows_occurred[div_position] = div_by_zero.target;
-        let mod_position = Identifiers::Operations(Operation::ModOp).get_position();
+        let mod_position = Operation::ModOp.position();
         possible_output_values[mod_position] = mod_res;
         possible_overflows_occurred[mod_position] = div_by_zero.target;
         // all other operations have no possible overflow error
-        possible_output_values[Identifiers::Operations(Operation::LessThanOp).get_position()] =
+        possible_output_values[Operation::LessThanOp.position()] =
             UInt256Target::new_from_bool_target(b, lt_res);
-        possible_output_values[Identifiers::Operations(Operation::LessThanOrEqOp).get_position()] =
+        possible_output_values[Operation::LessThanOrEqOp.position()] =
             UInt256Target::new_from_bool_target(b, lteq_res);
-        possible_output_values[Identifiers::Operations(Operation::GreaterThanOp).get_position()] =
+        possible_output_values[Operation::GreaterThanOp.position()] =
             UInt256Target::new_from_bool_target(b, gt_res);
-        possible_output_values
-            [Identifiers::Operations(Operation::GreaterThanOrEqOp).get_position()] =
+        possible_output_values[Operation::GreaterThanOrEqOp.position()] =
             UInt256Target::new_from_bool_target(b, gteq_res);
-        possible_output_values[Identifiers::Operations(Operation::EqOp).get_position()] =
+        possible_output_values[Operation::EqOp.position()] =
             UInt256Target::new_from_bool_target(b, eq_res);
-        possible_output_values[Identifiers::Operations(Operation::NeOp).get_position()] =
+        possible_output_values[Operation::NeOp.position()] =
             UInt256Target::new_from_bool_target(b, ne_res);
-        possible_output_values[Identifiers::Operations(Operation::AndOp).get_position()] =
+        possible_output_values[Operation::AndOp.position()] =
             UInt256Target::new_from_bool_target(b, and_res);
-        possible_output_values[Identifiers::Operations(Operation::OrOp).get_position()] =
+        possible_output_values[Operation::OrOp.position()] =
             UInt256Target::new_from_bool_target(b, or_res);
-        possible_output_values[Identifiers::Operations(Operation::NotOp).get_position()] =
+        possible_output_values[Operation::NotOp.position()] =
             UInt256Target::new_from_bool_target(b, not_res);
-        possible_output_values[Identifiers::Operations(Operation::XorOp).get_position()] =
+        possible_output_values[Operation::XorOp.position()] =
             UInt256Target::new_from_bool_target(b, xor_res_bool);
 
         // choose the proper output values and overflows error occurred depending on the
@@ -338,7 +337,7 @@ mod tests {
         let placeholder_id = F::from_canonical_u8(rng.gen());
         let first_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));
         let second_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));
-        let op_selector = Identifiers::Operations(op_identifier).to_field();
+        let op_selector = op_identifier.to_field();
 
         let component = BasicOperationInputs {
             constant_operand,
