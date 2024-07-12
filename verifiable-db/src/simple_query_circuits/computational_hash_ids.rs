@@ -104,19 +104,23 @@ impl Operation {
     pub(crate) fn basic_operation_hash(
         input_hash: &[HashOut<F>],
         constant_operand: U256,
-        placeholder_id: F,
+        placeholder_ids: [F; 2],
         first_selector: F,
         second_selector: F,
         op_selector: F,
     ) -> HashOut<F> {
         let constant_operand_hash =
             hash_n_to_hash_no_pad::<_, HashPermutation>(&constant_operand.to_fields());
-        let placeholder_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(&[placeholder_id]);
+        let first_placeholder_hash =
+            hash_n_to_hash_no_pad::<_, HashPermutation>(&[placeholder_ids[0]]);
+        let second_placeholder_hash =
+            hash_n_to_hash_no_pad::<_, HashPermutation>(&[placeholder_ids[1]]);
         let num_inputs = input_hash.len();
         let first_hash = match first_selector.to_canonical_u64() as usize {
             a if a < num_inputs => input_hash[a],
             a if a == num_inputs => constant_operand_hash,
-            a if a == num_inputs + 1 => placeholder_hash,
+            a if a == num_inputs + 1 => first_placeholder_hash,
+            a if a == num_inputs + 2 => second_placeholder_hash,
             a => panic!(
                 "sampled second input selector too big: max {}, sampled {}",
                 num_inputs + 2,
@@ -126,7 +130,8 @@ impl Operation {
         let second_hash = match second_selector.to_canonical_u64() as usize {
             a if a < num_inputs => input_hash[a],
             a if a == num_inputs => constant_operand_hash,
-            a if a == num_inputs + 1 => placeholder_hash,
+            a if a == num_inputs + 1 => first_placeholder_hash,
+            a if a == num_inputs + 2 => second_placeholder_hash,
             a => panic!(
                 "sampled second input selector too big: max {}, sampled {}",
                 num_inputs + 2,
@@ -146,21 +151,31 @@ impl Operation {
         b: &mut CBuilder,
         input_hash: &[HashOutTarget],
         constant_operand: &UInt256Target,
-        placeholder_id: Target,
+        placeholder_ids: [Target; 2],
         first_selector: Target,
         second_selector: Target,
         op_selector: Target,
     ) -> HashOutTarget {
         let constant_operand_hash =
             b.hash_n_to_hash_no_pad::<CHasher>(constant_operand.to_targets());
-        let placeholder_id_hash = b.hash_n_to_hash_no_pad::<CHasher>(vec![placeholder_id]);
+        let first_placeholder_id_hash =
+            b.hash_n_to_hash_no_pad::<CHasher>(vec![placeholder_ids[0]]);
+        let second_placeholder_id_hash =
+            b.hash_n_to_hash_no_pad::<CHasher>(vec![placeholder_ids[1]]);
         // Compute the vector of computational hashes associated to each entry in `possible_input_values`.
         // The vector is padded to the next power of 2 to safely use `random_access_hash` gadget
-        let pad_len = 1 << log2_ceil(input_hash.len() + 2); // length of the padded vector of computational hashes
+        let pad_len = 1 << log2_ceil(input_hash.len() + 3); // length of the padded vector of computational hashes
         let empty_poseidon_hash = b.constant_hash(*empty_poseidon_hash()); // employed for padding
         let possible_input_hash = input_hash
             .iter()
-            .chain([constant_operand_hash, placeholder_id_hash].iter())
+            .chain(
+                [
+                    constant_operand_hash,
+                    first_placeholder_id_hash,
+                    second_placeholder_id_hash,
+                ]
+                .iter(),
+            )
             .cloned()
             .chain(repeat(empty_poseidon_hash))
             .take(pad_len)

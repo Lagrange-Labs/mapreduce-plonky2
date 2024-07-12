@@ -26,10 +26,10 @@ use crate::simple_query_circuits::computational_hash_ids::{Identifiers, Operatio
 pub struct BasicOperationInputWires {
     /// value to be employed for constant operand, if any, in the basic operation
     constant_operand: UInt256Target,
-    /// value to be employed in case the current operation involves a placeholder
-    pub(crate) placeholder_value: UInt256Target,
+    /// value to be employed in case the current operation involves placeholders
+    pub(crate) placeholder_values: [UInt256Target; 2],
     /// identifier of the placeholder employed in the current operation
-    pub(crate) placeholder_id: Target,
+    pub(crate) placeholder_ids: [Target; 2],
     /// selector value employed to choose the inputs for the first operand
     /// among the list of possible input values and hashes
     first_input_selector: Target,
@@ -52,8 +52,8 @@ pub struct BasicOperationWires {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BasicOperationInputs {
     constant_operand: U256,
-    placeholder_value: U256,
-    placeholder_id: F,
+    placeholder_values: [U256; 2],
+    placeholder_ids: [F; 2],
     first_input_selector: F,
     second_input_selector: F,
     op_selector: F,
@@ -67,17 +67,17 @@ impl BasicOperationInputs {
         num_overflows: Target,
     ) -> BasicOperationWires {
         let zero = b.zero();
-        let additional_operands = b.add_virtual_u256_arr::<2>();
+        let additional_operands = b.add_virtual_u256_arr::<3>();
         let constant_operand = &additional_operands[0];
-        let placeholder_value = &additional_operands[1];
+        let placeholder_values = &additional_operands[1..];
         let possible_input_values = input_values
             .into_iter()
-            .chain([constant_operand, placeholder_value].into_iter())
+            .chain(additional_operands.iter())
             .cloned()
             .collect_vec();
         let first_input_selector = b.add_virtual_target();
         let second_input_selector = b.add_virtual_target();
-        let placeholder_id = b.add_virtual_target();
+        let placeholder_ids = b.add_virtual_target_arr::<2>();
         let op_selector = b.add_virtual_target();
         //TODO: these 2 random accesses could be done with a single operation, if we add an ad-hoc gate
         let first_input =
@@ -185,7 +185,7 @@ impl BasicOperationInputs {
             b,
             input_hash,
             constant_operand,
-            placeholder_id,
+            placeholder_ids,
             first_input_selector,
             second_input_selector,
             op_selector,
@@ -193,8 +193,8 @@ impl BasicOperationInputs {
 
         let input_wires = BasicOperationInputWires {
             constant_operand: constant_operand.clone(),
-            placeholder_value: placeholder_value.clone(),
-            placeholder_id,
+            placeholder_values: placeholder_values.to_vec().try_into().unwrap(),
+            placeholder_ids,
             first_input_selector,
             second_input_selector,
             op_selector,
@@ -210,8 +210,9 @@ impl BasicOperationInputs {
 
     pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &BasicOperationInputWires) {
         pw.set_u256_target(&wires.constant_operand, self.constant_operand);
-        pw.set_u256_target(&wires.placeholder_value, self.placeholder_value);
-        pw.set_target(wires.placeholder_id, self.placeholder_id);
+        pw.set_u256_target(&wires.placeholder_values[0], self.placeholder_values[0]);
+        pw.set_u256_target(&wires.placeholder_values[1], self.placeholder_values[1]);
+        pw.set_target_arr(&wires.placeholder_ids, &self.placeholder_ids);
         pw.set_target(wires.first_input_selector, self.first_input_selector);
         pw.set_target(wires.second_input_selector, self.second_input_selector);
         pw.set_target(wires.op_selector, self.op_selector);
@@ -332,17 +333,17 @@ mod tests {
     ) {
         let input_values = array::from_fn(|_| gen_u256_input(rng));
         let constant_operand = gen_u256_input(rng);
-        let placeholder_value = gen_u256_input(rng);
+        let placeholder_values = array::from_fn(|_| gen_u256_input(rng));
         let input_hash = array::from_fn(|_| gen_random_field_hash());
-        let placeholder_id = F::from_canonical_u8(rng.gen());
+        let placeholder_ids = array::from_fn(|_| F::from_canonical_u8(rng.gen()));
         let first_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));
         let second_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));
         let op_selector = op_identifier.to_field();
 
         let component = BasicOperationInputs {
             constant_operand,
-            placeholder_value,
-            placeholder_id,
+            placeholder_values,
+            placeholder_ids,
             first_input_selector,
             second_input_selector,
             op_selector,
@@ -352,7 +353,8 @@ mod tests {
         let first_input = match first_input_selector.to_canonical_u64() as usize {
             a if a < NUM_INPUTS => input_values[a],
             a if a == NUM_INPUTS => constant_operand,
-            a if a == NUM_INPUTS + 1 => placeholder_value,
+            a if a == NUM_INPUTS + 1 => placeholder_values[0],
+            a if a == NUM_INPUTS + 2 => placeholder_values[1],
             a => panic!(
                 "sampled second input selector too big: max {}, sampled {}",
                 NUM_INPUTS + 2,
@@ -363,7 +365,8 @@ mod tests {
         let second_input = match second_input_selector.to_canonical_u64() as usize {
             a if a < NUM_INPUTS => input_values[a],
             a if a == NUM_INPUTS => constant_operand,
-            a if a == NUM_INPUTS + 1 => placeholder_value,
+            a if a == NUM_INPUTS + 1 => placeholder_values[0],
+            a if a == NUM_INPUTS + 2 => placeholder_values[1],
             a => panic!(
                 "sampled second input selector too big: max {}, sampled {}",
                 NUM_INPUTS + 2,
@@ -375,7 +378,7 @@ mod tests {
         let expected_hash = Operation::basic_operation_hash(
             &input_hash,
             constant_operand,
-            placeholder_id,
+            placeholder_ids,
             first_input_selector,
             second_input_selector,
             op_selector,
@@ -617,7 +620,7 @@ mod tests {
             num_overflows,
         );
         // Change expected cost if there were changes to `BasicOperationInputs::build` that affect the cost
-        let expected_cost = 76;
+        let expected_cost = 78;
         assert_eq!(b.num_gates() - num_gates_pre_build, expected_cost);
     }
 }
