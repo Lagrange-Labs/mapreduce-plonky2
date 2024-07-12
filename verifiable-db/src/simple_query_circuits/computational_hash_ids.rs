@@ -1,4 +1,7 @@
-use std::iter::{once, repeat};
+use std::{
+    iter::{once, repeat},
+    mem::variant_count,
+};
 
 use ethers::types::U256;
 use itertools::Itertools;
@@ -29,14 +32,21 @@ pub enum Identifiers {
 
 impl Identifiers {
     pub fn offset(&self) -> usize {
-        // since extraction is before operation
-        std::mem::variant_count::<Extraction>()
+        match self {
+            &Identifiers::Extraction(_) => 0,
+            &Identifiers::Operations(_) => {
+                Identifiers::Extraction(Extraction::default()).offset()
+                    + variant_count::<Extraction>()
+            }
+        }
     }
     pub fn position(&self) -> usize {
-        match self {
-            Identifiers::Extraction(e) => *e as usize,
-            Identifiers::Operations(o) => *o as usize + std::mem::variant_count::<Extraction>(),
-        }
+        let offset = self.offset();
+        offset
+            + match self {
+                Identifiers::Extraction(e) => *e as usize,
+                Identifiers::Operations(o) => *o as usize,
+            }
     }
 }
 
@@ -46,8 +56,9 @@ impl<F: RichField> ToField<F> for Identifiers {
     }
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Default)]
 pub enum Extraction {
+    #[default]
     Column,
 }
 
@@ -122,10 +133,9 @@ impl Operation {
                 a
             ),
         };
-
-        let offset = op_selector + F::from_canonical_usize(Operation::offset());
+        let op_hash_identifier = F::from_canonical_usize(Operation::offset()) + op_selector;
         hash_n_to_hash_no_pad::<_, HashPermutation>(
-            &once(offset)
+            &once(op_hash_identifier)
                 .chain(first_hash.to_vec())
                 .chain(second_hash.to_vec())
                 .collect_vec(),
