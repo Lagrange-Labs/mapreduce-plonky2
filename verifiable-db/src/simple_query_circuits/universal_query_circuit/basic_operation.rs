@@ -1,19 +1,15 @@
-use std::iter::{once, repeat};
-
 use ethers::types::U256;
 use itertools::Itertools;
 use mp2_common::{
     array::Targetable,
-    poseidon::empty_poseidon_hash,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::ToTargets,
-    CHasher, D, F,
+    D, F,
 };
 use plonky2::{
     field::types::Field,
-    hash::{hash_types::HashOutTarget, hashing::hash_n_to_hash_no_pad},
+    hash::hash_types::HashOutTarget,
     iop::{
-        target::{self, BoolTarget, Target},
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
@@ -68,7 +64,7 @@ impl BasicOperationInputs {
     // match the assumptions needed in the circuit. Return the highest identifier
     // of supported basic operations
     pub(crate) fn check_op_identifiers() -> usize {
-        let mut op_identifiers = vec![
+        let op_identifiers = vec![
             ComputationalHashIdentifiers::AddOp as usize,
             ComputationalHashIdentifiers::SubOp as usize,
             ComputationalHashIdentifiers::MulOp as usize,
@@ -85,7 +81,6 @@ impl BasicOperationInputs {
             ComputationalHashIdentifiers::NotOp as usize,
             ComputationalHashIdentifiers::XorOp as usize,
         ];
-        op_identifiers.sort();
         // double-check that the identifiers are all consecutive and start
         // from 0, as this is assumed by the circuit for efficiency
         assert_eq!(
@@ -93,7 +88,7 @@ impl BasicOperationInputs {
             0,
             "ComputationHashIdentifiers of basic operations should be placed at the beginning of the ComputationHashIdentifiers enum"
         );
-        let highest_identifier = *op_identifiers.last().unwrap();
+        let highest_identifier = *op_identifiers.iter().max().unwrap();
         assert_eq!(
             highest_identifier,
             op_identifiers.len()-1,
@@ -142,27 +137,6 @@ impl BasicOperationInputs {
             b.random_access_u256(first_input_selector, possible_input_values.as_slice());
         let second_input =
             b.random_access_u256(second_input_selector, possible_input_values.as_slice());
-        let constant_operand_hash =
-            b.hash_n_to_hash_no_pad::<CHasher>(constant_operand.to_targets());
-        let placeholder_id_hash = b.hash_n_to_hash_no_pad::<CHasher>(vec![placeholder_id]);
-        // Compute the vector of computational hashes associated to each entry in `possible_input_values`.
-        // The vector is padded to the next power of 2 to safely use `random_access_hash` gadget
-        let pad_len = 1 << log2_ceil(input_hash.len() + 2); // length of the padded vector of computational hashes
-        let empty_poseidon_hash = b.constant_hash(*empty_poseidon_hash()); // employed for padding
-        let possible_input_hash = input_hash
-            .into_iter()
-            .chain([&constant_operand_hash, &placeholder_id_hash].into_iter())
-            .cloned()
-            .chain(repeat(empty_poseidon_hash))
-            .take(pad_len)
-            .collect_vec();
-        assert!(
-            possible_input_hash.len() <= 64,
-            "random access gadget works only for arrays with at most 64 elements"
-        );
-        let first_input_hash =
-            b.random_access_hash(first_input_selector, possible_input_hash.clone());
-        let second_input_hash = b.random_access_hash(second_input_selector, possible_input_hash);
 
         // compute results for all the operations
 
@@ -273,13 +247,15 @@ impl BasicOperationInputs {
         );
         let overflows_occurred = b.random_access(op_selector, possible_overflows_occurred);
 
-        // compute identifier of computed operation to be employed in computational hash
         // compute computational hash associated to the operation being computed
-        let output_hash = b.hash_n_to_hash_no_pad::<CHasher>(
-            once(op_selector)
-                .chain(first_input_hash.to_targets().into_iter())
-                .chain(second_input_hash.to_targets().into_iter())
-                .collect(),
+        let output_hash = ComputationalHashIdentifiers::basic_operation_hash_circuit(
+            b,
+            input_hash,
+            constant_operand,
+            placeholder_id,
+            first_input_selector,
+            second_input_selector,
+            op_selector,
         );
 
         let input_wires = BasicOperationInputWires {
@@ -311,43 +287,32 @@ impl BasicOperationInputs {
 
 #[cfg(test)]
 mod tests {
-    use std::{array, iter::once};
+    use std::array;
 
     use ethers::types::U256;
-    use itertools::Itertools;
     use mp2_common::{
         default_config,
         u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-        utils::{ToFields, ToTargets},
-        CHasher, C, D, F,
+        C, D, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        utils::{gen_random_field_hash, gen_random_u256, random_vector},
+        utils::{gen_random_field_hash, gen_random_u256},
     };
     use plonky2::{
         field::types::{Field, PrimeField64},
-        gadgets::arithmetic,
-        hash::{
-            hash_types::{HashOut, HashOutTarget},
-            hashing::hash_n_to_hash_no_pad,
-        },
+        hash::hash_types::{HashOut, HashOutTarget},
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
-        plonk::{
-            circuit_builder::CircuitBuilder,
-            config::{GenericHashOut, Hasher},
-        },
+        plonk::circuit_builder::CircuitBuilder,
     };
     use rand::{thread_rng, Rng};
 
     use crate::simple_query_circuits::computational_hash_ids::ComputationalHashIdentifiers;
 
     use super::{BasicOperationInputWires, BasicOperationInputs};
-
-    type HashPermutation = <CHasher as Hasher<F>>::Permutation;
 
     #[derive(Clone, Debug)]
     struct TestBasicOperationComponent<const NUM_INPUTS: usize> {
@@ -453,13 +418,10 @@ mod tests {
         };
 
         // compute expected outputs
-        let constant_operand_hash =
-            hash_n_to_hash_no_pad::<_, HashPermutation>(&constant_operand.to_fields());
-        let placeholder_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(&[placeholder_id]);
-        let (first_input, first_hash) = match first_input_selector.to_noncanonical_u64() as usize {
-            a if a < NUM_INPUTS => (input_values[a], input_hash[a]),
-            a if a == NUM_INPUTS => (constant_operand, constant_operand_hash),
-            a if a == NUM_INPUTS + 1 => (placeholder_value, placeholder_hash),
+        let first_input = match first_input_selector.to_canonical_u64() as usize {
+            a if a < NUM_INPUTS => input_values[a],
+            a if a == NUM_INPUTS => constant_operand,
+            a if a == NUM_INPUTS + 1 => placeholder_value,
             a => panic!(
                 "sampled second input selector too big: max {}, sampled {}",
                 NUM_INPUTS + 2,
@@ -467,11 +429,10 @@ mod tests {
             ),
         };
 
-        let (second_input, second_hash) = match second_input_selector.to_noncanonical_u64() as usize
-        {
-            a if a < NUM_INPUTS => (input_values[a], input_hash[a]),
-            a if a == NUM_INPUTS => (constant_operand, constant_operand_hash),
-            a if a == NUM_INPUTS + 1 => (placeholder_value, placeholder_hash),
+        let second_input = match second_input_selector.to_canonical_u64() as usize {
+            a if a < NUM_INPUTS => input_values[a],
+            a if a == NUM_INPUTS => constant_operand,
+            a if a == NUM_INPUTS + 1 => placeholder_value,
             a => panic!(
                 "sampled second input selector too big: max {}, sampled {}",
                 NUM_INPUTS + 2,
@@ -480,11 +441,13 @@ mod tests {
         };
 
         let (expected_result, arithmetic_error) = compute_result(first_input, second_input);
-        let expected_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(
-            &once(F::from_canonical_usize(op_identifier as usize))
-                .chain(first_hash.to_vec().into_iter())
-                .chain(second_hash.to_vec().into_iter())
-                .collect_vec(),
+        let expected_hash = ComputationalHashIdentifiers::basic_operation_hash(
+            &input_hash,
+            constant_operand,
+            placeholder_id,
+            first_input_selector,
+            second_input_selector,
+            op_selector,
         );
 
         let test_circuit = TestBasicOperationComponent::<NUM_INPUTS> {
