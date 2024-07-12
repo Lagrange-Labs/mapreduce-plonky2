@@ -13,7 +13,7 @@ use plonky2::{
     field::types::Field,
     hash::{hash_types::HashOutTarget, hashing::hash_n_to_hash_no_pad},
     iop::{
-        target::{self, Target},
+        target::{self, BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
@@ -21,15 +21,15 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::simple_query_circuits::ComputationalHashIdentifiers;
-
 use anyhow::{Error, Result};
+
+use crate::simple_query_circuits::computational_hash_ids::ComputationalHashIdentifiers;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for basic operation component
 pub struct BasicOperationInputWires {
     /// value to be employed for constant operand, if any, in the basic operation
-    value_operand: UInt256Target,
+    constant_operand: UInt256Target,
     /// value to be employed in case the current operation involves a placeholder
     pub(crate) placeholder_value: UInt256Target,
     /// identifier of the placeholder employed in the current operation
@@ -55,7 +55,7 @@ pub struct BasicOperationWires {
 /// Witness input values for basic operation component
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BasicOperationInputs {
-    value_operand: U256,
+    constant_operand: U256,
     placeholder_value: U256,
     placeholder_id: F,
     first_input_selector: F,
@@ -133,23 +133,24 @@ impl BasicOperationInputs {
     ) -> BasicOperationWires {
         let zero = b.zero();
         let additional_operands = b.add_virtual_u256_arr::<2>();
-        let value_operand = &additional_operands[0];
+        let constant_operand = &additional_operands[0];
         let placeholder_value = &additional_operands[1];
         let possible_input_values = input_values
             .into_iter()
-            .chain([value_operand, placeholder_value].into_iter())
+            .chain([constant_operand, placeholder_value].into_iter())
             .cloned()
             .collect_vec();
         let first_input_selector = b.add_virtual_target();
         let second_input_selector = b.add_virtual_target();
         let placeholder_id = b.add_virtual_target();
         let op_selector = b.add_virtual_target();
-        //ToDO: these 2 random accesses could be done with a single operation, if we add an ad-hoc gate
+        //TODO: these 2 random accesses could be done with a single operation, if we add an ad-hoc gate
         let first_input =
             b.random_access_u256(first_input_selector, possible_input_values.as_slice());
         let second_input =
             b.random_access_u256(second_input_selector, possible_input_values.as_slice());
-        let value_hash = b.hash_n_to_hash_no_pad::<CHasher>(value_operand.to_targets());
+        let constant_operand_hash =
+            b.hash_n_to_hash_no_pad::<CHasher>(constant_operand.to_targets());
         let placeholder_id_hash = b.hash_n_to_hash_no_pad::<CHasher>(vec![placeholder_id]);
         // Compute the vector of computational hashes associated to each entry in `possible_input_values`.
         // The vector is padded to the next power of 2 to safely use `random_access_hash` gadget
@@ -157,11 +158,15 @@ impl BasicOperationInputs {
         let empty_poseidon_hash = b.constant_hash(*empty_poseidon_hash()); // employed for padding
         let possible_input_hash = input_hash
             .into_iter()
-            .chain([&value_hash, &placeholder_id_hash].into_iter())
+            .chain([&constant_operand_hash, &placeholder_id_hash].into_iter())
             .cloned()
             .chain(repeat(empty_poseidon_hash))
             .take(pad_len)
             .collect_vec();
+        assert!(
+            possible_input_hash.len() <= 64,
+            "random access gadget works only for arrays with at most 64 elements"
+        );
         let first_input_hash =
             b.random_access_hash(first_input_selector, possible_input_hash.clone());
         let second_input_hash = b.random_access_hash(second_input_selector, possible_input_hash);
@@ -200,24 +205,17 @@ impl BasicOperationInputs {
         let ne_res = b.not(eq_res);
 
         // Boolean operations: assume input values are either 0 or 1, so we can only
-        // computed over the least significant limb
-        let first_input_bool = b.add_virtual_bool_target_unsafe();
-        b.connect(
-            first_input_bool.target,
-            first_input.to_targets().last().unwrap().to_target(),
-        );
-        let second_input_bool = b.add_virtual_bool_target_unsafe();
-        b.connect(
-            second_input_bool.target,
-            second_input.to_targets().last().unwrap().to_target(),
-        );
+        // compute over the least significant limb
+        let first_input_bool = first_input.to_bool_target();
+        let second_input_bool = second_input.to_bool_target();
         let and_res = b.and(first_input_bool, second_input_bool);
         let or_res = b.or(first_input_bool, second_input_bool);
         let not_res = b.not(first_input_bool);
         let xor_res = b.sub(or_res.target, and_res.target);
-        let xor_res_bool = b.add_virtual_bool_target_unsafe();
-        b.connect(xor_res_bool.target, xor_res);
+        let xor_res_bool = BoolTarget::new_unsafe(xor_res);
 
+        // The number of operations computed by this "gadget" in total. This is required to select
+        // the output from all the outputs computed by each operation.
         const NUM_SUPPORTED_OPS: usize = 15;
         let mut possible_output_values = vec![b.zero_u256(); NUM_SUPPORTED_OPS];
         // length of `possible_overflows_occurred` must be a power of 2 to safely use random access gadget
@@ -276,6 +274,10 @@ impl BasicOperationInputs {
         // operation to be performed in the current instance of basic operation component
         let output_value = b.random_access_u256(op_selector, &possible_output_values);
 
+        assert!(
+            possible_overflows_occurred.len() <= 64,
+            "random access gadget works only for arrays with at most 64 elements"
+        );
         let overflows_occurred = b.random_access(op_selector, possible_overflows_occurred);
 
         // compute identifier of computed operation to be employed in computational hash
@@ -289,7 +291,7 @@ impl BasicOperationInputs {
         );
 
         let input_wires = BasicOperationInputWires {
-            value_operand: value_operand.clone(),
+            constant_operand: constant_operand.clone(),
             placeholder_value: placeholder_value.clone(),
             placeholder_id,
             first_input_selector,
@@ -306,7 +308,7 @@ impl BasicOperationInputs {
     }
 
     pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &BasicOperationInputWires) {
-        pw.set_u256_target(&wires.value_operand, self.value_operand);
+        pw.set_u256_target(&wires.constant_operand, self.constant_operand);
         pw.set_u256_target(&wires.placeholder_value, self.placeholder_value);
         pw.set_target(wires.placeholder_id, self.placeholder_id);
         pw.set_target(wires.first_input_selector, self.first_input_selector);
@@ -349,7 +351,7 @@ mod tests {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::simple_query_circuits::ComputationalHashIdentifiers;
+    use crate::simple_query_circuits::computational_hash_ids::ComputationalHashIdentifiers;
 
     use super::{BasicOperationInputWires, BasicOperationInputs};
 
@@ -438,7 +440,7 @@ mod tests {
         compute_result: RFn,
     ) {
         let input_values = array::from_fn(|_| gen_u256_input(rng));
-        let value_operand = gen_u256_input(rng);
+        let constant_operand = gen_u256_input(rng);
         let placeholder_value = gen_u256_input(rng);
         let input_hash = array::from_fn(|_| gen_random_field_hash());
         let placeholder_id = F::from_canonical_u8(rng.gen());
@@ -450,7 +452,7 @@ mod tests {
         );
 
         let component = BasicOperationInputs {
-            value_operand,
+            constant_operand,
             placeholder_value,
             placeholder_id,
             first_input_selector,
@@ -459,11 +461,12 @@ mod tests {
         };
 
         // compute expected outputs
-        let value_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(&value_operand.to_fields());
+        let constant_operand_hash =
+            hash_n_to_hash_no_pad::<_, HashPermutation>(&constant_operand.to_fields());
         let placeholder_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(&[placeholder_id]);
         let (first_input, first_hash) = match first_input_selector.to_noncanonical_u64() as usize {
             a if a < NUM_INPUTS => (input_values[a], input_hash[a]),
-            a if a == NUM_INPUTS => (value_operand, value_hash),
+            a if a == NUM_INPUTS => (constant_operand, constant_operand_hash),
             a if a == NUM_INPUTS + 1 => (placeholder_value, placeholder_hash),
             a => panic!(
                 "sampled second input selector too big: max {}, sampled {}",
@@ -475,7 +478,7 @@ mod tests {
         let (second_input, second_hash) = match second_input_selector.to_noncanonical_u64() as usize
         {
             a if a < NUM_INPUTS => (input_values[a], input_hash[a]),
-            a if a == NUM_INPUTS => (value_operand, value_hash),
+            a if a == NUM_INPUTS => (constant_operand, constant_operand_hash),
             a if a == NUM_INPUTS + 1 => (placeholder_value, placeholder_hash),
             a => panic!(
                 "sampled second input selector too big: max {}, sampled {}",

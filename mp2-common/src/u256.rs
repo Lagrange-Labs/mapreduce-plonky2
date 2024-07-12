@@ -405,6 +405,10 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
         access_index: Target,
         inputs: &[UInt256Target],
     ) -> UInt256Target {
+        assert!(
+            inputs.len() <= 64,
+            "random access gadget works only for arrays with at most 64 elements"
+        );
         // compute padded length of inputs to safely use the
         // `random_access` gadget (must be a power of 2)
         let pad_len = 1 << log2_ceil(inputs.len());
@@ -495,6 +499,12 @@ impl UInt256Target {
             .chain(once(U32Target::from_target(target.target)))
             .collect_vec();
         Self::new_from_be_limbs(&limbs).unwrap()
+    }
+    /// Take a `UInt256Target` which is assumed to represent a single bit and convert it to
+    /// a `BoolTarget`. Note that this method assumes that the input `UInt256Target` is either
+    /// 0 or 1, it is not enforced in the circuit
+    pub fn to_bool_target(&self) -> BoolTarget {
+        BoolTarget::new_unsafe(*self.to_targets().last().unwrap())
     }
 
     /// Utility function employed to implement multiplication, division and remainder of
