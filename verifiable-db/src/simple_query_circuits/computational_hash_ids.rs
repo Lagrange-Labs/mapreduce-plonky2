@@ -22,16 +22,16 @@ use plonky2::{
 };
 
 pub enum Identifiers {
+    Extraction(Extraction),
     Operations(Operation),
     // TODO
-    Extraction(Extraction),
 }
 
 impl Identifiers {
     pub fn position(&self) -> usize {
         match self {
-            Identifiers::Operations(o) => *o as usize,
-            Identifiers::Extraction(e) => *e as usize + std::mem::variant_count::<Operation>(),
+            Identifiers::Extraction(e) => *e as usize,
+            Identifiers::Operations(o) => *o as usize + std::mem::variant_count::<Extraction>(),
         }
     }
 }
@@ -71,15 +71,15 @@ pub enum Operation {
 
 impl<F: RichField> ToField<F> for Operation {
     fn to_field(&self) -> F {
-        Identifiers::Operations(*self).to_field()
+        F::from_canonical_usize(self.index())
     }
 }
 
 type HashPermutation = <CHasher as Hasher<F>>::Permutation;
 
 impl Operation {
-    pub fn position(&self) -> usize {
-        Identifiers::Operations(*self).position()
+    pub fn index(&self) -> usize {
+        *self as usize
     }
     pub(crate) fn basic_operation_hash(
         input_hash: &[HashOut<F>],
@@ -139,8 +139,8 @@ impl Operation {
         let pad_len = 1 << log2_ceil(input_hash.len() + 2); // length of the padded vector of computational hashes
         let empty_poseidon_hash = b.constant_hash(*empty_poseidon_hash()); // employed for padding
         let possible_input_hash = input_hash
-            .into_iter()
-            .chain([&constant_operand_hash, &placeholder_id_hash].into_iter())
+            .iter()
+            .chain([constant_operand_hash, placeholder_id_hash].iter())
             .cloned()
             .chain(repeat(empty_poseidon_hash))
             .take(pad_len)
@@ -154,8 +154,8 @@ impl Operation {
 
         b.hash_n_to_hash_no_pad::<CHasher>(
             once(op_selector)
-                .chain(first_input_hash.to_targets().into_iter())
-                .chain(second_input_hash.to_targets().into_iter())
+                .chain(first_input_hash.to_targets())
+                .chain(second_input_hash.to_targets())
                 .collect(),
         )
     }

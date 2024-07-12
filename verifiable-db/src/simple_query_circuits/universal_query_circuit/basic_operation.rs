@@ -133,41 +133,41 @@ impl BasicOperationInputs {
         // fill `possible_output_values` and `possible_overflows_occurred` with the results of all the
         // supported operation, placing such results in the position of the vector corresponding to
         // the given operation
-        let add_position = Operation::AddOp.position();
+        let add_position = Operation::AddOp.index();
         possible_output_values[add_position] = add_res;
         possible_overflows_occurred[add_position] = add_overflow.to_target();
-        let sub_position = Operation::SubOp.position();
+        let sub_position = Operation::SubOp.index();
         possible_output_values[sub_position] = sub_res;
         possible_overflows_occurred[sub_position] = sub_overflow.to_target();
-        let mul_position = Operation::MulOp.position();
+        let mul_position = Operation::MulOp.index();
         possible_output_values[mul_position] = mul_res;
         possible_overflows_occurred[mul_position] = mul_overflow.target;
-        let div_position = Operation::DivOp.position();
+        let div_position = Operation::DivOp.index();
         possible_output_values[div_position] = div_res;
         possible_overflows_occurred[div_position] = div_by_zero.target;
-        let mod_position = Operation::ModOp.position();
+        let mod_position = Operation::ModOp.index();
         possible_output_values[mod_position] = mod_res;
         possible_overflows_occurred[mod_position] = div_by_zero.target;
         // all other operations have no possible overflow error
-        possible_output_values[Operation::LessThanOp.position()] =
+        possible_output_values[Operation::LessThanOp.index()] =
             UInt256Target::new_from_bool_target(b, lt_res);
-        possible_output_values[Operation::LessThanOrEqOp.position()] =
+        possible_output_values[Operation::LessThanOrEqOp.index()] =
             UInt256Target::new_from_bool_target(b, lteq_res);
-        possible_output_values[Operation::GreaterThanOp.position()] =
+        possible_output_values[Operation::GreaterThanOp.index()] =
             UInt256Target::new_from_bool_target(b, gt_res);
-        possible_output_values[Operation::GreaterThanOrEqOp.position()] =
+        possible_output_values[Operation::GreaterThanOrEqOp.index()] =
             UInt256Target::new_from_bool_target(b, gteq_res);
-        possible_output_values[Operation::EqOp.position()] =
+        possible_output_values[Operation::EqOp.index()] =
             UInt256Target::new_from_bool_target(b, eq_res);
-        possible_output_values[Operation::NeOp.position()] =
+        possible_output_values[Operation::NeOp.index()] =
             UInt256Target::new_from_bool_target(b, ne_res);
-        possible_output_values[Operation::AndOp.position()] =
+        possible_output_values[Operation::AndOp.index()] =
             UInt256Target::new_from_bool_target(b, and_res);
-        possible_output_values[Operation::OrOp.position()] =
+        possible_output_values[Operation::OrOp.index()] =
             UInt256Target::new_from_bool_target(b, or_res);
-        possible_output_values[Operation::NotOp.position()] =
+        possible_output_values[Operation::NotOp.index()] =
             UInt256Target::new_from_bool_target(b, not_res);
-        possible_output_values[Operation::XorOp.position()] =
+        possible_output_values[Operation::XorOp.index()] =
             UInt256Target::new_from_bool_target(b, xor_res_bool);
 
         // choose the proper output values and overflows error occurred depending on the
