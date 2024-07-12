@@ -1,4 +1,4 @@
-//! Query circuit utilities
+//! Cells tree utilities for query circuit
 
 use itertools::Itertools;
 use mp2_common::{
