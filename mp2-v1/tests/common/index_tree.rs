@@ -1,14 +1,11 @@
 use anyhow::{Context, Result};
-use mp2_v1::api;
-use std::iter::once;
-
-use ethers::types::{BlockNumber, U256};
+use ethers::types::{Block, BlockNumber, U128, U256};
+use log::info;
 use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
+use mp2_v1::{api, values_extraction::compute_block_id};
 use plonky2::{
-    hash::{
-        hash_types::HashOut,
-        hashing::{hash_n_to_hash_no_pad, hash_n_to_m_no_pad},
-    },
+    field::types::Field,
+    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
     plonk::config::Hasher,
 };
 use ryhope::{
@@ -21,6 +18,7 @@ use ryhope::{
     MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
+use std::iter::once;
 
 use crate::common::proof_storage::{IndexProofIdentifier, ProofKey};
 
@@ -30,12 +28,12 @@ use super::{
 };
 
 /// Hardcoded to use blocks but the spirit for any primary index is the same
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct IndexNode {
     pub identifier: F,
     pub value: U256,
     pub node_hash: HashOut<F>,
-    pub row_tree_root_proof_id: RowProofIdentifier<BlockPrimaryIndex>,
+    pub row_tree_proof_id: RowProofIdentifier<BlockPrimaryIndex>,
     pub row_tree_hash: HashOut<F>,
     pub min: U256,
     pub max: U256,
@@ -91,11 +89,10 @@ pub type IndexTreeKey = <IndexTree as TreeTopology>::Key;
 type IndexStorage = InMemory<IndexTree, IndexNode>;
 pub type MerkleIndexTree = MerkleTreeKvDb<IndexTree, IndexNode, IndexStorage>;
 
-pub async fn build_initial_index_tree(
-    block_number: BlockNumber,
+pub fn build_initial_index_tree(
     index: &IndexNode,
 ) -> Result<(MerkleIndexTree, UpdateTree<IndexTreeKey>)> {
-    let block_usize: BlockPrimaryIndex = block_number.as_number().unwrap().try_into().unwrap();
+    let block_usize: BlockPrimaryIndex = index.value.try_into().unwrap();
 
     // should always be one anyway since we iterate over blocks one by one
     // but in the case of general index we might create multiple nodes
@@ -114,22 +111,23 @@ impl TestContext {
     /// NOTE: we require the added_index information because we need to distinguish if a new node
     /// added has a leaf or a as parent. The rest of the nodes in the update tree are to be proven
     /// by the "membership" circuit. So we need to differentiate between the two cases.
-    pub async fn prove_index_tree<P: ProofStorage>(
+    pub fn prove_index_tree<P: ProofStorage>(
         &self,
         table_id: &TableID,
         t: &MerkleIndexTree,
         ut: UpdateTree<IndexTreeKey>,
-        added_index: &BlockPrimaryIndex,
+        added_index: &IndexNode,
         storage: &mut P,
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, node) = t.fetch_with_context(&k);
             let row_tree_proof = storage
-                .get_proof(&ProofKey::Row(node.row_tree_root_proof_id.clone()))
+                .get_proof(&ProofKey::Row(node.row_tree_proof_id.clone()))
                 .expect("should find row proof");
+            // extraction proof is done once per block, so its key can just be block based
             let extraction_proof = storage
-                .get_proof(&ProofKey::Extraction(node.row_tree_root_proof_id.primary))
+                .get_proof(&ProofKey::Extraction(node.row_tree_proof_id.primary))
                 .expect("should find extraction proof");
             let proof = if context.is_leaf() {
                 let inputs = api::CircuitInput::BlockTree(
@@ -145,7 +143,7 @@ impl TestContext {
                 // a node that was already there before and is in the path of the added node to the
                 // root should always have two children
                 assert_eq!(
-                    added_index, &node.row_tree_root_proof_id.primary,
+                    added_index.value, node.value,
                     "a changed node should never be a partial node"
                 );
                 // we know it's a new node, and a new node becomes the parent of a previous
@@ -224,5 +222,28 @@ impl TestContext {
             .get_proof(&ProofKey::Index(root_proof_key.clone()))
             .unwrap();
         root_proof_key
+    }
+
+    pub(crate) fn build_and_prove_index_tree<P: ProofStorage>(
+        &self,
+        table: &TableID,
+        storage: &mut P,
+        row_root_proof_key: &RowProofIdentifier<BlockPrimaryIndex>,
+    ) -> IndexProofIdentifier<BlockPrimaryIndex> {
+        let row_tree_proof = storage
+            .get_proof(&ProofKey::Row(row_root_proof_key.clone()))
+            .unwrap();
+        let row_tree_hash = verifiable_db::row_tree::extract_hash_from_proof(&row_tree_proof)
+            .expect("can't find hash?");
+        let node = IndexNode {
+            identifier: F::from_canonical_u64(compute_block_id()),
+            value: U256::from(U128::from(self.block_number.as_number().unwrap().as_u64())),
+            row_tree_proof_id: row_root_proof_key.clone(),
+            row_tree_hash,
+            ..Default::default()
+        };
+        let (tree, update) = build_initial_index_tree(&node).expect("can't build index tree");
+        info!("Generated index tree");
+        self.prove_index_tree(table, &tree, update, &node, storage)
     }
 }

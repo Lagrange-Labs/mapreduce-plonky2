@@ -224,7 +224,7 @@ impl TestContext {
             .await
             .expect("failed to create cell tree");
         let root_key = self
-            .prove_cell_tree(&table_id, &cell_tree, cell_tree_ut, storage)
+            .prove_cell_tree(table_id, &cell_tree, cell_tree_ut, storage)
             .await;
         let cell_root_proof = storage
             .get_proof(&ProofKey::Cell(root_key.clone()))
@@ -239,14 +239,14 @@ impl TestContext {
         Row {
             k: RowTreeKey {
                 // the 0th cell value is the secondary index
-                value: cells[0].value.clone(),
+                value: cells[0].value,
                 // there is always only one row in the scalar slots table
                 id: 0,
             },
             cell_tree_root_proof_id: root_key,
             cell_tree_root_hash: tree_hash,
-            min: cells[0].value.clone(),
-            max: cells[0].value.clone(),
+            min: cells[0].value,
+            max: cells[0].value,
             cells,
             hash: Default::default(),
         }

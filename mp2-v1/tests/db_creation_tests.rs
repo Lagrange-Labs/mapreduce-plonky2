@@ -1,12 +1,20 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
-use common::{proof_storage::TableID, TestCase, TestContext};
+use common::{
+    proof_storage::{ProofKey, TableID},
+    TestCase, TestContext,
+};
 use ethers::types::Address;
 use log::info;
-use mp2_common::proof::{serialize_proof, ProofWithVK};
+use mp2_common::{
+    poseidon::empty_poseidon_hash,
+    proof::{serialize_proof, ProofWithVK},
+};
+use mp2_v1::values_extraction::compute_block_id;
 use std::{collections::HashMap, str::FromStr};
 use test_log::test;
+use verifiable_db::extraction;
 
 pub(crate) mod common;
 
@@ -25,13 +33,22 @@ async fn prove_scalar_values<P: common::proof_storage::ProofStorage>(
     info!("Generated Values Extraction (C.1) proof for single variables");
 
     // final extraction for single variables
-    let _ = ctx.prove_final_extraction(
-        contract_proof.serialize().unwrap(),
-        single_values_proof.serialize().unwrap(),
-        block_proof.to_vec(),
-        false,
-        None,
-    );
+    let extraction_proof = ctx
+        .prove_final_extraction(
+            contract_proof.serialize().unwrap(),
+            single_values_proof.serialize().unwrap(),
+            block_proof.to_vec(),
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+    storage
+        .store_proof(
+            ProofKey::Extraction(ctx.block_number.as_number().unwrap().as_usize()),
+            extraction_proof.serialize().unwrap(),
+        )
+        .unwrap();
     info!("Generated Final Extraction (C.5.1) proof for single variables");
 
     let row = ctx
@@ -43,10 +60,13 @@ async fn prove_scalar_values<P: common::proof_storage::ProofStorage>(
             storage,
         )
         .await;
-
+    info!("Generated final CELLs tree proofs for single variables");
     // In the case of the scalars slots, there is a single node in the row tree.
     let rows = vec![row];
-    let _row_tree_proof = ctx.build_and_prove_rowtree(&table_id, &rows, storage).await;
+    let row_tree_proof_key = ctx.build_and_prove_rowtree(&table_id, &rows, storage).await;
+    info!("Generated final ROWs tree proofs for single variables");
+    let _ = ctx.build_and_prove_index_tree(&table_id, storage, &row_tree_proof_key);
+    info!("Generated final BLOCK tree proofs for single variables");
 }
 
 async fn prove_mappings_with_length(

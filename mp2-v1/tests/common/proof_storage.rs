@@ -10,7 +10,7 @@ type CellTreeKey = <CellTree as TreeTopology>::Key;
 type RowTreeKey = <RowTree as TreeTopology>::Key;
 type IndexTreeKey = <IndexTree as TreeTopology>::Key;
 
-#[derive(Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TableID(String);
 
 impl TableID {
@@ -45,7 +45,7 @@ where
     pub(crate) tree_key: CellTreeKey,
 }
 
-#[derive(Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+#[derive(Clone, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub(crate) struct RowProofIdentifier<PrimaryIndex>
 where
     PrimaryIndex: std::hash::Hash + PartialEq + Eq,

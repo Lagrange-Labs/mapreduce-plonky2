@@ -33,7 +33,7 @@ use super::{
 };
 
 /// A unique identifier in a row tree
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RowTreeKey {
     /// Value of the secondary index of the row
     pub value: U256,
@@ -200,7 +200,7 @@ impl TestContext {
         t: &MerkleRowTree,
         ut: UpdateTree<<RowTree as TreeTopology>::Key>,
         storage: &mut P,
-    ) -> Vec<u8> {
+    ) -> RowProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
         // THIS can panic but for block number it should be fine on 64bit platforms...
         // unwrap is safe since we know it is really a block number and not set to Latest or stg
@@ -309,7 +309,10 @@ impl TestContext {
             tree_key: root,
         };
 
-        storage.get_proof(&ProofKey::Row(root_proof_key)).unwrap()
+        storage
+            .get_proof(&ProofKey::Row(root_proof_key.clone()))
+            .expect("row tree root proof absent");
+        root_proof_key
     }
 
     /// Build and prove the row tree from the [`Row`]s and the secondary index
@@ -319,13 +322,16 @@ impl TestContext {
         table_id: &TableID,
         rows: &[Row],
         storage: &mut P,
-    ) -> Vec<u8> {
+    ) -> RowProofIdentifier<BlockPrimaryIndex> {
         let (row_tree, row_tree_ut) = build_row_tree(rows)
             .await
             .expect("failed to create row tree");
-        let row_tree_proof = self
+        let root_proof_key = self
             .prove_row_tree(table_id, &row_tree, row_tree_ut, storage)
             .await;
+        let row_tree_proof = storage
+            .get_proof(&ProofKey::Row(root_proof_key.clone()))
+            .unwrap();
 
         let tree_hash = row_tree.root_data().unwrap().hash;
         let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
@@ -335,6 +341,6 @@ impl TestContext {
             "mismatch between row tree root hash as computed by ryhope and mp2",
         );
 
-        row_tree_proof
+        root_proof_key
     }
 }

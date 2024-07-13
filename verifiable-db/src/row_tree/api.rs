@@ -1,6 +1,7 @@
 use anyhow::Result;
 use ethers::types::U256;
-use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
+use mp2_common::{default_config, proof::ProofWithVK, public_inputs, C, D, F};
+use plonky2::hash::hash_types::HashOut;
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set as p, RecursiveCircuits},
@@ -13,7 +14,7 @@ use super::{
     full_node::{self, FullNodeCircuit},
     leaf::{self, LeafCircuit},
     partial_node::{self, PartialNodeCircuit},
-    IndexTuple,
+    IndexTuple, PublicInputs,
 };
 
 /// Parameters holding the circuits for the row tree creation
@@ -217,6 +218,11 @@ impl CircuitInput {
             cells_proof,
         })
     }
+}
+
+pub fn extract_hash_from_proof(proof: &[u8]) -> Result<HashOut<F>> {
+    let p = ProofWithVK::deserialize(proof)?;
+    Ok(PublicInputs::from_slice(&p.proof.public_inputs).root_hash_hashout())
 }
 
 #[cfg(test)]
