@@ -352,7 +352,7 @@ pub trait ToFields<F: RichField> {
 
 impl<F: RichField> ToFields<F> for H256 {
     fn to_fields(&self) -> Vec<F> {
-        self.as_fixed_bytes().pack(Endianness::Little).to_fields()
+        self.as_bytes().pack(Endianness::Little).to_fields()
     }
 }
 
