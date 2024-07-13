@@ -32,13 +32,13 @@ impl TestContext {
         )?)?;
 
         let block = self.query_block().await;
-        let block_hash = HashOutput::from(block.hash.unwrap().as_fixed_bytes().to_owned());
-        let prev_block_hash = HashOutput::from(block.parent_hash.as_fixed_bytes().to_owned());
+        let block_hash = block.hash.unwrap().to_fields();
+        let prev_block_hash = block.parent_hash.to_fields();
 
         let pis = PublicInputs::from_slice(proof.proof().public_inputs.as_slice());
         assert_eq!(pis.block_number(), block.number.unwrap());
-        assert_eq!(pis.block_hash_raw(), block_hash.to_fields());
-        assert_eq!(pis.prev_block_hash_raw(), prev_block_hash.to_fields());
+        assert_eq!(pis.block_hash_raw(), block_hash);
+        assert_eq!(pis.prev_block_hash_raw(), prev_block_hash);
 
         Ok(proof)
     }

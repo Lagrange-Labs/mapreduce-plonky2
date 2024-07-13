@@ -1,7 +1,7 @@
 use std::array::from_fn as create_array;
 
 use anyhow::Result;
-use ethers::types::U256;
+use ethers::types::{H256, U256};
 use itertools::Itertools;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field64;
@@ -348,6 +348,12 @@ impl<F: RichField + Extendable<D>, const D: usize> SelectHashBuilder for Circuit
 
 pub trait ToFields<F: RichField> {
     fn to_fields(&self) -> Vec<F>;
+}
+
+impl<F: RichField> ToFields<F> for H256 {
+    fn to_fields(&self) -> Vec<F> {
+        self.as_fixed_bytes().pack(Endianness::Little).to_fields()
+    }
 }
 
 impl<F: RichField> ToFields<F> for &[u8] {
