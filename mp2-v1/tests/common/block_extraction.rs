@@ -3,6 +3,7 @@ use ethers::types::U64;
 use mp2_common::{
     eth::{left_pad_generic, BlockUtil},
     proof::deserialize_proof,
+    types::HashOutput,
     u256,
     utils::{Endianness, Packer, ToFields},
     C, D, F,
@@ -24,7 +25,7 @@ impl TestContext {
         let block = self.query_block().await;
         let buffer = block.rlp();
         let proof = api::generate_proof(
-            &self.params(),
+            self.params(),
             api::CircuitInput::BlockExtraction(block_extraction::CircuitInput::from_block_header(
                 buffer,
             )),
@@ -32,7 +33,13 @@ impl TestContext {
         let p2_proof = deserialize_proof::<F, C, D>(&proof)?;
         let pi = block_extraction::PublicInputs::from_slice(&p2_proof.public_inputs);
         let block_number = block_number_to_u256_limbs(block.number.unwrap());
+        let block_hash = HashOutput::from(block.hash.unwrap().as_fixed_bytes().to_owned());
+        let prev_block_hash = HashOutput::from(block.parent_hash.as_fixed_bytes().to_owned());
+
         assert_eq!(pi.block_number_raw(), &block_number);
+        assert_eq!(pi.block_hash_raw(), block_hash.to_fields());
+        assert_eq!(pi.prev_block_hash_raw(), prev_block_hash.to_fields());
+
         Ok(p2_proof)
     }
 }

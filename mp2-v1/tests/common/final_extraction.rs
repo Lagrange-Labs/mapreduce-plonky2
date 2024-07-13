@@ -27,15 +27,13 @@ impl TestContext {
             CircuitInput::new_simple_input(block_proof, contract_proof, values_proof, compound_type)
         }?;
         let proof = ProofWithVK::deserialize(&api::generate_proof(
-            &self.params(),
+            self.params(),
             api::CircuitInput::FinalExtraction(circuit_input),
         )?)?;
 
         let block = self.query_block().await;
-        let block_hash =
-            HashOutput::try_from(block.hash.unwrap().as_fixed_bytes().to_owned()).unwrap();
-        let prev_block_hash =
-            HashOutput::try_from(block.parent_hash.as_fixed_bytes().to_owned()).unwrap();
+        let block_hash = HashOutput::from(block.hash.unwrap().as_fixed_bytes().to_owned());
+        let prev_block_hash = HashOutput::from(block.parent_hash.as_fixed_bytes().to_owned());
 
         let pis = PublicInputs::from_slice(proof.proof().public_inputs.as_slice());
         assert_eq!(pis.block_number(), block.number.unwrap());
