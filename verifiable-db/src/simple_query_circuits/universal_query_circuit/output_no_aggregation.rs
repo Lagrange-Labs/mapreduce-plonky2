@@ -181,8 +181,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         // Set the remaining outputs to dummy values.
         let output_values = vec![u256_zero; MAX_NUM_RESULTS - 1];
 
-        // Compute the computational hash representing the accumulation of the items,
-        // including the bounds on counter of matching records.
+        // Compute the computational hash representing the accumulation of the items.
         let prefix = b.constant(F::from_canonical_u8(OUTPUT_HASH_PREFIX));
         let inputs = iter::once(prefix).chain(predicate_hash.elements).collect();
         let mut output_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
