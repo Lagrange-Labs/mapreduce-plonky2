@@ -27,7 +27,7 @@ use super::{
     COLUMN_INDEX_NUM,
 };
 
-// TODO: replace with enum values.
+// TODO: fix to enum values after merging PR [#249](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/249).
 const OUTPUT_HASH_PREFIX: u8 = 120; // SELECT_ACC
 const OP_ID: u8 = 121; // ID
 const OP_SUM: u8 = 122; // SUM
@@ -194,6 +194,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         let output_values = vec![u256_zero; MAX_NUM_RESULTS - 1];
 
         // Compute the computational hash representing the accumulation of the items.
+        // TODO: fix to an enum value after merging PR [#249](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/249).
         let prefix = b.constant(F::from_canonical_u8(OUTPUT_HASH_PREFIX));
         let inputs = iter::once(prefix).chain(predicate_hash.elements).collect();
         let mut output_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
@@ -223,6 +224,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         // accumulator, while the other slots are filled by the dummy zero values.
         // So the circuit claims that there is no aggregation operation on the
         // first value in V, while all the other values can be simply summed up.
+        // TODO: fix to enum values after merging PR [#249](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/249).
         let op_id = b.constant(F::from_canonical_u8(OP_ID));
         let op_sum = b.constant(F::from_canonical_u8(OP_SUM));
         let ops_ids: Vec<_> = iter::once(op_id)
