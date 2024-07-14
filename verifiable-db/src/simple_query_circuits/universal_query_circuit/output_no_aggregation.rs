@@ -32,6 +32,10 @@ const OUTPUT_HASH_PREFIX: u8 = 120; // SELECT_ACC
 const OP_ID: u8 = 121; // ID
 const OP_SUM: u8 = 122; // SUM
 
+/// Constrain the maximum column number must be less than 64. Since the `random_access`
+/// function cannot handle more than 64 elements (63 columns + 1 item result).
+const MAX_NUM_COLUMNS: usize = 64;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for output component for queries without results aggregation
 pub struct InputWires<const MAX_NUM_RESULTS: usize> {
@@ -127,9 +131,16 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         predicate_value: &BoolTarget,
         predicate_hash: &HashOutTarget,
     ) -> Self::Wires {
-        assert_eq!(column_values.len(), column_hash.len());
         assert_eq!(item_values.len(), MAX_NUM_RESULTS);
         assert_eq!(item_hash.len(), MAX_NUM_RESULTS);
+
+        let num_columns = column_values.len();
+        assert_eq!(num_columns, column_hash.len());
+        assert!(
+            num_columns < MAX_NUM_COLUMNS,
+            "The `random_access` function cannot handle more than 64 elements (63 columns + 1 item result)",
+        );
+        let possible_num_inputs = (num_columns + 1).next_power_of_two();
 
         let u256_zero = b.zero_u256();
         let curve_zero = b.curve_zero();
@@ -145,7 +156,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         // Append the column values by a corresponding item value to construct the inputs.
         let item_index = column_values.len();
         let mut possible_input_values = column_values.to_vec();
-        possible_input_values.push(u256_zero.clone());
+        possible_input_values.resize(possible_num_inputs, u256_zero.clone());
 
         // Build the output items to be returned.
         let output_items: [_; MAX_NUM_RESULTS] = array::from_fn(|i| {
@@ -189,7 +200,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
 
         let item_index = column_hash.len();
         let mut possible_input_hash = column_hash.to_vec();
-        possible_input_hash.push(empty_hash);
+        possible_input_hash.resize(possible_num_inputs, empty_hash);
         for i in 0..MAX_NUM_RESULTS {
             possible_input_hash[item_index] = item_hash[i].clone();
             let input_hash =
@@ -278,26 +289,28 @@ mod tests {
     }
 
     #[derive(Clone, Debug)]
-    struct TestOutputWires<const NUM_COLUMNS: usize, const NUM_ITEMS: usize> {
+    struct TestOutputWires<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> {
         column_values: [UInt256Target; NUM_COLUMNS],
         column_hash: [HashOutTarget; NUM_COLUMNS],
-        item_values: [UInt256Target; NUM_ITEMS],
-        item_hash: [HashOutTarget; NUM_ITEMS],
+        item_values: [UInt256Target; MAX_NUM_RESULTS],
+        item_hash: [HashOutTarget; MAX_NUM_RESULTS],
         predicate_value: BoolTarget,
         predicate_hash: HashOutTarget,
     }
 
     #[derive(Clone, Debug)]
-    struct TestOutput<const NUM_COLUMNS: usize, const NUM_ITEMS: usize> {
+    struct TestOutput<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> {
         column_values: [U256; NUM_COLUMNS],
         column_hash: [HashOut<F>; NUM_COLUMNS],
-        item_values: [U256; NUM_ITEMS],
-        item_hash: [HashOut<F>; NUM_ITEMS],
+        item_values: [U256; MAX_NUM_RESULTS],
+        item_hash: [HashOut<F>; MAX_NUM_RESULTS],
         predicate_value: bool,
         predicate_hash: HashOut<F>,
     }
 
-    impl<const NUM_COLUMNS: usize, const NUM_ITEMS: usize> TestOutput<NUM_COLUMNS, NUM_ITEMS> {
+    impl<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize>
+        TestOutput<NUM_COLUMNS, MAX_NUM_RESULTS>
+    {
         /// Sample a test output.
         fn sample(predicate_value: bool) -> Self {
             let mut rng = thread_rng();
@@ -318,11 +331,11 @@ mod tests {
             }
         }
 
-        fn build(b: &mut CBuilder) -> TestOutputWires<NUM_COLUMNS, NUM_ITEMS> {
+        fn build(b: &mut CBuilder) -> TestOutputWires<NUM_COLUMNS, MAX_NUM_RESULTS> {
             let column_values = b.add_virtual_u256_arr();
             let column_hash = [0; NUM_COLUMNS].map(|_| b.add_virtual_hash());
             let item_values = b.add_virtual_u256_arr();
-            let item_hash = [0; NUM_ITEMS].map(|_| b.add_virtual_hash());
+            let item_hash = [0; MAX_NUM_RESULTS].map(|_| b.add_virtual_hash());
             let predicate_value = b.add_virtual_bool_target_safe();
             let predicate_hash = b.add_virtual_hash();
 
@@ -339,7 +352,7 @@ mod tests {
         fn assign(
             &self,
             pw: &mut PartialWitness<F>,
-            wires: &TestOutputWires<NUM_COLUMNS, NUM_ITEMS>,
+            wires: &TestOutputWires<NUM_COLUMNS, MAX_NUM_RESULTS>,
         ) {
             self.column_values
                 .iter()
@@ -376,13 +389,9 @@ mod tests {
 
     impl TestExpected {
         /// Compute the expected values by the input and output.
-        async fn new<
-            const NUM_COLUMNS: usize,
-            const NUM_ITEMS: usize,
-            const MAX_NUM_RESULTS: usize,
-        >(
+        async fn new<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize>(
             c: &Circuit<MAX_NUM_RESULTS>,
-            output: &TestOutput<NUM_COLUMNS, NUM_ITEMS>,
+            output: &TestOutput<NUM_COLUMNS, MAX_NUM_RESULTS>,
         ) -> Self {
             let u256_zero = U256::zero();
             let curve_zero = Point::NEUTRAL;
@@ -485,24 +494,19 @@ mod tests {
     }
 
     #[derive(Clone, Debug)]
-    struct TestOutputNoAggregationCircuit<
-        const NUM_COLUMNS: usize,
-        const NUM_ITEMS: usize,
-        const MAX_NUM_RESULTS: usize,
-    > {
+    struct TestOutputNoAggregationCircuit<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> {
         c: Circuit<MAX_NUM_RESULTS>,
-        output: TestOutput<NUM_COLUMNS, NUM_ITEMS>,
+        output: TestOutput<NUM_COLUMNS, MAX_NUM_RESULTS>,
         expected: TestExpected,
     }
 
-    impl<const NUM_COLUMNS: usize, const NUM_ITEMS: usize, const MAX_NUM_RESULTS: usize>
-        UserCircuit<F, D>
-        for TestOutputNoAggregationCircuit<NUM_COLUMNS, NUM_ITEMS, MAX_NUM_RESULTS>
+    impl<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> UserCircuit<F, D>
+        for TestOutputNoAggregationCircuit<NUM_COLUMNS, MAX_NUM_RESULTS>
     {
         // Circuit wires + output wires + expected wires
         type Wires = (
             Wires<MAX_NUM_RESULTS>,
-            TestOutputWires<NUM_COLUMNS, NUM_ITEMS>,
+            TestOutputWires<NUM_COLUMNS, MAX_NUM_RESULTS>,
             TestExpectedWires,
         );
 
@@ -549,8 +553,8 @@ mod tests {
         }
     }
 
-    impl<const NUM_COLUMNS: usize, const NUM_ITEMS: usize, const MAX_NUM_RESULTS: usize>
-        TestOutputNoAggregationCircuit<NUM_COLUMNS, NUM_ITEMS, MAX_NUM_RESULTS>
+    impl<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize>
+        TestOutputNoAggregationCircuit<NUM_COLUMNS, MAX_NUM_RESULTS>
     {
         async fn sample(predicate_value: bool, valid_num_outputs: usize) -> Self {
             let c = Circuit::<MAX_NUM_RESULTS>::sample::<NUM_COLUMNS>(valid_num_outputs);
@@ -567,36 +571,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_no_aggregation_output_with_predicated() {
-        // `random_access` function constrains it must be power of two (7 + 1).
-        const NUM_COLUMNS: usize = 7;
-        const NUM_ITEMS: usize = 5;
+        const NUM_COLUMNS: usize = 5;
         const MAX_NUM_RESULTS: usize = 13;
         const NUM_VALID_OUTPUTS: usize = 13;
 
-        let test_circuit =
-            TestOutputNoAggregationCircuit::<NUM_COLUMNS, NUM_ITEMS, MAX_NUM_RESULTS>::sample(
-                true,
-                NUM_VALID_OUTPUTS,
-            )
-            .await;
+        let test_circuit = TestOutputNoAggregationCircuit::<NUM_COLUMNS, MAX_NUM_RESULTS>::sample(
+            true,
+            NUM_VALID_OUTPUTS,
+        )
+        .await;
 
         run_circuit::<F, D, C, _>(test_circuit);
     }
 
     #[tokio::test]
     async fn test_query_no_aggregation_output_with_no_predicated() {
-        // `random_access` function constrains it must be power of two (15 + 1).
-        const NUM_COLUMNS: usize = 15;
-        const NUM_ITEMS: usize = 3;
+        const NUM_COLUMNS: usize = 11;
         const MAX_NUM_RESULTS: usize = 9;
         const NUM_VALID_OUTPUTS: usize = 5;
 
-        let test_circuit =
-            TestOutputNoAggregationCircuit::<NUM_COLUMNS, NUM_ITEMS, MAX_NUM_RESULTS>::sample(
-                false,
-                NUM_VALID_OUTPUTS,
-            )
-            .await;
+        let test_circuit = TestOutputNoAggregationCircuit::<NUM_COLUMNS, MAX_NUM_RESULTS>::sample(
+            false,
+            NUM_VALID_OUTPUTS,
+        )
+        .await;
 
         run_circuit::<F, D, C, _>(test_circuit);
     }
