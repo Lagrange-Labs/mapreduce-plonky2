@@ -185,14 +185,13 @@ async fn anvil_block_hash() -> Result<()> {
     let ctx = &mut TestContext::new_local_node().await;
     let provider = ProviderBuilder::new().on_http(ctx.rpc_url.parse().unwrap());
     let latest = ctx.rpc.get_block_number().await.unwrap();
-    let previous_block = ctx
-        .rpc
-        .get_block(BlockNumber::Number(latest - 1))
+    let previous_block = provider
+        .get_block_by_number(BlockNumberOrTag::Number(latest.as_u64() - 1), true)
         .await
         .unwrap()
         .unwrap();
 
-    let previous_computed_hash = keccak256(&previous_block.rlp());
+    let previous_computed_hash = previous_block.block_hash();
 
     let next_block = provider
         .get_block_by_number(BlockNumberOrTag::Number(latest.as_u64()), true)
@@ -203,29 +202,7 @@ async fn anvil_block_hash() -> Result<()> {
     // check if the way we compute hash is compatible with the way hash is
     // computed onchain
     let given_next_previous_hash = next_block.header.parent_hash.as_slice();
-    // FAIL
-    //assert_eq!(&previous_computed_hash, given_next_previous_hash);
-
-    let next_block_ethers = ctx
-        .rpc
-        .get_block(BlockNumber::Number(latest))
-        .await
-        .unwrap()
-        .unwrap();
-
-    let given_hash = next_block.header.hash.unwrap();
-    let given_hash = given_hash.as_slice();
-
-    let block2_hash = next_block_ethers.hash.unwrap();
-    let given_hash2 = block2_hash.as_bytes();
-
-    // check if ethers and alloy compute same hash
-    assert_eq!(given_hash, given_hash2);
-
-    let computed_hash = keccak256(&next_block_ethers.rlp());
-    // check if  the hash computed from a block is the same as the one
-    // given by library
-    // FAIL
-    assert_eq!(given_hash, computed_hash);
+    // PASS now that we compute everything from alloy
+    assert_eq!(&previous_computed_hash, given_next_previous_hash);
     Ok(())
 }
