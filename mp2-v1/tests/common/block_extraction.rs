@@ -4,7 +4,7 @@ use mp2_common::{
     eth::{left_pad_generic, BlockUtil},
     proof::deserialize_proof,
     u256,
-    utils::{Endianness, Packer, ToFields},
+    utils::{keccak256, Endianness, Packer, ToFields},
     C, D, F,
 };
 use mp2_v1::{api, block_extraction};
@@ -39,8 +39,9 @@ impl TestContext {
         let pp2_proof = deserialize_proof(&p2_proof)?;
         let pi2 = block_extraction::PublicInputs::from_slice(&pp2_proof.public_inputs);
         assert_eq!(pi.block_number_raw(), &block_number);
-        assert_eq!(pi.block_hash_raw(), pi2.block_hash_raw(),);
-
+        assert_eq!(pi.block_hash_raw(), pi2.block_hash_raw());
+        let manual_hash = keccak256(&block.rlp()).pack(Endianness::Little).to_fields();
+        assert_eq!(pi.block_hash_raw(), manual_hash);
         assert_eq!(
             pi.block_hash_raw(),
             block

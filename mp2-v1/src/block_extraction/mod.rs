@@ -75,7 +75,7 @@ mod test {
         eth::BlockUtil,
         proof::deserialize_proof,
         u256::U256PubInputs,
-        utils::{Endianness, Packer, ToFields},
+        utils::{keccak256, Endianness, Packer, ToFields},
         C, D, F,
     };
     use mp2_test::eth::get_sepolia_url;
@@ -94,6 +94,9 @@ mod test {
         // check public inputs
         let proof = deserialize_proof::<F, C, D>(&proof)?;
         let pi = PublicInputs::from_slice(&proof.public_inputs);
+        let block_hash_manual = keccak256(&block.rlp()).pack(Endianness::Little).to_fields();
+        assert_eq!(pi.block_hash_raw(), block_hash_manual);
+
         assert_eq!(
             pi.block_hash_raw(),
             block
