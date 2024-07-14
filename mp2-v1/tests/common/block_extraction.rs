@@ -33,8 +33,17 @@ impl TestContext {
         let p2_proof = deserialize_proof::<F, C, D>(&proof)?;
         let pi = block_extraction::PublicInputs::from_slice(&p2_proof.public_inputs);
         let block_number = block_number_to_u256_limbs(block.number.unwrap());
-        let block_hash = block.hash.unwrap().to_fields();
-        let prev_block_hash = block.parent_hash.to_fields();
+        let block_hash = block
+            .hash
+            .unwrap()
+            .as_bytes()
+            .pack(Endianness::Little)
+            .to_fields();
+        let prev_block_hash = block
+            .parent_hash
+            .as_bytes()
+            .pack(Endianness::Little)
+            .to_fields();
 
         assert_eq!(pi.block_number_raw(), &block_number);
         assert_eq!(pi.block_hash_raw(), block_hash);

@@ -350,12 +350,6 @@ pub trait ToFields<F: RichField> {
     fn to_fields(&self) -> Vec<F>;
 }
 
-impl<F: RichField> ToFields<F> for H256 {
-    fn to_fields(&self) -> Vec<F> {
-        self.as_bytes().pack(Endianness::Little).to_fields()
-    }
-}
-
 impl<F: RichField> ToFields<F> for &[u8] {
     fn to_fields(&self) -> Vec<F> {
         self.iter().map(|x| F::from_canonical_u8(*x)).collect()
