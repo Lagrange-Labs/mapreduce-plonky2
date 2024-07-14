@@ -24,7 +24,7 @@ impl TestContext {
         let block = self.query_block().await;
         let buffer = block.rlp();
         let proof = api::generate_proof(
-            &self.params(),
+            self.params(),
             api::CircuitInput::BlockExtraction(block_extraction::CircuitInput::from_block_header(
                 buffer,
             )),
@@ -33,6 +33,16 @@ impl TestContext {
         let pi = block_extraction::PublicInputs::from_slice(&p2_proof.public_inputs);
         let block_number = block_number_to_u256_limbs(block.number.unwrap());
         assert_eq!(pi.block_number_raw(), &block_number);
+        assert_eq!(
+            pi.block_hash_raw(),
+            block
+                .hash
+                .unwrap()
+                .as_bytes()
+                .pack(Endianness::Little)
+                .to_fields(),
+        );
+
         Ok(p2_proof)
     }
 }
