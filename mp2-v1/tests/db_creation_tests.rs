@@ -7,7 +7,10 @@ use alloy::{
 };
 use anyhow::Result;
 use common::{proof_storage::TableID, TestCase, TestContext};
-use ethers::types::Address;
+use ethers::{
+    providers::Middleware,
+    types::{Address, BlockNumber},
+};
 use log::info;
 use mp2_common::{
     eth::BlockUtil,
@@ -180,22 +183,49 @@ async fn anvil_block_hash() -> Result<()> {
     let _ = env_logger::try_init();
     // Create the test context for the local node.
     let ctx = &mut TestContext::new_local_node().await;
-    let block = ctx.query_block().await;
-
-    let computed_hash = keccak256(&block.rlp());
-    let given_hash = block.hash.unwrap();
-    let given_hash = given_hash.as_bytes();
-
     let provider = ProviderBuilder::new().on_http(ctx.rpc_url.parse().unwrap());
-    let bn = ctx.block_number.as_number().unwrap().as_u64();
-    let block2 = provider
-        .get_block_by_number(BlockNumberOrTag::Number(bn), true)
+    let latest = ctx.rpc.get_block_number().await.unwrap();
+    let previous_block = ctx
+        .rpc
+        .get_block(BlockNumber::Number(latest - 1))
         .await
         .unwrap()
         .unwrap();
-    let block2_hash = block2.header.hash.unwrap();
-    let given_hash2 = block2_hash.as_slice();
+
+    let previous_computed_hash = keccak256(&previous_block.rlp());
+
+    let next_block = provider
+        .get_block_by_number(BlockNumberOrTag::Number(latest.as_u64()), true)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // check if the way we compute hash is compatible with the way hash is
+    // computed onchain
+    let given_next_previous_hash = next_block.header.parent_hash.as_slice();
+    // FAIL
+    //assert_eq!(&previous_computed_hash, given_next_previous_hash);
+
+    let next_block_ethers = ctx
+        .rpc
+        .get_block(BlockNumber::Number(latest))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let given_hash = next_block.header.hash.unwrap();
+    let given_hash = given_hash.as_slice();
+
+    let block2_hash = next_block_ethers.hash.unwrap();
+    let given_hash2 = block2_hash.as_bytes();
+
+    // check if ethers and alloy compute same hash
     assert_eq!(given_hash, given_hash2);
+
+    let computed_hash = keccak256(&next_block_ethers.rlp());
+    // check if  the hash computed from a block is the same as the one
+    // given by library
+    // FAIL
     assert_eq!(given_hash, computed_hash);
     Ok(())
 }
