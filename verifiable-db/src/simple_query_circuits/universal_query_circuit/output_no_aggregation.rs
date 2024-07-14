@@ -128,7 +128,8 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         predicate_hash: &HashOutTarget,
     ) -> Self::Wires {
         assert_eq!(column_values.len(), column_hash.len());
-        assert_eq!(item_values.len(), item_hash.len());
+        assert_eq!(item_values.len(), MAX_NUM_RESULTS);
+        assert_eq!(item_hash.len(), MAX_NUM_RESULTS);
 
         let u256_zero = b.zero_u256();
         let curve_zero = b.curve_zero();
@@ -148,7 +149,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
 
         // Build the output items to be returned.
         let output_items: [_; MAX_NUM_RESULTS] = array::from_fn(|i| {
-            possible_input_values[item_index] = item_values.get(i).unwrap_or(&u256_zero).clone();
+            possible_input_values[item_index] = item_values[i].clone();
             b.random_access_u256(input_wires.selector[i], &possible_input_values)
         });
 
@@ -190,7 +191,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         let mut possible_input_hash = column_hash.to_vec();
         possible_input_hash.push(empty_hash);
         for i in 0..MAX_NUM_RESULTS {
-            possible_input_hash[item_index] = item_hash.get(i).unwrap_or(&empty_hash).clone();
+            possible_input_hash[item_index] = item_hash[i].clone();
             let input_hash =
                 b.random_access_hash(input_wires.selector[i], possible_input_hash.clone());
 
