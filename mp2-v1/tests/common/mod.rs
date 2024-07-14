@@ -18,9 +18,6 @@ pub(crate) use context::TestContext;
 
 use mp2_common::{proof::ProofWithVK, F};
 use plonky2::hash::hash_types::HashOut;
-use ryhope::tree::TreeTopology;
-
-use self::{celltree::CellTree, rowtree::RowTree};
 
 fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOut<F> {
     let root_pi = ProofWithVK::deserialize(&proof)

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use ethers::prelude::Address;
+use alloy::primitives::Address;
 use log::info;
 use mp2_common::{
     eth::StorageSlot, mpt_sequential::utils::bytes_to_nibbles, proof::ProofWithVK, types::GFp,

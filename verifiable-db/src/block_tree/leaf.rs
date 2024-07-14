@@ -9,13 +9,8 @@ use crate::{
 };
 use anyhow::Result;
 use mp2_common::{
-    default_config,
-    group_hashing::CircuitBuilderGroupHashing,
-    poseidon::{empty_poseidon_hash, hash_to_int_target},
-    proof::ProofWithVK,
-    public_inputs::PublicInputCommon,
-    types::CBuilder,
-    utils::{SliceConnector, ToTargets},
+    default_config, group_hashing::CircuitBuilderGroupHashing, poseidon::empty_poseidon_hash,
+    proof::ProofWithVK, public_inputs::PublicInputCommon, types::CBuilder, utils::ToTargets,
     CHasher, C, D, F,
 };
 use plonky2::{
@@ -24,11 +19,7 @@ use plonky2::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{
-        circuit_builder::CircuitBuilder,
-        config::{AlgebraicHasher, GenericConfig},
-        proof::ProofWithPublicInputsTarget,
-    },
+    plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
@@ -220,7 +211,7 @@ pub mod tests {
         super::tests::{random_extraction_pi, random_rows_tree_pi},
         *,
     };
-    use ethers::prelude::U256;
+    use alloy::primitives::U256;
     use mp2_common::{
         poseidon::{hash_to_int_value, H},
         utils::{Fieldable, ToFields},
@@ -301,7 +292,7 @@ pub mod tests {
         let mut rng = thread_rng();
 
         let block_id = rng.gen::<u32>().to_field();
-        let block_number = U256(rng.gen::<[u64; 4]>());
+        let block_number = U256::from_limbs(rng.gen::<[u64; 4]>());
 
         let row_digest = Point::sample(&mut rng).to_weierstrass().to_fields();
         let extraction_pi = &random_extraction_pi(&mut rng, block_number, &row_digest);

@@ -1,5 +1,5 @@
 [package]
-name = "mp2_v1" # TODO: fix the name to a meaningful one.
+name = "mp2_v1"   # TODO: fix the name to a meaningful one.
 version = "0.1.0"
 edition = "2021"
 
@@ -8,8 +8,8 @@ anyhow.workspace = true
 bincode.workspace = true
 env_logger.workspace = true
 eth_trie.workspace = true
-ethers.workspace = true
 hashbrown.workspace = true
+alloy.workspace = true
 itertools.workspace = true
 log.workspace = true
 paste.workspace = true

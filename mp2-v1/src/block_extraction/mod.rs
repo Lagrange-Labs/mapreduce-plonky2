@@ -66,16 +66,18 @@ impl PublicParameters {
 
 #[cfg(test)]
 mod test {
-    use anyhow::Result;
-    use ethers::{
-        providers::{Http, Middleware, Provider},
-        types::{BlockNumber, U256, U64},
+    use alloy::{
+        eips::BlockNumberOrTag,
+        primitives::U256,
+        providers::{Provider, ProviderBuilder},
+        rpc::types::BlockTransactionsKind,
     };
+    use anyhow::Result;
     use mp2_common::{
         eth::BlockUtil,
         proof::deserialize_proof,
         u256::U256PubInputs,
-        utils::{keccak256, Endianness, Packer, ToFields},
+        utils::{keccak256, Endianness, FromFields, Packer, ToFields},
         C, D, F,
     };
     use mp2_test::eth::get_sepolia_url;
@@ -86,16 +88,21 @@ mod test {
         let params = PublicParameters::build();
         println!("parameters built");
         let url = get_sepolia_url();
-        let provider = Provider::<Http>::try_from(url).unwrap();
-        let bn = provider.get_block_number().await.unwrap().as_u64();
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let bn = provider.get_block_number().await.unwrap();
         // first do it on the previous block header to fetch its hash, and then fetch the next one
         // to compare the hashes computed by ethers and the one we compute manually.
-        let block_number = BlockNumber::Number(U64::from(bn - 1));
-        let block = provider.get_block(block_number).await.unwrap().unwrap();
+        let block_number = BlockNumberOrTag::Number(bn - 1);
+        let block = provider
+            .get_block(block_number.into(), BlockTransactionsKind::Hashes)
+            .await
+            .unwrap()
+            .unwrap();
         println!(" first block fetched");
         let prev_block_hash = block
+            .header
             .parent_hash
-            .as_bytes()
+            .0
             .pack(Endianness::Little)
             .to_fields();
 
@@ -111,9 +118,9 @@ mod test {
         assert_eq!(
             pi.block_hash_raw(),
             block
+                .header
                 .hash
                 .unwrap()
-                .as_bytes()
                 .pack(Endianness::Little)
                 .to_fields(),
         );
@@ -122,31 +129,27 @@ mod test {
         assert_eq!(
             pi.prev_block_hash_raw(),
             block
+                .header
                 .parent_hash
-                .as_bytes()
                 .pack(Endianness::Little)
                 .to_fields(),
         );
         assert_eq!(
-            U256::from(U256PubInputs::try_from(pi.block_number_raw())?),
-            U256::from(block.number.unwrap().as_ref()[0])
+            U256::from_fields(pi.block_number_raw()),
+            U256::from(block.header.number.unwrap()),
         );
         assert_eq!(
             pi.state_root_raw(),
-            block
-                .state_root
-                .as_bytes()
-                .pack(Endianness::Little)
-                .to_fields(),
+            block.header.state_root.pack(Endianness::Little).to_fields(),
         );
         let next_block = provider
-            .get_block(BlockNumber::Number(U64::from(bn)))
+            .get_block_by_number(BlockNumberOrTag::Number(bn), true)
             .await
             .unwrap()
             .unwrap();
         let next_previous_hash = next_block
+            .header
             .parent_hash
-            .as_bytes()
             .pack(Endianness::Little)
             .to_fields();
         assert_eq!(block_hash_manual, next_previous_hash);

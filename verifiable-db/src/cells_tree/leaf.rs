@@ -1,7 +1,7 @@
 //! Module handling the leaf node inside a cells tree
 
 use super::public_inputs::PublicInputs;
-use ethers::prelude::U256;
+use alloy::primitives::U256;
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     poseidon::empty_poseidon_hash,
@@ -123,7 +123,7 @@ mod tests {
         let mut rng = thread_rng();
 
         let identifier = rng.gen::<u32>().to_field();
-        let value = U256(rng.gen::<[u64; 4]>());
+        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let value_fields = value.to_fields();
 
         let test_circuit = LeafCircuit { identifier, value };

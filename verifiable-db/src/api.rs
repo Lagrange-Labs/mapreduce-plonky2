@@ -5,8 +5,8 @@ use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     ivc, row_tree,
 };
+use alloy::primitives::U256;
 use anyhow::Result;
-use ethers::prelude::U256;
 use mp2_common::{C, D, F};
 use recursion_framework::framework::RecursiveCircuits;
 use serde::{Deserialize, Serialize};

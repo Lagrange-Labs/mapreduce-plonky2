@@ -113,8 +113,8 @@ impl PublicParameters {
 mod test {
 
     use super::*;
+    use alloy::primitives::U256;
     use anyhow::Result;
-    use ethers::types::U256;
     use mp2_common::{
         keccak::PACKED_HASH_LEN,
         poseidon::empty_poseidon_hash,
@@ -134,7 +134,7 @@ mod test {
         let block_set = TestingRecursiveCircuits::<F, C, D, BLOCK_IO>::default();
         let params = PublicParameters::build(block_set.get_recursive_circuit_set());
 
-        let first_block_number = U256(thread_rng().gen::<[u64; 4]>());
+        let first_block_number = U256::from_limbs(thread_rng().gen::<[u64; 4]>());
         let min = first_block_number;
         let max = first_block_number;
         let block_number = first_block_number;
@@ -193,7 +193,7 @@ mod test {
         println!("Generating second block proof");
         let h_old = h_new;
         let h_new = HashOut::<F>::rand().to_fields();
-        let next_block_number = (first_block_number + U256::one()).to_fields();
+        let next_block_number = (first_block_number + U256::from(1)).to_fields();
         let prev_block_hash = block_hash;
         let next_block_hash = random_vector::<u32>(PACKED_HASH_LEN).to_fields();
         let next_value_digest = Point::rand().to_fields();

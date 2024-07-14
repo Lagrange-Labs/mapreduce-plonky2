@@ -1,4 +1,4 @@
-use ethers::types::U256;
+use alloy::primitives::U256;
 use mp2_common::{
     u256::{UInt256Target, WitnessWriteU256},
     D, F,
@@ -53,10 +53,10 @@ pub struct BasicOperationInputs {
 
 impl BasicOperationInputs {
     pub(crate) fn build(
-        b: &mut CircuitBuilder<F, D>,
-        input_values: &[UInt256Target],
-        input_hash: &[HashOutTarget],
-        num_overflows: Target,
+        _b: &mut CircuitBuilder<F, D>,
+        _input_values: &[UInt256Target],
+        _input_hash: &[HashOutTarget],
+        _num_overflows: Target,
     ) -> BasicOperationWires {
         todo!()
     }

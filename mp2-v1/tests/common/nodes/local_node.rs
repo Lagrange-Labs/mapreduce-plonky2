@@ -3,15 +3,11 @@
 use super::super::{bindings::simple::Simple, TestCase, TestContext};
 use alloy::{
     contract::private::{Network, Provider, Transport},
+    eips::BlockNumberOrTag,
     network::EthereumWallet,
     node_bindings::Anvil,
     providers::ProviderBuilder,
     signers::local::PrivateKeySigner,
-};
-use ethers::{
-    prelude::{Http, Provider as EthProvider},
-    providers::Middleware,
-    types::BlockNumber,
 };
 use log::info;
 
@@ -36,14 +32,14 @@ impl TestContext {
         // Deploy the Simple contract and create the corresponding test case.
         let simple_case = init_simple_contract(&provider).await;
 
-        let rpc = EthProvider::<Http>::try_from(rpc_url).unwrap();
+        let rpc = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
 
         let bn = rpc.get_block_number().await.unwrap();
 
         Self {
             rpc_url: anvil.endpoint(),
-            rpc,
-            block_number: BlockNumber::Number(bn),
+            rpc: rpc,
+            block_number: BlockNumberOrTag::Number(bn),
             local_node: Some(anvil),
             params: None,
             cases: vec![simple_case],

@@ -1,23 +1,20 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
+use std::str::FromStr;
+
 use alloy::{
     eips::BlockNumberOrTag,
+    primitives::Address,
     providers::{Provider, ProviderBuilder},
 };
 use anyhow::Result;
 use common::{proof_storage::TableID, TestCase, TestContext};
-use ethers::{
-    providers::Middleware,
-    types::{Address, BlockNumber},
-};
 use log::info;
 use mp2_common::{
     eth::BlockUtil,
     proof::{serialize_proof, ProofWithVK},
-    utils::{keccak256, Endianness, Packer},
 };
-use std::{collections::HashMap, str::FromStr};
 use test_log::test;
 
 pub(crate) mod common;
@@ -37,13 +34,15 @@ async fn prove_scalar_values<P: common::proof_storage::ProofStorage>(
     info!("Generated Values Extraction (C.1) proof for single variables");
 
     // final extraction for single variables
-    let _ = ctx.prove_final_extraction(
-        contract_proof.serialize().unwrap(),
-        single_values_proof.serialize().unwrap(),
-        block_proof.to_vec(),
-        false,
-        None,
-    );
+    let _ = ctx
+        .prove_final_extraction(
+            contract_proof.serialize().unwrap(),
+            single_values_proof.serialize().unwrap(),
+            block_proof.to_vec(),
+            false,
+            None,
+        )
+        .await;
     info!("Generated Final Extraction (C.5.1) proof for single variables");
 
     let row = ctx
@@ -186,7 +185,7 @@ async fn anvil_block_hash() -> Result<()> {
     let provider = ProviderBuilder::new().on_http(ctx.rpc_url.parse().unwrap());
     let latest = ctx.rpc.get_block_number().await.unwrap();
     let previous_block = provider
-        .get_block_by_number(BlockNumberOrTag::Number(latest.as_u64() - 1), true)
+        .get_block_by_number(BlockNumberOrTag::Number(latest - 1), true)
         .await
         .unwrap()
         .unwrap();
@@ -194,7 +193,7 @@ async fn anvil_block_hash() -> Result<()> {
     let previous_computed_hash = previous_block.block_hash();
 
     let next_block = provider
-        .get_block_by_number(BlockNumberOrTag::Number(latest.as_u64()), true)
+        .get_block_by_number(BlockNumberOrTag::Number(latest), true)
         .await
         .unwrap()
         .unwrap();

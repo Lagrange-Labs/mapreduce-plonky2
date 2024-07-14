@@ -178,7 +178,7 @@ pub mod test {
     use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::curve::Point;
 
-    use ethers::types::U256;
+    use alloy::primitives::U256;
     use mp2_common::{C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
@@ -252,12 +252,12 @@ pub mod test {
     fn partial_node_circuit(child_at_left: bool) {
         let tuple = IndexTuple::new(F::rand(), U256::from(18));
         let (child_min, child_max) = match child_at_left {
-            true => (10, 15),
-            false => (20, 25),
+            true => (U256::from(10), U256::from(15)),
+            false => (U256::from(20), U256::from(25)),
         };
         partial_safety_check(child_min, child_max, tuple.index_value, child_at_left);
         let node_circuit = PartialNodeCircuit::new(tuple.clone(), child_at_left);
-        let child_pi = generate_random_pi(child_min, child_max);
+        let child_pi = generate_random_pi(child_min.to(), child_max.to());
         let cells_point = Point::rand();
         let cells_digest = cells_point.to_weierstrass().to_fields();
         let cells_hash = HashOut::rand().to_fields();

@@ -6,12 +6,12 @@ use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
 };
+use alloy::primitives::U256;
 use anyhow::Result;
-use ethers::prelude::U256;
 use mp2_common::{
     default_config,
     group_hashing::CircuitBuilderGroupHashing,
-    poseidon::{empty_poseidon_hash, hash_to_int_target},
+    poseidon::empty_poseidon_hash,
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
@@ -31,7 +31,6 @@ use plonky2::{
     },
     plonk::{circuit_builder::CircuitBuilder, config::Hasher, proof::ProofWithPublicInputsTarget},
 };
-use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
     framework::{
@@ -276,12 +275,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        block_tree::{
-            leaf::tests::{compute_expected_hash, compute_expected_set_digest},
-            tests::{TestPIField, TestPITargets},
-        },
-        extraction,
+    use crate::block_tree::{
+        leaf::tests::{compute_expected_hash, compute_expected_set_digest},
+        tests::{TestPIField, TestPITargets},
     };
 
     use super::{
@@ -289,19 +285,17 @@ mod tests {
         *,
     };
     use mp2_common::{
-        poseidon::{hash_to_int_value, H},
+        poseidon::H,
         utils::{Fieldable, ToFields},
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        utils::{random_vector, weierstrass_to_point},
+        utils::random_vector,
     };
     use plonky2::{
-        field::types::{Field, Sample},
-        hash::hash_types::NUM_HASH_OUT_ELTS,
-        plonk::config::Hasher,
+        field::types::Sample, hash::hash_types::NUM_HASH_OUT_ELTS, plonk::config::Hasher,
     };
-    use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
+    use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
 
     #[derive(Clone, Debug)]
@@ -341,12 +335,13 @@ mod tests {
         let mut rng = thread_rng();
 
         let index_identifier = rng.gen::<u32>().to_field();
-        let [old_index_value, old_min, old_max] = [0; 3].map(|_| U256(rng.gen::<[u64; 4]>()));
+        let [old_index_value, old_min, old_max] =
+            [0; 3].map(|_| U256::from_limbs(rng.gen::<[u64; 4]>()));
         let [left_child, right_child, old_rows_tree_hash] =
             [0; 3].map(|_| HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields()));
 
         let row_digest = Point::sample(&mut rng).to_weierstrass().to_fields();
-        let extraction_pi = &random_extraction_pi(&mut rng, old_max + 1, &row_digest);
+        let extraction_pi = &random_extraction_pi(&mut rng, old_max + U256::from(1), &row_digest);
         let rows_tree_pi = &random_rows_tree_pi(&mut rng, &row_digest);
 
         let test_circuit = TestParentCircuit {

@@ -23,6 +23,7 @@ alloy = { version = "0.1", default-features = false, features = [
   "consensus",
   "rlp",
   "transports",
+  "transport-http",
 ] }
 anyhow = "1.0"
 base64 = "0.22"

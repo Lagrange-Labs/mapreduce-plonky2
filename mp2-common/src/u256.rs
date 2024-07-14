@@ -13,8 +13,8 @@ use crate::{
     },
     utils::{Endianness, FromFields, FromTargets, Packer, ToFields, ToTargets},
 };
+use alloy::primitives::U256;
 use anyhow::{ensure, Result};
-use ethers::types::U256;
 use itertools::Itertools;
 use plonky2::{
     gates::gate::Gate,
@@ -432,7 +432,7 @@ impl<T: WitnessU32<F>, F: RichField> WitnessReadU256<F> for T {
                 low.to_le_bytes().to_vec()
             })
             .collect_vec();
-        U256::from_little_endian(&bytes)
+        U256::from_le_slice(&bytes)
     }
 }
 
@@ -541,9 +541,7 @@ impl FromBytes for UInt256Target {
 impl<F: RichField> ToFields<F> for U256 {
     /// Return the 32-bit limbs representing a u256 as field elements, in big-endian order    
     fn to_fields(&self) -> Vec<F> {
-        let mut bytes = [0u8; 32];
-        self.to_big_endian(&mut bytes);
-        let limbs = bytes.pack(Endianness::Big).to_fields();
+        let limbs = self.to_be_bytes_vec().pack(Endianness::Big).to_fields();
         assert_eq!(limbs.len(), NUM_LIMBS);
         limbs
     }
@@ -551,7 +549,16 @@ impl<F: RichField> ToFields<F> for U256 {
 
 impl<F: RichField> FromFields<F> for U256 {
     fn from_fields(t: &[F]) -> Self {
-        U256::from(U256PubInputs::try_from(t).unwrap())
+        let pi = U256PubInputs::try_from(t).unwrap();
+        let bytes =
+            pi.0.iter()
+                .flat_map(|f| (f.to_canonical_u64() as u32).to_be_bytes())
+                .collect_vec();
+
+        U256::from_be_slice(&bytes)
+        // TODO XXX compile time error with error from U256 mixing in
+        // had to copy the public input logic
+        //U256::from(pi)
     }
 }
 /// Struct to wrap a set of public inputs representing a single U256
@@ -578,7 +585,7 @@ impl<'a, F: RichField> From<U256PubInputs<'a, F>> for U256 {
             .iter()
             .flat_map(|f| (f.to_canonical_u64() as u32).to_be_bytes())
             .collect_vec();
-        U256::from_big_endian(&bytes)
+        U256::from_be_slice(&bytes)
     }
 }
 
@@ -608,9 +615,9 @@ impl<F: SerializableRichField<D>, const D: usize> SimpleGenerator<F, D> for UInt
         let divisor = witness.get_u256_target(&self.divisor);
 
         let (quotient, remainder) = if divisor.is_zero() {
-            (U256::zero(), dividend)
+            (U256::ZERO, dividend)
         } else {
-            dividend.div_mod(divisor)
+            dividend.div_rem(divisor)
         };
 
         out_buffer.set_u256_target(&self.quotient, quotient);
@@ -649,7 +656,7 @@ mod tests {
 
     use core::num;
 
-    use ethers::types::U256;
+    use alloy::primitives::U256;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,
@@ -669,6 +676,7 @@ mod tests {
         serialization::{deserialize, serialize},
         types::GFp,
         u256::{U256PubInputs, NUM_LIMBS},
+        utils::FromFields,
     };
 
     use super::{CircuitBuilderU256, UInt256Target, WitnessWriteU256};
@@ -868,8 +876,7 @@ mod tests {
         proof: &ProofWithPublicInputs<F, C, D>,
         test_case: &str,
     ) {
-        let proven_res =
-            U256::from(U256PubInputs::try_from(&proof.public_inputs[..NUM_LIMBS]).unwrap());
+        let proven_res = U256::from_fields(&proof.public_inputs[..NUM_LIMBS]);
         // check that result is the same as the one exposed by the proof
         assert_eq!(
             result, proven_res,
@@ -896,7 +903,7 @@ mod tests {
 
     fn gen_random_u256<R: Rng>(rng: &mut R) -> U256 {
         let bytes: [u8; 32] = rng.gen();
-        U256::from_little_endian(bytes.as_slice())
+        U256::from_be_bytes(bytes)
     }
 
     #[test]
@@ -914,7 +921,7 @@ mod tests {
         check_result(res, carry, &proof, "add");
 
         // check addition by 0
-        let zero = U256::zero();
+        let zero = U256::ZERO;
         let circuit = TestAddCircuit(TestOperationsCircuit { left, right: zero });
 
         let proof = run_circuit::<F, D, C, _>(circuit);
@@ -943,7 +950,7 @@ mod tests {
         // test subtraction by zero
         let circuit = TestSubCircuit(TestOperationsCircuit {
             left,
-            right: U256::zero(),
+            right: U256::ZERO,
         });
 
         let proof = run_circuit::<F, D, C, _>(circuit);
@@ -952,16 +959,16 @@ mod tests {
         // test subtraction by itself
         let circuit = TestSubCircuit(TestOperationsCircuit { left, right: left });
         let proof = run_circuit::<F, D, C, _>(circuit);
-        check_result(U256::zero(), false, &proof, "sub by itself");
+        check_result(U256::ZERO, false, &proof, "sub by itself");
 
         // test negation
         let circuit = TestSubCircuit(TestOperationsCircuit {
-            left: U256::zero(),
+            left: U256::ZERO,
             right,
         });
 
         let proof = run_circuit::<F, D, C, _>(circuit);
-        let res = U256::max_value() - right + U256::one();
+        let res = U256::MAX - right + U256::from(1);
         check_result(res, true, &proof, "negation");
     }
 
@@ -981,16 +988,16 @@ mod tests {
         // test multiplication by 0
         let circuit = TestMulCircuit(TestOperationsCircuit {
             left,
-            right: U256::zero(),
+            right: U256::ZERO,
         });
 
         let proof = run_circuit::<F, D, C, _>(circuit);
-        check_result(U256::zero(), false, &proof, "mul by 0");
+        check_result(U256::ZERO, false, &proof, "mul by 0");
 
         // test multiplication by 1
         let circuit = TestMulCircuit(TestOperationsCircuit {
             left,
-            right: U256::one(),
+            right: U256::from(1),
         });
 
         let proof = run_circuit::<F, D, C, _>(circuit);
@@ -1017,17 +1024,15 @@ mod tests {
                                 proof: &ProofWithPublicInputs<F, C, D>,
                                 test_case: &str| {
             // check that quotient is the same as the one exposed by the proof
-            let proven_quotient =
-                U256::from(U256PubInputs::try_from(&proof.public_inputs[..NUM_LIMBS]).unwrap());
+            let proven_quotient = U256::from_fields(&proof.public_inputs[..NUM_LIMBS]);
             assert_eq!(
                 quotient, proven_quotient,
                 "quotient not correct for test: {}",
                 test_case
             );
             // check that remainder is the same as the one exposed by the proof
-            let proven_remainder = U256::from(
-                U256PubInputs::try_from(&proof.public_inputs[NUM_LIMBS..2 * NUM_LIMBS]).unwrap(),
-            );
+            let proven_remainder =
+                U256::from_fields(&proof.public_inputs[NUM_LIMBS..2 * NUM_LIMBS]);
             assert_eq!(
                 remainder, proven_remainder,
                 "remainder not correct for test: {}",
@@ -1058,24 +1063,24 @@ mod tests {
 
         let circuit = TestDivCircuit(TestOperationsCircuit { left, right });
         let proof = run_circuit::<F, D, C, _>(circuit);
-        let (quotient, remainder) = left.div_mod(right);
+        let (quotient, remainder) = left.div_rem(right);
         check_div_result(quotient, remainder, right.is_zero(), &proof, "div");
 
         // test division by 0
         let circuit = TestDivCircuit(TestOperationsCircuit {
             left,
-            right: U256::zero(),
+            right: U256::ZERO,
         });
         let proof = run_circuit::<F, D, C, _>(circuit);
-        check_div_result(U256::zero(), left, true, &proof, "div by 0");
+        check_div_result(U256::ZERO, left, true, &proof, "div by 0");
 
         // test division by 1
         let circuit = TestDivCircuit(TestOperationsCircuit {
             left,
-            right: U256::one(),
+            right: U256::from(1),
         });
         let proof = run_circuit::<F, D, C, _>(circuit);
-        check_div_result(left, U256::zero(), false, &proof, "div by 1");
+        check_div_result(left, U256::ZERO, false, &proof, "div by 1");
 
         // check div is inverse operation of mul
         let left = U256::from(rng.gen::<u128>());
@@ -1085,7 +1090,7 @@ mod tests {
         // now check that prod/right=left
         let circuit = TestDivCircuit(TestOperationsCircuit { left: prod, right });
         let proof = run_circuit::<F, D, C, _>(circuit);
-        check_div_result(left, U256::zero(), false, &proof, "div after mul");
+        check_div_result(left, U256::ZERO, false, &proof, "div after mul");
     }
 
     #[test]
@@ -1129,7 +1134,7 @@ mod tests {
 
         // test zero is always less than any other non-zero item
         let circuit = TestLessThanCircuit(TestOperationsCircuit {
-            left: U256::zero(),
+            left: U256::ZERO,
             right,
         });
         let proof = run_circuit::<F, D, C, _>(circuit);
@@ -1142,7 +1147,7 @@ mod tests {
         // test that an item is never less than zero
         let circuit = TestLessThanCircuit(TestOperationsCircuit {
             left,
-            right: U256::zero(),
+            right: U256::ZERO,
         });
         let proof = run_circuit::<F, D, C, _>(circuit);
         assert_eq!(F::ZERO, proof.public_inputs[0]);
@@ -1183,7 +1188,7 @@ mod tests {
         }
 
         // test with zero
-        let circuit = TestIsZeroCircuit(U256::zero());
+        let circuit = TestIsZeroCircuit(U256::ZERO);
         let proof = run_circuit::<F, D, C, _>(circuit);
         assert_eq!(F::ONE, proof.public_inputs[0]);
     }
@@ -1209,8 +1214,8 @@ mod tests {
 
         // use deserialized parameters to generate a proof
         let circuit = TestDivCircuit(TestOperationsCircuit {
-            left: U256::zero(),
-            right: U256::one(),
+            left: U256::ZERO,
+            right: U256::from(1),
         });
         let mut pw = PartialWitness::new();
         circuit.prove(&mut pw, &wires);
@@ -1222,8 +1227,8 @@ mod tests {
     fn test_u256_one() {
         let circuit = TestCreateOne;
         let proof = run_circuit::<F, D, C, _>(circuit);
-        let found = U256::from(U256PubInputs::try_from(proof.public_inputs.as_slice()).unwrap());
-        let exp = U256::one();
+        let found = U256::from_fields(proof.public_inputs.as_slice());
+        let exp = U256::from(1);
         assert_eq!(found, exp);
     }
 

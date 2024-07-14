@@ -1,11 +1,11 @@
 use std::iter::once;
 
-use ethers::types::U256;
+use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, CURVE_TARGET_LEN},
-    u256::{U256PubInputs, UInt256Target, NUM_LIMBS},
+    u256::{UInt256Target, NUM_LIMBS},
     utils::{FromFields, FromTargets},
     F,
 };
@@ -125,7 +125,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         let pi_pos = query_pi as usize;
         while i < pi_pos {
             offset += Self::SIZES[i];
-            i = i + 1;
+            i += 1;
         }
         offset..offset + Self::SIZES[pi_pos]
     }
@@ -380,13 +380,13 @@ impl<'a, const S: usize> PublicInputs<'a, F, S> {
 
     pub fn first_value_as_u256(&self) -> U256 {
         let fields = Self::truncate_slice_to_u256_raw(self.to_values_raw());
-        U256::from(U256PubInputs::try_from(fields).unwrap())
+        U256::from_fields(fields)
     }
 
     pub fn values(&self) -> [U256; S - 1] {
         self.to_values_raw()[CURVE_TARGET_LEN..]
             .chunks(NUM_LIMBS)
-            .map(|chunk| U256::from(U256PubInputs::try_from(chunk).unwrap()))
+            .map(U256::from_fields)
             .collect_vec()
             .try_into()
             .unwrap()
@@ -401,15 +401,15 @@ impl<'a, const S: usize> PublicInputs<'a, F, S> {
     }
 
     pub fn index_value(&self) -> U256 {
-        U256::from(U256PubInputs::try_from(self.to_index_value_raw()).unwrap())
+        U256::from_fields(self.to_index_value_raw())
     }
 
     pub fn min_value(&self) -> U256 {
-        U256::from(U256PubInputs::try_from(self.to_min_value_raw()).unwrap())
+        U256::from_fields(self.to_min_value_raw())
     }
 
     pub fn max_value(&self) -> U256 {
-        U256::from(U256PubInputs::try_from(self.to_max_value_raw()).unwrap())
+        U256::from_fields(self.to_max_value_raw())
     }
 
     pub fn index_ids(&self) -> [F; 2] {
@@ -417,11 +417,11 @@ impl<'a, const S: usize> PublicInputs<'a, F, S> {
     }
 
     pub fn min_query_value(&self) -> U256 {
-        U256::from(U256PubInputs::try_from(self.to_min_query_raw()).unwrap())
+        U256::from_fields(self.to_min_query_raw())
     }
 
     pub fn max_query_value(&self) -> U256 {
-        U256::from(U256PubInputs::try_from(self.to_max_query_raw()).unwrap())
+        U256::from_fields(self.to_max_query_raw())
     }
 
     pub fn overflow_flag(&self) -> bool {

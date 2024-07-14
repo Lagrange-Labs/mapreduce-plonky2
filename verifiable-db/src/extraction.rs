@@ -1,9 +1,6 @@
 //! Public inputs for Contract Extraction circuits
 
-use ethers::{
-    core::k256::elliptic_curve::Curve,
-    types::{U256, U64},
-};
+use alloy::primitives::U256;
 use mp2_common::{
     array::Array,
     group_hashing::EXTENSION_DEGREE,
@@ -128,11 +125,8 @@ pub mod test {
             WeierstrassPoint::from_fields(self.dv)
         }
         /// Get block number as U64
-        pub fn block_number(&self) -> U64 {
-            let mut bytes = vec![0u8; 32];
-            let number = U256::from(U256PubInputs::try_from(self.bn).unwrap());
-            number.to_little_endian(&mut bytes);
-            U64::from_little_endian(&bytes[..8])
+        pub fn block_number(&self) -> u64 {
+            U256::from_fields(self.bn).to()
         }
     }
 

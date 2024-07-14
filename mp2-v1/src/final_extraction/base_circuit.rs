@@ -4,7 +4,7 @@ use mp2_common::{
     keccak::PACKED_HASH_LEN,
     proof::{deserialize_proof, verify_proof_fixed_circuit, ProofWithVK},
     serialization::{deserialize, serialize},
-    u256::{self, UInt256Target},
+    u256::UInt256Target,
     C, D, F,
 };
 use plonky2::{
@@ -15,7 +15,6 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::VerifierCircuitData,
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -207,20 +206,18 @@ pub(crate) mod test {
     use crate::{final_extraction::PublicInputs, length_extraction};
 
     use super::*;
+    use alloy::primitives::U256;
     use anyhow::Result;
-    use contract_extraction::build_circuits_params;
-    use ethers::types::U256;
     use itertools::Itertools;
     use mp2_common::{
         group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,
-        mpt_sequential::MPTKeyWire,
         rlp::MAX_KEY_NIBBLE_LEN,
         types::GFp,
-        utils::{Endianness, IntTargetWriter, Packer, ToFields},
+        utils::{Endianness, Packer, ToFields},
     };
     use mp2_test::{
-        circuit::{run_circuit, setup_circuit, UserCircuit},
+        circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
     use plonky2::{
@@ -230,7 +227,6 @@ pub(crate) mod test {
         plonk::config::{GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
     };
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
-    use std::array::from_fn as create_array;
     use values_extraction::public_inputs::tests::new_extraction_public_inputs;
 
     pub const D: usize = 2;

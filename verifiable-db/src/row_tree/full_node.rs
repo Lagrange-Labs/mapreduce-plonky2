@@ -137,7 +137,7 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
 #[cfg(test)]
 pub(crate) mod test {
 
-    use ethers::types::U256;
+    use alloy::primitives::U256;
     use mp2_common::{group_hashing::map_to_curve_point, poseidon::H, utils::ToFields, C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
@@ -152,7 +152,7 @@ pub(crate) mod test {
         },
         plonk::{circuit_builder::CircuitBuilder, config::Hasher},
     };
-    use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
+    use plonky2_ecgfp5::curve::curve::Point;
 
     use crate::{
         cells_tree,

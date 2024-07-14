@@ -3,7 +3,7 @@
 use alloy::{
     consensus::Transaction,
     eips::BlockNumberOrTag,
-    primitives::{Address, B256},
+    primitives::{Address, B128, B256},
     providers::{Provider, ProviderBuilder, RootProvider},
     rlp::Encodable as AlloyEncodable,
     rpc::types::{Block, EIP1186AccountProofResponse},
@@ -13,6 +13,7 @@ use anyhow::{bail, Result};
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethereum_types::H256;
 use log::warn;
+use num::traits::ToBytes;
 use rlp::{Encodable, Rlp, RlpStream};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "ci")]
@@ -174,7 +175,7 @@ pub enum StorageSlot {
 impl StorageSlot {
     pub fn location(&self) -> B256 {
         match self {
-            StorageSlot::Simple(slot) => B256::from(*slot as u64),
+            StorageSlot::Simple(slot) => B256::left_padding_from(&(*slot as u64).to_be_bytes()[..]),
             StorageSlot::Mapping(mapping_key, mapping_slot) => {
                 // H( pad32(address), pad32(mapping_slot))
                 let padded_mkey = left_pad32(mapping_key);
@@ -188,10 +189,10 @@ impl StorageSlot {
         }
     }
     pub fn mpt_key_vec(&self) -> Vec<u8> {
-        keccak256(&self.location())
+        keccak256(&self.location().as_slice())
     }
     pub fn mpt_key(&self) -> [u8; 32] {
-        let hash = keccak256(&self.location());
+        let hash = keccak256(&self.location().as_slice());
         create_array(|i| hash[i])
     }
     pub fn mpt_nibbles(&self) -> [u8; MAX_KEY_NIBBLE_LEN] {
@@ -271,7 +272,7 @@ impl ProofQuery {
         let state_root_hash = H256(keccak256(&res.account_proof[0]).try_into().unwrap());
 
         // The MPT key is Keccak hash of the contract (requested) address.
-        let mpt_key = keccak256(&self.contract.into_word().0);
+        let mpt_key = keccak256(self.contract.0.as_slice());
 
         let is_valid = tx_trie.verify_proof(
             state_root_hash,
@@ -299,15 +300,18 @@ impl ProofQuery {
 mod test {
     use std::{env, str::FromStr};
 
-    use ethers::types::H256;
+    use alloy::{
+        primitives::{Bytes, B256},
+        rpc::types::{Block, BlockTransactionsKind},
+    };
     use hashbrown::HashMap;
-    use mp2_test::eth::{get_mainnet_url, get_sepolia_url};
     use rand::{thread_rng, Rng};
 
     use crate::{
         types::MAX_BLOCK_LEN,
-        utils::{find_index_subvector, Endianness, Packer},
+        utils::{Endianness, Packer},
     };
+    use mp2_test::eth::{get_mainnet_url, get_sepolia_url};
 
     #[tokio::test]
     #[ignore]
@@ -315,13 +319,24 @@ mod test {
         let url = get_sepolia_url();
         let block_number1 = 5674446;
         let block_number2 = block_number1 + 1;
-        let provider =
-            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
-        let block = provider.get_block(U64::from(block_number1)).await?.unwrap();
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let block = provider
+            .get_block(
+                BlockNumberOrTag::Number(block_number1).into(),
+                BlockTransactionsKind::Hashes,
+            )
+            .await?
+            .unwrap();
         let comp_hash = keccak256(&block.rlp());
-        let block_next = provider.get_block(U64::from(block_number2)).await?.unwrap();
-        let exp_hash = block_next.parent_hash;
-        assert!(comp_hash == exp_hash.as_bytes());
+        let block_next = provider
+            .get_block(
+                BlockNumberOrTag::from(block_number2).into(),
+                BlockTransactionsKind::Hashes,
+            )
+            .await?
+            .unwrap();
+        let exp_hash = block_next.header.parent_hash;
+        assert!(comp_hash == exp_hash.as_slice());
         assert!(
             block.rlp().len() <= MAX_BLOCK_LEN,
             " rlp len = {}",
@@ -338,12 +353,13 @@ mod test {
         #[cfg(not(feature = "ci"))]
         let url = "https://ethereum-sepolia-rpc.publicnode.com";
 
-        let provider =
-            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
         let pidgy_address = Address::from_str("0x363971ee2b96f360ec9d04b5809afd15c77b1af1")?;
         let length_slot = 8;
         let query = ProofQuery::new_simple_slot(pidgy_address, length_slot);
-        let res = query.query_mpt_proof(&provider, None).await?;
+        let res = query
+            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+            .await?;
         let tree_res = ProofQuery::verify_storage_proof(&res)?;
         println!("official response: {}", res.storage_proof[0].value);
         println!("tree response = {:?}", tree_res);
@@ -379,13 +395,14 @@ mod test {
         let url = env::var("CI_ETH").expect("CI_ETH env var not set");
         #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
-        let provider =
-            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
 
         // pidgy pinguins address
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_simple_slot(pidgy_address, 8);
-        let res = query.query_mpt_proof(&provider, None).await?;
+        let res = query
+            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+            .await?;
         let tree_res = ProofQuery::verify_storage_proof(&res)?;
         println!("official response: {}", res.storage_proof[0].value);
         println!("tree response = {:?}", tree_res);
@@ -449,9 +466,8 @@ mod test {
             Address::from_str("0x188B264AA1456B869C3a92eeeD32117EbB835f47").unwrap();
         let nft_id: u32 = 1116;
         let mapping_key = left_pad32(&nft_id.to_be_bytes());
-        let url = "https://eth.llamarpc.com";
-        let provider =
-            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+        let url = get_mainnet_url();
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
 
         // extracting from
         // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol
@@ -460,7 +476,9 @@ mod test {
         // pudgy pinguins
         let pudgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_mapping_slot(pudgy_address, mapping_slot, mapping_key.to_vec());
-        let res = query.query_mpt_proof(&provider, None).await?;
+        let res = query
+            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+            .await?;
         let raw_address = ProofQuery::verify_storage_proof(&res)?;
         // the value is actually RLP encoded !
         let decoded_address: Vec<u8> = rlp::decode(&raw_address).unwrap();
@@ -477,20 +495,18 @@ mod test {
         // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
         // uint256 public n_registered; // storage slot 0
         // mapping(address => uint256) public holders; // storage slot 1
-        #[cfg(feature = "ci")]
-        let url = env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
-        #[cfg(not(feature = "ci"))]
-        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+        let url = get_sepolia_url();
 
-        let provider =
-            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
 
         // sepolia contract
         let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
         // simple storage test
         {
             let query = ProofQuery::new_simple_slot(contract, 0);
-            let res = query.query_mpt_proof(&provider, None).await?;
+            let res = query
+                .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+                .await?;
             ProofQuery::verify_storage_proof(&res)?;
             query.verify_state_proof(&res)?;
         }
@@ -499,54 +515,11 @@ mod test {
             let mapping_key =
                 hex::decode("000000000000000000000000000000000000000000000000000000000001abcd")?;
             let query = ProofQuery::new_mapping_slot(contract, 1, mapping_key);
-            let res = query.query_mpt_proof(&provider, None).await?;
+            let res = query
+                .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+                .await?;
             ProofQuery::verify_storage_proof(&res)?;
             query.verify_state_proof(&res)?;
-        }
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn fetch_block() -> Result<()> {
-        let block_number = 10593419;
-        let mut block = BlockData::fetch(block_number).await?;
-        assert_eq!(block.block.number.unwrap(), block_number.into());
-        let computed = block.block.block_hash();
-        let expected = block.block.hash.unwrap();
-        assert_eq!(computed.to_vec(), expected.as_bytes());
-        let thin_block: Block<H256> = block.block.clone().into();
-        let encoding = serde_json::to_vec(&thin_block).unwrap();
-        let thin_block2: Block<H256> = serde_json::from_slice(&encoding).unwrap();
-        //let encoding = bincode::serialize(&thin_block).unwrap();
-        //let thin_block2: Block<H256> = bincode::deserialize(&encoding).unwrap();
-        //let encoding = rmp_serde::encode::to_vec(&thin_block).unwrap();
-        //let thin_block2: Block<H256> = rmp_serde::decode::from_slice(&encoding).unwrap();
-        assert_eq!(thin_block, thin_block2);
-
-        println!("block hash : {:?}", hex::encode(computed));
-        println!(
-            "block tx root hash : {:?}",
-            hex::encode(block.tx_trie.root_hash()?)
-        );
-        let random_idx = thread_rng().gen_range(0..block.txs.len());
-        let mut proof = block
-            .tx_trie
-            .get_proof(&U64::from(random_idx).rlp_bytes())?;
-        proof.reverse();
-        println!("Proof for tx index {:?}", random_idx);
-        for i in 1..proof.len() {
-            let child_hash = keccak256(&proof[i - 1]);
-            match find_index_subvector(&proof[i], &child_hash) {
-                Some(index) => {
-                    println!(
-                        "Index node {}: child hash found index {} in proof",
-                        i, index
-                    );
-                }
-                None => {
-                    println!("could not find index in proof");
-                }
-            }
         }
         Ok(())
     }
