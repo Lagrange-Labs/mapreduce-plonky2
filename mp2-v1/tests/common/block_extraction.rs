@@ -26,13 +26,21 @@ impl TestContext {
         let proof = api::generate_proof(
             self.params(),
             api::CircuitInput::BlockExtraction(block_extraction::CircuitInput::from_block_header(
-                buffer,
+                buffer.clone(),
             )),
         )?;
-        let p2_proof = deserialize_proof::<F, C, D>(&proof)?;
-        let pi = block_extraction::PublicInputs::from_slice(&p2_proof.public_inputs);
+        let pproof = deserialize_proof::<F, C, D>(&proof)?;
+        let pi = block_extraction::PublicInputs::from_slice(&pproof.public_inputs);
         let block_number = block_number_to_u256_limbs(block.number.unwrap());
+
+        let p2 = mp2_v1::block_extraction::PublicParameters::build();
+        let p2_proof =
+            p2.generate_proof(block_extraction::CircuitInput::from_block_header(buffer))?;
+        let pp2_proof = deserialize_proof(&p2_proof)?;
+        let pi2 = block_extraction::PublicInputs::from_slice(&pp2_proof.public_inputs);
         assert_eq!(pi.block_number_raw(), &block_number);
+        assert_eq!(pi.block_hash_raw(), pi2.block_hash_raw(),);
+
         assert_eq!(
             pi.block_hash_raw(),
             block
@@ -43,6 +51,6 @@ impl TestContext {
                 .to_fields(),
         );
 
-        Ok(p2_proof)
+        Ok(pp2_proof)
     }
 }
