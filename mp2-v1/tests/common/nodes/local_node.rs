@@ -37,9 +37,11 @@ impl TestContext {
         let simple_case = init_simple_contract(&provider).await;
 
         let rpc = EthProvider::<Http>::try_from(rpc_url).unwrap();
+
         let bn = rpc.get_block_number().await.unwrap();
 
         Self {
+            rpc_url: anvil.endpoint(),
             rpc,
             block_number: BlockNumber::Number(bn),
             local_node: Some(anvil),

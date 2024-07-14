@@ -84,13 +84,24 @@ mod test {
     #[tokio::test]
     async fn test_api() -> Result<()> {
         let params = PublicParameters::build();
+        println!("parameters built");
         let url = get_sepolia_url();
         let provider = Provider::<Http>::try_from(url).unwrap();
-        let block_number = BlockNumber::Latest;
+        let bn = provider.get_block_number().await.unwrap().as_u64();
+        // first do it on the previous block header to fetch its hash, and then fetch the next one
+        // to compare the hashes computed by ethers and the one we compute manually.
+        let block_number = BlockNumber::Number(U64::from(bn - 1));
         let block = provider.get_block(block_number).await.unwrap().unwrap();
+        println!(" first block fetched");
+        let prev_block_hash = block
+            .parent_hash
+            .as_bytes()
+            .pack(Endianness::Little)
+            .to_fields();
 
         let rlp_headers = super::CircuitInput::from_block_header(block.rlp());
         let proof = params.generate_proof(rlp_headers)?;
+        println!(" proof generation done");
         // check public inputs
         let proof = deserialize_proof::<F, C, D>(&proof)?;
         let pi = PublicInputs::from_slice(&proof.public_inputs);
@@ -106,6 +117,8 @@ mod test {
                 .pack(Endianness::Little)
                 .to_fields(),
         );
+
+        assert_eq!(pi.prev_block_hash_raw(), prev_block_hash);
         assert_eq!(
             pi.prev_block_hash_raw(),
             block
@@ -126,6 +139,18 @@ mod test {
                 .pack(Endianness::Little)
                 .to_fields(),
         );
+        let next_block = provider
+            .get_block(BlockNumber::Number(U64::from(bn)))
+            .await
+            .unwrap()
+            .unwrap();
+        let next_previous_hash = next_block
+            .parent_hash
+            .as_bytes()
+            .pack(Endianness::Little)
+            .to_fields();
+        assert_eq!(block_hash_manual, next_previous_hash);
+
         Ok(())
     }
 }

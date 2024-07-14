@@ -29,6 +29,7 @@ struct TestContextConfig {
 
 /// Test context
 pub(crate) struct TestContext {
+    pub(crate) rpc_url: String,
     /// HTTP provider
     /// TODO: fix to use alloy provider.
     pub(crate) rpc: Provider<Http>,

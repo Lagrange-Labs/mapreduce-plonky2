@@ -1,10 +1,19 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
+use alloy::{
+    eips::BlockNumberOrTag,
+    providers::{Provider, ProviderBuilder},
+};
+use anyhow::Result;
 use common::{proof_storage::TableID, TestCase, TestContext};
 use ethers::types::Address;
 use log::info;
-use mp2_common::proof::{serialize_proof, ProofWithVK};
+use mp2_common::{
+    eth::BlockUtil,
+    proof::{serialize_proof, ProofWithVK},
+    utils::{keccak256, Endianness, Packer},
+};
 use std::{collections::HashMap, str::FromStr};
 use test_log::test;
 
@@ -162,4 +171,31 @@ async fn db_creation_integrated_tests() {
         )
         .await;
     }
+}
+
+#[tokio::test]
+async fn anvil_block_hash() -> Result<()> {
+    // Create the test context for mainnet.
+    // let ctx = &mut TestContext::new_mainet();
+    let _ = env_logger::try_init();
+    // Create the test context for the local node.
+    let ctx = &mut TestContext::new_local_node().await;
+    let block = ctx.query_block().await;
+
+    let computed_hash = keccak256(&block.rlp());
+    let given_hash = block.hash.unwrap();
+    let given_hash = given_hash.as_bytes();
+
+    let provider = ProviderBuilder::new().on_http(ctx.rpc_url.parse().unwrap());
+    let bn = ctx.block_number.as_number().unwrap().as_u64();
+    let block2 = provider
+        .get_block_by_number(BlockNumberOrTag::Number(bn), true)
+        .await
+        .unwrap()
+        .unwrap();
+    let block2_hash = block2.header.hash.unwrap();
+    let given_hash2 = block2_hash.as_slice();
+    assert_eq!(given_hash, given_hash2);
+    assert_eq!(given_hash, computed_hash);
+    Ok(())
 }

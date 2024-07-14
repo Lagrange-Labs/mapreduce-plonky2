@@ -12,9 +12,10 @@ impl TestContext {
     /// Create the test context with the mainnet contracts.
     pub(crate) async fn new_mainnet() -> Self {
         let rpc_url = get_mainnet_url();
-        let rpc = Provider::<Http>::try_from(rpc_url).unwrap();
+        let rpc = Provider::<Http>::try_from(rpc_url.clone()).unwrap();
         let bn = rpc.get_block_number().await.unwrap();
         Self {
+            rpc_url,
             rpc,
             block_number: BlockNumber::Number(bn),
             local_node: None,
