@@ -128,7 +128,8 @@ fn build_column_hash<const MAX_NUM_COLUMNS: usize>(
 
     array::from_fn(|i| {
         // Column identifier hash
-        let hash = Identifiers::Extraction(Extraction::Column).hash_circuit(b, input.column_ids[i]);
+        let hash = Identifiers::Extraction(Extraction::Column)
+            .prefix_id_hash_circuit(b, vec![input.column_ids[i]]);
 
         if i < COLUMN_INDEX_NUM {
             hash
@@ -233,7 +234,9 @@ mod tests {
         let empty_hash = empty_poseidon_hash();
 
         array::from_fn(|i| match columns.get(i) {
-            Some(TestCell { id, .. }) => Identifiers::Extraction(Extraction::Column).hash(*id),
+            Some(TestCell { id, .. }) => {
+                Identifiers::Extraction(Extraction::Column).prefix_id_hash(vec![*id])
+            }
             None => *empty_hash,
         })
     }

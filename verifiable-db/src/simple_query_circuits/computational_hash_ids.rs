@@ -48,12 +48,17 @@ impl Identifiers {
                 Identifiers::Operations(o) => *o as usize,
             }
     }
-    pub(crate) fn hash(&self, id: F) -> HashOut<F> {
-        H::hash_no_pad(&[self.to_field(), id])
+    pub(crate) fn prefix_id_hash(&self, elements: Vec<F>) -> HashOut<F> {
+        let inputs: Vec<_> = once(self.to_field()).chain(elements).collect();
+        H::hash_no_pad(&inputs)
     }
-    pub(crate) fn hash_circuit(&self, b: &mut CBuilder, id: Target) -> HashOutTarget {
-        let prefix = b.constant(self.to_field());
-        b.hash_n_to_hash_no_pad::<CHasher>(vec![prefix, id])
+    pub(crate) fn prefix_id_hash_circuit(
+        &self,
+        b: &mut CBuilder,
+        elements: Vec<Target>,
+    ) -> HashOutTarget {
+        let inputs = once(b.constant(self.to_field())).chain(elements).collect();
+        b.hash_n_to_hash_no_pad::<CHasher>(inputs)
     }
 }
 
