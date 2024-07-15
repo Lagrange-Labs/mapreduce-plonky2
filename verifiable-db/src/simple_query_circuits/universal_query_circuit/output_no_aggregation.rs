@@ -156,7 +156,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         // Append the column values by a corresponding item value to construct the inputs.
         let item_index = column_values.len();
         let mut possible_input_values = column_values.to_vec();
-        possible_input_values.resize(possible_num_inputs, u256_zero.clone());
+        possible_input_values.push(u256_zero.clone());
 
         // Build the output items to be returned.
         let output_items: [_; MAX_NUM_RESULTS] = array::from_fn(|i| {
