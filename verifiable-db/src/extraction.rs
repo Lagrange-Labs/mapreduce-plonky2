@@ -1,22 +1,7 @@
 //! Public inputs for Contract Extraction circuits
 
-use alloy::primitives::U256;
-use mp2_common::{
-    array::Array,
-    group_hashing::EXTENSION_DEGREE,
-    keccak::{OutputHash, PACKED_HASH_LEN},
-    mpt_sequential::MPTKeyWire,
-    public_inputs::{PublicInputCommon, PublicInputRange},
-    rlp::MAX_KEY_NIBBLE_LEN,
-    types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
-    u256::{self, U256PubInputs},
-    utils::{FromFields, FromTargets, ToTargets},
-    D, F,
-};
-use plonky2::{
-    iop::target::Target,
-    plonk::{circuit_builder::CircuitBuilder, config::GenericConfig},
-};
+use mp2_common::{D, F};
+use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -38,6 +23,16 @@ pub trait ExtractionPIWrap: Serialize + DeserializeOwned {
 
 #[cfg(test)]
 pub mod test {
+
+    use alloy::primitives::U256;
+    use mp2_common::{
+        keccak::{OutputHash, PACKED_HASH_LEN},
+        public_inputs::{PublicInputCommon, PublicInputRange},
+        types::{CBuilder, GFp, CURVE_TARGET_LEN},
+        u256::{self},
+        utils::{FromFields, FromTargets, ToTargets},
+        D, F,
+    };
     use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
     use serde::Deserialize;
     use u256::UInt256Target;
@@ -139,33 +134,33 @@ pub mod test {
 
     impl<'a> PublicInputs<'a, Target> {
         pub fn generic_register_args(&self, cb: &mut CBuilder) {
-            cb.register_public_inputs(&self.h);
-            cb.register_public_inputs(&self.ph);
-            cb.register_public_inputs(&self.dv);
-            cb.register_public_inputs(&self.dm);
-            cb.register_public_inputs(&self.bn);
+            cb.register_public_inputs(self.h);
+            cb.register_public_inputs(self.ph);
+            cb.register_public_inputs(self.dv);
+            cb.register_public_inputs(self.dm);
+            cb.register_public_inputs(self.bn);
         }
 
         /// Get the blockchain block hash corresponding to the values extracted
         pub fn block_hash(&self) -> OutputHash {
-            OutputHash::from_targets(&self.h)
+            OutputHash::from_targets(self.h)
         }
 
         /// Get the predecessor block hash
         pub fn previous_block_hash(&self) -> OutputHash {
-            OutputHash::from_targets(&self.ph)
+            OutputHash::from_targets(self.ph)
         }
 
         pub fn digest_value(&self) -> CurveTarget {
-            CurveTarget::from_targets(&self.dv)
+            CurveTarget::from_targets(self.dv)
         }
 
         pub fn digest_metadata(&self) -> CurveTarget {
-            CurveTarget::from_targets(&self.dm)
+            CurveTarget::from_targets(self.dm)
         }
 
         pub fn block_number(&self) -> UInt256Target {
-            UInt256Target::from_targets(&self.bn)
+            UInt256Target::from_targets(self.bn)
         }
     }
 
@@ -199,19 +194,19 @@ pub mod test {
         }
 
         pub fn block_hash_raw(&self) -> &[T] {
-            &self.h
+            self.h
         }
 
         pub fn prev_block_hash_raw(&self) -> &[T] {
-            &self.ph
+            self.ph
         }
 
         pub fn block_number_raw(&self) -> &[T] {
-            &self.bn
+            self.bn
         }
 
         pub fn digest_metadata_raw(&self) -> &[T] {
-            &self.dm
+            self.dm
         }
     }
 }
