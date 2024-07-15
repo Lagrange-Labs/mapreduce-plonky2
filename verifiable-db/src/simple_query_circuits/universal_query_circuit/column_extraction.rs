@@ -146,7 +146,7 @@ mod tests {
         cells_tree::{compute_cells_tree_hash, TestCell},
         circuit::{run_circuit, UserCircuit},
     };
-    use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
+    use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::Hasher};
 
     #[derive(Clone, Debug)]
     struct TestColumnExtractionCircuit<const MAX_NUM_COLUMNS: usize> {
