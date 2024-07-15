@@ -45,8 +45,8 @@ impl Identifiers {
                     + variant_count::<Operation>()
             }
             &Identifiers::AggregationOperations(_) => {
-                Identifiers::AggregationOperations(AggregationOperation::default()).offset()
-                    + variant_count::<AggregationOperation>()
+                Identifiers::Output(Output::default()).offset()
+                    + variant_count::<Output>()
             }
         }
     }

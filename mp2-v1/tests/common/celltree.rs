@@ -160,7 +160,6 @@ impl TestContext {
         let cells = self.build_cells(contract_address, slots).await;
         // NOTE: the sec. index slot is assumed to be the first.
         let (cell_tree, cell_tree_ut) = build_cell_tree(&cells[1..])
-            .await
             .expect("failed to create cell tree");
         let root_key = self
             .prove_cell_tree(&table_id, &cell_tree, cell_tree_ut, storage)
