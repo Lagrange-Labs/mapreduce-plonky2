@@ -38,7 +38,7 @@ impl TestContext {
 
         Self {
             rpc_url: anvil.endpoint(),
-            rpc: rpc,
+            rpc,
             block_number: BlockNumberOrTag::Number(bn),
             local_node: Some(anvil),
             params: None,

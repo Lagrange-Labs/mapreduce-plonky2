@@ -4,7 +4,7 @@ use std::array::from_fn as create_array;
 
 use mp2_common::{
     array::{Array, Vector, VectorWire},
-    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
+    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{utils::left_pad_leaf_value, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::{CBuilder, GFp, MAX_BLOCK_LEN},
@@ -12,7 +12,6 @@ use mp2_common::{
     utils::{Endianness, ToTargets},
 };
 use plonky2::iop::{target::Target, witness::PartialWitness};
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use serde::{Deserialize, Serialize};
 
 use public_inputs::PublicInputs;

@@ -231,7 +231,7 @@ impl ProofQuery {
                 .await
             {
                 Ok(response) => return Ok(response),
-                Err(e) => warn!("Failed to query the MPT proof at {i} time: {e:?}"),
+                Err(e) => println!("Failed to query the MPT proof at {i} time: {e:?}"),
             }
         }
 
@@ -496,7 +496,7 @@ mod test {
         // uint256 public n_registered; // storage slot 0
         // mapping(address => uint256) public holders; // storage slot 1
         let url = get_sepolia_url();
-
+        println!("URL given = {}", url);
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
 
         // sepolia contract
