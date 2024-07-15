@@ -647,7 +647,7 @@ impl FromBytes for UInt256Target {
 }
 
 impl<F: RichField> ToFields<F> for U256 {
-    /// Return the 32-bit limbs representing a u256 as field elements, in big-endian order    
+    /// Return the 32-bit limbs representing a u256 as field elements, packed, in big-endian order    
     fn to_fields(&self) -> Vec<F> {
         let limbs = self.to_be_bytes_vec().pack(Endianness::Big).to_fields();
         assert_eq!(limbs.len(), NUM_LIMBS);
@@ -657,42 +657,18 @@ impl<F: RichField> ToFields<F> for U256 {
 
 impl<F: RichField> FromFields<F> for U256 {
     fn from_fields(t: &[F]) -> Self {
-        let pi = U256PubInputs::try_from(t).unwrap();
-        let bytes =
-            pi.0.iter()
-                .flat_map(|f| (f.to_canonical_u64() as u32).to_be_bytes())
-                .collect_vec();
-
-        U256::from_be_slice(&bytes)
-        // TODO XXX compile time error with error from U256 mixing in
-        // had to copy the public input logic
-        //U256::from(pi)
-    }
-}
-/// Struct to wrap a set of public inputs representing a single U256
-pub struct U256PubInputs<'a, F: RichField>(&'a [F]);
-
-impl<'a, F: RichField> TryFrom<&'a [F]> for U256PubInputs<'a, F> {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &'a [F]) -> std::result::Result<Self, Self::Error> {
-        ensure!(
-            value.len() == NUM_LIMBS,
+        assert!(
+            t.len() == NUM_LIMBS,
             "invalid number of limbs provided as input, expected {}, got {}",
             NUM_LIMBS,
-            value.len()
+            t.len()
         );
-        Ok(U256PubInputs(value))
-    }
-}
 
-impl<'a, F: RichField> From<U256PubInputs<'a, F>> for U256 {
-    fn from(value: U256PubInputs<'a, F>) -> Self {
-        let bytes = value
-            .0
+        let bytes = t
             .iter()
             .flat_map(|f| (f.to_canonical_u64() as u32).to_be_bytes())
             .collect_vec();
+
         U256::from_be_slice(&bytes)
     }
 }
@@ -787,8 +763,6 @@ impl<F: SerializableRichField<D>, const D: usize> SimpleGenerator<F, D> for UInt
 #[cfg(test)]
 mod tests {
 
-    use core::num;
-
     use alloy::primitives::U256;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
@@ -808,7 +782,7 @@ mod tests {
         default_config,
         serialization::{deserialize, serialize},
         types::GFp,
-        u256::{U256PubInputs, NUM_LIMBS},
+        u256::NUM_LIMBS,
         utils::FromFields,
     };
 
@@ -827,7 +801,6 @@ mod tests {
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let input = c.one_u256();
             c.register_public_input_u256(&input);
-            ()
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {}

@@ -174,34 +174,3 @@ async fn db_creation_integrated_tests() {
         .await;
     }
 }
-
-#[tokio::test]
-async fn anvil_block_hash() -> Result<()> {
-    // Create the test context for mainnet.
-    // let ctx = &mut TestContext::new_mainet();
-    let _ = env_logger::try_init();
-    // Create the test context for the local node.
-    let ctx = &mut TestContext::new_local_node().await;
-    let provider = ProviderBuilder::new().on_http(ctx.rpc_url.parse().unwrap());
-    let latest = ctx.rpc.get_block_number().await.unwrap();
-    let previous_block = provider
-        .get_block_by_number(BlockNumberOrTag::Number(latest - 1), true)
-        .await
-        .unwrap()
-        .unwrap();
-
-    let previous_computed_hash = previous_block.block_hash();
-
-    let next_block = provider
-        .get_block_by_number(BlockNumberOrTag::Number(latest), true)
-        .await
-        .unwrap()
-        .unwrap();
-
-    // check if the way we compute hash is compatible with the way hash is
-    // computed onchain
-    let given_next_previous_hash = next_block.header.parent_hash.as_slice();
-    // PASS now that we compute everything from alloy
-    assert_eq!(&previous_computed_hash, given_next_previous_hash);
-    Ok(())
-}

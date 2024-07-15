@@ -30,10 +30,7 @@ impl TestContext {
         )?;
         let pproof = deserialize_proof::<F, C, D>(&proof)?;
         let pi = block_extraction::PublicInputs::from_slice(&pproof.public_inputs);
-        let block_number = U256::from(block.header.number.unwrap())
-            .to_be_bytes_vec()
-            .pack(Endianness::Big)
-            .to_fields();
+        let block_number = U256::from(block.header.number.unwrap()).to_fields();
 
         let p2 = mp2_v1::block_extraction::PublicParameters::build();
         let p2_proof =
