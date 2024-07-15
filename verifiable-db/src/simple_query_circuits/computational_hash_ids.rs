@@ -7,7 +7,7 @@ use ethers::types::U256;
 use itertools::Itertools;
 use mp2_common::{
     array::{Targetable, ToField},
-    poseidon::empty_poseidon_hash,
+    poseidon::{empty_poseidon_hash, H},
     types::CBuilder,
     u256::UInt256Target,
     utils::{ToFields, ToTargets},
@@ -27,6 +27,8 @@ use plonky2::{
 pub enum Identifiers {
     Extraction(Extraction),
     Operations(Operation),
+    Output(Output),
+    AggregationOperations(AggregationOperation),
     // TODO
 }
 
@@ -38,6 +40,14 @@ impl Identifiers {
                 Identifiers::Extraction(Extraction::default()).offset()
                     + variant_count::<Extraction>()
             }
+            &Identifiers::Output(_) => {
+                Identifiers::Operations(Operation::default()).offset()
+                    + variant_count::<Operation>()
+            }
+            &Identifiers::AggregationOperations(_) => {
+                Identifiers::AggregationOperations(AggregationOperation::default()).offset()
+                    + variant_count::<AggregationOperation>()
+            }
         }
     }
     pub fn position(&self) -> usize {
@@ -46,7 +56,21 @@ impl Identifiers {
             + match self {
                 Identifiers::Extraction(e) => *e as usize,
                 Identifiers::Operations(o) => *o as usize,
+                Identifiers::Output(o) => *o as usize,
+                Identifiers::AggregationOperations(ao) => *ao as usize,
             }
+    }
+    pub(crate) fn prefix_id_hash(&self, elements: Vec<F>) -> HashOut<F> {
+        let inputs: Vec<_> = once(self.to_field()).chain(elements).collect();
+        H::hash_no_pad(&inputs)
+    }
+    pub(crate) fn prefix_id_hash_circuit(
+        &self,
+        b: &mut CBuilder,
+        elements: Vec<Target>,
+    ) -> HashOutTarget {
+        let inputs = once(b.constant(self.to_field())).chain(elements).collect();
+        b.hash_n_to_hash_no_pad::<CHasher>(inputs)
     }
 }
 
@@ -196,4 +220,18 @@ impl Operation {
                 .collect(),
         )
     }
+}
+
+#[derive(Clone, Debug, Copy, Default)]
+pub enum Output {
+    #[default]
+    Aggregation,
+    NoAggregation,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+pub enum AggregationOperation {
+    #[default]
+    IdOp,
+    SumOp,
 }

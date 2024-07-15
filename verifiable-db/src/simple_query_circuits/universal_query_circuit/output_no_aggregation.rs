@@ -1,4 +1,8 @@
+use crate::simple_query_circuits::computational_hash_ids::{
+    AggregationOperation, Identifiers, Output,
+};
 use mp2_common::{
+    array::ToField,
     group_hashing::CircuitBuilderGroupHashing,
     poseidon::empty_poseidon_hash,
     serialization::{
@@ -26,11 +30,6 @@ use super::{
     universal_query_circuit::{OutputComponent, OutputComponentWires},
     COLUMN_INDEX_NUM,
 };
-
-// TODO: fix to enum values after merging PR [#249](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/249).
-const OUTPUT_HASH_PREFIX: u8 = 120; // SELECT_ACC
-const OP_ID: u8 = 121; // ID
-const OP_SUM: u8 = 122; // SUM
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for output component for queries without results aggregation
@@ -183,16 +182,16 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         let output_values = vec![u256_zero; MAX_NUM_RESULTS - 1];
 
         // Compute the computational hash representing the accumulation of the items.
-        // TODO: fix to an enum value after merging PR [#249](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/249).
-        let prefix = b.constant(F::from_canonical_u8(OUTPUT_HASH_PREFIX));
-        let inputs = iter::once(prefix).chain(predicate_hash.elements).collect();
-        let mut output_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
-
+        let mut output_hash = Identifiers::Output(Output::NoAggregation)
+            .prefix_id_hash_circuit(b, predicate_hash.elements.to_vec());
         let item_index = column_hash.len();
         let mut possible_input_hash = column_hash.to_vec();
         possible_input_hash.push(empty_hash);
         let pad_len = possible_input_hash.len().next_power_of_two();
-        assert!(pad_len <= 64, "random_access function cannot handle more than 64 elements");
+        assert!(
+            pad_len <= 64,
+            "random_access function cannot handle more than 64 elements"
+        );
         possible_input_hash.resize(pad_len, empty_hash);
 
         for i in 0..MAX_NUM_RESULTS {
@@ -217,9 +216,8 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         // accumulator, while the other slots are filled by the dummy zero values.
         // So the circuit claims that there is no aggregation operation on the
         // first value in V, while all the other values can be simply summed up.
-        // TODO: fix to enum values after merging PR [#249](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/249).
-        let op_id = b.constant(F::from_canonical_u8(OP_ID));
-        let op_sum = b.constant(F::from_canonical_u8(OP_SUM));
+        let [op_id, op_sum] = [AggregationOperation::IdOp, AggregationOperation::SumOp]
+            .map(|op| b.constant(Identifiers::AggregationOperations(op).to_field()));
         let ops_ids: Vec<_> = iter::once(op_id)
             .chain(iter::repeat(op_sum).take(MAX_NUM_RESULTS - 1))
             .collect();
@@ -439,11 +437,8 @@ mod tests {
             };
 
             // Compute the computational output hash.
-            let prefix = F::from_canonical_u8(OUTPUT_HASH_PREFIX);
-            let inputs: Vec<_> = iter::once(prefix)
-                .chain(output.predicate_hash.elements)
-                .collect();
-            let mut output_hash = H::hash_no_pad(&inputs);
+            let mut output_hash = Identifiers::Output(Output::NoAggregation)
+                .prefix_id_hash(output.predicate_hash.elements.to_vec());
             let item_index = output.column_hash.len();
             let mut possible_input_hash = output.column_hash.to_vec();
             possible_input_hash.push(*empty_hash);
@@ -531,9 +526,9 @@ mod tests {
                 .for_each(|t| b.enforce_equal_u256(t, &u256_zero));
 
             // Check the first OP is ID, and the remainings are SUM.
-            let op_id = b.constant(F::from_canonical_u8(OP_ID));
+            let [op_id, op_sum] = [AggregationOperation::IdOp, AggregationOperation::SumOp]
+                .map(|op| b.constant(Identifiers::AggregationOperations(op).to_field()));
             b.connect(wires.ops_ids[0], op_id);
-            let op_sum = b.constant(F::from_canonical_u8(OP_SUM));
             wires.ops_ids[1..]
                 .iter()
                 .for_each(|t| b.connect(*t, op_sum));
