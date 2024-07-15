@@ -429,7 +429,7 @@ mod test {
         );
         let mut n = sliced.to_vec();
         n.resize(4, 0); // what happens in circuit effectively
-        println!("sliced: {:?} - hex {}", sliced, hex::encode(&sliced));
+        println!("sliced: {:?} - hex {}", sliced, hex::encode(sliced));
         let length = n.pack(Endianness::Little)[0];
         let length2 = sliced
             .iter()
@@ -482,7 +482,7 @@ mod test {
         let raw_address = ProofQuery::verify_storage_proof(&res)?;
         // the value is actually RLP encoded !
         let decoded_address: Vec<u8> = rlp::decode(&raw_address).unwrap();
-        let leaf_node: Vec<Vec<u8>> = rlp::decode_list(&res.storage_proof[0].proof.last().unwrap());
+        let leaf_node: Vec<Vec<u8>> = rlp::decode_list(res.storage_proof[0].proof.last().unwrap());
         println!("leaf_node[1].len() = {}", leaf_node[1].len());
         // this is read in the same order
         let found_address = Address::from_slice(&decoded_address.into_iter().collect::<Vec<u8>>());

@@ -1,6 +1,6 @@
 use std::array::from_fn as create_array;
 
-use alloy::primitives::U256;
+use alloy::primitives::{B256, U256};
 use anyhow::Result;
 use itertools::Itertools;
 use plonky2::field::goldilocks_field::GoldilocksField;
@@ -484,6 +484,13 @@ pub enum Endianness {
 pub trait Packer {
     type T;
     fn pack(&self, endianness: Endianness) -> Vec<Self::T>;
+}
+
+impl Packer for B256 {
+    type T = u32;
+    fn pack(&self, endianness: Endianness) -> Vec<u32> {
+        self.0.pack(endianness)
+    }
 }
 
 impl Packer for &[u8] {

@@ -57,9 +57,7 @@ impl BlockCircuit {
             rlp_headers.len() <= MAX_BLOCK_LEN,
             "block rlp headers too long"
         );
-        Ok(Self {
-            rlp_headers: rlp_headers,
-        })
+        Ok(Self { rlp_headers })
     }
 
     /// Build the circuit, assigning the public inputs and returning the internal wires.
