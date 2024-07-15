@@ -3,23 +3,14 @@
 #![feature(generic_const_exprs)]
 use std::str::FromStr;
 
-use alloy::{
-    eips::BlockNumberOrTag,
-    primitives::Address,
-    providers::{Provider, ProviderBuilder},
-};
-use anyhow::Result;
+use alloy::primitives::Address;
 use common::{
     proof_storage::{ProofKey, TableID},
     TestCase, TestContext,
 };
 use log::info;
-use mp2_common::{
-    eth::BlockUtil,
-    proof::{serialize_proof, ProofWithVK},
-};
+use mp2_common::proof::{serialize_proof, ProofWithVK};
 use test_log::test;
-use verifiable_db::extraction;
 
 pub(crate) mod common;
 
