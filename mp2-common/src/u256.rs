@@ -3,11 +3,13 @@
 
 use std::{
     array::{self, from_fn as create_array},
+    iter::{once, repeat},
+    ops::Mul,
     usize,
 };
 
 use crate::{
-    array::Array,
+    array::{Array, Targetable},
     serialization::{
         circuit_data_serialization::SerializableRichField, FromBytes, SerializationError, ToBytes,
     },
@@ -17,15 +19,19 @@ use anyhow::{ensure, Result};
 use ethers::types::U256;
 use itertools::Itertools;
 use plonky2::{
+    field::extension::Extendable,
     gates::gate::Gate,
     hash::hash_types::RichField,
     iop::{
         generator::{GeneratedValues, SimpleGenerator},
         target::{BoolTarget, Target},
-        witness::{PartitionWitness, WitnessWrite},
+        witness::{PartitionWitness, Witness, WitnessWrite},
     },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CommonCircuitData},
-    util::serialization::{Buffer, IoResult, Read, Write},
+    util::{
+        log2_ceil,
+        serialization::{Buffer, IoResult, Read, Write},
+    },
 };
 use plonky2_crypto::u32::{
     arithmetic_u32::{CircuitBuilderU32, U32Target},
@@ -98,7 +104,7 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
     /// Compute a `BoolTarget` being true if and only the 2 input UInt256Target are equal
     fn is_equal_u256(&mut self, left: &UInt256Target, right: &UInt256Target) -> BoolTarget;
 
-    /// Return  true iif  `left <= right`
+    /// Return  true iff  `left <= right`
     fn is_less_or_equal_than_u256(
         &mut self,
         left: &UInt256Target,
@@ -116,6 +122,13 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
         cond: BoolTarget,
         left: &UInt256Target,
         right: &UInt256Target,
+    ) -> UInt256Target;
+
+    /// Return the element in the `inputs` array with position `access_index`  
+    fn random_access_u256(
+        &mut self,
+        access_index: Target,
+        inputs: &[UInt256Target],
     ) -> UInt256Target;
 }
 
@@ -324,30 +337,8 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
     ) -> (UInt256Target, UInt256Target, BoolTarget) {
         let _true = self._true();
         let _false = self._false();
-        let zero = self.zero();
 
-        // enforce that right is not zero
-        let is_zero = self.is_zero(right);
-        let quotient = self.add_virtual_u256();
-        let remainder = self.add_virtual_u256();
-        self.add_simple_generator(UInt256DivGenerator {
-            dividend: left.clone(),
-            divisor: right.clone(),
-            quotient: quotient.clone(),
-            remainder: remainder.clone(),
-        });
-        // enforce that remainder < right, if right != 0
-        let is_less_than = self.is_less_than_u256(&remainder, right);
-        let is_not_zero = self.not(is_zero);
-        self.connect(is_less_than.target, is_not_zero.target);
-        // enforce that left == quotient*right +  remainder
-        let (prod, overflow) = self.mul_u256(&quotient, right);
-        // ensure no overflow occurred during multiplication
-        self.connect(overflow.target, _false.target);
-        let (computed_dividend, carry) = self.add_u256(&prod, &remainder);
-        // ensure no overflow occurred during addition
-        self.connect(carry.0, zero);
-        self.enforce_equal_u256(left, &computed_dividend);
+        let (_, quotient, remainder, _, is_zero) = left.mul_div_u256(right, self, _true);
 
         (quotient, remainder, is_zero)
     }
@@ -407,6 +398,29 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
     ) -> UInt256Target {
         let limbs = create_array(|i| U32Target(self.select(cond, left.0[i].0, right.0[i].0)));
         UInt256Target(limbs)
+    }
+
+    fn random_access_u256(
+        &mut self,
+        access_index: Target,
+        inputs: &[UInt256Target],
+    ) -> UInt256Target {
+        assert!(
+            inputs.len() <= 64,
+            "random access gadget works only for arrays with at most 64 elements"
+        );
+        // compute padded length of inputs to safely use the
+        // `random_access` gadget (must be a power of 2)
+        let pad_len = 1 << log2_ceil(inputs.len());
+        UInt256Target(create_array(|i| {
+            let ith_limbs = inputs
+                .iter()
+                .map(|u256_t| u256_t.0[i].to_target())
+                .chain(repeat(self.zero()))
+                .take(pad_len)
+                .collect_vec();
+            U32Target(self.random_access(access_index, ith_limbs))
+        }))
     }
 }
 
@@ -474,6 +488,100 @@ impl UInt256Target {
                     ))
                 })?,
         ))
+    }
+    /// Initialize a `UInt256Target` from a target representing a single bit
+    pub fn new_from_bool_target<F: SerializableRichField<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        target: BoolTarget,
+    ) -> Self {
+        let limbs = repeat(b.zero_u32())
+            .take(NUM_LIMBS - 1)
+            .chain(once(U32Target::from_target(target.target)))
+            .collect_vec();
+        Self::new_from_be_limbs(&limbs).unwrap()
+    }
+    /// Take a `UInt256Target` which is assumed to represent a single bit and convert it to
+    /// a `BoolTarget`. Note that this method assumes that the input `UInt256Target` is either
+    /// 0 or 1, it is not enforced in the circuit
+    pub fn to_bool_target(&self) -> BoolTarget {
+        BoolTarget::new_unsafe(*self.to_targets().last().unwrap())
+    }
+
+    /// Utility function employed to implement multiplication, division and remainder of
+    /// `Self` values with a single u256 multiplier. The function returns 3 results,
+    /// which correspond to:
+    /// - The result of the multiplication, if the input flag `is_div == false`, a dummy value otherwise
+    /// - The results of the divisions (i.e., quotient and remainder), if the input flag `is_div == true`, dummy values otherwise
+    /// - A flag specifying whether an overflow has occurred in the multiplication operations
+    /// - A flag specyifng whether a division by zero was performed
+    pub fn mul_div_u256<F: SerializableRichField<D>, const D: usize>(
+        &self,
+        other: &Self,
+        b: &mut CircuitBuilder<F, D>,
+        is_div: BoolTarget,
+    ) -> (Self, Self, Self, BoolTarget, BoolTarget) {
+        let _true = b._true();
+        let _false = b._false();
+        let zero = b.zero();
+
+        // enforce that other is not zero
+        let is_zero = b.is_zero(other);
+        let quotient = b.add_virtual_u256();
+        let remainder = b.add_virtual_u256();
+        b.add_simple_generator(UInt256DivGenerator {
+            dividend: self.clone(),
+            divisor: other.clone(),
+            quotient: quotient.clone(),
+            remainder: remainder.clone(),
+            is_div,
+        });
+        // enforce that remainder < other, if other != 0 and is_div == true;
+        // this is equivalent to assert_eq!(other == 0 OR (NOT is_div) OR remainder < other, true)
+        // which is equivalent to assert_eq!(other != 0 AND is_div AND remainder >= other, false).
+        // We can compute the left expression with only 2 arithmetic operations as follows.
+        // first, we compute other != 0 AND is_div as is_div * (1 - is_zero) = is_div - is_div*is_zero
+        let antecedent = b.arithmetic(
+            F::NEG_ONE,
+            F::ONE,
+            is_div.target,
+            is_zero.target,
+            is_div.target,
+        );
+        // then, we compute the whole proposition as antecedent AND (NOT remainder < other)
+        let is_less_than = b.is_less_than_u256(&remainder, other);
+        let should_be_false = b.arithmetic(
+            F::NEG_ONE,
+            F::ONE,
+            antecedent,
+            is_less_than.target,
+            antecedent,
+        );
+        b.connect(should_be_false, _false.target);
+        // compute multiplication: if is_div == false, then prod = self*other;
+        // otherwise, prod = quotient*other, as we need to later check that quotient*other + remainder == self
+        let mul_input = if let Some(val) = b.target_as_constant(is_div.target) {
+            if val == F::ONE {
+                &quotient
+            } else {
+                self
+            }
+        } else {
+            &b.select_u256(is_div, &quotient, self)
+        };
+        let (prod, mul_overflow) = b.mul_u256(mul_input, other);
+        let (computed_dividend, carry) = b.add_u256(&prod, &remainder);
+        b.enforce_equal_u256(self, &computed_dividend);
+
+        // if is_div == true, enforce both mul_overflow and carry are zero
+        // this is equivalent to enforce that is_div == false OR mul_overflow == 0,
+        // which is equivalent to enforce that NOT(is_div AND mul_overflow != 0),
+        // which is equivalent to enforce that is_div*mul_overflow == 0
+        let enforce_no_mul_overflow = b.and(is_div, mul_overflow);
+        b.connect(enforce_no_mul_overflow.target, _false.target);
+        let enforce_no_add_overflow = b.mul(is_div.target, carry.to_target());
+        b.connect(enforce_no_add_overflow, zero);
+
+        (prod, quotient, remainder, mul_overflow, is_zero)
     }
 
     /// Utility function for serialization of UInt256Target
@@ -589,6 +697,7 @@ pub struct UInt256DivGenerator {
     divisor: UInt256Target,
     quotient: UInt256Target,
     remainder: UInt256Target,
+    is_div: BoolTarget,
 }
 
 impl<F: SerializableRichField<D>, const D: usize> SimpleGenerator<F, D> for UInt256DivGenerator {
@@ -600,17 +709,38 @@ impl<F: SerializableRichField<D>, const D: usize> SimpleGenerator<F, D> for UInt
         [&self.dividend, &self.divisor]
             .into_iter()
             .flat_map::<Vec<Target>, _>(|u256_t| u256_t.into())
+            .chain(once(self.is_div.target))
             .collect_vec()
     }
 
     fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
         let dividend = witness.get_u256_target(&self.dividend);
         let divisor = witness.get_u256_target(&self.divisor);
+        let is_div = witness.get_bool_target(self.is_div);
 
-        let (quotient, remainder) = if divisor.is_zero() {
-            (U256::zero(), dividend)
+        let (quotient, remainder) = if is_div {
+            if divisor.is_zero() {
+                (U256::zero(), dividend)
+            } else {
+                dividend.div_mod(divisor)
+            }
         } else {
-            dividend.div_mod(divisor)
+            // if is_div == false, then we assign input values to satisfy the
+            // constraint dividend*divisor + remainder == dividend, which is
+            // needed when is_div == true
+            let remainder = dividend
+                .overflowing_sub(dividend.overflowing_mul(divisor).0)
+                .0;
+            // safety check
+            assert_eq!(
+                dividend
+                    .overflowing_mul(divisor)
+                    .0
+                    .overflowing_add(remainder)
+                    .0,
+                dividend
+            );
+            (U256::one(), remainder)
         };
 
         out_buffer.set_u256_target(&self.quotient, quotient);
@@ -622,6 +752,7 @@ impl<F: SerializableRichField<D>, const D: usize> SimpleGenerator<F, D> for UInt
         self.divisor.write_to_bytes(dst);
         self.quotient.write_to_bytes(dst);
         self.remainder.write_to_bytes(dst);
+        dst.write_target_bool(self.is_div);
 
         Ok(())
     }
@@ -634,12 +765,14 @@ impl<F: SerializableRichField<D>, const D: usize> SimpleGenerator<F, D> for UInt
         let divisor = UInt256Target::read_from_buffer(src)?;
         let quotient = UInt256Target::read_from_buffer(src)?;
         let remainder = UInt256Target::read_from_buffer(src)?;
+        let is_div = src.read_target_bool()?;
 
         Ok(Self {
             dividend,
             divisor,
             quotient,
             remainder,
+            is_div,
         })
     }
 }
