@@ -114,7 +114,6 @@ impl ByteProofTuple {
 
 #[cfg(test)]
 mod test {
-    use ethers::utils::keccak256;
     use plonky2::{
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
@@ -129,7 +128,10 @@ mod test {
     };
     use rand::Rng;
 
-    use crate::{utils::verify_proof_tuple, ByteProofTuple};
+    use crate::{
+        utils::{keccak256, verify_proof_tuple},
+        ByteProofTuple,
+    };
     use anyhow::Result;
     use plonky2::field::types::Field;
     const D: usize = 2;

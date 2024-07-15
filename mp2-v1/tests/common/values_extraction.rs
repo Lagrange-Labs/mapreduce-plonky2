@@ -1,7 +1,9 @@
 //! Test utilities for Values Extraction (C.1)
 
+use std::str::FromStr;
+
 use super::{storage_trie::TestStorageTrie, TestContext};
-use ethers::prelude::Address;
+use alloy::primitives::Address;
 use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
@@ -11,7 +13,6 @@ use mp2_common::{
 };
 use mp2_v1::values_extraction::public_inputs::PublicInputs;
 use plonky2::field::types::Field;
-use std::str::FromStr;
 
 type MappingKey = Vec<u8>;
 

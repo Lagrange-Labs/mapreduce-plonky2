@@ -1,12 +1,13 @@
 //! Test context used in the test cases
-use alloy::node_bindings::AnvilInstance;
+use alloy::{
+    eips::BlockNumberOrTag,
+    node_bindings::AnvilInstance,
+    providers::{Provider, ProviderBuilder, RootProvider},
+    rpc::types::{Block, BlockTransactionsKind, EIP1186AccountProofResponse},
+    transports::http::{Client, Http},
+};
 use anyhow::Context;
 use envconfig::Envconfig;
-use ethers::{
-    prelude::{Block, BlockId, EIP1186ProofResponse, Http, Provider, TxHash},
-    providers::Middleware,
-    types::BlockNumber,
-};
 use log::info;
 use mp2_common::eth::ProofQuery;
 use mp2_v1::api::{build_circuits_params, PublicParameters};
@@ -29,10 +30,11 @@ struct TestContextConfig {
 
 /// Test context
 pub(crate) struct TestContext {
+    pub(crate) rpc_url: String,
     /// HTTP provider
     /// TODO: fix to use alloy provider.
-    pub(crate) rpc: Provider<Http>,
-    pub(crate) block_number: BlockNumber,
+    pub(crate) rpc: RootProvider<Http<Client>>,
+    pub(crate) block_number: BlockNumberOrTag,
     /// Local node
     /// Should release after finishing the all tests.
     pub(crate) local_node: Option<AnvilInstance>,
@@ -100,19 +102,15 @@ impl TestContext {
     }
 
     pub(crate) fn get_block_number(&self) -> Option<u64> {
-        self.block_number.as_number().map(|bn| {
-            let mut bytes = [0u8; 8];
-            bn.to_big_endian(&mut bytes);
-            u64::from_be_bytes(bytes)
-        })
+        self.block_number.as_number()
     }
 
     /// Returns the block for which this test context is set
-    pub(crate) async fn query_block(&self) -> Block<TxHash> {
+    pub(crate) async fn query_block(&self) -> Block {
         // assume there is always a block so None.unwrap() should not occur
         // and it's still a test...
         self.rpc
-            .get_block(self.block_number)
+            .get_block(self.block_number.into(), BlockTransactionsKind::Hashes)
             .await
             .unwrap()
             .unwrap()
@@ -123,14 +121,17 @@ impl TestContext {
         &self,
         query: &ProofQuery,
         block_number: Option<u64>,
-    ) -> EIP1186ProofResponse {
-        let block_id = block_number.map(|n| BlockId::Number(n.into()));
+    ) -> EIP1186AccountProofResponse {
+        let block_id = match block_number {
+            Some(b) => BlockNumberOrTag::Number(b),
+            None => BlockNumberOrTag::Latest,
+        };
         query.query_mpt_proof(&self.rpc, block_id).await.unwrap()
     }
 
     /// Reset the RPC provider. It could be used to query data from the
     /// different RPCs during testing.
     pub(crate) fn set_rpc(&mut self, rpc_url: &str) {
-        self.rpc = Provider::<Http>::try_from(rpc_url).unwrap();
+        self.rpc = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
     }
 }

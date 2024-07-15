@@ -8,8 +8,8 @@ use super::{
     parent::{ParentCircuit, RecursiveParentInput, RecursiveParentWires},
     PublicInputs,
 };
+use alloy::primitives::U256;
 use anyhow::Result;
-use ethers::types::U256;
 use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
 use plonky2::{
     hash::{hash_types::HashOut, poseidon::PoseidonHash},
@@ -279,17 +279,15 @@ mod tests {
         extraction, row_tree,
     };
     use mp2_common::{
-        poseidon::{empty_poseidon_hash, hash_to_int_value, H},
+        poseidon::{empty_poseidon_hash, H},
         utils::{Fieldable, ToFields},
     };
     use mp2_test::utils::random_vector;
     use plonky2::{
-        field::types::{Field, Sample},
-        hash::hash_types::NUM_HASH_OUT_ELTS,
-        iop::target::Target,
+        field::types::Sample, hash::hash_types::NUM_HASH_OUT_ELTS, iop::target::Target,
         plonk::config::Hasher,
     };
-    use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
+    use plonky2_ecgfp5::curve::curve::Point;
     use rand::{rngs::ThreadRng, thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use std::iter;
@@ -668,22 +666,21 @@ mod tests {
         let block_id = rng.gen::<u32>().to_field();
 
         log::info!("Generating a dummy proof of left child");
-        let block_number = 100.into();
+        let block_number: U256 = U256::from(100);
         let left_child_pi =
             random_block_index_pi(&mut rng, block_number, block_number, block_number);
         let left_child_pi = PublicInputs::from_slice(&left_child_pi);
 
         log::info!("Generating a leaf proof of right child");
-        let block_number = block_number + 1;
+        let block_number = block_number + U256::from(1);
         let right_child_proof = b.generate_leaf_proof(&mut rng, block_id, block_number)?;
         let right_child_pi = PublicInputs::from_slice(&right_child_proof.proof.public_inputs);
-        let e = right_child_pi.new_merkle_hash_field();
 
         log::info!("Generating the parent proof");
         b.generate_parent_proof(
             &mut rng,
             block_id,
-            block_number + 1,
+            block_number + U256::from(1),
             block_number,
             block_number,
             block_number,
@@ -694,7 +691,7 @@ mod tests {
         log::info!("Generating the membership proof");
         b.generate_membership_proof(
             block_id,
-            block_number - 1,
+            block_number - U256::from(1),
             block_number,
             block_number,
             left_child_pi.new_merkle_hash_field(),

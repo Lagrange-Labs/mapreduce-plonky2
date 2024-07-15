@@ -1,5 +1,5 @@
+use alloy::primitives::U256;
 use anyhow::Result;
-use ethers::types::U256;
 use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},

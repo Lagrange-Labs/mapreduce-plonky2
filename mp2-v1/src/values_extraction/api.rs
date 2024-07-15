@@ -9,8 +9,8 @@ use super::{
     public_inputs::PublicInputs,
 };
 use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
+use alloy::primitives::Address;
 use anyhow::{bail, Result};
-use ethers::types::Address;
 use log::debug;
 use mp2_common::{
     default_config,
@@ -399,8 +399,8 @@ mod tests {
         },
         *,
     };
+    use alloy::primitives::Address;
     use eth_trie::{EthTrie, MemoryDB, Trie};
-    use ethers::types::Address;
     use mp2_common::{
         eth::StorageSlot,
         mpt_sequential::utils::bytes_to_nibbles,

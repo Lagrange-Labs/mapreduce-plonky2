@@ -1,5 +1,5 @@
+use alloy::primitives::U256;
 use anyhow::*;
-use ethers::types::U256;
 use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
 use mp2_v1::api::{self, CircuitInput};
 use plonky2::{
@@ -19,12 +19,10 @@ use ryhope::{
     MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 use crate::common::row_tree_proof_to_hash;
 
 use super::{
-    cell_tree_proof_to_hash,
     celltree::Cell,
     proof_storage::{
         BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier, TableID,

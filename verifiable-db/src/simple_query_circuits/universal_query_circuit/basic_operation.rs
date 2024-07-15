@@ -1,4 +1,4 @@
-use ethers::types::U256;
+use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     array::{Targetable, ToField},
@@ -223,7 +223,7 @@ impl BasicOperationInputs {
 mod tests {
     use std::array;
 
-    use ethers::types::U256;
+    use alloy::primitives::U256;
     use mp2_common::{
         array::ToField,
         default_config,
@@ -245,7 +245,7 @@ mod tests {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::simple_query_circuits::computational_hash_ids::{Identifiers, Operation};
+    use crate::simple_query_circuits::computational_hash_ids::Operation;
 
     use super::{BasicOperationInputWires, BasicOperationInputs};
 
@@ -435,7 +435,7 @@ mod tests {
             Operation::DivOp,
             |a, b| match a.checked_div(b) {
                 Some(res) => (res, false),
-                None => (U256::zero(), true),
+                None => (U256::ZERO, true),
             },
         )
     }
@@ -450,7 +450,7 @@ mod tests {
                 if b.is_zero() {
                     (a, true)
                 } else {
-                    (a.div_mod(b).1, false)
+                    (a.div_rem(b).1, false)
                 }
             },
         )
@@ -459,14 +459,14 @@ mod tests {
     #[test]
     fn test_mod_by_zero() {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
-            |_| U256::zero(),
+            |_| U256::ZERO,
             &mut thread_rng(),
             Operation::ModOp,
             |a, b| {
                 if b.is_zero() {
                     (a, true)
                 } else {
-                    (a.div_mod(b).1, false)
+                    (a.div_rem(b).1, false)
                 }
             },
         )
@@ -475,12 +475,12 @@ mod tests {
     #[test]
     fn test_div_by_zero() {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
-            |_| U256::zero(),
+            |_| U256::ZERO,
             &mut thread_rng(),
             Operation::DivOp,
             |a, b| match a.checked_div(b) {
                 Some(res) => (res, false),
-                None => (U256::zero(), true),
+                None => (U256::ZERO, true),
             },
         )
     }
@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn test_mul_by_zero() {
         test_basic_operation::<TEST_NUM_INPUTS, _, _, _>(
-            |_| U256::zero(),
+            |_| U256::ZERO,
             &mut thread_rng(),
             Operation::MulOp,
             |a, b| a.overflowing_mul(b),
@@ -586,9 +586,9 @@ mod tests {
             gen_random_u256_bit,
             &mut thread_rng(),
             Operation::NotOp,
-            |a, b| {
+            |a, _b| {
                 (
-                    !a & U256::one(), // b is unused since Not is a unary operation
+                    !a & U256::from(1), // b is unused since Not is a unary operation
                     false,
                 )
             },

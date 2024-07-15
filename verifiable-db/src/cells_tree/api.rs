@@ -8,8 +8,8 @@ use super::{
     public_inputs::PublicInputs,
 };
 use crate::api::CellNode;
+use alloy::primitives::U256;
 use anyhow::Result;
-use ethers::prelude::U256;
 use mp2_common::{
     default_config,
     proof::{ProofInputSerialized, ProofWithVK},
@@ -187,7 +187,7 @@ mod tests {
     use mp2_common::{
         group_hashing::{add_curve_point, map_to_curve_point},
         poseidon::{empty_poseidon_hash, H},
-        utils::{Endianness, Fieldable, ToFields},
+        utils::{Fieldable, ToFields},
     };
     use plonky2::plonk::config::Hasher;
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
@@ -218,7 +218,7 @@ mod tests {
         // Build the circuit input.
         let mut rng = thread_rng();
         let identifier = rng.gen::<u32>().to_field();
-        let value = U256(rng.gen::<[u64; 4]>());
+        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let value_fields = value.to_fields();
         let input = CircuitInput::leaf(identifier, value);
 
@@ -296,7 +296,7 @@ mod tests {
         // Build the circuit input.
         let mut rng = thread_rng();
         let identifier = rng.gen::<u32>().to_field();
-        let value = U256(rng.gen::<[u64; 4]>());
+        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let packed_value = value.to_fields();
         let input = CircuitInput::full(identifier, value, child_proofs);
 
@@ -350,7 +350,7 @@ mod tests {
         // Build the circuit input.
         let mut rng = thread_rng();
         let identifier = rng.gen::<u32>().to_field();
-        let value = U256(rng.gen::<[u64; 4]>());
+        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let packed_value = value.to_fields();
         let input = CircuitInput::partial(identifier, value, child_proof);
 

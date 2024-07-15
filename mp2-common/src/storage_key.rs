@@ -187,7 +187,7 @@ impl SimpleSlot {
             }
             _ => panic!("Invalid storage slot type"), // should not happen using constructor
         }
-        let input = self.0.location().as_fixed_bytes().to_vec();
+        let input = self.0.location().as_slice().to_vec();
         KeccakCircuit::assign(
             pw,
             &wires.keccak_mpt,
@@ -401,7 +401,7 @@ mod test {
                 mapping_slot: mapping_slot as u8,
             },
             exp_mpt_key_nibbles: bytes_to_nibbles(&mpt_key),
-            exp_keccak_location: slot.location().as_bytes().to_vec(),
+            exp_keccak_location: slot.location().as_slice().to_vec(),
         };
         run_circuit::<F, D, C, _>(circuit);
     }

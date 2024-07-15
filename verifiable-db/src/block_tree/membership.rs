@@ -3,8 +3,8 @@
 //! of the tree, proving over the same path.
 
 use super::public_inputs::PublicInputs;
+use alloy::primitives::U256;
 use anyhow::Result;
-use ethers::prelude::U256;
 use mp2_common::{
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
@@ -215,12 +215,17 @@ mod tests {
         let mut rng = thread_rng();
 
         let index_identifier = rng.gen::<u32>().to_field();
-        let [index_value, old_min, old_max] = [0; 3].map(|_| U256(rng.gen::<[u64; 4]>()));
+        let [index_value, old_min, old_max] =
+            [0; 3].map(|_| U256::from_limbs(rng.gen::<[u64; 4]>()));
         let [left_child, rows_tree_hash] =
             [0; 2].map(|_| HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields()));
 
-        let child_pi =
-            &random_block_index_pi(&mut rng, index_value + 1, index_value + 2, index_value + 2);
+        let child_pi = &random_block_index_pi(
+            &mut rng,
+            index_value + U256::from(1),
+            index_value + U256::from(2),
+            index_value + U256::from(2),
+        );
 
         let test_circuit = TestMembershipCircuit {
             c: MembershipCircuit {

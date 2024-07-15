@@ -1,4 +1,4 @@
-use ethers::types::U256;
+use alloy::primitives::U256;
 use plonky2::hash::hash_types::{HashOut, RichField};
 use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
 use rand::{
@@ -21,8 +21,7 @@ pub fn weierstrass_to_point(w: &WeierstrassPoint) -> Point {
 }
 
 pub fn gen_random_u256<R: Rng>(rng: &mut R) -> U256 {
-    let bytes: [u8; 32] = rng.gen();
-    U256::from_little_endian(bytes.as_slice())
+    U256::from_limbs(rng.gen::<[u64; 4]>())
 }
 
 pub fn gen_random_field_hash<F: RichField>() -> HashOut<F> {

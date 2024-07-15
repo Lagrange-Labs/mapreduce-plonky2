@@ -1,7 +1,7 @@
 use std::array::from_fn as create_array;
 
+use alloy::primitives::{B256, U256};
 use anyhow::Result;
-use ethers::types::U256;
 use itertools::Itertools;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field64;
@@ -486,6 +486,13 @@ pub trait Packer {
     fn pack(&self, endianness: Endianness) -> Vec<Self::T>;
 }
 
+impl Packer for B256 {
+    type T = u32;
+    fn pack(&self, endianness: Endianness) -> Vec<u32> {
+        self.0.pack(endianness)
+    }
+}
+
 impl Packer for &[u8] {
     type T = u32;
     fn pack(&self, endianness: Endianness) -> Vec<u32> {
@@ -716,11 +723,11 @@ mod test {
         greater_than, greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits,
         Endianness, PackerTarget,
     };
+    use alloy::primitives::Address;
     use anyhow::Result;
-    use ethers::types::Address;
     use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::field::types::Field;
-    use plonky2::iop::target::{BoolTarget, Target};
+    use plonky2::iop::target::Target;
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
@@ -729,8 +736,9 @@ mod test {
 
     #[test]
     fn test_pack() {
-        let addr = Address::random();
-        let _: Vec<GoldilocksField> = addr.as_fixed_bytes().pack(Endianness::Big).to_fields();
+        // XXX TODO Address::random() fails
+        let addr = Address::from_slice(&thread_rng().gen::<[u8; 20]>());
+        let _: Vec<GoldilocksField> = addr.0.as_slice().pack(Endianness::Big).to_fields();
     }
 
     fn test_convert_u8_to_u32_with_size<const SIZE: usize>() {

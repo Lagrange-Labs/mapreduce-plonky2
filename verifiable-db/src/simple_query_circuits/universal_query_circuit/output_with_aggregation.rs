@@ -104,13 +104,13 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
     type Wires = Wires<MAX_NUM_RESULTS>;
 
     fn build(
-        b: &CircuitBuilder<F, D>,
-        column_values: &[UInt256Target],
-        column_hash: &[HashOutTarget],
-        item_values: &[UInt256Target],
-        item_hash: &[HashOutTarget],
-        predicate_value: &BoolTarget,
-        predicate_hash: &HashOutTarget,
+        _b: &CircuitBuilder<F, D>,
+        _column_values: &[UInt256Target],
+        _column_hash: &[HashOutTarget],
+        _item_values: &[UInt256Target],
+        _item_hash: &[HashOutTarget],
+        _predicate_value: &BoolTarget,
+        _predicate_hash: &HashOutTarget,
     ) -> Self::Wires {
         todo!()
     }
