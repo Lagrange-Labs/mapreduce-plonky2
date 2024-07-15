@@ -1,4 +1,5 @@
 use super::cells::build_cells_tree;
+use crate::simple_query_circuits::computational_hash_ids::{Extraction, Identifiers};
 use ethers::types::U256;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
@@ -8,10 +9,9 @@ use mp2_common::{
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::SelectHashBuilder,
-    CHasher, F,
+    F,
 };
 use plonky2::{
-    field::types::Field,
     hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
@@ -124,12 +124,11 @@ fn build_column_hash<const MAX_NUM_COLUMNS: usize>(
     b: &mut CBuilder,
     input: &ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
 ) -> [HashOutTarget; MAX_NUM_COLUMNS] {
-    let prefix = b.constant(F::from_canonical_u8(COLUMN_HASH_PREFIX));
     let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
     array::from_fn(|i| {
-        // H(PREFIX || id)
-        let hash = b.hash_n_to_hash_no_pad::<CHasher>(vec![prefix, input.column_ids[i]]);
+        // Column identifier hash
+        let hash = Identifiers::Extraction(Extraction::Column).hash_circuit(b, input.column_ids[i]);
 
         if i < COLUMN_INDEX_NUM {
             hash
@@ -142,7 +141,7 @@ fn build_column_hash<const MAX_NUM_COLUMNS: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{poseidon::H, utils::Fieldable, C, D};
+    use mp2_common::{utils::Fieldable, C, D};
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},
         circuit::{run_circuit, UserCircuit},
@@ -234,7 +233,7 @@ mod tests {
         let empty_hash = empty_poseidon_hash();
 
         array::from_fn(|i| match columns.get(i) {
-            Some(TestCell { id, .. }) => H::hash_no_pad(&[COLUMN_HASH_PREFIX.to_field(), *id]),
+            Some(TestCell { id, .. }) => Identifiers::Extraction(Extraction::Column).hash(*id),
             None => *empty_hash,
         })
     }

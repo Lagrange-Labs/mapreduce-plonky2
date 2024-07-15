@@ -7,7 +7,7 @@ use ethers::types::U256;
 use itertools::Itertools;
 use mp2_common::{
     array::{Targetable, ToField},
-    poseidon::empty_poseidon_hash,
+    poseidon::{empty_poseidon_hash, H},
     types::CBuilder,
     u256::UInt256Target,
     utils::{ToFields, ToTargets},
@@ -47,6 +47,13 @@ impl Identifiers {
                 Identifiers::Extraction(e) => *e as usize,
                 Identifiers::Operations(o) => *o as usize,
             }
+    }
+    pub(crate) fn hash(&self, id: F) -> HashOut<F> {
+        H::hash_no_pad(&[self.to_field(), id])
+    }
+    pub(crate) fn hash_circuit(&self, b: &mut CBuilder, id: Target) -> HashOutTarget {
+        let prefix = b.constant(self.to_field());
+        b.hash_n_to_hash_no_pad::<CHasher>(vec![prefix, id])
     }
 }
 
