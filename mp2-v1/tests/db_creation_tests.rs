@@ -1,18 +1,23 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
+use std::str::FromStr;
+
+use alloy::{
+    eips::BlockNumberOrTag,
+    primitives::Address,
+    providers::{Provider, ProviderBuilder},
+};
+use anyhow::Result;
 use common::{
     proof_storage::{ProofKey, TableID},
     TestCase, TestContext,
 };
-use ethers::types::Address;
 use log::info;
 use mp2_common::{
-    poseidon::empty_poseidon_hash,
+    eth::BlockUtil,
     proof::{serialize_proof, ProofWithVK},
 };
-use mp2_v1::values_extraction::compute_block_id;
-use std::{collections::HashMap, str::FromStr};
 use test_log::test;
 use verifiable_db::extraction;
 
@@ -45,7 +50,7 @@ async fn prove_scalar_values<P: common::proof_storage::ProofStorage>(
         .unwrap();
     storage
         .store_proof(
-            ProofKey::Extraction(ctx.block_number.as_number().unwrap().as_usize()),
+            ProofKey::Extraction(ctx.block_number.as_number().unwrap() as usize),
             extraction_proof.serialize().unwrap(),
         )
         .unwrap();

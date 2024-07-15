@@ -1,4 +1,4 @@
-use ethers::types::Address;
+use alloy::primitives::Address;
 use mp2_common::{
     eth::left_pad32,
     group_hashing::map_to_curve_point,

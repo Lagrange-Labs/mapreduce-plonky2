@@ -1,6 +1,6 @@
 use std::{fmt::Debug, iter::once};
 
-use ethers::types::U256;
+use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
@@ -228,8 +228,12 @@ where
             // update the counter of overflows detected
             num_overflows = new_num_overflows;
             // add placeholder data to payload for placeholder hash
-            placeholder_hash_payload.push(input_wires.placeholder_id);
-            placeholder_hash_payload.extend_from_slice(&input_wires.placeholder_value.to_targets());
+            placeholder_hash_payload.push(input_wires.placeholder_ids[0]);
+            placeholder_hash_payload
+                .extend_from_slice(&input_wires.placeholder_values[0].to_targets());
+            placeholder_hash_payload.push(input_wires.placeholder_ids[1]);
+            placeholder_hash_payload
+                .extend_from_slice(&input_wires.placeholder_values[1].to_targets());
             filtering_predicate_wires.push(input_wires);
         }
         // Place the evaluation of the filtering predicate, and the corresponding computational hash, in
@@ -262,8 +266,12 @@ where
             // update the counter of overflows detected
             num_overflows = new_num_overflows;
             // add placeholder data to payload for placeholder hash
-            placeholder_hash_payload.push(input_wires.placeholder_id);
-            placeholder_hash_payload.extend_from_slice(&input_wires.placeholder_value.to_targets());
+            placeholder_hash_payload.push(input_wires.placeholder_ids[0]);
+            placeholder_hash_payload
+                .extend_from_slice(&input_wires.placeholder_values[0].to_targets());
+            placeholder_hash_payload.push(input_wires.placeholder_ids[1]);
+            placeholder_hash_payload
+                .extend_from_slice(&input_wires.placeholder_values[1].to_targets());
             result_value_wires.push(input_wires);
         }
         // Place the results to be returned for the current row, and the corresponding computational hashes,

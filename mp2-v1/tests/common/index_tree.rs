@@ -1,5 +1,5 @@
+use alloy::primitives::U256;
 use anyhow::{Context, Result};
-use ethers::types::{Block, BlockNumber, U128, U256};
 use log::info;
 use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
 use mp2_v1::{api, values_extraction::compute_block_id};
@@ -80,10 +80,6 @@ impl NodePayload for IndexNode {
     }
 }
 
-pub fn u256_as_usize(u: &U256) -> usize {
-    u.as_u64() as usize
-}
-
 pub type IndexTree = sbbst::Tree;
 pub type IndexTreeKey = <IndexTree as TreeTopology>::Key;
 type IndexStorage = InMemory<IndexTree, IndexNode>;
@@ -100,7 +96,7 @@ pub fn build_initial_index_tree(
     let mut index_tree = MerkleIndexTree::create((block_usize, 1), ()).unwrap();
     let update_tree = index_tree
         .in_transaction(|t| {
-            t.store(u256_as_usize(&index.value), index.clone())?;
+            t.store(index.value.to(), index.clone())?;
             Ok(())
         })
         .context("while filling up index tree")?;
@@ -237,7 +233,7 @@ impl TestContext {
             .expect("can't find hash?");
         let node = IndexNode {
             identifier: F::from_canonical_u64(compute_block_id()),
-            value: U256::from(U128::from(self.block_number.as_number().unwrap().as_u64())),
+            value: U256::from(self.block_number.as_number().unwrap()),
             row_tree_proof_id: row_root_proof_key.clone(),
             row_tree_hash,
             ..Default::default()

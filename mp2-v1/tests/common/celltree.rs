@@ -1,5 +1,5 @@
+use alloy::primitives::{Address, U256};
 use anyhow::*;
-use ethers::types::{Address, U256};
 use mp2_common::{eth::ProofQuery, poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
 use mp2_v1::{api, api::CircuitInput, values_extraction::compute_leaf_single_id};
 use plonky2::{

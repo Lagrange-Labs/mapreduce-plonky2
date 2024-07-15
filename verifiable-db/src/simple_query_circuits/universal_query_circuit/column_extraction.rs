@@ -1,4 +1,4 @@
-use ethers::types::U256;
+use alloy::primitives::U256;
 use mp2_common::{
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
@@ -69,7 +69,7 @@ pub struct ColumnExtractionInputs<const MAX_NUM_COLUMNS: usize> {
 }
 
 impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
-    pub(crate) fn build(b: &mut CircuitBuilder<F, D>) -> ColumnExtractionWires<MAX_NUM_COLUMNS> {
+    pub(crate) fn build(_b: &mut CircuitBuilder<F, D>) -> ColumnExtractionWires<MAX_NUM_COLUMNS> {
         todo!()
     }
 

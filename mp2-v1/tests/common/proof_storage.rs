@@ -1,6 +1,6 @@
 use super::{celltree::CellTree, index_tree::IndexTree, rowtree::RowTree};
+use alloy::primitives::Address;
 use anyhow::{Context, Result};
-use ethers::types::{Address, BlockNumber};
 use hashbrown::HashMap;
 use rand::distributions::{Alphanumeric, DistString};
 use ryhope::tree::{sbbst, TreeTopology};

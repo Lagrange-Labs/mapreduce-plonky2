@@ -1,6 +1,6 @@
+use alloy::primitives::U256;
 use anyhow::Result;
-use ethers::types::U256;
-use mp2_common::{default_config, proof::ProofWithVK, public_inputs, C, D, F};
+use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
 use plonky2::hash::hash_types::HashOut;
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},

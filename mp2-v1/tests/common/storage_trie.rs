@@ -1,10 +1,7 @@
 //! Storage trie for proving tests
 
 use super::TestContext;
-use ethers::{
-    prelude::Address,
-    utils::rlp::{Prototype, Rlp},
-};
+use alloy::primitives::Address;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
@@ -15,6 +12,7 @@ use mp2_v1::{
     api::{generate_proof, CircuitInput, PublicParameters},
     length_extraction, values_extraction,
 };
+use rlp::{Prototype, Rlp};
 use std::collections::HashMap;
 
 /// Maximum child number of a branch node

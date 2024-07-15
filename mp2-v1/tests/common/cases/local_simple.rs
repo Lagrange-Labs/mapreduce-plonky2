@@ -7,9 +7,8 @@ use super::{
 };
 use alloy::{
     contract::private::{Network, Provider, Transport},
-    primitives::{Address, U256},
+    primitives::{Address, Address as EthAddress, U256},
 };
-use ethers::prelude::Address as EthAddress;
 use mp2_common::eth::{left_pad32, StorageSlot};
 use rand::{thread_rng, Rng};
 use std::str::FromStr;
@@ -105,7 +104,7 @@ fn test_mapping_keys() -> Vec<MappingKey> {
         .iter()
         .map(|address| {
             let address = EthAddress::from_str(address).unwrap();
-            left_pad32(&address.to_fixed_bytes()).to_vec()
+            address.into_word().to_vec()
         })
         .collect()
 }

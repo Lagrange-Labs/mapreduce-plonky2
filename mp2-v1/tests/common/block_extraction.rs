@@ -1,11 +1,11 @@
+use alloy::primitives::U256;
 use anyhow::Result;
-use ethers::types::U64;
 use mp2_common::{
     eth::{left_pad_generic, BlockUtil},
     proof::deserialize_proof,
     types::HashOutput,
     u256,
-    utils::{Endianness, Packer, ToFields},
+    utils::{keccak256, Endianness, Packer, ToFields},
     C, D, F,
 };
 use mp2_v1::{api, block_extraction};
@@ -13,10 +13,9 @@ use plonky2::plonk::proof::ProofWithPublicInputs;
 
 use super::TestContext;
 
-pub(crate) fn block_number_to_u256_limbs(number: U64) -> Vec<F> {
+pub(crate) fn block_number_to_u256_limbs(number: u64) -> Vec<F> {
     const NUM_LIMBS: usize = u256::NUM_LIMBS;
-    let mut block_number_buff = [0u8; NUM_LIMBS];
-    number.to_big_endian(&mut block_number_buff[..]);
+    let block_number_buff = number.to_be_bytes();
     left_pad_generic::<u32, NUM_LIMBS>(&block_number_buff.pack(Endianness::Big)).to_fields()
 }
 
@@ -27,21 +26,24 @@ impl TestContext {
         let proof = api::generate_proof(
             self.params(),
             api::CircuitInput::BlockExtraction(block_extraction::CircuitInput::from_block_header(
-                buffer,
+                buffer.clone(),
             )),
         )?;
-        let p2_proof = deserialize_proof::<F, C, D>(&proof)?;
-        let pi = block_extraction::PublicInputs::from_slice(&p2_proof.public_inputs);
-        let block_number = block_number_to_u256_limbs(block.number.unwrap());
+
+        let pproof = deserialize_proof::<F, C, D>(&proof)?;
+        let pi = block_extraction::PublicInputs::from_slice(&pproof.public_inputs);
+        let block_number = U256::from(block.header.number.unwrap()).to_fields();
         let block_hash = block
+            .header
             .hash
             .unwrap()
-            .as_bytes()
+            .as_slice()
             .pack(Endianness::Little)
             .to_fields();
         let prev_block_hash = block
+            .header
             .parent_hash
-            .as_bytes()
+            .as_slice()
             .pack(Endianness::Little)
             .to_fields();
 
@@ -49,6 +51,6 @@ impl TestContext {
         assert_eq!(pi.block_hash_raw(), block_hash);
         assert_eq!(pi.prev_block_hash_raw(), prev_block_hash);
 
-        Ok(p2_proof)
+        Ok(pproof)
     }
 }

@@ -1,5 +1,5 @@
+use alloy::primitives::U256;
 use derive_more::Constructor;
-use ethers::types::U256;
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},

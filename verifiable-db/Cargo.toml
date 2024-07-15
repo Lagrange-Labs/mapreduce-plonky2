@@ -9,7 +9,7 @@ plonky2_crypto.workspace = true
 recursion_framework = { path = "../recursion-framework" }
 anyhow.workspace = true
 bincode.workspace = true
-ethers.workspace = true
+alloy.workspace = true
 log.workspace = true
 plonky2.workspace = true
 plonky2_ecdsa.workspace = true
@@ -25,4 +25,3 @@ rand.workspace = true
 serial_test.workspace = true
 mp2_test = { path = "../mp2-test" }
 env_logger.workspace = true
-
