@@ -391,7 +391,7 @@ mod tests {
 
     impl TestExpected {
         /// Compute the expected values by the input and output.
-        async fn new<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize>(
+        fn new<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize>(
             c: &Circuit<MAX_NUM_RESULTS>,
             output: &TestOutput<NUM_COLUMNS, MAX_NUM_RESULTS>,
         ) -> Self {
@@ -423,7 +423,7 @@ mod tests {
                     ..Default::default()
                 })
                 .collect();
-            let tree_hash = compute_cells_tree_hash(&cells[COLUMN_INDEX_NUM..]).await;
+            let tree_hash = compute_cells_tree_hash(&cells[COLUMN_INDEX_NUM..]);
 
             // Compute the first output value only for predicate value.
             let first_output_value = if output.predicate_value {
@@ -558,10 +558,10 @@ mod tests {
     impl<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize>
         TestOutputNoAggregationCircuit<NUM_COLUMNS, MAX_NUM_RESULTS>
     {
-        async fn sample(predicate_value: bool, valid_num_outputs: usize) -> Self {
+        fn sample(predicate_value: bool, valid_num_outputs: usize) -> Self {
             let c = Circuit::<MAX_NUM_RESULTS>::sample::<NUM_COLUMNS>(valid_num_outputs);
             let output = TestOutput::sample(predicate_value);
-            let expected = TestExpected::new(&c, &output).await;
+            let expected = TestExpected::new(&c, &output);
 
             Self {
                 c,
@@ -571,8 +571,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_query_no_aggregation_output_with_predicated() {
+    #[test]
+    fn test_query_no_aggregation_output_with_predicated() {
         const NUM_COLUMNS: usize = 5;
         const MAX_NUM_RESULTS: usize = 13;
         const NUM_VALID_OUTPUTS: usize = 13;
@@ -580,14 +580,13 @@ mod tests {
         let test_circuit = TestOutputNoAggregationCircuit::<NUM_COLUMNS, MAX_NUM_RESULTS>::sample(
             true,
             NUM_VALID_OUTPUTS,
-        )
-        .await;
+        );
 
         run_circuit::<F, D, C, _>(test_circuit);
     }
 
-    #[tokio::test]
-    async fn test_query_no_aggregation_output_with_no_predicated() {
+    #[test]
+    fn test_query_no_aggregation_output_with_no_predicated() {
         const NUM_COLUMNS: usize = 11;
         const MAX_NUM_RESULTS: usize = 9;
         const NUM_VALID_OUTPUTS: usize = 5;
@@ -595,8 +594,7 @@ mod tests {
         let test_circuit = TestOutputNoAggregationCircuit::<NUM_COLUMNS, MAX_NUM_RESULTS>::sample(
             false,
             NUM_VALID_OUTPUTS,
-        )
-        .await;
+        );
 
         run_circuit::<F, D, C, _>(test_circuit);
     }
