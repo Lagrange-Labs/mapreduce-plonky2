@@ -32,10 +32,6 @@ const OUTPUT_HASH_PREFIX: u8 = 120; // SELECT_ACC
 const OP_ID: u8 = 121; // ID
 const OP_SUM: u8 = 122; // SUM
 
-/// Constrain the maximum column number must be less than 64. Since the `random_access`
-/// function cannot handle more than 64 elements (63 columns + 1 item result).
-const MAX_NUM_COLUMNS: usize = 64;
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for output component for queries without results aggregation
 pub struct InputWires<const MAX_NUM_RESULTS: usize> {
@@ -131,16 +127,9 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         predicate_value: &BoolTarget,
         predicate_hash: &HashOutTarget,
     ) -> Self::Wires {
+        assert_eq!(column_values.len(), column_hash.len());
         assert_eq!(item_values.len(), MAX_NUM_RESULTS);
         assert_eq!(item_hash.len(), MAX_NUM_RESULTS);
-
-        let num_columns = column_values.len();
-        assert_eq!(num_columns, column_hash.len());
-        assert!(
-            num_columns < MAX_NUM_COLUMNS,
-            "The `random_access` function cannot handle more than 64 elements (63 columns + 1 item result)",
-        );
-        let possible_num_inputs = (num_columns + 1).next_power_of_two();
 
         let u256_zero = b.zero_u256();
         let curve_zero = b.curve_zero();
@@ -201,7 +190,11 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
 
         let item_index = column_hash.len();
         let mut possible_input_hash = column_hash.to_vec();
-        possible_input_hash.resize(possible_num_inputs, empty_hash);
+        possible_input_hash.push(empty_hash);
+        let pad_len = possible_input_hash.len().next_power_of_two();
+        assert!(pad_len <= 64, "random_access function cannot handle more than 64 elements");
+        possible_input_hash.resize(pad_len, empty_hash);
+
         for i in 0..MAX_NUM_RESULTS {
             possible_input_hash[item_index] = item_hash[i].clone();
             let input_hash =
