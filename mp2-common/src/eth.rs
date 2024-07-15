@@ -3,9 +3,9 @@
 use alloy::{
     consensus::Transaction,
     eips::BlockNumberOrTag,
-    primitives::{Address, B128, B256},
+    primitives::{Address, B128, B256, U256},
     providers::{Provider, ProviderBuilder, RootProvider},
-    rlp::Encodable as AlloyEncodable,
+    rlp::{BufMut, Encodable as AlloyEncodable, EMPTY_LIST_CODE},
     rpc::types::{Block, EIP1186AccountProofResponse},
     transports::Transport,
 };
@@ -30,52 +30,6 @@ pub trait BlockUtil {
         keccak256(&self.rlp())
     }
     fn rlp(&self) -> Vec<u8>;
-}
-
-fn from_rpc_header_to_consensus(h: &alloy::rpc::types::Header) -> alloy::consensus::Header {
-    alloy::consensus::Header {
-        parent_hash: h.parent_hash,
-        ommers_hash: h.uncles_hash,
-        beneficiary: h.miner,
-        state_root: h.state_root,
-        transactions_root: h.transactions_root,
-        receipts_root: h.receipts_root,
-        withdrawals_root: h.withdrawals_root,
-        logs_bloom: h.logs_bloom,
-        difficulty: h.difficulty,
-        number: h.number.unwrap(),
-        gas_limit: h.gas_limit,
-        gas_used: h.gas_used,
-        timestamp: h.timestamp,
-        mix_hash: h.mix_hash.unwrap(),
-        nonce: h.nonce.unwrap(),
-        base_fee_per_gas: h.base_fee_per_gas,
-        blob_gas_used: h.blob_gas_used,
-        excess_blob_gas: h.excess_blob_gas,
-        parent_beacon_block_root: h.parent_beacon_block_root,
-        requests_root: h.requests_root,
-        extra_data: alloy::primitives::Bytes::new(),
-    }
-}
-
-impl BlockUtil for alloy::rpc::types::Block {
-    fn rlp(&self) -> Vec<u8> {
-        self.header.rlp()
-    }
-}
-
-impl BlockUtil for alloy::rpc::types::Header {
-    fn rlp(&self) -> Vec<u8> {
-        from_rpc_header_to_consensus(self).rlp()
-    }
-}
-
-impl BlockUtil for alloy::consensus::Header {
-    fn rlp(&self) -> Vec<u8> {
-        let mut out = Vec::<u8>::new();
-        self.encode(&mut out);
-        out
-    }
 }
 
 /// Extract the hash in case of Extension node, or all the hashes in case of a Branch node.
@@ -296,13 +250,68 @@ impl ProofQuery {
     }
 }
 
+// since alloy exports two header structs, and from RPC we only receive the rpc-defined one that
+// does not contain the methods to get the RLP encoding and the hash, we have to pass from one to
+// another manually.
+fn from_rpc_header_to_consensus(h: &alloy::rpc::types::Header) -> alloy::consensus::Header {
+    alloy::consensus::Header {
+        parent_hash: h.parent_hash,
+        ommers_hash: h.uncles_hash,
+        beneficiary: h.miner,
+        state_root: h.state_root,
+        transactions_root: h.transactions_root,
+        receipts_root: h.receipts_root,
+        withdrawals_root: h.withdrawals_root,
+        logs_bloom: h.logs_bloom,
+        difficulty: h.difficulty,
+        number: h.number.unwrap(),
+        gas_limit: h.gas_limit,
+        gas_used: h.gas_used,
+        timestamp: h.timestamp,
+        mix_hash: h.mix_hash.unwrap(),
+        nonce: h.nonce.unwrap(),
+        base_fee_per_gas: h.base_fee_per_gas,
+        blob_gas_used: h.blob_gas_used,
+        excess_blob_gas: h.excess_blob_gas,
+        parent_beacon_block_root: h.parent_beacon_block_root,
+        requests_root: h.requests_root,
+        extra_data: h.extra_data.clone(),
+    }
+}
+
+impl BlockUtil for alloy::rpc::types::Block {
+    fn rlp(&self) -> Vec<u8> {
+        self.header.rlp()
+    }
+}
+
+impl BlockUtil for alloy::rpc::types::Header {
+    fn rlp(&self) -> Vec<u8> {
+        from_rpc_header_to_consensus(self).rlp()
+    }
+}
+
+impl BlockUtil for alloy::consensus::Header {
+    fn rlp(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        self.encode(&mut out);
+        out
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use super::*;
     use std::{env, str::FromStr};
 
     use alloy::{
         primitives::{Bytes, B256},
         rpc::types::{Block, BlockTransactionsKind},
+    };
+    use ethereum_types::U64;
+    use ethers::{
+        providers::{Http, Middleware},
+        types::BlockNumber,
     };
     use hashbrown::HashMap;
     use rand::{thread_rng, Rng};
@@ -522,5 +531,121 @@ mod test {
             query.verify_state_proof(&res)?;
         }
         Ok(())
+    }
+    #[tokio::test]
+    async fn test_alloy_header_conversion() -> Result<()> {
+        let url = get_sepolia_url();
+        println!("URL given = {}", url);
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let block = provider
+            .get_block_by_number(BlockNumberOrTag::Latest, true)
+            .await?
+            .unwrap();
+        let previous_block = provider
+            .get_block_by_number(
+                BlockNumberOrTag::Number(block.header.number.unwrap() - 1),
+                true,
+            )
+            .await?
+            .unwrap();
+
+        let mp2_computed = block.block_hash();
+        let alloy_computed = from_rpc_header_to_consensus(&block.header).hash_slow();
+        assert_eq!(mp2_computed.as_slice(), alloy_computed.as_slice());
+
+        // CHECK RLP ENCODING FROM ETHERS MMODIF AND ALLOY
+        let ethers_provider = ethers::providers::Provider::<Http>::try_from(url)
+            .expect("could not instantiate HTTP Provider");
+        let ethers_block = ethers_provider
+            .get_block_with_txs(BlockNumber::Number(U64::from(block.header.number.unwrap())))
+            .await?
+            .unwrap();
+        // sanity check that ethers manual rlp implementation works
+        assert_eq!(
+            block.header.hash.unwrap().as_slice(),
+            ethers_block.block_hash()
+        );
+        let ethers_rlp = ethers_block.rlp();
+        let alloy_rlp = from_rpc_header_to_consensus(&block.header).rlp();
+        assert_eq!(ethers_rlp, alloy_rlp);
+        let manual_alloy_rlp = from_rpc_header_to_consensus(&block.header).rlp();
+        let ethers_stream = rlp::Rlp::new(&ethers_rlp);
+        let manual_stream = rlp::Rlp::new(&manual_alloy_rlp);
+        compare_rlp(ethers_stream, manual_stream);
+        assert_eq!(ethers_rlp, manual_alloy_rlp);
+
+        let previous_computed = previous_block.block_hash();
+        assert_eq!(&previous_computed, block.header.parent_hash.as_slice());
+        let alloy_given = block.header.hash.unwrap();
+        assert_eq!(alloy_given, alloy_computed);
+        Ok(())
+    }
+
+    fn compare_rlp<'a>(a: rlp::Rlp<'a>, b: rlp::Rlp<'a>) {
+        let ap = a.payload_info().unwrap();
+        let bp = b.payload_info().unwrap();
+        assert_eq!(
+            a.item_count().unwrap(),
+            b.item_count().unwrap(),
+            "not same item count in  list"
+        );
+        assert_eq!(
+            ap.header_len, bp.header_len,
+            "payloads different header len"
+        );
+        assert_eq!(a.is_list(), b.is_list());
+        println!(
+            "Item count for block RLP => a = {}, b = {}",
+            a.item_count().unwrap(),
+            b.item_count().unwrap()
+        );
+        for i in 0..a.item_count().unwrap() {
+            let ae = a.at(i).unwrap().as_raw();
+            let be = b.at(i).unwrap().as_raw();
+            println!("Checking element {} - len {} vs {}", i, ae.len(), be.len());
+            assert_eq!(ae, be, "elements not the same at index {i}");
+        }
+        // FAILING
+        assert_eq!(ap.value_len, bp.value_len, "payloads different value len");
+    }
+    /// TEST to compare alloy with ethers
+    pub struct RLPBlock<'a, X>(pub &'a ethers::types::Block<X>);
+    impl<X> BlockUtil for ethers::types::Block<X> {
+        fn rlp(&self) -> Vec<u8> {
+            let rlp = RLPBlock(self);
+            rlp::encode(&rlp).to_vec()
+        }
+    }
+    impl<'a, X> rlp::Encodable for RLPBlock<'a, X> {
+        fn rlp_append(&self, s: &mut rlp::RlpStream) {
+            s.begin_unbounded_list();
+            s.append(&self.0.parent_hash);
+            s.append(&self.0.uncles_hash);
+            s.append(&self.0.author.unwrap_or_default());
+            s.append(&self.0.state_root);
+            s.append(&self.0.transactions_root);
+            s.append(&self.0.receipts_root);
+            s.append(&self.0.logs_bloom.unwrap_or_default());
+            s.append(&self.0.difficulty);
+            s.append(&self.0.number.unwrap_or_default());
+            s.append(&self.0.gas_limit);
+            s.append(&self.0.gas_used);
+            s.append(&self.0.timestamp);
+            s.append(&self.0.extra_data.to_vec());
+            s.append(&self.0.mix_hash.unwrap_or_default());
+            s.append(&self.0.nonce.unwrap_or_default());
+            rlp_opt(s, &self.0.base_fee_per_gas);
+            rlp_opt(s, &self.0.withdrawals_root);
+            rlp_opt(s, &self.0.blob_gas_used);
+            rlp_opt(s, &self.0.excess_blob_gas);
+            rlp_opt(s, &self.0.parent_beacon_block_root);
+            s.finalize_unbounded_list();
+        }
+    }
+    /// Extracted from ether-rs
+    pub(crate) fn rlp_opt<T: rlp::Encodable>(rlp: &mut rlp::RlpStream, opt: &Option<T>) {
+        if let Some(inner) = opt {
+            rlp.append(inner);
+        }
     }
 }

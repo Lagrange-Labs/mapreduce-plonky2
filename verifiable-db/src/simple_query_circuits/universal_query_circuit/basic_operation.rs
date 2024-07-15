@@ -586,7 +586,7 @@ mod tests {
             gen_random_u256_bit,
             &mut thread_rng(),
             Operation::NotOp,
-            |a, b| {
+            |a, _b| {
                 (
                     !a & U256::from(1), // b is unused since Not is a unary operation
                     false,

@@ -187,6 +187,16 @@ mod test {
 
         assert_eq!(pi.prev_block_hash_raw(), &prev_block_hash);
         assert_eq!(pi.block_hash_raw(), &block_hash);
+        assert_eq!(
+            pi.block_hash_raw(),
+            block
+                .header
+                .hash
+                .unwrap()
+                .0
+                .pack(Endianness::Little)
+                .to_fields()
+        );
         assert_eq!(pi.state_root_raw(), &state_root);
         assert_eq!(pi.block_number_raw(), &block_number);
         Ok(())
