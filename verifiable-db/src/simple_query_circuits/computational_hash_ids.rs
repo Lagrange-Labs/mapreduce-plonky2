@@ -233,4 +233,7 @@ pub enum AggregationOperation {
     #[default]
     IdOp,
     SumOp,
+    MinOp,
+    MaxOp,
+    AvgOp,
 }
