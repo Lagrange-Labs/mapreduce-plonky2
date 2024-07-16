@@ -10,7 +10,7 @@ use mp2_common::{
     poseidon::{empty_poseidon_hash, H},
     types::CBuilder,
     u256::UInt256Target,
-    utils::{ToFields, ToTargets, SelectHashBuilder},
+    utils::{SelectHashBuilder, ToFields, ToTargets},
     CHasher, F,
 };
 use plonky2::{
@@ -221,7 +221,6 @@ impl Operation {
     }
 }
 
-
 #[derive(Clone, Debug, Copy, Default)]
 pub enum Output {
     #[default]
@@ -243,24 +242,19 @@ impl Output {
         item_hash: &[HashOut<F>],
         selector: &[usize],
         output_ids: &[F],
-        num_outputs: usize
+        num_outputs: usize,
     ) -> HashOut<F> {
-        let hash_identifier = self.to_field();
-        let mut output_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(&
-            once(hash_identifier)
-            .chain(predicate_hash.to_vec().into_iter())
-            .collect_vec()
-        );
+        let mut output_hash = Identifiers::Output(*self).prefix_id_hash(predicate_hash.to_vec());
         for i in 0..num_outputs {
-            let possible_hashes = column_hash.iter()
-                .chain(once(&item_hash[i]))
-                .collect_vec();
+            let possible_hashes = column_hash.iter().chain(once(&item_hash[i])).collect_vec();
             let current_output_hash = possible_hashes[selector[i]];
-            output_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(&
-                output_hash.to_vec().into_iter()
-                .chain(once(output_ids[i]))
-                .chain(current_output_hash.to_vec().into_iter())
-                .collect_vec()
+            output_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(
+                &output_hash
+                    .to_vec()
+                    .into_iter()
+                    .chain(once(output_ids[i]))
+                    .chain(current_output_hash.to_vec().into_iter())
+                    .collect_vec(),
             );
         }
 
@@ -268,62 +262,59 @@ impl Output {
     }
 
     pub(crate) fn output_computational_hash_circuit<const MAX_NUM_RESULTS: usize>(
-            &self,
-            b: &mut CBuilder,
-            predicate_hash: &HashOutTarget,
-            column_hash: &[HashOutTarget],
-            item_hash: &[HashOutTarget; MAX_NUM_RESULTS],
-            selector: &[Target; MAX_NUM_RESULTS],
-            output_ids: &[Target; MAX_NUM_RESULTS],
-            is_output_valid: &[BoolTarget; MAX_NUM_RESULTS],
-        ) -> HashOutTarget {
-            let empty_hash = b.constant_hash(*empty_poseidon_hash());
-            let hash_identifier = b.constant(
-                    self.to_field()
+        &self,
+        b: &mut CBuilder,
+        predicate_hash: &HashOutTarget,
+        column_hash: &[HashOutTarget],
+        item_hash: &[HashOutTarget; MAX_NUM_RESULTS],
+        selector: &[Target; MAX_NUM_RESULTS],
+        output_ids: &[Target; MAX_NUM_RESULTS],
+        is_output_valid: &[BoolTarget; MAX_NUM_RESULTS],
+    ) -> HashOutTarget {
+        let empty_hash = b.constant_hash(*empty_poseidon_hash());
+        let mut output_hash =
+            Identifiers::Output(*self).prefix_id_hash_circuit(b, predicate_hash.to_targets());
+        for i in 0..MAX_NUM_RESULTS {
+            let possible_output_hashes = column_hash
+                .iter()
+                .chain(once(&item_hash[i]))
+                .chain(repeat(&empty_hash))
+                .take(1 << log2_ceil(column_hash.len() + 1)) // pad up to next power of 2 with empty_hash to safely use random_access gadget
+                .cloned()
+                .collect_vec();
+            assert!(
+                possible_output_hashes.len() <= 64,
+                "too many inputs for random access gate, at most 64 are allowed"
             );
-            let mut output_hash = b.hash_n_to_hash_no_pad::<CHasher>(
-                once(hash_identifier)
-                .chain(predicate_hash.to_targets().into_iter())
-                .collect()
-            );
-            for i in 0..MAX_NUM_RESULTS {
-                let possible_output_hashes = column_hash.iter()
-                    .chain(once(&item_hash[i]))
-                    .chain(repeat(&empty_hash))
-                    .take(1 << log2_ceil(column_hash.len()+1)) // pad up to next power of 2 with empty_hash to safely use random_access gadget
-                    .cloned()
-                    .collect_vec();
-                let current_output_hash = b.random_access_hash(selector[i], possible_output_hashes);
+            let current_output_hash = b.random_access_hash(selector[i], possible_output_hashes);
 
-                let new_output_hash = b.hash_n_to_hash_no_pad::<CHasher>(
-                    output_hash.to_targets().into_iter()
+            let new_output_hash = b.hash_n_to_hash_no_pad::<CHasher>(
+                output_hash
+                    .to_targets()
+                    .into_iter()
                     .chain(once(output_ids[i]))
                     .chain(current_output_hash.to_targets().into_iter())
-                    .collect()
-                );
+                    .collect(),
+            );
 
-                // Output computational hash is updated only if there is a valid output to be
-                // computed for this slot
-                output_hash = b.select_hash(
-                    is_output_valid[i], 
-                    &new_output_hash, 
-                    &output_hash,
-                );
-            }
-
-            output_hash
+            // Output computational hash is updated only if there is a valid output to be
+            // computed for this slot
+            output_hash = b.select_hash(is_output_valid[i], &new_output_hash, &output_hash);
         }
+
+        output_hash
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 pub enum AggregationOperation {
     #[default]
-    IdOp,
     SumOp,
     MinOp,
     MaxOp,
     AvgOp,
     CountOp,
+    IdOp,
 }
 
 impl<F: RichField> ToField<F> for AggregationOperation {

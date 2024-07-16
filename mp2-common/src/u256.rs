@@ -398,7 +398,33 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
         left: &UInt256Target,
         right: &UInt256Target,
     ) -> UInt256Target {
-        let limbs = create_array(|i| U32Target(self.select(cond, left.0[i].0, right.0[i].0)));
+        // first check if `cond` is a constant
+        match self.target_as_constant(cond.target) {
+            Some(val) if val == F::ZERO => return right.clone(),
+            Some(val) if val == F::ONE => return left.clone(),
+            _ => (),
+        };
+        let limbs = create_array(|i| {
+            U32Target(
+                // check if either left or right is the 0 constant, as we can save an arithemtic operation
+                match (
+                    self.target_as_constant(left.0[i].0),
+                    self.target_as_constant(right.0[i].0),
+                ) {
+                    (Some(val), _) if val == F::ZERO =>
+                    // if left == 0, then out = (1-cond)*right
+                    {
+                        self.arithmetic(F::NEG_ONE, F::ONE, cond.target, right.0[i].0, right.0[i].0)
+                    }
+                    (_, Some(val)) if val == F::ZERO =>
+                    // if right == 0, then out = cond*left
+                    {
+                        self.mul(cond.target, left.0[i].0)
+                    }
+                    _ => self.select(cond, left.0[i].0, right.0[i].0),
+                },
+            )
+        });
         UInt256Target(limbs)
     }
 
@@ -424,11 +450,13 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
             U32Target(self.random_access(access_index, ith_limbs))
         }))
     }
-    
+
     fn constant_u256(&mut self, value: U256) -> UInt256Target {
-        let value_be_targets = value.to_fields().into_iter().map(|limb| 
-            self.constant(limb)
-        ).collect_vec();
+        let value_be_targets = value
+            .to_fields()
+            .into_iter()
+            .map(|limb| self.constant(limb))
+            .collect_vec();
         UInt256Target::from_targets(value_be_targets.as_slice())
     }
 }
