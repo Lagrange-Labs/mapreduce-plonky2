@@ -1,4 +1,3 @@
-use ethers::core::k256::elliptic_curve::rand_core::block;
 use mp2_common::{
     default_config,
     proof::{deserialize_proof, ProofWithVK},

@@ -1,14 +1,13 @@
 //! Cells tree test helper functions
 
+use alloy::primitives::U256;
 use anyhow::{Context, Result};
-use ethers::types::U256;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
     poseidon::H,
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::Fieldable,
-    utils::ToFields,
+    utils::{Fieldable, ToFields},
     F,
 };
 use plonky2::{
@@ -64,7 +63,7 @@ impl TestCell {
 
         Self {
             id: rng.gen::<u32>().to_field(),
-            value: U256(rng.gen::<[u64; 4]>()),
+            value: U256::from_limbs(rng.gen::<[u64; 4]>()),
             hash: Default::default(),
         }
     }

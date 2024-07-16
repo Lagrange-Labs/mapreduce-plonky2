@@ -1,14 +1,11 @@
 use super::rowtree::RowTree;
+use alloy::primitives::Address;
 use anyhow::{Context, Result};
-use ethers::types::{Address, U256};
 use hashbrown::HashMap;
 use mp2_test::cells_tree::CellTree;
-use rand::{
-    distributions::{Alphanumeric, DistString},
-    thread_rng,
-};
+use rand::distributions::{Alphanumeric, DistString};
 use ryhope::tree::{sbbst, TreeTopology};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 type CellTreeKey = <CellTree as TreeTopology>::Key;
 type RowTreeKey = <RowTree as TreeTopology>::Key;

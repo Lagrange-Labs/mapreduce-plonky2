@@ -403,9 +403,11 @@ mod test {
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use alloy::{
+        eips::BlockNumberOrTag, primitives::Address, providers::ProviderBuilder,
+        rpc::types::EIP1186AccountProofResponse,
+    };
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
-    use ethers::providers::{Http, Provider};
-    use ethers::types::{Address, EIP1186ProofResponse};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         log::init_logging,
@@ -516,23 +518,21 @@ mod test {
         }
     }
     use anyhow::Result;
-
+    use mp2_test::eth::get_sepolia_url;
     #[tokio::test]
     async fn test_kashish_contract_simple_slot() -> Result<()> {
         // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
-        #[cfg(feature = "ci")]
-        let url = std::env::var("CI_SEPOLIA").expect("CI_SEPOLIA env var not set");
-        #[cfg(not(feature = "ci"))]
-        let url = "https://ethereum-sepolia-rpc.publicnode.com";
+        let url = get_sepolia_url();
 
-        let provider =
-            Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
 
         // sepolia contract
         let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
         // simple storage test
         let query = ProofQuery::new_simple_slot(contract, 0);
-        let res = query.query_mpt_proof(&provider, None).await?;
+        let res = query
+            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+            .await?;
 
         // Verify both storage and state proofs by this MPT circuit.
 
@@ -546,7 +546,7 @@ mod test {
     /// Verify the storage proof from query result.
     pub(crate) fn verify_storage_proof_from_query<const DEPTH: usize, const NODE_LEN: usize>(
         query: &ProofQuery,
-        res: &EIP1186ProofResponse,
+        res: &EIP1186AccountProofResponse,
     ) -> Result<()>
     where
         [(); PAD_LEN(NODE_LEN)]:,
@@ -556,9 +556,7 @@ mod test {
         ProofQuery::verify_storage_proof(&res)?;
 
         let value = res.storage_proof[0].value;
-        let mut value_bytes = [0u8; MAPPING_LEAF_VALUE_LEN];
-        value.to_big_endian(&mut value_bytes);
-        let encoded_value = rlp::encode(&value_bytes.to_vec()).to_vec();
+        let encoded_value = rlp::encode(&value.to_be_bytes_vec()).to_vec();
         let mpt_proof = res.storage_proof[0]
             .proof
             .iter()
@@ -590,7 +588,10 @@ mod test {
     }
 
     /// Verify the state proof from query result.
-    fn verify_state_proof_from_query(query: &ProofQuery, res: &EIP1186ProofResponse) -> Result<()> {
+    fn verify_state_proof_from_query(
+        query: &ProofQuery,
+        res: &EIP1186AccountProofResponse,
+    ) -> Result<()> {
         query.verify_state_proof(&res)?;
 
         let mpt_proof = res
@@ -600,7 +601,7 @@ mod test {
             .map(|b| b.to_vec())
             .collect::<Vec<Vec<u8>>>();
         let root = keccak256(mpt_proof.last().unwrap());
-        let mpt_key = keccak256(&query.contract.0);
+        let mpt_key = keccak256(&query.contract.0.as_slice());
         println!("Account proof depth : {}", mpt_proof.len());
         println!(
             "Account proof max len node : {}",

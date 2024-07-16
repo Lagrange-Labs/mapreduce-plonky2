@@ -1,28 +1,16 @@
 //! Public inputs for Contract Extraction circuits
 
-use ethers::{
-    core::k256::elliptic_curve::Curve,
-    types::{U256, U64},
-};
+use alloy::primitives::U256;
 use mp2_common::{
-    array::Array,
-    group_hashing::EXTENSION_DEGREE,
     keccak::{OutputHash, PACKED_HASH_LEN},
-    mpt_sequential::MPTKeyWire,
     public_inputs::{PublicInputCommon, PublicInputRange},
-    rlp::MAX_KEY_NIBBLE_LEN,
-    types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
-    u256::{self, U256PubInputs, UInt256Target},
+    types::{CBuilder, GFp, CURVE_TARGET_LEN},
+    u256::{self, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
 };
-use plonky2::{
-    field::{extension::FieldExtension, types::Field},
-    iop::target::Target,
-};
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use plonky2::iop::target::Target;
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{array, iter};
+use serde::{Deserialize, Serialize};
 use verifiable_db::extraction::{ExtractionPI, ExtractionPIWrap};
 
 // Contract extraction public Inputs:
@@ -109,11 +97,8 @@ impl<'a> PublicInputs<'a, GFp> {
         WeierstrassPoint::from_fields(self.dv)
     }
     /// Get block number as U64
-    pub fn block_number(&self) -> U64 {
-        let mut bytes = vec![0u8; 32];
-        let number = U256::from(U256PubInputs::try_from(self.bn).unwrap());
-        number.to_little_endian(&mut bytes);
-        U64::from_little_endian(&bytes[..8])
+    pub fn block_number(&self) -> u64 {
+        U256::from_fields(self.bn).to()
     }
 }
 
@@ -188,19 +173,19 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     pub fn block_hash_raw(&self) -> &[T] {
-        &self.h
+        self.h
     }
 
     pub fn prev_block_hash_raw(&self) -> &[T] {
-        &self.ph
+        self.ph
     }
 
     pub fn block_number_raw(&self) -> &[T] {
-        &self.bn
+        self.bn
     }
 
     pub fn digest_metadata_raw(&self) -> &[T] {
-        &self.dm
+        self.dm
     }
 }
 
@@ -216,7 +201,7 @@ mod tests {
         utils::random_vector,
     };
     use plonky2::{
-        field::{goldilocks_field::GoldilocksField, types::Sample},
+        field::types::Sample,
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
@@ -241,7 +226,7 @@ mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_target_arr(&wires, self.exp_pi);
+            pw.set_target_arr(wires, self.exp_pi);
         }
     }
 
@@ -249,7 +234,6 @@ mod tests {
     fn test_contract_extraction_public_inputs() {
         let mut rng = thread_rng();
 
-        let o = GFp::ONE;
         // Prepare the public inputs.
         let h = random_vector::<u32>(PACKED_HASH_LEN).to_fields();
         let ph = random_vector::<u32>(PACKED_HASH_LEN).to_fields();
@@ -257,7 +241,7 @@ mod tests {
         let dv = Point::sample(&mut rng).to_weierstrass().to_fields();
         // block number as u256
         let bn = &random_vector::<u32>(8).to_fields();
-        let exp_pi = PublicInputs::new(&h, &ph, &dv, &dm, &bn);
+        let exp_pi = PublicInputs::new(&h, &ph, &dv, &dm, bn);
         let exp_pi = &exp_pi.to_vec();
         assert_eq!(exp_pi.len(), PublicInputs::<Target>::TOTAL_LEN);
 

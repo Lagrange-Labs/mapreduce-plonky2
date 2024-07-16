@@ -130,7 +130,7 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
 #[cfg(test)]
 mod test {
 
-    use ethers::types::U256;
+    use alloy::primitives::U256;
     use mp2_common::{
         group_hashing::map_to_curve_point, poseidon::empty_poseidon_hash, utils::ToFields, CHasher,
         C, D, F,
@@ -175,7 +175,7 @@ mod test {
     #[test]
     fn test_row_tree_leaf_circuit() {
         let mut rng = thread_rng();
-        let value = U256::from(rng.gen::<[u8; 32]>());
+        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let identifier = F::rand();
         let tuple = IndexTuple::new(identifier, value);
         let circuit = LeafCircuit::from(tuple.clone());

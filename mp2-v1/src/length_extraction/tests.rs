@@ -1,11 +1,11 @@
+use alloy::rpc::types::EIP1186AccountProofResponse;
 use eth_trie::Nibbles;
-use ethers::{types::EIP1186ProofResponse, utils::keccak256};
 use mp2_common::{
     eth::{left_pad, ProofQuery},
     mpt_sequential::utils::visit_proof,
     rlp::MAX_KEY_NIBBLE_LEN,
     types::GFp,
-    utils::{Endianness, Packer, ToFields},
+    utils::{keccak256, Endianness, Packer, ToFields},
     D,
 };
 use mp2_test::circuit::{prove_circuit, setup_circuit};
@@ -65,7 +65,7 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
         };
         let branch_proof = prove_circuit(&setup_branch, &branch_circuit);
         let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
-        let root: Vec<_> = keccak256(node).pack(Endianness::Little).to_fields();
+        let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
         assert_eq!(branch_pi.length(), &length);
         assert_eq!(branch_pi.root_hash_raw(), &root);
         assert_eq!(branch_pi.metadata_point(), dm);
@@ -78,7 +78,7 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
 
 /// Pudgy state extracted from mainnet live data.
 pub struct PudgyState {
-    pub eip: EIP1186ProofResponse,
+    pub eip: EIP1186AccountProofResponse,
     pub depth: usize,
     pub slot: u8,
     pub length: u32,
@@ -189,7 +189,7 @@ impl PudgyState {
     /// let query = ProofQuery::new_simple_slot(pidgy_address, slot as usize);
     /// let res = query.query_mpt_proof(&provider, None).await.unwrap();
     /// ```
-    pub fn eip1186() -> EIP1186ProofResponse {
+    pub fn eip1186() -> EIP1186AccountProofResponse {
         serde_json::from_str(r#"
 {
     "address": "0xbd3531da5cf5857e7cfaa92426877b022e612cf8",

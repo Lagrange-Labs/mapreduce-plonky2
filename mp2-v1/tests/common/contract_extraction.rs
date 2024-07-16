@@ -1,8 +1,8 @@
 //! Test utilities for Contract Extraction (C.3)
 
 use super::TestContext;
+use alloy::primitives::Address;
 use eth_trie::Nibbles;
-use ethers::prelude::Address;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     mpt_sequential::{
@@ -40,7 +40,7 @@ impl TestContext {
             }
         };
         let res = self
-            .query_mpt_proof(&query, Some(block.number.unwrap().as_u64()))
+            .query_mpt_proof(&query, Some(block.header.number.unwrap()))
             .await;
 
         // Get the storage root hash, and check it with `keccak(storage_root)`,
@@ -75,7 +75,7 @@ impl TestContext {
         let pi = PublicInputs::from_slice(&proof.proof().public_inputs);
         // Check the state and storage root hashes.
         let [exp_state_root_hash, exp_storage_root_hash] =
-            [&block.state_root.0, storage_root.as_slice()]
+            [&block.header.state_root.0, storage_root.as_slice()]
                 .map(|hash| HashOutput::try_from(hash.to_vec()).unwrap().to_fields());
         assert_eq!(pi.h_raw(), exp_state_root_hash);
         assert_eq!(pi.s_raw(), exp_storage_root_hash);
@@ -117,7 +117,7 @@ fn prove_leaf(
         let key = pi.k_raw();
         let ptr = pi.t_raw();
 
-        let mpt_key = keccak256(&contract_address.0);
+        let mpt_key = keccak256(contract_address.as_slice());
         let exp_key: Vec<_> = bytes_to_nibbles(&mpt_key)
             .into_iter()
             .map(F::from_canonical_u8)

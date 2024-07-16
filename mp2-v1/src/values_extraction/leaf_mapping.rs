@@ -184,8 +184,8 @@ mod tests {
         },
         *,
     };
+    use alloy::primitives::Address;
     use eth_trie::{Nibbles, Trie};
-    use ethers::types::Address;
     use mp2_common::{
         array::Array,
         eth::StorageSlot,
