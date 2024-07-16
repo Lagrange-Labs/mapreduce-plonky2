@@ -1,9 +1,9 @@
 use std::{array, iter::once};
 
-use ethers::types::U256;
+use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
-    serialization::{
+    array::ToField, serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     }, u256::{CircuitBuilderU256, UInt256Target}, D, F
 };
@@ -18,7 +18,7 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::simple_query_circuits::ComputationalHashIdentifiers;
+use crate::simple_query_circuits::computational_hash_ids::{AggregationOperation, Identifiers, Output};
 
 use super::universal_query_circuit::{OutputComponent, OutputComponentWires};
 
@@ -121,9 +121,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         let u256_max = b.constant_u256(U256::MAX);
         let zero = b.zero_u256();
         let min_op_identifier = b.constant(
-            F::from_canonical_usize(
-                ComputationalHashIdentifiers::MinAggOp as usize,
-            )
+            AggregationOperation::MinOp.to_field()
         );
 
         let mut output_values = vec![];
@@ -155,7 +153,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
             output_values.push(actual_output_value);
         }
 
-        let output_hash = ComputationalHashIdentifiers::output_with_aggregation_hash_circuit(
+        let output_hash = (Output::Aggregation).output_computational_hash_circuit(
             b, 
             predicate_hash, 
             column_hash, 

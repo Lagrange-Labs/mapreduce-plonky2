@@ -1,4 +1,4 @@
-use ethers::types::Address;
+use alloy::primitives::Address;
 use mp2_common::{
     group_hashing::map_to_curve_point,
     utils::{Endianness, Packer, ToFields},

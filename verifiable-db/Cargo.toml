@@ -7,9 +7,10 @@ edition = "2021"
 mp2_common = { path = "../mp2-common" }
 plonky2_crypto.workspace = true
 recursion_framework = { path = "../recursion-framework" }
+ryhope.workspace = true
 anyhow.workspace = true
 bincode.workspace = true
-ethers.workspace = true
+alloy.workspace = true
 log.workspace = true
 plonky2.workspace = true
 plonky2_ecdsa.workspace = true
@@ -19,10 +20,9 @@ serde.workspace = true
 derive_more = "0.99.18"
 itertools.workspace = true
 
-
 [dev-dependencies]
+env_logger.workspace = true
+mp2_test = { path = "../mp2-test" }
 rand.workspace = true
 serial_test.workspace = true
-mp2_test = { path = "../mp2-test" }
-env_logger.workspace = true
-
+tokio.workspace = true

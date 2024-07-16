@@ -2,7 +2,7 @@
 
 use super::public_inputs::PublicInputs;
 use crate::MAX_LEAF_NODE_LEN;
-use ethers::prelude::H160;
+use alloy::primitives::Address;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
@@ -45,7 +45,7 @@ where
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct LeafCircuit<const NODE_LEN: usize> {
-    pub(crate) contract_address: H160,
+    pub(crate) contract_address: Address,
     /// The offset of storage root hash located in RLP encoded account node
     pub(crate) storage_root_offset: usize,
     pub(crate) node: Vec<u8>,
@@ -129,7 +129,7 @@ where
             pw,
             &wires.keccak_contract_address,
             &InputData::Assigned(
-                &Vector::from_vec(&self.contract_address.0)
+                &Vector::from_vec(self.contract_address.as_slice())
                     .expect("Cannot create vector input for keccak contract address"),
             ),
         );
@@ -178,8 +178,8 @@ mod tests {
     use crate::contract_extraction::compute_metadata_digest;
 
     use super::*;
+    use alloy::primitives::Address;
     use eth_trie::Trie;
-    use ethers::types::Address;
     use mp2_common::{
         keccak::HASH_LEN,
         mpt_sequential::{mpt_key_ptr, utils::bytes_to_nibbles},
@@ -218,7 +218,7 @@ mod tests {
         const NODE_LEN: usize = 80;
 
         let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let mpt_key = keccak256(&contract_address.0);
+        let mpt_key = keccak256(contract_address.as_slice());
 
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);

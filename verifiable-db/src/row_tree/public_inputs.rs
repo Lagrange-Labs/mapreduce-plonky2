@@ -1,11 +1,10 @@
 //! Public inputs for rows trees creation circuits
 //!
-use ethers::types::U256;
+use alloy::primitives::U256;
 use mp2_common::{
-    keccak::OutputHash,
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::CURVE_TARGET_LEN,
-    u256::{self, U256PubInputs, UInt256Target},
+    u256::{self, UInt256Target},
     utils::{FromFields, FromTargets},
     D, F,
 };
@@ -55,11 +54,11 @@ impl<'a> PublicInputs<'a, F> {
     }
     /// minimum index value
     pub fn min_value_u256(&self) -> U256 {
-        U256::from(U256PubInputs::try_from(self.min).unwrap())
+        U256::from_fields(self.min)
     }
     /// maximum index value
     pub fn max_value_u256(&self) -> U256 {
-        U256::from(U256PubInputs::try_from(self.max).unwrap())
+        U256::from_fields(self.max)
     }
     /// hash of the subtree at this node
     pub fn root_hash_hashout(&self) -> HashOut<F> {
@@ -130,7 +129,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers::types::U256;
+    use alloy::primitives::U256;
     use mp2_common::{public_inputs::PublicInputCommon, utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
@@ -172,8 +171,8 @@ mod tests {
         let h = HashOut::rand().to_vec();
         let dr = Point::sample(&mut rng);
         let drw = dr.to_weierstrass().to_fields();
-        let min = U256::from(rng.gen::<[u8; 32]>()).to_fields();
-        let max = U256::from(rng.gen::<[u8; 32]>()).to_fields();
+        let min = U256::from_limbs(rng.gen::<[u64; 4]>()).to_fields();
+        let max = U256::from_limbs(rng.gen::<[u64; 4]>()).to_fields();
         let exp_pi = PublicInputs::new(&h, &drw, &min, &max);
         let exp_pi = &exp_pi.to_vec();
         assert_eq!(exp_pi.len(), PublicInputs::<Target>::TOTAL_LEN);

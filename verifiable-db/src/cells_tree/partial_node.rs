@@ -1,8 +1,8 @@
 //! Module handling the intermediate node with 1 child inside a cells tree
 
 use super::public_inputs::PublicInputs;
+use alloy::primitives::U256;
 use anyhow::Result;
-use ethers::prelude::U256;
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     poseidon::empty_poseidon_hash,
@@ -104,7 +104,7 @@ mod tests {
     use mp2_common::{
         group_hashing::{add_curve_point, map_to_curve_point},
         poseidon::H,
-        utils::{Fieldable, Packer, ToFields},
+        utils::{Fieldable, ToFields},
         C,
     };
     use mp2_test::{
@@ -112,9 +112,7 @@ mod tests {
         utils::random_vector,
     };
     use plonky2::{
-        field::types::{Field, Sample},
-        hash::hash_types::NUM_HASH_OUT_ELTS,
-        iop::witness::WitnessWrite,
+        field::types::Sample, hash::hash_types::NUM_HASH_OUT_ELTS, iop::witness::WitnessWrite,
         plonk::config::Hasher,
     };
     use plonky2_ecgfp5::curve::curve::Point;
@@ -149,7 +147,7 @@ mod tests {
         let mut rng = thread_rng();
 
         let identifier = rng.gen::<u32>().to_field();
-        let value = U256(rng.gen::<[u64; 4]>());
+        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let value_fields = value.to_fields();
 
         // Create the child public inputs.

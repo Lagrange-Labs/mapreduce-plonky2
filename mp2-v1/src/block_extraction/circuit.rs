@@ -2,23 +2,16 @@ use super::public_inputs;
 use anyhow::{ensure, Result};
 use std::array::from_fn as create_array;
 
-use std::array;
-
 use mp2_common::{
-    array::{Array, Vector, VectorWire, L32},
-    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
+    array::{Array, Vector, VectorWire},
+    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{utils::left_pad_leaf_value, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::{CBuilder, GFp, MAX_BLOCK_LEN},
-    u256::{self, CircuitBuilderU256, UInt256Target},
-    utils::{less_than, Endianness, PackerTarget, ToTargets},
-    D,
+    u256::UInt256Target,
+    utils::{Endianness, ToTargets},
 };
-use plonky2::{
-    field::types::Field,
-    iop::{target::Target, witness::PartialWitness},
-};
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use plonky2::iop::{target::Target, witness::PartialWitness};
 use serde::{Deserialize, Serialize};
 
 use public_inputs::PublicInputs;
@@ -64,9 +57,7 @@ impl BlockCircuit {
             rlp_headers.len() <= MAX_BLOCK_LEN,
             "block rlp headers too long"
         );
-        Ok(Self {
-            rlp_headers: rlp_headers,
-        })
+        Ok(Self { rlp_headers })
     }
 
     /// Build the circuit, assigning the public inputs and returning the internal wires.
@@ -132,18 +123,12 @@ impl BlockCircuit {
 
 #[cfg(test)]
 mod test {
-    use std::array::from_fn as create_array;
 
-    use ethers::{
-        providers::{Http, Middleware, Provider},
-        types::{BlockNumber, U256},
-        utils::keccak256,
+    use alloy::{
+        eips::BlockNumberOrTag,
+        providers::{Provider, ProviderBuilder},
     };
-    use mp2_common::{
-        eth::{left_pad, left_pad32, left_pad_generic},
-        u256,
-        utils::ToFields,
-    };
+    use mp2_common::{eth::left_pad_generic, u256, utils::ToFields};
 
     use mp2_common::{
         eth::BlockUtil,
@@ -156,11 +141,7 @@ mod test {
         eth::get_sepolia_url,
     };
 
-    use plonky2::{
-        field::types::Field, iop::witness::PartialWitness, plonk::config::PoseidonGoldilocksConfig,
-    };
-
-    use super::MAX_BLOCK_NUMBER_LEN;
+    use plonky2::{iop::witness::PartialWitness, plonk::config::PoseidonGoldilocksConfig};
 
     use super::{public_inputs::PublicInputs, BlockCircuit, BlockWires};
     use anyhow::Result;
@@ -170,30 +151,30 @@ mod test {
     #[tokio::test]
     async fn prove_and_verify_block_extraction_circuit() -> Result<()> {
         let url = get_sepolia_url();
-        let provider = Provider::<Http>::try_from(url).unwrap();
-        let block_number = BlockNumber::Latest;
-        let block = provider.get_block(block_number).await.unwrap().unwrap();
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let block_number = BlockNumberOrTag::Latest;
+        let block = provider
+            .get_block_by_number(block_number, true)
+            .await
+            .unwrap()
+            .unwrap();
 
         let rlp_headers = block.rlp();
 
         let prev_block_hash = block
+            .header
             .parent_hash
             .0
-            .to_vec()
             .pack(Endianness::Little)
             .to_fields();
         let block_hash = block.block_hash().pack(Endianness::Little).to_fields();
         let state_root = block
+            .header
             .state_root
             .0
-            .to_vec()
             .pack(Endianness::Little)
             .to_fields();
-        let mut block_number_buff = [0u8; 8];
-        block
-            .number
-            .unwrap()
-            .to_big_endian(&mut block_number_buff[..]);
+        let block_number_buff = block.header.number.unwrap().to_be_bytes();
         const NUM_LIMBS: usize = u256::NUM_LIMBS;
         let block_number =
             left_pad_generic::<u32, NUM_LIMBS>(&block_number_buff.pack(Endianness::Big))
@@ -206,6 +187,16 @@ mod test {
 
         assert_eq!(pi.prev_block_hash_raw(), &prev_block_hash);
         assert_eq!(pi.block_hash_raw(), &block_hash);
+        assert_eq!(
+            pi.block_hash_raw(),
+            block
+                .header
+                .hash
+                .unwrap()
+                .0
+                .pack(Endianness::Little)
+                .to_fields()
+        );
         assert_eq!(pi.state_root_raw(), &state_root);
         assert_eq!(pi.block_number_raw(), &block_number);
         Ok(())

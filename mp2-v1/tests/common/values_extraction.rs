@@ -1,7 +1,9 @@
 //! Test utilities for Values Extraction (C.1)
 
+use std::str::FromStr;
+
 use super::{storage_trie::TestStorageTrie, TestContext};
-use ethers::prelude::Address;
+use alloy::primitives::Address;
 use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
@@ -11,7 +13,6 @@ use mp2_common::{
 };
 use mp2_v1::values_extraction::public_inputs::PublicInputs;
 use plonky2::field::types::Field;
-use std::str::FromStr;
 
 type MappingKey = Vec<u8>;
 
@@ -35,7 +36,7 @@ impl TestContext {
         }
 
         info!("Prove the test storage trie including the simple slots {slots:?}");
-        let proof_value = trie.prove_value(&contract_address, &self.params());
+        let proof_value = trie.prove_value(&contract_address, self.params());
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof_value.proof().public_inputs);

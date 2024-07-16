@@ -1,9 +1,9 @@
-use ethers::types::U256;
+use alloy::primitives::U256;
 use mp2_common::{
     keccak::PACKED_HASH_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::CURVE_TARGET_LEN,
-    u256::{self, U256PubInputs, UInt256Target},
+    u256::{self, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
     F,
 };

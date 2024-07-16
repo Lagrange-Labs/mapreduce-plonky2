@@ -8,8 +8,8 @@ use super::{
     public_inputs::PublicInputs,
 };
 use crate::api::CellNode;
+use alloy::primitives::U256;
 use anyhow::Result;
-use ethers::prelude::U256;
 use mp2_common::{
     default_config,
     proof::{ProofInputSerialized, ProofWithVK},
@@ -36,17 +36,17 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     /// Create a circuit input for proving a leaf node.
-    pub fn new_leaf(identifier: F, value: U256) -> Self {
+    pub fn leaf(identifier: F, value: U256) -> Self {
         CircuitInput::Leaf(LeafCircuit { identifier, value })
     }
 
     /// Create a circuit input for proving a full node of 2 children.
-    pub fn new_full_node(identifier: F, value: U256, child_proofs: [Vec<u8>; 2]) -> Self {
+    pub fn full(identifier: F, value: U256, child_proofs: [Vec<u8>; 2]) -> Self {
         CircuitInput::FullNode(new_child_input(identifier, value, child_proofs.to_vec()))
     }
 
     /// Create a circuit input for proving a partial node of 1 child.
-    pub fn new_partial_node(identifier: F, value: U256, child_proof: Vec<u8>) -> Self {
+    pub fn partial(identifier: F, value: U256, child_proof: Vec<u8>) -> Self {
         CircuitInput::PartialNode(new_child_input(identifier, value, vec![child_proof]))
     }
 }
@@ -187,7 +187,7 @@ mod tests {
     use mp2_common::{
         group_hashing::{add_curve_point, map_to_curve_point},
         poseidon::{empty_poseidon_hash, H},
-        utils::{Endianness, Fieldable, ToFields},
+        utils::{Fieldable, ToFields},
     };
     use plonky2::plonk::config::Hasher;
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
@@ -218,9 +218,9 @@ mod tests {
         // Build the circuit input.
         let mut rng = thread_rng();
         let identifier = rng.gen::<u32>().to_field();
-        let value = U256(rng.gen::<[u64; 4]>());
+        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let value_fields = value.to_fields();
-        let input = CircuitInput::new_leaf(identifier, value);
+        let input = CircuitInput::leaf(identifier, value);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -296,9 +296,9 @@ mod tests {
         // Build the circuit input.
         let mut rng = thread_rng();
         let identifier = rng.gen::<u32>().to_field();
-        let value = U256(rng.gen::<[u64; 4]>());
+        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let packed_value = value.to_fields();
-        let input = CircuitInput::new_full_node(identifier, value, child_proofs);
+        let input = CircuitInput::full(identifier, value, child_proofs);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -350,9 +350,9 @@ mod tests {
         // Build the circuit input.
         let mut rng = thread_rng();
         let identifier = rng.gen::<u32>().to_field();
-        let value = U256(rng.gen::<[u64; 4]>());
+        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let packed_value = value.to_fields();
-        let input = CircuitInput::new_partial_node(identifier, value, child_proof);
+        let input = CircuitInput::partial(identifier, value, child_proof);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
