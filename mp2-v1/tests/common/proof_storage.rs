@@ -1,4 +1,4 @@
-use super::{celltree::CellTree, index_tree::IndexTree, rowtree::RowTree};
+use super::{index_tree::IndexTree, rowtree::RowTree};
 use alloy::primitives::Address;
 use anyhow::{Context, Result};
 use hashbrown::HashMap;
