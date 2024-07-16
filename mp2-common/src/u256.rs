@@ -737,7 +737,6 @@ impl<F: SerializableRichField<D>, const D: usize> SimpleGenerator<F, D> for UInt
         let dividend = witness.get_u256_target(&self.dividend);
         let divisor = witness.get_u256_target(&self.divisor);
         let is_div = witness.get_bool_target(self.is_div);
-        let is_div = witness.get_bool_target(self.is_div);
 
         let (quotient, remainder) = if is_div {
             if divisor.is_zero() {
