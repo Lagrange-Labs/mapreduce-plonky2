@@ -1,6 +1,7 @@
 use alloy::primitives::U256;
 use anyhow::*;
 use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
+use mp2_test::cells_tree::TestCell as Cell;
 use mp2_v1::api::{self, CircuitInput};
 use plonky2::{
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
@@ -23,7 +24,6 @@ use serde::{Deserialize, Serialize};
 use crate::common::row_tree_proof_to_hash;
 
 use super::{
-    celltree::Cell,
     proof_storage::{
         BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier, TableID,
     },
@@ -88,7 +88,7 @@ impl NodePayload for Row {
                     .chain(self.min.to_fields().into_iter())
                     .chain(self.max.to_fields().into_iter())
                     // P(id)
-                    .chain(std::iter::once(self.secondary_index().identifier))
+                    .chain(std::iter::once(self.secondary_index().id))
                     // P(value)
                     .chain(self.secondary_index().value.to_fields().into_iter())
                     // P(cell_tree_hash)
@@ -111,7 +111,7 @@ impl NodePayload for Row {
                     // P(max)
                     .chain(self.max.to_fields().into_iter())
                     // P(id)
-                    .chain(std::iter::once(self.secondary_index().identifier))
+                    .chain(std::iter::once(self.secondary_index().id))
                     // P(value)
                     .chain(self.secondary_index().value.to_fields().into_iter())
                     // P(cell_tree_hash)
@@ -134,7 +134,7 @@ impl NodePayload for Row {
                     // P(max)
                     .chain(self.max.to_fields().into_iter())
                     // P(id)
-                    .chain(std::iter::once(self.secondary_index().identifier))
+                    .chain(std::iter::once(self.secondary_index().id))
                     // P(value)
                     .chain(self.secondary_index().value.to_fields().into_iter())
                     // P(cell_tree_hash)
@@ -155,7 +155,7 @@ impl NodePayload for Row {
                     // P(max)
                     .chain(self.max.to_fields().into_iter())
                     // P(id)
-                    .chain(std::iter::once(self.secondary_index().identifier))
+                    .chain(std::iter::once(self.secondary_index().id))
                     // P(value)
                     .chain(self.secondary_index().value.to_fields().into_iter())
                     // P(cell_tree_hash)
@@ -209,7 +209,7 @@ impl TestContext {
             let (context, row) = t.fetch_with_context(&k);
             // NOTE: the sec. index. is assumed to be in the first position
             // Sec. index identifier
-            let identifier = row.secondary_index().identifier;
+            let id = row.secondary_index().id;
             // Sec. index value
             let value = row.secondary_index().value;
 
@@ -219,7 +219,7 @@ impl TestContext {
             let proof = if context.is_leaf() {
                 // Prove a leaf
                 let inputs = CircuitInput::RowsTree(
-                    verifiable_db::row_tree::CircuitInput::leaf(identifier, value, cell_tree_proof)
+                    verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
                         .unwrap(),
                 );
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
@@ -244,7 +244,7 @@ impl TestContext {
                     .expect("should find cells tree root proof");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::partial(
-                        identifier,
+                        id,
                         value,
                         context.left.is_some(),
                         child_proof,
@@ -278,7 +278,7 @@ impl TestContext {
                     .expect("UT guarantees proving in order");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::full(
-                        identifier,
+                        id,
                         value,
                         left_proof,
                         right_proof,

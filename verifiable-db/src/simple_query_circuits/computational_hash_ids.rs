@@ -7,7 +7,7 @@ use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     array::{Targetable, ToField},
-    poseidon::empty_poseidon_hash,
+    poseidon::{empty_poseidon_hash, H},
     types::CBuilder,
     u256::UInt256Target,
     utils::{ToFields, ToTargets},
@@ -47,6 +47,18 @@ impl Identifiers {
                 Identifiers::Extraction(e) => *e as usize,
                 Identifiers::Operations(o) => *o as usize,
             }
+    }
+    pub(crate) fn prefix_id_hash(&self, elements: Vec<F>) -> HashOut<F> {
+        let inputs: Vec<_> = once(self.to_field()).chain(elements).collect();
+        H::hash_no_pad(&inputs)
+    }
+    pub(crate) fn prefix_id_hash_circuit(
+        &self,
+        b: &mut CBuilder,
+        elements: Vec<Target>,
+    ) -> HashOutTarget {
+        let inputs = once(b.constant(self.to_field())).chain(elements).collect();
+        b.hash_n_to_hash_no_pad::<CHasher>(inputs)
     }
 }
 

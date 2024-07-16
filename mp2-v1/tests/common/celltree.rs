@@ -1,6 +1,7 @@
 use alloy::primitives::{Address, U256};
 use anyhow::*;
 use mp2_common::{eth::ProofQuery, poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
+use mp2_test::cells_tree::{build_cell_tree, CellTree, MerkleCellTree, TestCell as Cell};
 use mp2_v1::{api, api::CircuitInput, values_extraction::compute_leaf_single_id};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
@@ -25,66 +26,6 @@ use super::{
     rowtree::Row,
 };
 
-/// A cell in one of the zkDB virtual tables.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Cell {
-    /// The unique identifier of the cell, derived from the contract it comes
-    /// from and its slot in its storage.
-    pub identifier: F,
-    /// The value stored in the cell.
-    pub value: U256,
-    /// The hash of this node in the tree
-    pub hash: HashOut<F>,
-}
-impl NodePayload for Cell {
-    fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
-        // P(L || R || ID || value)
-        let fs =
-        // Take 2 elts (# of children), filling empty slots with P("")
-                children
-                .into_iter()
-                .map(|c| c.map(|x| x.hash).unwrap_or_else(|| *empty_poseidon_hash()))
-                .flat_map(|x| x.elements.into_iter())
-                // ID
-                .chain(std::iter::once(self.identifier))
-                // Value
-                .chain(self.value.to_fields())
-                .collect::<Vec<_>>();
-
-        self.hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&fs);
-    }
-}
-impl std::fmt::Debug for Cell {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "C:{} := {}", self.identifier, self.value)
-    }
-}
-
-pub type CellTree = sbbst::Tree;
-type CellStorage = InMemory<CellTree, Cell>;
-pub type MerkleCellTree = MerkleTreeKvDb<CellTree, Cell, CellStorage>;
-
-// NOTE: this is not really aync for now, but will be in the future when Ryhope
-// turns async.
-pub async fn build_cell_tree(
-    row: &[Cell],
-) -> Result<(MerkleCellTree, UpdateTree<<CellTree as TreeTopology>::Key>)> {
-    let mut cell_tree = MerkleCellTree::create((0, 0), ()).unwrap();
-    let update_tree = cell_tree
-        .in_transaction(|t| {
-            for (i, cell) in row.iter().enumerate() {
-                // SBBST starts at 1, not 0. Note though this index is not important
-                // since at no point we are looking up value per index in the cells
-                // tree we always look at the entire row at the row tree level.
-                t.store(i + 1, cell.to_owned())?;
-            }
-            Ok(())
-        })
-        .context("while building tree")?;
-
-    Ok((cell_tree, update_tree))
-}
-
 impl TestContext {
     /// Fetch the values and build the identifiers from a list of slots to
     /// generate [`Cell`]s that will then be encoded as a [`MerkleCellTree`].
@@ -92,7 +33,7 @@ impl TestContext {
         let mut cells = Vec::new();
         for slot in slots {
             let query = ProofQuery::new_simple_slot(*contract_address, *slot as usize);
-            let identifier = GoldilocksField::from_canonical_u64(compute_leaf_single_id(
+            let id = GoldilocksField::from_canonical_u64(compute_leaf_single_id(
                 *slot,
                 contract_address,
             ));
@@ -102,7 +43,7 @@ impl TestContext {
                 .storage_proof[0]
                 .value;
             cells.push(Cell {
-                identifier,
+                id,
                 value,
                 // we don't know yet its hash because the tree is not constructed
                 // this will be done by the Aggregate trait
@@ -136,7 +77,7 @@ impl TestContext {
             let proof = if context.is_leaf() {
                 // Prove a leaf
                 let inputs = CircuitInput::CellsTree(
-                    verifiable_db::cells_tree::CircuitInput::leaf(cell.identifier, cell.value),
+                    verifiable_db::cells_tree::CircuitInput::leaf(cell.id, cell.value),
                 );
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.right.is_none() {
@@ -151,9 +92,7 @@ impl TestContext {
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::partial(
-                        cell.identifier,
-                        cell.value,
-                        left_proof,
+                        cell.id, cell.value, left_proof,
                     ));
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
@@ -177,7 +116,7 @@ impl TestContext {
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::full(
-                        cell.identifier,
+                        cell.id,
                         cell.value,
                         [left_proof, right_proof],
                     ));

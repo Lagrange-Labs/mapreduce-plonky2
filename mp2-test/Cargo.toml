@@ -4,15 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+alloy.workspace = true
 anyhow.workspace = true
 env_logger.workspace = true
 eth_trie.workspace = true
+ethers.workspace = true
 hashbrown.workspace = true
 log.workspace = true
 plonky2.workspace = true
 plonky2_ecgfp5.workspace = true
 rand.workspace = true
-alloy.workspace = true
+ryhope.workspace = true
+serde.workspace = true
 
 recursion_framework = { path = "../recursion-framework" }
 mp2_common = { path = "../mp2-common" }

@@ -2,6 +2,7 @@ use super::{celltree::CellTree, index_tree::IndexTree, rowtree::RowTree};
 use alloy::primitives::Address;
 use anyhow::{Context, Result};
 use hashbrown::HashMap;
+use mp2_test::cells_tree::CellTree;
 use rand::distributions::{Alphanumeric, DistString};
 use ryhope::tree::{sbbst, TreeTopology};
 use serde::{Deserialize, Serialize};
