@@ -93,7 +93,7 @@ pub fn build_initial_index_tree(
     // should always be one anyway since we iterate over blocks one by one
     // but in the case of general index we might create multiple nodes
     // at the same time
-    let mut index_tree = MerkleIndexTree::create((block_usize, 1), ()).unwrap();
+    let mut index_tree = MerkleIndexTree::create((block_usize - 1, 0), ()).unwrap();
     let update_tree = index_tree
         .in_transaction(|t| {
             t.store(index.value.to(), index.clone())?;
