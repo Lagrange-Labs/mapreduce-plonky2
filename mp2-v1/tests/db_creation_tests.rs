@@ -1,11 +1,20 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
+use std::str::FromStr;
+
+use alloy::{
+    eips::BlockNumberOrTag,
+    primitives::Address,
+    providers::{Provider, ProviderBuilder},
+};
+use anyhow::Result;
 use common::{proof_storage::TableID, TestCase, TestContext};
-use ethers::types::Address;
 use log::info;
-use mp2_common::proof::{serialize_proof, ProofWithVK};
-use std::{collections::HashMap, str::FromStr};
+use mp2_common::{
+    eth::BlockUtil,
+    proof::{serialize_proof, ProofWithVK},
+};
 use test_log::test;
 
 pub(crate) mod common;
@@ -25,13 +34,15 @@ async fn prove_scalar_values<P: common::proof_storage::ProofStorage>(
     info!("Generated Values Extraction (C.1) proof for single variables");
 
     // final extraction for single variables
-    let _ = ctx.prove_final_extraction(
-        contract_proof.serialize().unwrap(),
-        single_values_proof.serialize().unwrap(),
-        block_proof.to_vec(),
-        false,
-        None,
-    );
+    let _ = ctx
+        .prove_final_extraction(
+            contract_proof.serialize().unwrap(),
+            single_values_proof.serialize().unwrap(),
+            block_proof.to_vec(),
+            false,
+            None,
+        )
+        .await;
     info!("Generated Final Extraction (C.5.1) proof for single variables");
 
     let row = ctx

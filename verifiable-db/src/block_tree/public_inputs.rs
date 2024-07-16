@@ -2,12 +2,12 @@
 
 use std::array::from_fn as create_array;
 
-use ethers::types::U256;
+use alloy::primitives::U256;
 use mp2_common::{
     keccak::PACKED_HASH_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, CURVE_TARGET_LEN},
-    u256::{self, U256PubInputs, UInt256Target},
+    u256::{self, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
     F,
 };
@@ -105,7 +105,7 @@ impl<'a> PublicInputs<'a, F> {
     }
 
     pub fn min_block_number(&self) -> anyhow::Result<U256> {
-        Ok(U256::from(U256PubInputs::try_from(self.min)?))
+        Ok(U256::from_fields(self.min))
     }
 }
 
@@ -221,20 +221,12 @@ mod tests {
     use crate::block_tree::tests::random_block_index_pi;
 
     use super::*;
-    use ethers::prelude::U256;
     use mp2_common::{C, D, F};
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
     };
-    use plonky2::{
-        field::types::Sample,
-        iop::{
-            target::Target,
-            witness::{PartialWitness, WitnessWrite},
-        },
-    };
-    use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
 
     #[derive(Clone, Debug)]
@@ -261,7 +253,7 @@ mod tests {
     fn test_block_insertion_public_inputs() {
         let mut rng = thread_rng();
 
-        let [min, max, block_number] = [0; 3].map(|_| U256(rng.gen::<[u64; 4]>()));
+        let [min, max, block_number] = [0; 3].map(|_| U256::from_limbs(rng.gen::<[u64; 4]>()));
         let exp_pi = random_block_index_pi(&mut rng, min, max, block_number).to_vec();
 
         let test_circuit = TestPICircuit { exp_pi: &exp_pi };

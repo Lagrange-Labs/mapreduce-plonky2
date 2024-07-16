@@ -1,4 +1,4 @@
-use ethers::types::U256;
+use alloy::primitives::U256;
 use mp2_common::{
     default_config,
     keccak::PACKED_HASH_LEN,
@@ -183,7 +183,7 @@ impl DummyCircuit {
     pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &DummyWires) {
         // safety check, since we need to do -1 on it. It is anyway checked in the  main circuit
         // but easier to debug it already now.
-        assert!(self.z0 != U256::zero());
+        assert!(self.z0 != U256::ZERO);
         pw.set_hash_target(wires.md_set_digest, self.metadata_hash);
         pw.set_u256_target(&wires.z0, self.z0);
         pw.set_target_arr(&wires.block_hash, &self.block_hash);
@@ -213,17 +213,16 @@ impl CircuitLogicWires<F, D, 0> for DummyWires {
 
 #[cfg(test)]
 mod test {
-    use anyhow::Result;
-    use std::ops::Sub;
 
-    use ethers::types::U256;
+    use anyhow::Result;
+
+    use alloy::primitives::U256;
     use mp2_common::{
         group_hashing::weierstrass_to_point, poseidon::empty_poseidon_hash, utils::ToFields, C, D,
         F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
-        field::types::Field,
         hash::hash_types::HashOut,
         iop::{target::Target, witness::WitnessWrite},
     };
@@ -272,14 +271,15 @@ mod test {
     #[test]
     fn ivc_circuit() -> Result<()> {
         // block_pi
-        let [min, max, block_number] = [0; 3].map(|_| U256(thread_rng().gen::<[u64; 4]>()));
+        let [min, max, block_number] =
+            [0; 3].map(|_| U256::from_limbs(thread_rng().gen::<[u64; 4]>()));
         let minf: Vec<F> = min.to_fields();
         let block_pi = random_block_index_pi(&mut thread_rng(), min, max, block_number);
         let block_pi = crate::block_tree::PublicInputs::from_slice(&block_pi);
         // previous ivc_pi
         let z0 = min;
         // previous block number
-        let zi = block_number.sub(U256::one());
+        let zi = block_number - U256::from(1);
         let (z0f, zif) = (z0.to_fields(), zi.to_fields());
         // First case where we  construct a ivc pi which is not designated as the dummy first one
         let prev_pi = IVCPI::new(
@@ -292,7 +292,7 @@ mod test {
             // since this is the previous proof, we put the previous blockchain hash
             block_pi.prev_block_hash,
         );
-        let mut prev_pi_field = prev_pi.to_vec();
+        let prev_pi_field = prev_pi.to_vec();
         assert_eq!(prev_pi_field.len(), crate::ivc::NUM_IO);
         let tc = TestCircuit {
             prev_pi: prev_pi_field.to_vec(),

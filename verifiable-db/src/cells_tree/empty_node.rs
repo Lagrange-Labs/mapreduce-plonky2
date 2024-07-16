@@ -59,7 +59,7 @@ mod tests {
     use super::*;
     use mp2_common::C;
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
+    use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
 
     impl UserCircuit<F, D> for EmptyNodeCircuit {
         type Wires = EmptyNodeWires;
@@ -68,7 +68,7 @@ mod tests {
             EmptyNodeCircuit::build(b)
         }
 
-        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {}
+        fn prove(&self, _pw: &mut PartialWitness<F>, _wires: &Self::Wires) {}
     }
 
     #[test]

@@ -7,12 +7,12 @@ use super::{
     public_inputs::PublicInputs,
 };
 use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
+use alloy::primitives::Address;
 use anyhow::Result;
-use ethers::types::Address;
 use mp2_common::{
     default_config,
     proof::{ProofInputSerialized, ProofWithVK},
-    utils::{find_index_subvector, Packer},
+    utils::find_index_subvector,
     C, D, F,
 };
 use recursion_framework::{
@@ -177,15 +177,14 @@ impl PublicParameters {
 mod tests {
     use super::*;
     use crate::contract_extraction::compute_metadata_digest;
+    use alloy::{eips::BlockNumberOrTag, providers::ProviderBuilder};
     use eth_trie::Nibbles;
-    use ethers::prelude::{Http, Provider};
     use mp2_common::{
         eth::ProofQuery,
-        group_hashing::map_to_curve_point,
         mpt_sequential::{
             mpt_key_ptr, utils::bytes_to_nibbles, MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE,
         },
-        utils::{keccak256, Endianness, ToFields},
+        utils::{keccak256, Endianness, Packer, ToFields},
     };
     use mp2_test::eth::get_mainnet_url;
     use plonky2::field::types::Field;
@@ -201,10 +200,12 @@ mod tests {
     async fn test_contract_extraction_api() -> Result<()> {
         // Query the MPT proof from RPC.
         let rpc_url = get_mainnet_url();
-        let provider = Provider::<Http>::try_from(rpc_url).unwrap();
+        let provider = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
         let contract_address = Address::from_str(PUDGY_PENGUINS_ADDRESS)?;
         let query = ProofQuery::new_simple_slot(contract_address, 0);
-        let res = query.query_mpt_proof(&provider, None).await?;
+        let res = query
+            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+            .await?;
 
         // Get the storage root, it should be same with `keccak(storage_root)`,
         // but we don't prove the storage root here.
@@ -240,7 +241,7 @@ mod tests {
             let key = pi.k;
             let ptr = pi.t;
 
-            let mpt_key = keccak256(&contract_address.0);
+            let mpt_key = keccak256(contract_address.as_slice());
             let exp_key: Vec<_> = bytes_to_nibbles(&mpt_key)
                 .into_iter()
                 .map(F::from_canonical_u8)

@@ -1,6 +1,6 @@
 use super::{cells::build_cells_tree, COLUMN_INDEX_NUM};
 use crate::simple_query_circuits::computational_hash_ids::{Extraction, Identifiers};
-use ethers::types::U256;
+use alloy::primitives::U256;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
     serialization::{
@@ -203,7 +203,7 @@ mod tests {
             let (mut column_ids, mut column_values): (Vec<_>, Vec<_>) =
                 columns.into_iter().map(|col| (col.id, col.value)).unzip();
             column_ids.resize(MAX_NUM_COLUMNS, F::ZERO);
-            column_values.resize(MAX_NUM_COLUMNS, U256::zero());
+            column_values.resize(MAX_NUM_COLUMNS, U256::ZERO);
             let column_ids = column_ids.try_into().unwrap();
             let column_values = column_values.try_into().unwrap();
             let inputs = ColumnExtractionInputs {

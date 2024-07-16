@@ -66,16 +66,16 @@ impl PublicParameters {
 
 #[cfg(test)]
 mod test {
-    use anyhow::Result;
-    use ethers::{
-        providers::{Http, Middleware, Provider},
-        types::{BlockNumber, U256, U64},
+    use alloy::{
+        eips::BlockNumberOrTag,
+        primitives::U256,
+        providers::{Provider, ProviderBuilder},
     };
+    use anyhow::Result;
     use mp2_common::{
         eth::BlockUtil,
         proof::deserialize_proof,
-        u256::U256PubInputs,
-        utils::{Endianness, Packer, ToFields},
+        utils::{Endianness, FromFields, Packer, ToFields},
         C, D, F,
     };
     use mp2_test::eth::get_sepolia_url;
@@ -85,9 +85,13 @@ mod test {
     async fn test_api() -> Result<()> {
         let params = PublicParameters::build();
         let url = get_sepolia_url();
-        let provider = Provider::<Http>::try_from(url).unwrap();
-        let block_number = BlockNumber::Latest;
-        let block = provider.get_block(block_number).await.unwrap().unwrap();
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let block_number = BlockNumberOrTag::Latest;
+        let block = provider
+            .get_block_by_number(block_number, true)
+            .await
+            .unwrap()
+            .unwrap();
 
         let rlp_headers = super::CircuitInput::from_block_header(block.rlp());
         let proof = params.generate_proof(rlp_headers)?;
@@ -96,32 +100,37 @@ mod test {
         let pi = PublicInputs::from_slice(&proof.public_inputs);
         assert_eq!(
             pi.block_hash_raw(),
+            block.block_hash().pack(Endianness::Little).to_fields()
+        );
+        // sanity check to know we generate the hash the same way as what is included in headers
+        assert_eq!(
+            pi.block_hash_raw(),
             block
+                .header
                 .hash
                 .unwrap()
-                .as_bytes()
+                // XXX unclear why that fails when one removes the ".0" since we access things
+                // directly underneath when calling pack directly or using as_slice, both fail.
+                // XXX unclear why it is needed here but not for previous hash...
+                .0
                 .pack(Endianness::Little)
                 .to_fields(),
         );
         assert_eq!(
             pi.prev_block_hash_raw(),
             block
+                .header
                 .parent_hash
-                .as_bytes()
                 .pack(Endianness::Little)
                 .to_fields(),
         );
         assert_eq!(
-            U256::from(U256PubInputs::try_from(pi.block_number_raw())?),
-            U256::from(block.number.unwrap().as_ref()[0])
+            U256::from_fields(pi.block_number_raw()),
+            U256::from(block.header.number.unwrap())
         );
         assert_eq!(
             pi.state_root_raw(),
-            block
-                .state_root
-                .as_bytes()
-                .pack(Endianness::Little)
-                .to_fields(),
+            block.header.state_root.pack(Endianness::Little).to_fields(),
         );
         Ok(())
     }

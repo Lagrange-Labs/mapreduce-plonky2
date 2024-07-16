@@ -1,6 +1,6 @@
 use std::{fmt::Debug, iter::once};
 
-use ethers::types::U256;
+use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     poseidon::empty_poseidon_hash,

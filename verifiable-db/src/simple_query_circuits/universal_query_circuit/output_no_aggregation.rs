@@ -14,7 +14,6 @@ use mp2_common::{
     CHasher, F,
 };
 use plonky2::{
-    field::types::Field,
     hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
@@ -246,7 +245,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers::types::U256;
+    use alloy::primitives::U256;
     use mp2_common::{
         group_hashing::map_to_curve_point, poseidon::H, u256::WitnessWriteU256, utils::ToFields, C,
         D,
@@ -256,7 +255,7 @@ mod tests {
         circuit::{run_circuit, UserCircuit},
     };
     use plonky2::{
-        field::types::{PrimeField64, Sample},
+        field::types::{Field, PrimeField64, Sample},
         hash::hash_types::HashOut,
         plonk::config::Hasher,
     };
@@ -308,9 +307,9 @@ mod tests {
         fn sample(predicate_value: bool) -> Self {
             let mut rng = thread_rng();
 
-            let column_values = array::from_fn(|_| U256(rng.gen::<[u64; 4]>()));
+            let column_values = array::from_fn(|_| U256::from_limbs(rng.gen::<[u64; 4]>()));
             let column_hash = array::from_fn(|_| HashOut::sample(&mut rng));
-            let item_values = array::from_fn(|_| U256(rng.gen::<[u64; 4]>()));
+            let item_values = array::from_fn(|_| U256::from_limbs(rng.gen::<[u64; 4]>()));
             let item_hash = array::from_fn(|_| HashOut::sample(&mut rng));
             let predicate_hash = HashOut::sample(&mut rng);
 
@@ -386,7 +385,7 @@ mod tests {
             c: &Circuit<MAX_NUM_RESULTS>,
             output: &TestOutput<NUM_COLUMNS, MAX_NUM_RESULTS>,
         ) -> Self {
-            let u256_zero = U256::zero();
+            let u256_zero = U256::ZERO;
             let curve_zero = Point::NEUTRAL;
             let empty_hash = empty_poseidon_hash();
 
