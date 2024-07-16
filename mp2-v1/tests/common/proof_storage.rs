@@ -1,7 +1,8 @@
-use super::{celltree::CellTree, rowtree::RowTree};
+use super::rowtree::RowTree;
 use alloy::primitives::Address;
 use anyhow::{Context, Result};
 use hashbrown::HashMap;
+use mp2_test::cells_tree::CellTree;
 use rand::distributions::{Alphanumeric, DistString};
 use ryhope::tree::{sbbst, TreeTopology};
 use serde::{Deserialize, Serialize};
