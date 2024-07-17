@@ -25,15 +25,6 @@ jobs:
           profile: minimal
           toolchain: nightly-2024-05-17
           override: true
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - run: rustup component add rustfmt
       - uses: actions-rs/cargo@v1
         with:
@@ -54,15 +45,6 @@ jobs:
           profile: minimal
           toolchain: nightly-2024-05-17
           override: true
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SSH_RYHOPE }}
@@ -82,15 +64,6 @@ jobs:
         run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "cargo install --git https://github.com/foundry-rs/foundry --rev c4a984f forge anvil"
       - name: Put cargo in PATH
         run: echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SSH_RYHOPE }}
