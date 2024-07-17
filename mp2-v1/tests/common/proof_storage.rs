@@ -1,4 +1,7 @@
-use std::hash::{Hash, Hasher};
+use std::{
+    fmt::Display,
+    hash::{Hash, Hasher},
+};
 
 use super::{
     cases::{SingleValuesExtractionArgs, TableSourceSlot},
@@ -19,7 +22,7 @@ type IndexTreeKey = <IndexTree as TreeTopology>::Key;
 
 type ContractKey = (Address, BlockPrimaryIndex);
 
-#[derive(Clone, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TableID(String);
 
 impl TableID {

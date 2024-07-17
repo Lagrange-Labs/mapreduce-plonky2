@@ -1,6 +1,6 @@
 use alloy::primitives::U256;
 use anyhow::{Context, Result};
-use log::info;
+use log::{debug, info};
 use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
 use mp2_v1::{api, values_extraction::compute_block_id};
 use plonky2::{
@@ -122,6 +122,10 @@ impl<P: ProofStorage> TestContext<P> {
                 .get_proof(&ProofKey::Row(node.row_tree_proof_id.clone()))
                 .expect("should find row proof");
             // extraction proof is done once per block, so its key can just be block based
+            debug!(
+                "trying to LOAD the extraction proof from {table_id:?} and {}",
+                node.row_tree_proof_id.primary
+            );
             let extraction_proof = self
                 .storage
                 .get_proof(&ProofKey::Extraction((

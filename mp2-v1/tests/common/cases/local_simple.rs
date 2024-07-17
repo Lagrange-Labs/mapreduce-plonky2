@@ -2,7 +2,7 @@
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
 use anyhow::Result;
-use log::info;
+use log::{debug, info};
 use mp2_test::cells_tree::TestCell as Cell;
 use mp2_v1::values_extraction::compute_leaf_single_id;
 use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
@@ -146,7 +146,7 @@ impl TestCase {
                     )
                     .await;
                 ctx.storage
-                    .store_proof(contract_proof_key, contract_proof.clone());
+                    .store_proof(contract_proof_key, contract_proof.clone())?;
                 info!(
                     "Generated Contract Extraction (C.3) proof for block number {}",
                     bn
@@ -168,7 +168,7 @@ impl TestCase {
             }
             Err(_) => {
                 let proof = ctx.prove_block_extraction().await.unwrap();
-                ctx.storage.store_proof(block_proof_key, proof.clone());
+                ctx.storage.store_proof(block_proof_key, proof.clone())?;
                 info!(
                     "Generated Block Extraction (C.4) proof for block number {}",
                     bn
@@ -196,7 +196,7 @@ impl TestCase {
                     }
                 };
                 // final extraction for single variables combining the different proofs generated before
-                let final_key = ProofKey::Extraction((table_id, bn as BlockPrimaryIndex));
+                let final_key = ProofKey::Extraction((table_id.clone(), bn as BlockPrimaryIndex));
                 match ctx.storage.get_proof(&final_key) {
                     Ok(proof) => proof,
                     Err(_) => {
@@ -211,6 +211,7 @@ impl TestCase {
                             .await
                             .unwrap();
                         ctx.storage.store_proof(final_key, proof.clone())?;
+                        debug!("SAVING final extraction key from {table_id:?} and {bn}");
                         info!("Generated Final Extraction (C.5.1) proof for single variables");
                         proof
                     }
