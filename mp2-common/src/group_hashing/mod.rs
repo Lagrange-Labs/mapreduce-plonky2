@@ -50,9 +50,10 @@ pub trait CircuitBuilderGroupHashing {
     /// Convert the field targets to a curve target.
     fn map_to_curve_point(&mut self, targets: &[Target]) -> CurveTarget;
 
-    /// Require that two points must be equal, and none is infinity.
-    /// Unlike the [curve_eq](https://github.com/Lagrange-Labs/plonky2-ecgfp5/blob/d5a6a0b7dfee4ab69d8c1c315f9f4407502f07eb/src/gadgets/curve.rs#L83)
-    /// function, this constrains none of the points is infinity.
+    /// Require that two points must be strictly equal. It contrains the
+    /// coodinates and infinity flag must be equal, and could also be used to
+    /// check for the zero point which infinity flag is true as
+    /// [NEUTRAL](https://github.com/Lagrange-Labs/plonky2-ecgfp5/blob/d5a6a0b7dfee4ab69d8c1c315f9f4407502f07eb/src/curve/curve.rs#L70).
     fn connect_curve_points(&mut self, a: CurveTarget, b: CurveTarget);
 }
 
@@ -81,10 +82,8 @@ where
         self.connect_quintic_ext(ax, bx);
         self.connect_quintic_ext(ay, by);
 
-        // Constrain none is infinity.
-        let ffalse = self._false();
-        self.connect(a_is_inf.target, ffalse.target);
-        self.connect(b_is_inf.target, ffalse.target);
+        // Constrain the infinity flags are equal.
+        self.connect(a_is_inf.target, b_is_inf.target);
     }
 }
 

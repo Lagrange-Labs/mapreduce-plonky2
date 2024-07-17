@@ -102,7 +102,7 @@ impl NodePayload for TestCell {
 
 // NOTE: this is not really aync for now, but will be in the future when Ryhope
 // turns async.
-pub async fn build_cell_tree(
+pub fn build_cell_tree(
     row: &[TestCell],
 ) -> Result<(MerkleCellTree, UpdateTree<<CellTree as TreeTopology>::Key>)> {
     let mut cell_tree = MerkleCellTree::create((0, 0), ()).unwrap();
@@ -122,8 +122,8 @@ pub async fn build_cell_tree(
 }
 
 /// Compute the expected root hash of constructed cell tree.
-pub async fn compute_cells_tree_hash(cells: &[TestCell]) -> HashOut<F> {
-    let cell_tree = build_cell_tree(cells).await.unwrap().0;
+pub fn compute_cells_tree_hash(cells: &[TestCell]) -> HashOut<F> {
+    let cell_tree = build_cell_tree(cells).unwrap().0;
 
     cell_tree.root_data().unwrap().hash
 }

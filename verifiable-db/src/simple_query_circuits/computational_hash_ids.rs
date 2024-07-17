@@ -27,6 +27,8 @@ use plonky2::{
 pub enum Identifiers {
     Extraction(Extraction),
     Operations(Operation),
+    Output(Output),
+    AggregationOperations(AggregationOperation),
     // TODO
 }
 
@@ -38,6 +40,13 @@ impl Identifiers {
                 Identifiers::Extraction(Extraction::default()).offset()
                     + variant_count::<Extraction>()
             }
+            &Identifiers::Output(_) => {
+                Identifiers::Operations(Operation::default()).offset()
+                    + variant_count::<Operation>()
+            }
+            &Identifiers::AggregationOperations(_) => {
+                Identifiers::Output(Output::default()).offset() + variant_count::<Output>()
+            }
         }
     }
     pub fn position(&self) -> usize {
@@ -46,6 +55,8 @@ impl Identifiers {
             + match self {
                 Identifiers::Extraction(e) => *e as usize,
                 Identifiers::Operations(o) => *o as usize,
+                Identifiers::Output(o) => *o as usize,
+                Identifiers::AggregationOperations(ao) => *ao as usize,
             }
     }
     pub(crate) fn prefix_id_hash(&self, elements: Vec<F>) -> HashOut<F> {
@@ -208,4 +219,18 @@ impl Operation {
                 .collect(),
         )
     }
+}
+
+#[derive(Clone, Debug, Copy, Default)]
+pub enum Output {
+    #[default]
+    Aggregation,
+    NoAggregation,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+pub enum AggregationOperation {
+    #[default]
+    IdOp,
+    SumOp,
 }
