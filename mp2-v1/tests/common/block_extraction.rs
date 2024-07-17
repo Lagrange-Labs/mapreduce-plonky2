@@ -3,9 +3,8 @@ use anyhow::Result;
 use mp2_common::{
     eth::{left_pad_generic, BlockUtil},
     proof::deserialize_proof,
-    types::HashOutput,
     u256,
-    utils::{keccak256, Endianness, Packer, ToFields},
+    utils::{Endianness, Packer, ToFields},
     C, D, F,
 };
 use mp2_v1::{api, block_extraction};

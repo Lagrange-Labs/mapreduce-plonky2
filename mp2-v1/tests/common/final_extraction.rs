@@ -1,8 +1,4 @@
-use mp2_common::{
-    proof::ProofWithVK,
-    types::HashOutput,
-    utils::{Packer, ToFields},
-};
+use mp2_common::{proof::ProofWithVK, types::HashOutput, utils::ToFields};
 use mp2_v1::{
     api,
     final_extraction::{CircuitInput, PublicInputs},
@@ -36,7 +32,6 @@ impl TestContext {
         )?)?;
 
         let block = self.query_block().await;
-        let pis = PublicInputs::from_slice(proof.proof().public_inputs.as_slice());
 
         let block_hash = HashOutput::try_from(block.header.hash.unwrap().0).unwrap();
         let prev_block_hash = HashOutput::try_from(block.header.parent_hash.0).unwrap();

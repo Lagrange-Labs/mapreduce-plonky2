@@ -112,10 +112,7 @@ mod tests {
     use plonky2::{
         field::types::Field,
         iop::{target::Target, witness::WitnessWrite},
-        plonk::{
-            circuit_builder::CircuitBuilder,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
-        },
+        plonk::circuit_builder::CircuitBuilder,
     };
     use rand::{thread_rng, Rng};
     use std::sync::Arc;

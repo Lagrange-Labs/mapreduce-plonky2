@@ -81,7 +81,7 @@ fn build_cells_subtree_at_key(
     fake_storage: &MerkleTree,
 ) -> HashOutTarget {
     let empty_hash = b.constant_hash(*empty_poseidon_hash());
-    let node_context = fake_storage.node_context(&key).unwrap();
+    let node_context = fake_storage.node_context(key).unwrap();
     let children = node_context
         .iter_children()
         .map(|child| {
@@ -91,7 +91,7 @@ fn build_cells_subtree_at_key(
                     input_values,
                     input_ids,
                     is_real_value,
-                    &child_key,
+                    child_key,
                     fake_storage,
                 )
             } else {
@@ -117,7 +117,7 @@ fn build_cells_subtree_at_key(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{poseidon::H, C, D, F};
+    use mp2_common::{C, D, F};
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell, TestCellTarget},
         circuit::{run_circuit, UserCircuit},
@@ -125,7 +125,6 @@ mod tests {
     use plonky2::{
         hash::hash_types::HashOut,
         iop::witness::{PartialWitness, WitnessWrite},
-        plonk::config::Hasher,
     };
     use std::array;
 

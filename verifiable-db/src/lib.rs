@@ -4,17 +4,6 @@
 /// Module for circuits for simple queries
 pub mod simple_query_circuits;
 
-use anyhow::Result;
-use plonky2::{
-    field::types::Field,
-    iop::witness::{PartialWitness, WitnessWrite},
-    plonk::{
-        circuit_builder::CircuitBuilder,
-        circuit_data::CircuitConfig,
-        config::{GenericConfig, PoseidonGoldilocksConfig},
-    },
-};
-
 pub mod api;
 pub mod block_tree;
 pub mod cells_tree;

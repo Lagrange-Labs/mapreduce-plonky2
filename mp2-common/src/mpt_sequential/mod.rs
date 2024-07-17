@@ -401,13 +401,12 @@ where
 mod test {
     use std::array::from_fn as create_array;
     use std::str::FromStr;
-    use std::sync::Arc;
 
     use alloy::{
         eips::BlockNumberOrTag, primitives::Address, providers::ProviderBuilder,
         rpc::types::EIP1186AccountProofResponse,
     };
-    use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
+    use eth_trie::{Nibbles, Trie};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         log::init_logging,
@@ -429,12 +428,11 @@ mod test {
         },
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
-    use rand::{thread_rng, Rng, RngCore};
+    use rand::{thread_rng, RngCore};
 
     use crate::eth::ProofQuery;
     use crate::keccak::{HASH_LEN, PACKED_HASH_LEN};
     use crate::rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN};
-    use crate::types::MAPPING_LEAF_VALUE_LEN;
     use crate::utils::{Endianness, PackerTarget};
     use crate::{
         array::Array,

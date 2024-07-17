@@ -167,7 +167,7 @@ where
             k: &new_prefix,
             dv: values_digest,
             dm: metadata_digest,
-            n: n,
+            n,
         }
         .register(b);
 
@@ -246,10 +246,8 @@ mod tests {
     use plonky2::{
         field::types::Field,
         iop::{target::Target, witness::WitnessWrite},
-        plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
     };
     use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{thread_rng, Rng};
     use std::{array, iter, sync::Arc};
 
     #[derive(Clone, Debug, Default)]
@@ -338,7 +336,7 @@ mod tests {
         is_simple_aggregation: bool,
     ) where
         [(); PAD_LEN(NODE_LEN)]:,
-        [(); { N_REAL + N_PADDING }]:,
+        [(); N_REAL + N_PADDING]:,
     {
         let compute_key_ptr = |leaf: &[u8]| {
             let tuple: Vec<Vec<u8>> = rlp::decode_list(leaf);

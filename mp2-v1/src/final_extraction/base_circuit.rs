@@ -80,7 +80,7 @@ impl BaseCircuit {
         }
     }
 
-    pub(crate) fn assign(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &BaseWires) {}
+    pub(crate) fn assign(&self, _pw: &mut PartialWitness<GoldilocksField>, _wires: &BaseWires) {}
 }
 
 /// This parameter struct is not intended to be built on its own

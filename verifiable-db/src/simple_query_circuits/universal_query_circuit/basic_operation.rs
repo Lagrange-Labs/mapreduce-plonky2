@@ -6,7 +6,6 @@ use mp2_common::{
     D, F,
 };
 use plonky2::{
-    field::types::Field,
     hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
@@ -17,9 +16,7 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use anyhow::{Error, Result};
-
-use crate::simple_query_circuits::computational_hash_ids::{Identifiers, Operation};
+use crate::simple_query_circuits::computational_hash_ids::Operation;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for basic operation component

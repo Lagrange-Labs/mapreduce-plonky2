@@ -310,7 +310,7 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
     /// Return the first output value as a `UInt256Target`
     pub fn first_value_as_u256_target(&self) -> UInt256Target {
         let targets = Self::truncate_slice_to_u256_raw(self.to_values_raw());
-        UInt256Target::from_targets(&targets)
+        UInt256Target::from_targets(targets)
     }
 
     /// Return the `UInt256` targets for the last `S-1` values
@@ -318,7 +318,7 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
         let targets = &self.to_values_raw()[CURVE_TARGET_LEN..];
         targets
             .chunks(NUM_LIMBS)
-            .map(|chunk| UInt256Target::from_targets(chunk))
+            .map(UInt256Target::from_targets)
             .collect_vec()
             .try_into()
             .unwrap()

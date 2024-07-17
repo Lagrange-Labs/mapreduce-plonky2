@@ -13,7 +13,6 @@ use plonky2::{
     field::{extension::FieldExtension, types::Field},
     iop::target::Target,
 };
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
@@ -160,13 +159,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use mp2_common::{
-        array::Array,
-        group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
-        keccak::PACKED_HASH_LEN,
-        mpt_sequential::MPTKeyWire,
-        C, D, F,
-    };
+    use mp2_common::{mpt_sequential::MPTKeyWire, C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
@@ -177,12 +170,8 @@ pub(crate) mod tests {
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
-        plonk::{
-            circuit_builder::CircuitBuilder,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
-        },
+        plonk::circuit_builder::CircuitBuilder,
     };
-    use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use plonky2_ecgfp5::{
         curve::curve::Point,
         gadgets::curve::{CurveTarget, PartialWitnessCurve},

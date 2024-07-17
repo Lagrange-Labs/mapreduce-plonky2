@@ -1,11 +1,10 @@
 //! Module containing several structure definitions for Ethereum related operations
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
 use alloy::{
-    consensus::Transaction,
     eips::BlockNumberOrTag,
-    primitives::{Address, B128, B256, U256},
-    providers::{Provider, ProviderBuilder, RootProvider},
-    rlp::{BufMut, Encodable as AlloyEncodable, EMPTY_LIST_CODE},
+    primitives::{Address, B256},
+    providers::{Provider, RootProvider},
+    rlp::Encodable as AlloyEncodable,
     rpc::types::{Block, EIP1186AccountProofResponse},
     transports::Transport,
 };
@@ -13,11 +12,8 @@ use anyhow::{bail, Result};
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethereum_types::H256;
 use log::warn;
-use num::traits::ToBytes;
-use rlp::{Encodable, Rlp, RlpStream};
+use rlp::Rlp;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "ci")]
-use std::env;
 use std::{array::from_fn as create_array, sync::Arc};
 
 use crate::{mpt_sequential::utils::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
@@ -143,10 +139,10 @@ impl StorageSlot {
         }
     }
     pub fn mpt_key_vec(&self) -> Vec<u8> {
-        keccak256(&self.location().as_slice())
+        keccak256(self.location().as_slice())
     }
     pub fn mpt_key(&self) -> [u8; 32] {
-        let hash = keccak256(&self.location().as_slice());
+        let hash = keccak256(self.location().as_slice());
         create_array(|i| hash[i])
     }
     pub fn mpt_nibbles(&self) -> [u8; MAX_KEY_NIBBLE_LEN] {
@@ -301,20 +297,15 @@ impl BlockUtil for alloy::consensus::Header {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use std::{env, str::FromStr};
 
-    use alloy::{
-        primitives::{Bytes, B256},
-        rpc::types::{Block, BlockTransactionsKind},
-    };
+    use alloy::{primitives::Bytes, providers::ProviderBuilder, rpc::types::BlockTransactionsKind};
     use ethereum_types::U64;
     use ethers::{
         providers::{Http, Middleware},
         types::BlockNumber,
     };
     use hashbrown::HashMap;
-    use rand::{thread_rng, Rng};
 
     use crate::{
         types::MAX_BLOCK_LEN,

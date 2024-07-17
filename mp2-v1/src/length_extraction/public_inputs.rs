@@ -2,18 +2,14 @@ use core::{array, iter};
 
 use mp2_common::{
     array::Array,
-    group_hashing::EXTENSION_DEGREE,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::MPTKeyWire,
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
-    types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
-    utils::{FromFields, FromTargets, ToTargets},
+    types::{CBuilder, GFp, CURVE_TARGET_LEN},
+    utils::{FromFields, FromTargets},
 };
-use plonky2::{
-    field::{extension::FieldExtension, types::Field},
-    iop::target::Target,
-};
+use plonky2::iop::target::Target;
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 
@@ -144,7 +140,7 @@ impl<'a, T> PublicInputs<'a, T> {
 
     /// Pointer in the MPT key.
     pub const fn mpt_key_pointer(&self) -> &T {
-        &self.t
+        self.t
     }
 
     /// Length of the dynamic length variable.
@@ -156,6 +152,6 @@ impl<'a, T> PublicInputs<'a, T> {
 impl<'a> PublicInputs<'a, GFp> {
     /// Creates a [WeierstrassPoint] from the metadata.
     pub fn metadata_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(&self.dm)
+        WeierstrassPoint::from_fields(self.dm)
     }
 }

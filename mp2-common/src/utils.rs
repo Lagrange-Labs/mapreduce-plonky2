@@ -1,11 +1,10 @@
 use std::array::from_fn as create_array;
 
-use alloy::primitives::{B256, U256};
+use alloy::primitives::B256;
 use anyhow::Result;
 use itertools::Itertools;
+use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::field::types::Field64;
-use plonky2::field::{extension::Extendable, types::Field};
 use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField};
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::iop::target::{BoolTarget, Target};
@@ -15,22 +14,12 @@ use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher};
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
-use plonky2_ecgfp5::{
-    curve::curve::Point,
-    gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget},
-};
-use rand::{thread_rng, Rng};
+use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
 use sha3::Digest;
 use sha3::Keccak256;
 
 use crate::array::Targetable;
-use crate::mpt_sequential::Circuit;
-use crate::u256::NUM_LIMBS;
-use crate::{
-    group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing, EXTENSION_DEGREE},
-    types::{GFp, HashOutput},
-    ProofTuple,
-};
+use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
@@ -256,7 +245,7 @@ pub fn read_le_u32(input: &mut &[u8]) -> u32 {
 /// Convert a list of elements to a curve point.
 pub fn convert_slice_to_curve_point<T: Copy>(s: &[T]) -> ([T; 5], [T; 5], T) {
     // 5 F for each coordinates + 1 bool flag
-    assert!(s.len() >= 2 * EXTENSION_DEGREE + 1);
+    assert!(s.len() > 2 * EXTENSION_DEGREE);
 
     let x = s[..EXTENSION_DEGREE].try_into().unwrap();
     let y = s[EXTENSION_DEGREE..2 * EXTENSION_DEGREE]
@@ -339,7 +328,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SelectHashBuilder for Circuit
             first_hash
                 .elements
                 .into_iter()
-                .zip(second_hash.elements.into_iter())
+                .zip(second_hash.elements)
                 .map(|(first, second)| self.select(cond, first, second))
                 .collect_vec(),
         )
@@ -534,7 +523,7 @@ impl<F: PackableRichField> Packer for &[F] {
 
     fn pack(&self, endianness: Endianness) -> Vec<Self::T> {
         // convert field elements to u8
-        self.into_iter()
+        self.iter()
             .map(|f| f.to_canonical_u64() as u8)
             .collect_vec()
             .pack(endianness)
@@ -618,7 +607,7 @@ impl<F: RichField + Extendable<D>, const D: usize> PackerTarget<F, D, U32Target>
                         // target has been multiplied by TWO_POWER_24, the second one by TWO_POWER_16,
                         // the third one by TWO_POWER_8 while the last one is never multiplied to a
                         // constant
-                        U32Target(chunk.into_iter().fold(zero, |res, el| {
+                        U32Target(chunk.iter().fold(zero, |res, el| {
                             b.mul_const_add(F::from_canonical_usize(TWO_POWER_8), res, *el)
                         }))
                     })

@@ -181,7 +181,7 @@ where
         // value of the primary indexed column for the current row
         let index_value = &column_extraction_wires.input_wires.column_values[0];
         // compute hash of the node in case the current row is stored in a leaf of the rows tree
-        let empty_hash = b.constant_hash(empty_poseidon_hash().clone());
+        let empty_hash = b.constant_hash(*empty_poseidon_hash());
         let leaf_hash_inputs = empty_hash
             .elements
             .iter()
@@ -284,7 +284,7 @@ where
         let output_component_wires = T::build(
             b,
             column_extraction_wires.input_wires.column_values.as_slice(),
-            &column_extraction_wires.column_hash.as_slice(),
+            column_extraction_wires.column_hash.as_slice(),
             item_values,
             item_hash,
             &predicate_value,
@@ -315,13 +315,13 @@ where
         output_values.extend_from_slice(
             &output_component_wires
                 .get_other_output_values()
-                .into_iter()
+                .iter()
                 .flat_map(|t| t.to_targets())
                 .collect_vec(),
         );
         PublicInputs::<Target, MAX_NUM_RESULTS>::new(
             &tree_hash.to_targets(),
-            &output_values.as_slice(),
+            output_values.as_slice(),
             &[count],
             output_component_wires.get_ops_ids(),
             &index_value.to_targets(),
