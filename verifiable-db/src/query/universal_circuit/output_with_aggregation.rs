@@ -21,9 +21,7 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::query::computational_hash_ids::{
-    AggregationOperation, Identifiers, Output,
-};
+use crate::query::computational_hash_ids::{AggregationOperation, Identifiers, Output};
 
 use super::universal_query_circuit::{OutputComponent, OutputComponentWires};
 

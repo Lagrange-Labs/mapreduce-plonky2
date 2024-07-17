@@ -1,6 +1,4 @@
-use crate::query::computational_hash_ids::{
-    AggregationOperation, Identifiers, Output,
-};
+use crate::query::computational_hash_ids::{AggregationOperation, Identifiers, Output};
 use mp2_common::{
     array::ToField,
     group_hashing::CircuitBuilderGroupHashing,
@@ -182,11 +180,12 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
 
         // Compute the computational hash representing the accumulation of the items.
         let output_hash = Output::NoAggregation.output_computational_hash_circuit(
-            b, predicate_hash, 
-            column_hash, 
-            item_hash.try_into().unwrap(), 
-            &input_wires.selector, 
-            &input_wires.ids, 
+            b,
+            predicate_hash,
+            column_hash,
+            item_hash.try_into().unwrap(),
+            &input_wires.selector,
+            &input_wires.ids,
             &input_wires.is_output_valid,
         );
 
@@ -368,9 +367,11 @@ mod tests {
             let u256_zero = U256::ZERO;
             let curve_zero = Point::NEUTRAL;
             let empty_hash = empty_poseidon_hash();
-            let selectors = c.selector.iter().map(|s|
-                s.to_canonical_u64() as usize
-            ).collect_vec();
+            let selectors = c
+                .selector
+                .iter()
+                .map(|s| s.to_canonical_u64() as usize)
+                .collect_vec();
 
             // Construct the output items to be returned.
             let item_index = output.column_values.len();
@@ -420,11 +421,11 @@ mod tests {
 
             // Compute the computational output hash.
             let output_hash = Output::NoAggregation.output_computational_hash(
-                &output.predicate_hash, 
-                &output.column_hash, 
-                &output.item_hash, 
-                &selectors, 
-                &c.ids, 
+                &output.predicate_hash,
+                &output.column_hash,
+                &output.item_hash,
+                &selectors,
+                &c.ids,
                 c.valid_num_outputs,
             );
 
