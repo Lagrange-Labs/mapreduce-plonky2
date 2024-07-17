@@ -2,7 +2,7 @@
 #![feature(generic_const_exprs)]
 #![feature(variant_count)]
 /// Module for circuits for simple queries
-pub mod simple_query_circuits;
+pub mod query;
 
 use anyhow::Result;
 use plonky2::{
