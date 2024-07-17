@@ -3,18 +3,13 @@
 #![feature(generic_const_exprs)]
 use std::str::FromStr;
 
-use alloy::{
-    eips::BlockNumberOrTag,
-    primitives::Address,
-    providers::{Provider, ProviderBuilder},
+use alloy::primitives::Address;
+use common::{
+    proof_storage::{ProofKey, TableID},
+    TestCase, TestContext,
 };
-use anyhow::Result;
-use common::{proof_storage::TableID, TestCase, TestContext};
 use log::info;
-use mp2_common::{
-    eth::BlockUtil,
-    proof::{serialize_proof, ProofWithVK},
-};
+use mp2_common::proof::{serialize_proof, ProofWithVK};
 use test_log::test;
 
 pub(crate) mod common;
@@ -34,7 +29,7 @@ async fn prove_scalar_values<P: common::proof_storage::ProofStorage>(
     info!("Generated Values Extraction (C.1) proof for single variables");
 
     // final extraction for single variables
-    let _ = ctx
+    let extraction_proof = ctx
         .prove_final_extraction(
             contract_proof.serialize().unwrap(),
             single_values_proof.serialize().unwrap(),
@@ -42,7 +37,14 @@ async fn prove_scalar_values<P: common::proof_storage::ProofStorage>(
             false,
             None,
         )
-        .await;
+        .await
+        .unwrap();
+    storage
+        .store_proof(
+            ProofKey::Extraction(ctx.block_number.as_number().unwrap() as usize),
+            extraction_proof.serialize().unwrap(),
+        )
+        .unwrap();
     info!("Generated Final Extraction (C.5.1) proof for single variables");
 
     let row = ctx
@@ -54,10 +56,13 @@ async fn prove_scalar_values<P: common::proof_storage::ProofStorage>(
             storage,
         )
         .await;
-
+    info!("Generated final CELLs tree proofs for single variables");
     // In the case of the scalars slots, there is a single node in the row tree.
     let rows = vec![row];
-    let _row_tree_proof = ctx.build_and_prove_rowtree(&table_id, &rows, storage).await;
+    let row_tree_proof_key = ctx.build_and_prove_rowtree(&table_id, &rows, storage).await;
+    info!("Generated final ROWs tree proofs for single variables");
+    let _ = ctx.build_and_prove_index_tree(&table_id, storage, &row_tree_proof_key);
+    info!("Generated final BLOCK tree proofs for single variables");
 }
 
 async fn prove_mappings_with_length(
