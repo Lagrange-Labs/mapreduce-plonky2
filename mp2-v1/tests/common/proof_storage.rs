@@ -1,14 +1,12 @@
 use std::{
-    fmt::Display,
-    hash::{Hash, Hasher},
+    hash::{DefaultHasher, Hash, Hasher},
     path::Path,
 };
 
 use super::{index_tree::IndexTree, rowtree::RowTree};
 use alloy::primitives::Address;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use mp2_test::cells_tree::CellTree;
-use rand::distributions::{Alphanumeric, DistString};
 use ryhope::tree::{sbbst, TreeTopology};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -86,6 +84,17 @@ pub enum ProofKey {
     ValueExtraction((TableID, BlockPrimaryIndex)),
 }
 
+impl ProofKey {
+    // For the moment, using simple hash scheme from Rust. probably should move to something
+    // stronger for collision resistance but given the low amount of proofs we generate in this
+    // test, it should not be a problem
+    pub fn compute_hash(&self) -> u64 {
+        let mut s = DefaultHasher::new();
+        self.hash(&mut s);
+        s.finish()
+    }
+}
+
 //  manually insert a prefix to make sure all keys are unique
 impl Hash for ProofKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -146,7 +155,12 @@ pub struct KeyValueDB {
 }
 
 const BUCKET_NAME: &str = "v1_proof_store_test";
+pub const ENV_PROOF_STORE: &str = "PROOF_STORE";
 impl KeyValueDB {
+    pub fn new_from_env(default: &str) -> Result<Self> {
+        let path = std::env::var(ENV_PROOF_STORE).unwrap_or(default.to_string());
+        Self::new(Path::new(&path))
+    }
     pub fn new(path: &Path) -> Result<Self> {
         let db = DB::open(path)?;
         let tx = db.tx(true)?;
@@ -166,10 +180,24 @@ impl KeyValueDB {
 
 impl ProofStorage for KeyValueDB {
     fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()> {
-        todo!()
+        let store_key = key.compute_hash();
+        let tx = self.db.tx(true)?;
+        let bucket = tx.get_bucket(BUCKET_NAME)?;
+        bucket.put(store_key.to_be_bytes(), proof)?;
+        tx.commit()?;
+        Ok(())
     }
 
     fn get_proof(&self, key: &ProofKey) -> Result<Vec<u8>> {
-        todo!()
+        let store_key = key.compute_hash();
+        let tx = self.db.tx(true)?;
+        let bucket = tx.get_bucket(BUCKET_NAME)?;
+        let d = bucket
+            .get(store_key.to_be_bytes())
+            .context("proof with key {key:?} not found")?;
+        match d {
+            Data::Bucket(_) => bail!("bucket found while required proofs"),
+            Data::KeyValue(kv) => Ok(kv.value().to_vec()),
+        }
     }
 }

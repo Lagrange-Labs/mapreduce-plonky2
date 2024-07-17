@@ -232,8 +232,7 @@ impl TestCase {
             TableSourceSlot::Mapping(_) => unimplemented!("to come"),
             TableSourceSlot::SingleValues(ref args) => {
                 for slot in args.slots.iter() {
-                    let query =
-                        ProofQuery::new_simple_slot(self.contract_address.clone(), *slot as usize);
+                    let query = ProofQuery::new_simple_slot(self.contract_address, *slot as usize);
                     let id = GoldilocksField::from_canonical_u64(compute_leaf_single_id(
                         *slot,
                         &self.contract_address,

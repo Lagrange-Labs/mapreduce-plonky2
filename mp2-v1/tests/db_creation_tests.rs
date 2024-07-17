@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use common::{
     context,
-    proof_storage::{MemoryProofStorage, ProofKey, TableID},
+    proof_storage::{KeyValueDB, MemoryProofStorage, ProofKey, TableID},
     TestCase, TestContext,
 };
 use log::info;
@@ -64,7 +64,8 @@ async fn db_creation_integrated_tests() -> Result<()> {
     // let ctx = &mut TestContext::new_mainet();
     let _ = env_logger::try_init();
     // Create the test context for the local node.
-    let storage = MemoryProofStorage::default();
+    //let storage = MemoryProofStorage::default();
+    let storage = KeyValueDB::new_from_env("test_proofs.store")?;
     let mut ctx = context::new_local_chain(storage).await;
     info!("Building params");
     // Build the parameters.
