@@ -7,6 +7,7 @@ use mp2_common::{
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
+    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
     D, F,
 };
@@ -17,7 +18,6 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
 };
 use serde::{Deserialize, Serialize};
 
@@ -110,7 +110,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
     type Wires = Wires<MAX_NUM_RESULTS>;
 
     fn build(
-        b: &mut CircuitBuilder<F, D>,
+        b: &mut CBuilder,
         column_values: &[UInt256Target],
         column_hash: &[HashOutTarget],
         item_values: &[UInt256Target],

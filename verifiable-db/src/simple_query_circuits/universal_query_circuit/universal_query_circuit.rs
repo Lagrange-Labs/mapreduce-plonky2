@@ -6,6 +6,7 @@ use mp2_common::{
     poseidon::empty_poseidon_hash,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
+    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{SelectHashBuilder, ToTargets},
     CHasher, D, F,
@@ -72,7 +73,7 @@ pub(crate) trait OutputComponent {
     type Wires: OutputComponentWires;
 
     fn build(
-        b: &mut CircuitBuilder<F, D>,
+        b: &mut CBuilder,
         column_values: &[UInt256Target],
         column_hash: &[HashOutTarget],
         item_values: &[UInt256Target],

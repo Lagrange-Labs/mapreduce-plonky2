@@ -126,7 +126,7 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
         right: &UInt256Target,
     ) -> UInt256Target;
 
-    /// Return the element in the `inputs` array with position `access_index`  
+    /// Return the element in the `inputs` array with position `access_index`
     fn random_access_u256(
         &mut self,
         access_index: Target,
