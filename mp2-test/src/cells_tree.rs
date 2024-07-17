@@ -93,7 +93,7 @@ impl NodePayload for TestCell {
             // ID
             .chain(iter::once(self.id))
             // Value
-            .chain(self.value.to_fields().into_iter())
+            .chain(self.value.to_fields())
             .collect();
 
         self.hash = H::hash_no_pad(&inputs);

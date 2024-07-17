@@ -120,7 +120,7 @@ where
             k: &wires.key,
             dv: values_digest,
             dm: metadata_digest,
-            n: n,
+            n,
         }
         .register(b);
 

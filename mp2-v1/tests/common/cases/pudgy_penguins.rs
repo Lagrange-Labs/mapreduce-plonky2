@@ -5,7 +5,6 @@ use super::{
     SingleValuesExtractionArgs, TestCase,
 };
 use mp2_common::eth::{left_pad32, StorageSlot};
-use mp2_test::eth::get_mainnet_url;
 
 /// Pudgy Penguins contract address
 const PUDGY_PENGUINS_ADDRESS: &str = "0xbd3531da5cf5857e7cfaa92426877b022e612cf8";

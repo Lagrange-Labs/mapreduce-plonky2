@@ -79,7 +79,7 @@ pub fn compute_leaf_mapping_values_digest(
     assert!(value.len() <= MAPPING_LEAF_VALUE_LEN);
 
     let [packed_key, packed_value] =
-        [mapping_key, value].map(|arr| left_pad32(&arr).pack(Endianness::Big).to_fields());
+        [mapping_key, value].map(|arr| left_pad32(arr).pack(Endianness::Big).to_fields());
 
     let inputs: Vec<_> = iter::once(GFp::from_canonical_u64(key_id))
         .chain(packed_key)
@@ -105,7 +105,7 @@ pub fn compute_leaf_mapping_values_digest(
 pub fn compute_leaf_single_values_digest(id: u64, value: &[u8]) -> Digest {
     assert!(value.len() <= MAPPING_LEAF_VALUE_LEN);
 
-    let packed_value = left_pad32(&value).pack(Endianness::Big).to_fields();
+    let packed_value = left_pad32(value).pack(Endianness::Big).to_fields();
 
     let inputs: Vec<_> = iter::once(GFp::from_canonical_u64(id))
         .chain(packed_value)

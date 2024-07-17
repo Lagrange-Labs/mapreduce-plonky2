@@ -1,23 +1,12 @@
-use alloy::primitives::{Address, U256};
-use anyhow::*;
-use mp2_common::{eth::ProofQuery, poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
+use alloy::primitives::Address;
+use mp2_common::eth::ProofQuery;
 use mp2_test::cells_tree::{build_cell_tree, CellTree, MerkleCellTree, TestCell as Cell};
 use mp2_v1::{api, api::CircuitInput, values_extraction::compute_leaf_single_id};
-use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
-    plonk::config::Hasher,
-};
+use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
 use ryhope::{
-    storage::{
-        memory::InMemory,
-        updatetree::{Next, UpdateTree},
-        EpochKvStorage, TreeTransactionalStorage,
-    },
-    tree::{sbbst, TreeTopology},
-    MerkleTreeKvDb, NodePayload,
+    storage::updatetree::{Next, UpdateTree},
+    tree::TreeTopology,
 };
-use serde::{Deserialize, Serialize};
 
 use crate::common::{cell_tree_proof_to_hash, rowtree::RowTreeKey, TestContext};
 

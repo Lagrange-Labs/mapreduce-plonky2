@@ -2,8 +2,6 @@
 
 use crate::{
     array::Array,
-    rlp::short_string_len,
-    types::VALUE_LEN,
     utils::{find_index_subvector, keccak256, less_than},
 };
 use eth_trie::Nibbles;

@@ -9,7 +9,7 @@ use alloy::{
     contract::private::{Network, Provider, Transport},
     primitives::{Address, Address as EthAddress, U256},
 };
-use mp2_common::eth::{left_pad32, StorageSlot};
+use mp2_common::eth::StorageSlot;
 use rand::{thread_rng, Rng};
 use std::str::FromStr;
 

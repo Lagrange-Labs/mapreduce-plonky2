@@ -1,11 +1,8 @@
 use crate::{
     serialization::{deserialize_long_array, serialize_long_array},
-    utils::{
-        less_than_or_equal_to_unsafe, range_check_optimized, Endianness, PackerTarget, ToTargets,
-    },
+    utils::{less_than_or_equal_to_unsafe, range_check_optimized, Endianness, PackerTarget},
 };
 use anyhow::{anyhow, Result};
-use core::num;
 use plonky2::{
     field::{extension::Extendable, types::Field},
     hash::hash_types::RichField,
@@ -14,7 +11,6 @@ use plonky2::{
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
-    util::log2_ceil,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use serde::{Deserialize, Serialize};

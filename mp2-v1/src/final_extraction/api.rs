@@ -1,12 +1,5 @@
-use mp2_common::{
-    default_config,
-    proof::{deserialize_proof, ProofWithVK},
-    C, D, F,
-};
-use plonky2::{
-    iop::target::Target,
-    plonk::{circuit_data::VerifierCircuitData, proof::ProofWithPublicInputs},
-};
+use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
+use plonky2::{iop::target::Target, plonk::circuit_data::VerifierCircuitData};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
