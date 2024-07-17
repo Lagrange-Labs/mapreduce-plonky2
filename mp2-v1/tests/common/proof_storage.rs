@@ -1,13 +1,10 @@
 use std::{
     fmt::Display,
     hash::{Hash, Hasher},
+    path::Path,
 };
 
-use super::{
-    cases::{SingleValuesExtractionArgs, TableSourceSlot},
-    index_tree::IndexTree,
-    rowtree::RowTree,
-};
+use super::{index_tree::IndexTree, rowtree::RowTree};
 use alloy::primitives::Address;
 use anyhow::{Context, Result};
 use mp2_test::cells_tree::CellTree;
@@ -26,18 +23,16 @@ type ContractKey = (Address, BlockPrimaryIndex);
 pub(crate) struct TableID(String);
 
 impl TableID {
-    /// Contains a random component to allow multiple tables for the same slots
     /// TODO: should contain more info probablyalike which index are selected
     pub fn new(contract: &Address, slots: &[u8]) -> Self {
         TableID(format!(
-            "{}-{}-{}",
-            contract.to_string(),
+            "{}-{}",
+            contract,
             slots
                 .iter()
                 .map(|s| s.to_string())
                 .collect::<Vec<_>>()
                 .join("+"),
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 8),
         ))
     }
 }
@@ -142,6 +137,39 @@ impl ProofStorage for MemoryProofStorage {
     }
 
     fn get_proof(&self, key: &ProofKey) -> Result<Vec<u8>> {
-        self.0.get(&key).context("unable to get proof").cloned()
+        self.0.get(key).context("unable to get proof").cloned()
+    }
+}
+use jammdb::{Data, Error, DB};
+pub struct KeyValueDB {
+    db: DB,
+}
+
+const BUCKET_NAME: &str = "v1_proof_store_test";
+impl KeyValueDB {
+    pub fn new(path: &Path) -> Result<Self> {
+        let db = DB::open(path)?;
+        let tx = db.tx(true)?;
+        match tx.create_bucket(BUCKET_NAME) {
+            Ok(_) => log::info!("Created bucket {BUCKET_NAME} into store db"),
+            Err(e) => match e {
+                Error::BucketExists => {
+                    log::info!("Opening already existing bucket {BUCKET_NAME} into store db")
+                }
+                _ => panic!("Error creating bucket: {e}"),
+            },
+        }
+        tx.commit()?;
+        Ok(Self { db })
+    }
+}
+
+impl ProofStorage for KeyValueDB {
+    fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()> {
+        todo!()
+    }
+
+    fn get_proof(&self, key: &ProofKey) -> Result<Vec<u8>> {
+        todo!()
     }
 }

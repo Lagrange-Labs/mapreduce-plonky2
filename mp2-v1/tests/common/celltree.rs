@@ -129,6 +129,7 @@ impl<P: ProofStorage> TestContext<P> {
 
     /// Generate and prove a [`MerkleCellTree`] encoding the content of the
     /// given slots for the contract located at `contract_address`.
+    // NOTE: the 0th column is assumed to be the secondary index.
     pub async fn prove_cells_tree(&mut self, table_id: &TableID, cells: Vec<Cell>) -> Row {
         // NOTE: the sec. index slot is assumed to be the first.
         let (cell_tree, cell_tree_ut) =
