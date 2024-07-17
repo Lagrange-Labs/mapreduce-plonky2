@@ -166,3 +166,20 @@ mod test {
         Ok(())
     }
 }
+
+#[test]
+#[should_panic]
+fn test_debug_asserts_are_enabled() {
+    // Tests should be executed with `RUSTFLAGS="-C debug-assertions".
+    debug_assert!(false);
+}
+
+#[test]
+#[should_panic]
+#[allow(arithmetic_overflow)]
+fn test_overflow_panics_are_enabled() {
+    // Tests should check for overflow
+    let a = 1_u64;
+    let b = 64;
+    assert_ne!(a << b, 0);
+}

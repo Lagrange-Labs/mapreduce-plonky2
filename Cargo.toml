@@ -64,18 +64,22 @@ serial_test = "3.0"
 sha3 = "0.10"
 tokio = { version = "1.34", features = ["macros", "rt-multi-thread"] }
 
-
 # just for test
 ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features = false, features = [
   "rustls",
 ], branch = "get-proof-0x" }
 
-[profile.release]
+[profile.dev]
+# Reference: https://doc.rust-lang.org/cargo/reference/profiles.html#dev
+# Proving is too slow without optimizations
 opt-level = 3
-incremental = true
 
-[profile.bench]
-opt-level = 3
+[profile.release]
+# Reference: https://doc.rust-lang.org/cargo/reference/profiles.html#release
+# Proving is a bottleneck, enable agressive optimizations.
+# Reference: https://nnethercote.github.io/perf-book/build-configuration.html#codegen-units
+codegen-units = 1
+lto = "fat"
 
 [patch.crates-io]
 plonky2 = { git = "https://github.com/Lagrange-Labs/plonky2", branch = "upstream" }

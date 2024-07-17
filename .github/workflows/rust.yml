@@ -95,7 +95,7 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_RYHOPE }}
       - name: Run cargo test
-        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "eval \"$(ssh-agent -s)\" && ssh-add - <<< '${{ secrets.SSH_RYHOPE }}' && cargo test --features ci --release -- --test-threads 16"
+        run: nix-shell -I /nix/var/nix/profiles/per-user/root/channels/nixos --run "eval \"$(ssh-agent -s)\" && ssh-add - <<< '${{ secrets.SSH_RYHOPE }}' && cargo test --features ci -- --test-threads 16"
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
           RUST_LOG: "info"
