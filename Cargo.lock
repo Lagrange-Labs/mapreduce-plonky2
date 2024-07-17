@@ -4284,14 +4284,15 @@ dependencies = [
 [[package]]
 name = "ryhope"
 version = "0.1.0"
-source = "git+ssh://git@github.com/Lagrange-Labs/ryhope.git?rev=8cc9489#8cc948901ed857c2b874cd066c3a8b392583e479"
 dependencies = [
  "anyhow",
  "delegate",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "log",
  "postgres",
+ "rand",
  "serde",
+ "sha256",
 ]
 
 [[package]]
@@ -4604,6 +4605,18 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "sha256"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18278f6a914fa3070aa316493f7d2ddfb9ac86ebc06fa3b83bffda487e9065b0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "hex",
+ "sha2",
 ]
 
 [[package]]

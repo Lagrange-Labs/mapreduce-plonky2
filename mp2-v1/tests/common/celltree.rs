@@ -123,7 +123,7 @@ impl TestContext {
 
             workplan.done(&k).unwrap();
         }
-        let root = t.tree().root().unwrap();
+        let root = t.root().unwrap();
         let root_proof_key = CellProofIdentifier {
             table: table_id.clone(),
             primary: block_key,

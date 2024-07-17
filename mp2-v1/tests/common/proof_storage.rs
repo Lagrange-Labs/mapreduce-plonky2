@@ -11,7 +11,7 @@ type CellTreeKey = <CellTree as TreeTopology>::Key;
 type RowTreeKey = <RowTree as TreeTopology>::Key;
 type IndexTreeKey = <IndexTree as TreeTopology>::Key;
 
-#[derive(Clone, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TableID(String);
 
 impl TableID {
@@ -36,7 +36,7 @@ impl TableID {
 /// is not global, so two nodes in the row tree with different value could have the same tree
 /// identifier since they are not shared, they are isolated trees.
 /// TODO: make it nice with lifetimes, and easier constructor
-#[derive(Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub(crate) struct CellProofIdentifier<PrimaryIndex>
 where
     PrimaryIndex: std::hash::Hash + PartialEq + Eq,
@@ -46,7 +46,7 @@ where
     pub(crate) tree_key: CellTreeKey,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub(crate) struct RowProofIdentifier<PrimaryIndex>
 where
     PrimaryIndex: std::hash::Hash + PartialEq + Eq,

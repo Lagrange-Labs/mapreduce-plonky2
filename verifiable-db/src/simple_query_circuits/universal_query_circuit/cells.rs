@@ -15,7 +15,7 @@ use plonky2::{
 use ryhope::{
     storage::memory::InMemory,
     tree::{sbbst, TreeTopology},
-    MerkleTreeKvDb, NodePayload,
+    InitSettings, MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
 use std::iter::once;
@@ -59,9 +59,9 @@ pub(crate) fn build_cells_tree(
     // we create a dummy storage representing a sbbst tree with `input_len` elements;
     // the storage is fake becuase we don't store anything in the nodes, as we are just
     // interested in the tree topology
-    let fake_storage = MerkleTree::create((0, input_len), ()).unwrap();
+    let fake_storage = MerkleTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap();
 
-    let root_key = fake_storage.tree().root().unwrap();
+    let root_key = fake_storage.root().unwrap();
     build_cells_subtree_at_key(
         b,
         input_values,
