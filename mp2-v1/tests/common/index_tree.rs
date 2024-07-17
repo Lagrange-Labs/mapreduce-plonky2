@@ -152,15 +152,25 @@ impl TestContext {
                 // It's ok to fetch the node at the same epoch because for the block tree
                 // we know it's the left children now so the min and max didn't change, we
                 // didn't insert anything new below
-                let previous_node = t.fetch(previous_key);
+                let (prev_ctx, previous_node) = t.fetch_with_context(previous_key);
+                let prev_left_hash = match prev_ctx.left {
+                    Some(kk) => t.fetch(&kk).node_hash,
+                    None => *empty_poseidon_hash(),
+                };
+
+                let prev_right_hash = match prev_ctx.right {
+                    Some(kk) => t.fetch(&kk).node_hash,
+                    None => *empty_poseidon_hash(),
+                };
+
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_parent(
                         node.identifier,
                         previous_node.value,
                         previous_node.min,
                         previous_node.max,
-                        previous_node.node_hash,
-                        *empty_poseidon_hash(),
+                        prev_left_hash,
+                        prev_right_hash,
                         previous_node.row_tree_hash,
                         extraction_proof,
                         row_tree_proof,
