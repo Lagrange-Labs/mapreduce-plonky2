@@ -165,13 +165,15 @@ impl KeyValueDB {
         let db = DB::open(path)?;
         let tx = db.tx(true)?;
         match tx.create_bucket(BUCKET_NAME) {
-            Ok(_) => log::info!("Created bucket {BUCKET_NAME} into store db"),
-            Err(e) => match e {
-                Error::BucketExists => {
-                    log::info!("Opening already existing bucket {BUCKET_NAME} into store db")
+            Ok(_) => log::info!("Created bucket {BUCKET_NAME} into store db at path {path:?}"),
+            Err(e) => {
+                match e {
+                    Error::BucketExists => {
+                        log::info!("Opening already existing bucket {BUCKET_NAME} into store db from {path:?}")
+                    }
+                    _ => panic!("Error creating bucket: {e}"),
                 }
-                _ => panic!("Error creating bucket: {e}"),
-            },
+            }
         }
         tx.commit()?;
         Ok(Self { db })
