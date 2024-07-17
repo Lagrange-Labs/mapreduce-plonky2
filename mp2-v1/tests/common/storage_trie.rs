@@ -1,7 +1,7 @@
 //! Storage trie for proving tests
 
-use super::TestContext;
-use alloy::primitives::Address;
+use super::{proof_storage::ProofStorage, TestContext};
+use alloy::{eips::BlockNumberOrTag, primitives::Address};
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
@@ -336,16 +336,18 @@ impl TestStorageTrie {
 
     /// Query the contract at the provided address, fetch a proof using the context, and add it to
     /// the trie's slot.
-    pub(crate) async fn query_proof_and_add_slot(
+    pub(crate) async fn query_proof_and_add_slot<P: ProofStorage>(
         &mut self,
-        ctx: &TestContext,
-        contract_address: Address,
+        ctx: &TestContext<P>,
+        contract_address: &Address,
         slot: usize,
     ) {
         log::debug!("Querying the simple slot `{slot:?}` of the contract `{contract_address}` from the test context's RPC");
 
-        let query = ProofQuery::new_simple_slot(contract_address, slot);
-        let response = ctx.query_mpt_proof(&query, ctx.get_block_number()).await;
+        let query = ProofQuery::new_simple_slot(*contract_address, slot);
+        let response = ctx
+            .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
+            .await;
 
         // Get the nodes to prove. Reverse to the sequence from leaf to root.
         let nodes: Vec<_> = response.storage_proof[0]

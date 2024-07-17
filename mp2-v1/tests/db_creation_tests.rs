@@ -1,181 +1,112 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
-use std::str::FromStr;
+use anyhow::Result;
 
-use alloy::primitives::Address;
 use common::{
-    proof_storage::{ProofKey, TableID},
+    context,
+    proof_storage::{MemoryProofStorage, ProofKey, TableID},
     TestCase, TestContext,
 };
 use log::info;
-use mp2_common::proof::{serialize_proof, ProofWithVK};
 use test_log::test;
 
 pub(crate) mod common;
 
-async fn prove_scalar_values<P: common::proof_storage::ProofStorage>(
-    ctx: &TestContext,
-    t: &TestCase,
-    contract_proof: &ProofWithVK,
-    block_proof: &[u8],
-    storage: &mut P,
-) {
-    let contract_address = Address::from_str(&t.contract_address).unwrap();
-    let table_id = TableID::new(&contract_address, &t.values_extraction_single.slots);
-    let single_values_proof = ctx
-        .prove_single_values_extraction(&t.contract_address, &t.values_extraction_single.slots)
-        .await;
-    info!("Generated Values Extraction (C.1) proof for single variables");
-
-    // final extraction for single variables
-    let extraction_proof = ctx
-        .prove_final_extraction(
-            contract_proof.serialize().unwrap(),
-            single_values_proof.serialize().unwrap(),
-            block_proof.to_vec(),
-            false,
-            None,
-        )
-        .await
-        .unwrap();
-    storage
-        .store_proof(
-            ProofKey::Extraction(ctx.block_number.as_number().unwrap() as usize),
-            extraction_proof.serialize().unwrap(),
-        )
-        .unwrap();
-    info!("Generated Final Extraction (C.5.1) proof for single variables");
-
-    let row = ctx
-        .build_and_prove_celltree(
-            &table_id,
-            &contract_address,
-            // NOTE: the 0th column is assumed to be the secondary index.
-            &t.values_extraction_single.slots,
-            storage,
-        )
-        .await;
-    info!("Generated final CELLs tree proofs for single variables");
-    // In the case of the scalars slots, there is a single node in the row tree.
-    let rows = vec![row];
-    let row_tree_proof_key = ctx.build_and_prove_rowtree(&table_id, &rows, storage).await;
-    info!("Generated final ROWs tree proofs for single variables");
-    let _ = ctx.build_and_prove_index_tree(&table_id, storage, &row_tree_proof_key);
-    info!("Generated final BLOCK tree proofs for single variables");
-}
-
-async fn prove_mappings_with_length(
-    ctx: &TestContext,
-    t: &TestCase,
-    contract_proof: &ProofWithVK,
-    block_proof: &[u8],
-    mapping_values_proof: &ProofWithVK,
-) {
-    let length_proof = ctx
-        .prove_length_extraction(
-            &t.contract_address,
-            t.length_extraction.slot,
-            t.length_extraction.value,
-        )
-        .await;
-    info!("Generated Length Extraction (C.2) proof");
-
-    let _ = ctx.prove_final_extraction(
-        contract_proof.serialize().unwrap(),
-        mapping_values_proof.serialize().unwrap(),
-        block_proof.to_vec(),
-        true,
-        Some(length_proof.serialize().unwrap()),
-    );
-    info!("Generated Final Extraction (C.5.1) proof for mapping (with length slot check)");
-}
-
-async fn prove_mappings_without_length(
-    ctx: &TestContext,
-    _t: &TestCase,
-    contract_proof: &ProofWithVK,
-    block_proof: &[u8],
-    mapping_values_proof: &ProofWithVK,
-) {
-    // final extraction for mappings without length slots
-    let _ = ctx.prove_final_extraction(
-        contract_proof.serialize().unwrap(),
-        mapping_values_proof.serialize().unwrap(),
-        block_proof.to_vec(),
-        true,
-        None,
-    );
-    info!("Generated Final Extraction (C.5.1) proof for mapping (without length slot check)");
-}
+// TODO: move to local_simple logic
+//async fn prove_mappings_with_length(
+//    ctx: &TestContext,
+//    t: &TestCase,
+//    contract_proof: &ProofWithVK,
+//    block_proof: &[u8],
+//    mapping_values_proof: &ProofWithVK,
+//) {
+//    let length_proof = ctx
+//        .prove_length_extraction(
+//            &t.contract_address,
+//            t.length_extraction.slot,
+//            t.length_extraction.value,
+//        )
+//        .await;
+//    info!("Generated Length Extraction (C.2) proof");
+//
+//    let _ = ctx.prove_final_extraction(
+//        contract_proof.serialize().unwrap(),
+//        mapping_values_proof.serialize().unwrap(),
+//        block_proof.to_vec(),
+//        true,
+//        Some(length_proof.serialize().unwrap()),
+//    );
+//    info!("Generated Final Extraction (C.5.1) proof for mapping (with length slot check)");
+//}
+//
+//async fn prove_mappings_without_length(
+//    ctx: &TestContext,
+//    _t: &TestCase,
+//    contract_proof: &ProofWithVK,
+//    block_proof: &[u8],
+//    mapping_values_proof: &ProofWithVK,
+//) {
+//    // final extraction for mappings without length slots
+//    let _ = ctx.prove_final_extraction(
+//        contract_proof.serialize().unwrap(),
+//        mapping_values_proof.serialize().unwrap(),
+//        block_proof.to_vec(),
+//        true,
+//        None,
+//    );
+//    info!("Generated Final Extraction (C.5.1) proof for mapping (without length slot check)");
+//}
 
 #[test(tokio::test)]
-async fn db_creation_integrated_tests() {
+async fn db_creation_integrated_tests() -> Result<()> {
     // Create the test context for mainnet.
     // let ctx = &mut TestContext::new_mainet();
     let _ = env_logger::try_init();
     // Create the test context for the local node.
-    let ctx = &mut TestContext::new_local_node().await;
+    let storage = MemoryProofStorage::default();
+    let mut ctx = context::new_local_chain(storage).await;
     info!("Building params");
     // Build the parameters.
     ctx.build_params().unwrap();
 
     info!("Params built");
-
+    let cases = TestCase::new_local_simple_contract(&ctx).await?;
+    info!("Test Cases deployed");
     // Prove for each test case.
-    for t in &ctx.cases {
-        let contract_proof = ctx
-            .prove_contract_extraction(&t.contract_address, t.contract_extraction.slot.clone())
-            .await;
-        info!("Generated Contract Extraction (C.3) proof");
-
-        let block_proof = ctx.prove_block_extraction().await.unwrap();
-        info!("Generated Block Extraction (C.4) proof");
-
-        //
-        // Prove scalar slots
-        //
-        let mut scalar_proof_storage = common::proof_storage::MemoryProofStorage::default();
-        prove_scalar_values(
-            ctx,
-            t,
-            &contract_proof,
-            &serialize_proof(&block_proof).unwrap(),
-            &mut scalar_proof_storage,
-        )
-        .await;
-        info!("Generated Single Variables table");
-
-        //
-        // Prove mapping slots
-        //
-        let mapping_values_proof = ctx
-            .prove_mapping_values_extraction(
-                &t.contract_address,
-                t.values_extraction_mapping.slot,
-                t.values_extraction_mapping.mapping_keys.clone(),
-            )
-            .await;
-        info!("Generated Values Extraction (C.1) proof for mapping variable");
-
-        // // Prove mappings slots with length check
-        prove_mappings_with_length(
-            ctx,
-            t,
-            &contract_proof,
-            &serialize_proof(&block_proof).unwrap(),
-            &mapping_values_proof,
-        )
-        .await;
-
-        // // Prove mappings slots without length check
-        prove_mappings_without_length(
-            ctx,
-            t,
-            &contract_proof,
-            &serialize_proof(&block_proof).unwrap(),
-            &mapping_values_proof,
-        )
-        .await;
+    for case in &cases {
+        case.run(&mut ctx).await?;
     }
+    ////
+    //// Prove mapping slots
+    ////
+    //let mapping_values_proof = ctx
+    //    .prove_mapping_values_extraction(
+    //        &t.contract_address,
+    //        t.values_extraction_mapping.slot,
+    //        t.values_extraction_mapping.mapping_keys.clone(),
+    //    )
+    //    .await;
+    //info!("Generated Values Extraction (C.1) proof for mapping variable");
+
+    //// // Prove mappings slots with length check
+    //prove_mappings_with_length(
+    //    ctx,
+    //    t,
+    //    &contract_proof,
+    //    &serialize_proof(&block_proof).unwrap(),
+    //    &mapping_values_proof,
+    //)
+    //.await;
+
+    //// // Prove mappings slots without length check
+    //prove_mappings_without_length(
+    //    ctx,
+    //    t,
+    //    &contract_proof,
+    //    &serialize_proof(&block_proof).unwrap(),
+    //    &mapping_values_proof,
+    //)
+    //.await;
+    Ok(())
 }

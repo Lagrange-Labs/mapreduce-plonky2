@@ -1,9 +1,11 @@
 //! Test context used in the test cases
 use alloy::{
-    eips::BlockNumberOrTag,
-    node_bindings::AnvilInstance,
+    eips::{BlockId, BlockNumberOrTag},
+    network::{EthereumWallet, Network},
+    node_bindings::{Anvil, AnvilInstance},
     providers::{Provider, ProviderBuilder, RootProvider},
     rpc::types::{Block, BlockTransactionsKind, EIP1186AccountProofResponse},
+    signers::local::PrivateKeySigner,
     transports::http::{Client, Http},
 };
 use anyhow::Context;
@@ -17,7 +19,7 @@ use std::{
     path::PathBuf,
 };
 
-use super::TestCase;
+use super::proof_storage::ProofStorage;
 
 #[derive(Envconfig)]
 struct TestContextConfig {
@@ -29,22 +31,51 @@ struct TestContextConfig {
 }
 
 /// Test context
-pub(crate) struct TestContext {
+pub(crate) struct TestContext<P: ProofStorage> {
     pub(crate) rpc_url: String,
     /// HTTP provider
     /// TODO: fix to use alloy provider.
     pub(crate) rpc: RootProvider<Http<Client>>,
-    pub(crate) block_number: BlockNumberOrTag,
     /// Local node
     /// Should release after finishing the all tests.
     pub(crate) local_node: Option<AnvilInstance>,
     /// Parameters
     pub(crate) params: Option<PublicParameters>,
-    /// Supported test cases
-    pub(crate) cases: Vec<TestCase>,
+    pub(crate) storage: P,
+}
+/// Create the test context on a local anvil chain. It also setups the local simple test cases
+pub async fn new_local_chain<P: ProofStorage>(storage: P) -> TestContext<P> {
+    // Spin up a local node.
+    let anvil = Anvil::new().spawn();
+
+    // Set up signer from the first default Anvil account.
+    let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
+    let wallet = EthereumWallet::from(signer);
+
+    // Create a provider with the wallet for contract deployment and interaction.
+    let rpc_url = anvil.endpoint();
+    let provider = ProviderBuilder::new()
+        .with_recommended_fillers()
+        .wallet(wallet)
+        .on_http(rpc_url.parse().unwrap());
+    info!("Anvil running at `{}`", rpc_url);
+
+    let rpc = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
+
+    TestContext {
+        rpc_url: anvil.endpoint(),
+        rpc,
+        local_node: Some(anvil),
+        params: None,
+        storage,
+    }
 }
 
-impl TestContext {
+impl<P: ProofStorage> TestContext<P> {
+    pub(crate) fn wallet(&self) -> EthereumWallet {
+        let signer: PrivateKeySigner = self.local_node.as_ref().unwrap().keys()[0].clone().into();
+        EthereumWallet::from(signer)
+    }
     /// Build the parameters.
     ///
     /// NOTE: It could avoid `runtime stack overflow`, otherwise needs to set
@@ -101,16 +132,20 @@ impl TestContext {
         self.params.as_ref().unwrap()
     }
 
-    pub(crate) fn get_block_number(&self) -> Option<u64> {
-        self.block_number.as_number()
+    pub(crate) async fn block_number(&self) -> u64 {
+        self.rpc.get_block_number().await.unwrap()
     }
 
-    /// Returns the block for which this test context is set
-    pub(crate) async fn query_block(&self) -> Block {
+    pub(crate) async fn query_current_block(&self) -> Block {
+        self.query_block_at(BlockNumberOrTag::Number(self.block_number().await))
+            .await
+    }
+    /// Returns the block
+    pub(crate) async fn query_block_at(&self, bn: BlockNumberOrTag) -> Block {
         // assume there is always a block so None.unwrap() should not occur
         // and it's still a test...
         self.rpc
-            .get_block(self.block_number.into(), BlockTransactionsKind::Hashes)
+            .get_block(BlockId::Number(bn), BlockTransactionsKind::Hashes)
             .await
             .unwrap()
             .unwrap()
@@ -120,13 +155,12 @@ impl TestContext {
     pub(crate) async fn query_mpt_proof(
         &self,
         query: &ProofQuery,
-        block_number: Option<u64>,
+        block_number: BlockNumberOrTag,
     ) -> EIP1186AccountProofResponse {
-        let block_id = match block_number {
-            Some(b) => BlockNumberOrTag::Number(b),
-            None => BlockNumberOrTag::Latest,
-        };
-        query.query_mpt_proof(&self.rpc, block_id).await.unwrap()
+        query
+            .query_mpt_proof(&self.rpc, block_number)
+            .await
+            .unwrap()
     }
 
     /// Reset the RPC provider. It could be used to query data from the

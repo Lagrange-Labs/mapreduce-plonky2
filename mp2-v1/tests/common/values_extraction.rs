@@ -2,8 +2,8 @@
 
 use std::str::FromStr;
 
-use super::{storage_trie::TestStorageTrie, TestContext};
-use alloy::primitives::Address;
+use super::{proof_storage::ProofStorage, storage_trie::TestStorageTrie, TestContext};
+use alloy::{eips::BlockNumberOrTag, primitives::Address};
 use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
@@ -16,15 +16,13 @@ use plonky2::field::types::Field;
 
 type MappingKey = Vec<u8>;
 
-impl TestContext {
+impl<P: ProofStorage> TestContext<P> {
     /// Generate the Values Extraction (C.1) proof for single variables.
     pub(crate) async fn prove_single_values_extraction(
         &self,
-        contract_address: &str,
+        contract_address: &Address,
         slots: &[u8],
-    ) -> ProofWithVK {
-        let contract_address = Address::from_str(contract_address).unwrap();
-
+    ) -> Vec<u8> {
         // Initialize the test trie.
         let mut trie = TestStorageTrie::new();
         info!("Initialized the test storage trie");
@@ -54,7 +52,7 @@ impl TestContext {
             assert_eq!(ptr, F::NEG_ONE);
         }
 
-        proof_value
+        proof_value.serialize().unwrap()
     }
 
     /// Generate the Values Extraction (C.1) proof for mapping variables.
@@ -78,7 +76,9 @@ impl TestContext {
         for mapping_key in mapping_keys {
             info!("Query the mapping slot ({slot}, {mapping_key:?})");
             let query = ProofQuery::new_mapping_slot(contract_address, slot, mapping_key.clone());
-            let response = self.query_mpt_proof(&query, self.get_block_number()).await;
+            let response = self
+                .query_mpt_proof(&query, BlockNumberOrTag::Number(self.block_number().await))
+                .await;
 
             // Get the nodes to prove. Reverse to the sequence from leaf to root.
             let nodes: Vec<_> = response.storage_proof[0]

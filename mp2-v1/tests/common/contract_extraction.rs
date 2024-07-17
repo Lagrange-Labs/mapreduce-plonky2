@@ -1,7 +1,7 @@
 //! Test utilities for Contract Extraction (C.3)
 
-use super::TestContext;
-use alloy::primitives::Address;
+use super::{proof_storage::ProofStorage, TestContext};
+use alloy::{eips::BlockNumberOrTag, primitives::Address};
 use eth_trie::Nibbles;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
@@ -21,26 +21,28 @@ use plonky2::field::types::Field;
 use rlp::{Prototype, Rlp};
 use std::str::FromStr;
 
-impl TestContext {
+impl<P: ProofStorage> TestContext<P> {
     /// Generate the Contract Extraction (C.3) proof.
     pub(crate) async fn prove_contract_extraction(
         &self,
-        contract_address: &str,
+        contract_address: &Address,
         slot: StorageSlot,
-    ) -> ProofWithVK {
+        block_number: u64,
+    ) -> Vec<u8> {
         // Query the block for checking the block hash.
-        let block = self.query_block().await;
+        let block = self
+            .query_block_at(BlockNumberOrTag::Number(block_number))
+            .await;
 
         // Query the MPT proof from RPC.
-        let contract_address = Address::from_str(contract_address).unwrap();
         let query = match slot {
-            StorageSlot::Simple(slot) => ProofQuery::new_simple_slot(contract_address, slot),
+            StorageSlot::Simple(slot) => ProofQuery::new_simple_slot(*contract_address, slot),
             StorageSlot::Mapping(mapping_key, slot) => {
-                ProofQuery::new_mapping_slot(contract_address, slot, mapping_key)
+                ProofQuery::new_mapping_slot(*contract_address, slot, mapping_key)
             }
         };
         let res = self
-            .query_mpt_proof(&query, Some(block.header.number.unwrap()))
+            .query_mpt_proof(&query, BlockNumberOrTag::Number(block_number))
             .await;
 
         // Get the storage root hash, and check it with `keccak(storage_root)`,
@@ -71,8 +73,8 @@ impl TestContext {
         }
 
         // Check the exposed public inputs.
-        let proof = ProofWithVK::deserialize(&proof).unwrap();
-        let pi = PublicInputs::from_slice(&proof.proof().public_inputs);
+        let proofk = ProofWithVK::deserialize(&proof).unwrap();
+        let pi = PublicInputs::from_slice(&proofk.proof().public_inputs);
         // Check the state and storage root hashes.
         let [exp_state_root_hash, exp_storage_root_hash] =
             [&block.header.state_root.0, storage_root.as_slice()]
@@ -91,11 +93,14 @@ fn prove_leaf(
     params: &PublicParameters,
     node: Vec<u8>,
     storage_root: &[u8],
-    contract_address: Address,
+    contract_address: &Address,
 ) -> Vec<u8> {
     // Generate the proof.
-    let input =
-        contract_extraction::CircuitInput::new_leaf(node.clone(), &storage_root, contract_address);
+    let input = contract_extraction::CircuitInput::new_leaf(
+        node.clone(),
+        &storage_root,
+        contract_address.clone(),
+    );
     let input = CircuitInput::ContractExtraction(input);
     let proof = generate_proof(params, input).unwrap();
 

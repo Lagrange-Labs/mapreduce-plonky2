@@ -1,4 +1,7 @@
-use alloy::primitives::{Address, U256};
+use alloy::{
+    eips::BlockNumberOrTag,
+    primitives::{Address, U256},
+};
 use anyhow::*;
 use mp2_common::{eth::ProofQuery, poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
 use mp2_test::cells_tree::{build_cell_tree, CellTree, MerkleCellTree, TestCell as Cell};
@@ -22,51 +25,23 @@ use serde::{Deserialize, Serialize};
 use crate::common::{cell_tree_proof_to_hash, rowtree::RowTreeKey, TestContext};
 
 use super::{
+    cases::TableSourceSlot,
     proof_storage::{BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, TableID},
     rowtree::Row,
 };
 
-impl TestContext {
-    /// Fetch the values and build the identifiers from a list of slots to
-    /// generate [`Cell`]s that will then be encoded as a [`MerkleCellTree`].
-    pub async fn build_cells(&self, contract_address: &Address, slots: &[u8]) -> Vec<Cell> {
-        let mut cells = Vec::new();
-        for slot in slots {
-            let query = ProofQuery::new_simple_slot(*contract_address, *slot as usize);
-            let id = GoldilocksField::from_canonical_u64(compute_leaf_single_id(
-                *slot,
-                contract_address,
-            ));
-            let value = self
-                .query_mpt_proof(&query, self.get_block_number())
-                .await
-                .storage_proof[0]
-                .value;
-            cells.push(Cell {
-                id,
-                value,
-                // we don't know yet its hash because the tree is not constructed
-                // this will be done by the Aggregate trait
-                hash: Default::default(),
-            });
-        }
-
-        cells
-    }
-
+impl<P: ProofStorage> TestContext<P> {
     /// Given a [`MerkleCellTree`], recursively prove its hash and returns the storage key
     /// associated to the root proof
-    pub async fn prove_cell_tree<P: ProofStorage>(
-        &self,
+    async fn prove_cell_tree(
+        &mut self,
         table_id: &TableID,
         t: &MerkleCellTree,
         ut: UpdateTree<<CellTree as TreeTopology>::Key>,
-        storage: &mut P,
     ) -> CellProofIdentifier<BlockPrimaryIndex> {
         // THIS can panic but for block number it should be fine on 64bit platforms...
         // unwrap is safe since we know it is really a block number and not set to Latest or stg
-        let block_key: BlockPrimaryIndex =
-            self.block_number.as_number().unwrap().try_into().unwrap();
+        let block_key = self.block_number().await as BlockPrimaryIndex;
         // Store the proofs here for the tests; will probably be done in S3 for
         // prod.
         let mut workplan = ut.into_workplan();
@@ -87,7 +62,8 @@ impl TestContext {
                     primary: block_key,
                     tree_key: context.left.unwrap(),
                 };
-                let left_proof = storage
+                let left_proof = self
+                    .storage
                     .get_proof(&ProofKey::Cell(proof_key))
                     .expect("UT guarantees proving in order");
                 let inputs =
@@ -108,10 +84,12 @@ impl TestContext {
                     tree_key: context.right.unwrap(),
                 };
 
-                let left_proof = storage
+                let left_proof = self
+                    .storage
                     .get_proof(&ProofKey::Cell(left_proof_key))
                     .expect("UT guarantees proving in order");
-                let right_proof = storage
+                let right_proof = self
+                    .storage
                     .get_proof(&ProofKey::Cell(right_proof_key))
                     .expect("UT guarantees proving in order");
                 let inputs =
@@ -128,7 +106,7 @@ impl TestContext {
                 tree_key: k,
             };
 
-            storage
+            self.storage
                 .store_proof(ProofKey::Cell(generated_proof_key), proof)
                 .expect("storing should work");
 
@@ -142,7 +120,8 @@ impl TestContext {
         };
 
         // just checking the storage is there
-        let _ = storage
+        let _ = self
+            .storage
             .get_proof(&ProofKey::Cell(root_proof_key.clone()))
             .unwrap();
         root_proof_key
@@ -150,21 +129,15 @@ impl TestContext {
 
     /// Generate and prove a [`MerkleCellTree`] encoding the content of the
     /// given slots for the contract located at `contract_address`.
-    pub async fn build_and_prove_celltree<P: ProofStorage>(
-        &self,
-        table_id: &TableID,
-        contract_address: &Address,
-        slots: &[u8],
-        storage: &mut P,
-    ) -> Row {
-        let cells = self.build_cells(contract_address, slots).await;
+    pub async fn prove_cells_tree(&mut self, table_id: &TableID, cells: Vec<Cell>) -> Row {
         // NOTE: the sec. index slot is assumed to be the first.
         let (cell_tree, cell_tree_ut) =
             build_cell_tree(&cells[1..]).expect("failed to create cell tree");
         let root_key = self
-            .prove_cell_tree(table_id, &cell_tree, cell_tree_ut, storage)
+            .prove_cell_tree(table_id, &cell_tree, cell_tree_ut)
             .await;
-        let cell_root_proof = storage
+        let cell_root_proof = self
+            .storage
             .get_proof(&ProofKey::Cell(root_key.clone()))
             .unwrap();
         let tree_hash = cell_tree.root_data().unwrap().hash;

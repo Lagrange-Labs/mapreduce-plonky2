@@ -1,9 +1,12 @@
 //! Pudgy Penguins mainnet test case
 
+use std::str::FromStr;
+
 use super::{
     ContractExtractionArgs, LengthExtractionArgs, MappingKey, MappingValuesExtractionArgs,
-    SingleValuesExtractionArgs, TestCase,
+    SingleValuesExtractionArgs, TableSourceSlot, TestCase,
 };
+use alloy::primitives::Address;
 use mp2_common::eth::{left_pad32, StorageSlot};
 use mp2_test::eth::get_mainnet_url;
 
@@ -48,18 +51,17 @@ impl TestCase {
     /// Create a test case for Pudgy Penguins contract.
     pub(crate) fn pudgy_penguins_test_case() -> Self {
         Self {
-            contract_address: PUDGY_PENGUINS_ADDRESS.to_string(),
-            values_extraction_single: SingleValuesExtractionArgs {
-                slots: SINGLE_SLOTS.to_vec(),
-            },
-            values_extraction_mapping: MappingValuesExtractionArgs {
-                slot: MAPPING_SLOT,
-                mapping_keys: test_mapping_keys(),
-            },
-            length_extraction: LengthExtractionArgs {
-                slot: LENGTH_SLOT,
-                value: LENGTH_VALUE,
-            },
+            contract_address: Address::from_str(PUDGY_PENGUINS_ADDRESS).unwrap(),
+            source: TableSourceSlot::Mapping((
+                MappingValuesExtractionArgs {
+                    slot: MAPPING_SLOT,
+                    mapping_keys: test_mapping_keys(),
+                },
+                Some(LengthExtractionArgs {
+                    slot: LENGTH_SLOT,
+                    value: LENGTH_VALUE,
+                }),
+            )),
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
             },

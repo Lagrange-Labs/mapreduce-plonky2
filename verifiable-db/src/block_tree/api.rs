@@ -56,7 +56,7 @@ impl CircuitInput {
         }
     }
 
-    /// Create a circuit input for proving a parent node.
+    /// Create a circuiold_t input for proving a parent node.
     pub fn new_parent(
         block_id: F,
         old_block_number: U256,

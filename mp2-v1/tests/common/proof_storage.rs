@@ -1,15 +1,23 @@
-use super::{index_tree::IndexTree, rowtree::RowTree};
+use std::hash::{Hash, Hasher};
+
+use super::{
+    cases::{SingleValuesExtractionArgs, TableSourceSlot},
+    index_tree::IndexTree,
+    rowtree::RowTree,
+};
 use alloy::primitives::Address;
 use anyhow::{Context, Result};
-use hashbrown::HashMap;
 use mp2_test::cells_tree::CellTree;
 use rand::distributions::{Alphanumeric, DistString};
 use ryhope::tree::{sbbst, TreeTopology};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 type CellTreeKey = <CellTree as TreeTopology>::Key;
 type RowTreeKey = <RowTree as TreeTopology>::Key;
 type IndexTreeKey = <IndexTree as TreeTopology>::Key;
+
+type ContractKey = (Address, BlockPrimaryIndex);
 
 #[derive(Clone, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TableID(String);
@@ -69,12 +77,51 @@ pub(crate) struct IndexProofIdentifier<PrimaryIndex> {
 pub(crate) type BlockPrimaryIndex = <sbbst::Tree as TreeTopology>::Key;
 
 /// Uniquely identifies a proof in the proof storage backend.
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum ProofKey {
     Cell(CellProofIdentifier<BlockPrimaryIndex>),
     Row(RowProofIdentifier<BlockPrimaryIndex>),
     Index(IndexProofIdentifier<BlockPrimaryIndex>),
-    Extraction(BlockPrimaryIndex),
+    Extraction((TableID, BlockPrimaryIndex)),
+    Contract(ContractKey),
+    Block(BlockPrimaryIndex),
+    ValueExtraction((TableID, BlockPrimaryIndex)),
+}
+
+//  manually insert a prefix to make sure all keys are unique
+impl Hash for ProofKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            ProofKey::Cell(c) => {
+                "cell_tree".hash(state);
+                c.hash(state);
+            }
+            ProofKey::Row(c) => {
+                "row_tree".hash(state);
+                c.hash(state);
+            }
+            ProofKey::Index(c) => {
+                "index_tree".hash(state);
+                c.hash(state);
+            }
+            ProofKey::Extraction(e) => {
+                "final_extract".hash(state);
+                e.hash(state);
+            }
+            ProofKey::Contract(e) => {
+                "contract_extract".hash(state);
+                e.hash(state);
+            }
+            ProofKey::Block(b) => {
+                "block_proof".hash(state);
+                b.hash(state);
+            }
+            ProofKey::ValueExtraction(s) => {
+                "value_extract".hash(state);
+                s.hash(state);
+            }
+        }
+    }
 }
 pub trait ProofStorage {
     fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()>;
@@ -83,32 +130,15 @@ pub trait ProofStorage {
 
 /// This is simply a suggestion but this should be stored on a proper backend of course.
 #[derive(Default)]
-pub struct MemoryProofStorage {
-    cells: HashMap<CellProofIdentifier<BlockPrimaryIndex>, Vec<u8>>,
-    rows: HashMap<RowProofIdentifier<BlockPrimaryIndex>, Vec<u8>>,
-    index: HashMap<IndexProofIdentifier<BlockPrimaryIndex>, Vec<u8>>,
-    extraction: HashMap<BlockPrimaryIndex, Vec<u8>>,
-}
+pub struct MemoryProofStorage(HashMap<ProofKey, Vec<u8>>);
 
 impl ProofStorage for MemoryProofStorage {
     fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()> {
-        match key {
-            ProofKey::Cell(k) => self.cells.insert(k, proof),
-            ProofKey::Row(k) => self.rows.insert(k, proof),
-            ProofKey::Index(k) => self.index.insert(k, proof),
-            ProofKey::Extraction(k) => self.extraction.insert(k, proof),
-        };
+        self.0.insert(key, proof);
         Ok(())
     }
 
     fn get_proof(&self, key: &ProofKey) -> Result<Vec<u8>> {
-        match key {
-            ProofKey::Cell(k) => self.cells.get(k),
-            ProofKey::Row(k) => self.rows.get(k),
-            ProofKey::Index(k) => self.index.get(k),
-            ProofKey::Extraction(k) => self.extraction.get(k),
-        }
-        .context("unable to get proof from storage")
-        .cloned()
+        self.0.get(&key).context("unable to get proof").cloned()
     }
 }

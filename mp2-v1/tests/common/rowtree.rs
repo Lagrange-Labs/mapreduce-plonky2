@@ -1,4 +1,4 @@
-use alloy::primitives::U256;
+use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::*;
 use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
 use mp2_test::cells_tree::TestCell as Cell;
@@ -74,82 +74,32 @@ impl NodePayload for Row {
         let children = children.into_iter().collect::<Vec<_>>();
         assert_eq!(children.len(), 2);
 
-        self.hash = match [&children[0], &children[1]] {
+        let (left_hash, right_hash) = match [&children[0], &children[1]] {
             [None, None] => {
                 self.min = self.secondary_index().value.clone();
                 self.max = self.secondary_index().value.clone();
-                let to_hash =
-                    // 2 × P("")
-                    empty_poseidon_hash()
-                    .to_fields()
-                    .into_iter()
-                    .chain(empty_poseidon_hash().to_fields().into_iter())
-                    // P(min) = P(max) = P(value)
-                    .chain(self.min.to_fields().into_iter())
-                    .chain(self.max.to_fields().into_iter())
-                    // P(id)
-                    .chain(std::iter::once(self.secondary_index().id))
-                    // P(value)
-                    .chain(self.secondary_index().value.to_fields().into_iter())
-                    // P(cell_tree_hash)
-                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
-                    .collect::<Vec<_>>();
-                hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
+                (*empty_poseidon_hash(), *empty_poseidon_hash())
             }
             [None, Some(right)] => {
                 self.min = self.secondary_index().value.clone();
                 self.max = right.max.clone();
-                let to_hash =
-                    // P(leftH) = ""
-                    empty_poseidon_hash()
-                    .to_fields()
-                    .into_iter()
-                    // P(rightH)
-                    .chain(right.hash.elements.into_iter())
-                    // P(min)
-                    .chain(self.min.to_fields().into_iter())
-                    // P(max)
-                    .chain(self.max.to_fields().into_iter())
-                    // P(id)
-                    .chain(std::iter::once(self.secondary_index().id))
-                    // P(value)
-                    .chain(self.secondary_index().value.to_fields().into_iter())
-                    // P(cell_tree_hash)
-                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
-                    .collect::<Vec<_>>();
-                hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
+                (*empty_poseidon_hash(), right.hash.clone())
             }
             [Some(left), None] => {
                 self.min = left.min.clone();
                 self.max = self.secondary_index().value.clone();
-                let to_hash =
-                    // P(leftH")
-                    left.hash.elements.into_iter()
-                    // P(rightH) = ""
-                    .chain(empty_poseidon_hash()
-                    .to_fields()
-                    .into_iter())
-                    // P(min)
-                    .chain(self.min.to_fields().into_iter())
-                    // P(max)
-                    .chain(self.max.to_fields().into_iter())
-                    // P(id)
-                    .chain(std::iter::once(self.secondary_index().id))
-                    // P(value)
-                    .chain(self.secondary_index().value.to_fields().into_iter())
-                    // P(cell_tree_hash)
-                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
-                    .collect::<Vec<_>>();
-                hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
+                (left.hash, *empty_poseidon_hash())
             }
             [Some(left), Some(right)] => {
                 self.min = left.min.clone();
                 self.max = right.max.clone();
-                let to_hash =
-                    // P(leftH)
-                    left.hash.elements.into_iter()
+                (left.hash.clone(), right.hash.clone())
+            }
+        };
+        let to_hash = // P(leftH)
+                    left_hash.elements.into_iter()
                     // P(rightH)
-                    .chain(right.hash.elements.into_iter())
+                    .chain(right_hash.elements.into_iter())
                     // P(min)
                     .chain(self.min.to_fields().into_iter())
                     // P(max)
@@ -161,9 +111,7 @@ impl NodePayload for Row {
                     // P(cell_tree_hash)
                     .chain(self.cell_tree_root_hash.to_fields().into_iter())
                     .collect::<Vec<_>>();
-                hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
-            }
-        };
+        self.hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
     }
 }
 
@@ -189,21 +137,19 @@ pub async fn build_row_tree(rows: &[Row]) -> Result<(MerkleRowTree, UpdateTree<R
     Ok((row_tree, update_tree))
 }
 
-impl TestContext {
+impl<P: ProofStorage> TestContext<P> {
     /// Given a row tree (i.e. secondary index tree) and its update tree, prove
     /// it.
-    pub async fn prove_row_tree<P: ProofStorage>(
-        &self,
+    pub async fn prove_row_tree(
+        &mut self,
         table_id: &TableID,
         t: &MerkleRowTree,
         ut: UpdateTree<<RowTree as TreeTopology>::Key>,
-        storage: &mut P,
     ) -> RowProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
         // THIS can panic but for block number it should be fine on 64bit platforms...
         // unwrap is safe since we know it is really a block number and not set to Latest or stg
-        let block_key: BlockPrimaryIndex =
-            self.block_number.as_number().unwrap().try_into().unwrap();
+        let block_key = self.block_number().await as BlockPrimaryIndex;
 
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, row) = t.fetch_with_context(&k);
@@ -213,7 +159,8 @@ impl TestContext {
             // Sec. index value
             let value = row.secondary_index().value;
 
-            let cell_tree_proof = storage
+            let cell_tree_proof = self
+                .storage
                 .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
                 .expect("should find cell root proof");
             let proof = if context.is_leaf() {
@@ -235,11 +182,13 @@ impl TestContext {
                         .unwrap(),
                 };
                 // Prove a partial node
-                let child_proof = storage
+                let child_proof = self
+                    .storage
                     .get_proof(&ProofKey::Row(proof_key))
                     .expect("UT guarantees proving in order");
 
-                let cell_tree_proof = storage
+                let cell_tree_proof = self
+                    .storage
                     .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id))
                     .expect("should find cells tree root proof");
                 let inputs = CircuitInput::RowsTree(
@@ -265,15 +214,18 @@ impl TestContext {
                     primary: block_key,
                     tree_key: context.right.unwrap(),
                 };
-                let cell_tree_proof = storage
+                let cell_tree_proof = self
+                    .storage
                     .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
                     .expect("should find cells tree root proof");
 
                 // Prove a full node.
-                let left_proof = storage
+                let left_proof = self
+                    .storage
                     .get_proof(&ProofKey::Row(left_proof_key))
                     .expect("UT guarantees proving in order");
-                let right_proof = storage
+                let right_proof = self
+                    .storage
                     .get_proof(&ProofKey::Row(right_proof_key))
                     .expect("UT guarantees proving in order");
                 let inputs = CircuitInput::RowsTree(
@@ -294,7 +246,7 @@ impl TestContext {
                 tree_key: k.clone(),
             };
 
-            storage
+            self.storage
                 .store_proof(ProofKey::Row(new_proof_key), proof)
                 .expect("storing should work");
 
@@ -307,7 +259,7 @@ impl TestContext {
             tree_key: root,
         };
 
-        storage
+        self.storage
             .get_proof(&ProofKey::Row(root_proof_key.clone()))
             .expect("row tree root proof absent");
         root_proof_key
@@ -315,19 +267,17 @@ impl TestContext {
 
     /// Build and prove the row tree from the [`Row`]s and the secondary index
     /// data (which **must be absent** from the rows), returning its proof.
-    pub async fn build_and_prove_rowtree<P: ProofStorage>(
-        &self,
+    pub async fn build_and_prove_rowtree(
+        &mut self,
         table_id: &TableID,
         rows: &[Row],
-        storage: &mut P,
     ) -> RowProofIdentifier<BlockPrimaryIndex> {
         let (row_tree, row_tree_ut) = build_row_tree(rows)
             .await
             .expect("failed to create row tree");
-        let root_proof_key = self
-            .prove_row_tree(table_id, &row_tree, row_tree_ut, storage)
-            .await;
-        let row_tree_proof = storage
+        let root_proof_key = self.prove_row_tree(table_id, &row_tree, row_tree_ut).await;
+        let row_tree_proof = self
+            .storage
             .get_proof(&ProofKey::Row(root_proof_key.clone()))
             .unwrap();
 

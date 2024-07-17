@@ -103,27 +103,31 @@ pub fn build_initial_index_tree(
     Ok((index_tree, update_tree))
 }
 
-impl TestContext {
+impl<P: ProofStorage> TestContext<P> {
     /// NOTE: we require the added_index information because we need to distinguish if a new node
     /// added has a leaf or a as parent. The rest of the nodes in the update tree are to be proven
     /// by the "membership" circuit. So we need to differentiate between the two cases.
-    pub fn prove_index_tree<P: ProofStorage>(
-        &self,
+    pub fn prove_index_tree(
+        &mut self,
         table_id: &TableID,
         t: &MerkleIndexTree,
         ut: UpdateTree<IndexTreeKey>,
         added_index: &IndexNode,
-        storage: &mut P,
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, node) = t.fetch_with_context(&k);
-            let row_tree_proof = storage
+            let row_tree_proof = self
+                .storage
                 .get_proof(&ProofKey::Row(node.row_tree_proof_id.clone()))
                 .expect("should find row proof");
             // extraction proof is done once per block, so its key can just be block based
-            let extraction_proof = storage
-                .get_proof(&ProofKey::Extraction(node.row_tree_proof_id.primary))
+            let extraction_proof = self
+                .storage
+                .get_proof(&ProofKey::Extraction((
+                    table_id.clone(),
+                    node.row_tree_proof_id.primary,
+                )))
                 .expect("should find extraction proof");
             let proof = if context.is_leaf() {
                 let inputs = api::CircuitInput::BlockTree(
@@ -187,7 +191,8 @@ impl TestContext {
                 let left_node = t.fetch(&left_key);
                 // this should be one of the nodes we just proved in this loop before
                 let right_key = context.right.expect("should always be a right child");
-                let right_proof = storage
+                let right_proof = self
+                    .storage
                     .get_proof(&ProofKey::Index(IndexProofIdentifier {
                         table: table_id.clone(),
                         tree_key: right_key,
@@ -211,7 +216,7 @@ impl TestContext {
                 table: table_id.clone(),
                 tree_key: k,
             };
-            storage
+            self.storage
                 .store_proof(ProofKey::Index(proof_key), proof)
                 .expect("unable to store index tree proof");
 
@@ -224,32 +229,33 @@ impl TestContext {
         };
 
         // just checking the storage is there
-        let _ = storage
+        let _ = self
+            .storage
             .get_proof(&ProofKey::Index(root_proof_key.clone()))
             .unwrap();
         root_proof_key
     }
 
-    pub(crate) fn build_and_prove_index_tree<P: ProofStorage>(
-        &self,
+    pub(crate) async fn build_and_prove_index_tree(
+        &mut self,
         table: &TableID,
-        storage: &mut P,
         row_root_proof_key: &RowProofIdentifier<BlockPrimaryIndex>,
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
-        let row_tree_proof = storage
+        let row_tree_proof = self
+            .storage
             .get_proof(&ProofKey::Row(row_root_proof_key.clone()))
             .unwrap();
         let row_tree_hash = verifiable_db::row_tree::extract_hash_from_proof(&row_tree_proof)
             .expect("can't find hash?");
         let node = IndexNode {
             identifier: F::from_canonical_u64(compute_block_id()),
-            value: U256::from(self.block_number.as_number().unwrap()),
+            value: U256::from(self.block_number().await),
             row_tree_proof_id: row_root_proof_key.clone(),
             row_tree_hash,
             ..Default::default()
         };
         let (tree, update) = build_initial_index_tree(&node).expect("can't build index tree");
         info!("Generated index tree");
-        self.prove_index_tree(table, &tree, update, &node, storage)
+        self.prove_index_tree(table, &tree, update, &node)
     }
 }
