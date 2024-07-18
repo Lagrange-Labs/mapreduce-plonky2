@@ -2,7 +2,7 @@
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
 use anyhow::Result;
-use log::{debug, info};
+use log::{debug, info, warn};
 use mp2_test::cells_tree::TestCell as Cell;
 use mp2_v1::values_extraction::compute_leaf_single_id;
 use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
@@ -63,15 +63,15 @@ impl TestCase {
             "Deployed Simple contract at address: {}",
             contract.address()
         );
-        let contract_address = contract.address().clone();
+        let contract_address = contract.address();
         // Call the contract function to set the test data.
-        set_contract_data(contract).await;
+        init_contract_data(&contract).await;
 
         let single = Self {
             source: TableSourceSlot::SingleValues(SingleValuesExtractionArgs {
                 slots: SINGLE_SLOTS.to_vec(),
             }),
-            contract_address: contract_address.clone(),
+            contract_address: *contract_address,
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
             },
@@ -80,7 +80,7 @@ impl TestCase {
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
             },
-            contract_address: contract_address.clone(),
+            contract_address: *contract_address,
             source: TableSourceSlot::Mapping((
                 MappingValuesExtractionArgs {
                     slot: MAPPING_SLOT,
@@ -254,20 +254,50 @@ impl TestCase {
             }
         }
     }
+    pub async fn current_single_values<P: ProofStorage>(
+        &self,
+        ctx: &TestContext<P>,
+    ) -> Result<SimpleSingleValue> {
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let contract = Simple::new(self.contract_address, &provider);
+
+        Ok(SimpleSingleValue {
+            s1: contract.s1().call().await.unwrap()._0,
+            s2: contract.s2().call().await.unwrap()._0,
+            s3: contract.s3().call().await.unwrap()._0,
+            s4: contract.s4().call().await.unwrap()._0,
+        })
+    }
+}
+
+async fn update_single_values<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+    contract: &SimpleInstance<T, P, N>,
+    values: SimpleSingleValue,
+) {
+    let b = contract.setSimples(values.s1, values.s2, values.s3, values.s4);
+    b.send().await.unwrap().watch().await.unwrap();
+    log::info!("Updated simple contract single values");
 }
 
 /// Call the contract function to set the test data.
-async fn set_contract_data<T: Transport + Clone, P: Provider<T, N>, N: Network>(
-    contract: SimpleInstance<T, P, N>,
+async fn init_contract_data<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+    contract: &SimpleInstance<T, P, N>,
 ) {
     // setSimples(bool newS1, uint256 newS2, string memory newS3, address newS4)
-    let b = contract.setSimples(
-        true,
-        U256::from(LENGTH_VALUE), // use this variable as the length slot for the mapping
-        "test".to_string(),
-        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
-    );
-    b.send().await.unwrap().watch().await.unwrap();
+    update_single_values(
+        contract,
+        SimpleSingleValue {
+            s1: true,
+            s2: U256::from(LENGTH_VALUE), // use this variable as the length slot for the mapping
+            s3: "test".to_string(),
+            s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
+        },
+    )
+    .await;
 
     // setMapping(address key, uint256 value)
     let mut rng = thread_rng();
@@ -286,6 +316,27 @@ async fn set_contract_data<T: Transport + Clone, P: Provider<T, N>, N: Network>(
     }
 }
 
+enum UpdateSingleStorage {
+    Single(SimpleSingleValue),
+    // MAPPING ...
+}
+struct SimpleSingleValue {
+    pub(crate) s1: bool,
+    pub(crate) s2: U256,
+    pub(crate) s3: String,
+    pub(crate) s4: Address,
+}
+
+// This function applies the update in _one_ transaction so that Anvil only moves by one block
+// so we can test the "subsequent block"
+async fn update_contract_data<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+    contract: &SimpleInstance<T, P, N>,
+    update: UpdateSingleStorage,
+) {
+    match update {
+        UpdateSingleStorage::Single(single) => update_single_values(&contract, single).await,
+    }
+}
 /// Convert the test mapping addresses to mapping keys.
 fn test_mapping_keys() -> Vec<MappingKey> {
     MAPPING_ADDRESSES
