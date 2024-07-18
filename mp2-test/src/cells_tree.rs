@@ -22,7 +22,7 @@ use rand::{thread_rng, Rng};
 use ryhope::{
     storage::{memory::InMemory, updatetree::UpdateTree, EpochKvStorage, TreeTransactionalStorage},
     tree::{sbbst, TreeTopology},
-    MerkleTreeKvDb, NodePayload,
+    InitSettings, MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
 use std::iter;
@@ -105,7 +105,7 @@ impl NodePayload for TestCell {
 pub fn build_cell_tree(
     row: &[TestCell],
 ) -> Result<(MerkleCellTree, UpdateTree<<CellTree as TreeTopology>::Key>)> {
-    let mut cell_tree = MerkleCellTree::create((0, 0), ()).unwrap();
+    let mut cell_tree = MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap();
     let update_tree = cell_tree
         .in_transaction(|t| {
             for (i, cell) in row.iter().enumerate() {

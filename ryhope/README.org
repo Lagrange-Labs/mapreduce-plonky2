@@ -1,0 +1,23 @@
+* Ryhope - A Forest Library
+
+Ryhope aims at centralizing all the tree-related need of Lagrange projects. Its
+core-feature is to juggle all the ways trees are used in these projects.
+
+** Interface
+Storage trees are exposed in two different ways to the components using them:
+ - as key-value database to the components handling data collection and transformation;
+ - as tree structures to the ZK system, which needs to prove tree transformation, inclusion, etc.
+
+To this end, two main traits are provided:
+ - the [[file:src/storage/mod.rs][Storage]] trait presents a KV database-like interface to components just needing to interact with data;
+ - the [[file:src/tree/mod.rs][TreeTopology]] trait presents a classical tree interface, targeted at the proving system.
+** Tree Types
+Different tree types are proposed, depending on the pattern of the keys stored:
+ - [[file:src/tree/sbbst.rs][self-balanced BST]] :: optimal in the case of monotonously increasing sequenctial keys;
+ - [[file:src/tree/scapegoat.rs][scapegoat tree]] :: aimed at pseudo-random keys, with no discernible patterns.
+
+More types may be implemented on an on-demand basis.
+** Storage
+Storage tree may be backed in multiple fashions, adapted to different workflows. For now, the following backends are available:
+ - [[file:src/storage/memory.rs][in-memory]] :: fit for ephemeral experimental or testing purposes, where simplicity of usage is important and lasting storage does not matter;
+ - [TODO] PostgreSQL :: designed for production usage, where a drop in performances is an acceptable price to pay for ACID guarantees, parallelism, and long-lasting storage.

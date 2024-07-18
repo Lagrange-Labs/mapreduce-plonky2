@@ -15,7 +15,7 @@ use ryhope::{
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
     tree::{sbbst, TreeTopology},
-    MerkleTreeKvDb, NodePayload,
+    InitSettings, MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
 use std::iter::once;
@@ -28,7 +28,7 @@ use super::{
 };
 
 /// Hardcoded to use blocks but the spirit for any primary index is the same
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct IndexNode {
     pub identifier: F,
     pub value: U256,
@@ -93,7 +93,11 @@ pub fn build_initial_index_tree(
     // should always be one anyway since we iterate over blocks one by one
     // but in the case of general index we might create multiple nodes
     // at the same time
-    let mut index_tree = MerkleIndexTree::create((block_usize - 1, 0), ()).unwrap();
+    let mut index_tree = MerkleIndexTree::new(
+        InitSettings::Reset(sbbst::Tree::with_shift_and_capacity(block_usize - 1, 0)),
+        (),
+    )
+    .unwrap();
     let update_tree = index_tree
         .in_transaction(|t| {
             t.store(index.value.to(), index.clone())?;
@@ -217,7 +221,7 @@ impl TestContext {
 
             workplan.done(&k).unwrap();
         }
-        let root = t.tree().root().unwrap();
+        let root = t.root().unwrap();
         let root_proof_key = IndexProofIdentifier {
             table: table_id.clone(),
             tree_key: root,

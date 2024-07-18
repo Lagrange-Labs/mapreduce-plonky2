@@ -18,14 +18,14 @@ plonky2_crypto.workspace = true
 plonky2_ecgfp5.workspace = true
 rand.workspace = true
 rlp.workspace = true
-ryhope.workspace = true
 serde.workspace = true
 serde_arrays.workspace = true
 sha3.workspace = true
 
 mp2_common = { path = "../mp2-common" }
-verifiable-db = { path = "../verifiable-db" }
 recursion_framework = { path = "../recursion-framework" }
+ryhope = { path = "../ryhope" }
+verifiable-db = { path = "../verifiable-db" }
 
 [dev-dependencies]
 alloy.workspace = true
