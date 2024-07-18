@@ -55,7 +55,7 @@ pub(crate) struct ParentWires {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ParentCircuit {
+pub struct ParentCircuit {
     /// Identifier of the block number column
     pub(crate) index_identifier: F,
     /// Block number stored in the old node

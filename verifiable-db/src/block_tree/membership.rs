@@ -38,7 +38,7 @@ pub(crate) struct MembershipWires {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct MembershipCircuit {
+pub struct MembershipCircuit {
     /// Identifier of the block number column
     pub(crate) index_identifier: F,
     /// Block number of the current node
