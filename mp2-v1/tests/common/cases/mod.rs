@@ -29,7 +29,7 @@ pub(crate) struct TestCase {
 }
 
 impl TestCase {
-    fn table_id(&self) -> TableID {
+    pub fn table_id(&self) -> TableID {
         let slots = match self.source {
             TableSourceSlot::SingleValues(ref s) => s.slots.clone(),
             TableSourceSlot::Mapping((ref map, ref length)) => {

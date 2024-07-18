@@ -116,10 +116,15 @@ impl TestCase {
         let rows = vec![row];
         let row_tree_proof_key = ctx.build_and_prove_rowtree(&self.table_id(), &rows).await;
         info!("Generated final ROWs tree proofs for single variables");
-        let _ = ctx
+        let index_tree = ctx
             .build_and_prove_index_tree(&self.table_id(), &row_tree_proof_key)
             .await;
         info!("Generated final BLOCK tree proofs for single variables");
+        let _ = ctx.prove_ivc(self, &index_tree).await;
+        info!(
+            "Generated final IVC proof for single variable - block {}",
+            ctx.block_number().await
+        );
 
         Ok(())
     }
@@ -128,7 +133,7 @@ impl TestCase {
     async fn run_mpt_preprocessing<P: ProofStorage>(&self, ctx: &mut TestContext<P>) -> Result<()> {
         let bn = ctx.block_number().await;
         let contract_proof_key =
-            ProofKey::Contract((self.contract_address, bn as BlockPrimaryIndex));
+            ProofKey::ContractExtraction((self.contract_address, bn as BlockPrimaryIndex));
         let contract_proof = match ctx.storage.get_proof(&contract_proof_key) {
             Ok(proof) => {
                 info!(
@@ -157,7 +162,7 @@ impl TestCase {
 
         // We look if block proof has already been generated for this block
         // since it is the same between proofs
-        let block_proof_key = ProofKey::Block(bn as BlockPrimaryIndex);
+        let block_proof_key = ProofKey::BlockExtraction(bn as BlockPrimaryIndex);
         let block_proof = match ctx.storage.get_proof(&block_proof_key) {
             Ok(proof) => {
                 info!(
@@ -196,7 +201,8 @@ impl TestCase {
                     }
                 };
                 // final extraction for single variables combining the different proofs generated before
-                let final_key = ProofKey::Extraction((table_id.clone(), bn as BlockPrimaryIndex));
+                let final_key =
+                    ProofKey::FinalExtraction((table_id.clone(), bn as BlockPrimaryIndex));
                 match ctx.storage.get_proof(&final_key) {
                     Ok(proof) => proof,
                     Err(_) => {

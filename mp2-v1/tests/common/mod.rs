@@ -7,6 +7,7 @@ pub mod context;
 mod contract_extraction;
 mod final_extraction;
 mod index_tree;
+pub mod ivc;
 mod length_extraction;
 pub(crate) mod proof_storage;
 mod rowtree;

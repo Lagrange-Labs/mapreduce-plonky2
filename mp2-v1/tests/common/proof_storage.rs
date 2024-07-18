@@ -78,10 +78,11 @@ pub enum ProofKey {
     Cell(CellProofIdentifier<BlockPrimaryIndex>),
     Row(RowProofIdentifier<BlockPrimaryIndex>),
     Index(IndexProofIdentifier<BlockPrimaryIndex>),
-    Extraction((TableID, BlockPrimaryIndex)),
-    Contract(ContractKey),
-    Block(BlockPrimaryIndex),
+    FinalExtraction((TableID, BlockPrimaryIndex)),
+    ContractExtraction(ContractKey),
+    BlockExtraction(BlockPrimaryIndex),
     ValueExtraction((TableID, BlockPrimaryIndex)),
+    IVC(BlockPrimaryIndex),
 }
 
 impl ProofKey {
@@ -111,21 +112,25 @@ impl Hash for ProofKey {
                 "index_tree".hash(state);
                 c.hash(state);
             }
-            ProofKey::Extraction(e) => {
+            ProofKey::FinalExtraction(e) => {
                 "final_extract".hash(state);
                 e.hash(state);
             }
-            ProofKey::Contract(e) => {
+            ProofKey::ContractExtraction(e) => {
                 "contract_extract".hash(state);
                 e.hash(state);
             }
-            ProofKey::Block(b) => {
+            ProofKey::BlockExtraction(b) => {
                 "block_proof".hash(state);
                 b.hash(state);
             }
             ProofKey::ValueExtraction(s) => {
                 "value_extract".hash(state);
                 s.hash(state);
+            }
+            ProofKey::IVC(n) => {
+                "ivc".hash(state);
+                n.hash(state);
             }
         }
     }

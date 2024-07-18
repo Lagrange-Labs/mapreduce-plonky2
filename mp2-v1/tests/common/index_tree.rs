@@ -113,7 +113,7 @@ impl<P: ProofStorage> TestContext<P> {
         t: &MerkleIndexTree,
         ut: UpdateTree<IndexTreeKey>,
         added_index: &IndexNode,
-    ) -> IndexProofIdentifier<BlockPrimaryIndex> {
+    ) {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, node) = t.fetch_with_context(&k);
@@ -128,7 +128,7 @@ impl<P: ProofStorage> TestContext<P> {
             );
             let extraction_proof = self
                 .storage
-                .get_proof(&ProofKey::Extraction((
+                .get_proof(&ProofKey::FinalExtraction((
                     table_id.clone(),
                     node.row_tree_proof_id.primary,
                 )))
@@ -237,14 +237,13 @@ impl<P: ProofStorage> TestContext<P> {
             .storage
             .get_proof(&ProofKey::Index(root_proof_key.clone()))
             .unwrap();
-        root_proof_key
     }
 
     pub(crate) async fn build_and_prove_index_tree(
         &mut self,
         table: &TableID,
         row_root_proof_key: &RowProofIdentifier<BlockPrimaryIndex>,
-    ) -> IndexProofIdentifier<BlockPrimaryIndex> {
+    ) -> MerkleIndexTree {
         let row_tree_proof = self
             .storage
             .get_proof(&ProofKey::Row(row_root_proof_key.clone()))
@@ -260,6 +259,7 @@ impl<P: ProofStorage> TestContext<P> {
         };
         let (tree, update) = build_initial_index_tree(&node).expect("can't build index tree");
         info!("Generated index tree");
-        self.prove_index_tree(table, &tree, update, &node)
+        self.prove_index_tree(table, &tree, update, &node);
+        tree
     }
 }
