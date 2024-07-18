@@ -1,11 +1,14 @@
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
-use super::{index_tree::IndexTree, rowtree::RowTree, table::TableID};
+use super::{
+    context::TestContextConfig, index_tree::IndexTree, mkdir_all, rowtree::RowTree, table::TableID,
+};
 use alloy::primitives::Address;
 use anyhow::{bail, Context, Result};
+use envconfig::Envconfig;
 use mp2_test::cells_tree::CellTree;
 use ryhope::tree::{sbbst, TreeTopology};
 use serde::{Deserialize, Serialize};
@@ -142,14 +145,25 @@ pub struct KeyValueDB {
 }
 
 const BUCKET_NAME: &str = "v1_proof_store_test";
-pub const ENV_PROOF_STORE: &str = "PROOF_STORE";
+pub const ENV_PROOF_STORE: &str = "proofs.store";
 impl KeyValueDB {
     pub fn new_from_env(default: &str) -> Result<Self> {
-        let path = std::env::var(ENV_PROOF_STORE).unwrap_or(default.to_string());
-        Self::new(Path::new(&path))
+        let filename = std::env::var(ENV_PROOF_STORE).unwrap_or(default.to_string());
+        Self::new(Path::new(&filename))
     }
-    pub fn new(path: &Path) -> Result<Self> {
-        let db = DB::open(path)?;
+    pub fn new(filename: &Path) -> Result<Self> {
+        let cfg = TestContextConfig::init_from_env().context("while parsing configuration")?;
+
+        println!("Hello -- A");
+        let path = cfg.params_dir.expect("no params build defined");
+        println!("Hello -- B");
+        mkdir_all(&path)?;
+        let mut path = PathBuf::from(path);
+        println!("Hello -- C");
+        path.push(filename);
+        println!("Hello -- CC");
+        let db = DB::open(path.clone())?;
+        println!("Hello -- D");
         let tx = db.tx(true)?;
         match tx.create_bucket(BUCKET_NAME) {
             Ok(_) => log::info!("Created bucket {BUCKET_NAME} into store db at path {path:?}"),

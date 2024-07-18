@@ -19,15 +19,17 @@ use std::{
     path::PathBuf,
 };
 
+use crate::common::mkdir_all;
+
 use super::proof_storage::ProofStorage;
 
 #[derive(Envconfig)]
-struct TestContextConfig {
+pub struct TestContextConfig {
     #[envconfig(from = "LPN_PARAMS_DIR")]
-    params_dir: Option<String>,
+    pub params_dir: Option<String>,
 
     #[envconfig(from = "LPN_PARAMS_REBUILD", default = "false")]
-    force_rebuild: bool,
+    pub force_rebuild: bool,
 }
 
 /// Test context
@@ -86,11 +88,8 @@ impl<P: ProofStorage> TestContext<P> {
         self.params = Some(match cfg.params_dir {
             Some(params_path_str) => {
                 info!("attempting to read parameters from {params_path_str}");
+                mkdir_all(&params_path_str)?;
                 let params_path = PathBuf::from(params_path_str);
-                if !params_path.exists() {
-                    std::fs::create_dir_all(&params_path)
-                        .context("while creating parameters folder")?;
-                }
 
                 let mut mp2_filepath = params_path.clone();
                 mp2_filepath.push("params_mp2");
