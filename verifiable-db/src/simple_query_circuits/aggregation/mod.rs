@@ -1,7 +1,7 @@
-mod full_node_index_leaf;
-mod full_node_with_one_child;
-mod full_node_with_two_children;
-mod output_computation;
+pub(crate) mod full_node_index_leaf;
+pub(crate) mod full_node_with_one_child;
+pub(crate) mod full_node_with_two_children;
+pub(crate) mod output_computation;
 
 #[cfg(test)]
 pub(crate) mod tests {
