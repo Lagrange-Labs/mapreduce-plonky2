@@ -134,7 +134,7 @@ pub mod tests {
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
     use crate::length_extraction::{
-        api::compute_metadata_digest, branch::tests::BranchTestCircuit, BranchLengthCircuit,
+        api::utils::compute_metadata_digest, branch::tests::BranchTestCircuit, BranchLengthCircuit,
         LeafLengthCircuit, PublicInputs,
     };
 

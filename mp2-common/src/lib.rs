@@ -4,15 +4,10 @@
 #![feature(generic_arg_infer)]
 #![feature(const_for)]
 #![feature(generic_const_items)]
-use anyhow::Result;
-use plonky2::{
-    field::extension::Extendable,
-    hash::hash_types::RichField,
-    plonk::{
-        circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
-        config::{GenericConfig, PoseidonGoldilocksConfig},
-        proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs},
-    },
+use plonky2::plonk::{
+    circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
+    config::{GenericConfig, PoseidonGoldilocksConfig},
+    proof::ProofWithPublicInputs,
 };
 use serde::{Deserialize, Serialize};
 
@@ -64,63 +59,26 @@ struct ByteProofTuple {
     common_data: Vec<u8>,
 }
 
-impl ByteProofTuple {
-    fn from_proof_tuple<
-        F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
-        const D: usize,
-    >(
-        proof_tuple: ProofTuple<F, C, D>,
-    ) -> Result<Vec<u8>> {
-        let (proof, vd, cd) = proof_tuple;
-        let compressed_proof = proof.compress(&vd.circuit_digest, &cd)?;
-        let proof_bytes = compressed_proof.to_bytes();
-        let verification_data = vd
-            .to_bytes()
-            .map_err(|e| anyhow::anyhow!("can't serialize vk: {:?}", e))?;
-        //let common_data = bincode::serialize(&cd)?;
-        let gate_serializer = plonky2_crypto::u32::gates::HashGateSerializer;
-        let common_data = cd
-            .to_bytes(&gate_serializer)
-            .map_err(|e| anyhow::anyhow!("can't serialize cd: {:?}", e))?; // nikko TODO: this is a hack, we need to serialize the cd properly
-        let btp = ByteProofTuple {
-            proof_bytes,
-            verification_data,
-            common_data,
-        };
-        let buff = bincode::serialize(&btp)?;
-        Ok(buff)
-    }
-
-    fn into_proof_tuple<
-        F: RichField + Extendable<D>,
-        C: GenericConfig<D, F = F>,
-        const D: usize,
-    >(
-        proof_bytes: &[u8],
-    ) -> Result<ProofTuple<F, C, D>> {
-        let btp: ByteProofTuple = bincode::deserialize(proof_bytes)?;
-        let vd = VerifierOnlyCircuitData::from_bytes(btp.verification_data)
-            .map_err(|e| anyhow::anyhow!(e))?;
-        //let cd: CommonCircuitData<F, D> = bincode::deserialize(&btp.common_data)?;
-        let gate_serializer = plonky2_crypto::u32::gates::HashGateSerializer;
-        let cd = CommonCircuitData::<F, D>::from_bytes(btp.common_data, &gate_serializer)
-            .map_err(|e| anyhow::anyhow!("can't deserialize common data {:?}", e))?;
-        let compressed_proof = CompressedProofWithPublicInputs::from_bytes(btp.proof_bytes, &cd)?;
-        let proof = compressed_proof.decompress(&vd.circuit_digest, &cd)?;
-        Ok((proof, vd, cd))
-    }
-}
-
 #[cfg(test)]
 mod test {
+    use crate::{
+        utils::{keccak256, verify_proof_tuple},
+        ByteProofTuple, ProofTuple,
+    };
+    use anyhow::Result;
+    use plonky2::field::types::Field;
+    use plonky2::{
+        field::extension::Extendable,
+        hash::hash_types::RichField,
+        plonk::{
+            circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+            proof::CompressedProofWithPublicInputs,
+        },
+    };
     use plonky2::{
         iop::witness::{PartialWitness, WitnessWrite},
-        plonk::{
-            circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
-        },
+        plonk::circuit_builder::CircuitBuilder,
     };
     use plonky2_crypto::hash::{
         keccak256::{CircuitBuilderHashKeccak, WitnessHashKeccak, KECCAK256_R},
@@ -128,15 +86,58 @@ mod test {
     };
     use rand::Rng;
 
-    use crate::{
-        utils::{keccak256, verify_proof_tuple},
-        ByteProofTuple,
-    };
-    use anyhow::Result;
-    use plonky2::field::types::Field;
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
+
+    impl ByteProofTuple {
+        fn from_proof_tuple<
+            F: RichField + Extendable<D>,
+            C: GenericConfig<D, F = F>,
+            const D: usize,
+        >(
+            proof_tuple: ProofTuple<F, C, D>,
+        ) -> Result<Vec<u8>> {
+            let (proof, vd, cd) = proof_tuple;
+            let compressed_proof = proof.compress(&vd.circuit_digest, &cd)?;
+            let proof_bytes = compressed_proof.to_bytes();
+            let verification_data = vd
+                .to_bytes()
+                .map_err(|e| anyhow::anyhow!("can't serialize vk: {:?}", e))?;
+            //let common_data = bincode::serialize(&cd)?;
+            let gate_serializer = plonky2_crypto::u32::gates::HashGateSerializer;
+            let common_data = cd
+                .to_bytes(&gate_serializer)
+                .map_err(|e| anyhow::anyhow!("can't serialize cd: {:?}", e))?; // nikko TODO: this is a hack, we need to serialize the cd properly
+            let btp = ByteProofTuple {
+                proof_bytes,
+                verification_data,
+                common_data,
+            };
+            let buff = bincode::serialize(&btp)?;
+            Ok(buff)
+        }
+
+        fn into_proof_tuple<
+            F: RichField + Extendable<D>,
+            C: GenericConfig<D, F = F>,
+            const D: usize,
+        >(
+            proof_bytes: &[u8],
+        ) -> Result<ProofTuple<F, C, D>> {
+            let btp: ByteProofTuple = bincode::deserialize(proof_bytes)?;
+            let vd = VerifierOnlyCircuitData::from_bytes(btp.verification_data)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            //let cd: CommonCircuitData<F, D> = bincode::deserialize(&btp.common_data)?;
+            let gate_serializer = plonky2_crypto::u32::gates::HashGateSerializer;
+            let cd = CommonCircuitData::<F, D>::from_bytes(btp.common_data, &gate_serializer)
+                .map_err(|e| anyhow::anyhow!("can't deserialize common data {:?}", e))?;
+            let compressed_proof =
+                CompressedProofWithPublicInputs::from_bytes(btp.proof_bytes, &cd)?;
+            let proof = compressed_proof.decompress(&vd.circuit_digest, &cd)?;
+            Ok((proof, vd, cd))
+        }
+    }
 
     #[test]
     fn test_proof_serialization() -> Result<()> {

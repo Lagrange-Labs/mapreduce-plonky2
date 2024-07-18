@@ -61,22 +61,6 @@ pub struct Vector<F, const MAX_LEN: usize> {
 }
 
 impl<T: Default + Clone + Debug, const MAX_LEN: usize> Vector<T, MAX_LEN> {
-    /// Utility wrapper around vector of bytes
-    pub(crate) fn to_fields<F: RichField>(&self) -> Vector<F, MAX_LEN>
-    where
-        T: ToField<F>,
-    {
-        Vector {
-            arr: self
-                .arr
-                .iter()
-                .map(|x| x.to_field())
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-            real_len: self.real_len,
-        }
-    }
     pub fn from_vec(d: &[T]) -> Result<Self> {
         let fields = d
             .iter()
