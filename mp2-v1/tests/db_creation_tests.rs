@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use common::{
     context,
-    proof_storage::{KeyValueDB, MemoryProofStorage, ProofKey, TableID},
+    proof_storage::{KeyValueDB, MemoryProofStorage, ProofKey},
     TestCase, TestContext,
 };
 use log::info;

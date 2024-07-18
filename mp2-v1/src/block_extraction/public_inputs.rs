@@ -66,11 +66,11 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     pub fn block_hash(&self) -> OutputHash {
-        OutputHash::from_targets(&self.bh)
+        OutputHash::from_targets(self.bh)
     }
 
     pub fn state_root(&self) -> OutputHash {
-        OutputHash::from_targets(&self.sh)
+        OutputHash::from_targets(self.sh)
     }
 }
 
@@ -127,7 +127,7 @@ impl<'a, T> PublicInputs<'a, T> {
 
     /// Returns the block number.
     pub const fn block_number_raw(&self) -> &[T] {
-        &self.bn
+        self.bn
     }
 
     /// Returns the packed state root hash.

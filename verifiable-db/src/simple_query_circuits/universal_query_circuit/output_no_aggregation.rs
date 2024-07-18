@@ -101,7 +101,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
     }
 
     fn get_other_output_values(&self) -> &[UInt256Target] {
-        &self.output_values.as_slice()
+        self.output_values.as_slice()
     }
 
     fn get_computational_hash(&self) -> HashOutTarget {
@@ -406,8 +406,7 @@ mod tests {
             let cells: Vec<_> = output_items
                 .into_iter()
                 .zip(c.ids)
-                .enumerate()
-                .map(|(i, (value, id))| TestCell {
+                .map(|(value, id)| TestCell {
                     id,
                     value,
                     ..Default::default()
@@ -473,7 +472,6 @@ mod tests {
         }
 
         fn assign(&self, pw: &mut PartialWitness<F>, wires: &TestExpectedWires) {
-            use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
             pw.set_curve_target(
                 wires.first_output_value,
                 self.first_output_value.to_weierstrass(),

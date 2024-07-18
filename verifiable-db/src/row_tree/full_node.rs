@@ -27,7 +27,7 @@ use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
 pub struct FullNodeCircuit(IndexTuple);
 
 #[derive(Clone, Serialize, Deserialize, From, Deref)]
-struct FullNodeWires(IndexTupleWire);
+pub(crate) struct FullNodeWires(IndexTupleWire);
 
 impl FullNodeCircuit {
     pub(crate) fn build(

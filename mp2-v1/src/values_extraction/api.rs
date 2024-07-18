@@ -407,7 +407,7 @@ mod tests {
         types::{GFp, ADDRESS_LEN},
     };
     use mp2_test::{mpt_sequential::generate_random_storage_mpt, utils::random_vector};
-    use plonky2::{field::types::Field, hash::poseidon::PoseidonHash, plonk::config::Hasher};
+    use plonky2::field::types::Field;
     use plonky2_ecgfp5::curve::curve::Point;
     use serial_test::serial;
     use std::{str::FromStr, sync::Arc};

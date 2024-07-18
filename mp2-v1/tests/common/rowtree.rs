@@ -17,7 +17,7 @@ use ryhope::{
         scapegoat::{self, Alpha},
         TreeTopology,
     },
-    MerkleTreeKvDb, NodePayload,
+    InitSettings, MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +42,7 @@ pub struct RowTreeKey {
 
 /// Represent a row in one of the virtual tables stored in the zkDB; which
 /// encapsulates its cells and the tree they form.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Row {
     /// A key *uniquely* representing this row in the row tree.
     ///
@@ -123,8 +123,11 @@ pub type MerkleRowTree = MerkleTreeKvDb<RowTree, Row, RowStorage>;
 /// Given a list of row, build the Merkle tree of the secondary index and
 /// returns it along its update tree.
 pub async fn build_row_tree(rows: &[Row]) -> Result<(MerkleRowTree, UpdateTree<RowTreeKey>)> {
-    let mut row_tree =
-        MerkleRowTree::create(Alpha::new(0.8), ()).context("while creating row tree instance")?;
+    let mut row_tree = MerkleRowTree::new(
+        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
+        (),
+    )
+    .context("while creating row tree instance")?;
 
     let update_tree = row_tree
         .in_transaction(|t| {
@@ -253,7 +256,7 @@ impl<P: ProofStorage> TestContext<P> {
 
             workplan.done(&k).unwrap();
         }
-        let root = t.tree().root().unwrap();
+        let root = t.root().unwrap();
         let root_proof_key = RowProofIdentifier {
             table: table_id.clone(),
             primary: block_key,

@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 const INPUT_PADDED_ADDRESS_LEN: usize = PAD_LEN(ADDRESS_LEN);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct LeafWires<const NODE_LEN: usize>
+pub struct LeafWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
@@ -44,7 +44,7 @@ where
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct LeafCircuit<const NODE_LEN: usize> {
+pub struct LeafCircuit<const NODE_LEN: usize> {
     pub(crate) contract_address: Address,
     /// The offset of storage root hash located in RLP encoded account node
     pub(crate) storage_root_offset: usize,

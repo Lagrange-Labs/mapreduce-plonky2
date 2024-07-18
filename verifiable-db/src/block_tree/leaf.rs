@@ -37,7 +37,7 @@ pub(crate) struct LeafWires<E> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct LeafCircuit {
+pub struct LeafCircuit {
     /// Identifier of the block number column
     pub(crate) index_identifier: F,
 }

@@ -119,7 +119,7 @@ impl TestCase {
         let row_tree = ctx.build_and_prove_rowtree(&self.table_id(), &rows).await;
         info!("Generated final ROWs tree proofs for single variables");
         let index_tree = ctx
-            .build_and_prove_index_tree(&self.table_id(), &row_tree.tree().root().unwrap())
+            .build_and_prove_index_tree(&self.table_id(), &row_tree.root().unwrap())
             .await;
         info!("Generated final BLOCK tree proofs for single variables");
         let _ = ctx.prove_ivc(self, &index_tree).await;

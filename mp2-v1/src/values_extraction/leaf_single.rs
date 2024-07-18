@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use std::iter;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct LeafSingleWires<const NODE_LEN: usize>
+pub struct LeafSingleWires<const NODE_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
@@ -51,7 +51,7 @@ where
 
 /// Circuit to prove the correct derivation of the MPT key from a simple slot
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct LeafSingleCircuit<const NODE_LEN: usize> {
+pub struct LeafSingleCircuit<const NODE_LEN: usize> {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: SimpleSlot,
     pub(crate) id: u64,
@@ -98,7 +98,7 @@ where
             k: &wires.key,
             dv: values_digest,
             dm: metadata_digest,
-            n: n,
+            n,
         }
         .register(b);
 

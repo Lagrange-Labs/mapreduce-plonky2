@@ -141,7 +141,8 @@ impl CircuitLogicWires<F, D, 0> for LengthedRecursiveWires {
         let (proof, vd) = (&inputs.length_proof).into();
         self.length_proof_wires
             .set_target(pw, &inputs.length_circuit_set, proof, vd)?;
-        Ok(inputs.lengthed.assign(pw, &self.wires))
+        inputs.lengthed.assign(pw, &self.wires);
+        Ok(())
     }
 }
 

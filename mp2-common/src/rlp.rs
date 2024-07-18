@@ -1,14 +1,10 @@
 use crate::array::{Array, VectorWire};
 
-use crate::utils::{
-    greater_than_or_equal_to, greater_than_or_equal_to_unsafe, less_than, less_than_unsafe,
-    num_to_bits,
-};
+use crate::utils::{greater_than_or_equal_to_unsafe, less_than, less_than_unsafe, num_to_bits};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
 /// The maximum number of bytes the length of data can take.
 /// NOTE: However, this is set arbitrarily because there can be up 7 bytes
