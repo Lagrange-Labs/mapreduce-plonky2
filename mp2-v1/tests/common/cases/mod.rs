@@ -3,7 +3,7 @@
 use alloy::primitives::Address;
 use mp2_common::eth::StorageSlot;
 
-use super::proof_storage::{ProofStorage, TableID};
+use super::{proof_storage::ProofStorage, table::TableID};
 
 pub(crate) mod local_simple;
 pub(crate) mod pudgy_penguins;

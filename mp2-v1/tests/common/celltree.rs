@@ -26,8 +26,9 @@ use crate::common::{cell_tree_proof_to_hash, rowtree::RowTreeKey, TestContext};
 
 use super::{
     cases::TableSourceSlot,
-    proof_storage::{BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, TableID},
+    proof_storage::{BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage},
     rowtree::Row,
+    table::TableID,
 };
 
 impl<P: ProofStorage> TestContext<P> {
@@ -130,7 +131,11 @@ impl<P: ProofStorage> TestContext<P> {
     /// Generate and prove a [`MerkleCellTree`] encoding the content of the
     /// given slots for the contract located at `contract_address`.
     // NOTE: the 0th column is assumed to be the secondary index.
-    pub async fn prove_cells_tree(&mut self, table_id: &TableID, cells: Vec<Cell>) -> Row {
+    pub async fn prove_cells_tree(
+        &mut self,
+        table_id: &TableID,
+        cells: Vec<Cell>,
+    ) -> (MerkleCellTree, Row) {
         // NOTE: the sec. index slot is assumed to be the first.
         let (cell_tree, cell_tree_ut) =
             build_cell_tree(&cells[1..]).expect("failed to create cell tree");
@@ -148,19 +153,22 @@ impl<P: ProofStorage> TestContext<P> {
             "mismatch between cell tree root hash as computed by ryhope and mp2",
         );
 
-        Row {
-            k: RowTreeKey {
-                // the 0th cell value is the secondary index
-                value: cells[0].value,
-                // there is always only one row in the scalar slots table
-                id: 0,
+        (
+            cell_tree,
+            Row {
+                k: RowTreeKey {
+                    // the 0th cell value is the secondary index
+                    value: cells[0].value,
+                    // there is always only one row in the scalar slots table
+                    id: 0,
+                },
+                cell_tree_root_proof_id: root_key,
+                cell_tree_root_hash: tree_hash,
+                min: cells[0].value,
+                max: cells[0].value,
+                cells,
+                hash: Default::default(),
             },
-            cell_tree_root_proof_id: root_key,
-            cell_tree_root_hash: tree_hash,
-            min: cells[0].value,
-            max: cells[0].value,
-            cells,
-            hash: Default::default(),
-        }
+        )
     }
 }

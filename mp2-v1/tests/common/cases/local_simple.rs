@@ -6,10 +6,13 @@ use log::{debug, info, warn};
 use mp2_test::cells_tree::TestCell as Cell;
 use mp2_v1::values_extraction::compute_leaf_single_id;
 use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
+use ryhope::tree::TreeTopology;
 
 use crate::common::{
     bindings::simple::Simple,
+    index_tree::MerkleIndexTree,
     proof_storage::{BlockPrimaryIndex, ProofKey, ProofStorage},
+    table::Table,
     TestContext,
 };
 
@@ -97,10 +100,9 @@ impl TestCase {
         Ok(vec![single])
     }
 
-    pub async fn run<P: ProofStorage>(&self, ctx: &mut TestContext<P>) -> Result<()> {
+    pub async fn initial_run<P: ProofStorage>(&self, ctx: &mut TestContext<P>) -> Result<Table> {
         self.run_mpt_preprocessing(ctx).await?;
-        self.run_lagrange_preprocessing(ctx).await?;
-        Ok(())
+        self.run_lagrange_preprocessing(ctx).await
     }
 
     // separate function only dealing with preprocesisng MPT proofs
@@ -108,16 +110,16 @@ impl TestCase {
     async fn run_lagrange_preprocessing<P: ProofStorage>(
         &self,
         ctx: &mut TestContext<P>,
-    ) -> Result<()> {
+    ) -> Result<Table> {
         let cells = self.build_cells(ctx).await;
-        let row = ctx.prove_cells_tree(&self.table_id(), cells).await;
+        let (cell_tree, row) = ctx.prove_cells_tree(&self.table_id(), cells).await;
         info!("Generated final CELLs tree proofs for single variables");
         // In the case of the scalars slots, there is a single node in the row tree.
         let rows = vec![row];
-        let row_tree_proof_key = ctx.build_and_prove_rowtree(&self.table_id(), &rows).await;
+        let row_tree = ctx.build_and_prove_rowtree(&self.table_id(), &rows).await;
         info!("Generated final ROWs tree proofs for single variables");
         let index_tree = ctx
-            .build_and_prove_index_tree(&self.table_id(), &row_tree_proof_key)
+            .build_and_prove_index_tree(&self.table_id(), &row_tree.tree().root().unwrap())
             .await;
         info!("Generated final BLOCK tree proofs for single variables");
         let _ = ctx.prove_ivc(self, &index_tree).await;
@@ -126,7 +128,12 @@ impl TestCase {
             ctx.block_number().await
         );
 
-        Ok(())
+        Ok(Table {
+            id: self.table_id(),
+            cell: cell_tree,
+            row: row_tree,
+            index: index_tree,
+        })
     }
 
     // separate function only dealing with preprocessing MPT proofs

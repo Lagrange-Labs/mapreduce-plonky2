@@ -76,7 +76,7 @@ async fn db_creation_integrated_tests() -> Result<()> {
     info!("Test Cases deployed");
     // Prove for each test case.
     for case in &cases {
-        case.run(&mut ctx).await?;
+        case.initial_run(&mut ctx).await?;
     }
     ////
     //// Prove mapping slots

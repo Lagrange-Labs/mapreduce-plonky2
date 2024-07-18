@@ -25,8 +25,9 @@ use crate::common::row_tree_proof_to_hash;
 
 use super::{
     proof_storage::{
-        BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier, TableID,
+        BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier,
     },
+    table::TableID,
     TestContext,
 };
 
@@ -271,7 +272,7 @@ impl<P: ProofStorage> TestContext<P> {
         &mut self,
         table_id: &TableID,
         rows: &[Row],
-    ) -> RowProofIdentifier<BlockPrimaryIndex> {
+    ) -> MerkleRowTree {
         let (row_tree, row_tree_ut) = build_row_tree(rows)
             .await
             .expect("failed to create row tree");
@@ -288,7 +289,6 @@ impl<P: ProofStorage> TestContext<P> {
             tree_hash, proved_hash,
             "mismatch between row tree root hash as computed by ryhope and mp2",
         );
-
-        root_proof_key
+        row_tree
     }
 }

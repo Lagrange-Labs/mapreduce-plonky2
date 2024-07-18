@@ -3,7 +3,7 @@ use std::{
     path::Path,
 };
 
-use super::{index_tree::IndexTree, rowtree::RowTree};
+use super::{index_tree::IndexTree, rowtree::RowTree, table::TableID};
 use alloy::primitives::Address;
 use anyhow::{bail, Context, Result};
 use mp2_test::cells_tree::CellTree;
@@ -16,24 +16,6 @@ type RowTreeKey = <RowTree as TreeTopology>::Key;
 type IndexTreeKey = <IndexTree as TreeTopology>::Key;
 
 type ContractKey = (Address, BlockPrimaryIndex);
-
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TableID(String);
-
-impl TableID {
-    /// TODO: should contain more info probablyalike which index are selected
-    pub fn new(contract: &Address, slots: &[u8]) -> Self {
-        TableID(format!(
-            "{}-{}",
-            contract,
-            slots
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>()
-                .join("+"),
-        ))
-    }
-}
 
 /// This is the identifier we are storing proof in storage under. This identifier needs
 /// to be unique accross all tables and all blocks. Remember the identifier that the tree uses

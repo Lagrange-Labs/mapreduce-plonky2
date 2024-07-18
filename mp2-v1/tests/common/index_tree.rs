@@ -23,7 +23,9 @@ use std::iter::once;
 use crate::common::proof_storage::{IndexProofIdentifier, ProofKey};
 
 use super::{
-    proof_storage::{BlockPrimaryIndex, ProofStorage, RowProofIdentifier, TableID},
+    proof_storage::{BlockPrimaryIndex, ProofStorage, RowProofIdentifier},
+    rowtree::RowTreeKey,
+    table::TableID,
     TestContext,
 };
 
@@ -242,8 +244,14 @@ impl<P: ProofStorage> TestContext<P> {
     pub(crate) async fn build_and_prove_index_tree(
         &mut self,
         table: &TableID,
-        row_root_proof_key: &RowProofIdentifier<BlockPrimaryIndex>,
+        row_tree_root: &RowTreeKey,
     ) -> MerkleIndexTree {
+        let row_root_proof_key = RowProofIdentifier {
+            table: table.clone(),
+            primary: self.block_number().await as BlockPrimaryIndex,
+            tree_key: row_tree_root.clone(),
+        };
+
         let row_tree_proof = self
             .storage
             .get_proof(&ProofKey::Row(row_root_proof_key.clone()))

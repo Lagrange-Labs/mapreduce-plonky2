@@ -12,6 +12,7 @@ mod length_extraction;
 pub(crate) mod proof_storage;
 mod rowtree;
 mod storage_trie;
+mod table;
 mod values_extraction;
 
 pub(crate) use cases::TestCase;
