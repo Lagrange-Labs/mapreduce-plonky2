@@ -105,7 +105,7 @@ pub(crate) const BLOCK_SET_NUM_IO: usize =
     block_extraction::public_inputs::PublicInputs::<F>::TOTAL_LEN;
 
 #[derive(Clone, Debug)]
-pub(super) struct BaseCircuitInput {
+pub struct BaseCircuitInput {
     block_proof: ProofWithPublicInputs<F, C, D>,
     contract_proof: ProofWithVK,
     value_proof: ProofWithVK,
