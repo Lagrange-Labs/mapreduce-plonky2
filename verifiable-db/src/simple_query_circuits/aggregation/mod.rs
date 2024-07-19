@@ -2,6 +2,8 @@ mod full_node_index_leaf;
 mod full_node_with_one_child;
 mod full_node_with_two_children;
 mod output_computation;
+mod partial_node;
+mod utils;
 
 #[cfg(test)]
 pub(crate) mod tests {
