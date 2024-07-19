@@ -112,9 +112,8 @@ where
     // Set the overflow if the operation is SUM or AVG:
     // overflow = (op == SUM OR op == AVG) AND sum_overflow != 0
     let is_op_sum_or_avg = b.or(is_op_sum, is_op_avg);
-    let is_overflow_zero = b.is_equal(sum_overflow.0, u32_zero.0);
-    let is_overflow_non_zero = b.not(is_overflow_zero);
-    let overflow = b.and(is_op_sum_or_avg, is_overflow_non_zero);
+    let overflow = b.is_not_equal(sum_overflow.0, u32_zero.0);
+    let overflow = b.and(is_op_sum_or_avg, overflow);
 
     (output, overflow)
 }
