@@ -4,8 +4,6 @@
 use std::{
     array::{self, from_fn as create_array},
     iter::{once, repeat},
-    ops::Mul,
-    usize,
 };
 
 use crate::{
@@ -201,7 +199,7 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
             .zip(right.0.iter())
             .map(|(left_limb, right_limb)| {
                 let to_add_limbs = vec![*left_limb, *right_limb];
-                let (result, new_carry) = self.add_u32s_with_carry(&to_add_limbs.as_slice(), carry);
+                let (result, new_carry) = self.add_u32s_with_carry(to_add_limbs.as_slice(), carry);
                 carry = new_carry;
                 result
             })
@@ -494,7 +492,7 @@ impl UInt256Target {
             limbs
                 .iter()
                 .rev()
-                .map(|t| *t)
+                .cloned()
                 .collect_vec()
                 .try_into()
                 .map_err(|_| {
@@ -598,14 +596,14 @@ impl UInt256Target {
         // otherwise, prod = quotient*other, as we need to later check that quotient*other + remainder == self
         let mul_input = if let Some(val) = b.target_as_constant(is_div.target) {
             if val == F::ONE {
-                &quotient
+                quotient.clone()
             } else {
-                self
+                self.clone()
             }
         } else {
-            &b.select_u256(is_div, &quotient, self)
+            b.select_u256(is_div, &quotient, self)
         };
-        let (prod, mul_overflow) = b.mul_u256(mul_input, other);
+        let (prod, mul_overflow) = b.mul_u256(&mul_input, other);
         let (computed_dividend, carry) = b.add_u256(&prod, &remainder);
         b.enforce_equal_u256(self, &computed_dividend);
 
@@ -634,7 +632,7 @@ impl UInt256Target {
     fn read_from_buffer(buffer: &mut Buffer) -> IoResult<Self> {
         Ok(UInt256Target(
             (0..NUM_LIMBS)
-                .map(|_| buffer.read_target().map(|t| U32Target(t)))
+                .map(|_| buffer.read_target().map(U32Target))
                 .rev() // targets are serialized in big-endian order, so we need to reverse them to get little-endian
                 .collect::<Result<Vec<_>, _>>()?
                 .try_into()
@@ -684,7 +682,7 @@ impl FromBytes for UInt256Target {
 }
 
 impl<F: RichField> ToFields<F> for U256 {
-    /// Return the 32-bit limbs representing a u256 as field elements, packed, in big-endian order    
+    /// Return the 32-bit limbs representing a u256 as field elements, packed, in big-endian order
     fn to_fields(&self) -> Vec<F> {
         let limbs = self.to_be_bytes_vec().pack(Endianness::Big).to_fields();
         assert_eq!(limbs.len(), NUM_LIMBS);
@@ -772,9 +770,7 @@ impl<F: SerializableRichField<D>, const D: usize> SimpleGenerator<F, D> for UInt
         self.divisor.write_to_bytes(dst);
         self.quotient.write_to_bytes(dst);
         self.remainder.write_to_bytes(dst);
-        dst.write_target_bool(self.is_div);
-
-        Ok(())
+        dst.write_target_bool(self.is_div)
     }
 
     fn deserialize(src: &mut Buffer, _common_data: &CommonCircuitData<F, D>) -> IoResult<Self>

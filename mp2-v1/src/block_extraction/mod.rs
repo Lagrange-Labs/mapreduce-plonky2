@@ -1,10 +1,6 @@
 use plonky2::{
     iop::witness::PartialWitness,
-    plonk::{
-        circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitData, VerifierCircuitData},
-    },
-    util::serialization::gate_serialization::default,
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitData},
 };
 
 mod circuit;

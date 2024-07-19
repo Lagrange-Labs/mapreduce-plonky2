@@ -55,7 +55,7 @@ pub(crate) struct ParentWires {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ParentCircuit {
+pub struct ParentCircuit {
     /// Identifier of the block number column
     pub(crate) index_identifier: F,
     /// Block number stored in the old node
@@ -65,9 +65,9 @@ pub(crate) struct ParentCircuit {
     /// Maximum block number stored in the subtree rooted in the old node
     pub(crate) old_max: U256,
     /// Hash of the left child of the old node
-    pub(crate) left_child: HashOut<F>,
+    pub(crate) old_left_child: HashOut<F>,
     /// Hash of the right child of the old node
-    pub(crate) right_child: HashOut<F>,
+    pub(crate) old_right_child: HashOut<F>,
     /// Hash of the rows tree stored in the old node
     pub(crate) old_rows_tree_hash: HashOut<F>,
 }
@@ -82,7 +82,8 @@ impl ParentCircuit {
 
         let index_identifier = b.add_virtual_target();
         let [old_index_value, old_min, old_max] = [0; 3].map(|_| b.add_virtual_u256());
-        let [left_child, right_child, old_rows_tree_hash] = [0; 3].map(|_| b.add_virtual_hash());
+        let [old_left_child, old_right_child, old_rows_tree_hash] =
+            [0; 3].map(|_| b.add_virtual_hash());
 
         let extraction_pi = E::PI::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
@@ -117,10 +118,10 @@ impl ParentCircuit {
         // We recompute the hash of the old node to bind the `old_min` and `old_max`
         // values to the hash of the old tree.
         // H_old = H(left_child || right_child || old_min || old_max || block_id || old_block_number || old_rows_tree_hash)
-        let inputs = left_child
+        let inputs = old_left_child
             .to_targets()
             .into_iter()
-            .chain(right_child.to_targets())
+            .chain(old_right_child.to_targets())
             .chain(old_min.to_targets())
             .chain(old_max.to_targets())
             .chain(iter::once(index_identifier))
@@ -173,8 +174,8 @@ impl ParentCircuit {
             old_index_value,
             old_min,
             old_max,
-            left_child,
-            right_child,
+            left_child: old_left_child,
+            right_child: old_right_child,
             old_rows_tree_hash,
         }
     }
@@ -190,8 +191,8 @@ impl ParentCircuit {
         .into_iter()
         .for_each(|(t, v)| pw.set_u256_target(t, v));
         [
-            (wires.left_child, self.left_child),
-            (wires.right_child, self.right_child),
+            (wires.left_child, self.old_left_child),
+            (wires.right_child, self.old_right_child),
             (wires.old_rows_tree_hash, self.old_rows_tree_hash),
         ]
         .into_iter()
@@ -350,8 +351,8 @@ mod tests {
                 old_index_value,
                 old_min,
                 old_max,
-                left_child,
-                right_child,
+                old_left_child: left_child,
+                old_right_child: right_child,
                 old_rows_tree_hash,
             },
             extraction_pi,

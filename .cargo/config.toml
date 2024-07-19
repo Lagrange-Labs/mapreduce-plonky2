@@ -1,3 +1,9 @@
+[build]
+rustflags = ["-C", "target-cpu=native"]
+
 # Used for compile the Go code of gnark-utils on Mac.
 [target.'cfg(target_os="macos")']
-rustflags = ["-C", "link-args=-framework CoreFoundation -framework Security"]
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "link-args=-framework CoreFoundation -framework Security",
+]

@@ -6,7 +6,7 @@ use std::{
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
-    array::{Targetable, ToField},
+    array::ToField,
     poseidon::{empty_poseidon_hash, H},
     types::CBuilder,
     u256::UInt256Target,

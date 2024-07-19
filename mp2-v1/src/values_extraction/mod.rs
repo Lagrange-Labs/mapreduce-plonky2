@@ -28,6 +28,13 @@ pub(crate) use public_inputs::PublicInputs;
 pub(crate) const KEY_ID_PREFIX: &[u8] = b"KEY";
 pub(crate) const VALUE_ID_PREFIX: &[u8] = b"VAL";
 
+pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
+
+pub fn compute_block_id() -> u64 {
+    pack_and_compute_poseidon_value::<GFp>(BLOCK_ID_DST, Endianness::Big).elements[0]
+        .to_canonical_u64()
+}
+
 /// Calculate `id = Poseidon(slot || contract_address)[0]` for single variable leaf.
 pub fn compute_leaf_single_id(slot: u8, contract_address: &Address) -> u64 {
     let packed_contract_address: Vec<_> = contract_address.0.pack(Endianness::Big).to_fields();
@@ -72,7 +79,7 @@ pub fn compute_leaf_mapping_values_digest(
     assert!(value.len() <= MAPPING_LEAF_VALUE_LEN);
 
     let [packed_key, packed_value] =
-        [mapping_key, value].map(|arr| left_pad32(&arr).pack(Endianness::Big).to_fields());
+        [mapping_key, value].map(|arr| left_pad32(arr).pack(Endianness::Big).to_fields());
 
     let inputs: Vec<_> = iter::once(GFp::from_canonical_u64(key_id))
         .chain(packed_key)
@@ -98,7 +105,7 @@ pub fn compute_leaf_mapping_values_digest(
 pub fn compute_leaf_single_values_digest(id: u64, value: &[u8]) -> Digest {
     assert!(value.len() <= MAPPING_LEAF_VALUE_LEN);
 
-    let packed_value = left_pad32(&value).pack(Endianness::Big).to_fields();
+    let packed_value = left_pad32(value).pack(Endianness::Big).to_fields();
 
     let inputs: Vec<_> = iter::once(GFp::from_canonical_u64(id))
         .chain(packed_value)

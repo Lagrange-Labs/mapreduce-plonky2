@@ -1,7 +1,3 @@
-use log::{log_enabled, Level, LevelFilter};
-use std::env;
-use std::io::Write;
-
 mod array_access;
 #[cfg(test)]
 mod recursion;

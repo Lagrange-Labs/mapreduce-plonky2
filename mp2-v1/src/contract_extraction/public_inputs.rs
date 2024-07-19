@@ -2,19 +2,14 @@
 
 use mp2_common::{
     array::Array,
-    group_hashing::EXTENSION_DEGREE,
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::MPTKeyWire,
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
-    types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
-    utils::{FromFields, FromTargets, ToTargets},
+    types::{CBuilder, GFp, CURVE_TARGET_LEN},
+    utils::{FromFields, FromTargets},
 };
-use plonky2::{
-    field::{extension::FieldExtension, types::Field},
-    iop::target::Target,
-};
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use plonky2::iop::target::Target;
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 use std::{array, iter};
 
@@ -89,7 +84,7 @@ impl<'a> PublicInputs<'a, Target> {
         }
     }
     pub fn metadata_digest(&self) -> CurveTarget {
-        CurveTarget::from_targets(&self.dm)
+        CurveTarget::from_targets(self.dm)
     }
 
     pub fn storage_root(&self) -> OutputHash {

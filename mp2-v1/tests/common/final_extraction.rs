@@ -27,11 +27,12 @@ impl TestContext {
             CircuitInput::new_simple_input(block_proof, contract_proof, values_proof, compound_type)
         }?;
         let proof = ProofWithVK::deserialize(&api::generate_proof(
-            &self.params(),
+            self.params(),
             api::CircuitInput::FinalExtraction(circuit_input),
         )?)?;
 
         let block = self.query_block().await;
+
         let block_hash = HashOutput::try_from(block.header.hash.unwrap().0).unwrap();
         let prev_block_hash = HashOutput::try_from(block.header.parent_hash.0).unwrap();
 

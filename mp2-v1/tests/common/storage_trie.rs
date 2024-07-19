@@ -342,7 +342,7 @@ impl TestStorageTrie {
         contract_address: Address,
         slot: usize,
     ) {
-        log::info!("Querying the simple slot `{slot:?}` of the contract `{contract_address}` from the test context's RPC");
+        log::debug!("Querying the simple slot `{slot:?}` of the contract `{contract_address}` from the test context's RPC");
 
         let query = ProofQuery::new_simple_slot(contract_address, slot);
         let response = ctx.query_mpt_proof(&query, ctx.get_block_number()).await;
@@ -357,7 +357,7 @@ impl TestStorageTrie {
 
         let slot = StorageSlot::Simple(slot);
 
-        log::info!(
+        log::debug!(
             "Simple slot {slot:?} queried, appending `{}` proof nodes to the trie",
             nodes.len()
         );

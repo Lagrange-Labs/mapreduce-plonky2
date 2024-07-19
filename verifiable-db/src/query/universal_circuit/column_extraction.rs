@@ -135,12 +135,12 @@ fn build_column_hash<const MAX_NUM_COLUMNS: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{utils::Fieldable, C, D};
+    use mp2_common::{C, D};
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},
         circuit::{run_circuit, UserCircuit},
     };
-    use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::Hasher};
+    use plonky2::{field::types::Field, hash::hash_types::HashOut};
 
     #[derive(Clone, Debug)]
     struct TestColumnExtractionCircuit<const MAX_NUM_COLUMNS: usize> {

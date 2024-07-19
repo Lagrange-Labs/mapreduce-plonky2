@@ -4,7 +4,7 @@ use mp2_common::{
     serialization::{deserialize, serialize},
     types::GFp,
     utils::ToTargets,
-    C, D, F,
+    D, F,
 };
 use plonky2::{
     iop::{
@@ -122,17 +122,15 @@ impl CircuitLogicWires<F, D, 0> for SimpleCircuitRecursiveWires {
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
         inputs.base.assign_proof_targets(pw, &self.base)?;
-        Ok(inputs.simple.assign(pw, &self.simple_wires))
+        inputs.simple.assign(pw, &self.simple_wires);
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{block_extraction, contract_extraction};
-
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
-    use mp2_common::{group_hashing::map_to_curve_point, utils::ToFields};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     pub const D: usize = 2;

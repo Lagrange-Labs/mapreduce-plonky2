@@ -13,9 +13,9 @@ use plonky2::{
     iop::target::{BoolTarget, Target},
 };
 use ryhope::{
-    storage::memory::InMemory,
+    storage::{memory::InMemory, EpochKvStorage, TreeTransactionalStorage},
     tree::{sbbst, TreeTopology},
-    MerkleTreeKvDb, NodePayload,
+    InitSettings, MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
 use std::iter::once;
@@ -59,9 +59,19 @@ pub(crate) fn build_cells_tree(
     // we create a dummy storage representing a sbbst tree with `input_len` elements;
     // the storage is fake becuase we don't store anything in the nodes, as we are just
     // interested in the tree topology
-    let fake_storage = MerkleTree::create((0, input_len), ()).unwrap();
+    let mut fake_storage = MerkleTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap();
 
-    let root_key = fake_storage.tree().root().unwrap();
+    // Insert the `input_len` nodes in the tree
+    fake_storage
+        .in_transaction(|s| {
+            for i in 1..=input_len {
+                s.store(i, Payload(()))?;
+            }
+            Ok(())
+        })
+        .expect("failed to initialize fake storage");
+
+    let root_key = fake_storage.root().unwrap();
     build_cells_subtree_at_key(
         b,
         input_values,
@@ -81,7 +91,7 @@ fn build_cells_subtree_at_key(
     fake_storage: &MerkleTree,
 ) -> HashOutTarget {
     let empty_hash = b.constant_hash(*empty_poseidon_hash());
-    let node_context = fake_storage.node_context(&key).unwrap();
+    let node_context = fake_storage.node_context(key).unwrap();
     let children = node_context
         .iter_children()
         .map(|child| {
@@ -91,7 +101,7 @@ fn build_cells_subtree_at_key(
                     input_values,
                     input_ids,
                     is_real_value,
-                    &child_key,
+                    child_key,
                     fake_storage,
                 )
             } else {
@@ -117,7 +127,7 @@ fn build_cells_subtree_at_key(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{poseidon::H, C, D, F};
+    use mp2_common::{C, D, F};
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell, TestCellTarget},
         circuit::{run_circuit, UserCircuit},
@@ -125,7 +135,6 @@ mod tests {
     use plonky2::{
         hash::hash_types::HashOut,
         iop::witness::{PartialWitness, WitnessWrite},
-        plonk::config::Hasher,
     };
     use std::array;
 

@@ -17,7 +17,7 @@ use ryhope::{
         scapegoat::{self, Alpha},
         TreeTopology,
     },
-    MerkleTreeKvDb, NodePayload,
+    InitSettings, MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +31,7 @@ use super::{
 };
 
 /// A unique identifier in a row tree
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RowTreeKey {
     /// Value of the secondary index of the row
     pub value: U256,
@@ -41,7 +41,7 @@ pub struct RowTreeKey {
 
 /// Represent a row in one of the virtual tables stored in the zkDB; which
 /// encapsulates its cells and the tree they form.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Row {
     /// A key *uniquely* representing this row in the row tree.
     ///
@@ -174,8 +174,11 @@ pub type MerkleRowTree = MerkleTreeKvDb<RowTree, Row, RowStorage>;
 /// Given a list of row, build the Merkle tree of the secondary index and
 /// returns it along its update tree.
 pub async fn build_row_tree(rows: &[Row]) -> Result<(MerkleRowTree, UpdateTree<RowTreeKey>)> {
-    let mut row_tree =
-        MerkleRowTree::create(Alpha::new(0.8), ()).context("while creating row tree instance")?;
+    let mut row_tree = MerkleRowTree::new(
+        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
+        (),
+    )
+    .context("while creating row tree instance")?;
 
     let update_tree = row_tree
         .in_transaction(|t| {
@@ -198,7 +201,7 @@ impl TestContext {
         t: &MerkleRowTree,
         ut: UpdateTree<<RowTree as TreeTopology>::Key>,
         storage: &mut P,
-    ) -> Vec<u8> {
+    ) -> RowProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
         // THIS can panic but for block number it should be fine on 64bit platforms...
         // unwrap is safe since we know it is really a block number and not set to Latest or stg
@@ -300,14 +303,17 @@ impl TestContext {
 
             workplan.done(&k).unwrap();
         }
-        let root = t.tree().root().unwrap();
+        let root = t.root().unwrap();
         let root_proof_key = RowProofIdentifier {
             table: table_id.clone(),
             primary: block_key,
             tree_key: root,
         };
 
-        storage.get_proof(&ProofKey::Row(root_proof_key)).unwrap()
+        storage
+            .get_proof(&ProofKey::Row(root_proof_key.clone()))
+            .expect("row tree root proof absent");
+        root_proof_key
     }
 
     /// Build and prove the row tree from the [`Row`]s and the secondary index
@@ -317,13 +323,16 @@ impl TestContext {
         table_id: &TableID,
         rows: &[Row],
         storage: &mut P,
-    ) -> Vec<u8> {
+    ) -> RowProofIdentifier<BlockPrimaryIndex> {
         let (row_tree, row_tree_ut) = build_row_tree(rows)
             .await
             .expect("failed to create row tree");
-        let row_tree_proof = self
+        let root_proof_key = self
             .prove_row_tree(table_id, &row_tree, row_tree_ut, storage)
             .await;
+        let row_tree_proof = storage
+            .get_proof(&ProofKey::Row(root_proof_key.clone()))
+            .unwrap();
 
         let tree_hash = row_tree.root_data().unwrap().hash;
         let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
@@ -333,6 +342,6 @@ impl TestContext {
             "mismatch between row tree root hash as computed by ryhope and mp2",
         );
 
-        row_tree_proof
+        root_proof_key
     }
 }

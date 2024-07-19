@@ -4,7 +4,7 @@ use mp2_common::{
     eth::{left_pad_generic, BlockUtil},
     proof::deserialize_proof,
     u256,
-    utils::{keccak256, Endianness, Packer, ToFields},
+    utils::{Endianness, Packer, ToFields},
     C, D, F,
 };
 use mp2_v1::{api, block_extraction};
@@ -28,30 +28,28 @@ impl TestContext {
                 buffer.clone(),
             )),
         )?;
+
         let pproof = deserialize_proof::<F, C, D>(&proof)?;
         let pi = block_extraction::PublicInputs::from_slice(&pproof.public_inputs);
         let block_number = U256::from(block.header.number.unwrap()).to_fields();
+        let block_hash = block
+            .header
+            .hash
+            .unwrap()
+            .as_slice()
+            .pack(Endianness::Little)
+            .to_fields();
+        let prev_block_hash = block
+            .header
+            .parent_hash
+            .as_slice()
+            .pack(Endianness::Little)
+            .to_fields();
 
-        let p2 = mp2_v1::block_extraction::PublicParameters::build();
-        let p2_proof =
-            p2.generate_proof(block_extraction::CircuitInput::from_block_header(buffer))?;
-        let pp2_proof = deserialize_proof(&p2_proof)?;
-        let pi2 = block_extraction::PublicInputs::from_slice(&pp2_proof.public_inputs);
         assert_eq!(pi.block_number_raw(), &block_number);
-        assert_eq!(pi.block_hash_raw(), pi2.block_hash_raw());
-        let manual_hash = keccak256(&block.rlp()).pack(Endianness::Little).to_fields();
-        assert_eq!(pi.block_hash_raw(), manual_hash);
-        assert_eq!(
-            pi.block_hash_raw(),
-            block
-                .header
-                .hash
-                .unwrap()
-                .as_slice()
-                .pack(Endianness::Little)
-                .to_fields(),
-        );
+        assert_eq!(pi.block_hash_raw(), block_hash);
+        assert_eq!(pi.prev_block_hash_raw(), prev_block_hash);
 
-        Ok(pp2_proof)
+        Ok(pproof)
     }
 }

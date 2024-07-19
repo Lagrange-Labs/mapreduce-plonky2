@@ -23,13 +23,13 @@ use serde::{Deserialize, Serialize};
 use std::iter;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct LeafWires {
+pub struct LeafWires {
     identifier: Target,
     value: UInt256Target,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct LeafCircuit {
+pub struct LeafCircuit {
     /// The same identifier derived from the MPT extraction
     pub(crate) identifier: F,
     /// Uint256 value

@@ -1,23 +1,12 @@
-use alloy::primitives::{Address, U256};
-use anyhow::*;
-use mp2_common::{eth::ProofQuery, poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
+use alloy::primitives::Address;
+use mp2_common::eth::ProofQuery;
 use mp2_test::cells_tree::{build_cell_tree, CellTree, MerkleCellTree, TestCell as Cell};
 use mp2_v1::{api, api::CircuitInput, values_extraction::compute_leaf_single_id};
-use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
-    plonk::config::Hasher,
-};
+use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
 use ryhope::{
-    storage::{
-        memory::InMemory,
-        updatetree::{Next, UpdateTree},
-        EpochKvStorage, TreeTransactionalStorage,
-    },
-    tree::{sbbst, TreeTopology},
-    MerkleTreeKvDb, NodePayload,
+    storage::updatetree::{Next, UpdateTree},
+    tree::TreeTopology,
 };
-use serde::{Deserialize, Serialize};
 
 use crate::common::{cell_tree_proof_to_hash, rowtree::RowTreeKey, TestContext};
 
@@ -134,7 +123,7 @@ impl TestContext {
 
             workplan.done(&k).unwrap();
         }
-        let root = t.tree().root().unwrap();
+        let root = t.root().unwrap();
         let root_proof_key = CellProofIdentifier {
             table: table_id.clone(),
             primary: block_key,
@@ -162,7 +151,7 @@ impl TestContext {
         let (cell_tree, cell_tree_ut) =
             build_cell_tree(&cells[1..]).expect("failed to create cell tree");
         let root_key = self
-            .prove_cell_tree(&table_id, &cell_tree, cell_tree_ut, storage)
+            .prove_cell_tree(table_id, &cell_tree, cell_tree_ut, storage)
             .await;
         let cell_root_proof = storage
             .get_proof(&ProofKey::Cell(root_key.clone()))
@@ -177,14 +166,14 @@ impl TestContext {
         Row {
             k: RowTreeKey {
                 // the 0th cell value is the secondary index
-                value: cells[0].value.clone(),
+                value: cells[0].value,
                 // there is always only one row in the scalar slots table
                 id: 0,
             },
             cell_tree_root_proof_id: root_key,
             cell_tree_root_hash: tree_hash,
-            min: cells[0].value.clone(),
-            max: cells[0].value.clone(),
+            min: cells[0].value,
+            max: cells[0].value,
             cells,
             hash: Default::default(),
         }
