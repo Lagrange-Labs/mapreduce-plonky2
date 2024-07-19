@@ -7,12 +7,13 @@ use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
     array::Array,
-    poseidon::{empty_poseidon_hash, H},
+    hash::hash_maybe_first,
+    poseidon::empty_poseidon_hash,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{SelectHashBuilder, ToTargets},
+    utils::ToTargets,
     D, F,
 };
 use plonky2::{
@@ -78,26 +79,26 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
             &index_value,
         );
 
-        let left_child_hash =
-            b.select_hash(is_left_child, &child_proof.tree_hash_target(), &empty_hash);
-        let right_child_hash =
-            b.select_hash(is_left_child, &empty_hash, &child_proof.tree_hash_target());
         let node_min = b.select_u256(is_left_child, &child_proof.min_value_target(), &node_value);
         let node_max = b.select_u256(is_left_child, &node_value, &child_proof.max_value_target());
 
         // Compute the node hash:
         // H(left_child.H || right_child.H || node_min || node_max || column_id || node_value || p.H))
-        let inputs = left_child_hash
-            .elements
+        let rest: Vec<_> = node_min
+            .to_targets()
             .into_iter()
-            .chain(right_child_hash.elements)
-            .chain(node_min.to_targets())
             .chain(node_max.to_targets())
             .chain(iter::once(column_id))
             .chain(node_value.to_targets())
             .chain(base_proof.tree_hash_target().elements)
             .collect();
-        let node_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
+        let node_hash = hash_maybe_first(
+            b,
+            is_left_child,
+            empty_hash.elements,
+            child_proof.tree_hash_target().elements,
+            &rest,
+        );
 
         // Ensure the proofs in the same subtree are employing the same value
         // of the indexed column:
@@ -264,7 +265,7 @@ mod tests {
         public_inputs::QueryPublicInputs,
         PI_LEN,
     };
-    use mp2_common::{utils::ToFields, C};
+    use mp2_common::{poseidon::H, utils::ToFields, C};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{iop::witness::WitnessWrite, plonk::config::Hasher};
     use std::array;
