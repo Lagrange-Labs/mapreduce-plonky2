@@ -256,7 +256,6 @@ mod tests {
 
         // Generate the random operations.
         let mut ops: [_; S] = random_aggregation_operations();
-        let ops_range = PublicInputs::<Target, S>::to_range(QueryPublicInputs::OpIds);
 
         // Set the first operation to ID for testing the digest computation.
         ops[0] = Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
