@@ -111,6 +111,20 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
         right: &UInt256Target,
     ) -> BoolTarget;
 
+    /// Compute a `BoolTarget` being true if and only `left > right`
+    fn is_greater_than_u256(&mut self, left: &UInt256Target, right: &UInt256Target) -> BoolTarget {
+        self.is_less_than_u256(right, left)
+    }
+
+    /// Compute a `BoolTarget` being true if and only `left >= right`
+    fn is_greater_or_equal_than_u256(
+        &mut self,
+        left: &UInt256Target,
+        right: &UInt256Target,
+    ) -> BoolTarget {
+        self.is_less_or_equal_than_u256(right, left)
+    }
+
     /// Compute a `BoolTarget` being true if and only if the input UInt256Target is zero
     fn is_zero(&mut self, target: &UInt256Target) -> BoolTarget;
 
@@ -353,6 +367,45 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
     }
 
     fn is_equal_u256(&mut self, left: &UInt256Target, right: &UInt256Target) -> BoolTarget {
+        // optimization: we first check if `left` or `right` are constants
+        let left_constant_limbs = left
+            .0
+            .iter()
+            .filter_map(|limb| self.target_as_constant(limb.0))
+            .collect_vec();
+        let is_left_constant = left_constant_limbs.len() == NUM_LIMBS;
+        let right_constant_limbs = right
+            .0
+            .iter()
+            .filter_map(|limb| self.target_as_constant(limb.0))
+            .collect_vec();
+        let is_right_constant = right_constant_limbs.len() == NUM_LIMBS;
+        match (is_left_constant, is_right_constant) {
+            (true, true) => {
+                let left_val = U256::from_fields(&left_constant_limbs);
+                let right_val = U256::from_fields(&right_constant_limbs);
+                if left_val == right_val {
+                    return self._true();
+                } else {
+                    return self._false();
+                }
+            }
+            (true, false) => {
+                // if left == 0, then it is more efficient to use `is_zero` method
+                let left_val = U256::from_fields(&left_constant_limbs);
+                if left_val.is_zero() {
+                    return self.is_zero(right);
+                }
+            }
+            (false, true) => {
+                // if right == 0, then it is more efficient to use `is_zero` method
+                let right_val = U256::from_fields(&right_constant_limbs);
+                if right_val.is_zero() {
+                    return self.is_zero(left);
+                }
+            }
+            (false, false) => (),
+        }
         let _false = self._false();
         left.0
             .iter()
@@ -368,9 +421,11 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
         left: &UInt256Target,
         right: &UInt256Target,
     ) -> BoolTarget {
-        let a = self.is_less_than_u256(left, right);
-        let b = self.is_equal_u256(left, right);
-        self.or(a, b)
+        // left <= right iff left - right requires a borrow or left - right == 0
+        let (res, borrow) = self.sub_u256(left, right);
+        let less_than = BoolTarget::new_unsafe(borrow.0);
+        let is_eq = self.is_zero(&res);
+        self.or(less_than, is_eq)
     }
 
     fn is_zero(&mut self, target: &UInt256Target) -> BoolTarget {
