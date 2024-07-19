@@ -38,7 +38,7 @@ pub struct FullNodeIndexLeafCircuit<const MAX_NUM_RESULTS: usize> {
 impl<const MAX_NUM_RESULTS: usize> FullNodeIndexLeafCircuit<MAX_NUM_RESULTS> {
     pub fn build(
         b: &mut CBuilder,
-        query_proof: &PublicInputs<Target, MAX_NUM_RESULTS>,
+        subtree_proof: &PublicInputs<Target, MAX_NUM_RESULTS>,
     ) -> FullNodeIndexLeafWires<MAX_NUM_RESULTS> {
         let ttrue = b._true();
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
@@ -46,9 +46,9 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeIndexLeafCircuit<MAX_NUM_RESULTS> {
 
         let [min_query, max_query] = [0; 2].map(|_| b.add_virtual_u256());
 
-        let index_ids = query_proof.index_ids_target();
-        let index_value = query_proof.index_value_target();
-        let index_value_targets = query_proof.to_index_value_raw();
+        let index_ids = subtree_proof.index_ids_target();
+        let index_value = subtree_proof.index_value_target();
+        let index_value_targets = subtree_proof.to_index_value_raw();
 
         // Ensure the value of the indexed column for all the records stored in the
         // subtree found in this node is within the range specified by the query:
@@ -68,25 +68,25 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeIndexLeafCircuit<MAX_NUM_RESULTS> {
             .chain(iter::once(&index_ids[0]))
             .chain(index_value_targets)
             .cloned()
-            .chain(query_proof.tree_hash_target().to_targets())
+            .chain(subtree_proof.tree_hash_target().to_targets())
             .collect();
         let node_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
         // Register the public inputs.
         PublicInputs::<_, MAX_NUM_RESULTS>::new(
             &node_hash.to_targets(),
-            query_proof.to_values_raw(),
-            &[query_proof.num_matching_rows_target()],
-            query_proof.to_ops_raw(),
+            subtree_proof.to_values_raw(),
+            &[subtree_proof.num_matching_rows_target()],
+            subtree_proof.to_ops_raw(),
             index_value_targets,
             index_value_targets,
             index_value_targets,
-            query_proof.to_index_ids_raw(),
+            subtree_proof.to_index_ids_raw(),
             &min_query.to_targets(),
             &max_query.to_targets(),
-            &[*query_proof.to_overflow_raw()],
-            query_proof.to_computational_hash_raw(),
-            query_proof.to_placeholder_hash_raw(),
+            &[*subtree_proof.to_overflow_raw()],
+            subtree_proof.to_computational_hash_raw(),
+            subtree_proof.to_placeholder_hash_raw(),
         )
         .register(b);
 
@@ -119,9 +119,9 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         // The first one is the query proof.
-        let query_proof = PublicInputs::from_slice(&verified_proofs[0].public_inputs);
+        let subtree_proof = PublicInputs::from_slice(&verified_proofs[0].public_inputs);
 
-        Self::Inputs::build(builder, &query_proof)
+        Self::Inputs::build(builder, &subtree_proof)
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
@@ -146,7 +146,7 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TestFullNodeIndexLeafCircuit<'a> {
         c: FullNodeIndexLeafCircuit<MAX_NUM_RESULTS>,
-        query_proof: &'a [F],
+        subtree_proof: &'a [F],
     }
 
     impl<'a> UserCircuit<F, D> for TestFullNodeIndexLeafCircuit<'a> {
@@ -154,19 +154,19 @@ mod tests {
         type Wires = (FullNodeIndexLeafWires<MAX_NUM_RESULTS>, Vec<Target>);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let query_proof = b
+            let subtree_proof = b
                 .add_virtual_target_arr::<{ PI_LEN::<MAX_NUM_RESULTS> }>()
                 .to_vec();
-            let query_pi = PublicInputs::<Target, MAX_NUM_RESULTS>::from_slice(&query_proof);
+            let subtree_pi = PublicInputs::<Target, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
 
-            let wires = FullNodeIndexLeafCircuit::build(b, &query_pi);
+            let wires = FullNodeIndexLeafCircuit::build(b, &subtree_pi);
 
-            (wires, query_proof)
+            (wires, subtree_proof)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.c.assign(pw, &wires.0);
-            pw.set_target_arr(&wires.1, self.query_proof);
+            pw.set_target_arr(&wires.1, self.subtree_proof);
         }
     }
 
@@ -176,12 +176,12 @@ mod tests {
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
         // Build the query proof.
-        let [query_proof] = random_aggregation_public_inputs(ops);
-        let query_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&query_proof);
+        let [subtree_proof] = random_aggregation_public_inputs(ops);
+        let subtree_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
 
-        let index_value = query_pi.index_value();
-        let index_value_fields = query_pi.to_index_value_raw();
-        let index_ids = query_pi.index_ids();
+        let index_value = subtree_pi.index_value();
+        let index_value_fields = subtree_pi.to_index_value_raw();
+        let index_ids = subtree_pi.index_ids();
 
         // Construct the witness.
         let min_query = index_value
@@ -197,7 +197,7 @@ mod tests {
                 min_query,
                 max_query,
             },
-            query_proof: &query_proof,
+            subtree_proof: &subtree_proof,
         };
 
         // Prove for the test circuit.
@@ -217,7 +217,7 @@ mod tests {
                 .chain(index_value_fields)
                 .chain(iter::once(&index_ids[0]))
                 .chain(index_value_fields)
-                .chain(query_pi.to_hash_raw())
+                .chain(subtree_pi.to_hash_raw())
                 .cloned()
                 .collect();
             let exp_hash = H::hash_no_pad(&inputs);
@@ -225,11 +225,11 @@ mod tests {
             assert_eq!(pi.tree_hash(), exp_hash);
         }
         // Output values
-        assert_eq!(pi.to_values_raw(), query_pi.to_values_raw());
+        assert_eq!(pi.to_values_raw(), subtree_pi.to_values_raw());
         // Count
-        assert_eq!(pi.num_matching_rows(), query_pi.num_matching_rows());
+        assert_eq!(pi.num_matching_rows(), subtree_pi.num_matching_rows());
         // Operation IDs
-        assert_eq!(pi.operation_ids(), query_pi.operation_ids());
+        assert_eq!(pi.operation_ids(), subtree_pi.operation_ids());
         // Index value
         assert_eq!(pi.index_value(), index_value);
         // Minimum value
@@ -243,10 +243,10 @@ mod tests {
         // Maximum query
         assert_eq!(pi.max_query_value(), max_query);
         // Overflow flag
-        assert_eq!(pi.overflow_flag(), query_pi.overflow_flag());
+        assert_eq!(pi.overflow_flag(), subtree_pi.overflow_flag());
         // Computational hash
-        assert_eq!(pi.computational_hash(), query_pi.computational_hash());
+        assert_eq!(pi.computational_hash(), subtree_pi.computational_hash());
         // Placeholder hash
-        assert_eq!(pi.placeholder_hash(), query_pi.placeholder_hash());
+        assert_eq!(pi.placeholder_hash(), subtree_pi.placeholder_hash());
     }
 }
