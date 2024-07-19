@@ -359,7 +359,7 @@ mod tests {
         let left_child_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&left_child_proof);
         let right_child_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&right_child_proof);
 
-        // Construct the witness.
+        // Construct the expected public input values.
         let index_ids = query_pi.index_ids();
         let index_value = query_pi.index_value();
         let node_value = if is_rows_tree_node {
