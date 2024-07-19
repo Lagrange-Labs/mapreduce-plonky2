@@ -279,8 +279,14 @@ where
         // in the arrays `item_values` and `item_hash`; such results are expected to be found as the last
         // items computed by the last `MAX_NUM_RESULTS` basic operation components among the `MAX_NUM_RESULT_OPS`
         // ones employed to compute such results
-        let item_values = input_values[input_values.len() - MAX_NUM_RESULTS..].to_vec().try_into().unwrap();
-        let item_hash = input_hash[input_hash.len() - MAX_NUM_RESULTS..].to_vec().try_into().unwrap();
+        let item_values = input_values[input_values.len() - MAX_NUM_RESULTS..]
+            .to_vec()
+            .try_into()
+            .unwrap();
+        let item_hash = input_hash[input_hash.len() - MAX_NUM_RESULTS..]
+            .to_vec()
+            .try_into()
+            .unwrap();
         let output_component_wires = T::build(
             b,
             column_extraction_wires.input_wires.column_values.as_slice(),
