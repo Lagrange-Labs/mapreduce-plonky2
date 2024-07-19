@@ -341,9 +341,6 @@ mod tests {
         [&mut left_child_proof, &mut right_child_proof]
             .iter_mut()
             .for_each(|p| {
-                p[index_ids_range.clone()].copy_from_slice(query_pi.to_index_ids_raw());
-                p[c_hash_range.clone()].copy_from_slice(query_pi.to_computational_hash_raw());
-                p[p_hash_range.clone()].copy_from_slice(query_pi.to_placeholder_hash_raw());
                 p[min_query_range.clone()].copy_from_slice(&min_query.to_fields());
                 p[max_query_range.clone()].copy_from_slice(&max_query.to_fields());
             });

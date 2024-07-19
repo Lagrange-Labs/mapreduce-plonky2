@@ -15,7 +15,10 @@ pub(crate) mod tests {
         array::ToField, group_hashing::add_curve_point, types::CURVE_TARGET_LEN, utils::ToFields, F,
     };
     use mp2_test::utils::random_vector;
-    use plonky2::field::types::{Field, Sample};
+    use plonky2::{
+        field::types::{Field, Sample},
+        hash::hash_types::NUM_HASH_OUT_ELTS,
+    };
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{prelude::SliceRandom, thread_rng, Rng};
     use std::array;
@@ -43,15 +46,27 @@ pub(crate) mod tests {
     pub(crate) fn random_aggregation_public_inputs<const N: usize, const S: usize>(
         ops: [F; S],
     ) -> [Vec<F>; N] {
-        let [ops_range, overflow_range] = [QueryPublicInputs::OpIds, QueryPublicInputs::Overflow]
-            .map(|input| PublicInputs::<F, S>::to_range(input));
+        let [ops_range, overflow_range, index_ids_range, c_hash_range, p_hash_range] = [
+            QueryPublicInputs::OpIds,
+            QueryPublicInputs::Overflow,
+            QueryPublicInputs::IndexIds,
+            QueryPublicInputs::ComputationalHash,
+            QueryPublicInputs::PlaceholderHash,
+        ]
+        .map(|input| PublicInputs::<F, S>::to_range(input));
 
         let first_value_start =
             PublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues).start;
         let is_first_op_id =
             ops[0] == Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
 
+        // Generate the index ids, computational hash and placeholder hash,
+        // they should be same for a series of public inputs.
         let mut rng = thread_rng();
+        let index_ids: Vec<_> = random_vector::<u32>(2).to_fields();
+        let [computational_hash, placeholder_hash]: [Vec<_>; 2] =
+            array::from_fn(|_| random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
+
         array::from_fn(|_| {
             let mut pi = random_vector::<u32>(PI_LEN::<S>).to_fields();
 
@@ -61,6 +76,11 @@ pub(crate) mod tests {
             // Set the overflow flag to a random boolean.
             let overflow = F::from_bool(rng.gen());
             pi[overflow_range.clone()].copy_from_slice(&[overflow]);
+
+            // Set the index ids, computational hash and placeholder hash,
+            pi[index_ids_range.clone()].copy_from_slice(&index_ids);
+            pi[c_hash_range.clone()].copy_from_slice(&computational_hash);
+            pi[p_hash_range.clone()].copy_from_slice(&placeholder_hash);
 
             // If the first operation is ID, set the value to a random point.
             if is_first_op_id {
