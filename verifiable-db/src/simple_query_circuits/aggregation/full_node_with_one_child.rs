@@ -351,10 +351,6 @@ mod tests {
         if is_rows_tree_node {
             // child.I == p.I
             child_proof[index_value_range.clone()].copy_from_slice(query_pi.to_index_value_raw());
-            // child.MIN_I == p.MIN_I
-            child_proof[min_query_range].copy_from_slice(query_pi.to_min_query_raw());
-            // child.MAX_I == p.MAX_I.
-            child_proof[max_query_range].copy_from_slice(query_pi.to_max_query_raw());
         }
         let child_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&child_proof);
 
