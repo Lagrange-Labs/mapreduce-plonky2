@@ -109,7 +109,7 @@ where
     // Set the overflow if the operation is SUM or AVG:
     // overflow = op == SUM OR op == AVG ? sum_overflow : 0
     let is_op_sum_or_avg = b.or(is_op_sum, is_op_avg);
-    let overflow = b.select(is_op_sum_or_avg, sum_overflow, zero);
+    let overflow = b.mul(is_op_sum_or_avg.target, sum_overflow);
 
     (output, overflow)
 }
