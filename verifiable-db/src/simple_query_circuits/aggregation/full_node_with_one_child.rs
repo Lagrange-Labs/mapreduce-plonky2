@@ -113,23 +113,15 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
         // this node is within the range specified by the query:
         // NOT(is_rows_tree_node) ==
         //      NOT(is_row_tree_node) AND
-        //      p.min == p.max AND
         //      p.I >= MIN_query AND
         //      p.I <= MAX_query
         // => is_rows_tree_node ==
         //      is_row_tree_node OR
-        //      NOT(p.min == p.max) OR
         //      p.I < MIN_query OR
         //      p.I > MAX_query
-        let is_equal = b.is_equal_u256(
-            &base_proof.min_value_target(),
-            &base_proof.max_value_target(),
-        );
-        let is_diff = b.not(is_equal);
         let is_less_than_min = b.is_less_than_u256(&index_value, &min_query);
         let is_greater_than_max = b.is_less_than_u256(&max_query, &index_value);
-        let is_diff = b.or(is_diff, is_less_than_min);
-        let is_diff = b.or(is_diff, is_greater_than_max);
+        let is_diff = b.or(is_less_than_min, is_greater_than_max);
         let is_diff = b.or(is_diff, is_rows_tree_node);
         b.connect(is_diff.target, is_rows_tree_node.target);
 
@@ -319,11 +311,10 @@ mod tests {
 
         // Build the proofs.
         let [mut base_proof, mut child_proof] = random_aggregation_public_inputs(ops);
-        let [index_value_range, index_ids_range, min_value_range, min_query_range, max_query_range, c_hash_range, p_hash_range] =
+        let [index_value_range, index_ids_range, min_query_range, max_query_range, c_hash_range, p_hash_range] =
             [
                 QueryPublicInputs::IndexValue,
                 QueryPublicInputs::IndexIds,
-                QueryPublicInputs::MinValue,
                 QueryPublicInputs::MinQuery,
                 QueryPublicInputs::MaxQuery,
                 QueryPublicInputs::ComputationalHash,
@@ -337,11 +328,6 @@ mod tests {
             base_proof[min_query_range.clone()].copy_from_slice(&min_query.to_fields());
             base_proof[max_query_range.clone()].copy_from_slice(&max_query.to_fields());
         } else {
-            // p.min == p.max
-            let base_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&base_proof);
-            let max_value = base_pi.max_value();
-            base_proof[min_value_range.clone()].copy_from_slice(&max_value.to_fields());
-
             // p.I >= MIN_query AND p.I <= MAX_query
             let index_value: U256 = (min_query + max_query) >> 1;
             base_proof[index_value_range.clone()].copy_from_slice(&index_value.to_fields());
