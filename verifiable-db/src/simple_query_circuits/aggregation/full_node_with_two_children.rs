@@ -59,7 +59,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
         [(); MAX_NUM_RESULTS - 1]:,
     {
         let is_rows_tree_node = b.add_virtual_bool_target_safe();
-        let [min_query, max_query] = [0; 2].map(|_| b.add_virtual_u256());
+        let [min_query, max_query] = [0; 2].map(|_| b.add_virtual_u256_unsafe());
 
         // Choose the column ID and node value to be hashed depending on which tree
         // the current node belongs to.
