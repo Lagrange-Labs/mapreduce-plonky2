@@ -11,20 +11,21 @@ use mp2_common::{
     u256::CircuitBuilderU256,
     utils::{FromTargets, ToTargets},
 };
-use plonky2::iop::target::{BoolTarget, Target};
+use plonky2::iop::target::Target;
 use plonky2_crypto::u32::arithmetic_u32::CircuitBuilderU32;
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 
 /// Compute the node output item at the specified index by the proofs,
-/// and return the output item with the overflow flag.
+/// and return the output item with the overflow number.
 pub(crate) fn compute_output_item<const S: usize>(
     b: &mut CBuilder,
     i: usize,
     proofs: &[&PublicInputs<Target, S>],
-) -> (Vec<Target>, BoolTarget)
+) -> (Vec<Target>, Target)
 where
     [(); S - 1]:,
 {
+    let zero = b.zero();
     let u32_zero = b.zero_u32();
     let u256_zero = b.zero_u256();
 
@@ -52,7 +53,7 @@ where
         .for_each(|p| b.connect(p.operation_ids_target()[i], op));
 
     // Compute the SUM, MIN and MAX values.
-    let mut sum_overflow = u32_zero;
+    let mut sum_overflow = zero;
     let mut sum_value = proof0.value_target_at_index(i);
     if i == 0 {
         // If it's the first proof and the operation is ID,
@@ -73,11 +74,7 @@ where
         // Compute the SUM value and the overflow.
         let (addition, overflow) = b.add_u256(&sum_value, &value);
         sum_value = addition;
-        let (overflow, overflow_hi) = b.add_u32(sum_overflow, overflow);
-        sum_overflow = overflow;
-
-        // Constrain the overflow must be less than 1 << 16.
-        b.connect_u32(overflow_hi, u32_zero);
+        sum_overflow = b.add(sum_overflow, overflow.0);
 
         // Compute the MIN and MAX values.
         let (_, borrow) = b.sub_u256(&value, &min_value);
@@ -110,10 +107,9 @@ where
     }
 
     // Set the overflow if the operation is SUM or AVG:
-    // overflow = (op == SUM OR op == AVG) AND sum_overflow != 0
+    // overflow = op == SUM OR op == AVG ? sum_overflow : 0
     let is_op_sum_or_avg = b.or(is_op_sum, is_op_avg);
-    let overflow = b.is_not_equal(sum_overflow.0, u32_zero.0);
-    let overflow = b.and(is_op_sum_or_avg, overflow);
+    let overflow = b.select(is_op_sum_or_avg, sum_overflow, zero);
 
     (output, overflow)
 }
@@ -134,19 +130,22 @@ mod tests {
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+    use plonky2::{
+        field::types::Field,
+        iop::witness::{PartialWitness, WitnessWrite},
+    };
     use std::array;
 
     #[derive(Clone, Debug)]
     struct TestOutput {
         output: Vec<F>,
-        overflow: bool,
+        overflow: u32,
     }
 
     #[derive(Clone, Debug)]
     struct TestOutputWires {
         output: Vec<Target>,
-        overflow: BoolTarget,
+        overflow: Target,
     }
 
     #[derive(Clone, Debug)]
@@ -173,7 +172,7 @@ mod tests {
                 } else {
                     b.add_virtual_target_arr::<NUM_LIMBS>().to_vec()
                 };
-                let overflow = b.add_virtual_bool_target_safe();
+                let overflow = b.add_virtual_target();
 
                 TestOutputWires { output, overflow }
             });
@@ -190,7 +189,7 @@ mod tests {
                     .iter()
                     .zip(output)
                     .for_each(|(l, r)| b.connect(*l, r));
-                b.connect(overflow.target, exp.overflow.target);
+                b.connect(overflow, exp.overflow);
             });
 
             (proofs, exp_outputs)
@@ -206,7 +205,7 @@ mod tests {
                 .zip(wires.1.iter())
                 .for_each(|(v, t)| {
                     pw.set_target_arr(&t.output, &v.output);
-                    pw.set_bool_target(t.overflow, v.overflow);
+                    pw.set_target(t.overflow, F::from_canonical_u32(v.overflow));
                 });
         }
     }

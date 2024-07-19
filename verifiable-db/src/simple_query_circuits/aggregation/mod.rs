@@ -71,12 +71,12 @@ pub(crate) mod tests {
         })
     }
 
-    /// Compute the output values and the overflow flag at the specified index by
+    /// Compute the output values and the overflow number at the specified index by
     /// the proofs. It's the test function corresponding to `compute_output_item`.
     pub(crate) fn compute_output_item_value<const S: usize>(
         i: usize,
         proofs: &[&PublicInputs<F, S>],
-    ) -> (Vec<F>, bool)
+    ) -> (Vec<F>, u32)
     where
         [(); S - 1]:,
     {
@@ -104,7 +104,7 @@ pub(crate) mod tests {
             .for_each(|p| assert_eq!(p.operation_ids()[i], op));
 
         // Compute the SUM, MIN or MAX value.
-        let mut sum_overflow = false;
+        let mut sum_overflow = 0;
         let mut output = proof0.value_at_index(i);
         if i == 0 && is_op_id {
             // If it's the first proof and the operation is ID,
@@ -129,7 +129,9 @@ pub(crate) mod tests {
                 // Compute the SUM value and the overflow.
                 let (addition, overflow) = output.overflowing_add(value);
                 output = addition;
-                sum_overflow = sum_overflow || overflow;
+                if overflow {
+                    sum_overflow += 1;
+                }
             }
         }
 
@@ -149,8 +151,12 @@ pub(crate) mod tests {
         }
 
         // Set the overflow if the operation is SUM or AVG:
-        // overflow = (op == SUM OR op == AVG) AND sum_overflow != 0
-        let overflow = (is_op_sum || is_op_avg) && sum_overflow;
+        // overflow = op == SUM OR op == AVG ? sum_overflow : 0
+        let overflow = if is_op_sum || is_op_avg {
+            sum_overflow
+        } else {
+            0
+        };
 
         (output, overflow)
     }

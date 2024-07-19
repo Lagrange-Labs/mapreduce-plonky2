@@ -58,6 +58,8 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
     where
         [(); MAX_NUM_RESULTS - 1]:,
     {
+        let zero = b.zero();
+
         let is_rows_tree_node = b.add_virtual_bool_target_safe();
         let [min_query, max_query] = [0; 2].map(|_| b.add_virtual_u256_unsafe());
 
@@ -107,22 +109,15 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
         let is_out_of_range = b.or(is_out_of_range, is_rows_tree_node);
         b.connect(is_out_of_range.target, is_rows_tree_node.target);
 
-        // Initialize the aggregated overflow flag:
-        // p1.overflow OR p2.overflow OR p.overflow
-        let aggregated_overflow = b.or(
-            child_proof1.overflow_flag_target(),
-            child_proof2.overflow_flag_target(),
-        );
-        let mut aggregated_overflow = b.or(aggregated_overflow, base_proof.overflow_flag_target());
-
-        // Aggregate the output values of children and compute the overflow flag.
+        // Aggregate the output values of children and the overflow number.
+        let mut num_overflows = zero;
         let mut aggregated_values = vec![];
         for i in 0..MAX_NUM_RESULTS {
             let (mut output, overflow) =
                 compute_output_item(b, i, &[base_proof, child_proof1, child_proof2]);
 
             aggregated_values.append(&mut output);
-            aggregated_overflow = b.or(aggregated_overflow, overflow);
+            num_overflows = b.add(num_overflows, overflow);
         }
 
         // p1.index_ids == p2.index_ids == p.index_ids
@@ -164,6 +159,15 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
         );
         let count = b.add(count, base_proof.num_matching_rows_target());
 
+        // overflow = (p.overflow + p1.overflow + p2.overflow + num_overflows) != 0
+        let overflow = b.add_many([
+            base_proof.to_overflow_raw(),
+            child_proof1.to_overflow_raw(),
+            child_proof2.to_overflow_raw(),
+            &num_overflows,
+        ]);
+        let overflow = b.is_not_equal(overflow, zero);
+
         // Register the public inputs.
         PublicInputs::<_, MAX_NUM_RESULTS>::new(
             &node_hash.to_targets(),
@@ -176,7 +180,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
             base_proof.to_index_ids_raw(),
             &min_query.to_targets(),
             &max_query.to_targets(),
-            &[aggregated_overflow.target],
+            &[overflow.target],
             base_proof.to_computational_hash_raw(),
             base_proof.to_placeholder_hash_raw(),
         )
@@ -407,9 +411,7 @@ mod tests {
         }
         // Output values and overflow flag
         {
-            let mut aggregated_overflow = base_pi.overflow_flag()
-                || left_child_pi.overflow_flag()
-                || right_child_pi.overflow_flag();
+            let mut num_overflows = 0;
             let mut aggregated_values = vec![];
 
             for i in 0..MAX_NUM_RESULTS {
@@ -417,11 +419,17 @@ mod tests {
                     compute_output_item_value(i, &[&base_pi, &left_child_pi, &right_child_pi]);
 
                 aggregated_values.append(&mut output);
-                aggregated_overflow = aggregated_overflow || overflow;
+                num_overflows += overflow;
             }
 
             assert_eq!(pi.to_values_raw(), aggregated_values);
-            assert_eq!(pi.overflow_flag(), aggregated_overflow);
+            assert_eq!(
+                pi.overflow_flag(),
+                base_pi.overflow_flag()
+                    || left_child_pi.overflow_flag()
+                    || right_child_pi.overflow_flag()
+                    || num_overflows != 0
+            );
         }
         // Count
         assert_eq!(
