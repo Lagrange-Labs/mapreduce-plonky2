@@ -476,6 +476,12 @@ mod tests {
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let targets = c.add_virtual_target_arr::<{ PublicInputs::<Target, S>::total_len() }>();
             let pi_targets = PublicInputs::<Target, S>::from_slice(targets.as_slice());
+
+            use mp2_common::u256::CircuitBuilderU256;
+            let v1 = pi_targets.first_value_as_u256_target();
+            let v2 = pi_targets.values_target()[1].clone();
+            c.add_u256(&v1, &v2);
+
             pi_targets.register_args(c);
             pi_targets.to_vec()
         }
@@ -485,9 +491,38 @@ mod tests {
         }
     }
 
+    use mp2_common::types::CURVE_TARGET_LEN;
+    use plonky2::field::types::Sample;
+    use plonky2_ecgfp5::curve::curve::Point;
+    use rand::thread_rng;
+
+    #[test]
+    fn test_query_pi_first_point() {
+        let mut pis_raw: Vec<F> =
+            random_vector::<u32>(PublicInputs::<F, S>::total_len()).to_fields();
+
+        let start = PublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues).start;
+        let mut rng = thread_rng();
+        let point = Point::sample(&mut rng).to_weierstrass().to_fields();
+        println!("point = {point:?}");
+        pis_raw[start..start + CURVE_TARGET_LEN].copy_from_slice(&point);
+
+        let test_circuit = TestPublicInputs { pis: &pis_raw };
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
+        assert_eq!(proof.public_inputs, pis_raw);
+    }
+
     #[test]
     fn test_query_public_inputs() {
-        let pis_raw: Vec<F> = random_vector::<u32>(PublicInputs::<F, S>::total_len()).to_fields();
+        let mut pis_raw: Vec<F> =
+            random_vector::<u32>(PublicInputs::<F, S>::total_len()).to_fields();
+
+        let start = PublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues).start;
+        let mut rng = thread_rng();
+        let point = Point::sample(&mut rng).to_weierstrass().to_fields();
+        println!("point = {point:?}");
+        pis_raw[start..start + CURVE_TARGET_LEN].copy_from_slice(&point);
+
         let pis = PublicInputs::<F, S>::from_slice(pis_raw.as_slice());
         // check public inputs are constructed correctly
         assert_eq!(
