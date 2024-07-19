@@ -57,7 +57,7 @@ pub struct FullNodeWithOneChildCircuit<const MAX_NUM_RESULTS: usize> {
 impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> {
     pub fn build(
         b: &mut CBuilder,
-        base_proof: &PublicInputs<Target, MAX_NUM_RESULTS>,
+        query_proof: &PublicInputs<Target, MAX_NUM_RESULTS>,
         child_proof: &PublicInputs<Target, MAX_NUM_RESULTS>,
     ) -> FullNodeWithOneChildWires<MAX_NUM_RESULTS>
     where
@@ -71,12 +71,12 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
 
         // Choose the column ID and node value to be hashed depending on which tree
         // the current node belongs to.
-        let index_ids = base_proof.index_ids_target();
+        let index_ids = query_proof.index_ids_target();
         let column_id = b.select(is_rows_tree_node, index_ids[1], index_ids[0]);
-        let index_value = base_proof.index_value_target();
+        let index_value = query_proof.index_value_target();
         let node_value = b.select_u256(
             is_rows_tree_node,
-            &base_proof.min_value_target(),
+            &query_proof.min_value_target(),
             &index_value,
         );
 
@@ -91,7 +91,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
             .chain(node_max.to_targets())
             .chain(iter::once(column_id))
             .chain(node_value.to_targets())
-            .chain(base_proof.tree_hash_target().to_targets())
+            .chain(query_proof.tree_hash_target().to_targets())
             .collect();
         let node_hash = hash_maybe_first(
             b,
@@ -130,7 +130,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
         let mut num_overflows = zero;
         let mut aggregated_values = vec![];
         for i in 0..MAX_NUM_RESULTS {
-            let (mut output, overflow) = compute_output_item(b, i, &[base_proof, child_proof]);
+            let (mut output, overflow) = compute_output_item(b, i, &[query_proof, child_proof]);
 
             aggregated_values.append(&mut output);
             num_overflows = b.add(num_overflows, overflow);
@@ -142,13 +142,13 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
 
         // p.C == child.C
         b.connect_hashes(
-            base_proof.computational_hash_target(),
+            query_proof.computational_hash_target(),
             child_proof.computational_hash_target(),
         );
 
         // p.H_p == child.H_p
         b.connect_hashes(
-            base_proof.placeholder_hash_target(),
+            query_proof.placeholder_hash_target(),
             child_proof.placeholder_hash_target(),
         );
 
@@ -158,23 +158,23 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
         // child.MAX_I == MAX_query
         b.enforce_equal_u256(&max_query, &child_proof.max_query_target());
 
-        // If the base proof is generated from a rows tree node, the query bounds must be same:
+        // If the query proof is generated from a rows tree node, the query bounds must be same:
         // is_row_tree_node = is_row_tree_node AND MIN_query == p.MIN_I AND MAX_query == p.MAX_I
-        let is_min_query_equal = b.is_equal_u256(&min_query, &base_proof.min_query_target());
-        let is_max_query_equal = b.is_equal_u256(&max_query, &base_proof.max_query_target());
+        let is_min_query_equal = b.is_equal_u256(&min_query, &query_proof.min_query_target());
+        let is_max_query_equal = b.is_equal_u256(&max_query, &query_proof.max_query_target());
         let is_equal = b.and(is_min_query_equal, is_max_query_equal);
         let is_equal = b.and(is_equal, is_rows_tree_node);
         b.connect(is_equal.target, is_rows_tree_node.target);
 
         // count = current.count + child.count
         let count = b.add(
-            base_proof.num_matching_rows_target(),
+            query_proof.num_matching_rows_target(),
             child_proof.num_matching_rows_target(),
         );
 
         // overflow = (pC.overflow + pR.overflow + num_overflows) != 0
         let overflow = b.add_many([
-            base_proof.to_overflow_raw(),
+            query_proof.to_overflow_raw(),
             child_proof.to_overflow_raw(),
             &num_overflows,
         ]);
@@ -185,16 +185,16 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
             &node_hash.to_targets(),
             &aggregated_values.as_slice(),
             &[count],
-            base_proof.to_ops_raw(),
-            base_proof.to_index_value_raw(),
+            query_proof.to_ops_raw(),
+            query_proof.to_index_value_raw(),
             &node_min.to_targets(),
             &node_max.to_targets(),
-            base_proof.to_index_ids_raw(),
+            query_proof.to_index_ids_raw(),
             &min_query.to_targets(),
             &max_query.to_targets(),
             &[overflow.target],
-            base_proof.to_computational_hash_raw(),
-            base_proof.to_placeholder_hash_raw(),
+            query_proof.to_computational_hash_raw(),
+            query_proof.to_placeholder_hash_raw(),
         )
         .register(b);
 
@@ -218,7 +218,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
     }
 }
 
-/// Base proof number = 1, child proof number = 1
+/// Query proof number = 1, child proof number = 1
 pub(crate) const NUM_VERIFIED_PROOFS: usize = 2;
 
 impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
@@ -236,11 +236,11 @@ where
         verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_VERIFIED_PROOFS],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        // The first one is the base proof, and the second is the child proof.
-        let [base_proof, child_proof] =
+        // The first one is the query proof, and the second is the child proof.
+        let [query_proof, child_proof] =
             verified_proofs.map(|p| PublicInputs::from_slice(&p.public_inputs));
 
-        Self::Inputs::build(builder, &base_proof, &child_proof)
+        Self::Inputs::build(builder, &query_proof, &child_proof)
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
@@ -270,12 +270,12 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TestFullNodeWithOneChildCircuit<'a> {
         c: FullNodeWithOneChildCircuit<MAX_NUM_RESULTS>,
-        base_proof: &'a [F],
+        query_proof: &'a [F],
         child_proof: &'a [F],
     }
 
     impl<'a> UserCircuit<F, D> for TestFullNodeWithOneChildCircuit<'a> {
-        // Circuit wires + base proof + child proof
+        // Circuit wires + query proof + child proof
         type Wires = (
             FullNodeWithOneChildWires<MAX_NUM_RESULTS>,
             Vec<Target>,
@@ -287,19 +287,19 @@ mod tests {
                 b.add_virtual_target_arr::<{ PI_LEN::<MAX_NUM_RESULTS> }>()
                     .to_vec()
             });
-            let [base_pi, child_pi] =
+            let [query_pi, child_pi] =
                 array::from_fn(|i| PublicInputs::<Target, MAX_NUM_RESULTS>::from_slice(&proofs[i]));
 
-            let wires = FullNodeWithOneChildCircuit::build(b, &base_pi, &child_pi);
+            let wires = FullNodeWithOneChildCircuit::build(b, &query_pi, &child_pi);
 
-            let [base_proof, child_proof] = proofs;
+            let [query_proof, child_proof] = proofs;
 
-            (wires, base_proof, child_proof)
+            (wires, query_proof, child_proof)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.c.assign(pw, &wires.0);
-            pw.set_target_arr(&wires.1, self.base_proof);
+            pw.set_target_arr(&wires.1, self.query_proof);
             pw.set_target_arr(&wires.2, self.child_proof);
         }
     }
@@ -313,7 +313,7 @@ mod tests {
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
         // Build the proofs.
-        let [mut base_proof, mut child_proof] = random_aggregation_public_inputs(ops);
+        let [mut query_proof, mut child_proof] = random_aggregation_public_inputs(ops);
         let [index_value_range, index_ids_range, min_query_range, max_query_range, c_hash_range, p_hash_range] =
             [
                 QueryPublicInputs::IndexValue,
@@ -325,44 +325,44 @@ mod tests {
             ]
             .map(|input| PublicInputs::<F, MAX_NUM_RESULTS>::to_range(input));
 
-        // Build the base public inputs.
+        // Build the query public inputs.
         if is_rows_tree_node {
             // p.MIN_I == MIN_query AND p.MAX_I == MAX_query
-            base_proof[min_query_range.clone()].copy_from_slice(&min_query.to_fields());
-            base_proof[max_query_range.clone()].copy_from_slice(&max_query.to_fields());
+            query_proof[min_query_range.clone()].copy_from_slice(&min_query.to_fields());
+            query_proof[max_query_range.clone()].copy_from_slice(&max_query.to_fields());
         } else {
             // p.I >= MIN_query AND p.I <= MAX_query
             let index_value: U256 = (min_query + max_query) >> 1;
-            base_proof[index_value_range.clone()].copy_from_slice(&index_value.to_fields());
+            query_proof[index_value_range.clone()].copy_from_slice(&index_value.to_fields());
         }
-        let base_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&base_proof);
+        let query_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&query_proof);
 
         // Build the child public inputs.
         // child.index_ids == p.index_ids
-        child_proof[index_ids_range].copy_from_slice(base_pi.to_index_ids_raw());
+        child_proof[index_ids_range].copy_from_slice(query_pi.to_index_ids_raw());
         // child.C == p.C
-        child_proof[c_hash_range].copy_from_slice(base_pi.to_computational_hash_raw());
+        child_proof[c_hash_range].copy_from_slice(query_pi.to_computational_hash_raw());
         // child.H_p == p.H_p
-        child_proof[p_hash_range].copy_from_slice(base_pi.to_placeholder_hash_raw());
+        child_proof[p_hash_range].copy_from_slice(query_pi.to_placeholder_hash_raw());
         // child.MIN_I == MIN_query
         child_proof[min_query_range.clone()].copy_from_slice(&min_query.to_fields());
         // child.MAX_I == MAX_query
         child_proof[max_query_range.clone()].copy_from_slice(&max_query.to_fields());
         if is_rows_tree_node {
             // child.I == p.I
-            child_proof[index_value_range.clone()].copy_from_slice(base_pi.to_index_value_raw());
+            child_proof[index_value_range.clone()].copy_from_slice(query_pi.to_index_value_raw());
             // child.MIN_I == p.MIN_I
-            child_proof[min_query_range].copy_from_slice(base_pi.to_min_query_raw());
+            child_proof[min_query_range].copy_from_slice(query_pi.to_min_query_raw());
             // child.MAX_I == p.MAX_I.
-            child_proof[max_query_range].copy_from_slice(base_pi.to_max_query_raw());
+            child_proof[max_query_range].copy_from_slice(query_pi.to_max_query_raw());
         }
         let child_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&child_proof);
 
         // Construct the witness.
-        let index_ids = base_pi.index_ids();
-        let index_value = base_pi.index_value();
+        let index_ids = query_pi.index_ids();
+        let index_value = query_pi.index_value();
         let node_value = if is_rows_tree_node {
-            base_pi.min_value()
+            query_pi.min_value()
         } else {
             index_value
         };
@@ -380,7 +380,7 @@ mod tests {
                 min_query,
                 max_query,
             },
-            base_proof: &base_proof,
+            query_proof: &query_proof,
             child_proof: &child_proof,
         };
 
@@ -413,7 +413,7 @@ mod tests {
                 .chain(node_max.to_fields())
                 .chain(iter::once(column_id))
                 .chain(node_value.to_fields())
-                .chain(base_pi.tree_hash().to_fields())
+                .chain(query_pi.tree_hash().to_fields())
                 .collect();
             let exp_hash = H::hash_no_pad(&inputs);
 
@@ -425,7 +425,7 @@ mod tests {
             let mut aggregated_values = vec![];
 
             for i in 0..MAX_NUM_RESULTS {
-                let (mut output, overflow) = compute_output_item_value(i, &[&base_pi, &child_pi]);
+                let (mut output, overflow) = compute_output_item_value(i, &[&query_pi, &child_pi]);
 
                 aggregated_values.append(&mut output);
                 num_overflows += overflow;
@@ -434,16 +434,16 @@ mod tests {
             assert_eq!(pi.to_values_raw(), aggregated_values);
             assert_eq!(
                 pi.overflow_flag(),
-                base_pi.overflow_flag() || child_pi.overflow_flag() || num_overflows != 0
+                query_pi.overflow_flag() || child_pi.overflow_flag() || num_overflows != 0
             );
         }
         // Count
         assert_eq!(
             pi.num_matching_rows(),
-            base_pi.num_matching_rows() + child_pi.num_matching_rows(),
+            query_pi.num_matching_rows() + child_pi.num_matching_rows(),
         );
         // Operation IDs
-        assert_eq!(pi.operation_ids(), base_pi.operation_ids());
+        assert_eq!(pi.operation_ids(), query_pi.operation_ids());
         // Index value
         assert_eq!(pi.index_value(), index_value);
         // Minimum value
@@ -457,9 +457,9 @@ mod tests {
         // Maximum query
         assert_eq!(pi.max_query_value(), max_query);
         // Computational hash
-        assert_eq!(pi.computational_hash(), base_pi.computational_hash());
+        assert_eq!(pi.computational_hash(), query_pi.computational_hash());
         // Placeholder hash
-        assert_eq!(pi.placeholder_hash(), base_pi.placeholder_hash());
+        assert_eq!(pi.placeholder_hash(), query_pi.placeholder_hash());
     }
 
     #[test]
