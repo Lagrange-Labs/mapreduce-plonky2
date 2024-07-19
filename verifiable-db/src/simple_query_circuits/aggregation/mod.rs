@@ -20,7 +20,7 @@ pub(crate) mod tests {
     use rand::{prelude::SliceRandom, thread_rng, Rng};
     use std::array;
 
-    /// Generate an array of random aggregation operations.
+    /// Generate a field array of S random aggregation operations.
     pub(crate) fn random_aggregation_operations<const S: usize>() -> [F; S] {
         let ops = [
             AggregationOperation::IdOp,
@@ -37,7 +37,9 @@ pub(crate) mod tests {
         })
     }
 
-    /// Generate S public inputs by the operations.
+    /// Generate S number of proof public input slices by the specified operations.
+    /// The each returned proof public inputs could be constructed by
+    /// `PublicInputs::from_slice` function.
     pub(crate) fn random_aggregation_public_inputs<const N: usize, const S: usize>(
         ops: [F; S],
     ) -> [Vec<F>; N] {
@@ -51,23 +53,23 @@ pub(crate) mod tests {
 
         let mut rng = thread_rng();
         array::from_fn(|_| {
-            let mut proof = random_vector::<u32>(PI_LEN::<S>).to_fields();
+            let mut pi = random_vector::<u32>(PI_LEN::<S>).to_fields();
 
             // Copy the specified operations to the proofs.
-            proof[ops_range.clone()].copy_from_slice(&ops);
+            pi[ops_range.clone()].copy_from_slice(&ops);
 
             // Set the overflow flag to a random boolean.
             let overflow = F::from_bool(rng.gen());
-            proof[overflow_range.clone()].copy_from_slice(&[overflow]);
+            pi[overflow_range.clone()].copy_from_slice(&[overflow]);
 
             // If the first operation is ID, set the value to a random point.
             if is_first_op_id {
                 let first_value = Point::sample(&mut rng).to_weierstrass().to_fields();
-                proof[first_value_start..first_value_start + CURVE_TARGET_LEN]
+                pi[first_value_start..first_value_start + CURVE_TARGET_LEN]
                     .copy_from_slice(&first_value);
             }
 
-            proof
+            pi
         })
     }
 
