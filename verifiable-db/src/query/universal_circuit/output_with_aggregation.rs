@@ -83,36 +83,36 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
 
     type InputWires = InputWires<MAX_NUM_RESULTS>;
 
-    fn get_ops_ids(&self) -> &[Target] {
+    fn ops_ids(&self) -> &[Target] {
         self.input_wires.agg_ops.as_slice()
     }
 
-    fn get_first_output_value(&self) -> Self::FirstT {
+    fn first_output_value(&self) -> Self::FirstT {
         self.output_values[0].clone()
     }
 
-    fn get_other_output_values(&self) -> &[UInt256Target] {
+    fn other_output_values(&self) -> &[UInt256Target] {
         &self.output_values[1..]
     }
 
-    fn get_computational_hash(&self) -> HashOutTarget {
+    fn computational_hash(&self) -> HashOutTarget {
         self.output_hash
     }
 
-    fn get_input_wires(&self) -> Self::InputWires {
+    fn input_wires(&self) -> Self::InputWires {
         self.input_wires.clone()
     }
 }
 
-impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> {
+impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<MAX_NUM_RESULTS> {
     type Wires = Wires<MAX_NUM_RESULTS>;
 
     fn build(
         b: &mut CBuilder,
         column_values: &[UInt256Target],
         column_hash: &[HashOutTarget],
-        item_values: &[UInt256Target],
-        item_hash: &[HashOutTarget],
+        item_values: [UInt256Target; MAX_NUM_RESULTS],
+        item_hash: [HashOutTarget; MAX_NUM_RESULTS],
         predicate_value: &BoolTarget,
         predicate_hash: &HashOutTarget,
     ) -> Self::Wires {
@@ -150,7 +150,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
             b,
             predicate_hash,
             column_hash,
-            item_hash.try_into().unwrap(),
+            &item_hash,
             &selector,
             &agg_ops,
             &is_output_valid,
@@ -267,8 +267,8 @@ mod tests {
                 c,
                 &column_values,
                 &column_hash,
-                &item_values,
-                &item_hash,
+                item_values.clone(),
+                item_hash.clone().try_into().unwrap(),
                 &predicate_value,
                 &predicate_hash,
             );
@@ -284,7 +284,7 @@ mod tests {
 
             expected_ops_ids
                 .iter()
-                .zip(wires.get_ops_ids().iter())
+                .zip(wires.ops_ids().iter())
                 .for_each(|(expected, actual)| c.connect(*expected, *actual));
             c.connect_hashes(expected_output_hash, wires.output_hash);
 

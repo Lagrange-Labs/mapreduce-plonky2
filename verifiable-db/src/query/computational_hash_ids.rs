@@ -21,7 +21,6 @@ use plonky2::{
     },
     iop::target::{BoolTarget, Target},
     plonk::config::{GenericHashOut, Hasher},
-    util::log2_ceil,
 };
 
 pub enum Identifiers {
@@ -187,7 +186,7 @@ impl Operation {
             b.hash_n_to_hash_no_pad::<CHasher>(vec![placeholder_ids[1]]);
         // Compute the vector of computational hashes associated to each entry in `possible_input_values`.
         // The vector is padded to the next power of 2 to safely use `random_access_hash` gadget
-        let pad_len = 1 << log2_ceil(input_hash.len() + 3); // length of the padded vector of computational hashes
+        let pad_len = (input_hash.len() + 3).next_power_of_two(); // length of the padded vector of computational hashes
         let empty_poseidon_hash = b.constant_hash(*empty_poseidon_hash()); // employed for padding
         let possible_input_hash = input_hash
             .iter()
@@ -279,7 +278,7 @@ impl Output {
                 .iter()
                 .chain(once(&item_hash[i]))
                 .chain(repeat(&empty_hash))
-                .take(1 << log2_ceil(column_hash.len() + 1)) // pad up to next power of 2 with empty_hash to safely use random_access gadget
+                .take((column_hash.len() + 1).next_power_of_two()) // pad up to next power of 2 with empty_hash to safely use random_access gadget
                 .cloned()
                 .collect_vec();
             assert!(

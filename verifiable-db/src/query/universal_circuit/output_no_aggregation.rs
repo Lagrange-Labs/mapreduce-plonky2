@@ -90,42 +90,40 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
 
     type InputWires = InputWires<MAX_NUM_RESULTS>;
 
-    fn get_ops_ids(&self) -> &[Target] {
+    fn ops_ids(&self) -> &[Target] {
         self.ops_ids.as_slice()
     }
 
-    fn get_first_output_value(&self) -> Self::FirstT {
+    fn first_output_value(&self) -> Self::FirstT {
         self.first_output_value
     }
 
-    fn get_other_output_values(&self) -> &[UInt256Target] {
+    fn other_output_values(&self) -> &[UInt256Target] {
         &self.output_values.as_slice()
     }
 
-    fn get_computational_hash(&self) -> HashOutTarget {
+    fn computational_hash(&self) -> HashOutTarget {
         self.output_hash
     }
 
-    fn get_input_wires(&self) -> Self::InputWires {
+    fn input_wires(&self) -> Self::InputWires {
         self.input_wires.clone()
     }
 }
 
-impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> {
+impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<MAX_NUM_RESULTS> {
     type Wires = Wires<MAX_NUM_RESULTS>;
 
     fn build(
         b: &mut CBuilder,
         column_values: &[UInt256Target],
         column_hash: &[HashOutTarget],
-        item_values: &[UInt256Target],
-        item_hash: &[HashOutTarget],
+        item_values: [UInt256Target; MAX_NUM_RESULTS],
+        item_hash: [HashOutTarget; MAX_NUM_RESULTS],
         predicate_value: &BoolTarget,
         predicate_hash: &HashOutTarget,
     ) -> Self::Wires {
         assert_eq!(column_values.len(), column_hash.len());
-        assert_eq!(item_values.len(), MAX_NUM_RESULTS);
-        assert_eq!(item_hash.len(), MAX_NUM_RESULTS);
 
         let u256_zero = b.zero_u256();
         let curve_zero = b.curve_zero();
@@ -183,7 +181,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
             b,
             predicate_hash,
             column_hash,
-            item_hash.try_into().unwrap(),
+            &item_hash,
             &input_wires.selector,
             &input_wires.ids,
             &input_wires.is_output_valid,
@@ -481,8 +479,8 @@ mod tests {
                 b,
                 &output.column_values,
                 &output.column_hash,
-                &output.item_values,
-                &output.item_hash,
+                output.item_values.clone(),
+                output.item_hash.clone(),
                 &output.predicate_value,
                 &output.predicate_hash,
             );
