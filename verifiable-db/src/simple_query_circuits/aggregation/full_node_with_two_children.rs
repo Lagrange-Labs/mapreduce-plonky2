@@ -79,14 +79,14 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
         let [child_proof1, child_proof2] = child_proofs;
         let inputs = child_proof1
             .tree_hash_target()
-            .elements
+            .to_targets()
             .into_iter()
-            .chain(child_proof2.tree_hash_target().elements)
+            .chain(child_proof2.tree_hash_target().to_targets())
             .chain(child_proof1.min_value_target().to_targets())
             .chain(child_proof2.max_value_target().to_targets())
             .chain(iter::once(column_id))
             .chain(node_value.to_targets())
-            .chain(base_proof.tree_hash_target().elements)
+            .chain(base_proof.tree_hash_target().to_targets())
             .collect();
         let node_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
@@ -396,14 +396,14 @@ mod tests {
             // H(p1.H || p2.H || p1.min || p2.max || column_id || node_value || p.H)
             let inputs: Vec<_> = left_child_pi
                 .tree_hash()
-                .elements
+                .to_fields()
                 .into_iter()
-                .chain(right_child_pi.tree_hash().elements)
+                .chain(right_child_pi.tree_hash().to_fields())
                 .chain(left_child_pi.min_value().to_fields())
                 .chain(right_child_pi.max_value().to_fields())
                 .chain(iter::once(column_id))
                 .chain(node_value.to_fields())
-                .chain(base_pi.tree_hash().elements)
+                .chain(base_pi.tree_hash().to_fields())
                 .collect();
             let exp_hash = H::hash_no_pad(&inputs);
 

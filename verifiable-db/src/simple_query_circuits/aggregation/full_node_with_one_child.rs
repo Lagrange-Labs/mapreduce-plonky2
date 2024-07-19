@@ -91,7 +91,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
             .chain(node_max.to_targets())
             .chain(iter::once(column_id))
             .chain(node_value.to_targets())
-            .chain(base_proof.tree_hash_target().elements)
+            .chain(base_proof.tree_hash_target().to_targets())
             .collect();
         let node_hash = hash_maybe_first(
             b,
@@ -406,14 +406,14 @@ mod tests {
 
             // H(left_child.H || right_child.H || node_min || node_max || column_id || node_value || p.H))
             let inputs: Vec<_> = left_child_hash
-                .elements
+                .to_fields()
                 .into_iter()
-                .chain(right_child_hash.elements)
+                .chain(right_child_hash.to_fields())
                 .chain(node_min.to_fields())
                 .chain(node_max.to_fields())
                 .chain(iter::once(column_id))
                 .chain(node_value.to_fields())
-                .chain(base_pi.tree_hash().elements)
+                .chain(base_pi.tree_hash().to_fields())
                 .collect();
             let exp_hash = H::hash_no_pad(&inputs);
 

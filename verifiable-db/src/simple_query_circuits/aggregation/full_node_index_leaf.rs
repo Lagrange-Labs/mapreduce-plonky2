@@ -42,6 +42,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeIndexLeafCircuit<MAX_NUM_RESULTS> {
     ) -> FullNodeIndexLeafWires<MAX_NUM_RESULTS> {
         let ttrue = b._true();
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
+        let empty_hash_targets = empty_hash.to_targets();
 
         let [min_query, max_query] = [0; 2].map(|_| b.add_virtual_u256());
 
@@ -59,16 +60,15 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeIndexLeafCircuit<MAX_NUM_RESULTS> {
 
         // Compute the node hash:
         // node_hash = H(H("") || H("") || p.I || p.I || p.index_ids[0] || p.I || p.H))
-        let inputs = empty_hash
-            .elements
+        let inputs = empty_hash_targets
             .iter()
-            .chain(empty_hash.elements.iter())
+            .chain(empty_hash_targets.iter())
             .chain(index_value_targets)
             .chain(index_value_targets)
             .chain(iter::once(&index_ids[0]))
             .chain(index_value_targets)
             .cloned()
-            .chain(base_proof.tree_hash_target().elements)
+            .chain(base_proof.tree_hash_target().to_targets())
             .collect();
         let node_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
@@ -137,7 +137,7 @@ mod tests {
         aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
         PI_LEN,
     };
-    use mp2_common::C;
+    use mp2_common::{utils::ToFields, C};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{iop::witness::WitnessWrite, plonk::config::Hasher};
 
@@ -209,10 +209,10 @@ mod tests {
         {
             // H(H("") || H("") || p.I || p.I || p.index_ids[0] || p.I || p.H))
             let empty_hash = empty_poseidon_hash();
-            let inputs: Vec<_> = empty_hash
-                .elements
+            let empty_hash_fields = empty_hash.to_fields();
+            let inputs: Vec<_> = empty_hash_fields
                 .iter()
-                .chain(empty_hash.elements.iter())
+                .chain(empty_hash_fields.iter())
                 .chain(index_value_fields)
                 .chain(index_value_fields)
                 .chain(iter::once(&index_ids[0]))
