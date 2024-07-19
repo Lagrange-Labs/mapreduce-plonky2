@@ -46,17 +46,49 @@ pub struct BasicOperationWires {
     pub(crate) num_overflows: Target,
 }
 /// Witness input values for basic operation component
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct BasicOperationInputs {
-    constant_operand: U256,
-    placeholder_values: [U256; 2],
-    placeholder_ids: [F; 2],
-    first_input_selector: F,
-    second_input_selector: F,
-    op_selector: F,
+    pub(crate) constant_operand: U256,
+    pub(crate) placeholder_values: [U256; 2],
+    pub(crate) placeholder_ids: [F; 2],
+    pub(crate) first_input_selector: F,
+    pub(crate) second_input_selector: F,
+    pub(crate) op_selector: F,
 }
 
 impl BasicOperationInputs {
+    /// Method to return the offset to be employed as input selector in case the
+    /// input operand of the basic operation is the value found in the input_pos 
+    /// item of `input_values`
+    pub(crate) fn input_value_offset(
+        input_pos: usize,
+    ) -> usize {
+        input_pos
+    }
+    /// Method to return the offset to be employed as input selector in case the
+    /// input operand of the basic operation is the constant operand
+    pub(crate) fn constant_operand_offset(
+        num_inputs_values: usize
+    ) -> usize {
+        num_inputs_values
+    }
+    /// Method to return the offset to be employed as input selector in case the
+    /// input operand of the basic operation is the first placeholder value
+    pub(crate) fn first_placeholder_offset(
+        num_inputs_values: usize,
+    ) -> usize {
+        num_inputs_values+1
+    }
+
+    /// Method to return the offset to be employed as input selector in case the
+    /// input operand of the basic operation is the second placeholder value
+    pub(crate) fn second_placeholder_offset(
+        num_inputs_values: usize,
+    ) -> usize {
+        num_inputs_values+2
+    }
+
+
     pub(crate) fn build(
         b: &mut CircuitBuilder<F, D>,
         input_values: &[UInt256Target],

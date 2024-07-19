@@ -113,7 +113,7 @@ impl<F: RichField> ToField<F> for Operation {
     }
 }
 
-type HashPermutation = <CHasher as Hasher<F>>::Permutation;
+pub(crate) type HashPermutation = <CHasher as Hasher<F>>::Permutation;
 
 impl Operation {
     pub fn index(&self) -> usize {

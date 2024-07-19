@@ -1,4 +1,6 @@
 use crate::query::computational_hash_ids::{AggregationOperation, Identifiers, Output};
+use anyhow::ensure;
+use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     group_hashing::CircuitBuilderGroupHashing,
@@ -17,10 +19,11 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
+    field::types::Field,
 };
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 use serde::{Deserialize, Serialize};
-use std::{array, iter};
+use std::{array, iter::{self, repeat}};
 
 use super::{
     cells::build_cells_tree,
@@ -215,6 +218,34 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
             .iter()
             .enumerate()
             .for_each(|(i, t)| pw.set_bool_target(*t, i < self.valid_num_outputs));
+    }
+    
+    fn new(
+        selector: &[F],
+        ids: &[F],
+        num_outputs: usize,
+    ) -> anyhow::Result<Self> {
+        ensure!(selector.len() == num_outputs, 
+            "Output component without aggregation: Number of selectors different from number of actual outputs");
+        ensure!(ids.len() == num_outputs, 
+            "Output component without aggregation: Number of output ids different from number of actual outputs");
+        let selectors = selector.into_iter()
+            .chain(repeat(&F::ZERO))
+            .take(MAX_NUM_RESULTS)
+            .cloned()
+            .collect_vec();
+        let output_ids = ids.into_iter()
+            .chain(repeat(&F::ZERO))
+            .take(MAX_NUM_RESULTS)
+            .cloned()
+            .collect_vec();
+        Ok(
+            Self {
+                valid_num_outputs: num_outputs,
+                selector: selectors.try_into().unwrap(),
+                ids: output_ids.try_into().unwrap(),
+            }
+        )
     }
 }
 

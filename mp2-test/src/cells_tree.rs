@@ -68,6 +68,18 @@ impl TestCell {
         }
     }
 
+    /// Build new `TestCell` from `value` and `id`
+    pub fn new(
+        value: U256,
+        id: F,
+    ) -> Self {
+        Self {
+            id,
+            value,
+            hash: HashOut::default(),
+        }
+    }
+
     /// Build the test cell target.
     pub fn build(b: &mut CBuilder) -> TestCellTarget {
         let id = b.add_virtual_target();

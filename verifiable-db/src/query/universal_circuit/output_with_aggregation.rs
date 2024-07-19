@@ -1,4 +1,4 @@
-use std::{array, iter::once};
+use std::{array, iter::{once, repeat}};
 
 use alloy::primitives::U256;
 use itertools::Itertools;
@@ -24,6 +24,8 @@ use serde::{Deserialize, Serialize};
 use crate::query::computational_hash_ids::{AggregationOperation, Identifiers, Output};
 
 use super::universal_query_circuit::{OutputComponent, OutputComponentWires};
+
+use anyhow::{ensure, Result};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for output with aggregation component
@@ -175,6 +177,34 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
             .iter()
             .enumerate()
             .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_valid_outputs));
+    }
+    
+    fn new(
+        selector: &[F],
+        ids: &[F],
+        num_outputs: usize,
+    ) -> Result<Self> {
+        ensure!(selector.len() == num_outputs, 
+            "Output component with aggregation: Number of selectors different from number of actual outputs");
+        ensure!(ids.len() == num_outputs, 
+            "Output component with aggregation: Number of aggregation operations different from number of actual outputs");
+        let selectors = selector.into_iter()
+            .chain(repeat(&F::ZERO))
+            .take(MAX_NUM_RESULTS)
+            .cloned()
+            .collect_vec();
+        let agg_ops = ids.into_iter()
+            .chain(repeat(&AggregationOperation::default().to_field()))
+            .take(MAX_NUM_RESULTS)
+            .cloned()
+            .collect_vec();
+        Ok(
+            Self {
+                selector: selectors.try_into().unwrap(),
+                agg_ops: agg_ops.try_into().unwrap(),
+                num_valid_outputs: num_outputs,
+            }
+        )
     }
 }
 
@@ -376,14 +406,6 @@ mod tests {
                 &agg_ops,
                 ACTUAL_NUM_RESULTS,
             );
-            let padded_agg_ops = agg_ops
-                .iter()
-                .cloned()
-                .chain(repeat(AggregationOperation::default().to_field()))
-                .take(MAX_NUM_RESULTS)
-                .collect_vec()
-                .try_into()
-                .unwrap();
             Self {
                 column_values,
                 column_hash,
@@ -391,18 +413,11 @@ mod tests {
                 item_hash,
                 predicate_value,
                 predicate_hash,
-                component: Circuit::<MAX_NUM_RESULTS> {
-                    selector: selectors
-                        .into_iter()
-                        .chain(repeat(0usize))
-                        .take(MAX_NUM_RESULTS)
-                        .map(|s| s.to_field())
-                        .collect_vec()
-                        .try_into()
-                        .unwrap(),
-                    agg_ops: padded_agg_ops,
-                    num_valid_outputs: ACTUAL_NUM_RESULTS,
-                },
+                component: Circuit::<MAX_NUM_RESULTS>::new(
+                    &selectors.into_iter().map(|s| s.to_field()).collect_vec(),
+                    &agg_ops,
+                    ACTUAL_NUM_RESULTS,
+                    ).unwrap(),
                 expected_outputs: output_values.try_into().unwrap(),
                 expected_ops_ids: agg_ops,
                 expected_output_hash: output_hash,

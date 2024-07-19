@@ -56,17 +56,17 @@ pub(crate) struct ColumnExtractionWires<const MAX_NUM_COLUMNS: usize> {
 /// Witness input values for column extraction component
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ColumnExtractionInputs<const MAX_NUM_COLUMNS: usize> {
-    real_num_columns: usize,
+    pub(crate) real_num_columns: usize,
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    column_values: [U256; MAX_NUM_COLUMNS],
+    pub(crate) column_values: [U256; MAX_NUM_COLUMNS],
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    column_ids: [F; MAX_NUM_COLUMNS],
+    pub(crate) column_ids: [F; MAX_NUM_COLUMNS],
 }
 
 impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
