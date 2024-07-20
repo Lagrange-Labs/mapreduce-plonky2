@@ -16,6 +16,7 @@ use mp2_common::{
     D, F,
 };
 use plonky2::{
+    field::types::Field,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -58,6 +59,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
     where
         [(); MAX_NUM_RESULTS - 1]:,
     {
+        let ffalse = b._false();
         let zero = b.zero();
 
         let is_rows_tree_node = b.add_virtual_bool_target_safe();
@@ -102,12 +104,21 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
         // Ensure the value of the indexed column for all the records stored in the
         // rows tree found in this node is within the range specified by the query:
         // NOT(is_rows_tree_node) == NOT(is_row_tree_node) AND p.I >= MIN_query AND p.I <= MAX_query
-        // => is_rows_tree_node == is_row_tree_node OR p.I < MIN_query OR p.I > MAX_query
+        // And assume: is_out_of_range = p.I < MIN_query OR p.I > MAX_query
+        // => (1 - is_rows_tree_node) * is_out_of_range = 0
+        // => is_out_of_range - is_out_of_range * is_rows_tree_node = 0
         let is_less_than_min = b.is_less_than_u256(&index_value, &min_query);
         let is_greater_than_max = b.is_less_than_u256(&max_query, &index_value);
         let is_out_of_range = b.or(is_less_than_min, is_greater_than_max);
         let is_out_of_range = b.or(is_out_of_range, is_rows_tree_node);
-        b.connect(is_out_of_range.target, is_rows_tree_node.target);
+        let is_false = b.arithmetic(
+            F::NEG_ONE,
+            F::ONE,
+            is_out_of_range.target,
+            is_out_of_range.target,
+            is_rows_tree_node.target,
+        );
+        b.connect(is_false, ffalse.target);
 
         // Aggregate the output values of children and the overflow number.
         let mut num_overflows = zero;
