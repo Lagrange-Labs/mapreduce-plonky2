@@ -149,11 +149,22 @@ impl Table {
     // Then prove the updates. Once done, you can call `apply_row_update` to update the row trees
     // and then once done you can call `apply_index_update`
     pub fn apply_cells_update(&mut self, update: CellsUpdate) -> Result<CellsUpdateResult> {
+        // fetch previous row or return 0 cells in case of init
         let previous_cells = self
             .row
             .try_fetch(&update.row_key)
             .map(|row_node| row_node.cells)
-            .unwrap_or(CellCollection::default());
+            .or_else(|| {
+                if update.init {
+                    Some(CellCollection::default())
+                } else {
+                    log::error!(
+                        "either row is full or we are initializing - this is something else"
+                    );
+                    None
+                }
+            })
+            .unwrap();
         // reconstruct the _current_ cell tree before update
         // note we ignore the update plan here since we assume it already has been proven
         // or is empty
