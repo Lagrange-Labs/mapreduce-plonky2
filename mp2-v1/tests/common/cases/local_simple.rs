@@ -154,12 +154,18 @@ impl TestCase {
         self.run_lagrange_preprocessing(ctx, vec![cells_update])
             .await?;
 
-        log::info!("FIRST block {} finished proving. Moving on to update");
+        log::info!(
+            "FIRST block {} finished proving. Moving on to update",
+            ctx.block_number().await
+        );
 
         let (contract_update, cells_update) =
             self.subsequent_contract_data(ctx, UpdateType::Rest).await;
         self.apply_update_to_contract(ctx, &contract_update).await?;
-        log::info!("Applying follow up updates to contract done");
+        log::info!(
+            "Applying follow up updates to contract done - now at block {}",
+            ctx.block_number().await
+        );
         // we first run the initial preprocessing and db creation.
         // NOTE: we don't show copy on write here - the fact of only reproving what has been
         // updated, as this is not new from v0.
