@@ -46,12 +46,20 @@ use super::celltree::Cell;
 pub struct CellCollection(pub Vec<Cell>);
 impl CellCollection {
     /// Return the [`Cell`] containing the sec. index of this row.
-    pub fn secondary_index(&self) -> &Cell {
-        &self.0[0]
+    pub fn secondary_index(&self) -> Result<&Cell> {
+        ensure!(
+            self.0.len() > 0,
+            "secondary_index() called on empty CellCollection"
+        );
+        Ok(&self.0[0])
     }
 
-    pub fn non_indexed_cells(&self) -> &[Cell] {
-        &self.0[1..]
+    pub fn non_indexed_cells(&self) -> Result<&[Cell]> {
+        ensure!(
+            self.0.len() > 0,
+            "non_indexed_cells called on empty  CellCollection"
+        );
+        Ok(&self.0[1..])
     }
     // take all the cells in &self, and replace the ones with same identifier from other
     pub fn replace_by(&self, other: &Self) -> Self {
@@ -96,40 +104,40 @@ impl NodePayload for Row {
 
         let (left_hash, right_hash) = match [&children[0], &children[1]] {
             [None, None] => {
-                self.min = self.cells.secondary_index().value.clone();
-                self.max = self.cells.secondary_index().value.clone();
+                self.min = self.cells.secondary_index().unwrap().value;
+                self.max = self.cells.secondary_index().unwrap().value;
                 (*empty_poseidon_hash(), *empty_poseidon_hash())
             }
             [None, Some(right)] => {
-                self.min = self.cells.secondary_index().value.clone();
-                self.max = right.max.clone();
-                (*empty_poseidon_hash(), right.hash.clone())
+                self.min = self.cells.secondary_index().unwrap().value;
+                self.max = right.max;
+                (*empty_poseidon_hash(), right.hash)
             }
             [Some(left), None] => {
-                self.min = left.min.clone();
-                self.max = self.cells.secondary_index().value.clone();
+                self.min = left.min;
+                self.max = self.cells.secondary_index().unwrap().value;
                 (left.hash, *empty_poseidon_hash())
             }
             [Some(left), Some(right)] => {
-                self.min = left.min.clone();
-                self.max = right.max.clone();
-                (left.hash.clone(), right.hash.clone())
+                self.min = left.min;
+                self.max = right.max;
+                (left.hash, right.hash)
             }
         };
         let to_hash = // P(leftH)
                     left_hash.elements.into_iter()
                     // P(rightH)
-                    .chain(right_hash.elements.into_iter())
+                    .chain(right_hash.elements)
                     // P(min)
-                    .chain(self.min.to_fields().into_iter())
+                    .chain(self.min.to_fields())
                     // P(max)
-                    .chain(self.max.to_fields().into_iter())
+                    .chain(self.max.to_fields())
                     // P(id)
-                    .chain(std::iter::once(F::from_canonical_u64(self.cells.secondary_index().id)))
+                    .chain(std::iter::once(F::from_canonical_u64(self.cells.secondary_index().unwrap().id)))
                     // P(value)
-                    .chain(self.cells.secondary_index().value.to_fields().into_iter())
+                    .chain(self.cells.secondary_index().unwrap().value.to_fields())
                     // P(cell_tree_hash)
-                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
+                    .chain(self.cell_tree_root_hash.to_fields())
                     .collect::<Vec<_>>();
         self.hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
     }
@@ -176,9 +184,9 @@ impl<P: ProofStorage> TestContext<P> {
 
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, row) = t.fetch_with_context(&k);
-            let id = F::from_canonical_u64(row.cells.secondary_index().id);
+            let id = F::from_canonical_u64(row.cells.secondary_index().unwrap().id);
             // Sec. index value
-            let value = row.cells.secondary_index().value;
+            let value = row.cells.secondary_index().unwrap().value;
 
             let cell_tree_proof = self
                 .storage
@@ -297,7 +305,7 @@ impl<P: ProofStorage> TestContext<P> {
         table: &Table,
         update: RowUpdateResult,
     ) -> IndexNode {
-        let root_proof_key = self.prove_row_tree(&table, update.updates).await;
+        let root_proof_key = self.prove_row_tree(table, update.updates).await;
         let row_tree_proof = self
             .storage
             .get_proof(&ProofKey::Row(root_proof_key.clone()))

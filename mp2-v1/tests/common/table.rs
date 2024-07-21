@@ -135,7 +135,8 @@ impl Table {
             MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap();
         let ut = cell_tree
             .in_transaction(|t| {
-                for cell in cells.non_indexed_cells() {
+                // if there is no cell, this loop wont run
+                for cell in cells.non_indexed_cells().unwrap_or_default() {
                     let idx = self.columns.index_of(cell.id);
                     t.store(idx, cell.to_owned())?;
                 }
@@ -237,6 +238,10 @@ pub struct RowUpdateResult {
 #[derive(Debug, Clone)]
 pub struct CellsUpdate {
     pub row_key: RowTreeKey,
+    // this must be written in the format
+    // secondary_index_cell || rest of the cells
+    // This is because we want to keep the secondary index cell in the JSON description so it is
+    // easy to search
     pub modified_cells: Vec<Cell>,
     // set this to true to notify to consumers this is the first insert in the cell tree
     // Useful to know whether this update contains all the cells or the rest of the cells
