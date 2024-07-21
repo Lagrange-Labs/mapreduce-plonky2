@@ -427,6 +427,35 @@ impl TestCase {
             s3: "test".to_string(),
             s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
         };
+        let rest_cells = SINGLE_SLOTS
+            .iter()
+            .filter_map(|slot| {
+                if *slot == INDEX_SLOT {
+                    return None;
+                }
+                Some(Cell {
+                    id: self.slots_to_id.get(slot).cloned().unwrap_or_else(|| {
+                        panic!(
+                            "invalid slot ref {} on slot-id {:?}",
+                            *slot, self.slots_to_id,
+                        )
+                    }),
+                    // TODO: a bit hackyish way to store slots -> value update but that will do for
+                    // now
+                    value: contract_update.value_at_slot(*slot).unwrap(),
+                    // we don't know yet its hash because the tree is not constructed
+                    // this will be done by the Aggregate trait
+                    // TODO: move that to a plonky2 agnostic hash
+                    hash: Default::default(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut all_cells = vec![Cell {
+            id: self.slots_to_id[&INDEX_SLOT],
+            value: contract_update.value_at_slot(INDEX_SLOT).unwrap(),
+            hash: Default::default(),
+        }];
+        all_cells.extend(rest_cells);
         let table_update = CellsUpdate {
             init: true,
             row_key: RowTreeKey {
@@ -437,30 +466,7 @@ impl TestCase {
             },
             // since we are proving the initial state of the contract, all the cells are modified
             // cells
-            modified_cells: SINGLE_SLOTS
-                .iter()
-                .filter_map(|slot| {
-                    // NOTE: we don't store the primary nor  secondary column in the cells tree, so we MUST skip it
-                    if *slot == INDEX_SLOT {
-                        return None;
-                    }
-                    Some(Cell {
-                        id: self.slots_to_id.get(slot).cloned().unwrap_or_else(|| {
-                            panic!(
-                                "invalid slot ref {} on slot-id {:?}",
-                                *slot, self.slots_to_id,
-                            )
-                        }),
-                        // TODO: a bit hackyish way to store slots -> value update but that will do for
-                        // now
-                        value: contract_update.value_at_slot(*slot).unwrap(),
-                        // we don't know yet its hash because the tree is not constructed
-                        // this will be done by the Aggregate trait
-                        // TODO: move that to a plonky2 agnostic hash
-                        hash: Default::default(),
-                    })
-                })
-                .collect(),
+            modified_cells: all_cells,
         };
         (UpdateSingleStorage::Single(contract_update), table_update)
     }
