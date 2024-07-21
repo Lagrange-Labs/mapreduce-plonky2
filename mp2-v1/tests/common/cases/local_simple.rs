@@ -24,7 +24,6 @@ use super::{
 };
 use alloy::{
     contract::private::{Network, Provider, Transport},
-    eips::BlockNumberOrTag,
     primitives::{Address, U256},
     providers::ProviderBuilder,
 };
@@ -32,7 +31,6 @@ use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     F,
 };
-use rand::{random, thread_rng, Rng};
 use std::{collections::HashMap, str::FromStr};
 
 /// Test slots for single values extraction
@@ -90,22 +88,25 @@ impl TestCase {
                 identifier: identifier_single_var_column(INDEX_SLOT, contract_address),
                 index: IndexType::Secondary,
             },
-            rest: (0..SINGLE_SLOTS.len())
-                .filter_map(|i| match i {
-                    _ if SINGLE_SLOTS[i] == INDEX_SLOT => None,
+            rest: SINGLE_SLOTS
+                .iter()
+                .enumerate()
+                .filter_map(|(i, slot)| match i {
+                    _ if *slot == INDEX_SLOT => None,
                     _ => Some(TableColumn {
-                        identifier: identifier_single_var_column(SINGLE_SLOTS[i], contract_address),
+                        identifier: identifier_single_var_column(*slot, contract_address),
                         index: IndexType::None,
                     }),
                 })
                 .collect::<Vec<_>>(),
         };
         // simply a mapping we need keep around to make sure we always give the right update to the
-        // tree since it is not aware of the slots.
+        // tree since it is not aware of the slots (this is blockchain specific info).
         let mut mapping = HashMap::default();
         mapping.insert(INDEX_SLOT, columns.secondary_column().identifier);
         for (i, slot) in SINGLE_SLOTS.iter().enumerate() {
             if *slot != INDEX_SLOT {
+                // link the identifier to the slot
                 mapping.insert(*slot, columns.rest[i].identifier);
             }
         }
@@ -166,10 +167,12 @@ impl TestCase {
     ) -> Result<()> {
         assert!(updates.len() == 1, "mappings are not implemented yet");
         let updates = updates[0].clone();
+        // apply the new cells to the trees
         let update_cell_tree = self
             .table
             .apply_cells_update(updates.clone())
             .expect("can not update cells tree");
+        // find the all the cells, updated or not
         let all_cells = match updates.init {
             // in case it's init, then it's simply all the new cells
             true => CellCollection(updates.modified_cells.clone()),
@@ -181,6 +184,7 @@ impl TestCase {
                     .replace_by(&CellCollection(updates.modified_cells))
             }
         };
+        // prove the new cell tree and get the node row
         let row = ctx
             .prove_cells_tree(&self.table, all_cells, update_cell_tree)
             .await;
@@ -400,7 +404,12 @@ impl TestCase {
                         return None;
                     }
                     Some(Cell {
-                        id: self.slots_to_id[slot],
+                        id: self.slots_to_id.get(slot).cloned().unwrap_or_else(|| {
+                            panic!(
+                                "invalid slot ref {} on slot-id {:?}",
+                                *slot, self.slots_to_id,
+                            )
+                        }),
                         // TODO: a bit hackyish way to store slots -> value update but that will do for
                         // now
                         value: contract_update.value_at_slot(*slot).unwrap(),
