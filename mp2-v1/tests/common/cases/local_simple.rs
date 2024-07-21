@@ -108,7 +108,8 @@ impl TestCase {
         for (i, slot) in SINGLE_SLOTS.iter().enumerate() {
             if *slot != INDEX_SLOT {
                 // link the identifier to the slot
-                mapping.insert(*slot, columns.rest[i].identifier);
+                // -1 because the rest = all slots - secdonary slot
+                mapping.insert(*slot, columns.rest[i - 1].identifier);
             }
         }
         let single = Self {
