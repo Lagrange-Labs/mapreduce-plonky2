@@ -90,7 +90,6 @@ impl TableColumns {
 pub struct Table {
     pub(crate) id: TableID,
     pub(crate) columns: TableColumns,
-    pub(crate) genesis_block: u64,
     // NOTE: there is no cell tree because it's small and can be reconstructed
     // on the fly very quickly. Otherwise, we would need to store one cell tree per row
     // and that means one sql table per row which would be untenable.
@@ -119,7 +118,6 @@ impl Table {
         Self {
             columns,
             id: table_id,
-            genesis_block,
             row: row_tree,
             index: index_tree,
         }

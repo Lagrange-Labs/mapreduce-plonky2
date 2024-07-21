@@ -384,9 +384,11 @@ impl MutableTree for Tree {
 
         if inner_idx(k, s) != inner_max(s) + 1 {
             bail!(
-                "invalid insert in SBBST: trying to insert {}; current max. is {}",
+                "invalid insert in SBBST: trying to insert {}; current max. is {} -inner_idx() = {:?} vs inner_max+1 = {:?}",
                 k,
-                outer_max(s)
+                outer_max(s),
+                inner_idx(k,s),
+                inner_max(s)+1,
             );
         } else {
             s.state_mut().update(|state| state.max += 1);
