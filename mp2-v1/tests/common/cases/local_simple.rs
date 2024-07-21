@@ -423,9 +423,10 @@ pub struct SimpleSingleValue {
 
 impl SimpleSingleValue {
     pub fn value_at_slot(&self, slot_number: u8) -> Result<U256> {
-        match slot_number {
+        // just because the naming of the value start at 1 and slot number is at 0
+        match slot_number + 1 {
             1 => Ok(U256::from(self.s1)),
-            2 => Ok(self.s2.clone()),
+            2 => Ok(self.s2),
             3 => Ok(U256::from_be_slice(self.s3.as_bytes())),
             // TODO:: is there a better way ?
             4 => Ok(U256::from_be_slice(self.s4.into_word().as_slice())),
@@ -441,7 +442,7 @@ async fn update_contract_data<T: Transport + Clone, P: Provider<T, N>, N: Networ
     update: &UpdateSingleStorage,
 ) {
     match update {
-        UpdateSingleStorage::Single(ref single) => update_single_values(&contract, single).await,
+        UpdateSingleStorage::Single(ref single) => update_single_values(contract, single).await,
     }
 }
 
