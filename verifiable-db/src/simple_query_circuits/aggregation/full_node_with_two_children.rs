@@ -343,9 +343,6 @@ mod tests {
         let subtree_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
 
         // Build the child public inputs.
-        // p1.index_ids == p2.index_ids == p.index_ids
-        // p1.C == p2.C == p.C
-        // p1.H_p == p2.H_p == p.H_p
         // p1.MIN_I == p2.MIN_I == MIN_query
         // p1.MAX_I == p2.MAX_I == MAX_query
         [&mut left_child_proof, &mut right_child_proof]

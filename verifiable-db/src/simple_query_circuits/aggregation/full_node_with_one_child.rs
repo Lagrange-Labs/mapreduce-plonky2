@@ -342,12 +342,6 @@ mod tests {
         let subtree_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
 
         // Build the child public inputs.
-        // child.index_ids == p.index_ids
-        child_proof[index_ids_range].copy_from_slice(subtree_pi.to_index_ids_raw());
-        // child.C == p.C
-        child_proof[c_hash_range].copy_from_slice(subtree_pi.to_computational_hash_raw());
-        // child.H_p == p.H_p
-        child_proof[p_hash_range].copy_from_slice(subtree_pi.to_placeholder_hash_raw());
         // child.MIN_I == MIN_query
         child_proof[min_query_range.clone()].copy_from_slice(&min_query.to_fields());
         // child.MAX_I == MAX_query
