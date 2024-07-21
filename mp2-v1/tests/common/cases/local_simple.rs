@@ -170,6 +170,8 @@ impl TestCase {
         // updated, as this is not new from v0.
         // TODO: implement copy on write mechanism for MPT
         self.run_mpt_preprocessing(ctx).await?;
+        self.run_lagrange_preprocessing(ctx, vec![cells_update])
+            .await?;
 
         Ok(())
     }
@@ -196,7 +198,7 @@ impl TestCase {
             // in case it's init, then it's simply all the new cells
             true => CellCollection(updates.modified_cells.clone()),
             false => {
-                // fetch all the current cells, merge with the new modified one
+                // fetch all the current cells, merge with the new modified ones
                 let old_row = self.table.row.fetch(&updates.row_key);
                 old_row
                     .cells
