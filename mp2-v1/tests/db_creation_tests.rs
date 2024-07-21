@@ -69,7 +69,7 @@ async fn db_creation_integrated_tests() -> Result<()> {
     let storage = KeyValueDB::new_from_env("test_proofs.store")?;
     info!("Loading Anvil and contract");
     let mut ctx = context::new_local_chain(storage).await;
-    println!("CURRENT BLOCK: {}", ctx.block_number().await);
+    info!("Initial Anvil block: {}", ctx.block_number().await);
     info!("Building params");
     // Build the parameters.
     ctx.build_params().unwrap();
