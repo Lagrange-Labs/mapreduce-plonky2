@@ -108,11 +108,11 @@ impl Table {
         )
         .unwrap();
         let index_tree = MerkleIndexTree::new(
-            InitSettings::Reset(sbbst::Tree::empty()),
-            //InitSettings::Reset(sbbst::Tree::with_shift_and_capacity(
-            //    (genesis_block - 1) as usize,
-            //    0,
-            //)),
+            //InitSettings::Reset(sbbst::Tree::empty()),
+            InitSettings::Reset(sbbst::Tree::with_shift_and_capacity(
+                (genesis_block - 1) as usize,
+                usize::MAX,
+            )),
             (),
         )
         .unwrap();
