@@ -4,6 +4,7 @@
 use anyhow::{bail, Result};
 use log::{debug, info};
 use mp2_v1::values_extraction::{identifier_block_column, identifier_single_var_column};
+use rand::{thread_rng, Rng};
 use ryhope::{storage::RoEpochKvStorage, tree::TreeTopology};
 
 use crate::common::{
@@ -355,31 +356,49 @@ impl TestCase {
         })
     }
 
-    //async fn subsequent_contract_data<P: ProofStorage>(
-    //    &self,
-    //    ctx: &mut TestContext<P>,
-    //    u: UpdateType,
-    //    //) -> (UpdateSingleStorage, CellsUpdate) {
-    //) -> () {
-    //    let mut current_values = self
-    //        .current_single_values(ctx)
-    //        .await
-    //        .expect("can't get current values");
-    //    match u {
-    //        UpdateType::Rest => {
-    //            current_values.s4 = Address::ran();
-    //        }
-    //        UpdateType::SecondaryIndex => {
-    //            current_values.s2 = U256::try_from(thread_rng().gen::<[u64; 4]>()).unwrap();
-    //        }
-    //    }
-    //    let contract_update = SimpleSingleValue {
-    //        s1: true,
-    //        s2: U256::from(LENGTH_VALUE),
-    //        s3: "test".to_string(),
-    //        s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
-    //    };
-    //}
+    async fn subsequent_contract_data<P: ProofStorage>(
+        &self,
+        ctx: &mut TestContext<P>,
+        u: UpdateType,
+        //) -> (UpdateSingleStorage, CellsUpdate) {
+    ) -> (UpdateSingleStorage, CellsUpdate) {
+        let mut current_values = self
+            .current_single_values(ctx)
+            .await
+            .expect("can't get current values");
+        let mut modified_cells = Vec::new();
+        match u {
+            UpdateType::Rest => {
+                let s4_slot = 3;
+                current_values.s4 = Address::from_slice(&thread_rng().gen::<[u8; 20]>());
+                modified_cells.push(Cell {
+                    id: self.slots_to_id.get(&s4_slot).cloned().unwrap_or_else(|| {
+                        panic!("invalid slot ref {} on slot-id {:?}", 4, self.slots_to_id,)
+                    }),
+                    value: current_values.value_at_slot(4).unwrap(),
+                    // we don't know yet its hash because the tree is not constructed
+                    // this will be done by the Aggregate trait
+                    // TODO: move that to a plonky2 agnostic hash
+                    hash: Default::default(),
+                });
+            }
+            UpdateType::SecondaryIndex => {
+                current_values.s2 = U256::from_be_bytes(thread_rng().gen::<[u8; 32]>());
+            }
+        };
+        let row_tree_key = RowTreeKey {
+            value: current_values.s2,
+            id: 0, // only one row with this value since it's a row tree for single variable
+        };
+
+        let contract_update = UpdateSingleStorage::Single(current_values);
+        let table_update = CellsUpdate {
+            init: false,
+            row_key: row_tree_key,
+            modified_cells,
+        };
+        (contract_update, table_update)
+    }
     /// Defines the initial state of the contract, and thus initial state of our table as well
     async fn init_contract_data(&self) -> (UpdateSingleStorage, CellsUpdate) {
         let contract_update = SimpleSingleValue {
@@ -396,6 +415,8 @@ impl TestCase {
                 // there is no other rows in this table for this block so the enumeration is simple
                 id: 0,
             },
+            // since we are proving the initial state of the contract, all the cells are modified
+            // cells
             modified_cells: SINGLE_SLOTS
                 .iter()
                 .filter_map(|slot| {
