@@ -240,7 +240,7 @@ mod tests {
         let ops: [_; S] = random_aggregation_operations();
 
         // Build the input proofs.
-        let inputs = random_aggregation_public_inputs(ops);
+        let inputs = random_aggregation_public_inputs(&ops);
 
         // Construct the test circuit.
         let test_circuit = TestOutputComputationCircuit::<S, PROOF_NUM>::new(inputs);
@@ -261,7 +261,7 @@ mod tests {
         ops[0] = Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
 
         // Build the input proofs.
-        let inputs = random_aggregation_public_inputs(ops);
+        let inputs = random_aggregation_public_inputs(&ops);
 
         // Construct the test circuit.
         let test_circuit = TestOutputComputationCircuit::<S, PROOF_NUM>::new(inputs);

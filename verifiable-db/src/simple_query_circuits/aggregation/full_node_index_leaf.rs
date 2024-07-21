@@ -176,7 +176,7 @@ mod tests {
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
         // Build the query proof.
-        let [subtree_proof] = random_aggregation_public_inputs(ops);
+        let [subtree_proof] = random_aggregation_public_inputs(&ops);
         let subtree_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
 
         let index_value = subtree_pi.index_value();

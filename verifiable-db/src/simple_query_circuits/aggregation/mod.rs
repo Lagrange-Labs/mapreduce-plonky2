@@ -44,7 +44,7 @@ pub(crate) mod tests {
     /// The each returned proof public inputs could be constructed by
     /// `PublicInputs::from_slice` function.
     pub(crate) fn random_aggregation_public_inputs<const N: usize, const S: usize>(
-        ops: [F; S],
+        ops: &[F; S],
     ) -> [Vec<F>; N] {
         let [ops_range, overflow_range, index_ids_range, c_hash_range, p_hash_range] = [
             QueryPublicInputs::OpIds,
@@ -71,7 +71,7 @@ pub(crate) mod tests {
             let mut pi = random_vector::<u32>(PI_LEN::<S>).to_fields();
 
             // Copy the specified operations to the proofs.
-            pi[ops_range.clone()].copy_from_slice(&ops);
+            pi[ops_range.clone()].copy_from_slice(ops);
 
             // Set the overflow flag to a random boolean.
             let overflow = F::from_bool(rng.gen());

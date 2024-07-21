@@ -317,7 +317,7 @@ mod tests {
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
         // Build the proofs.
-        let [mut subtree_proof, mut child_proof] = random_aggregation_public_inputs(ops);
+        let [mut subtree_proof, mut child_proof] = random_aggregation_public_inputs(&ops);
         let [index_value_range, index_ids_range, min_query_range, max_query_range, c_hash_range, p_hash_range] =
             [
                 QueryPublicInputs::IndexValue,
