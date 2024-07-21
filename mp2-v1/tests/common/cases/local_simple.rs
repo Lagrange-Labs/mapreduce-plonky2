@@ -77,6 +77,9 @@ impl TestCase {
         });
 
         let table_id = TableID::new(ctx.block_number().await, contract_address, &source.slots());
+        // simply a mapping we need keep around to make sure we always give the right update to the
+        // tree since it is not aware of the slots (this is blockchain specific info).
+        let mut mapping = HashMap::default();
         // Defining the columns structure of the table from the source slots
         // This is depending on what is our data source, mappings and CSV both have their o
         // own way of defining their table.
@@ -94,24 +97,19 @@ impl TestCase {
                 .enumerate()
                 .filter_map(|(i, slot)| match i {
                     _ if *slot == INDEX_SLOT => None,
-                    _ => Some(TableColumn {
-                        identifier: identifier_single_var_column(*slot, contract_address),
-                        index: IndexType::None,
-                    }),
+                    _ => {
+                        let identifier = identifier_single_var_column(*slot, contract_address);
+                        // -1 because the rest = all slots - secondary slot
+                        mapping.insert(*slot, identifier);
+                        Some(TableColumn {
+                            identifier,
+                            index: IndexType::None,
+                        })
+                    }
                 })
                 .collect::<Vec<_>>(),
         };
-        // simply a mapping we need keep around to make sure we always give the right update to the
-        // tree since it is not aware of the slots (this is blockchain specific info).
-        let mut mapping = HashMap::default();
         mapping.insert(INDEX_SLOT, columns.secondary_column().identifier);
-        for (i, slot) in SINGLE_SLOTS.iter().enumerate() {
-            if *slot != INDEX_SLOT {
-                // link the identifier to the slot
-                // -1 because the rest = all slots - secdonary slot
-                mapping.insert(*slot, columns.rest[i - 1].identifier);
-            }
-        }
         let single = Self {
             slots_to_id: mapping,
             source: source.clone(),
