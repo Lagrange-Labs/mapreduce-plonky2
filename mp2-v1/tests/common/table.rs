@@ -197,7 +197,11 @@ impl Table {
     pub fn apply_row_update(&mut self, updates: RowUpdate) -> Result<RowUpdateResult> {
         let plan = self.row.in_transaction(move |t| {
             for update in updates.modified_rows.into_iter() {
-                t.update(update.k.clone(), update)?;
+                if updates.init {
+                    t.store(update.k.clone(), update)?;
+                } else {
+                    t.update(update.k.clone(), update)?;
+                }
             }
             Ok(())
         })?;
@@ -206,10 +210,15 @@ impl Table {
 
     // apply the transformation on the index tree and returns the new nodes to prove
     pub fn apply_index_update(&mut self, updates: IndexUpdate) -> Result<IndexUpdateResult> {
-        let plan = self
-            .index
-            .in_transaction(move |t| t.update(updates.added_index.0, updates.added_index.1))?;
-        Ok(IndexUpdateResult { plan: plan })
+        let plan = self.index.in_transaction(move |t| {
+            if updates.init {
+                t.store(updates.added_index.0, updates.added_index.1)?;
+            } else {
+                t.update(updates.added_index.0, updates.added_index.1)?;
+            }
+            Ok(())
+        })?;
+        Ok(IndexUpdateResult { plan })
     }
 }
 
@@ -218,6 +227,7 @@ pub struct IndexUpdate {
     // TODO: at the moment we only append one by one the block.
     // Depending on how we do things for CSV, this might be a vector
     pub added_index: (IndexTreeKey, IndexNode),
+    pub init: bool,
     // TODO for CSV modification and deletion ?
 }
 
@@ -232,6 +242,7 @@ pub struct RowUpdate {
     // * added rows
     // * deleted rows
     pub modified_rows: Vec<Row>,
+    pub init: bool,
 }
 
 #[derive(Clone)]

@@ -187,23 +187,23 @@ impl TestCase {
         updates: Vec<CellsUpdate>,
     ) -> Result<()> {
         assert!(updates.len() == 1, "mappings are not implemented yet");
-        let updates = updates[0].clone();
+        let cell_updates = updates[0].clone();
         // apply the new cells to the trees
         let update_cell_tree = self
             .table
-            .apply_cells_update(updates.clone())
+            .apply_cells_update(cell_updates.clone())
             .expect("can not update cells tree");
         log::info!("Applied updates to cells tree");
         // find the all the cells, updated or not
-        let all_cells = match updates.init {
+        let all_cells = match cell_updates.init {
             // in case it's init, then it's simply all the new cells
-            true => CellCollection(updates.modified_cells.clone()),
+            true => CellCollection(cell_updates.modified_cells.clone()),
             false => {
                 // fetch all the current cells, merge with the new modified ones
-                let old_row = self.table.row.fetch(&updates.row_key);
+                let old_row = self.table.row.fetch(&cell_updates.row_key);
                 old_row
                     .cells
-                    .replace_by(&CellCollection(updates.modified_cells))
+                    .replace_by(&CellCollection(cell_updates.modified_cells))
             }
         };
         // prove the new cell tree and get the node row
@@ -213,9 +213,11 @@ impl TestCase {
         info!("Generated final CELLs tree proofs for single variables");
         // In the case of the scalars slots, there is a single node in the row tree.
         let rows = RowUpdate {
+            init: cell_updates.init,
             modified_rows: vec![row],
         };
         let updates = self.table.apply_row_update(rows)?;
+        info!("Applied updates to row tree");
         let index_node = ctx.prove_update_row_tree(&self.table, updates).await;
         info!("Generated final ROWs tree proofs for single variables");
 
@@ -224,6 +226,7 @@ impl TestCase {
         // enumeration, something that may arise during the query when building a result tree.
         let index_update = IndexUpdate {
             added_index: (ctx.block_number().await as BlockPrimaryIndex, index_node),
+            init: cell_updates.init,
         };
         let updates = self
             .table
