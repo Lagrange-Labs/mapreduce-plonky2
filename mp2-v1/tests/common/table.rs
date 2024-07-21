@@ -177,7 +177,11 @@ impl Table {
             .in_transaction(|t| {
                 for new_cell in update.modified_cells.iter() {
                     let cell_key = self.columns.index_of(new_cell.id);
-                    t.update(cell_key, new_cell.clone())?;
+                    if update.init {
+                        t.store(cell_key, new_cell.clone())?;
+                    } else {
+                        t.update(cell_key, new_cell.clone())?;
+                    }
                 }
                 Ok(())
             })
