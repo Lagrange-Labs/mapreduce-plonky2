@@ -149,11 +149,17 @@ impl Table {
     // Then prove the updates. Once done, you can call `apply_row_update` to update the row trees
     // and then once done you can call `apply_index_update`
     pub fn apply_cells_update(&mut self, update: CellsUpdate) -> Result<CellsUpdateResult> {
-        let row_node = self.row.fetch(&update.row_key);
+        let previous_cells = self
+            .row
+            .try_fetch(&update.row_key)
+            .map(|row_node| row_node.cells)
+            .unwrap_or(CellCollection::default());
         // reconstruct the _current_ cell tree before update
         // note we ignore the update plan here since we assume it already has been proven
         // or is empty
-        let (mut cell_tree, _) = self.construct_cell_tree(&row_node.cells);
+        println!("BEFORE construct cell tree");
+        let (mut cell_tree, _) = self.construct_cell_tree(&previous_cells);
+        println!("BEFORE update cell tree");
         // apply updates and save the update plan for the new values
         let cell_update = cell_tree
             .in_transaction(|t| {

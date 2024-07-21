@@ -3008,6 +3008,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "csv",
+ "derive_more",
  "env_logger",
  "envconfig",
  "eth_trie",

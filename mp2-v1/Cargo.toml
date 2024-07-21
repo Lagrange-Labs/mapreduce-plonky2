@@ -26,6 +26,7 @@ mp2_common = { path = "../mp2-common" }
 recursion_framework = { path = "../recursion-framework" }
 ryhope = { path = "../ryhope" }
 verifiable-db = { path = "../verifiable-db" }
+derive_more = "0.99.18"
 
 [dev-dependencies]
 alloy.workspace = true

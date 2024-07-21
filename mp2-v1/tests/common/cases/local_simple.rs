@@ -193,6 +193,7 @@ impl TestCase {
             .table
             .apply_cells_update(updates.clone())
             .expect("can not update cells tree");
+        log::info!("Applied updates to cells tree");
         // find the all the cells, updated or not
         let all_cells = match updates.init {
             // in case it's init, then it's simply all the new cells
@@ -335,8 +336,7 @@ impl TestCase {
             }
         };
 
-        info!("Generated Single Variables MPT preprocessing proofs");
-
+        info!("Generated ALL Single Variables MPT preprocessing proofs");
         Ok(())
     }
 

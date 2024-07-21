@@ -30,6 +30,7 @@ use super::{
     table::{RowUpdateResult, Table, TableID},
     TestContext,
 };
+use derive_more::{From, Into};
 
 /// A unique identifier in a row tree
 #[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -41,7 +42,7 @@ pub struct RowTreeKey {
 }
 
 use super::celltree::Cell;
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(From, Into, Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CellCollection(pub Vec<Cell>);
 impl CellCollection {
     /// Return the [`Cell`] containing the sec. index of this row.
