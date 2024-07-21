@@ -32,7 +32,7 @@ use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     F,
 };
-use rand::{thread_rng, Rng};
+use rand::{random, thread_rng, Rng};
 use std::{collections::HashMap, str::FromStr};
 
 /// Test slots for single values extraction
@@ -104,9 +104,9 @@ impl TestCase {
         // tree since it is not aware of the slots.
         let mut mapping = HashMap::default();
         mapping.insert(INDEX_SLOT, columns.secondary_column().identifier);
-        for i in SINGLE_SLOTS {
-            if i != INDEX_SLOT {
-                mapping.insert(SINGLE_SLOTS[0], columns.secondary_column().identifier);
+        for (i, slot) in SINGLE_SLOTS.iter().enumerate() {
+            if *slot != INDEX_SLOT {
+                mapping.insert(*slot, columns.rest[i].identifier);
             }
         }
         let single = Self {
@@ -351,7 +351,31 @@ impl TestCase {
         })
     }
 
-    //async fn subsequent_contract_data(&self) -> (UpdateSingleStorage, CellsUpdate) {}
+    //async fn subsequent_contract_data<P: ProofStorage>(
+    //    &self,
+    //    ctx: &mut TestContext<P>,
+    //    u: UpdateType,
+    //    //) -> (UpdateSingleStorage, CellsUpdate) {
+    //) -> () {
+    //    let mut current_values = self
+    //        .current_single_values(ctx)
+    //        .await
+    //        .expect("can't get current values");
+    //    match u {
+    //        UpdateType::Rest => {
+    //            current_values.s4 = Address::ran();
+    //        }
+    //        UpdateType::SecondaryIndex => {
+    //            current_values.s2 = U256::try_from(thread_rng().gen::<[u64; 4]>()).unwrap();
+    //        }
+    //    }
+    //    let contract_update = SimpleSingleValue {
+    //        s1: true,
+    //        s2: U256::from(LENGTH_VALUE),
+    //        s3: "test".to_string(),
+    //        s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
+    //    };
+    //}
     /// Defines the initial state of the contract, and thus initial state of our table as well
     async fn init_contract_data(&self) -> (UpdateSingleStorage, CellsUpdate) {
         let contract_update = SimpleSingleValue {
@@ -464,4 +488,9 @@ fn test_mapping_keys() -> Vec<MappingKey> {
             address.into_word().to_vec()
         })
         .collect()
+}
+
+enum UpdateType {
+    SecondaryIndex,
+    Rest,
 }
