@@ -143,13 +143,12 @@ impl TestCase {
     pub async fn run<P: ProofStorage>(&mut self, ctx: &mut TestContext<P>) -> Result<()> {
         // Call the contract function to set the test data.
         let (contract_update, cells_update) = self.init_contract_data().await;
-        self.apply_update_to_contract(&ctx, &contract_update).await;
+        self.apply_update_to_contract(ctx, &contract_update).await?;
 
         // we first run the initial preprocessing and db creation.
         self.run_mpt_preprocessing(ctx).await?;
         // then we run the creation of our tree
-        let table = self
-            .run_lagrange_preprocessing(ctx, vec![cells_update])
+        self.run_lagrange_preprocessing(ctx, vec![cells_update])
             .await?;
         // now
         Ok(())
@@ -352,6 +351,7 @@ impl TestCase {
         })
     }
 
+    //async fn subsequent_contract_data(&self) -> (UpdateSingleStorage, CellsUpdate) {}
     /// Defines the initial state of the contract, and thus initial state of our table as well
     async fn init_contract_data(&self) -> (UpdateSingleStorage, CellsUpdate) {
         let contract_update = SimpleSingleValue {
@@ -429,7 +429,7 @@ impl SimpleSingleValue {
             3 => Ok(U256::from_be_slice(self.s3.as_bytes())),
             // TODO:: is there a better way ?
             4 => Ok(U256::from_be_slice(self.s4.into_word().as_slice())),
-            _ => bail!("single contract only has 4 values"),
+            a => bail!("single contract only has 4 values while given {}", a),
         }
     }
 }
