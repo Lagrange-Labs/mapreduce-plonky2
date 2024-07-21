@@ -232,7 +232,10 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq, V>: EpochKvStorage<K, V
     /// Execute the given function acting on `Self` within a transaction.
     ///
     /// Will fail if the transaction failed.
-    fn in_transaction<F: Fn(&mut Self) -> Result<()>>(&mut self, f: F) -> Result<UpdateTree<K>> {
+    fn in_transaction<F: FnOnce(&mut Self) -> Result<()>>(
+        &mut self,
+        f: F,
+    ) -> Result<UpdateTree<K>> {
         self.start_transaction()?;
         f(self)?;
         self.commit_transaction()

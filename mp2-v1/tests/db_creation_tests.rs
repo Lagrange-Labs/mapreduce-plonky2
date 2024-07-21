@@ -62,26 +62,21 @@ pub(crate) mod common;
 async fn db_creation_integrated_tests() -> Result<()> {
     // Create the test context for mainnet.
     // let ctx = &mut TestContext::new_mainet();
-    println!("Hello1");
     let _ = env_logger::try_init();
-    println!("Hello2");
     // Create the test context for the local node.
     //let storage = MemoryProofStorage::default();
     let storage = KeyValueDB::new_from_env("test_proofs.store")?;
-    println!("Hello3");
     let mut ctx = context::new_local_chain(storage).await;
-    println!("Hello4");
     info!("Building params");
     // Build the parameters.
     ctx.build_params().unwrap();
-    println!("Hello5");
 
     info!("Params built");
     let cases = TestCase::new_local_simple_contract(&ctx).await?;
     info!("Test Cases deployed");
     // Prove for each test case.
-    for case in &cases {
-        case.initial_run(&mut ctx).await?;
+    for mut case in cases.into_iter() {
+        case.run(&mut ctx).await?;
     }
     ////
     //// Prove mapping slots

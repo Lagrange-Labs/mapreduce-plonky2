@@ -3,7 +3,7 @@ use anyhow::Result;
 mod bindings;
 mod block_extraction;
 mod cases;
-mod celltree;
+pub mod celltree;
 pub mod context;
 mod contract_extraction;
 mod final_extraction;
@@ -24,6 +24,8 @@ pub(crate) use context::TestContext;
 
 use mp2_common::{proof::ProofWithVK, F};
 use plonky2::hash::hash_types::HashOut;
+
+type ColumnIdentifier = u64;
 
 fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOut<F> {
     let root_pi = ProofWithVK::deserialize(&proof)

@@ -1,18 +1,24 @@
 //! Test case for local Simple contract
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use log::{debug, info, warn};
-use mp2_test::cells_tree::TestCell as Cell;
-use mp2_v1::values_extraction::compute_leaf_single_id;
-use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
-use ryhope::tree::TreeTopology;
+use mp2_v1::values_extraction::{identifier_block_column, identifier_single_var_column};
+use plonky2::{
+    field::{goldilocks_field::GoldilocksField, types::Field},
+    hash::hash_types::HashOut,
+};
+use ryhope::{storage::RoEpochKvStorage, tree::TreeTopology};
 
 use crate::common::{
     bindings::simple::Simple,
-    index_tree::MerkleIndexTree,
+    celltree::Cell,
+    index_tree::{IndexNode, IndexTreeKey, MerkleIndexTree},
     proof_storage::{BlockPrimaryIndex, ProofKey, ProofStorage},
-    table::Table,
+    rowtree::{CellCollection, RowTreeKey},
+    table::{
+        CellsUpdate, IndexType, IndexUpdate, RowUpdate, Table, TableColumn, TableColumns, TableID,
+    },
     TestContext,
 };
 
@@ -26,12 +32,16 @@ use alloy::{
     primitives::{Address, U256},
     providers::ProviderBuilder,
 };
-use mp2_common::eth::{ProofQuery, StorageSlot};
+use mp2_common::{
+    eth::{ProofQuery, StorageSlot},
+    F,
+};
 use rand::{thread_rng, Rng};
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 
 /// Test slots for single values extraction
 const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
+const INDEX_SLOT: u8 = 1;
 
 /// Test slot for mapping values extraction
 const MAPPING_SLOT: u8 = 4;
@@ -67,73 +77,146 @@ impl TestCase {
             contract.address()
         );
         let contract_address = contract.address();
-        // Call the contract function to set the test data.
-        init_contract_data(&contract).await;
+        let source = TableSourceSlot::SingleValues(SingleValuesExtractionArgs {
+            slots: SINGLE_SLOTS.to_vec(),
+        });
 
+        let table_id = TableID::new(ctx.block_number().await, contract_address, &source.slots());
+        // Defining the columns structure of the table from the source slots
+        // This is depending on what is our data source, mappings and CSV both have their o
+        // own way of defining their table.
+        let columns = TableColumns {
+            primary: TableColumn {
+                identifier: identifier_block_column(),
+                index: IndexType::Primary,
+            },
+            secondary: TableColumn {
+                identifier: identifier_single_var_column(INDEX_SLOT, contract_address),
+                index: IndexType::Secondary,
+            },
+            rest: (0..SINGLE_SLOTS.len())
+                .filter_map(|i| match i {
+                    _ if SINGLE_SLOTS[i] == INDEX_SLOT => None,
+                    _ => Some(TableColumn {
+                        identifier: identifier_single_var_column(SINGLE_SLOTS[i], contract_address),
+                        index: IndexType::None,
+                    }),
+                })
+                .collect::<Vec<_>>(),
+        };
+        // simply a mapping we need keep around to make sure we always give the right update to the
+        // tree since it is not aware of the slots.
+        let mut mapping = HashMap::default();
+        mapping.insert(INDEX_SLOT, columns.secondary_column().identifier);
+        for i in SINGLE_SLOTS {
+            if i != INDEX_SLOT {
+                mapping.insert(SINGLE_SLOTS[0], columns.secondary_column().identifier);
+            }
+        }
         let single = Self {
-            source: TableSourceSlot::SingleValues(SingleValuesExtractionArgs {
-                slots: SINGLE_SLOTS.to_vec(),
-            }),
+            slots_to_id: mapping,
+            source: source.clone(),
+            table: Table::new(ctx.block_number().await, table_id, columns),
             contract_address: *contract_address,
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
             },
         };
-        let mapping = Self {
-            contract_extraction: ContractExtractionArgs {
-                slot: StorageSlot::Simple(CONTRACT_SLOT),
-            },
-            contract_address: *contract_address,
-            source: TableSourceSlot::Mapping((
-                MappingValuesExtractionArgs {
-                    slot: MAPPING_SLOT,
-                    mapping_keys: test_mapping_keys(),
-                },
-                Some(LengthExtractionArgs {
-                    slot: LENGTH_SLOT,
-                    value: LENGTH_VALUE,
-                }),
-            )),
-        };
+        //let mapping = Self {
+        //    contract_extraction: ContractExtractionArgs {
+        //        slot: StorageSlot::Simple(CONTRACT_SLOT),
+        //    },
+        //    contract_address: *contract_address,
+        //    source: TableSourceSlot::Mapping((
+        //        MappingValuesExtractionArgs {
+        //            slot: MAPPING_SLOT,
+        //            mapping_keys: test_mapping_keys(),
+        //        },
+        //        Some(LengthExtractionArgs {
+        //            slot: LENGTH_SLOT,
+        //            value: LENGTH_VALUE,
+        //        }),
+        //    )),
+        //};
+
         // Right now only single values. Moving to values in subsequent PR
         //Ok(vec![single, mapping])
         Ok(vec![single])
     }
 
-    pub async fn initial_run<P: ProofStorage>(&self, ctx: &mut TestContext<P>) -> Result<Table> {
+    pub async fn run<P: ProofStorage>(&mut self, ctx: &mut TestContext<P>) -> Result<()> {
+        // Call the contract function to set the test data.
+        let (contract_update, cells_update) = self.init_contract_data().await;
+        self.apply_update_to_contract(&ctx, &contract_update).await;
+
+        // we first run the initial preprocessing and db creation.
         self.run_mpt_preprocessing(ctx).await?;
-        self.run_lagrange_preprocessing(ctx).await
+        // then we run the creation of our tree
+        let table = self
+            .run_lagrange_preprocessing(ctx, vec![cells_update])
+            .await?;
+        // now
+        Ok(())
     }
 
     // separate function only dealing with preprocesisng MPT proofs
     // This function is "generic" as it can table a table description
     async fn run_lagrange_preprocessing<P: ProofStorage>(
-        &self,
+        &mut self,
         ctx: &mut TestContext<P>,
-    ) -> Result<Table> {
-        let cells = self.build_cells(ctx).await;
-        let (cell_tree, row) = ctx.prove_cells_tree(&self.table_id(), cells).await;
+        // cells we are modifying
+        // Note there is only one entry for a single variable update, but multiple for mappings for
+        // example
+        updates: Vec<CellsUpdate>,
+    ) -> Result<()> {
+        assert!(updates.len() == 1, "mappings are not implemented yet");
+        let updates = updates[0].clone();
+        let update_cell_tree = self
+            .table
+            .apply_cells_update(updates.clone())
+            .expect("can not update cells tree");
+        let all_cells = match updates.init {
+            // in case it's init, then it's simply all the new cells
+            true => CellCollection(updates.modified_cells.clone()),
+            false => {
+                // fetch all the current cells, merge with the new modified one
+                let old_row = self.table.row.fetch(&updates.row_key);
+                old_row
+                    .cells
+                    .replace_by(&CellCollection(updates.modified_cells))
+            }
+        };
+        let row = ctx
+            .prove_cells_tree(&self.table, all_cells, update_cell_tree)
+            .await;
         info!("Generated final CELLs tree proofs for single variables");
         // In the case of the scalars slots, there is a single node in the row tree.
-        let rows = vec![row];
-        let row_tree = ctx.build_and_prove_rowtree(&self.table_id(), &rows).await;
+        let rows = RowUpdate {
+            modified_rows: vec![row],
+        };
+        let updates = self.table.apply_row_update(rows)?;
+        let index_node = ctx.prove_update_row_tree(&self.table, updates).await;
         info!("Generated final ROWs tree proofs for single variables");
-        let index_tree = ctx
-            .build_and_prove_index_tree(&self.table_id(), &row_tree.root().unwrap())
-            .await;
+
+        // NOTE the reason we separate and use block number as IndexTreeKey is because this index
+        // could be different if we were using NOT block number. It should be the index of the
+        // enumeration, something that may arise during the query when building a result tree.
+        let index_update = IndexUpdate {
+            added_index: (ctx.block_number().await as BlockPrimaryIndex, index_node),
+        };
+        let updates = self
+            .table
+            .apply_index_update(index_update)
+            .expect("can't update index tree");
+        let root_proof_key = ctx.prove_update_index_tree(&self.table, updates.plan).await;
         info!("Generated final BLOCK tree proofs for single variables");
-        let _ = ctx.prove_ivc(self, &index_tree).await;
+        let _ = ctx.prove_ivc(&self.table.id, &self.table.index).await;
         info!(
             "Generated final IVC proof for single variable - block {}",
             ctx.block_number().await
         );
 
-        Ok(Table {
-            id: self.table_id(),
-            cell: cell_tree,
-            row: row_tree,
-            index: index_tree,
-        })
+        Ok(())
     }
 
     // separate function only dealing with preprocessing MPT proofs
@@ -189,7 +272,7 @@ impl TestCase {
             }
         };
 
-        let table_id = self.table_id();
+        let table_id = &self.table.id;
         match self.source {
             TableSourceSlot::Mapping(_) => panic!("not yet implemented"),
             TableSourceSlot::SingleValues(ref args) => {
@@ -237,37 +320,24 @@ impl TestCase {
         Ok(())
     }
 
-    /// Fetch the values and build the identifiers from a list of slots to
-    /// generate [`Cell`]s that will then be encoded as a [`MerkleCellTree`].
-    pub async fn build_cells<P: ProofStorage>(&self, ctx: &TestContext<P>) -> Vec<Cell> {
-        let mut cells = Vec::new();
-        match self.source {
-            TableSourceSlot::Mapping(_) => unimplemented!("to come"),
-            TableSourceSlot::SingleValues(ref args) => {
-                for slot in args.slots.iter() {
-                    let query = ProofQuery::new_simple_slot(self.contract_address, *slot as usize);
-                    let id = GoldilocksField::from_canonical_u64(compute_leaf_single_id(
-                        *slot,
-                        &self.contract_address,
-                    ));
-                    let value = ctx
-                        .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
-                        .await
-                        .storage_proof[0]
-                        .value;
-                    cells.push(Cell {
-                        id,
-                        value,
-                        // we don't know yet its hash because the tree is not constructed
-                        // this will be done by the Aggregate trait
-                        hash: Default::default(),
-                    });
-                }
-                cells
-            }
-        }
+    // Returns the table updated
+    pub async fn apply_update_to_contract<P: ProofStorage>(
+        &self,
+        ctx: &TestContext<P>,
+        update: &UpdateSingleStorage,
+    ) -> Result<()> {
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let contract = Simple::new(self.contract_address, &provider);
+        update_contract_data(&contract, &update).await;
+        info!("Updated contract with new values {:?}", update);
+        Ok(())
     }
-    pub async fn current_single_values<P: ProofStorage>(
+
+    async fn current_single_values<P: ProofStorage>(
         &self,
         ctx: &TestContext<P>,
     ) -> Result<SimpleSingleValue> {
@@ -285,71 +355,109 @@ impl TestCase {
             s4: contract.s4().call().await.unwrap()._0,
         })
     }
-}
 
-async fn update_single_values<T: Transport + Clone, P: Provider<T, N>, N: Network>(
-    contract: &SimpleInstance<T, P, N>,
-    values: SimpleSingleValue,
-) {
-    let b = contract.setSimples(values.s1, values.s2, values.s3, values.s4);
-    b.send().await.unwrap().watch().await.unwrap();
-    log::info!("Updated simple contract single values");
-}
-
-/// Call the contract function to set the test data.
-async fn init_contract_data<T: Transport + Clone, P: Provider<T, N>, N: Network>(
-    contract: &SimpleInstance<T, P, N>,
-) {
-    // setSimples(bool newS1, uint256 newS2, string memory newS3, address newS4)
-    update_single_values(
-        contract,
-        SimpleSingleValue {
+    /// Defines the initial state of the contract, and thus initial state of our table as well
+    async fn init_contract_data(&self) -> (UpdateSingleStorage, CellsUpdate) {
+        let contract_update = SimpleSingleValue {
             s1: true,
-            s2: U256::from(LENGTH_VALUE), // use this variable as the length slot for the mapping
+            s2: U256::from(LENGTH_VALUE),
             s3: "test".to_string(),
             s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
-        },
-    )
-    .await;
-
-    // setMapping(address key, uint256 value)
-    let mut rng = thread_rng();
-    for addr in MAPPING_ADDRESSES {
-        let b = contract.setMapping(
-            Address::from_str(addr).unwrap(),
-            U256::from(rng.gen::<u64>()),
-        );
-        b.send().await.unwrap().watch().await.unwrap();
+        };
+        let table_update = CellsUpdate {
+            init: true,
+            row_key: RowTreeKey {
+                // s2 is the index in the formalism of this  single variable table
+                value: contract_update.s2,
+                // there is no other rows in this table for this block so the enumeration is simple
+                id: 0,
+            },
+            modified_cells: SINGLE_SLOTS
+                .iter()
+                .filter_map(|slot| {
+                    // NOTE: we don't store the primary nor  secondary column in the cells tree, so we MUST skip it
+                    if *slot == INDEX_SLOT {
+                        return None;
+                    }
+                    Some(Cell {
+                        id: self.slots_to_id[slot],
+                        // TODO: a bit hackyish way to store slots -> value update but that will do for
+                        // now
+                        value: contract_update.value_at_slot(*slot).unwrap(),
+                        // we don't know yet its hash because the tree is not constructed
+                        // this will be done by the Aggregate trait
+                        // TODO: move that to a plonky2 agnostic hash
+                        hash: Default::default(),
+                    })
+                })
+                .collect(),
+        };
+        (UpdateSingleStorage::Single(contract_update), table_update)
     }
 
-    // addToArray(uint256 value)
-    for _ in 0..=LENGTH_VALUE {
-        let b = contract.addToArray(U256::from(rng.gen::<u64>()));
-        b.send().await.unwrap().watch().await.unwrap();
-    }
+    //let mut rng = thread_rng();
+    //for addr in MAPPING_ADDRESSES {
+    //    let b = contract.setMapping(
+    //        Address::from_str(addr).unwrap(),
+    //        U256::from(rng.gen::<u64>()),
+    //    );
+    //    b.send().await.unwrap().watch().await.unwrap();
+    //}
+
+    //// addToArray(uint256 value)
+    //for _ in 0..=LENGTH_VALUE {
+    //    let b = contract.addToArray(U256::from(rng.gen::<u64>()));
+    //    b.send().await.unwrap().watch().await.unwrap();
+    //}
 }
 
+#[derive(Clone, Debug)]
 enum UpdateSingleStorage {
     Single(SimpleSingleValue),
     // MAPPING ...
 }
-struct SimpleSingleValue {
+
+#[derive(Clone, Debug)]
+pub struct SimpleSingleValue {
     pub(crate) s1: bool,
     pub(crate) s2: U256,
     pub(crate) s3: String,
     pub(crate) s4: Address,
 }
 
+impl SimpleSingleValue {
+    pub fn value_at_slot(&self, slot_number: u8) -> Result<U256> {
+        match slot_number {
+            1 => Ok(U256::from(self.s1)),
+            2 => Ok(self.s2.clone()),
+            3 => Ok(U256::from_be_slice(self.s3.as_bytes())),
+            // TODO:: is there a better way ?
+            4 => Ok(U256::from_be_slice(self.s4.into_word().as_slice())),
+            _ => bail!("single contract only has 4 values"),
+        }
+    }
+}
+
 // This function applies the update in _one_ transaction so that Anvil only moves by one block
 // so we can test the "subsequent block"
 async fn update_contract_data<T: Transport + Clone, P: Provider<T, N>, N: Network>(
     contract: &SimpleInstance<T, P, N>,
-    update: UpdateSingleStorage,
+    update: &UpdateSingleStorage,
 ) {
     match update {
-        UpdateSingleStorage::Single(single) => update_single_values(&contract, single).await,
+        UpdateSingleStorage::Single(ref single) => update_single_values(&contract, single).await,
     }
 }
+
+async fn update_single_values<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+    contract: &SimpleInstance<T, P, N>,
+    values: &SimpleSingleValue,
+) {
+    let b = contract.setSimples(values.s1, values.s2, values.s3.clone(), values.s4);
+    b.send().await.unwrap().watch().await.unwrap();
+    log::info!("Updated simple contract single values");
+}
+
 /// Convert the test mapping addresses to mapping keys.
 fn test_mapping_keys() -> Vec<MappingKey> {
     MAPPING_ADDRESSES

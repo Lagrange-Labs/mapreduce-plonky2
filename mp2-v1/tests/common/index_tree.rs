@@ -2,7 +2,7 @@ use alloy::primitives::U256;
 use anyhow::{Context, Result};
 use log::{debug, info};
 use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
-use mp2_v1::{api, values_extraction::compute_block_id};
+use mp2_v1::{api, values_extraction::identifier_block_column};
 use plonky2::{
     field::types::Field,
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
@@ -25,18 +25,20 @@ use crate::common::proof_storage::{IndexProofIdentifier, ProofKey};
 use super::{
     proof_storage::{BlockPrimaryIndex, ProofStorage, RowProofIdentifier},
     rowtree::RowTreeKey,
-    table::TableID,
+    table::{Table, TableID},
     TestContext,
 };
 
 /// Hardcoded to use blocks but the spirit for any primary index is the same
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct IndexNode {
-    pub identifier: F,
+    // information that must be filled manually
+    pub identifier: u64,
     pub value: U256,
-    pub node_hash: HashOut<F>,
     pub row_tree_proof_id: RowProofIdentifier<BlockPrimaryIndex>,
     pub row_tree_hash: HashOut<F>,
+    // information filled during aggregation inside ryhope
+    pub node_hash: HashOut<F>,
     pub min: U256,
     pub max: U256,
 }
@@ -74,7 +76,7 @@ impl NodePayload for IndexNode {
             .chain(right.to_fields())
             .chain(self.min.to_fields())
             .chain(self.max.to_fields())
-            .chain(once(self.identifier))
+            .chain(once(F::from_canonical_u64(self.identifier)))
             .chain(self.value.to_fields())
             .chain(self.row_tree_hash.to_fields())
             .collect::<Vec<_>>();
@@ -119,7 +121,7 @@ impl<P: ProofStorage> TestContext<P> {
         t: &MerkleIndexTree,
         ut: UpdateTree<IndexTreeKey>,
         added_index: &IndexNode,
-    ) {
+    ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, node) = t.fetch_with_context(&k);
@@ -142,7 +144,7 @@ impl<P: ProofStorage> TestContext<P> {
             let proof = if context.is_leaf() {
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_leaf(
-                        node.identifier,
+                        F::from_canonical_u64(node.identifier),
                         extraction_proof,
                         row_tree_proof,
                     ),
@@ -179,7 +181,8 @@ impl<P: ProofStorage> TestContext<P> {
 
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_parent(
-                        node.identifier,
+                        // TODO: change API to use u64 only
+                        F::from_canonical_u64(node.identifier),
                         previous_node.value,
                         previous_node.min,
                         previous_node.max,
@@ -210,7 +213,7 @@ impl<P: ProofStorage> TestContext<P> {
                     .expect("previous index proof not found");
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_membership(
-                        node.identifier,
+                        F::from_canonical_u64(node.identifier),
                         node.value,
                         previous_node.min,
                         previous_node.max,
@@ -243,17 +246,19 @@ impl<P: ProofStorage> TestContext<P> {
             .storage
             .get_proof(&ProofKey::Index(root_proof_key.clone()))
             .unwrap();
+        root_proof_key
     }
 
-    pub(crate) async fn build_and_prove_index_tree(
+    pub(crate) async fn prove_update_index_tree(
         &mut self,
-        table: &TableID,
-        row_tree_root: &RowTreeKey,
-    ) -> MerkleIndexTree {
+        table: &Table,
+        ut: UpdateTree<IndexTreeKey>,
+    ) -> IndexProofIdentifier<BlockPrimaryIndex> {
+        let row_tree_root = table.row.root().unwrap();
         let row_root_proof_key = RowProofIdentifier {
-            table: table.clone(),
+            table: table.id.clone(),
             primary: self.block_number().await as BlockPrimaryIndex,
-            tree_key: row_tree_root.clone(),
+            tree_key: row_tree_root,
         };
 
         let row_tree_proof = self
@@ -263,15 +268,13 @@ impl<P: ProofStorage> TestContext<P> {
         let row_tree_hash = verifiable_db::row_tree::extract_hash_from_proof(&row_tree_proof)
             .expect("can't find hash?");
         let node = IndexNode {
-            identifier: F::from_canonical_u64(compute_block_id()),
+            identifier: identifier_block_column(),
             value: U256::from(self.block_number().await),
             row_tree_proof_id: row_root_proof_key.clone(),
             row_tree_hash,
             ..Default::default()
         };
-        let (tree, update) = build_initial_index_tree(&node).expect("can't build index tree");
         info!("Generated index tree");
-        self.prove_index_tree(table, &tree, update, &node);
-        tree
+        self.prove_index_tree(&table.id, &table.index, ut, &node)
     }
 }

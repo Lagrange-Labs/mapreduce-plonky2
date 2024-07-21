@@ -1,12 +1,17 @@
 //! Define test cases
 
-use alloy::primitives::Address;
-use mp2_common::eth::StorageSlot;
+use std::collections::HashMap;
 
-use super::{proof_storage::ProofStorage, table::TableID};
+use alloy::primitives::Address;
+use mp2_common::{eth::StorageSlot, F};
+
+use super::{
+    proof_storage::ProofStorage,
+    table::{Table, TableID},
+};
 
 pub(crate) mod local_simple;
-pub(crate) mod pudgy_penguins;
+////pub(crate) mod pudgy_penguins;
 
 /// Storage mapping key
 type MappingKey = Vec<u8>;
@@ -20,28 +25,22 @@ pub(crate) enum TableSourceSlot {
     Mapping((MappingValuesExtractionArgs, Option<LengthExtractionArgs>)),
 }
 
+impl TableSourceSlot {
+    pub fn slots(&self) -> Vec<u8> {
+        match self {
+            Self::SingleValues(s) => s.slots.clone(),
+            Self::Mapping(_) => unimplemented!("mappings are coming"),
+        }
+    }
+}
+
 /// Test case definition
-#[derive(Debug)]
 pub(crate) struct TestCase {
+    pub(crate) table: Table,
+    pub(crate) slots_to_id: HashMap<u8, u64>,
     pub(crate) contract_address: Address,
     pub(crate) contract_extraction: ContractExtractionArgs,
     pub(crate) source: TableSourceSlot,
-}
-
-impl TestCase {
-    pub fn table_id(&self) -> TableID {
-        let slots = match self.source {
-            TableSourceSlot::SingleValues(ref s) => s.slots.clone(),
-            TableSourceSlot::Mapping((ref map, ref length)) => {
-                let mut slots = vec![map.slot];
-                if let Some(l) = length {
-                    slots.push(l.slot);
-                }
-                slots
-            }
-        };
-        TableID::new(&self.contract_address, &slots)
-    }
 }
 
 /// Single values extraction arguments (C.1)

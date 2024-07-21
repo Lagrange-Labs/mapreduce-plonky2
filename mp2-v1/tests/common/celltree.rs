@@ -1,25 +1,75 @@
+use std::iter;
+
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
 };
 use anyhow::*;
-use mp2_common::{eth::ProofQuery, poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
-use mp2_test::cells_tree::{build_cell_tree, CellTree, MerkleCellTree, TestCell as Cell};
-use mp2_v1::{api, api::CircuitInput, values_extraction::compute_leaf_single_id};
-use plonky2::field::{goldilocks_field::GoldilocksField, types::Field};
-use ryhope::{
-    storage::updatetree::{Next, UpdateTree},
-    tree::TreeTopology,
+use mp2_common::{
+    eth::ProofQuery,
+    poseidon::{empty_poseidon_hash, H},
+    types::HashOutput,
+    utils::ToFields,
+    CHasher, F,
 };
+use mp2_v1::{api, api::CircuitInput, values_extraction::identifier_single_var_column};
+use plonky2::{
+    field::{goldilocks_field::GoldilocksField, types::Field},
+    hash::hash_types::HashOut,
+    plonk::config::Hasher,
+};
+use ryhope::{
+    storage::{
+        memory::InMemory,
+        updatetree::{Next, UpdateTree},
+    },
+    tree::{sbbst, TreeTopology},
+    MerkleTreeKvDb, NodePayload,
+};
+use serde::{Deserialize, Serialize};
 
 use crate::common::{cell_tree_proof_to_hash, rowtree::RowTreeKey, TestContext};
 
 use super::{
     cases::TableSourceSlot,
     proof_storage::{BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage},
-    rowtree::Row,
-    table::TableID,
+    rowtree::{CellCollection, Row},
+    table::{CellsUpdateResult, Table, TableID},
 };
+
+pub type CellTree = sbbst::Tree;
+pub type CellTreeKey = <CellTree as TreeTopology>::Key;
+type CellStorage = InMemory<CellTree, Cell>;
+pub type MerkleCellTree = MerkleTreeKvDb<CellTree, Cell, CellStorage>;
+
+// Just a clone of mp2-test cell tree but "public facing" without any plonky2 related values
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Cell {
+    /// The unique identifier of the cell, derived from the contract it comes
+    /// from and its slot in its storage.
+    pub id: u64,
+    /// The value stored in the cell
+    pub value: U256,
+    /// The hash of this node in the tree
+    pub hash: HashOut<F>,
+}
+
+impl NodePayload for Cell {
+    fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
+        // H(H(left_child) || H(right_child) || id || value)
+        let inputs: Vec<_> = children
+            .into_iter()
+            .map(|c| c.map(|x| x.hash).unwrap_or_else(|| *empty_poseidon_hash()))
+            .flat_map(|x| x.elements.into_iter())
+            // ID
+            .chain(iter::once(F::from_canonical_u64(self.id)))
+            // Value
+            .chain(self.value.to_fields())
+            .collect();
+
+        self.hash = H::hash_no_pad(&inputs);
+    }
+}
 
 impl<P: ProofStorage> TestContext<P> {
     /// Given a [`MerkleCellTree`], recursively prove its hash and returns the storage key
@@ -27,8 +77,8 @@ impl<P: ProofStorage> TestContext<P> {
     async fn prove_cell_tree(
         &mut self,
         table_id: &TableID,
-        t: &MerkleCellTree,
-        ut: UpdateTree<<CellTree as TreeTopology>::Key>,
+        tree: MerkleCellTree,
+        ut: UpdateTree<CellTreeKey>,
     ) -> CellProofIdentifier<BlockPrimaryIndex> {
         // THIS can panic but for block number it should be fine on 64bit platforms...
         // unwrap is safe since we know it is really a block number and not set to Latest or stg
@@ -38,13 +88,15 @@ impl<P: ProofStorage> TestContext<P> {
         let mut workplan = ut.into_workplan();
 
         while let Some(Next::Ready(k)) = workplan.next() {
-            let (context, cell) = t.fetch_with_context(&k);
+            let (context, cell) = tree.fetch_with_context(&k);
 
             let proof = if context.is_leaf() {
                 // Prove a leaf
-                let inputs = CircuitInput::CellsTree(
-                    verifiable_db::cells_tree::CircuitInput::leaf(cell.id, cell.value),
-                );
+                let inputs =
+                    CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::leaf(
+                        F::from_canonical_u64(cell.id),
+                        cell.value,
+                    ));
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.right.is_none() {
                 // Prove a partial node
@@ -59,7 +111,9 @@ impl<P: ProofStorage> TestContext<P> {
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::partial(
-                        cell.id, cell.value, left_proof,
+                        F::from_canonical_u64(cell.id),
+                        cell.value,
+                        left_proof,
                     ));
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
@@ -85,7 +139,7 @@ impl<P: ProofStorage> TestContext<P> {
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::full(
-                        cell.id,
+                        F::from_canonical_u64(cell.id),
                         cell.value,
                         [left_proof, right_proof],
                     ));
@@ -103,7 +157,7 @@ impl<P: ProofStorage> TestContext<P> {
 
             workplan.done(&k).unwrap();
         }
-        let root = t.root().unwrap();
+        let root = tree.root().unwrap();
         let root_proof_key = CellProofIdentifier {
             table: table_id.clone(),
             primary: block_key,
@@ -123,42 +177,34 @@ impl<P: ProofStorage> TestContext<P> {
     // NOTE: the 0th column is assumed to be the secondary index.
     pub async fn prove_cells_tree(
         &mut self,
-        table_id: &TableID,
-        cells: Vec<Cell>,
-    ) -> (MerkleCellTree, Row) {
-        // NOTE: the sec. index slot is assumed to be the first.
-        let (cell_tree, cell_tree_ut) =
-            build_cell_tree(&cells[1..]).expect("failed to create cell tree");
+        table: &Table,
+        all_cells: CellCollection,
+        cells_update: CellsUpdateResult,
+    ) -> Row {
+        let tree_hash = cells_update.latest.root_data().unwrap().hash;
         let root_key = self
-            .prove_cell_tree(table_id, &cell_tree, cell_tree_ut)
+            .prove_cell_tree(&table.id, cells_update.latest, cells_update.to_update)
             .await;
         let cell_root_proof = self
             .storage
             .get_proof(&ProofKey::Cell(root_key.clone()))
             .unwrap();
-        let tree_hash = cell_tree.root_data().unwrap().hash;
         let proved_hash = cell_tree_proof_to_hash(&cell_root_proof);
         assert_eq!(
             tree_hash, proved_hash,
             "mismatch between cell tree root hash as computed by ryhope and mp2",
         );
 
-        (
-            cell_tree,
-            Row {
-                k: RowTreeKey {
-                    // the 0th cell value is the secondary index
-                    value: cells[0].value,
-                    // there is always only one row in the scalar slots table
-                    id: 0,
-                },
-                cell_tree_root_proof_id: root_key,
-                cell_tree_root_hash: tree_hash,
-                min: cells[0].value,
-                max: cells[0].value,
-                cells,
-                hash: Default::default(),
-            },
-        )
+        Row {
+            k: cells_update.key,
+            cell_tree_root_proof_id: root_key,
+            cell_tree_root_hash: tree_hash,
+            cells: all_cells,
+            // these values are set during the tree update
+            // so we fill by default
+            min: U256::default(),
+            max: U256::default(),
+            hash: Default::default(),
+        }
     }
 }

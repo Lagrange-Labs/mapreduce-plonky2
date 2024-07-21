@@ -1,9 +1,9 @@
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::*;
-use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
-use mp2_test::cells_tree::TestCell as Cell;
+use mp2_common::{poseidon::empty_poseidon_hash, types::HashOutput, utils::ToFields, CHasher, F};
 use mp2_v1::api::{self, CircuitInput};
 use plonky2::{
+    field::types::Field,
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
     plonk::config::Hasher,
 };
@@ -21,13 +21,13 @@ use ryhope::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::common::row_tree_proof_to_hash;
+use crate::common::{index_tree::IndexNode, row_tree_proof_to_hash};
 
 use super::{
     proof_storage::{
         BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier,
     },
-    table::TableID,
+    table::{RowUpdateResult, Table, TableID},
     TestContext,
 };
 
@@ -40,6 +40,29 @@ pub struct RowTreeKey {
     pub id: usize,
 }
 
+use super::celltree::Cell;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CellCollection(pub Vec<Cell>);
+impl CellCollection {
+    /// Return the [`Cell`] containing the sec. index of this row.
+    pub fn secondary_index(&self) -> &Cell {
+        &self.0[0]
+    }
+
+    pub fn non_indexed_cells(&self) -> &[Cell] {
+        &self.0[1..]
+    }
+    // take all the cells in &self, and replace the ones with same identifier from other
+    pub fn replace_by(&self, other: &Self) -> Self {
+        Self(
+            self.0
+                .iter()
+                .map(|c| other.0.iter().find(|c2| c.id == c2.id).unwrap_or(c))
+                .cloned()
+                .collect(),
+        )
+    }
+}
 /// Represent a row in one of the virtual tables stored in the zkDB; which
 /// encapsulates its cells and the tree they form.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,7 +72,7 @@ pub struct Row {
     /// NOTE: this key is **not** the index as understood in the crypto
     /// formalization.
     pub k: RowTreeKey,
-    pub cells: Vec<Cell>,
+    pub cells: CellCollection,
     /// Storing the full identifier of the cells proof of the root of the cells tree.
     /// Note this identifier can refer to a proof for older blocks if the cells tree didn't change
     pub cell_tree_root_proof_id: CellProofIdentifier<BlockPrimaryIndex>,
@@ -64,12 +87,7 @@ pub struct Row {
     /// Hash of this node
     pub hash: HashOut<F>,
 }
-impl Row {
-    /// Return the [`Cell`] containing the sec. index of this row.
-    pub fn secondary_index(&self) -> &Cell {
-        &self.cells[0]
-    }
-}
+
 impl NodePayload for Row {
     fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
         let children = children.into_iter().collect::<Vec<_>>();
@@ -77,18 +95,18 @@ impl NodePayload for Row {
 
         let (left_hash, right_hash) = match [&children[0], &children[1]] {
             [None, None] => {
-                self.min = self.secondary_index().value.clone();
-                self.max = self.secondary_index().value.clone();
+                self.min = self.cells.secondary_index().value.clone();
+                self.max = self.cells.secondary_index().value.clone();
                 (*empty_poseidon_hash(), *empty_poseidon_hash())
             }
             [None, Some(right)] => {
-                self.min = self.secondary_index().value.clone();
+                self.min = self.cells.secondary_index().value.clone();
                 self.max = right.max.clone();
                 (*empty_poseidon_hash(), right.hash.clone())
             }
             [Some(left), None] => {
                 self.min = left.min.clone();
-                self.max = self.secondary_index().value.clone();
+                self.max = self.cells.secondary_index().value.clone();
                 (left.hash, *empty_poseidon_hash())
             }
             [Some(left), Some(right)] => {
@@ -106,9 +124,9 @@ impl NodePayload for Row {
                     // P(max)
                     .chain(self.max.to_fields().into_iter())
                     // P(id)
-                    .chain(std::iter::once(self.secondary_index().id))
+                    .chain(std::iter::once(F::from_canonical_u64(self.cells.secondary_index().id)))
                     // P(value)
-                    .chain(self.secondary_index().value.to_fields().into_iter())
+                    .chain(self.cells.secondary_index().value.to_fields().into_iter())
                     // P(cell_tree_hash)
                     .chain(self.cell_tree_root_hash.to_fields().into_iter())
                     .collect::<Vec<_>>();
@@ -146,10 +164,10 @@ impl<P: ProofStorage> TestContext<P> {
     /// it.
     pub async fn prove_row_tree(
         &mut self,
-        table_id: &TableID,
-        t: &MerkleRowTree,
+        table: &Table,
         ut: UpdateTree<<RowTree as TreeTopology>::Key>,
     ) -> RowProofIdentifier<BlockPrimaryIndex> {
+        let t = &table.row;
         let mut workplan = ut.into_workplan();
         // THIS can panic but for block number it should be fine on 64bit platforms...
         // unwrap is safe since we know it is really a block number and not set to Latest or stg
@@ -157,11 +175,9 @@ impl<P: ProofStorage> TestContext<P> {
 
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, row) = t.fetch_with_context(&k);
-            // NOTE: the sec. index. is assumed to be in the first position
-            // Sec. index identifier
-            let id = row.secondary_index().id;
+            let id = F::from_canonical_u64(row.cells.secondary_index().id);
             // Sec. index value
-            let value = row.secondary_index().value;
+            let value = row.cells.secondary_index().value;
 
             let cell_tree_proof = self
                 .storage
@@ -176,7 +192,7 @@ impl<P: ProofStorage> TestContext<P> {
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.is_partial() {
                 let proof_key = RowProofIdentifier {
-                    table: table_id.clone(),
+                    table: table.id.clone(),
                     primary: block_key,
                     tree_key: context
                         .left
@@ -209,12 +225,12 @@ impl<P: ProofStorage> TestContext<P> {
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
                 let left_proof_key = RowProofIdentifier {
-                    table: table_id.clone(),
+                    table: table.id.clone(),
                     primary: block_key,
                     tree_key: context.left.unwrap(),
                 };
                 let right_proof_key = RowProofIdentifier {
-                    table: table_id.clone(),
+                    table: table.id.clone(),
                     primary: block_key,
                     tree_key: context.right.unwrap(),
                 };
@@ -245,7 +261,7 @@ impl<P: ProofStorage> TestContext<P> {
                 api::generate_proof(self.params(), inputs).expect("while proving full node")
             };
             let new_proof_key = RowProofIdentifier {
-                table: table_id.clone(),
+                table: table.id.clone(),
                 primary: block_key,
                 tree_key: k.clone(),
             };
@@ -258,7 +274,7 @@ impl<P: ProofStorage> TestContext<P> {
         }
         let root = t.root().unwrap();
         let root_proof_key = RowProofIdentifier {
-            table: table_id.clone(),
+            table: table.id.clone(),
             primary: block_key,
             tree_key: root,
         };
@@ -270,28 +286,35 @@ impl<P: ProofStorage> TestContext<P> {
     }
 
     /// Build and prove the row tree from the [`Row`]s and the secondary index
-    /// data (which **must be absent** from the rows), returning its proof.
-    pub async fn build_and_prove_rowtree(
+    /// data (which **must be absent** from the rows).
+    /// Returns the identifier of the root proof and the hash of the updated row tree
+    /// NOTE:we are simplifying a bit here as we assume the construction of the index tree
+    /// is from (a) the block and (b) only one by one, i.e. there is only one IndexNode to return
+    /// that have to be inserted. For CSV case, it should return a vector of new inserted nodes.
+    pub async fn prove_update_row_tree(
         &mut self,
-        table_id: &TableID,
-        rows: &[Row],
-    ) -> MerkleRowTree {
-        let (row_tree, row_tree_ut) = build_row_tree(rows)
-            .await
-            .expect("failed to create row tree");
-        let root_proof_key = self.prove_row_tree(table_id, &row_tree, row_tree_ut).await;
+        table: &Table,
+        update: RowUpdateResult,
+    ) -> IndexNode {
+        let root_proof_key = self.prove_row_tree(&table, update.updates).await;
         let row_tree_proof = self
             .storage
             .get_proof(&ProofKey::Row(root_proof_key.clone()))
             .unwrap();
 
-        let tree_hash = row_tree.root_data().unwrap().hash;
+        let tree_hash = table.row.root_data().unwrap().hash;
         let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
 
         assert_eq!(
             tree_hash, proved_hash,
             "mismatch between row tree root hash as computed by ryhope and mp2",
         );
-        row_tree
+        IndexNode {
+            identifier: table.columns.primary_column().identifier,
+            value: U256::from(self.block_number().await),
+            row_tree_proof_id: root_proof_key,
+            row_tree_hash: table.row.root_data().unwrap().hash,
+            ..Default::default()
+        }
     }
 }

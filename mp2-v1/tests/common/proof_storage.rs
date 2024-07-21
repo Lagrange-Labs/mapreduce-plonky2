@@ -154,16 +154,11 @@ impl KeyValueDB {
     pub fn new(filename: &Path) -> Result<Self> {
         let cfg = TestContextConfig::init_from_env().context("while parsing configuration")?;
 
-        println!("Hello -- A");
         let path = cfg.params_dir.expect("no params build defined");
-        println!("Hello -- B");
         mkdir_all(&path)?;
         let mut path = PathBuf::from(path);
-        println!("Hello -- C");
         path.push(filename);
-        println!("Hello -- CC");
         let db = DB::open(path.clone())?;
-        println!("Hello -- D");
         let tx = db.tx(true)?;
         match tx.create_bucket(BUCKET_NAME) {
             Ok(_) => log::info!("Created bucket {BUCKET_NAME} into store db at path {path:?}"),
