@@ -65,7 +65,9 @@ async fn db_creation_integrated_tests() -> Result<()> {
     let _ = env_logger::try_init();
     // Create the test context for the local node.
     //let storage = MemoryProofStorage::default();
+    info!("Loading proof storage");
     let storage = KeyValueDB::new_from_env("test_proofs.store")?;
+    info!("Loading Anvil and contract");
     let mut ctx = context::new_local_chain(storage).await;
     info!("Building params");
     // Build the parameters.

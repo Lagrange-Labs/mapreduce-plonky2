@@ -2,12 +2,8 @@
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
 use anyhow::{bail, Result};
-use log::{debug, info, warn};
+use log::{debug, info};
 use mp2_v1::values_extraction::{identifier_block_column, identifier_single_var_column};
-use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::hash_types::HashOut,
-};
 use ryhope::{storage::RoEpochKvStorage, tree::TreeTopology};
 
 use crate::common::{
