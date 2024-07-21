@@ -110,7 +110,7 @@ impl Table {
             //InitSettings::Reset(sbbst::Tree::empty()),
             InitSettings::Reset(sbbst::Tree::with_shift_and_capacity(
                 (genesis_block - 1) as usize,
-                (genesis_block - 1) as usize,
+                0,
             )),
             (),
         )

@@ -118,7 +118,7 @@ impl TestCase {
         let single = Self {
             slots_to_id: mapping,
             source: source.clone(),
-            table: Table::new(ctx.block_number().await, table_id, columns),
+            table: Table::new(indexing_genesis_block, table_id, columns),
             contract_address: *contract_address,
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
