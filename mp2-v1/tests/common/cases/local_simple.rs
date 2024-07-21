@@ -76,7 +76,12 @@ impl TestCase {
             slots: SINGLE_SLOTS.to_vec(),
         });
 
-        let table_id = TableID::new(ctx.block_number().await, contract_address, &source.slots());
+        // TODO: change sbbst such that it doesn't require this max . Though we still need the
+        // correct shift.
+        // 2 because 1 tx to deploy contract, another one to call it
+        // TODO WARNING: this won't work with mappings, needs refactor somewhere
+        let indexing_genesis_block = ctx.block_number().await + 2;
+        let table_id = TableID::new(indexing_genesis_block, contract_address, &source.slots());
         // simply a mapping we need keep around to make sure we always give the right update to the
         // tree since it is not aware of the slots (this is blockchain specific info).
         let mut mapping = HashMap::default();
@@ -344,7 +349,7 @@ impl TestCase {
     }
 
     // Returns the table updated
-    pub async fn apply_update_to_contract<P: ProofStorage>(
+    async fn apply_update_to_contract<P: ProofStorage>(
         &self,
         ctx: &TestContext<P>,
         update: &UpdateSingleStorage,
