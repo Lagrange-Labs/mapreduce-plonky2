@@ -324,6 +324,18 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
             .unwrap()
     }
 
+    /// Return the value as a `UInt256Target` at the specified index
+    pub fn value_target_at_index(&self, i: usize) -> UInt256Target
+    where
+        [(); S - 1]:,
+    {
+        if i == 0 {
+            self.first_value_as_u256_target()
+        } else {
+            self.values_target()[i - 1].clone()
+        }
+    }
+
     pub fn num_matching_rows_target(&self) -> Target {
         *self.to_count_raw()
     }
@@ -390,6 +402,18 @@ impl<'a, const S: usize> PublicInputs<'a, F, S> {
             .collect_vec()
             .try_into()
             .unwrap()
+    }
+
+    /// Return the value as a UInt256 at the specified index
+    pub fn value_at_index(&self, i: usize) -> U256
+    where
+        [(); S - 1]:,
+    {
+        if i == 0 {
+            self.first_value_as_u256()
+        } else {
+            self.values()[i - 1]
+        }
     }
 
     pub fn num_matching_rows(&self) -> F {

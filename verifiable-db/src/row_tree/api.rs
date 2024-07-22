@@ -39,7 +39,6 @@ pub struct PublicParameters {
 }
 
 const ROW_IO_LEN: usize = super::public_inputs::TOTAL_LEN;
-const CELL_IO_LEN: usize = cells_tree::PublicInputs::<F>::TOTAL_LEN;
 
 impl PublicParameters {
     pub fn build(cells_set: &RecursiveCircuits<F, C, D>) -> Self {
@@ -247,6 +246,8 @@ mod test {
     };
     use plonky2_ecgfp5::curve::curve::Point;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
+
+    const CELL_IO_LEN: usize = cells_tree::PublicInputs::<F>::TOTAL_LEN;
 
     struct TestParams {
         cells_test: TestingRecursiveCircuits<F, C, D, CELL_IO_LEN>,

@@ -150,7 +150,9 @@ pub mod tests {
     };
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
-    use crate::length_extraction::{api::compute_metadata_digest, LeafLengthCircuit, PublicInputs};
+    use crate::length_extraction::{
+        api::utils::compute_metadata_digest, LeafLengthCircuit, PublicInputs,
+    };
 
     use super::LeafLengthWires;
 

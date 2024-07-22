@@ -79,7 +79,7 @@ impl BaseCircuit {
             bn: block_pi.block_number(),
         }
     }
-
+    #[cfg(test)]
     pub(crate) fn assign(&self, _pw: &mut PartialWitness<GoldilocksField>, _wires: &BaseWires) {}
 }
 
