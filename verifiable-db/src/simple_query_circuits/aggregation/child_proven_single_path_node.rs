@@ -2,7 +2,7 @@ use std::iter;
 
 use alloy::primitives::U256;
 use mp2_common::{
-    poseidon::{empty_poseidon_hash, H},
+    hash::hash_maybe_first,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
     types::CBuilder,
@@ -60,25 +60,14 @@ impl<const MAX_NUM_RESULTS: usize> ChildProvenSinglePathNodeCircuit<MAX_NUM_RESU
         b: &mut CBuilder,
         child_proof: &PublicInputs<Target, MAX_NUM_RESULTS>,
     ) -> ChildProvenSinglePathNodeWires {
-        let empty_hash = b.constant_hash(*empty_poseidon_hash());
-
-        let [is_rows_tree_node, is_left_child] = [0; 2].map(|_| b.add_virtual_bool_target_safe());
+        let is_rows_tree_node = b.add_virtual_bool_target_safe();
+        let is_left_child = b.add_virtual_bool_target_unsafe();
         let value = b.add_virtual_u256();
         let subtree_hash = b.add_virtual_hash();
         let sibling_hash = b.add_virtual_hash();
         let unproven_min = b.add_virtual_u256();
         let unproven_max = b.add_virtual_u256();
 
-        let left_child_hash = b.select_hash(
-            is_left_child,
-            &child_proof.tree_hash_target(),
-            &sibling_hash,
-        );
-        let right_child_hash = b.select_hash(
-            is_left_child,
-            &sibling_hash,
-            &child_proof.tree_hash_target(),
-        );
         let node_min = b.select_u256(
             is_left_child,
             &child_proof.min_value_target(),
@@ -96,17 +85,22 @@ impl<const MAX_NUM_RESULTS: usize> ChildProvenSinglePathNodeCircuit<MAX_NUM_RESU
         );
         // Compute the node hash:
         // node_hash = H(left_child_hash||right_child_hash||node_min||node_max||column_id||value||subtree_hash)
-        let node_hash_inputs = left_child_hash
-            .elements
+        let rest: Vec<_> = node_min
+            .to_targets()
             .into_iter()
-            .chain(right_child_hash.elements)
-            .chain(node_min.to_targets())
             .chain(node_max.to_targets())
             .chain(iter::once(column_id))
             .chain(value.to_targets())
             .chain(subtree_hash.elements)
             .collect();
-        let node_hash = b.hash_n_to_hash_no_pad::<H>(node_hash_inputs);
+
+        let node_hash = hash_maybe_first(
+            b,
+            is_left_child,
+            sibling_hash.elements,
+            child_proof.tree_hash_target().elements,
+            &rest,
+        );
 
         let is_greater_than_max = b.is_less_than_u256(&child_proof.max_query_target(), &value);
         let is_less_than_min = b.is_less_than_u256(&value, &child_proof.min_query_target());
@@ -165,12 +159,7 @@ mod tests {
         aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
         PI_LEN,
     };
-    use mp2_common::{
-        group_hashing::map_to_curve_point,
-        poseidon::H,
-        utils::{Fieldable, ToFields},
-        C, D,
-    };
+    use mp2_common::{poseidon::H, utils::ToFields, C, D};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
