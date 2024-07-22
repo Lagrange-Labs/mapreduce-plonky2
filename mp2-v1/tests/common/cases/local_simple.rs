@@ -36,6 +36,7 @@ use std::{collections::HashMap, str::FromStr};
 
 /// Test slots for single values extraction
 const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
+/// Define which slots is the secondary index. In this case, it's the U256
 const INDEX_SLOT: u8 = 1;
 
 /// Test slot for mapping values extraction
@@ -185,39 +186,41 @@ impl TestCase {
     async fn run_lagrange_preprocessing<P: ProofStorage>(
         &mut self,
         ctx: &mut TestContext<P>,
-        // cells we are modifying
         // Note there is only one entry for a single variable update, but multiple for mappings for
         // example
-        updates: Vec<CellsUpdate>,
+        updates: Vec<TableRowUpdate>,
     ) -> Result<()> {
         assert!(updates.len() == 1, "mappings are not implemented yet");
-        let cell_updates = updates[0].clone();
+        let single_row_update = updates[0].clone();
         // apply the new cells to the trees
+        // NOTE ONLY the rest of the cells, not including the secondary one !
         let update_cell_tree = self
             .table
-            .apply_cells_update(cell_updates.clone())
+            .apply_cells_update(single_row_update.updated_cells.clone())
             .expect("can not update cells tree");
         log::info!("Applied updates to cells tree");
-        // find the all the cells, updated or not
-        let all_cells = match cell_updates.init {
-            // in case it's init, then it's simply all the new cells
-            true => CellCollection(cell_updates.modified_cells.clone()),
+        // find the all the cells, updated or not, including the secondary index because this is to
+        // store in the row JSON description
+        let row_cells = match single_row_update.is_init() {
+            // initialization time = everything is "updated"
+            true => single_row_update.full_collection(),
             false => {
                 // fetch all the current cells, merge with the new modified ones
-                let old_row = self.table.row.fetch(&cell_updates.row_key);
-                old_row
-                    .cells
-                    .replace_by(&CellCollection(cell_updates.modified_cells))
+                let old_row = self
+                    .table
+                    .row
+                    .fetch(&single_row_update.updated_cells.row_key);
+                single_row_update.merge_with_previous_row(old_row.cells)
             }
         };
         // prove the new cell tree and get the node row
         let row = ctx
-            .prove_cells_tree(&self.table, all_cells, update_cell_tree)
+            .prove_cells_tree(&self.table, row_cells, update_cell_tree)
             .await;
         info!("Generated final CELLs tree proofs for single variables");
         // In the case of the scalars slots, there is a single node in the row tree.
         let rows = RowUpdate {
-            init: cell_updates.init,
+            init: single_row_update.is_init(),
             modified_rows: vec![row],
         };
         let updates = self.table.apply_row_update(rows)?;
@@ -230,7 +233,7 @@ impl TestCase {
         // enumeration, something that may arise during the query when building a result tree.
         let index_update = IndexUpdate {
             added_index: (ctx.block_number().await as BlockPrimaryIndex, index_node),
-            init: cell_updates.init,
+            init: single_row_update.is_init(),
         };
         let updates = self
             .table
@@ -389,7 +392,7 @@ impl TestCase {
         ctx: &mut TestContext<P>,
         u: UpdateType,
         //) -> (UpdateSingleStorage, CellsUpdate) {
-    ) -> (UpdateSingleStorage, CellsUpdate) {
+    ) -> (UpdateSingleStorage, TableRowUpdate) {
         let mut current_values = self
             .current_single_values(ctx)
             .await
@@ -420,15 +423,19 @@ impl TestCase {
         };
 
         let contract_update = UpdateSingleStorage::Single(current_values);
-        let table_update = CellsUpdate {
+        let modified_cells = CellsUpdate {
             init: false,
             row_key: row_tree_key,
             modified_cells,
         };
+        let table_update = TableRowUpdate {
+            updated_cells: modified_cells,
+            updated_secondary: None,
+        };
         (contract_update, table_update)
     }
     /// Defines the initial state of the contract, and thus initial state of our table as well
-    async fn init_contract_data(&self) -> (UpdateSingleStorage, CellsUpdate) {
+    async fn init_contract_data(&self) -> (UpdateSingleStorage, TableRowUpdate) {
         let contract_update = SimpleSingleValue {
             s1: true,
             s2: U256::from(LENGTH_VALUE),
@@ -464,26 +471,30 @@ impl TestCase {
         // scratch.
         // * When constructing the row object, we will give this array and thus the secondary index
         // needs to be first.
-        let mut all_cells = vec![Cell {
+        let secondary_cell = Cell {
             id: self.slots_to_id[&INDEX_SLOT],
             value: contract_update.value_at_slot(INDEX_SLOT).unwrap(),
             hash: Default::default(),
-        }];
-        all_cells.extend(rest_cells);
-        println!(" ALL THE CELLS -> INIT: {:?}", all_cells);
-        let table_update = CellsUpdate {
+        };
+        let cells_update = CellsUpdate {
             init: true,
             // necessary to indicate to which row we want to apply the updates
             // // necessary to indicate to which row we want to apply the updates
             row_key: RowTreeKey {
                 // s2 is the index in the formalism of this  single variable table
-                value: contract_update.s2,
+                value: contract_update.value_at_slot(INDEX_SLOT).unwrap(),
+                // This ID is just to be able to support multiple rows with the same secondary
+                // index value.
                 // there is no other rows in this table for this block so the enumeration is simple
                 id: 0,
             },
             // since we are proving the initial state of the contract, all the cells are modified
             // cells
-            modified_cells: all_cells,
+            modified_cells: rest_cells,
+        };
+        let table_update = TableRowUpdate {
+            updated_cells: cells_update,
+            updated_secondary: Some(secondary_cell),
         };
         (UpdateSingleStorage::Single(contract_update), table_update)
     }
@@ -566,4 +577,28 @@ fn test_mapping_keys() -> Vec<MappingKey> {
 enum UpdateType {
     SecondaryIndex,
     Rest,
+}
+
+#[derive(Clone, Debug)]
+struct TableRowUpdate {
+    // WITHOUT the secondary index value
+    updated_cells: CellsUpdate,
+    updated_secondary: Option<Cell>,
+    // NOTE: in ideal generic world, i.e. CSV, we would need to add primary here
+}
+
+impl TableRowUpdate {
+    fn merge_with_previous_row(&self, previous: CellCollection) -> CellCollection {
+        previous.replace_by(&self.full_collection())
+    }
+    fn full_collection(&self) -> CellCollection {
+        let rest = self.updated_cells.modified_cells.clone();
+        let secondary = self.updated_secondary.clone().unwrap_or_default();
+        let mut full = vec![secondary];
+        full.extend(rest);
+        CellCollection(full)
+    }
+    fn is_init(&self) -> bool {
+        self.updated_cells.init
+    }
 }

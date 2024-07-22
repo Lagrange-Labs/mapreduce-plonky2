@@ -247,10 +247,8 @@ pub struct RowUpdateResult {
 #[derive(Debug, Clone)]
 pub struct CellsUpdate {
     pub row_key: RowTreeKey,
-    // this must be written in the format
-    // secondary_index_cell || rest of the cells
-    // This is because we want to keep the secondary index cell in the JSON description so it is
-    // easy to search
+    // this must NOT contain the secondary index cell. Otherwise, in case the secondary index cell values
+    // did not change, we would not be able to separate the rest from the secondary index cell.
     pub modified_cells: Vec<Cell>,
     // set this to true to notify to consumers this is the first insert in the cell tree
     // Useful to know whether this update contains all the cells or the rest of the cells
@@ -261,6 +259,7 @@ pub struct CellsUpdate {
     // * add deleted cells
     // no need for added cells since we don't add columns on a table
 }
+
 // Contains the data necessary to start proving the update of the cells tree
 // and including the new information in the respective rows.
 // For example one needs to setup the location of the proof, the root hash of the new cells tree.

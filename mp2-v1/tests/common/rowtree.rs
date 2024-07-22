@@ -42,6 +42,8 @@ pub struct RowTreeKey {
 }
 
 use super::celltree::Cell;
+// A collection of cells inserted in the JSON.
+// IMPORTANT: This collection MUST CONTAIN the secondary index value, to easily search in JSON.
 #[derive(From, Into, Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CellCollection(pub Vec<Cell>);
 impl CellCollection {

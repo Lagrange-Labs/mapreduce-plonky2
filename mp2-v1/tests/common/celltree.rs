@@ -178,6 +178,7 @@ impl<P: ProofStorage> TestContext<P> {
     pub async fn prove_cells_tree(
         &mut self,
         table: &Table,
+        // All the new cells expected in the row, INCLUDING the secondary index
         all_cells: CellCollection,
         cells_update: CellsUpdateResult,
     ) -> Row {
