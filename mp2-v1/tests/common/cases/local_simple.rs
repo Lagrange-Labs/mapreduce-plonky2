@@ -104,7 +104,6 @@ impl TestCase {
                     _ if *slot == INDEX_SLOT => None,
                     _ => {
                         let identifier = identifier_single_var_column(*slot, contract_address);
-                        // -1 because the rest = all slots - secondary slot
                         mapping.insert(*slot, identifier);
                         Some(TableColumn {
                             identifier,
@@ -237,6 +236,7 @@ impl TestCase {
             .table
             .apply_index_update(index_update)
             .expect("can't update index tree");
+        info!("Applied updates to index tree");
         let root_proof_key = ctx.prove_update_index_tree(&self.table, updates.plan).await;
         info!("Generated final BLOCK tree proofs for single variables");
         let _ = ctx.prove_ivc(&self.table.id, &self.table.index).await;

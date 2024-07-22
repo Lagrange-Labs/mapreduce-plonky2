@@ -1,7 +1,7 @@
 use alloy::primitives::U256;
 use anyhow::{Context, Result};
 use log::{debug, info};
-use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
+use mp2_common::{poseidon::empty_poseidon_hash, proof::ProofWithVK, utils::ToFields, CHasher, F};
 use mp2_v1::{api, values_extraction::identifier_block_column};
 use plonky2::{
     field::types::Field,
@@ -142,6 +142,20 @@ impl<P: ProofStorage> TestContext<P> {
                 )))
                 .expect("should find extraction proof");
             let proof = if context.is_leaf() {
+                info!("NodeIndex Proving --> LEAF");
+                {
+                    let row_proof = ProofWithVK::deserialize(&row_tree_proof)
+                        .expect("can't deserialize row proof");
+                    let row_pi = verifiable_db::row_tree::PublicInputs::from_slice(
+                        &row_proof.proof().public_inputs,
+                    );
+                    let ext_proof = ProofWithVK::deserialize(&extraction_proof)
+                        .expect("can't deserialize extraction proof");
+                    let ext_pi = mp2_v1::final_extraction::PublicInputs::from_slice(
+                        &ext_proof.proof().public_inputs,
+                    );
+                    assert_eq!(row_pi.rows_digest_field(), ext_pi.value_point());
+                }
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_leaf(
                         F::from_canonical_u64(node.identifier),
