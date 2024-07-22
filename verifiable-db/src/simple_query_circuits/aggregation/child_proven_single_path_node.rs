@@ -162,7 +162,7 @@ mod tests {
     use mp2_common::{poseidon::H, utils::ToFields, C, D};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
+        utils::{gen_random_field_hash, random_vector},
     };
     use plonky2::{
         field::types::{Field, Sample},
@@ -217,8 +217,8 @@ mod tests {
         // Construct the witness.
         let mut rng = thread_rng();
         let mut value = U256::from_limbs(rng.gen::<[u64; 4]>());
-        let subtree_hash = HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
-        let sibling_hash = HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
+        let subtree_hash = gen_random_field_hash();
+        let sibling_hash = gen_random_field_hash();
         let is_left_child = rng.gen_bool(0.5);
         let unproven_min = index_value
             .checked_sub(U256::from(100))
