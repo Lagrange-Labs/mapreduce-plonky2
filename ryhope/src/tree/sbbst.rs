@@ -393,8 +393,8 @@ impl MutableTree for Tree {
             bail!(
                 "invalid insert in SBBST: trying to insert {}, but next insert should be {} (shift = {})",
                 k,
+                outer_idx(inner_max(s)+1, s),
                 s.state().fetch().shift,
-                outer_idx(inner_max(s)+1, s)
             );
         } else {
             s.state_mut().update(|state| state.max += 1);
