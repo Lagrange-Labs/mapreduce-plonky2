@@ -93,8 +93,8 @@ impl<const MAX_NUM_RESULTS: usize> PartialNodeCircuit<MAX_NUM_RESULTS> {
             array::from_fn(|_| b.add_virtual_bool_target_safe());
         let [sibling_tree_hash, sibling_child_hash1, sibling_child_hash2] =
             array::from_fn(|_| b.add_virtual_hash());
-        let [sibling_value, sibling_min, sibling_max] = array::from_fn(|_| b.add_virtual_u256());
-        let [min_query, max_query] = array::from_fn(|_| b.add_virtual_u256_unsafe());
+        let [sibling_value, sibling_min, sibling_max, min_query, max_query] =
+            array::from_fn(|_| b.add_virtual_u256_unsafe());
 
         // Check the consistency for the subtree proof and child proof.
         constrain_input_proofs(
