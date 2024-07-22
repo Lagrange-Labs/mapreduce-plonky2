@@ -65,20 +65,25 @@ impl TableColumns {
     pub fn non_indexed_columns(&self) -> Vec<TableColumn> {
         self.rest.clone()
     }
+    // Returns the index of the column identifier in the index tree, ie. the order of columns  in
+    // the cells tree
     // NOTE this assumes we keep all the values in the Row JSON payload which makes more sense
-    pub fn index_of(&self, identifier: ColumnIdentifier) -> usize {
+    pub fn cells_tree_index_of(&self, identifier: ColumnIdentifier) -> usize {
         match identifier {
             // TODO this will be problematic in the CSV case
             _ if identifier == self.primary.identifier => panic!(
-                "should not call the position on primary index since not stored in JSON payload"
+                "should not call the position on primary index since should not be included in cells tree"
             ),
-            _ if identifier == self.secondary.identifier => 1,
+            _ if identifier == self.secondary.identifier => panic!(
+                "should not call the position on secondary index since should not be included in cells tree"
+            ),
             _ => self
                 .rest
                 .iter()
                 .enumerate()
                 .find(|(_, c)| c.identifier == identifier)
-                .map(|(i, _)| i + 2)
+                // here we don't put i+2 since only those values are in the cells tree
+                .map(|(i, _)| i)
                 .expect("can't find index of identfier"),
         }
     }
@@ -131,7 +136,7 @@ impl Table {
             .in_transaction(|t| {
                 // if there is no cell, this loop wont run
                 for cell in cells.non_indexed_cells().unwrap_or_default() {
-                    let idx = self.columns.index_of(cell.id);
+                    let idx = self.columns.cells_tree_index_of(cell.id);
                     t.store(idx, cell.to_owned())?;
                 }
                 Ok(())
@@ -170,7 +175,7 @@ impl Table {
         let cell_update = cell_tree
             .in_transaction(|t| {
                 for new_cell in update.modified_cells.iter() {
-                    let cell_key = self.columns.index_of(new_cell.id);
+                    let cell_key = self.columns.cells_tree_index_of(new_cell.id);
                     if update.init {
                         t.store(cell_key, new_cell.clone())?;
                     } else {
