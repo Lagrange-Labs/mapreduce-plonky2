@@ -118,6 +118,13 @@ impl Tree {
         }
     }
 
+    pub fn with_shift(shift: usize) -> State {
+        State {
+            max: InnerIdx(0),
+            shift,
+        }
+    }
+
     pub fn with_shift_and_capacity(shift: usize, max: NodeIdx) -> State {
         State {
             max: InnerIdx(max),
@@ -384,11 +391,10 @@ impl MutableTree for Tree {
 
         if inner_idx(k, s) != inner_max(s) + 1 {
             bail!(
-                "invalid insert in SBBST: trying to insert {}; current max. is {} -inner_idx() = {:?} vs inner_max+1 = {:?}",
+                "invalid insert in SBBST: trying to insert {}, but next insert should be {} (shift = {})",
                 k,
-                outer_max(s),
-                inner_idx(k,s),
-                inner_max(s)+1,
+                s.state().fetch().shift,
+                outer_idx(inner_max(s)+1, s)
             );
         } else {
             s.state_mut().update(|state| state.max += 1);

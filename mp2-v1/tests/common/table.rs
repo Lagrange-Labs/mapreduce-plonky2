@@ -1,8 +1,5 @@
-use std::collections::HashMap;
-
-use alloy::{primitives::Address, transports::http::reqwest::Upgraded};
+use alloy::primitives::Address;
 use anyhow::Result;
-use mp2_common::F;
 use ryhope::{
     storage::{updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
     tree::{
@@ -106,12 +103,10 @@ impl Table {
             (),
         )
         .unwrap();
+        println!("genesis_block = {genesis_block}");
         let index_tree = MerkleIndexTree::new(
             //InitSettings::Reset(sbbst::Tree::empty()),
-            InitSettings::Reset(sbbst::Tree::with_shift_and_capacity(
-                (genesis_block - 1) as usize,
-                0,
-            )),
+            InitSettings::Reset(sbbst::Tree::with_shift((genesis_block - 1) as usize)),
             (),
         )
         .unwrap();
