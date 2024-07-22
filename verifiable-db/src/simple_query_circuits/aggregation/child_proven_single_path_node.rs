@@ -65,8 +65,8 @@ impl<const MAX_NUM_RESULTS: usize> ChildProvenSinglePathNodeCircuit<MAX_NUM_RESU
         let value = b.add_virtual_u256();
         let subtree_hash = b.add_virtual_hash();
         let sibling_hash = b.add_virtual_hash();
-        let unproven_min = b.add_virtual_u256();
-        let unproven_max = b.add_virtual_u256();
+        let unproven_min = b.add_virtual_u256_unsafe();
+        let unproven_max = b.add_virtual_u256_unsafe();
 
         let node_min = b.select_u256(
             is_left_child,
