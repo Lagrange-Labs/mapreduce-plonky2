@@ -163,7 +163,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
     }
 }
 
-/// Query proof number = 1, child proof number = 2
+/// Subtree proof number = 1, child proof number = 2
 pub(crate) const NUM_VERIFIED_PROOFS: usize = 3;
 
 impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
@@ -181,7 +181,7 @@ where
         verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_VERIFIED_PROOFS],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        // The first one is the query proof, and the remainings are child proofs.
+        // The first one is the subtree proof, and the remainings are child proofs.
         let [subtree_proof, child_proof1, child_proof2] =
             verified_proofs.map(|p| PublicInputs::from_slice(&p.public_inputs));
 
@@ -224,7 +224,7 @@ mod tests {
     }
 
     impl<'a> UserCircuit<F, D> for TestFullNodeWithTwoChildrenCircuit<'a> {
-        // Circuit wires + query proof + left child proof + right child proof
+        // Circuit wires + subtree proof + left child proof + right child proof
         type Wires = (
             FullNodeWithTwoChildrenWires<MAX_NUM_RESULTS>,
             Vec<Target>,
