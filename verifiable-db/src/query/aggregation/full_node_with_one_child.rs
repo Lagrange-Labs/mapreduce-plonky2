@@ -1,6 +1,6 @@
 //! Module handling the full node with one child for query aggregation circuits
 
-use crate::simple_query_circuits::{
+use crate::query::{
     aggregation::output_computation::compute_output_item, public_inputs::PublicInputs,
 };
 use alloy::primitives::U256;
@@ -256,7 +256,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simple_query_circuits::{
+    use crate::query::{
         aggregation::tests::{
             compute_output_item_value, random_aggregation_operations,
             random_aggregation_public_inputs,

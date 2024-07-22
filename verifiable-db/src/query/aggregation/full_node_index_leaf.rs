@@ -1,6 +1,6 @@
 //! Module handling the leaf full node of the index tree for query aggregation circuits
 
-use crate::simple_query_circuits::public_inputs::PublicInputs;
+use crate::query::public_inputs::PublicInputs;
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
@@ -133,7 +133,7 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simple_query_circuits::{
+    use crate::query::{
         aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
         PI_LEN,
     };

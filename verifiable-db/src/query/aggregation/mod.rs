@@ -5,7 +5,7 @@ mod output_computation;
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::simple_query_circuits::{
+    use crate::query::{
         computational_hash_ids::{AggregationOperation, Identifiers},
         public_inputs::{PublicInputs, QueryPublicInputs},
         PI_LEN,
