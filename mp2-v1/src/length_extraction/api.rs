@@ -1,12 +1,9 @@
 use mp2_common::{
     default_config,
-    group_hashing::map_to_curve_point,
     proof::{ProofInputSerialized, ProofWithVK},
     types::GFp,
     C, D, F,
 };
-use plonky2::field::types::Field;
-use plonky2_ecgfp5::curve::curve::Point as Digest;
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
@@ -22,12 +19,19 @@ use super::{
     BranchLengthWires, ExtensionLengthWires, LeafLengthCircuit, LeafLengthWires, PublicInputs,
 };
 
-/// Compute metadata digest D(length_slot || variable_slot)
-pub fn compute_metadata_digest(length_slot: u8, variable_slot: u8) -> Digest {
-    map_to_curve_point(&[
-        GFp::from_canonical_u8(length_slot),
-        GFp::from_canonical_u8(variable_slot),
-    ])
+#[cfg(test)]
+pub mod utils {
+    use mp2_common::{group_hashing::map_to_curve_point, types::GFp};
+    use plonky2::field::types::Field;
+    use plonky2_ecgfp5::curve::curve::Point as Digest;
+
+    /// Compute metadata digest D(length_slot || variable_slot)
+    pub fn compute_metadata_digest(length_slot: u8, variable_slot: u8) -> Digest {
+        map_to_curve_point(&[
+            GFp::from_canonical_u8(length_slot),
+            GFp::from_canonical_u8(variable_slot),
+        ])
+    }
 }
 
 type ExtensionInput = ProofInputSerialized<InputNode>;
@@ -201,7 +205,9 @@ mod tests {
     use plonky2::field::types::Field;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
-    use crate::length_extraction::{api::compute_metadata_digest, tests::PudgyState, PublicInputs};
+    use crate::length_extraction::{
+        api::utils::compute_metadata_digest, tests::PudgyState, PublicInputs,
+    };
 
     use super::{LengthCircuitInput, PublicParameters};
 

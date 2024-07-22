@@ -42,19 +42,6 @@ where
     value_id: Target,
 }
 
-impl<const N: usize> LeafMappingWires<N>
-where
-    [(); PAD_LEN(N)]:,
-{
-    pub fn mapping_key(&self) -> Array<Target, MAPPING_KEY_LEN> {
-        self.slot.mapping_key.clone()
-    }
-
-    pub fn mapping_slot(&self) -> Target {
-        self.slot.mapping_slot
-    }
-}
-
 /// Circuit to prove the correct derivation of the MPT key from a mapping slot
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeafMappingCircuit<const NODE_LEN: usize> {
@@ -202,10 +189,7 @@ mod tests {
     use plonky2::{
         field::types::Field,
         iop::{target::Target, witness::PartialWitness},
-        plonk::{
-            circuit_builder::CircuitBuilder,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
-        },
+        plonk::circuit_builder::CircuitBuilder,
     };
     use std::str::FromStr;
 

@@ -64,9 +64,6 @@ pub struct PublicInputs<'a, T> {
 }
 
 impl<'a> PublicInputs<'a, Target> {
-    const RANGES: &'static [PublicInputRange] =
-        &[H_RANGE, K_RANGE, T_RANGE, DV_RANGE, DM_RANGE, N_RANGE];
-
     /// Get the merkle hash of the subtree this proof has processed.
     pub fn root_hash(&self) -> OutputHash {
         OutputHash::from_targets(self.root_hash_info())

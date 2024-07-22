@@ -21,9 +21,6 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-/// A wrapper around the serialized proof and the corresponding circuit set.
-type ProofWithCircuitSet = (Vec<u8>, RecursiveCircuits<F, C, D>);
-
 /// CircuitInput is a wrapper around the different specialized circuits that can
 /// be used to prove a node recursively.
 #[derive(Serialize, Deserialize)]
