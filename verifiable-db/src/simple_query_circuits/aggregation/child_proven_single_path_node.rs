@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::simple_query_circuits::public_inputs::PublicInputs;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ChildProvenSinglePathNodeWires {
+pub struct ChildProvenSinglePathNodeWires<const MAX_NUM_RESULTS: usize> {
     value: UInt256Target,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     subtree_hash: HashOutTarget,
@@ -62,7 +62,7 @@ impl<const MAX_NUM_RESULTS: usize> ChildProvenSinglePathNodeCircuit<MAX_NUM_RESU
     pub fn build(
         b: &mut CBuilder,
         child_proof: &PublicInputs<Target, MAX_NUM_RESULTS>,
-    ) -> ChildProvenSinglePathNodeWires {
+    ) -> ChildProvenSinglePathNodeWires<MAX_NUM_RESULTS> {
         let is_rows_tree_node = b.add_virtual_bool_target_safe();
         let is_left_child = b.add_virtual_bool_target_unsafe();
         let value = b.add_virtual_u256();
@@ -144,7 +144,11 @@ impl<const MAX_NUM_RESULTS: usize> ChildProvenSinglePathNodeCircuit<MAX_NUM_RESU
         }
     }
 
-    fn assign(&self, pw: &mut PartialWitness<F>, wires: &ChildProvenSinglePathNodeWires) {
+    fn assign(
+        &self,
+        pw: &mut PartialWitness<F>,
+        wires: &ChildProvenSinglePathNodeWires<MAX_NUM_RESULTS>,
+    ) {
         pw.set_u256_target(&wires.value, self.value);
         pw.set_hash_target(wires.subtree_hash, self.subtree_hash);
         pw.set_hash_target(wires.sibling_hash, self.sibling_hash);
@@ -191,14 +195,9 @@ mod tests {
     use mp2_common::{poseidon::H, utils::ToFields, C, D};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        utils::{gen_random_field_hash, random_vector},
+        utils::gen_random_field_hash,
     };
-    use plonky2::{
-        field::types::{Field, Sample},
-        hash::hash_types::NUM_HASH_OUT_ELTS,
-        iop::witness::WitnessWrite,
-        plonk::config::Hasher,
-    };
+    use plonky2::{iop::witness::WitnessWrite, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
 
     const MAX_NUM_RESULTS: usize = 20;
@@ -210,7 +209,7 @@ mod tests {
     }
 
     impl<'a> UserCircuit<F, D> for TestChildProvenSinglePathNodeCircuit<'a> {
-        type Wires = (ChildProvenSinglePathNodeWires, Vec<Target>);
+        type Wires = (ChildProvenSinglePathNodeWires<MAX_NUM_RESULTS>, Vec<Target>);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let child_proof = b
