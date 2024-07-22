@@ -82,8 +82,9 @@ impl TableColumns {
                 .iter()
                 .enumerate()
                 .find(|(_, c)| c.identifier == identifier)
-                // here we don't put i+2 since only those values are in the cells tree
-                .map(|(i, _)| i)
+                // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
+                // but we put + 1 because sbbst starts at +1
+                .map(|(i, _)| i+1)
                 .expect("can't find index of identfier"),
         }
     }
