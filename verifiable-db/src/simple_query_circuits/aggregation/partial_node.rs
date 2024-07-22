@@ -87,6 +87,7 @@ impl<const MAX_NUM_RESULTS: usize> PartialNodeCircuit<MAX_NUM_RESULTS> {
     where
         [(); MAX_NUM_RESULTS - 1]:,
     {
+        let ttrue = b._true();
         let zero = b.zero();
 
         let [is_rows_tree_node, is_left_child] =
@@ -112,13 +113,12 @@ impl<const MAX_NUM_RESULTS: usize> PartialNodeCircuit<MAX_NUM_RESULTS> {
         // otherwise sibling_max < MIN_query.
         let is_greater_than_max = b.is_less_than_u256(&max_query, &sibling_min);
         let is_less_than_min = b.is_less_than_u256(&sibling_max, &min_query);
-        // is_left_child = is_left_child * is_greater_than_max
-        let is_out_of_range = b.and(is_left_child, is_greater_than_max);
-        b.connect(is_out_of_range.target, is_left_child.target);
-        // is_right_child = is_right_child * is_less_than_min
-        let is_right_child = b.not(is_left_child);
-        let is_out_of_range = b.and(is_right_child, is_less_than_min);
-        b.connect(is_out_of_range.target, is_right_child.target);
+        let is_out_of_range = b.select(
+            is_left_child,
+            is_greater_than_max.target,
+            is_less_than_min.target,
+        );
+        b.connect(is_out_of_range, ttrue.target);
 
         // Choose the column ID and node value to be hashed depending on which tree
         // the current node belongs to.
