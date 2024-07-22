@@ -80,7 +80,7 @@ impl TestCase {
         // correct shift.
         // 2 because 1 tx to deploy contract, another one to call it
         // TODO WARNING: this won't work with mappings, needs refactor somewhere
-        let indexing_genesis_block = ctx.block_number().await + 2;
+        let indexing_genesis_block = ctx.block_number().await + 1;
         let table_id = TableID::new(indexing_genesis_block, contract_address, &source.slots());
         // simply a mapping we need keep around to make sure we always give the right update to the
         // tree since it is not aware of the slots (this is blockchain specific info).
