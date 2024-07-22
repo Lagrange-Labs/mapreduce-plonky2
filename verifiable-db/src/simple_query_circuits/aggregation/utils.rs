@@ -47,7 +47,6 @@ pub(crate) fn constrain_input_proofs<const S: usize>(
     let is_less_than_min = b.is_less_than_u256(&index_value, &min_query);
     let is_greater_than_max = b.is_less_than_u256(&max_query, &index_value);
     let is_out_of_range = b.or(is_less_than_min, is_greater_than_max);
-    let is_out_of_range = b.or(is_out_of_range, is_rows_tree_node);
     let is_false = b.arithmetic(
         F::NEG_ONE,
         F::ONE,
