@@ -129,7 +129,8 @@ impl Table {
     fn construct_cell_tree(&mut self, cells: &CellCollection) -> MerkleCellTree {
         let mut cell_tree =
             MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap();
-        if cells.non_indexed_cells().unwrap_or_default().len() != 0 {
+        // the first time we actually create the cells tree, there is nothing
+        if !cells.non_indexed_cells().unwrap_or_default().is_empty() {
             let _ = cell_tree
                 .in_transaction(|t| {
                     // if there is no cell, this loop wont run
