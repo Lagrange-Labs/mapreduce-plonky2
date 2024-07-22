@@ -458,14 +458,23 @@ impl TestCase {
                 })
             })
             .collect::<Vec<_>>();
+        // it is a bit confusing to do this but the reason is
+        // * we need to give always the cells inside the row JSON with the secondary index first
+        // * in this case, it's an init, so all the cells need to be inserted and proven from
+        // scratch.
+        // * When constructing the row object, we will give this array and thus the secondary index
+        // needs to be first.
         let mut all_cells = vec![Cell {
             id: self.slots_to_id[&INDEX_SLOT],
             value: contract_update.value_at_slot(INDEX_SLOT).unwrap(),
             hash: Default::default(),
         }];
         all_cells.extend(rest_cells);
+        println!(" ALL THE CELLS -> INIT: {:?}", all_cells);
         let table_update = CellsUpdate {
             init: true,
+            // necessary to indicate to which row we want to apply the updates
+            // // necessary to indicate to which row we want to apply the updates
             row_key: RowTreeKey {
                 // s2 is the index in the formalism of this  single variable table
                 value: contract_update.s2,
