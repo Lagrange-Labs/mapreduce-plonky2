@@ -126,23 +126,22 @@ impl Table {
     // Function to call each time we need to build the index tree, i.e. for each row and
     // at each update for each row. Reason is we don't store it in memory since it's
     // very fast to recompute.
-    fn construct_cell_tree(
-        &mut self,
-        cells: &CellCollection,
-    ) -> (MerkleCellTree, UpdateTree<CellTreeKey>) {
+    fn construct_cell_tree(&mut self, cells: &CellCollection) -> MerkleCellTree {
         let mut cell_tree =
             MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap();
-        let ut = cell_tree
-            .in_transaction(|t| {
-                // if there is no cell, this loop wont run
-                for cell in cells.non_indexed_cells().unwrap_or_default() {
-                    let idx = self.columns.cells_tree_index_of(cell.id);
-                    t.store(idx, cell.to_owned())?;
-                }
-                Ok(())
-            })
-            .expect("can't update cell tree");
-        (cell_tree, ut)
+        if cells.non_indexed_cells().unwrap_or_default().len() != 0 {
+            let _ = cell_tree
+                .in_transaction(|t| {
+                    // if there is no cell, this loop wont run
+                    for cell in cells.non_indexed_cells().unwrap_or_default() {
+                        let idx = self.columns.cells_tree_index_of(cell.id);
+                        t.store(idx, cell.to_owned())?;
+                    }
+                    Ok(())
+                })
+                .expect("can't update cell tree");
+        }
+        cell_tree
     }
 
     // Call this function first on all the cells tree that change from one update to another
