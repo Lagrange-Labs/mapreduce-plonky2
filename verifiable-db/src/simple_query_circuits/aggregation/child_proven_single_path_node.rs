@@ -1,14 +1,15 @@
 use std::iter;
 
 use alloy::primitives::U256;
+use anyhow::Result;
 use mp2_common::{
     hash::hash_maybe_first,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{SelectHashBuilder, ToTargets},
-    F,
+    utils::ToTargets,
+    D, F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
@@ -16,7 +17,9 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
+    plonk::proof::ProofWithPublicInputsTarget,
 };
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::simple_query_circuits::public_inputs::PublicInputs;
@@ -149,6 +152,32 @@ impl<const MAX_NUM_RESULTS: usize> ChildProvenSinglePathNodeCircuit<MAX_NUM_RESU
         pw.set_u256_target(&wires.unproven_min, self.unproven_min);
         pw.set_u256_target(&wires.unproven_max, self.unproven_max);
         pw.set_bool_target(wires.is_rows_tree_node, self.is_rows_tree_node);
+    }
+}
+
+pub(crate) const NUM_VERIFIED_PROOFS: usize = 1;
+
+impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
+    for ChildProvenSinglePathNodeWires<MAX_NUM_RESULTS>
+{
+    type CircuitBuilderParams = ();
+    type Inputs = ChildProvenSinglePathNodeCircuit<MAX_NUM_RESULTS>;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F, MAX_NUM_RESULTS>::total_len();
+
+    fn circuit_logic(
+        builder: &mut CBuilder,
+        verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_VERIFIED_PROOFS],
+        _builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        let child_proof = PublicInputs::from_slice(&verified_proofs[0].public_inputs);
+
+        Self::Inputs::build(builder, &child_proof)
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
     }
 }
 
