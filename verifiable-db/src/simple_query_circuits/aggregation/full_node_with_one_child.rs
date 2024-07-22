@@ -66,7 +66,8 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
         let zero = b.zero();
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
-        let [is_rows_tree_node, is_left_child] = [0; 2].map(|_| b.add_virtual_bool_target_safe());
+        let is_rows_tree_node = b.add_virtual_bool_target_safe();
+        let is_left_child = b.add_virtual_bool_target_unsafe();
         let [min_query, max_query] = [0; 2].map(|_| b.add_virtual_u256_unsafe());
 
         // Check the consistency for the subtree proof and child proof.
