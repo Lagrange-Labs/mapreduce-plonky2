@@ -298,11 +298,9 @@ mod tests {
     use mp2_common::{poseidon::H, utils::ToFields, C};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
+        utils::{gen_random_field_hash, random_vector},
     };
-    use plonky2::{
-        hash::hash_types::NUM_HASH_OUT_ELTS, iop::witness::WitnessWrite, plonk::config::Hasher,
-    };
+    use plonky2::{iop::witness::WitnessWrite, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
     use std::array;
 
@@ -345,9 +343,8 @@ mod tests {
         let min_query = U256::from(100);
         let max_query = U256::from(200);
 
-        let [sibling_tree_hash, sibling_child_hash1, sibling_child_hash2] = array::from_fn(|_| {
-            HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields())
-        });
+        let [sibling_tree_hash, sibling_child_hash1, sibling_child_hash2] =
+            array::from_fn(|_| gen_random_field_hash());
 
         let mut rng = thread_rng();
         let sibling_value = U256::from_limbs(rng.gen());
