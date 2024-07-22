@@ -267,23 +267,21 @@ mod tests {
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
         let [mut subtree_proof, mut left_child_proof, mut right_child_proof] =
             random_aggregation_public_inputs(&ops);
-        unify_subtree_proof(
+        unify_subtree_proof::<MAX_NUM_RESULTS>(
             &mut subtree_proof,
             is_rows_tree_node,
             min_query,
             max_query,
-            &ops,
         );
         let subtree_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
         [&mut left_child_proof, &mut right_child_proof]
             .iter_mut()
             .for_each(|p| {
-                unify_child_proof(
+                unify_child_proof::<MAX_NUM_RESULTS>(
                     p,
                     is_rows_tree_node,
                     min_query,
                     max_query,
-                    &ops,
                     &subtree_pi,
                 )
             });

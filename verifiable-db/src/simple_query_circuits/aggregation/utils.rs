@@ -109,7 +109,6 @@ pub(crate) mod tests {
         is_rows_tree_node: bool,
         min_query: U256,
         max_query: U256,
-        ops: &[F; S],
     ) {
         let [index_value_range, min_query_range, max_query_range] = [
             QueryPublicInputs::IndexValue,
@@ -135,7 +134,6 @@ pub(crate) mod tests {
         is_rows_tree_node: bool,
         min_query: U256,
         max_query: U256,
-        ops: &[F; S],
         subtree_pi: &PublicInputs<F, S>,
     ) {
         let [index_value_range, min_query_range, max_query_range] = [

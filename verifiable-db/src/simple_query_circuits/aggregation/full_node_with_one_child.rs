@@ -269,20 +269,18 @@ mod tests {
         // Generate the input proofs.
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
         let [mut subtree_proof, mut child_proof] = random_aggregation_public_inputs(&ops);
-        unify_subtree_proof(
+        unify_subtree_proof::<MAX_NUM_RESULTS>(
             &mut subtree_proof,
             is_rows_tree_node,
             min_query,
             max_query,
-            &ops,
         );
         let subtree_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
-        unify_child_proof(
+        unify_child_proof::<MAX_NUM_RESULTS>(
             &mut child_proof,
             is_rows_tree_node,
             min_query,
             max_query,
-            &ops,
             &subtree_pi,
         );
         let child_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&child_proof);

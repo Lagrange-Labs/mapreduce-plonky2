@@ -181,7 +181,7 @@ mod tests {
         // Generate the subtree proof.
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
         let [mut subtree_proof] = random_aggregation_public_inputs(&ops);
-        unify_subtree_proof(&mut subtree_proof, false, min_query, max_query, &ops);
+        unify_subtree_proof::<MAX_NUM_RESULTS>(&mut subtree_proof, false, min_query, max_query);
         let subtree_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
 
         let index_value = subtree_pi.index_value();
