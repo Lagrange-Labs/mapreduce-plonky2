@@ -56,8 +56,8 @@ where
     let mut sum_overflow = zero;
     let mut sum_value = proof0.value_target_at_index(i);
     if i == 0 {
-        // If it's the first proof and the operation is ID,
-        // the value is a curve point not a Uint256.
+        // If it's the first proof and the operation is ID, the value is a curve point,
+        // which each field may be out of range of an Uint32 (to combine an Uint256).
         sum_value = b.select_u256(is_op_id, &u256_zero, &sum_value);
     }
     let mut min_value = sum_value.clone();
@@ -66,8 +66,8 @@ where
         // Get the current proof value.
         let mut value = p.value_target_at_index(i);
         if i == 0 {
-            // If it's the first proof and the operation is ID,
-            // the value is a curve point not a Uint256.
+            // If it's the first proof and the operation is ID, the value is a curve point,
+            // which each field may be out of range of an Uint32 (to combine an Uint256).
             value = b.select_u256(is_op_id, &u256_zero, &value);
         };
 
