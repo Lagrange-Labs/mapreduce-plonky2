@@ -18,7 +18,6 @@ use mp2_common::{
 };
 use plonky2::{
     field::types::Field,
-    gadgets::arithmetic,
     hash::{
         hash_types::{HashOut, HashOutTarget},
         hashing::hash_n_to_hash_no_pad,
@@ -94,7 +93,7 @@ impl BasicOperation {
         let mut results = Vec::with_capacity(operations.len());
         let mut arithmetic_error = false;
         let num_columns = column_values.len();
-        for (i, op) in operations.into_iter().enumerate() {
+        for (i, op) in operations.iter().enumerate() {
             let get_input_value = |operand| {
                 Ok(match operand {
                     &InputOperand::Placeholder(p) => match placeholder_values.get(&p) {
@@ -118,14 +117,10 @@ impl BasicOperation {
                 })
             };
             let first_input = get_input_value(&op.first_operand)?;
-            let second_input = op
-                .second_operand
-                .as_ref()
-                .map(|operand| get_input_value(operand))
-                .unwrap_or(
-                    // op.second_operand = None means it's a unary operation, so we can choose a dummy input value
-                    Ok(U256::ZERO),
-                )?;
+            let second_input = op.second_operand.as_ref().map(get_input_value).unwrap_or(
+                // op.second_operand = None means it's a unary operation, so we can choose a dummy input value
+                Ok(U256::ZERO),
+            )?;
             let result = match op.op {
                 Operation::AddOp => {
                     let (res, overflow) = first_input.overflowing_add(second_input);
@@ -378,13 +373,13 @@ where
             "number of columns is higher than the maximum value allowed"
         );
         let padded_column_values = column_values
-            .into_iter()
+            .iter()
             .chain(repeat(&U256::ZERO))
             .take(MAX_NUM_COLUMNS)
             .cloned()
             .collect_vec();
         let padded_column_ids = column_ids
-            .into_iter()
+            .iter()
             .chain(repeat(&F::NEG_ONE))
             .take(MAX_NUM_COLUMNS)
             .cloned()
@@ -410,7 +405,7 @@ where
             result_operations,
             placeholder_values,
         )?;
-        let selectors = output_items.into_iter().enumerate().map(|(i, item)| {
+        let selectors = output_items.iter().enumerate().map(|(i, item)| {
             Ok(
                 match item {
                     &OutputItem::Column(index) => {
@@ -616,7 +611,7 @@ where
         );
         PublicInputs::<Target, MAX_NUM_RESULTS>::new(
             &tree_hash.to_targets(),
-            &output_values.as_slice(),
+            output_values.as_slice(),
             &[predicate_value.target],
             output_component_wires.ops_ids(),
             &index_value.to_targets(),
@@ -679,10 +674,9 @@ where
     ) -> Result<HashOut<F>> {
         let mut cache = ComputationalHashCache::<MAX_NUM_COLUMNS>::new();
         let predicate_ops_hash =
-            Operation::operation_hash(&predicate_operations, column_ids, &mut cache)?;
+            Operation::operation_hash(predicate_operations, column_ids, &mut cache)?;
         let predicate_hash = predicate_ops_hash.last().unwrap();
-        let result_ops_hash =
-            Operation::operation_hash(&result_operations, column_ids, &mut cache)?;
+        let result_ops_hash = Operation::operation_hash(result_operations, column_ids, &mut cache)?;
         T::output_variant().output_hash(
             predicate_hash,
             &mut cache,
@@ -733,7 +727,7 @@ where
         placeholder_values: &HashMap<PlaceholderId, U256>,
     ) -> Result<[BasicOperationInputs; MAX_NUM_OPS]> {
         let default_placeholder = placeholder_values
-            .into_iter()
+            .iter()
             .next()
             .map(|(id, value)| Placeholder {
                 id: *id,
@@ -745,7 +739,7 @@ where
         // at the end of these functions in the last slots among the `MAX_NUM_OPS` available, as expected
         // by the circuit
         let start_actual_ops = MAX_NUM_COLUMNS + MAX_NUM_OPS - operations.len();
-        let ops_wires = operations.into_iter().enumerate().map(|(i, op)| {
+        let ops_wires = operations.iter().enumerate().map(|(i, op)| {
             let mut constant_operand = U256::ZERO;
             // the number of input values provided to the basic operation component 
             // computing the current predicate operation
@@ -839,7 +833,7 @@ where
             },
         )
         .take(MAX_NUM_OPS - operations.len())
-        .chain(ops_wires.into_iter())
+        .chain(ops_wires)
         .collect_vec()
         .try_into()
         .unwrap())

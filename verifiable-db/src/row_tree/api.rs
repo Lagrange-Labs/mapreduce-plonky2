@@ -8,8 +8,6 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::cells_tree;
-
 use super::{
     full_node::{self, FullNodeCircuit},
     leaf::{self, LeafCircuit},
@@ -226,7 +224,7 @@ pub fn extract_hash_from_proof(proof: &[u8]) -> Result<HashOut<F>> {
 
 #[cfg(test)]
 mod test {
-    use crate::row_tree::public_inputs::PublicInputs;
+    use crate::{cells_tree, row_tree::public_inputs::PublicInputs};
 
     use super::*;
     use mp2_common::{

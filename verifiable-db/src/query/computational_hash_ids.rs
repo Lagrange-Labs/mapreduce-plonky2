@@ -15,7 +15,7 @@ use mp2_common::{
     CHasher, F,
 };
 use plonky2::{
-    field::types::{Field, PrimeField64},
+    field::types::Field,
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField},
         hashing::hash_n_to_hash_no_pad,
@@ -221,7 +221,7 @@ impl Operation {
             compute_operand_hash(&InputOperand::default())
         }?;
         let op_identifier =
-            F::from_canonical_usize(Identifiers::Operations(operation.op.clone()).position());
+            F::from_canonical_usize(Identifiers::Operations(operation.op).position());
         Ok(hash_n_to_hash_no_pad::<_, HashPermutation>(
             &once(op_identifier)
                 .chain(first_hash.to_vec())
@@ -346,7 +346,7 @@ impl Output {
                         .to_vec()
                         .into_iter()
                         .chain(once(output_ids[i]))
-                        .chain(output_hash.to_vec().into_iter())
+                        .chain(output_hash.to_vec())
                         .collect_vec(),
                 ))
         })

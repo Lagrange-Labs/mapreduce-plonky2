@@ -1,7 +1,4 @@
-use std::{
-    array,
-    iter::{once, repeat},
-};
+use std::{array, iter::repeat};
 
 use alloy::primitives::U256;
 use itertools::Itertools;
@@ -12,10 +9,9 @@ use mp2_common::{
     },
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
-    D, F,
+    F,
 };
 use plonky2::{
-    field::types::Field,
     hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
@@ -24,7 +20,7 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::query::computational_hash_ids::{AggregationOperation, Identifiers, Output};
+use crate::query::computational_hash_ids::{AggregationOperation, Output};
 
 use super::universal_query_circuit::{OutputComponent, OutputComponentWires};
 
@@ -133,7 +129,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
         let possible_output_values = column_values
             .iter()
             .cloned()
-            .chain(item_values.into_iter())
+            .chain(item_values)
             .collect_vec();
 
         for i in 0..MAX_NUM_RESULTS {
@@ -188,13 +184,13 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
         ensure!(ids.len() == num_outputs,
             "Output component with aggregation: Number of aggregation operations different from number of actual outputs");
         let selectors = selector
-            .into_iter()
+            .iter()
             .chain(repeat(&F::default()))
             .take(MAX_NUM_RESULTS)
             .cloned()
             .collect_vec();
         let agg_ops = ids
-            .into_iter()
+            .iter()
             .chain(repeat(&AggregationOperation::default().to_field()))
             .take(MAX_NUM_RESULTS)
             .cloned()

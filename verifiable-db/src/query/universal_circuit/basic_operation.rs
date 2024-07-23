@@ -93,7 +93,7 @@ impl BasicOperationInputs {
         let constant_operand = &additional_operands[0];
         let placeholder_values = &additional_operands[1..];
         let possible_input_values = input_values
-            .into_iter()
+            .iter()
             .chain(additional_operands.iter())
             .cloned()
             .collect_vec();

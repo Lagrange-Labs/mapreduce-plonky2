@@ -4,17 +4,15 @@ use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     group_hashing::CircuitBuilderGroupHashing,
-    poseidon::empty_poseidon_hash,
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
-    utils::{SelectHashBuilder, ToTargets},
-    CHasher, F,
+    utils::ToTargets,
+    F,
 };
 use plonky2::{
-    field::types::Field,
     hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
@@ -105,7 +103,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
     }
 
     fn other_output_values(&self) -> &[UInt256Target] {
-        &self.output_values.as_slice()
+        self.output_values.as_slice()
     }
 
     fn computational_hash(&self) -> HashOutTarget {
@@ -229,13 +227,13 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
         ensure!(ids.len() == num_outputs,
             "Output component without aggregation: Number of output ids different from number of actual outputs");
         let selectors = selector
-            .into_iter()
+            .iter()
             .chain(repeat(&F::default()))
             .take(MAX_NUM_RESULTS)
             .cloned()
             .collect_vec();
         let output_ids = ids
-            .into_iter()
+            .iter()
             .chain(repeat(&F::default()))
             .take(MAX_NUM_RESULTS)
             .cloned()
