@@ -217,11 +217,12 @@ impl TrieNode {
         let pproof = ProofWithVK::deserialize(&proof).unwrap();
         let pi = mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
         let list: Vec<Vec<u8>> = rlp::decode_list(&node);
+        let value: Vec<u8> = rlp::decode(&list[1]).unwrap();
         println!(
             "[+] [+] SLOT {:?} identifier {:?} -> value {:?} value.digest() = {:?}",
             slot.slot(),
             identifier_single_var_column(slot.slot(), &Address::new(thread_rng().gen())),
-            left_pad32(&list[1]),
+            left_pad32(&value),
             pi.values_digest()
         );
         proof
