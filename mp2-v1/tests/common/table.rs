@@ -189,7 +189,7 @@ impl Table {
             })
             .expect("can't apply cells update");
         Ok(CellsUpdateResult {
-            key: update.row_key.clone(),
+            row_key: update.row_key.clone(),
             to_update: cell_update,
             latest: cell_tree,
         })
@@ -273,7 +273,7 @@ pub struct CellsUpdate {
 // For example one needs to setup the location of the proof, the root hash of the new cells tree.
 // Once that is done, one can call `apply_row_update`
 pub struct CellsUpdateResult {
-    pub key: RowTreeKey,
+    pub row_key: RowTreeKey,
     // give the tree here since we don't really store it so it's easier down the line to pass it
     // around
     pub latest: MerkleCellTree,

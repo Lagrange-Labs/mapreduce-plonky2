@@ -4,7 +4,8 @@ use std::{
 };
 
 use super::{
-    context::TestContextConfig, index_tree::IndexTree, mkdir_all, rowtree::RowTree, table::TableID,
+    context::TestContextConfig, index_tree::IndexTree, mkdir_all, rowtree::RowTreeKey,
+    table::TableID,
 };
 use alloy::primitives::Address;
 use anyhow::{bail, Context, Result};
@@ -15,26 +16,27 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 type CellTreeKey = <CellTree as TreeTopology>::Key;
-type RowTreeKey = <RowTree as TreeTopology>::Key;
 type IndexTreeKey = <IndexTree as TreeTopology>::Key;
 
 type ContractKey = (Address, BlockPrimaryIndex);
 
-/// This is the identifier we are storing proof in storage under. This identifier needs
+/// This is the identifier we store cells tree proof under in storage. This identifier
+/// is only unique per row tree key (i.e. secondary index value).
+/// WARNING: Therefore, if we create a new cell proof for the same row, i.e. when that cell value
+/// changed, the proof will be overwritten in the storage. This is something "ok" for this
+/// integrated test but needs to be carefully evaluated when running into production.
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub(crate) struct CellProofIdentifier {
+    pub(crate) table: TableID,
+    pub(crate) secondary: RowTreeKey,
+    pub(crate) tree_key: CellTreeKey,
+}
+
+/// This is the identifier we are storing row tree proof in storage under. This identifier needs
 /// to be unique accross all tables and all blocks. Remember the identifier that the tree uses
 /// is not global, so two nodes in the row tree with different value could have the same tree
 /// identifier since they are not shared, they are isolated trees.
 /// TODO: make it nice with lifetimes, and easier constructor
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub(crate) struct CellProofIdentifier<PrimaryIndex>
-where
-    PrimaryIndex: std::hash::Hash + PartialEq + Eq,
-{
-    pub(crate) table: TableID,
-    pub(crate) primary: PrimaryIndex,
-    pub(crate) tree_key: CellTreeKey,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub(crate) struct RowProofIdentifier<PrimaryIndex>
 where
@@ -60,7 +62,7 @@ pub(crate) type BlockPrimaryIndex = <sbbst::Tree as TreeTopology>::Key;
 /// Uniquely identifies a proof in the proof storage backend.
 #[derive(Clone, PartialEq, Eq)]
 pub enum ProofKey {
-    Cell(CellProofIdentifier<BlockPrimaryIndex>),
+    Cell(CellProofIdentifier),
     Row(RowProofIdentifier<BlockPrimaryIndex>),
     Index(IndexProofIdentifier<BlockPrimaryIndex>),
     FinalExtraction((TableID, BlockPrimaryIndex)),

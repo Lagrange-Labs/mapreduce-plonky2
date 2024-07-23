@@ -31,7 +31,7 @@ use super::{
     proof_storage::{
         BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier,
     },
-    table::{RowUpdateResult, Table, TableID},
+    table::{RowUpdateResult, Table},
     TestContext,
 };
 use derive_more::{From, Into};
@@ -135,7 +135,7 @@ pub struct RowPayload {
     pub cells: CellCollection,
     /// Storing the full identifier of the cells proof of the root of the cells tree.
     /// Note this identifier can refer to a proof for older blocks if the cells tree didn't change
-    pub cell_tree_root_proof_id: CellProofIdentifier<BlockPrimaryIndex>,
+    pub cell_tree_root_proof_id: CellProofIdentifier,
     /// Storing the hash of the root of the cells tree. Once could get it as well from the proof
     /// but it requires loading the proof, so when building the hashing structure it's best
     /// to keep it at hand directly.

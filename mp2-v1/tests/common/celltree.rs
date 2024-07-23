@@ -33,7 +33,7 @@ use crate::common::{cell_tree_proof_to_hash, TestContext};
 
 use super::{
     proof_storage::{BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage},
-    rowtree::{CellCollection, RowPayload},
+    rowtree::{CellCollection, RowPayload, RowTree, RowTreeKey},
     table::{CellsUpdateResult, Table, TableID},
 };
 
@@ -102,15 +102,13 @@ impl NodePayload for TreeCell {
 impl<P: ProofStorage> TestContext<P> {
     /// Given a [`MerkleCellTree`], recursively prove its hash and returns the storage key
     /// associated to the root proof
-    async fn prove_cell_tree(
+    fn prove_cell_tree(
         &mut self,
+        row_key: RowTreeKey,
         table_id: &TableID,
         tree: MerkleCellTree,
         ut: UpdateTree<CellTreeKey>,
-    ) -> CellProofIdentifier<BlockPrimaryIndex> {
-        // THIS can panic but for block number it should be fine on 64bit platforms...
-        // unwrap is safe since we know it is really a block number and not set to Latest or stg
-        let block_key = self.block_number().await as BlockPrimaryIndex;
+    ) -> CellProofIdentifier {
         // Store the proofs here for the tests; will probably be done in S3 for
         // prod.
         let mut workplan = ut.into_workplan();
@@ -130,7 +128,7 @@ impl<P: ProofStorage> TestContext<P> {
                 // Prove a partial node
                 let proof_key = CellProofIdentifier {
                     table: table_id.clone(),
-                    primary: block_key,
+                    secondary: row_key.clone(),
                     tree_key: context.left.unwrap(),
                 };
                 let left_proof = self
@@ -148,12 +146,12 @@ impl<P: ProofStorage> TestContext<P> {
                 // Prove a full node.
                 let left_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
-                    primary: block_key,
+                    secondary: row_key.clone(),
                     tree_key: context.left.unwrap(),
                 };
                 let right_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
-                    primary: block_key,
+                    secondary: row_key.clone(),
                     tree_key: context.right.unwrap(),
                 };
 
@@ -175,7 +173,7 @@ impl<P: ProofStorage> TestContext<P> {
             };
             let generated_proof_key = CellProofIdentifier {
                 table: table_id.clone(),
-                primary: block_key,
+                secondary: row_key.clone(),
                 tree_key: k,
             };
 
@@ -198,7 +196,7 @@ impl<P: ProofStorage> TestContext<P> {
         let root = tree.root().unwrap();
         let root_proof_key = CellProofIdentifier {
             table: table_id.clone(),
-            primary: block_key,
+            secondary: row_key.clone(),
             tree_key: root,
         };
 
@@ -221,9 +219,12 @@ impl<P: ProofStorage> TestContext<P> {
         cells_update: CellsUpdateResult,
     ) -> RowPayload {
         let tree_hash = cells_update.latest.root_data().unwrap().hash;
-        let root_key = self
-            .prove_cell_tree(&table.id, cells_update.latest, cells_update.to_update)
-            .await;
+        let root_key = self.prove_cell_tree(
+            cells_update.row_key,
+            &table.id,
+            cells_update.latest,
+            cells_update.to_update,
+        );
         let cell_root_proof = self
             .storage
             .get_proof(&ProofKey::Cell(root_key.clone()))
