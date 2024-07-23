@@ -127,7 +127,6 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
 
         let u256_zero = b.zero_u256();
         let curve_zero = b.curve_zero();
-        let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
         // Initialize the input wires.
         let input_wires = InputWires {
@@ -364,7 +363,6 @@ mod tests {
         ) -> Self {
             let u256_zero = U256::ZERO;
             let curve_zero = Point::NEUTRAL;
-            let empty_hash = empty_poseidon_hash();
             let selectors = c
                 .selector
                 .iter()
