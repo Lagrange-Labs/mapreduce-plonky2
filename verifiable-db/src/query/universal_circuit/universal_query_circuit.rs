@@ -487,8 +487,8 @@ where
         let tree_hash = b.select_hash(is_leaf, &leaf_hash, &column_extraction_wires.tree_hash);
         // ensure that the value of second indexed column for the current record is in
         // the range specified by the query
-        let min_query = b.add_virtual_u256();
-        let max_query = b.add_virtual_u256();
+        let min_query = b.add_virtual_u256_unsafe();
+        let max_query = b.add_virtual_u256_unsafe();
         let less_than_max = b.is_less_or_equal_than_u256(node_max, &max_query);
         let greater_than_min = b.is_less_or_equal_than_u256(&min_query, node_min);
         b.connect(less_than_max.target, _true.target);
@@ -1551,7 +1551,7 @@ mod tests {
     }
 
     #[test]
-    fn test_query_with_aggregation_single_output() {
+    fn test_query_without_aggregation_single_output() {
         query_without_aggregation(true)
     }
 

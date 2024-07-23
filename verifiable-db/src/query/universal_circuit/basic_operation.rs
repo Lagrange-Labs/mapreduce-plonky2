@@ -87,7 +87,9 @@ impl BasicOperationInputs {
         num_overflows: Target,
     ) -> BasicOperationWires {
         let zero = b.zero();
-        let additional_operands = b.add_virtual_u256_arr::<3>();
+        let additional_operands = [0;3].map(|_|
+            b.add_virtual_u256_unsafe() // should be ok to use `unsafe` here since these values are directly hashed in computational hash or in placeholder hash
+        );
         let constant_operand = &additional_operands[0];
         let placeholder_values = &additional_operands[1..];
         let possible_input_values = input_values
@@ -659,7 +661,7 @@ mod tests {
             num_overflows,
         );
         // Change expected cost if there were changes to `BasicOperationInputs::build` that affect the cost
-        let expected_cost = 78;
+        let expected_cost = 74;
         assert_eq!(b.num_gates() - num_gates_pre_build, expected_cost);
     }
 }

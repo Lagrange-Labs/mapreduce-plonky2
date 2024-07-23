@@ -73,7 +73,7 @@ impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
     pub(crate) fn build(b: &mut CBuilder) -> ColumnExtractionWires<MAX_NUM_COLUMNS> {
         // Initialize the input wires.
         let input_wires = ColumnExtractionInputWires {
-            column_values: b.add_virtual_u256_arr(),
+            column_values: [0; MAX_NUM_COLUMNS].map(|_| b.add_virtual_u256_unsafe()), // should be ok to use unsafe since these values are directly hashed to compute tree hash
             column_ids: b.add_virtual_target_arr(),
             is_real_column: [0; MAX_NUM_COLUMNS].map(|_| b.add_virtual_bool_target_safe()),
         };
