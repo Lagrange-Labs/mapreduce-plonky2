@@ -214,18 +214,16 @@ impl TrieNode {
 
         // Generate the proof.
         let proof = generate_proof(ctx.params, input).unwrap();
-        {
-            let pproof = ProofWithVK::deserialize(&proof).unwrap();
-            let pi = mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
-            let list: Vec<Vec<u8>> = rlp::decode_list(&node);
-            println!(
-                "[+] [+] SLOT {:?} identifier {:?} -> value {:?} value.digest() = {:?}",
-                slot.slot(),
-                identifier_single_var_column(slot.slot(), &Address::new(thread_rng().gen())),
-                left_pad32(&list[1]),
-                pi.values_digest()
-            );
-        }
+        let pproof = ProofWithVK::deserialize(&proof).unwrap();
+        let pi = mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
+        let list: Vec<Vec<u8>> = rlp::decode_list(&node);
+        println!(
+            "[+] [+] SLOT {:?} identifier {:?} -> value {:?} value.digest() = {:?}",
+            slot.slot(),
+            identifier_single_var_column(slot.slot(), &Address::new(thread_rng().gen())),
+            left_pad32(&list[1]),
+            pi.values_digest()
+        );
         proof
     }
 
