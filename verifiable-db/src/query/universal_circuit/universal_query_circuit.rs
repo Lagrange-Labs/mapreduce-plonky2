@@ -853,7 +853,11 @@ mod tests {
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
-        array::ToField, group_hashing::map_to_curve_point, poseidon::empty_poseidon_hash, utils::{FromFields, ToFields}, C, D, F
+        array::ToField,
+        group_hashing::map_to_curve_point,
+        poseidon::empty_poseidon_hash,
+        utils::{FromFields, ToFields},
+        C, D, F,
     };
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},
@@ -874,14 +878,14 @@ mod tests {
         computational_hash_ids::{AggregationOperation, HashPermutation, Operation, Output},
         public_inputs::PublicInputs,
         universal_circuit::{
-            output_with_aggregation::Circuit as AggOutputCircuit,
             output_no_aggregation::Circuit as NoAggOutputCircuit,
+            output_with_aggregation::Circuit as AggOutputCircuit,
             universal_query_circuit::{BasicOperation, InputOperand, OutputItem, Placeholder},
             COLUMN_INDEX_NUM,
         },
     };
 
-    use anyhow::{Result, Error};
+    use anyhow::{Error, Result};
 
     use super::{OutputComponent, UniversalQueryCircuitInputs, UniversalQueryCircuitWires};
 
@@ -924,9 +928,11 @@ mod tests {
         previous_ops: &[BasicOperation],
         op: &BasicOperation,
     ) -> Result<usize> {
-        previous_ops.into_iter().find_position(|current_op|
-            *current_op == op
-        ).map(|(pos, _)| pos).ok_or(Error::msg("operation {} not found in set of previous ops"))
+        previous_ops
+            .into_iter()
+            .find_position(|current_op| *current_op == op)
+            .map(|(pos, _)| pos)
+            .ok_or(Error::msg("operation {} not found in set of previous ops"))
     }
 
     // test the following query:
@@ -991,10 +997,10 @@ mod tests {
         // C1*C3 <= C4 + C5
         let expr_comparison = BasicOperation {
             first_operand: InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &column_prod).unwrap()
+                locate_previous_operation(&predicate_operations, &column_prod).unwrap(),
             ),
             second_operand: Some(InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &column_add).unwrap()
+                locate_previous_operation(&predicate_operations, &column_add).unwrap(),
             )),
             op: Operation::LessThanOrEqOp,
         };
@@ -1009,10 +1015,10 @@ mod tests {
         // c5_comparison AND expr_comparison
         let and_comparisons = BasicOperation {
             first_operand: InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &c5_comparison).unwrap()
+                locate_previous_operation(&predicate_operations, &c5_comparison).unwrap(),
             ),
             second_operand: Some(InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &expr_comparison).unwrap()
+                locate_previous_operation(&predicate_operations, &expr_comparison).unwrap(),
             )),
             op: Operation::AndOp,
         };
@@ -1020,10 +1026,10 @@ mod tests {
         // final filtering predicate: and_comparisons OR placeholder_eq
         let predicate = BasicOperation {
             first_operand: InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &and_comparisons).unwrap()
+                locate_previous_operation(&predicate_operations, &and_comparisons).unwrap(),
             ),
             second_operand: Some(InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &placeholder_eq).unwrap()
+                locate_previous_operation(&predicate_operations, &placeholder_eq).unwrap(),
             )),
             op: Operation::OrOp,
         };
@@ -1047,10 +1053,10 @@ mod tests {
         // C1 + C2/(C2*C3)
         let div = BasicOperation {
             first_operand: InputOperand::PreviousValue(
-                locate_previous_operation(&result_operations, &column_add).unwrap()
+                locate_previous_operation(&result_operations, &column_add).unwrap(),
             ),
             second_operand: Some(InputOperand::PreviousValue(
-                locate_previous_operation(&result_operations, &column_prod).unwrap()
+                locate_previous_operation(&result_operations, &column_prod).unwrap(),
             )),
             op: Operation::DivOp,
         };
@@ -1074,17 +1080,15 @@ mod tests {
         // output items are all computed values in this query, expect for the last item
         // which is a column
         let output_items = vec![
+            OutputItem::ComputedValue(locate_previous_operation(&result_operations, &div).unwrap()),
             OutputItem::ComputedValue(
-                locate_previous_operation(&result_operations, &div).unwrap()
+                locate_previous_operation(&result_operations, &column_add).unwrap(),
             ),
             OutputItem::ComputedValue(
-                locate_previous_operation(&result_operations, &column_add).unwrap()
+                locate_previous_operation(&result_operations, &column_placeholder).unwrap(),
             ),
             OutputItem::ComputedValue(
-                locate_previous_operation(&result_operations, &column_placeholder).unwrap()
-            ),
-            OutputItem::ComputedValue(
-                locate_previous_operation(&result_operations, &column_sub_const).unwrap()
+                locate_previous_operation(&result_operations, &column_sub_const).unwrap(),
             ),
             OutputItem::Column(4),
         ];
@@ -1216,10 +1220,8 @@ mod tests {
     }
 
     // test the following query:
-    // SELECT C1 < C2/45, C3*C4, C7, (C5-C6)%C1, C3*C4 - $1 FROM T WHERE ((NOT C5 != 42) OR C1*C7 <= C4/C6+C5 XOR C3 < $2) AND C2 > 42 AND C2 < 44 
-    fn query_without_aggregation(
-        single_result: bool,
-    ) {
+    // SELECT C1 < C2/45, C3*C4, C7, (C5-C6)%C1, C3*C4 - $1 FROM T WHERE ((NOT C5 != 42) OR C1*C7 <= C4/C6+C5 XOR C3 < $2) AND C2 > 42 AND C2 < 44
+    fn query_without_aggregation(single_result: bool) {
         init_logging();
         const NUM_ACTUAL_COLUMNS: usize = 7;
         const MAX_NUM_COLUMNS: usize = 30;
@@ -1278,7 +1280,7 @@ mod tests {
         // C4/C6 + C5
         let expr_add = BasicOperation {
             first_operand: InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &column_div).unwrap()
+                locate_previous_operation(&predicate_operations, &column_div).unwrap(),
             ),
             second_operand: Some(InputOperand::Column(4)),
             op: Operation::AddOp,
@@ -1287,10 +1289,10 @@ mod tests {
         // C1*C7 <= C4/C6 + C5
         let expr_comparison = BasicOperation {
             first_operand: InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &column_prod).unwrap() 
+                locate_previous_operation(&predicate_operations, &column_prod).unwrap(),
             ),
             second_operand: Some(InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &expr_add).unwrap()
+                locate_previous_operation(&predicate_operations, &expr_add).unwrap(),
             )),
             op: Operation::LessThanOrEqOp,
         };
@@ -1305,7 +1307,7 @@ mod tests {
         predicate_operations.push(placeholder_cmp.clone());
         let not_c5 = BasicOperation {
             first_operand: InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &c5_comparison).unwrap()
+                locate_previous_operation(&predicate_operations, &c5_comparison).unwrap(),
             ),
             second_operand: None,
             op: Operation::NotOp,
@@ -1314,10 +1316,10 @@ mod tests {
         // NOT c5_comparison OR expr_comparison
         let or_comparisons = BasicOperation {
             first_operand: InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &not_c5).unwrap()
+                locate_previous_operation(&predicate_operations, &not_c5).unwrap(),
             ),
             second_operand: Some(InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &expr_comparison).unwrap()
+                locate_previous_operation(&predicate_operations, &expr_comparison).unwrap(),
             )),
             op: Operation::OrOp,
         };
@@ -1325,10 +1327,10 @@ mod tests {
         // final filtering predicate: or_comparisons XOR placeholder_cmp
         let predicate = BasicOperation {
             first_operand: InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &or_comparisons).unwrap()
+                locate_previous_operation(&predicate_operations, &or_comparisons).unwrap(),
             ),
             second_operand: Some(InputOperand::PreviousValue(
-                locate_previous_operation(&predicate_operations, &placeholder_cmp).unwrap()
+                locate_previous_operation(&predicate_operations, &placeholder_cmp).unwrap(),
             )),
             op: Operation::XorOp,
         };
@@ -1346,7 +1348,7 @@ mod tests {
         let column_cmp = BasicOperation {
             first_operand: InputOperand::Column(0),
             second_operand: Some(InputOperand::PreviousValue(
-                locate_previous_operation(&result_operations, &div_const).unwrap()
+                locate_previous_operation(&result_operations, &div_const).unwrap(),
             )),
             op: Operation::LessThanOp,
         };
@@ -1368,7 +1370,7 @@ mod tests {
         // (C5 - C6) % C1
         let column_mod = BasicOperation {
             first_operand: InputOperand::PreviousValue(
-                locate_previous_operation(&result_operations, &column_sub).unwrap()
+                locate_previous_operation(&result_operations, &column_sub).unwrap(),
             ),
             second_operand: Some(InputOperand::Column(0)),
             op: Operation::AddOp,
@@ -1377,7 +1379,7 @@ mod tests {
         // C3*C4 - $1
         let sub_placeholder = BasicOperation {
             first_operand: InputOperand::PreviousValue(
-                locate_previous_operation(&result_operations, &column_prod).unwrap()
+                locate_previous_operation(&result_operations, &column_prod).unwrap(),
             ),
             second_operand: Some(InputOperand::Placeholder(first_placeholder)),
             op: Operation::SubOp,
@@ -1389,22 +1391,22 @@ mod tests {
         // which is a column
         let output_items = if single_result {
             vec![OutputItem::ComputedValue(
-                locate_previous_operation(&result_operations, &column_cmp).unwrap()
+                locate_previous_operation(&result_operations, &column_cmp).unwrap(),
             )]
         } else {
             vec![
                 OutputItem::ComputedValue(
-                    locate_previous_operation(&result_operations, &column_cmp).unwrap()
+                    locate_previous_operation(&result_operations, &column_cmp).unwrap(),
                 ),
                 OutputItem::ComputedValue(
-                    locate_previous_operation(&result_operations, &column_prod).unwrap()
+                    locate_previous_operation(&result_operations, &column_prod).unwrap(),
                 ),
                 OutputItem::Column(6),
                 OutputItem::ComputedValue(
-                    locate_previous_operation(&result_operations, &column_mod).unwrap()
+                    locate_previous_operation(&result_operations, &column_mod).unwrap(),
                 ),
                 OutputItem::ComputedValue(
-                    locate_previous_operation(&result_operations, &sub_placeholder).unwrap()
+                    locate_previous_operation(&result_operations, &sub_placeholder).unwrap(),
                 ),
             ]
         };
@@ -1487,15 +1489,29 @@ mod tests {
             })
             .collect_vec();
         let output_acc = if predicate_value == F::ONE {
-            map_to_curve_point(&once(out_cells[0].id)
-                .chain(out_cells[0].value.to_fields())
-                .chain(once(out_cells.get(1).map(|cell| cell.id).unwrap_or_default()))
-                .chain(out_cells.get(1).map(|cell| cell.value).unwrap_or_default().to_fields())
-                .chain(compute_cells_tree_hash(out_cells.get(COLUMN_INDEX_NUM..).unwrap_or_default()).to_vec())
-                .collect_vec()
+            map_to_curve_point(
+                &once(out_cells[0].id)
+                    .chain(out_cells[0].value.to_fields())
+                    .chain(once(
+                        out_cells.get(1).map(|cell| cell.id).unwrap_or_default(),
+                    ))
+                    .chain(
+                        out_cells
+                            .get(1)
+                            .map(|cell| cell.value)
+                            .unwrap_or_default()
+                            .to_fields(),
+                    )
+                    .chain(
+                        compute_cells_tree_hash(
+                            out_cells.get(COLUMN_INDEX_NUM..).unwrap_or_default(),
+                        )
+                        .to_vec(),
+                    )
+                    .collect_vec(),
             )
         } else {
-                Point::NEUTRAL
+            Point::NEUTRAL
         };
 
         let placeholder_hash = circuit.compute_placeholder_hash();
@@ -1519,18 +1535,14 @@ mod tests {
         let pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
         assert_eq!(tree_hash, pi.tree_hash());
         assert_eq!(output_acc.to_weierstrass(), pi.first_value_as_curve_point());
-        assert_eq!(
-            array::from_fn(|_|
-                U256::ZERO
-            ), 
-            pi.values()
-        );
+        assert_eq!(array::from_fn(|_| U256::ZERO), pi.values());
         assert_eq!(
             <AggregationOperation as ToField<F>>::to_field(&AggregationOperation::IdOp),
             pi.operation_ids()[0]
         );
         assert_eq!(
-            [<AggregationOperation as ToField<F>>::to_field(&AggregationOperation::default()); MAX_NUM_RESULTS-1],
+            [<AggregationOperation as ToField<F>>::to_field(&AggregationOperation::default());
+                MAX_NUM_RESULTS - 1],
             pi.operation_ids()[1..]
         );
         assert_eq!(predicate_value, pi.num_matching_rows());
@@ -1554,5 +1566,4 @@ mod tests {
     fn test_query_without_aggregation_single_output() {
         query_without_aggregation(true)
     }
-
 }

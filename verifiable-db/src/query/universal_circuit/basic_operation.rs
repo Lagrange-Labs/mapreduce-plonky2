@@ -87,8 +87,8 @@ impl BasicOperationInputs {
         num_overflows: Target,
     ) -> BasicOperationWires {
         let zero = b.zero();
-        let additional_operands = [0;3].map(|_|
-            b.add_virtual_u256_unsafe() // should be ok to use `unsafe` here since these values are directly hashed in computational hash or in placeholder hash
+        let additional_operands = [0; 3].map(
+            |_| b.add_virtual_u256_unsafe(), // should be ok to use `unsafe` here since these values are directly hashed in computational hash or in placeholder hash
         );
         let constant_operand = &additional_operands[0];
         let placeholder_values = &additional_operands[1..];
