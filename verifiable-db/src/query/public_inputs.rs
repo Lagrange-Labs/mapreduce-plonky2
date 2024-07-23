@@ -484,7 +484,7 @@ mod tests {
         plonk::circuit_builder::CircuitBuilder,
     };
 
-    use crate::simple_query_circuits::public_inputs::QueryPublicInputs;
+    use crate::query::public_inputs::QueryPublicInputs;
 
     use super::PublicInputs;
 

@@ -3,10 +3,12 @@ mod full_node_index_leaf;
 mod full_node_with_one_child;
 mod full_node_with_two_children;
 mod output_computation;
+mod partial_node;
+mod utils;
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::simple_query_circuits::{
+    use crate::query::{
         computational_hash_ids::{AggregationOperation, Identifiers},
         public_inputs::{PublicInputs, QueryPublicInputs},
         PI_LEN,

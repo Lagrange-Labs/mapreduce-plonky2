@@ -22,7 +22,7 @@ use plonky2::{
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
-use crate::simple_query_circuits::public_inputs::PublicInputs;
+use crate::query::public_inputs::PublicInputs;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChildProvenSinglePathNodeWires<const MAX_NUM_RESULTS: usize> {
@@ -188,7 +188,7 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simple_query_circuits::{
+    use crate::query::{
         aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
         PI_LEN,
     };

@@ -1,5 +1,5 @@
 use super::{cells::build_cells_tree, COLUMN_INDEX_NUM};
-use crate::simple_query_circuits::computational_hash_ids::{Extraction, Identifiers};
+use crate::query::computational_hash_ids::{Extraction, Identifiers};
 use alloy::primitives::U256;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
