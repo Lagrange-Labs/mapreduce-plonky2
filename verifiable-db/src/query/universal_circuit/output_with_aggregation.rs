@@ -189,7 +189,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
             "Output component with aggregation: Number of aggregation operations different from number of actual outputs");
         let selectors = selector
             .into_iter()
-            .chain(repeat(&F::ZERO))
+            .chain(repeat(&F::default()))
             .take(MAX_NUM_RESULTS)
             .cloned()
             .collect_vec();

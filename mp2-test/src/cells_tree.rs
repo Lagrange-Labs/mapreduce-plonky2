@@ -132,6 +132,9 @@ pub fn build_cell_tree(
 
 /// Compute the expected root hash of constructed cell tree.
 pub fn compute_cells_tree_hash(cells: &[TestCell]) -> HashOut<F> {
+    if cells.len() == 0 {
+        return *empty_poseidon_hash()
+    }
     let cell_tree = build_cell_tree(cells).unwrap().0;
 
     cell_tree.root_data().unwrap().hash
