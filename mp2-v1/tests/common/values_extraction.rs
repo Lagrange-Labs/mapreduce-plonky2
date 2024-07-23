@@ -34,7 +34,7 @@ impl<P: ProofStorage> TestContext<P> {
         }
 
         info!("Prove the test storage trie including the simple slots {slots:?}");
-        let proof_value = trie.prove_value(&contract_address, self.params());
+        let proof_value = trie.prove_value(contract_address, self.params());
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof_value.proof().public_inputs);

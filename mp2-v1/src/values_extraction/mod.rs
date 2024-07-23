@@ -21,7 +21,7 @@ mod leaf_single;
 pub mod public_inputs;
 
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
-pub(crate) use public_inputs::PublicInputs;
+pub use public_inputs::PublicInputs;
 
 /// Constant prefixes for key and value IDs. Restrict both prefixes to 3-bytes,
 /// so `prefix + slot (u8)` could be converted to an U32.
@@ -37,10 +37,11 @@ pub fn identifier_block_column() -> u64 {
 
 /// Calculate `id = Poseidon(slot || contract_address)[0]` for single variable.
 pub fn identifier_single_var_column(slot: u8, contract_address: &Address) -> u64 {
-    let packed_contract_address: Vec<_> = contract_address.0.pack(Endianness::Big).to_fields();
+    // TODO: reput
+    //let packed_contract_address: Vec<_> = contract_address.0.pack(Endianness::Big).to_fields();
 
     let inputs: Vec<_> = iter::once(GFp::from_canonical_u8(slot))
-        .chain(packed_contract_address)
+        //.chain(packed_contract_address)
         .collect();
 
     PoseidonHash::hash_no_pad(&inputs).elements[0].to_canonical_u64()

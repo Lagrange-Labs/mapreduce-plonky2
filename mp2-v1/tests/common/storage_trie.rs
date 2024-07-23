@@ -10,8 +10,10 @@ use mp2_common::{
 };
 use mp2_v1::{
     api::{generate_proof, CircuitInput, PublicParameters},
-    length_extraction, values_extraction,
+    length_extraction,
+    values_extraction::{self, identifier_single_var_column},
 };
+use rand::{thread_rng, Rng};
 use rlp::{Prototype, Rlp};
 use std::collections::HashMap;
 
@@ -211,7 +213,16 @@ impl TrieNode {
         let input = CircuitInput::ValuesExtraction(input);
 
         // Generate the proof.
-        generate_proof(ctx.params, input).unwrap()
+        let proof = generate_proof(ctx.params, input).unwrap();
+        let pproof = ProofWithVK::deserialize(&proof).unwrap();
+        let pi = mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
+        println!(
+            "[+] [+] SLOT {:?} identifier {:?} -> value.digest() = {:?}",
+            identifier_single_var_column(slot.slot(), &Address::new(thread_rng().gen())),
+            slot.slot(),
+            pi.values_digest()
+        );
+        proof
     }
 
     /// Prove a trie node recursively for length extraction.

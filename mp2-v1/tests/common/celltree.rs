@@ -8,6 +8,7 @@ use anyhow::*;
 use mp2_common::{
     eth::ProofQuery,
     poseidon::{empty_poseidon_hash, H},
+    proof::ProofWithVK,
     types::HashOutput,
     utils::ToFields,
     CHasher, F,
@@ -150,6 +151,15 @@ impl<P: ProofStorage> TestContext<P> {
                 primary: block_key,
                 tree_key: k,
             };
+
+            let pproof = ProofWithVK::deserialize(&proof).unwrap();
+            let pi =
+                verifiable_db::cells_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
+            println!(
+                "[+] [+] SLOT identifier {:?} -> value.digest() = {:?}",
+                cell.id,
+                pi.digest_point()
+            );
 
             self.storage
                 .store_proof(ProofKey::Cell(generated_proof_key), proof)

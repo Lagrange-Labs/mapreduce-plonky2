@@ -10,7 +10,6 @@ use ryhope::{storage::RoEpochKvStorage, tree::TreeTopology};
 use crate::common::{
     bindings::simple::Simple,
     celltree::Cell,
-    index_tree::{IndexNode, IndexTreeKey, MerkleIndexTree},
     proof_storage::{BlockPrimaryIndex, ProofKey, ProofStorage},
     rowtree::{CellCollection, RowTreeKey},
     table::{
@@ -141,7 +140,7 @@ impl TestCase {
         //    )),
         //};
 
-        // Right now only single values. Moving to values in subsequent PR
+        // Right now only single values. Moving to mapping values in subsequent PR
         //Ok(vec![single, mapping])
         Ok(vec![single])
     }
