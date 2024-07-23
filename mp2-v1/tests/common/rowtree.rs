@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use crate::common::{index_tree::IndexNode, row_tree_proof_to_hash};
 
 use super::{
+    celltree::Cell,
     proof_storage::{
         BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier,
     },
@@ -35,18 +36,56 @@ use super::{
 };
 use derive_more::{From, Into};
 
-/// A unique identifier in a row tree
+/// A unique identifier of a secondary-indexed row, from the secondary index value and an unique
+/// index since secondary index does not have to be unique.
+/// THis struct is kept in the JSON row as the "tree key".
 #[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RowTreeKey {
     /// Value of the secondary index of the row
     pub value: U256,
     /// Enumerated index of the row in the virtual table
-    pub id: usize,
+    /// Useful when multiple rows share the same value, this idx must be different
+    /// In case of unique values, 0 can be used.
+    pub idx: usize,
 }
 
-use super::celltree::Cell;
+/// Simply a struct useful to transmit around when dealing with the secondary index value, since
+/// the unique index must be kept around as well. It is not saved anywhere nor proven.
+#[derive(PartialEq, Eq, Default, Debug, Clone)]
+pub struct SecondaryIndexCell(Cell, usize);
+impl SecondaryIndexCell {
+    pub fn new(c: Cell, idx: usize) -> Self {
+        Self(c, idx)
+    }
+    pub fn unique_index(&self) -> usize {
+        self.1
+    }
+
+    pub fn cell(&self) -> Cell {
+        self.0.clone()
+    }
+}
+
+impl From<SecondaryIndexCell> for RowTreeKey {
+    fn from(value: SecondaryIndexCell) -> Self {
+        RowTreeKey {
+            value: value.0.value,
+            idx: value.1,
+        }
+    }
+}
+
+impl From<&SecondaryIndexCell> for RowTreeKey {
+    fn from(value: &SecondaryIndexCell) -> Self {
+        RowTreeKey {
+            value: value.0.value.clone(),
+            idx: value.1,
+        }
+    }
+}
 // A collection of cells inserted in the JSON.
-// IMPORTANT: This collection MUST CONTAIN the secondary index value, to easily search in JSON.
+// IMPORTANT: This collection MUST CONTAIN the secondary index value, as first element, to easily search
+// in JSONB from the SQL.
 #[derive(From, Into, Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CellCollection(pub Vec<Cell>);
 impl CellCollection {
@@ -77,15 +116,22 @@ impl CellCollection {
         )
     }
 }
-/// Represent a row in one of the virtual tables stored in the zkDB; which
-/// encapsulates its cells and the tree they form.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+
+/// An utility wrapper to pass around that connects what we put in the JSON description and
+/// the actual row key used to insert in the tree
+#[derive(Clone, Debug)]
 pub struct Row {
     /// A key *uniquely* representing this row in the row tree.
-    ///
     /// NOTE: this key is **not** the index as understood in the crypto
     /// formalization.
     pub k: RowTreeKey,
+    // What is being included in the row JSON
+    pub payload: RowPayload,
+}
+/// Represent a row in one of the virtual tables stored in the zkDB; which
+/// encapsulates its cells and the tree they form.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RowPayload {
     pub cells: CellCollection,
     /// Storing the full identifier of the cells proof of the root of the cells tree.
     /// Note this identifier can refer to a proof for older blocks if the cells tree didn't change
@@ -102,7 +148,7 @@ pub struct Row {
     pub hash: HashOut<F>,
 }
 
-impl NodePayload for Row {
+impl NodePayload for RowPayload {
     fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
         let children = children.into_iter().collect::<Vec<_>>();
         assert_eq!(children.len(), 2);
@@ -149,8 +195,8 @@ impl NodePayload for Row {
 }
 
 pub type RowTree = scapegoat::Tree<RowTreeKey>;
-type RowStorage = InMemory<RowTree, Row>;
-pub type MerkleRowTree = MerkleTreeKvDb<RowTree, Row, RowStorage>;
+type RowStorage = InMemory<RowTree, RowPayload>;
+pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload, RowStorage>;
 
 /// Given a list of row, build the Merkle tree of the secondary index and
 /// returns it along its update tree.
@@ -164,7 +210,7 @@ pub async fn build_row_tree(rows: &[Row]) -> Result<(MerkleRowTree, UpdateTree<R
     let update_tree = row_tree
         .in_transaction(|t| {
             for row in rows.iter() {
-                t.store(row.k.to_owned(), row.to_owned())?;
+                t.store(row.k.to_owned(), row.payload.to_owned())?;
             }
             Ok(())
         })

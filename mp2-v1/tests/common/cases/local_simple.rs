@@ -10,9 +10,9 @@ use serde::Deserialize;
 
 use crate::common::{
     bindings::simple::Simple,
-    celltree::Cell,
+    celltree::{Cell, TreeCell},
     proof_storage::{BlockPrimaryIndex, ProofKey, ProofStorage},
-    rowtree::{CellCollection, RowTreeKey},
+    rowtree::{CellCollection, Row, RowTreeKey, SecondaryIndexCell},
     table::{
         CellsUpdate, IndexType, IndexUpdate, RowUpdate, Table, TableColumn, TableColumns, TableID,
     },
@@ -25,6 +25,7 @@ use super::{
 };
 use alloy::{
     contract::private::{Network, Provider, Transport},
+    eips::BlockNumberOrTag,
     primitives::{Address, U256},
     providers::ProviderBuilder,
 };
@@ -149,28 +150,15 @@ impl TestCase {
 
     pub async fn run<P: ProofStorage>(&mut self, ctx: &mut TestContext<P>) -> Result<()> {
         // Call the contract function to set the test data.
-        let (contract_update, cells_update) = self.init_contract_data().await;
-        self.apply_update_to_contract(ctx, &contract_update).await?;
-        {
-            // sanity check
-            let updated = self.current_single_values(ctx).await.unwrap();
-            match contract_update {
-                UpdateSingleStorage::Single(e) => {
-                    assert_eq!(
-                        e.value_at_slot(2).unwrap(),
-                        updated.value_at_slot(2).unwrap()
-                    );
-                    println!("------ contract value fetched to u256 is working");
-                }
-                _ => panic!("not true"),
-            }
-        }
+        // TODO: make it return an update for a full table, right now it's only for one row.
+        // to make when we deal with mappings
+        let table_row_update = self.init_contract_data(ctx).await;
         log::info!("Applying initial updates to contract done");
 
         // we first run the initial preprocessing and db creation.
         self.run_mpt_preprocessing(ctx).await?;
         // then we run the creation of our tree
-        self.run_lagrange_preprocessing(ctx, vec![cells_update])
+        self.run_lagrange_preprocessing(ctx, vec![table_row_update])
             .await?;
 
         log::info!(
@@ -178,9 +166,7 @@ impl TestCase {
             ctx.block_number().await
         );
 
-        let (contract_update, cells_update) =
-            self.subsequent_contract_data(ctx, UpdateType::Rest).await;
-        self.apply_update_to_contract(ctx, &contract_update).await?;
+        let table_row_update = self.subsequent_contract_data(ctx, UpdateType::Rest).await;
         log::info!(
             "Applying follow up updates to contract done - now at block {}",
             ctx.block_number().await
@@ -190,7 +176,7 @@ impl TestCase {
         // updated, as this is not new from v0.
         // TODO: implement copy on write mechanism for MPT
         self.run_mpt_preprocessing(ctx).await?;
-        self.run_lagrange_preprocessing(ctx, vec![cells_update])
+        self.run_lagrange_preprocessing(ctx, vec![table_row_update])
             .await?;
 
         Ok(())
@@ -225,18 +211,23 @@ impl TestCase {
                     .table
                     .row
                     .fetch(&single_row_update.updated_cells.row_key);
-                single_row_update.merge_with_previous_row(old_row.cells)
+                single_row_update.merge_with_old_row(old_row.cells)
             }
         };
         // prove the new cell tree and get the node row
-        let row = ctx
+        let row_payload = ctx
             .prove_cells_tree(&self.table, row_cells, update_cell_tree)
             .await;
         info!("Generated final CELLs tree proofs for single variables");
         // In the case of the scalars slots, there is a single node in the row tree.
         let rows = RowUpdate {
             init: single_row_update.is_init(),
-            modified_rows: vec![row],
+            modified_rows: vec![Row {
+                // TODO: this only considers the case where we handle a cells update but not a
+                // secondary index value update
+                k: single_row_update.updated_cells.row_key.clone(),
+                payload: row_payload,
+            }],
         };
         let updates = self.table.apply_row_update(rows)?;
         info!("Applied updates to row tree");
@@ -413,112 +404,51 @@ impl TestCase {
         &self,
         ctx: &mut TestContext<P>,
         u: UpdateType,
-        //) -> (UpdateSingleStorage, CellsUpdate) {
-    ) -> (UpdateSingleStorage, TableRowUpdate) {
+    ) -> TableRowUpdate {
+        let old_table_values = self.current_table_row_values(ctx).await;
         let mut current_values = self
             .current_single_values(ctx)
             .await
             .expect("can't get current values");
-        let mut modified_cells = Vec::new();
         match u {
             UpdateType::Rest => {
-                let s4_slot = 3;
                 current_values.s4 = Address::from_slice(&thread_rng().gen::<[u8; 20]>());
-                modified_cells.push(Cell {
-                    id: self.slots_to_id.get(&s4_slot).cloned().unwrap_or_else(|| {
-                        panic!("invalid slot ref {} on slot-id {:?}", 4, self.slots_to_id,)
-                    }),
-                    value: current_values.value_at_slot(4).unwrap(),
-                    // we don't know yet its hash because the tree is not constructed
-                    // this will be done by the Aggregate trait
-                    // TODO: move that to a plonky2 agnostic hash
-                    hash: Default::default(),
-                });
             }
             UpdateType::SecondaryIndex => {
+                // TODO: not yet fully implemented this part
                 current_values.s2 = U256::from_be_bytes(thread_rng().gen::<[u8; 32]>());
             }
         };
-        let row_tree_key = RowTreeKey {
-            value: current_values.s2,
-            id: 0, // only one row with this value since it's a row tree for single variable
-        };
 
         let contract_update = UpdateSingleStorage::Single(current_values);
-        let modified_cells = CellsUpdate {
-            init: false,
-            row_key: row_tree_key,
-            modified_cells,
-        };
-        let table_update = TableRowUpdate {
-            updated_cells: modified_cells,
-            updated_secondary: None,
-        };
-        (contract_update, table_update)
+        self.apply_update_to_contract(ctx, &contract_update)
+            .await
+            .unwrap();
+        let new_table_values = self.current_table_row_values(ctx).await;
+        old_table_values.compute_update(&new_table_values)
     }
-    /// Defines the initial state of the contract, and thus initial state of our table as well
-    async fn init_contract_data(&self) -> (UpdateSingleStorage, TableRowUpdate) {
+
+    ///  1. get current table values
+    ///  2. apply new update to contract
+    ///  3. get new table values
+    ///  4. compute the diff, i.e. the update to apply to the table and the trees
+    async fn init_contract_data<P: ProofStorage>(
+        &self,
+        ctx: &mut TestContext<P>,
+    ) -> TableRowUpdate {
         let contract_update = SimpleSingleValue {
             s1: true,
             s2: U256::from(10),
             s3: "test".to_string(),
             s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
         };
-        let rest_cells = SINGLE_SLOTS
-            .iter()
-            .filter_map(|slot| {
-                if *slot == INDEX_SLOT {
-                    return None;
-                }
-                Some(Cell {
-                    id: self.slots_to_id.get(slot).cloned().unwrap_or_else(|| {
-                        panic!(
-                            "invalid slot ref {} on slot-id {:?}",
-                            *slot, self.slots_to_id,
-                        )
-                    }),
-                    // TODO: a bit hackyish way to store slots -> value update but that will do for
-                    // now
-                    value: contract_update.value_at_slot(*slot).unwrap(),
-                    // we don't know yet its hash because the tree is not constructed
-                    // this will be done by the Aggregate trait
-                    // TODO: move that to a plonky2 agnostic hash
-                    hash: Default::default(),
-                })
-            })
-            .collect::<Vec<_>>();
-        // it is a bit confusing to do this but the reason is
-        // * we need to give always the cells inside the row JSON with the secondary index first
-        // * in this case, it's an init, so all the cells need to be inserted and proven from
-        // scratch.
-        // * When constructing the row object, we will give this array and thus the secondary index
-        // needs to be first.
-        let secondary_cell = Cell {
-            id: self.slots_to_id[&INDEX_SLOT],
-            value: contract_update.value_at_slot(INDEX_SLOT).unwrap(),
-            hash: Default::default(),
-        };
-        let cells_update = CellsUpdate {
-            init: true,
-            // necessary to indicate to which row we want to apply the updates
-            // // necessary to indicate to which row we want to apply the updates
-            row_key: RowTreeKey {
-                // s2 is the index in the formalism of this  single variable table
-                value: contract_update.value_at_slot(INDEX_SLOT).unwrap(),
-                // This ID is just to be able to support multiple rows with the same secondary
-                // index value.
-                // there is no other rows in this table for this block so the enumeration is simple
-                id: 0,
-            },
-            // since we are proving the initial state of the contract, all the cells are modified
-            // cells
-            modified_cells: rest_cells,
-        };
-        let table_update = TableRowUpdate {
-            updated_cells: cells_update,
-            updated_secondary: Some(secondary_cell),
-        };
-        (UpdateSingleStorage::Single(contract_update), table_update)
+        // we fetch it from RPC as we would do in dist system
+        let old_table_values = self.current_table_row_values(ctx).await;
+        self.apply_update_to_contract(ctx, &UpdateSingleStorage::Single(contract_update))
+            .await
+            .unwrap();
+        let new_table_values = self.current_table_row_values(ctx).await;
+        old_table_values.compute_update(&new_table_values)
     }
 
     //let mut rng = thread_rng();
@@ -535,6 +465,46 @@ impl TestCase {
     //    let b = contract.addToArray(U256::from(rng.gen::<u64>()));
     //    b.send().await.unwrap().watch().await.unwrap();
     //}
+    //
+    // construct a row of the table from the actual value in the contract by fetching from MPT
+    async fn current_table_row_values<P: ProofStorage>(
+        &self,
+        ctx: &mut TestContext<P>,
+    ) -> TableRowValues {
+        let mut secondary_cell = None;
+        let rest_cells = match self.source {
+            TableSourceSlot::Mapping(_) => unimplemented!("to come"),
+            TableSourceSlot::SingleValues(ref args) => {
+                let mut rest_cells = Vec::new();
+                for slot in args.slots.iter() {
+                    let query = ProofQuery::new_simple_slot(self.contract_address, *slot as usize);
+                    let id = identifier_single_var_column(*slot, &self.contract_address);
+                    // Instead of manually setting the value to U256, we really extract from the
+                    // MPT proof to mimick the way to "see" update. Also, it ensures we are getting
+                    // the formatting and endianness right.
+                    let value = ctx
+                        .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
+                        .await
+                        .storage_proof[0]
+                        .value;
+                    let cell = Cell { id, value };
+                    // make sure we separate the secondary cells and rest of the cells separately.
+                    if *slot == INDEX_SLOT {
+                        // we put 0 since we know there are no other rows with that secondary value since we are dealing
+                        // we single values, so only 1 row.
+                        secondary_cell = Some(SecondaryIndexCell::new(cell, 0));
+                    } else {
+                        rest_cells.push(cell);
+                    }
+                }
+                rest_cells
+            }
+        };
+        TableRowValues {
+            current_cells: rest_cells,
+            current_secondary: secondary_cell.unwrap(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -549,22 +519,6 @@ pub struct SimpleSingleValue {
     pub(crate) s2: U256,
     pub(crate) s3: String,
     pub(crate) s4: Address,
-}
-
-impl SimpleSingleValue {
-    pub fn value_at_slot(&self, slot_number: u8) -> Result<U256> {
-        assert!(self.s3.bytes().len() <= 32);
-        // just because the naming of the value start at 1 and slot number is at 0
-        match slot_number + 1 {
-            1 => Ok(U256::from(self.s1)),
-            2 => Ok(self.s2),
-            // TODO: strings are ... hard
-            3 => Ok(U256::from_le_slice(self.s3.as_bytes())),
-            // TODO:: is there a better way ?
-            4 => Ok(U256::from_be_slice(self.s4.into_word().as_slice())),
-            a => bail!("single contract only has 4 values while given {}", a),
-        }
-    }
 }
 
 // This function applies the update in _one_ transaction so that Anvil only moves by one block
@@ -603,22 +557,100 @@ enum UpdateType {
     Rest,
 }
 
+/// Represents in a generic way the value present in a row from a table
+/// TODO: add the first index in generic way as well for CSV
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+struct TableRowValues {
+    // cells without the secondary index
+    current_cells: Vec<Cell>,
+    current_secondary: SecondaryIndexCell,
+}
+
+impl TableRowValues {
+    // Compute the update from the current values and the new values
+    fn compute_update(&self, new: &Self) -> TableRowUpdate {
+        // this is initialization
+        if self == &Self::default() {
+            let cells_update = CellsUpdate {
+                row_key: (&new.current_secondary).into(),
+                updated_cells: new.current_cells.clone(),
+                init: true,
+            };
+            return TableRowUpdate {
+                updated_cells: cells_update,
+                updated_secondary: Some(new.current_secondary.clone()),
+            };
+        }
+
+        // the cells columns are fixed so we can compare
+        assert!(self.current_cells.len() == new.current_cells.len());
+        let updated_cells = self
+            .current_cells
+            .iter()
+            .filter_map(|current| {
+                let new = new
+                    .current_cells
+                    .iter()
+                    .find(|new| current.id == new.id)
+                    .expect("missing cell");
+                if new.value != current.value {
+                    // there is an update!
+                    Some(new.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            self.current_secondary.cell().id == new.current_secondary.cell().id,
+            "ids are different between updates?"
+        );
+        assert!(
+            self.current_secondary.unique_index() == new.current_secondary.unique_index(),
+            "computing update from different row"
+        );
+        let updated_secondary = match self.current_secondary.cell() != new.current_secondary.cell()
+        {
+            true => Some(new.current_secondary.clone()),
+            // no update on the secondary index value
+            false => None,
+        };
+        TableRowUpdate {
+            updated_cells: CellsUpdate {
+                // NOTE: here we MUST give the new row tree key because
+                // (a) in case it didn't change, well, no problem
+                // (b) in case it changed, we will actually have to "delete" the previous key
+                // first, then "insert" the new row
+                // TODO: add the previous one
+                row_key: (&new.current_secondary).into(),
+                updated_cells,
+                init: false,
+            },
+            // TODO: not yet done the "delete then insert" mode
+            updated_secondary,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TableRowUpdate {
     // WITHOUT the secondary index value
     updated_cells: CellsUpdate,
-    updated_secondary: Option<Cell>,
+    // TODO: in case of updated secondary, we must know the previous secondary value to "delete it"
+    updated_secondary: Option<SecondaryIndexCell>,
     // NOTE: in ideal generic world, i.e. CSV, we would need to add primary here
 }
 
 impl TableRowUpdate {
-    fn merge_with_previous_row(&self, previous: CellCollection) -> CellCollection {
+    // Returns the full collection to be inserted in an "update" row from the previous cells
+    // and the new updates contained in self
+    fn merge_with_old_row(&self, previous: CellCollection) -> CellCollection {
         previous.replace_by(&self.full_collection())
     }
     fn full_collection(&self) -> CellCollection {
-        let rest = self.updated_cells.modified_cells.clone();
+        let rest = self.updated_cells.updated_cells.clone();
         let secondary = self.updated_secondary.clone().unwrap_or_default();
-        let mut full = vec![secondary];
+        let mut full = vec![secondary.cell()];
         full.extend(rest);
         CellCollection(full)
     }

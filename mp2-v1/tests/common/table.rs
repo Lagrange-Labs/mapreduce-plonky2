@@ -11,9 +11,9 @@ use ryhope::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    celltree::{Cell, CellTreeKey, MerkleCellTree},
+    celltree::{Cell, CellTreeKey, MerkleCellTree, TreeCell},
     index_tree::{IndexNode, IndexTreeKey, MerkleIndexTree},
-    rowtree::{CellCollection, MerkleRowTree, Row, RowTreeKey},
+    rowtree::{CellCollection, MerkleRowTree, Row, RowPayload, RowTreeKey},
     ColumnIdentifier,
 };
 
@@ -137,7 +137,7 @@ impl Table {
                     // if there is no cell, this loop wont run
                     for cell in cells.non_indexed_cells().unwrap_or_default() {
                         let idx = self.columns.cells_tree_index_of(cell.id);
-                        t.store(idx, cell.to_owned())?;
+                        t.store(idx, cell.into())?;
                     }
                     Ok(())
                 })
@@ -149,6 +149,8 @@ impl Table {
     // Call this function first on all the cells tree that change from one update to another
     // Then prove the updates. Once done, you can call `apply_row_update` to update the row trees
     // and then once done you can call `apply_index_update`
+    // TODO: handle the case where the row secondary index changes, as this requires a deletion
+    // then fresh insertion
     pub fn apply_cells_update(&mut self, update: CellsUpdate) -> Result<CellsUpdateResult> {
         // fetch previous row or return 0 cells in case of init
         let previous_cells = self
@@ -175,12 +177,12 @@ impl Table {
         // apply updates and save the update plan for the new values
         let cell_update = cell_tree
             .in_transaction(|t| {
-                for new_cell in update.modified_cells.iter() {
+                for new_cell in update.updated_cells.iter() {
                     let cell_key = self.columns.cells_tree_index_of(new_cell.id);
                     if update.init {
-                        t.store(cell_key, new_cell.clone())?;
+                        t.store(cell_key, new_cell.into())?;
                     } else {
-                        t.update(cell_key, new_cell.clone())?;
+                        t.update(cell_key, new_cell.into())?;
                     }
                 }
                 Ok(())
@@ -198,9 +200,9 @@ impl Table {
         let plan = self.row.in_transaction(move |t| {
             for update in updates.modified_rows.into_iter() {
                 if updates.init {
-                    t.store(update.k.clone(), update)?;
+                    t.store(update.k.clone(), update.payload)?;
                 } else {
-                    t.update(update.k.clone(), update)?;
+                    t.update(update.k.clone(), update.payload)?;
                 }
             }
             Ok(())
@@ -255,7 +257,7 @@ pub struct CellsUpdate {
     pub row_key: RowTreeKey,
     // this must NOT contain the secondary index cell. Otherwise, in case the secondary index cell values
     // did not change, we would not be able to separate the rest from the secondary index cell.
-    pub modified_cells: Vec<Cell>,
+    pub updated_cells: Vec<Cell>,
     // set this to true to notify to consumers this is the first insert in the cell tree
     // Useful to know whether this update contains all the cells or the rest of the cells
     // must be fetching somewhere else.

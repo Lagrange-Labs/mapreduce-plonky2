@@ -29,33 +29,60 @@ use ryhope::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::common::{cell_tree_proof_to_hash, rowtree::RowTreeKey, TestContext};
+use crate::common::{cell_tree_proof_to_hash, TestContext};
 
 use super::{
-    cases::TableSourceSlot,
     proof_storage::{BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage},
-    rowtree::{CellCollection, Row},
+    rowtree::{CellCollection, RowPayload},
     table::{CellsUpdateResult, Table, TableID},
 };
 
+use derive_more::Deref;
+
 pub type CellTree = sbbst::Tree;
 pub type CellTreeKey = <CellTree as TreeTopology>::Key;
-type CellStorage = InMemory<CellTree, Cell>;
-pub type MerkleCellTree = MerkleTreeKvDb<CellTree, Cell, CellStorage>;
+type CellStorage = InMemory<CellTree, TreeCell>;
+pub type MerkleCellTree = MerkleTreeKvDb<CellTree, TreeCell, CellStorage>;
 
-// Just a clone of mp2-test cell tree but "public facing" without any plonky2 related values
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// Cell is the information stored in a specific cell of a specific row.
+/// A row node in the row tree contains a vector of such cells.
+#[derive(Clone, Default, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Cell {
     /// The unique identifier of the cell, derived from the contract it comes
     /// from and its slot in its storage.
     pub id: u64,
     /// The value stored in the cell
     pub value: U256,
-    /// The hash of this node in the tree
+}
+
+/// TreeCell is the node stored in the cells tree. It contains a cell and a hash of the subtree
+/// rooted at the cell in the cells tree.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Deref)]
+pub struct TreeCell {
+    #[deref]
+    cell: Cell,
+    /// The hash of this node in the cells tree
     pub hash: HashOut<F>,
 }
 
-impl NodePayload for Cell {
+impl From<Cell> for TreeCell {
+    fn from(value: Cell) -> Self {
+        TreeCell {
+            cell: value,
+            hash: Default::default(),
+        }
+    }
+}
+
+impl From<&Cell> for TreeCell {
+    fn from(value: &Cell) -> Self {
+        TreeCell {
+            cell: value.clone(),
+            hash: Default::default(),
+        }
+    }
+}
+impl NodePayload for TreeCell {
     fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
         // H(H(left_child) || H(right_child) || id || value)
         let inputs: Vec<_> = children
@@ -192,7 +219,7 @@ impl<P: ProofStorage> TestContext<P> {
         // All the new cells expected in the row, INCLUDING the secondary index
         all_cells: CellCollection,
         cells_update: CellsUpdateResult,
-    ) -> Row {
+    ) -> RowPayload {
         let tree_hash = cells_update.latest.root_data().unwrap().hash;
         let root_key = self
             .prove_cell_tree(&table.id, cells_update.latest, cells_update.to_update)
@@ -207,8 +234,7 @@ impl<P: ProofStorage> TestContext<P> {
             "mismatch between cell tree root hash as computed by ryhope and mp2",
         );
 
-        Row {
-            k: cells_update.key,
+        RowPayload {
             cell_tree_root_proof_id: root_key,
             cell_tree_root_hash: tree_hash,
             cells: all_cells,
