@@ -1,6 +1,9 @@
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::*;
-use mp2_common::{poseidon::empty_poseidon_hash, types::HashOutput, utils::ToFields, CHasher, F};
+use mp2_common::{
+    poseidon::empty_poseidon_hash, proof::ProofWithVK, types::HashOutput, utils::ToFields, CHasher,
+    F,
+};
 use mp2_v1::api::{self, CircuitInput};
 use plonky2::{
     field::types::Field,
@@ -290,9 +293,19 @@ impl<P: ProofStorage> TestContext<P> {
             tree_key: root,
         };
 
-        self.storage
+        let p = self
+            .storage
             .get_proof(&ProofKey::Row(root_proof_key.clone()))
             .expect("row tree root proof absent");
+        {
+            let pproof = ProofWithVK::deserialize(&p).unwrap();
+            let pi =
+                verifiable_db::row_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
+            println!(
+                "[--] FINAL MERKLE DIGEST VALUE --> {:?} ",
+                pi.rows_digest_field()
+            );
+        }
         root_proof_key
     }
 

@@ -6,6 +6,7 @@ use log::{debug, info};
 use mp2_v1::values_extraction::{identifier_block_column, identifier_single_var_column};
 use rand::{thread_rng, Rng};
 use ryhope::{storage::RoEpochKvStorage, tree::TreeTopology};
+use serde::Deserialize;
 
 use crate::common::{
     bindings::simple::Simple,
@@ -29,6 +30,7 @@ use alloy::{
 };
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
+    proof::ProofWithVK,
     F,
 };
 use std::{collections::HashMap, str::FromStr};
@@ -318,6 +320,13 @@ impl TestCase {
                         ctx.storage
                             .store_proof(proof_key, single_values_proof.clone())?;
                         info!("Generated Values Extraction (C.1) proof for single variables");
+                        {
+                            let pproof = ProofWithVK::deserialize(&single_values_proof).unwrap();
+                            let pi = mp2_v1::values_extraction::PublicInputs::new(
+                                &pproof.proof().public_inputs,
+                            );
+                            println!("[--] FINAL MPT DIGEST VALUE --> {:?} ", pi.values_digest());
+                        }
                         single_values_proof
                     }
                 };

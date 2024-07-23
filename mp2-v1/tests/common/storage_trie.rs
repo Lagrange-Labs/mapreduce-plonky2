@@ -218,8 +218,8 @@ impl TrieNode {
         let pi = mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
         println!(
             "[+] [+] SLOT {:?} identifier {:?} -> value.digest() = {:?}",
-            identifier_single_var_column(slot.slot(), &Address::new(thread_rng().gen())),
             slot.slot(),
+            identifier_single_var_column(slot.slot(), &Address::new(thread_rng().gen())),
             pi.values_digest()
         );
         proof
