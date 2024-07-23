@@ -1,7 +1,10 @@
 //! Storage trie for proving tests
 
 use super::{proof_storage::ProofStorage, TestContext};
-use alloy::{eips::BlockNumberOrTag, primitives::Address};
+use alloy::{
+    eips::BlockNumberOrTag,
+    primitives::{Address, U256},
+};
 use mp2_common::{
     eth::{left_pad32, ProofQuery, StorageSlot},
     mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
@@ -222,7 +225,7 @@ impl TrieNode {
             "[+] [+] SLOT {:?} identifier {:?} -> value {:?} value.digest() = {:?}",
             slot.slot(),
             identifier_single_var_column(slot.slot(), &Address::new(thread_rng().gen())),
-            left_pad32(&value),
+            U256::from_be_slice(&value),
             pi.values_digest()
         );
         proof
