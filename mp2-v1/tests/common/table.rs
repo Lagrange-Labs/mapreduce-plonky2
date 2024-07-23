@@ -213,11 +213,7 @@ impl Table {
     // apply the transformation on the index tree and returns the new nodes to prove
     pub fn apply_index_update(&mut self, updates: IndexUpdate) -> Result<IndexUpdateResult> {
         let plan = self.index.in_transaction(move |t| {
-            if updates.init {
-                t.store(updates.added_index.0, updates.added_index.1)?;
-            } else {
-                t.update(updates.added_index.0, updates.added_index.1)?;
-            }
+            t.store(updates.added_index.0, updates.added_index.1)?;
             Ok(())
         })?;
         Ok(IndexUpdateResult { plan })
@@ -229,7 +225,6 @@ pub struct IndexUpdate {
     // TODO: at the moment we only append one by one the block.
     // Depending on how we do things for CSV, this might be a vector
     pub added_index: (IndexTreeKey, IndexNode),
-    pub init: bool,
     // TODO for CSV modification and deletion ?
 }
 

@@ -237,9 +237,11 @@ impl TestCase {
         // NOTE the reason we separate and use block number as IndexTreeKey is because this index
         // could be different if we were using NOT block number. It should be the index of the
         // enumeration, something that may arise during the query when building a result tree.
+        // NOTE2: There is no "init" field here since we _always_ insert in the index tree by
+        // definition. This is a core assumption we currently have and that will not change in the
+        // short term.
         let index_update = IndexUpdate {
             added_index: (ctx.block_number().await as BlockPrimaryIndex, index_node),
-            init: single_row_update.is_init(),
         };
         let updates = self
             .table
@@ -405,27 +407,33 @@ impl TestCase {
         ctx: &mut TestContext<P>,
         u: UpdateType,
     ) -> TableRowUpdate {
-        let old_table_values = self.current_table_row_values(ctx).await;
-        let mut current_values = self
-            .current_single_values(ctx)
-            .await
-            .expect("can't get current values");
-        match u {
-            UpdateType::Rest => {
-                current_values.s4 = Address::from_slice(&thread_rng().gen::<[u8; 20]>());
-            }
-            UpdateType::SecondaryIndex => {
-                // TODO: not yet fully implemented this part
-                current_values.s2 = U256::from_be_bytes(thread_rng().gen::<[u8; 32]>());
-            }
-        };
+        match self.source {
+            TableSourceSlot::Mapping(_) => unimplemented!("yet"),
+            TableSourceSlot::SingleValues(_) => {
+                let old_table_values = self.current_table_row_values(ctx).await;
+                let mut current_values = self
+                    .current_single_values(ctx)
+                    .await
+                    .expect("can't get current values");
+                match u {
+                    UpdateType::Rest => {
+                        current_values.s4 = Address::from_slice(&thread_rng().gen::<[u8; 20]>());
+                    }
+                    UpdateType::SecondaryIndex => {
+                        // TODO: not yet fully implemented this part
+                        current_values.s2 = U256::from_be_bytes(thread_rng().gen::<[u8; 32]>());
+                        unimplemented!("not yet");
+                    }
+                };
 
-        let contract_update = UpdateSingleStorage::Single(current_values);
-        self.apply_update_to_contract(ctx, &contract_update)
-            .await
-            .unwrap();
-        let new_table_values = self.current_table_row_values(ctx).await;
-        old_table_values.compute_update(&new_table_values)
+                let contract_update = UpdateSingleStorage::Single(current_values);
+                self.apply_update_to_contract(ctx, &contract_update)
+                    .await
+                    .unwrap();
+                let new_table_values = self.current_table_row_values(ctx).await;
+                old_table_values.compute_update(&new_table_values)
+            }
+        }
     }
 
     ///  1. get current table values
@@ -436,26 +444,31 @@ impl TestCase {
         &self,
         ctx: &mut TestContext<P>,
     ) -> TableRowUpdate {
-        let contract_update = SimpleSingleValue {
-            s1: true,
-            s2: U256::from(10),
-            s3: "test".to_string(),
-            s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
-        };
-        // since the table is not created yet, we are giving an empty table row. When making the
-        // diff with the new updated contract storage, the logic will detect it's an initialization
-        // phase
-        let old_table_values = TableRowValues::default();
-        self.apply_update_to_contract(ctx, &UpdateSingleStorage::Single(contract_update))
-            .await
-            .unwrap();
-        let new_table_values = self.current_table_row_values(ctx).await;
-        let update = old_table_values.compute_update(&new_table_values);
-        assert!(
-            update.is_init(),
-            "initialization of the contract's table should be init"
-        );
-        update
+        match self.source {
+            TableSourceSlot::Mapping(_) => unimplemented!("yet"),
+            TableSourceSlot::SingleValues(_) => {
+                let contract_update = SimpleSingleValue {
+                    s1: true,
+                    s2: U256::from(10),
+                    s3: "test".to_string(),
+                    s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
+                };
+                // since the table is not created yet, we are giving an empty table row. When making the
+                // diff with the new updated contract storage, the logic will detect it's an initialization
+                // phase
+                let old_table_values = TableRowValues::default();
+                self.apply_update_to_contract(ctx, &UpdateSingleStorage::Single(contract_update))
+                    .await
+                    .unwrap();
+                let new_table_values = self.current_table_row_values(ctx).await;
+                let update = old_table_values.compute_update(&new_table_values);
+                assert!(
+                    update.is_init(),
+                    "initialization of the contract's table should be init"
+                );
+                update
+            }
+        }
     }
 
     //let mut rng = thread_rng();

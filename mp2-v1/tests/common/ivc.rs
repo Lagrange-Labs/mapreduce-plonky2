@@ -28,6 +28,7 @@ impl<P: ProofStorage> TestContext<P> {
             .expect("index tree proof is not stored");
         // load the previous IVC proof if there is one
         // we simply can try to load from the storage at block -1
+        // TODO: generalize that to a better more generic method for any index tree
         let previous_ivc_key = ProofKey::IVC(bn - 1);
         let input = match self.storage.get_proof(&previous_ivc_key) {
             Ok(previous_proof) => {
