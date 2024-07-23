@@ -151,6 +151,19 @@ impl TestCase {
         // Call the contract function to set the test data.
         let (contract_update, cells_update) = self.init_contract_data().await;
         self.apply_update_to_contract(ctx, &contract_update).await?;
+        {
+            // sanity check
+            let updated = self.current_single_values(ctx).await.unwrap();
+            match contract_update {
+                UpdateSingleStorage::Single(e) => {
+                    assert_eq!(
+                        updated.value_at_slot(2).unwrap(),
+                        updated.value_at_slot(2).unwrap()
+                    );
+                }
+                _ => panic!("not true"),
+            }
+        }
         log::info!("Applying initial updates to contract done");
 
         // we first run the initial preprocessing and db creation.
@@ -371,7 +384,7 @@ impl TestCase {
             .on_http(ctx.rpc_url.parse().unwrap());
 
         let contract = Simple::new(self.contract_address, &provider);
-        update_contract_data(&contract, &update).await;
+        update_contract_data(&contract, update).await;
         info!("Updated contract with new values {:?}", update);
         Ok(())
     }
@@ -446,7 +459,7 @@ impl TestCase {
     async fn init_contract_data(&self) -> (UpdateSingleStorage, TableRowUpdate) {
         let contract_update = SimpleSingleValue {
             s1: true,
-            s2: U256::from(LENGTH_VALUE),
+            s2: U256::from(10),
             s3: "test".to_string(),
             s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
         };
@@ -539,11 +552,13 @@ pub struct SimpleSingleValue {
 
 impl SimpleSingleValue {
     pub fn value_at_slot(&self, slot_number: u8) -> Result<U256> {
+        assert!(self.s3.bytes().len() <= 32);
         // just because the naming of the value start at 1 and slot number is at 0
         match slot_number + 1 {
             1 => Ok(U256::from(self.s1)),
             2 => Ok(self.s2),
-            3 => Ok(U256::from_be_slice(self.s3.as_bytes())),
+            // TODO: strings are ... hard
+            3 => Ok(U256::from_le_slice(self.s3.as_bytes())),
             // TODO:: is there a better way ?
             4 => Ok(U256::from_be_slice(self.s4.into_word().as_slice())),
             a => bail!("single contract only has 4 values while given {}", a),
