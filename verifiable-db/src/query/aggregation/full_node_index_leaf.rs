@@ -102,7 +102,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeIndexLeafCircuit<MAX_NUM_RESULTS> {
     }
 }
 
-/// Query proof number = 1, child proof number = 0
+/// Subtree proof number = 1, child proof number = 0
 pub(crate) const NUM_VERIFIED_PROOFS: usize = 1;
 
 impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
@@ -118,7 +118,7 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
         verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_VERIFIED_PROOFS],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        // The first one is the query proof.
+        // The first one is the subtree proof.
         let subtree_proof = PublicInputs::from_slice(&verified_proofs[0].public_inputs);
 
         Self::Inputs::build(builder, &subtree_proof)
@@ -134,7 +134,10 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
 mod tests {
     use super::*;
     use crate::query::{
-        aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
+        aggregation::{
+            tests::{random_aggregation_operations, random_aggregation_public_inputs},
+            utils::tests::unify_subtree_proof,
+        },
         PI_LEN,
     };
     use mp2_common::{utils::ToFields, C};
@@ -150,7 +153,7 @@ mod tests {
     }
 
     impl<'a> UserCircuit<F, D> for TestFullNodeIndexLeafCircuit<'a> {
-        // Circuit wires + query proof
+        // Circuit wires + subtree proof
         type Wires = (FullNodeIndexLeafWires<MAX_NUM_RESULTS>, Vec<Target>);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
@@ -172,24 +175,18 @@ mod tests {
 
     #[test]
     fn test_query_agg_full_node_index_leaf() {
-        // Generate the random operations.
-        let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
+        let min_query = U256::from(100);
+        let max_query = U256::from(200);
 
-        // Build the query proof.
-        let [subtree_proof] = random_aggregation_public_inputs(&ops);
+        // Generate the subtree proof.
+        let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
+        let [mut subtree_proof] = random_aggregation_public_inputs(&ops);
+        unify_subtree_proof::<MAX_NUM_RESULTS>(&mut subtree_proof, false, min_query, max_query);
         let subtree_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
 
         let index_value = subtree_pi.index_value();
         let index_value_fields = subtree_pi.to_index_value_raw();
         let index_ids = subtree_pi.index_ids();
-
-        // Construct the witness.
-        let min_query = index_value
-            .checked_sub(U256::from(100))
-            .unwrap_or(index_value);
-        let max_query = index_value
-            .checked_add(U256::from(100))
-            .unwrap_or(index_value);
 
         // Construct the test circuit.
         let test_circuit = TestFullNodeIndexLeafCircuit {

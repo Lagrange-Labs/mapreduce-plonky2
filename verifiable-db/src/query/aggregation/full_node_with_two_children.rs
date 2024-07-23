@@ -1,12 +1,12 @@
 //! Module handling the full node with two children for query aggregation circuits
 
 use crate::query::{
-    aggregation::output_computation::compute_output_item, public_inputs::PublicInputs,
+    aggregation::{output_computation::compute_output_item, utils::constrain_input_proofs},
+    public_inputs::PublicInputs,
 };
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
-    array::Array,
     poseidon::H,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
@@ -16,7 +16,6 @@ use mp2_common::{
     D, F,
 };
 use plonky2::{
-    field::types::Field,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -59,11 +58,20 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
     where
         [(); MAX_NUM_RESULTS - 1]:,
     {
-        let ffalse = b._false();
         let zero = b.zero();
 
         let is_rows_tree_node = b.add_virtual_bool_target_safe();
         let [min_query, max_query] = [0; 2].map(|_| b.add_virtual_u256_unsafe());
+
+        // Check the consistency for the subtree proof and child proofs.
+        constrain_input_proofs(
+            b,
+            is_rows_tree_node,
+            &min_query,
+            &max_query,
+            subtree_proof,
+            child_proofs,
+        );
 
         // Choose the column ID and node value to be hashed depending on which tree
         // the current node belongs to.
@@ -92,33 +100,6 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
             .collect();
         let node_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        // Ensure the proofs in the same rows tree are employing the same value
-        // of the primary indexed column:
-        // is_rows_tree_node == is_rows_tree_node AND p.I == p1.I AND p.I == p2.I
-        let [is_equal1, is_equal2] = [child_proof1, child_proof2]
-            .map(|p| b.is_equal_u256(&index_value, &p.index_value_target()));
-        let is_equal = b.and(is_equal1, is_equal2);
-        let is_equal = b.and(is_equal, is_rows_tree_node);
-        b.connect(is_equal.target, is_rows_tree_node.target);
-
-        // Ensure the value of the indexed column for all the records stored in the
-        // rows tree found in this node is within the range specified by the query:
-        // NOT(is_rows_tree_node) == NOT(is_row_tree_node) AND p.I >= MIN_query AND p.I <= MAX_query
-        // And assume: is_out_of_range = p.I < MIN_query OR p.I > MAX_query
-        // => (1 - is_rows_tree_node) * is_out_of_range = 0
-        // => is_out_of_range - is_out_of_range * is_rows_tree_node = 0
-        let is_less_than_min = b.is_less_than_u256(&index_value, &min_query);
-        let is_greater_than_max = b.is_less_than_u256(&max_query, &index_value);
-        let is_out_of_range = b.or(is_less_than_min, is_greater_than_max);
-        let is_false = b.arithmetic(
-            F::NEG_ONE,
-            F::ONE,
-            is_rows_tree_node.target,
-            is_out_of_range.target,
-            is_out_of_range.target,
-        );
-        b.connect(is_false, ffalse.target);
-
         // Aggregate the output values of children and the overflow number.
         let mut num_overflows = zero;
         let mut aggregated_values = vec![];
@@ -129,38 +110,6 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
             aggregated_values.append(&mut output);
             num_overflows = b.add(num_overflows, overflow);
         }
-
-        // p1.index_ids == p2.index_ids == p.index_ids
-        let index_ids = Array::from(index_ids);
-        index_ids.enforce_equal(b, &Array::from(child_proof1.index_ids_target()));
-        index_ids.enforce_equal(b, &Array::from(child_proof2.index_ids_target()));
-
-        // p1.C == p2.C == p.C
-        let computational_hash = subtree_proof.computational_hash_target();
-        b.connect_hashes(computational_hash, child_proof1.computational_hash_target());
-        b.connect_hashes(computational_hash, child_proof2.computational_hash_target());
-
-        // p1.H_p == p2.H_p == p.H_p
-        let placeholder_hash = subtree_proof.placeholder_hash_target();
-        b.connect_hashes(placeholder_hash, child_proof1.placeholder_hash_target());
-        b.connect_hashes(placeholder_hash, child_proof2.placeholder_hash_target());
-
-        // p1.MIN_I == p2.MIN_I == MIN_query
-        b.enforce_equal_u256(&min_query, &child_proof1.min_query_target());
-        b.enforce_equal_u256(&min_query, &child_proof2.min_query_target());
-
-        // p1.MAX_I == p2.MAX_I == MAX_query
-        b.enforce_equal_u256(&max_query, &child_proof1.max_query_target());
-        b.enforce_equal_u256(&max_query, &child_proof2.max_query_target());
-
-        // if the current proof is generated for a rows tree node,
-        // the query bounds must be same:
-        // is_row_tree_node = is_row_tree_node AND MIN_query == p.MIN_I AND MAX_query == p.MAX_I
-        let is_min_query_equal = b.is_equal_u256(&min_query, &subtree_proof.min_query_target());
-        let is_max_query_equal = b.is_equal_u256(&max_query, &subtree_proof.max_query_target());
-        let is_equal = b.and(is_min_query_equal, is_max_query_equal);
-        let is_equal = b.and(is_equal, is_rows_tree_node);
-        b.connect(is_equal.target, is_rows_tree_node.target);
 
         // count = p1.count + p2.count + p.count
         let count = b.add(
@@ -214,7 +163,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithTwoChildrenCircuit<MAX_NUM_RESULT
     }
 }
 
-/// Query proof number = 1, child proof number = 2
+/// Subtree proof number = 1, child proof number = 2
 pub(crate) const NUM_VERIFIED_PROOFS: usize = 3;
 
 impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
@@ -232,7 +181,7 @@ where
         verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_VERIFIED_PROOFS],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        // The first one is the query proof, and the remainings are child proofs.
+        // The first one is the subtree proof, and the remainings are child proofs.
         let [subtree_proof, child_proof1, child_proof2] =
             verified_proofs.map(|p| PublicInputs::from_slice(&p.public_inputs));
 
@@ -249,9 +198,12 @@ where
 mod tests {
     use super::*;
     use crate::query::{
-        aggregation::tests::{
-            compute_output_item_value, random_aggregation_operations,
-            random_aggregation_public_inputs,
+        aggregation::{
+            tests::{
+                compute_output_item_value, random_aggregation_operations,
+                random_aggregation_public_inputs,
+            },
+            utils::tests::{unify_child_proof, unify_subtree_proof},
         },
         public_inputs::QueryPublicInputs,
         PI_LEN,
@@ -272,7 +224,7 @@ mod tests {
     }
 
     impl<'a> UserCircuit<F, D> for TestFullNodeWithTwoChildrenCircuit<'a> {
-        // Circuit wires + query proof + left child proof + right child proof
+        // Circuit wires + subtree proof + left child proof + right child proof
         type Wires = (
             FullNodeWithTwoChildrenWires<MAX_NUM_RESULTS>,
             Vec<Target>,
@@ -308,58 +260,31 @@ mod tests {
     }
 
     fn test_full_node_with_two_children_circuit(is_rows_tree_node: bool) {
-        // Construct the witness.
         let min_query = U256::from(100);
         let max_query = U256::from(200);
 
-        // Generate the random operations.
+        // Generate the input proofs.
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
-
-        // Build the proofs.
         let [mut subtree_proof, mut left_child_proof, mut right_child_proof] =
             random_aggregation_public_inputs(&ops);
-        let [index_value_range, index_ids_range, min_value_range, min_query_range, max_query_range, c_hash_range, p_hash_range] =
-            [
-                QueryPublicInputs::IndexValue,
-                QueryPublicInputs::IndexIds,
-                QueryPublicInputs::MinValue,
-                QueryPublicInputs::MinQuery,
-                QueryPublicInputs::MaxQuery,
-                QueryPublicInputs::ComputationalHash,
-                QueryPublicInputs::PlaceholderHash,
-            ]
-            .map(|input| PublicInputs::<F, MAX_NUM_RESULTS>::to_range(input));
-
-        // Build the subtree public inputs.
-        if is_rows_tree_node {
-            // p.MIN_I == MIN_query AND p.MAX_I == MAX_query
-            subtree_proof[min_query_range.clone()].copy_from_slice(&min_query.to_fields());
-            subtree_proof[max_query_range.clone()].copy_from_slice(&max_query.to_fields());
-        } else {
-            // p.I >= MIN_query AND p.I <= MAX_query
-            let index_value: U256 = (min_query + max_query) >> 1;
-            subtree_proof[index_value_range.clone()].copy_from_slice(&index_value.to_fields());
-        }
+        unify_subtree_proof::<MAX_NUM_RESULTS>(
+            &mut subtree_proof,
+            is_rows_tree_node,
+            min_query,
+            max_query,
+        );
         let subtree_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
-
-        // Build the child public inputs.
-        // p1.MIN_I == p2.MIN_I == MIN_query
-        // p1.MAX_I == p2.MAX_I == MAX_query
         [&mut left_child_proof, &mut right_child_proof]
             .iter_mut()
             .for_each(|p| {
-                p[min_query_range.clone()].copy_from_slice(&min_query.to_fields());
-                p[max_query_range.clone()].copy_from_slice(&max_query.to_fields());
+                unify_child_proof::<MAX_NUM_RESULTS>(
+                    p,
+                    is_rows_tree_node,
+                    min_query,
+                    max_query,
+                    &subtree_pi,
+                )
             });
-        if is_rows_tree_node {
-            // p.I == p1.I AND p.I == p2.I
-            [&mut left_child_proof, &mut right_child_proof]
-                .iter_mut()
-                .for_each(|p| {
-                    p[index_value_range.clone()].copy_from_slice(subtree_pi.to_index_value_raw())
-                });
-        }
-
         let left_child_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&left_child_proof);
         let right_child_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&right_child_proof);
 

@@ -1,4 +1,4 @@
-//! Module handling the full node with one child for query aggregation circuits
+//! Module handling the partial node for query aggregation circuits
 
 use crate::query::{
     aggregation::{output_computation::compute_output_item, utils::constrain_input_proofs},
@@ -8,15 +8,16 @@ use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
     hash::hash_maybe_first,
-    poseidon::empty_poseidon_hash,
+    poseidon::H,
     public_inputs::PublicInputCommon,
-    serialization::{deserialize, serialize},
+    serialization::{deserialize, deserialize_array, serialize, serialize_array},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
     D, F,
 };
 use plonky2::{
+    hash::hash_types::{HashOut, HashOutTarget},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -25,27 +26,50 @@ use plonky2::{
 };
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use std::{iter, slice};
+use std::{array, iter, slice};
 
-/// Full node wires with one child
+/// Partial node wires
 /// The constant generic parameter is only used for impl `CircuitLogicWires`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FullNodeWithOneChildWires<const MAX_NUM_RESULTS: usize> {
+pub struct PartialNodeWires<const MAX_NUM_RESULTS: usize> {
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_rows_tree_node: BoolTarget,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_left_child: BoolTarget,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    sibling_tree_hash: HashOutTarget,
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
+    sibling_child_hashes: [HashOutTarget; 2],
+    sibling_value: UInt256Target,
+    sibling_min: UInt256Target,
+    sibling_max: UInt256Target,
     min_query: UInt256Target,
     max_query: UInt256Target,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FullNodeWithOneChildCircuit<const MAX_NUM_RESULTS: usize> {
+pub struct PartialNodeCircuit<const MAX_NUM_RESULTS: usize> {
     /// The flag specified if the proof is generated for a node in a rows tree or
     /// for a node in the index tree
     pub(crate) is_rows_tree_node: bool,
-    /// The flag specified if the child node is the left or right child
+    /// The flag indicating if the proven child is the left child or right child
     pub(crate) is_left_child: bool,
+    /// Hash of the rows tree stored in the sibling of the proven child
+    pub(crate) sibling_tree_hash: HashOut<F>,
+    /// The child hashes of the proven child's sibling
+    pub(crate) sibling_child_hashes: [HashOut<F>; 2],
+    /// Value of the indexed column for the rows tree stored in the sibling of
+    /// the proven child
+    pub(crate) sibling_value: U256,
+    /// Minimum value of the indexed column for the subtree rooted in the sibling
+    /// of the proven child
+    pub(crate) sibling_min: U256,
+    /// Maximum value of the indexed column for the subtree rooted in the sibling
+    /// of the proven child
+    pub(crate) sibling_max: U256,
     /// Minimum range bound specified in the query for the indexed column
     /// It's a range bound for the primary indexed column for index tree,
     /// and secondary indexed column for rows tree.
@@ -54,21 +78,24 @@ pub struct FullNodeWithOneChildCircuit<const MAX_NUM_RESULTS: usize> {
     pub(crate) max_query: U256,
 }
 
-impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> {
+impl<const MAX_NUM_RESULTS: usize> PartialNodeCircuit<MAX_NUM_RESULTS> {
     pub fn build(
         b: &mut CBuilder,
         subtree_proof: &PublicInputs<Target, MAX_NUM_RESULTS>,
         child_proof: &PublicInputs<Target, MAX_NUM_RESULTS>,
-    ) -> FullNodeWithOneChildWires<MAX_NUM_RESULTS>
+    ) -> PartialNodeWires<MAX_NUM_RESULTS>
     where
         [(); MAX_NUM_RESULTS - 1]:,
     {
+        let ttrue = b._true();
         let zero = b.zero();
-        let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
         let is_rows_tree_node = b.add_virtual_bool_target_safe();
         let is_left_child = b.add_virtual_bool_target_unsafe();
-        let [min_query, max_query] = [0; 2].map(|_| b.add_virtual_u256_unsafe());
+        let [sibling_tree_hash, sibling_child_hash1, sibling_child_hash2] =
+            array::from_fn(|_| b.add_virtual_hash());
+        let [sibling_value, sibling_min, sibling_max, min_query, max_query] =
+            array::from_fn(|_| b.add_virtual_u256_unsafe());
 
         // Check the consistency for the subtree proof and child proof.
         constrain_input_proofs(
@@ -79,6 +106,19 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
             subtree_proof,
             slice::from_ref(child_proof),
         );
+
+        // Check that the subtree rooted in sibling node contains only leaves with
+        // indexed columns values outside the query range.
+        // If the proved child is the left child, ensure sibling_min > MAX_query,
+        // otherwise sibling_max < MIN_query.
+        let is_greater_than_max = b.is_less_than_u256(&max_query, &sibling_min);
+        let is_less_than_min = b.is_less_than_u256(&sibling_max, &min_query);
+        let is_out_of_range = b.select(
+            is_left_child,
+            is_greater_than_max.target,
+            is_less_than_min.target,
+        );
+        b.connect(is_out_of_range, ttrue.target);
 
         // Choose the column ID and node value to be hashed depending on which tree
         // the current node belongs to.
@@ -91,11 +131,27 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
             &index_value,
         );
 
-        let node_min = b.select_u256(is_left_child, &child_proof.min_value_target(), &node_value);
-        let node_max = b.select_u256(is_left_child, &node_value, &child_proof.max_value_target());
+        // Recompute the tree hash for the sibling node:
+        // H(h1 || h2 || sibling_min || sibling_max || column_id || sibling_value || sibling_tree_hash)
+        let inputs = sibling_child_hash1
+            .to_targets()
+            .into_iter()
+            .chain(sibling_child_hash2.to_targets())
+            .chain(sibling_min.to_targets())
+            .chain(sibling_max.to_targets())
+            .chain(iter::once(column_id))
+            .chain(sibling_value.to_targets())
+            .chain(sibling_tree_hash.to_targets())
+            .collect();
+        let sibling_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
+
+        // node_min = is_left_child ? child.min : sibling_min
+        let node_min = b.select_u256(is_left_child, &child_proof.min_value_target(), &sibling_min);
+        // node_max = is_left_child ? sibling_max : child.max
+        let node_max = b.select_u256(is_left_child, &sibling_max, &child_proof.max_value_target());
 
         // Compute the node hash:
-        // H(left_child.H || right_child.H || node_min || node_max || column_id || node_value || p.H))
+        // H(left_child_hash || right_child_hash || node_min || node_max || column_id || node_value || p.H)
         let rest: Vec<_> = node_min
             .to_targets()
             .into_iter()
@@ -107,7 +163,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
         let node_hash = hash_maybe_first(
             b,
             is_left_child,
-            empty_hash.elements,
+            sibling_hash.elements,
             child_proof.tree_hash_target().elements,
             &rest,
         );
@@ -122,7 +178,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
             num_overflows = b.add(num_overflows, overflow);
         }
 
-        // count = current.count + child.count
+        // count = p.count + child.count
         let count = b.add(
             subtree_proof.num_matching_rows_target(),
             child_proof.num_matching_rows_target(),
@@ -154,23 +210,43 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
         )
         .register(b);
 
-        FullNodeWithOneChildWires {
+        let sibling_child_hashes = [sibling_child_hash1, sibling_child_hash2];
+
+        PartialNodeWires {
             is_rows_tree_node,
             is_left_child,
+            sibling_tree_hash,
+            sibling_child_hashes,
+            sibling_value,
+            sibling_min,
+            sibling_max,
             min_query,
             max_query,
         }
     }
 
-    fn assign(
-        &self,
-        pw: &mut PartialWitness<F>,
-        wires: &FullNodeWithOneChildWires<MAX_NUM_RESULTS>,
-    ) {
-        pw.set_bool_target(wires.is_rows_tree_node, self.is_rows_tree_node);
-        pw.set_bool_target(wires.is_left_child, self.is_left_child);
-        pw.set_u256_target(&wires.min_query, self.min_query);
-        pw.set_u256_target(&wires.max_query, self.max_query);
+    fn assign(&self, pw: &mut PartialWitness<F>, wires: &PartialNodeWires<MAX_NUM_RESULTS>) {
+        [
+            (wires.is_rows_tree_node, self.is_rows_tree_node),
+            (wires.is_left_child, self.is_left_child),
+        ]
+        .iter()
+        .for_each(|(t, v)| pw.set_bool_target(*t, *v));
+        [
+            (&wires.sibling_value, self.sibling_value),
+            (&wires.sibling_min, self.sibling_min),
+            (&wires.sibling_max, self.sibling_max),
+            (&wires.min_query, self.min_query),
+            (&wires.max_query, self.max_query),
+        ]
+        .iter()
+        .for_each(|(t, v)| pw.set_u256_target(t, *v));
+        pw.set_hash_target(wires.sibling_tree_hash, self.sibling_tree_hash);
+        wires
+            .sibling_child_hashes
+            .iter()
+            .zip(self.sibling_child_hashes)
+            .for_each(|(t, v)| pw.set_hash_target(*t, v));
     }
 }
 
@@ -178,12 +254,12 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
 pub(crate) const NUM_VERIFIED_PROOFS: usize = 2;
 
 impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
-    for FullNodeWithOneChildWires<MAX_NUM_RESULTS>
+    for PartialNodeWires<MAX_NUM_RESULTS>
 where
     [(); MAX_NUM_RESULTS - 1]:,
 {
     type CircuitBuilderParams = ();
-    type Inputs = FullNodeWithOneChildCircuit<MAX_NUM_RESULTS>;
+    type Inputs = PartialNodeCircuit<MAX_NUM_RESULTS>;
 
     const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F, MAX_NUM_RESULTS>::total_len();
 
@@ -220,26 +296,26 @@ mod tests {
         PI_LEN,
     };
     use mp2_common::{poseidon::H, utils::ToFields, C};
-    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::{gen_random_field_hash, random_vector},
+    };
     use plonky2::{iop::witness::WitnessWrite, plonk::config::Hasher};
+    use rand::{thread_rng, Rng};
     use std::array;
 
     const MAX_NUM_RESULTS: usize = 20;
 
     #[derive(Clone, Debug)]
-    struct TestFullNodeWithOneChildCircuit<'a> {
-        c: FullNodeWithOneChildCircuit<MAX_NUM_RESULTS>,
+    struct TestPartialNodeCircuit<'a> {
+        c: PartialNodeCircuit<MAX_NUM_RESULTS>,
         subtree_proof: &'a [F],
         child_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestFullNodeWithOneChildCircuit<'a> {
-        // Circuit wires + subtree proof + child proof
-        type Wires = (
-            FullNodeWithOneChildWires<MAX_NUM_RESULTS>,
-            Vec<Target>,
-            Vec<Target>,
-        );
+    impl<'a> UserCircuit<F, D> for TestPartialNodeCircuit<'a> {
+        // Circuit wires + query proof + child proof
+        type Wires = (PartialNodeWires<MAX_NUM_RESULTS>, Vec<Target>, Vec<Target>);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let proofs = array::from_fn(|_| {
@@ -249,7 +325,7 @@ mod tests {
             let [subtree_pi, child_pi] =
                 array::from_fn(|i| PublicInputs::<Target, MAX_NUM_RESULTS>::from_slice(&proofs[i]));
 
-            let wires = FullNodeWithOneChildCircuit::build(b, &subtree_pi, &child_pi);
+            let wires = PartialNodeCircuit::build(b, &subtree_pi, &child_pi);
 
             let [subtree_proof, child_proof] = proofs;
 
@@ -263,9 +339,21 @@ mod tests {
         }
     }
 
-    fn test_full_node_with_one_child_circuit(is_rows_tree_node: bool, is_left_child: bool) {
+    fn test_partial_node_circuit(is_rows_tree_node: bool, is_left_child: bool) {
         let min_query = U256::from(100);
         let max_query = U256::from(200);
+
+        let [sibling_tree_hash, sibling_child_hash1, sibling_child_hash2] =
+            array::from_fn(|_| gen_random_field_hash());
+
+        let mut rng = thread_rng();
+        let sibling_value = U256::from_limbs(rng.gen());
+        let [sibling_min, sibling_max] = if is_left_child {
+            // sibling_min > MAX_query
+            [max_query + U256::from(1), U256::from_limbs(rng.gen())]
+        } else {
+            [U256::from_limbs(rng.gen()), min_query - U256::from(1)]
+        };
 
         // Generate the input proofs.
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
@@ -295,16 +383,22 @@ mod tests {
             index_value
         };
         let [node_min, node_max] = if is_left_child {
-            [child_pi.min_value(), node_value]
+            [child_pi.min_value(), sibling_max]
         } else {
-            [node_value, child_pi.max_value()]
+            [sibling_min, child_pi.max_value()]
         };
 
         // Construct the test circuit.
-        let test_circuit = TestFullNodeWithOneChildCircuit {
-            c: FullNodeWithOneChildCircuit {
+        let sibling_child_hashes = [sibling_child_hash1, sibling_child_hash2];
+        let test_circuit = TestPartialNodeCircuit {
+            c: PartialNodeCircuit {
                 is_rows_tree_node,
                 is_left_child,
+                sibling_tree_hash,
+                sibling_child_hashes,
+                sibling_value,
+                sibling_min,
+                sibling_max,
                 min_query,
                 max_query,
             },
@@ -324,15 +418,28 @@ mod tests {
             } else {
                 index_ids[0]
             };
-            let empty_hash = empty_poseidon_hash();
+
+            // H(h1 || h2 || sibling_min || sibling_max || column_id || sibling_value || sibling_tree_hash)
+            let inputs: Vec<_> = sibling_child_hash1
+                .to_fields()
+                .into_iter()
+                .chain(sibling_child_hash2.to_fields())
+                .chain(sibling_min.to_fields())
+                .chain(sibling_max.to_fields())
+                .chain(iter::once(column_id))
+                .chain(sibling_value.to_fields())
+                .chain(sibling_tree_hash.to_fields())
+                .collect();
+            let sibling_hash = H::hash_no_pad(&inputs);
+
             let child_hash = child_pi.tree_hash();
             let [left_child_hash, right_child_hash] = if is_left_child {
-                [child_hash, *empty_hash]
+                [child_hash, sibling_hash]
             } else {
-                [*empty_hash, child_hash]
+                [sibling_hash, child_hash]
             };
 
-            // H(left_child.H || right_child.H || node_min || node_max || column_id || node_value || p.H))
+            // H(left_child_hash || right_child_hash || node_min || node_max || column_id || node_value || p.H)
             let inputs: Vec<_> = left_child_hash
                 .to_fields()
                 .into_iter()
@@ -392,22 +499,22 @@ mod tests {
     }
 
     #[test]
-    fn test_query_agg_full_node_with_one_child_for_row_node_with_left_child() {
-        test_full_node_with_one_child_circuit(true, true);
+    fn test_query_agg_partial_node_for_row_node_with_left_child() {
+        test_partial_node_circuit(true, true);
     }
 
     #[test]
-    fn test_query_agg_full_node_with_one_child_for_row_node_with_right_child() {
-        test_full_node_with_one_child_circuit(true, false);
+    fn test_query_agg_partial_node_for_row_node_with_right_child() {
+        test_partial_node_circuit(true, false);
     }
 
     #[test]
-    fn test_query_agg_full_node_with_one_child_for_index_node_with_left_child() {
-        test_full_node_with_one_child_circuit(false, true);
+    fn test_query_agg_partial_node_for_index_node_with_left_child() {
+        test_partial_node_circuit(false, true);
     }
 
     #[test]
-    fn test_query_agg_full_node_with_one_child_for_index_node_with_right_child() {
-        test_full_node_with_one_child_circuit(false, false);
+    fn test_query_agg_partial_node_for_index_node_with_right_child() {
+        test_partial_node_circuit(false, false);
     }
 }
