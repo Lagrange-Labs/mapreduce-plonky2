@@ -157,9 +157,10 @@ impl TestCase {
             match contract_update {
                 UpdateSingleStorage::Single(e) => {
                     assert_eq!(
-                        updated.value_at_slot(2).unwrap(),
+                        e.value_at_slot(2).unwrap(),
                         updated.value_at_slot(2).unwrap()
                     );
+                    println!("------ contract value fetched to u256 is working");
                 }
                 _ => panic!("not true"),
             }
