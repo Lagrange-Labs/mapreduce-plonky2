@@ -156,8 +156,9 @@ impl<P: ProofStorage> TestContext<P> {
             let pi =
                 verifiable_db::cells_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
             println!(
-                "[+] [+] SLOT identifier {:?} -> value.digest() = {:?}",
+                "[+] [+] SLOT identifier {:?} -> value {} value.digest() = {:?}",
                 cell.id,
+                cell.value,
                 pi.digest_point()
             );
 

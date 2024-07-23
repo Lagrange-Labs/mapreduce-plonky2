@@ -3,7 +3,7 @@
 use super::{proof_storage::ProofStorage, TestContext};
 use alloy::{eips::BlockNumberOrTag, primitives::Address};
 use mp2_common::{
-    eth::{ProofQuery, StorageSlot},
+    eth::{left_pad32, ProofQuery, StorageSlot},
     mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
     proof::ProofWithVK,
     utils::{keccak256, Endianness, Packer},
@@ -197,13 +197,13 @@ impl TrieNode {
         // Build the leaf circuit input.
         let input = match slot {
             StorageSlot::Simple(slot) => values_extraction::CircuitInput::new_single_variable_leaf(
-                node,
+                node.clone(),
                 *slot as u8,
                 ctx.contract_address,
             ),
             StorageSlot::Mapping(mapping_key, slot) => {
                 values_extraction::CircuitInput::new_mapping_variable_leaf(
-                    node,
+                    node.clone(),
                     *slot as u8,
                     mapping_key.clone(),
                     ctx.contract_address,
@@ -214,14 +214,18 @@ impl TrieNode {
 
         // Generate the proof.
         let proof = generate_proof(ctx.params, input).unwrap();
-        let pproof = ProofWithVK::deserialize(&proof).unwrap();
-        let pi = mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
-        println!(
-            "[+] [+] SLOT {:?} identifier {:?} -> value.digest() = {:?}",
-            slot.slot(),
-            identifier_single_var_column(slot.slot(), &Address::new(thread_rng().gen())),
-            pi.values_digest()
-        );
+        {
+            let pproof = ProofWithVK::deserialize(&proof).unwrap();
+            let pi = mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
+            let list: Vec<Vec<u8>> = rlp::decode_list(&node);
+            println!(
+                "[+] [+] SLOT {:?} identifier {:?} -> value {:?} value.digest() = {:?}",
+                slot.slot(),
+                identifier_single_var_column(slot.slot(), &Address::new(thread_rng().gen())),
+                left_pad32(&list[1]),
+                pi.values_digest()
+            );
+        }
         proof
     }
 
