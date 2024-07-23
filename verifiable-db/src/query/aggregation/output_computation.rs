@@ -1,6 +1,6 @@
 //! Compute each node output item by the input proofs
 
-use crate::simple_query_circuits::{
+use crate::query::{
     computational_hash_ids::{AggregationOperation, Identifiers},
     public_inputs::PublicInputs,
 };
@@ -117,7 +117,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simple_query_circuits::{
+    use crate::query::{
         aggregation::tests::{
             compute_output_item_value, random_aggregation_operations,
             random_aggregation_public_inputs,

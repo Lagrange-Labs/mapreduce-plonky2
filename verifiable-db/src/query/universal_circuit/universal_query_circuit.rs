@@ -21,8 +21,8 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::simple_query_circuits::{
-    public_inputs::PublicInputs, universal_query_circuit::basic_operation::BasicOperationInputs,
+use crate::query::{
+    public_inputs::PublicInputs, universal_circuit::basic_operation::BasicOperationInputs,
 };
 
 use super::{
@@ -37,7 +37,7 @@ pub struct UniversalQueryCircuitWires<
     const MAX_NUM_PREDICATE_OPS: usize,
     const MAX_NUM_RESULT_OPS: usize,
     const MAX_NUM_RESULTS: usize,
-    T: OutputComponent,
+    T: OutputComponent<MAX_NUM_RESULTS>,
 > {
     /// Input wires for column extraction component
     column_extraction_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
@@ -69,15 +69,15 @@ pub struct UniversalQueryCircuitWires<
 
 /// Trait for the 2 different variants of output components we currently support
 /// in query circuits
-pub(crate) trait OutputComponent {
+pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize> {
     type Wires: OutputComponentWires;
 
     fn build(
         b: &mut CBuilder,
         column_values: &[UInt256Target],
         column_hash: &[HashOutTarget],
-        item_values: &[UInt256Target],
-        item_hash: &[HashOutTarget],
+        item_values: [UInt256Target; MAX_NUM_RESULTS],
+        item_hash: [HashOutTarget; MAX_NUM_RESULTS],
         predicate_value: &BoolTarget,
         predicate_hash: &HashOutTarget,
     ) -> Self::Wires;
@@ -101,17 +101,17 @@ pub(crate) trait OutputComponentWires {
 
     /// Get the identifiers of the aggregation operations specified in the query to aggregate the
     /// results (e.g., `SUM`, `AVG`)
-    fn get_ops_ids(&self) -> &[Target];
+    fn ops_ids(&self) -> &[Target];
     /// Get the first output value returned by the output component; this is accessed by an ad-hoc
     /// method since such output value could be a `UInt256Target` or a `CurveTarget`, depending
     /// on the output component instance
-    fn get_first_output_value(&self) -> Self::FirstT;
+    fn first_output_value(&self) -> Self::FirstT;
     /// Get the subsequent output values returned by the output component
-    fn get_other_output_values(&self) -> &[UInt256Target];
+    fn other_output_values(&self) -> &[UInt256Target];
     /// Get the computational hash returned by the output component
-    fn get_computational_hash(&self) -> HashOutTarget;
+    fn computational_hash(&self) -> HashOutTarget;
     /// Get the input wires for the output component
-    fn get_input_wires(&self) -> Self::InputWires;
+    fn input_wires(&self) -> Self::InputWires;
 }
 /// Witness input values for the universal query circuit
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -120,7 +120,7 @@ pub struct UniversalQueryCircuitInputs<
     const MAX_NUM_PREDICATE_OPS: usize,
     const MAX_NUM_RESULT_OPS: usize,
     const MAX_NUM_RESULTS: usize,
-    T: OutputComponent,
+    T: OutputComponent<MAX_NUM_RESULTS>,
 > {
     column_extraction_inputs: ColumnExtractionInputs<MAX_NUM_COLUMNS>,
     is_leaf: bool,
@@ -144,7 +144,7 @@ impl<
         const MAX_NUM_PREDICATE_OPS: usize,
         const MAX_NUM_RESULT_OPS: usize,
         const MAX_NUM_RESULTS: usize,
-        T: OutputComponent,
+        T: OutputComponent<MAX_NUM_RESULTS>,
     >
     UniversalQueryCircuitInputs<
         MAX_NUM_COLUMNS,
@@ -279,8 +279,14 @@ where
         // in the arrays `item_values` and `item_hash`; such results are expected to be found as the last
         // items computed by the last `MAX_NUM_RESULTS` basic operation components among the `MAX_NUM_RESULT_OPS`
         // ones employed to compute such results
-        let item_values = &input_values[input_values.len() - MAX_NUM_RESULTS..];
-        let item_hash = &input_hash[input_hash.len() - MAX_NUM_RESULTS..];
+        let item_values = input_values[input_values.len() - MAX_NUM_RESULTS..]
+            .to_vec()
+            .try_into()
+            .unwrap();
+        let item_hash = input_hash[input_hash.len() - MAX_NUM_RESULTS..]
+            .to_vec()
+            .try_into()
+            .unwrap();
         let output_component_wires = T::build(
             b,
             column_extraction_wires.input_wires.column_values.as_slice(),
@@ -309,12 +315,12 @@ where
         // compute output_values to be exposed; we call `pad_slice_to_curve_len` to ensure that the
         // first output value is always padded to the size of a `CurveTarget`
         let mut output_values = PublicInputs::<_, MAX_NUM_RESULTS>::pad_slice_to_curve_len(
-            &output_component_wires.get_first_output_value().to_targets(),
+            &output_component_wires.first_output_value().to_targets(),
         );
         // Append the other `MAX_NUM_RESULTS-1` output values
         output_values.extend_from_slice(
             &output_component_wires
-                .get_other_output_values()
+                .other_output_values()
                 .iter()
                 .flat_map(|t| t.to_targets())
                 .collect_vec(),
@@ -323,7 +329,7 @@ where
             &tree_hash.to_targets(),
             output_values.as_slice(),
             &[count],
-            output_component_wires.get_ops_ids(),
+            output_component_wires.ops_ids(),
             &index_value.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
@@ -331,7 +337,7 @@ where
             &min_query.to_targets(),
             &max_query.to_targets(),
             &[overflow.target],
-            &output_component_wires.get_computational_hash().to_targets(),
+            &output_component_wires.computational_hash().to_targets(),
             &placeholder_hash.to_targets(),
         )
         .register(b);
@@ -343,7 +349,7 @@ where
             max_query,
             filtering_predicate_ops: filtering_predicate_wires.try_into().unwrap(),
             result_value_ops: result_value_wires.try_into().unwrap(),
-            output_component_wires: output_component_wires.get_input_wires(),
+            output_component_wires: output_component_wires.input_wires(),
         }
     }
 

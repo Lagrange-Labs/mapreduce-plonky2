@@ -16,7 +16,7 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::simple_query_circuits::computational_hash_ids::Operation;
+use crate::query::computational_hash_ids::Operation;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for basic operation component
@@ -242,7 +242,7 @@ mod tests {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::simple_query_circuits::computational_hash_ids::Operation;
+    use crate::query::computational_hash_ids::Operation;
 
     use super::{BasicOperationInputWires, BasicOperationInputs};
 

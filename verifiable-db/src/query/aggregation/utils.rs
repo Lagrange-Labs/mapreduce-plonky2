@@ -1,6 +1,6 @@
 //! Utility functions for query aggregation circuits
 
-use crate::simple_query_circuits::public_inputs::PublicInputs;
+use crate::query::public_inputs::PublicInputs;
 use mp2_common::{
     array::Array,
     types::CBuilder,
@@ -97,7 +97,7 @@ pub(crate) fn constrain_input_proofs<const S: usize>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::simple_query_circuits::{
+    use crate::query::{
         aggregation::tests::random_aggregation_public_inputs, public_inputs::QueryPublicInputs,
     };
     use alloy::primitives::U256;

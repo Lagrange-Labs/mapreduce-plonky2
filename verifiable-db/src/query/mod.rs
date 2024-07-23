@@ -4,7 +4,7 @@ use public_inputs::PublicInputs;
 pub mod aggregation;
 pub mod computational_hash_ids;
 pub mod public_inputs;
-pub mod universal_query_circuit;
+pub mod universal_circuit;
 
 // Without this skipping config, the generic parameter was deleted when `cargo fmt`.
 #[rustfmt::skip]
