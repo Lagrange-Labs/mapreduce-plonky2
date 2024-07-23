@@ -69,10 +69,7 @@ impl TestCell {
     }
 
     /// Build new `TestCell` from `value` and `id`
-    pub fn new(
-        value: U256,
-        id: F,
-    ) -> Self {
+    pub fn new(value: U256, id: F) -> Self {
         Self {
             id,
             value,

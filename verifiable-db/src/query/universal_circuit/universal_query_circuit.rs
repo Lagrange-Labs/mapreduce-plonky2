@@ -1,39 +1,62 @@
-use std::{fmt::Debug, iter::{once, repeat}};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    iter::{once, repeat},
+};
 
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
-    array::ToField, poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array}, types::CBuilder, u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256}, utils::{SelectHashBuilder, ToFields, ToTargets}, CHasher, D, F
+    array::ToField,
+    poseidon::empty_poseidon_hash,
+    public_inputs::PublicInputCommon,
+    serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
+    types::CBuilder,
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    utils::{SelectHashBuilder, ToFields, ToTargets},
+    CHasher, D, F,
 };
 use plonky2::{
-    field::types::Field, gadgets::arithmetic, hash::{hash_types::{HashOut, HashOutTarget}, hashing::hash_n_to_hash_no_pad}, iop::{
+    field::types::Field,
+    gadgets::arithmetic,
+    hash::{
+        hash_types::{HashOut, HashOutTarget},
+        hashing::hash_n_to_hash_no_pad,
+    },
+    iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
-    }, plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut}
+    },
+    plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
 };
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    computational_hash_ids::{HashPermutation, Operation}, public_inputs::PublicInputs, universal_circuit::basic_operation::BasicOperationInputs
+    computational_hash_ids::{ComputationalHashCache, HashPermutation, Operation, Output},
+    public_inputs::PublicInputs,
+    universal_circuit::basic_operation::BasicOperationInputs,
 };
 
 use super::{
     basic_operation::{BasicOperationInputWires, BasicOperationWires},
     column_extraction::{ColumnExtractionInputWires, ColumnExtractionInputs},
 };
-use anyhow::{ensure, Result};
+use anyhow::{bail, ensure, Result};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 /// Data structure representing a placeholder in the query, given by its value and its identifier
 pub(crate) struct Placeholder {
     value: U256,
-    id: F,
+    id: PlaceholderId,
 }
+
+pub(crate) type PlaceholderId = F;
+
 #[derive(Clone, Copy, Debug)]
 /// Enumeration representing all the possible types of input operands for a basic operation
 pub(crate) enum InputOperand {
     // Input operand is a placeholder in the query
-    Placeholder(Placeholder),
+    Placeholder(PlaceholderId),
     // Input operand is a constant value in the query
     Constant(U256),
     /// Input operand is a column of the table
@@ -41,128 +64,150 @@ pub(crate) enum InputOperand {
     /// Input operand is the output of a previous basic operation
     PreviousValue(usize),
 }
+
+impl Default for InputOperand {
+    fn default() -> Self {
+        InputOperand::Column(0)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
+/// Data structure employed to specify a basic operation to be performed to
+/// compute the query
 pub(crate) struct BasicOperation {
-    first_operand: InputOperand,
+    pub(crate) first_operand: InputOperand,
     /// Can be None in case of unary operation
-    second_operand: Option<InputOperand>,
-    op: Operation,
+    pub(crate) second_operand: Option<InputOperand>,
+    pub(crate) op: Operation,
 }
 
 impl BasicOperation {
-    /// Compute the results of the `operations` provided as input, employing the provided 
+    /// Compute the results of the `operations` provided as input, employing the provided
     /// `column_values` as the operands for the operations having `InputOperand::Column`
-    /// operands. The method returns also a flag which specifies if an arithemtic error 
+    /// operands. The method returns also a flag which specifies if an arithemtic error
     /// has occurred throughout any of these operations
     pub(crate) fn compute_operations(
         operations: &[Self],
-        column_values: &[U256],     
+        column_values: &[U256],
+        placeholder_values: &HashMap<PlaceholderId, U256>,
     ) -> Result<(Vec<U256>, bool)> {
         let mut results = Vec::with_capacity(operations.len());
         let mut arithmetic_error = false;
-        let num_columns = column_values.len(); 
+        let num_columns = column_values.len();
         for (i, op) in operations.into_iter().enumerate() {
             let get_input_value = |operand| {
-                Ok(
-                    match operand {
-                        &InputOperand::Placeholder(p) => p.value,
-                        &InputOperand::Constant(v) => v,
-                        &InputOperand::Column(index) => {
-                            ensure!(index < num_columns,
-                                "invalid input operation: column index out of range for operation {}", i);
-                            column_values[index]
-                        },
-                        &InputOperand::PreviousValue(index) => {
-                            ensure!(index < results.len(),
-                                "invalid input operation: accessing a value that has not been computed yet in operation {}", i);
-                            results[index]
-                        },
+                Ok(match operand {
+                    &InputOperand::Placeholder(p) => match placeholder_values.get(&p) {
+                        Some(value) => *value,
+                        None => bail!("No placeholder value found associated to id {}", p),
+                    },
+                    &InputOperand::Constant(v) => v,
+                    &InputOperand::Column(index) => {
+                        ensure!(
+                            index < num_columns,
+                            "invalid input operation: column index out of range for operation {}",
+                            i
+                        );
+                        column_values[index]
                     }
-                )
+                    &InputOperand::PreviousValue(index) => {
+                        ensure!(index < results.len(),
+                                "invalid input operation: accessing a value that has not been computed yet in operation {}", i);
+                        results[index]
+                    }
+                })
             };
             let first_input = get_input_value(&op.first_operand)?;
-            let second_input = op.second_operand.as_ref().map(|operand|
-                get_input_value(operand)
-            ).unwrap_or( 
-                // op.second_operand = None means it's a unary operation, so we can choose a dummy input value
-                Ok(U256::ZERO)
-            )?;
+            let second_input = op
+                .second_operand
+                .as_ref()
+                .map(|operand| get_input_value(operand))
+                .unwrap_or(
+                    // op.second_operand = None means it's a unary operation, so we can choose a dummy input value
+                    Ok(U256::ZERO),
+                )?;
             let result = match op.op {
                 Operation::AddOp => {
                     let (res, overflow) = first_input.overflowing_add(second_input);
                     arithmetic_error |= overflow;
                     res
-                },
+                }
                 Operation::SubOp => {
                     let (res, overflow) = first_input.overflowing_sub(second_input);
                     arithmetic_error |= overflow;
                     res
-                },
+                }
                 Operation::MulOp => {
                     let (res, overflow) = first_input.overflowing_mul(second_input);
                     arithmetic_error |= overflow;
                     res
-                },
+                }
                 Operation::DivOp => {
                     arithmetic_error |= second_input.is_zero();
                     first_input.div_rem(second_input).0
-                },
+                }
                 Operation::ModOp => {
                     arithmetic_error |= second_input.is_zero();
                     first_input.div_rem(second_input).1
-                },
-                Operation::LessThanOp => U256::from(
-                    (first_input < second_input) as u8 
-                ),
-                Operation::EqOp => U256::from(
-                    (first_input == second_input) as u8 
-                ),
-                Operation::NeOp => U256::from(
-                    (first_input != second_input) as u8 
-                ),
-                Operation::GreaterThanOp => U256::from(
-                    (first_input > second_input) as u8 
-                ),
-                Operation::LessThanOrEqOp => U256::from(
-                    (first_input <= second_input) as u8 
-                ),
-                Operation::GreaterThanOrEqOp => U256::from(
-                    (first_input >= second_input) as u8 
-                ),
+                }
+                Operation::LessThanOp => U256::from((first_input < second_input) as u8),
+                Operation::EqOp => U256::from((first_input == second_input) as u8),
+                Operation::NeOp => U256::from((first_input != second_input) as u8),
+                Operation::GreaterThanOp => U256::from((first_input > second_input) as u8),
+                Operation::LessThanOrEqOp => U256::from((first_input <= second_input) as u8),
+                Operation::GreaterThanOrEqOp => U256::from((first_input >= second_input) as u8),
                 Operation::AndOp => {
-                    ensure!(first_input.is_zero() || first_input == U256::from(1), 
-                        "first input value to AND op is not Boolean for operation {}", i);
-                    ensure!(second_input.is_zero() || second_input == U256::from(1), 
-                        "second input value to AND op is not Boolean for operation {}", i);
-                    first_input*second_input
-                },
+                    ensure!(
+                        first_input.is_zero() || first_input == U256::from(1),
+                        "first input value to AND op is not Boolean for operation {}",
+                        i
+                    );
+                    ensure!(
+                        second_input.is_zero() || second_input == U256::from(1),
+                        "second input value to AND op is not Boolean for operation {}",
+                        i
+                    );
+                    first_input * second_input
+                }
                 Operation::OrOp => {
-                    ensure!(first_input.is_zero() || first_input == U256::from(1), 
-                        "first input value to OR op is not Boolean for operation {}", i);
-                    ensure!(second_input.is_zero() || second_input == U256::from(1), 
-                        "second input value to OR op is not Boolean for operation {}", i);
-                    first_input + second_input - first_input*second_input 
-                },
+                    ensure!(
+                        first_input.is_zero() || first_input == U256::from(1),
+                        "first input value to OR op is not Boolean for operation {}",
+                        i
+                    );
+                    ensure!(
+                        second_input.is_zero() || second_input == U256::from(1),
+                        "second input value to OR op is not Boolean for operation {}",
+                        i
+                    );
+                    first_input + second_input - first_input * second_input
+                }
                 Operation::NotOp => {
-                    ensure!(first_input.is_zero() || first_input == U256::from(1), 
-                        "input value to NOT op is not Boolean for operation {}", i);
+                    ensure!(
+                        first_input.is_zero() || first_input == U256::from(1),
+                        "input value to NOT op is not Boolean for operation {}",
+                        i
+                    );
                     U256::from(1) - first_input
-                },
+                }
                 Operation::XorOp => {
-                    ensure!(first_input.is_zero() || first_input == U256::from(1), 
-                        "first input value to XOR op is not Boolean for operation {}", i);
-                    ensure!(second_input.is_zero() || second_input == U256::from(1), 
-                        "secondinput value to XOR op is not Boolean for operation {}", i);
-                    first_input + second_input - U256::from(2)*first_input*second_input
-                },
+                    ensure!(
+                        first_input.is_zero() || first_input == U256::from(1),
+                        "first input value to XOR op is not Boolean for operation {}",
+                        i
+                    );
+                    ensure!(
+                        second_input.is_zero() || second_input == U256::from(1),
+                        "secondinput value to XOR op is not Boolean for operation {}",
+                        i
+                    );
+                    first_input + second_input - U256::from(2) * first_input * second_input
+                }
             };
             results.push(result);
         }
 
-        Ok((
-            results,
-            arithmetic_error,
-        ))
+        Ok((results, arithmetic_error))
     }
 }
 
@@ -171,8 +216,10 @@ impl BasicOperation {
 pub(crate) enum OutputItem {
     /// Output value is a column of the table
     Column(usize),
-    /// Output value is computed in one of the `MAX_NUM_RESULT_OPS` operations
-    ComputedValue,
+    /// Output value is computed in one of the `MAX_NUM_RESULT_OPS` operations; the numeric value
+    /// stored in this variant is the index of the `BasicOperation` computing the output value in the
+    /// set of result operations
+    ComputedValue(usize),
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for the universal query circuit
@@ -216,11 +263,7 @@ pub struct UniversalQueryCircuitWires<
 pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
     type Wires: OutputComponentWires;
 
-    fn new(
-        selector: &[F],
-        ids: &[F],
-        num_outputs: usize,
-    ) -> Result<Self>;
+    fn new(selector: &[F], ids: &[F], num_outputs: usize) -> Result<Self>;
 
     fn build(
         b: &mut CBuilder,
@@ -237,6 +280,8 @@ pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
         pw: &mut PartialWitness<F>,
         wires: &<Self::Wires as OutputComponentWires>::InputWires,
     );
+
+    fn output_variant() -> Output;
 }
 /// Trait representing the wires that need to be exposed by an `OutputComponent`
 /// employed in query circuits
@@ -316,6 +361,7 @@ where
         column_ids: &[F],
         predicate_operations: &[BasicOperation],
         result_operations: &[BasicOperation],
+        placeholder_values: &HashMap<PlaceholderId, U256>,
         is_leaf: bool,
         min_query: U256,
         max_query: U256,
@@ -323,16 +369,22 @@ where
         output_ids: &[F],
     ) -> Result<Self> {
         let num_columns = column_values.len();
-        ensure!(column_ids.len() == num_columns, 
-            "column_ids and column_values have different length");
-        ensure!(num_columns <= MAX_NUM_COLUMNS,
-            "number of columns is higher than the maximum value allowed");
-        let padded_column_values = column_values.into_iter()
+        ensure!(
+            column_ids.len() == num_columns,
+            "column_ids and column_values have different length"
+        );
+        ensure!(
+            num_columns <= MAX_NUM_COLUMNS,
+            "number of columns is higher than the maximum value allowed"
+        );
+        let padded_column_values = column_values
+            .into_iter()
             .chain(repeat(&U256::ZERO))
             .take(MAX_NUM_COLUMNS)
             .cloned()
             .collect_vec();
-        let padded_column_ids = column_ids.into_iter()
+        let padded_column_ids = column_ids
+            .into_iter()
             .chain(repeat(&F::NEG_ONE))
             .take(MAX_NUM_COLUMNS)
             .cloned()
@@ -346,18 +398,17 @@ where
         ensure!(num_predicate_ops <= MAX_NUM_PREDICATE_OPS,
             "Number of operations to compute filtering predicate is higher than the maximum number allowed");
         let num_result_ops = result_operations.len();
-            ensure!(num_result_ops <= MAX_NUM_RESULT_OPS,
-                "Number of operations to compute results is higher than the maximum number allowed");
-        let default_placeholder = Self::compute_default_placeholder(
-            predicate_operations.iter().chain(result_operations.iter())
+        ensure!(
+            num_result_ops <= MAX_NUM_RESULT_OPS,
+            "Number of operations to compute results is higher than the maximum number allowed"
         );
         let predicate_ops_inputs = Self::compute_operation_inputs::<MAX_NUM_PREDICATE_OPS>(
-            predicate_operations, 
-            &default_placeholder
+            predicate_operations,
+            placeholder_values,
         )?;
         let result_ops_inputs = Self::compute_operation_inputs::<MAX_NUM_RESULT_OPS>(
-            result_operations, 
-            &default_placeholder
+            result_operations,
+            placeholder_values,
         )?;
         let selectors = output_items.into_iter().enumerate().map(|(i, item)| {
             Ok(
@@ -367,28 +418,34 @@ where
                         "Column index provided as {}-th output value is higher than the maximum number of columns", i);
                     F::from_canonical_usize(index)
                     },
-                    &OutputItem::ComputedValue => F::from_canonical_usize(MAX_NUM_COLUMNS),
+                    &OutputItem::ComputedValue(index) => {
+                        ensure!(index < num_result_ops,
+                            "an operation computing an output results not found in set of result operations");
+                        let starting_index = if num_result_ops > MAX_NUM_RESULTS {
+                            num_result_ops - MAX_NUM_RESULTS
+                        } else {
+                            0
+                        };
+                        ensure!(index >= starting_index,
+                            "an operation computing an output results is not placed in the last {} elements of result operations vector", MAX_NUM_RESULTS);
+                        // the output will be placed in the `num_result_ops - index` last slot in the circuit
+                        F::from_canonical_usize(MAX_NUM_COLUMNS + MAX_NUM_RESULTS - (num_result_ops - index))
+                    },
             })
         }).collect::<Result<Vec<_>>>()?;
-        let output_component_inputs = T::new(
-            &selectors, 
-            output_ids, 
-            output_ids.len(),
-        )?;
-        
+        let output_component_inputs = T::new(&selectors, output_ids, output_ids.len())?;
 
-        Ok(
-            Self {
-                column_extraction_inputs,
-                is_leaf,
-                min_query,
-                max_query,
-                filtering_predicate_inputs: predicate_ops_inputs,
-                result_values_inputs: result_ops_inputs,
-                output_component_inputs,
-            })
+        Ok(Self {
+            column_extraction_inputs,
+            is_leaf,
+            min_query,
+            max_query,
+            filtering_predicate_inputs: predicate_ops_inputs,
+            result_values_inputs: result_ops_inputs,
+            output_component_inputs,
+        })
     }
-    
+
     pub(crate) fn build(
         b: &mut CircuitBuilder<F, D>,
     ) -> UniversalQueryCircuitWires<
@@ -613,71 +670,76 @@ where
             .assign(pw, &wires.output_component_wires);
     }
 
+    pub(crate) fn computational_hash(
+        column_ids: &[F],
+        predicate_operations: &[BasicOperation],
+        result_operations: &[BasicOperation],
+        output_items: &[OutputItem],
+        output_ids: &[F],
+    ) -> Result<HashOut<F>> {
+        let mut cache = ComputationalHashCache::<MAX_NUM_COLUMNS>::new();
+        let predicate_ops_hash =
+            Operation::operation_hash(&predicate_operations, column_ids, &mut cache)?;
+        let predicate_hash = predicate_ops_hash.last().unwrap();
+        let result_ops_hash =
+            Operation::operation_hash(&result_operations, column_ids, &mut cache)?;
+        T::output_variant().output_hash(
+            predicate_hash,
+            &mut cache,
+            column_ids,
+            &result_ops_hash,
+            output_items,
+            output_ids,
+        )
+    }
+
     /// Compute the placeholder hash for the given instance of `self`
-    pub(crate) fn compute_placeholder_hash(
-        &self
-    ) -> HashOut<F> {
-        let inputs = self.filtering_predicate_inputs.iter().flat_map(|op_inputs| {
-            once(op_inputs.placeholder_ids[0])
-            .chain(op_inputs.placeholder_values[0].to_fields())
-            .chain(once(op_inputs.placeholder_ids[1]))
-            .chain(op_inputs.placeholder_values[1].to_fields())
-            .collect_vec()
-        }).chain(
-            self.result_values_inputs.iter().flat_map(|op_inputs| {
+    pub(crate) fn compute_placeholder_hash(&self) -> HashOut<F> {
+        let inputs = self
+            .filtering_predicate_inputs
+            .iter()
+            .flat_map(|op_inputs| {
                 once(op_inputs.placeholder_ids[0])
-                .chain(op_inputs.placeholder_values[0].to_fields())
-                .chain(once(op_inputs.placeholder_ids[1]))
-                .chain(op_inputs.placeholder_values[1].to_fields())
-                .collect_vec()
+                    .chain(op_inputs.placeholder_values[0].to_fields())
+                    .chain(once(op_inputs.placeholder_ids[1]))
+                    .chain(op_inputs.placeholder_values[1].to_fields())
+                    .collect_vec()
             })
-        ).collect_vec();
+            .chain(self.result_values_inputs.iter().flat_map(|op_inputs| {
+                once(op_inputs.placeholder_ids[0])
+                    .chain(op_inputs.placeholder_values[0].to_fields())
+                    .chain(once(op_inputs.placeholder_ids[1]))
+                    .chain(op_inputs.placeholder_values[1].to_fields())
+                    .collect_vec()
+            }))
+            .collect_vec();
         let placeholders_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(&inputs);
         // add query bounds to placeholder hash
-        hash_n_to_hash_no_pad::<_, HashPermutation>(&
-            placeholders_hash.to_vec().into_iter()
-            .chain(self.min_query.to_fields())
-            .chain(self.max_query.to_fields())
-            .collect_vec()
-        )
-    } 
-    
-    /// Compute the default placeholder to be employed as placeholder operand when an operation operand is not 
-    /// a placeholder
-    fn compute_default_placeholder<'a, OpIter: Iterator<Item = &'a BasicOperation>>(
-        mut operations: OpIter,
-    ) -> Placeholder {
-        operations.find_map(|op| {
-            match op.first_operand {
-                InputOperand::Placeholder(p) => return Some(p),
-                _ => (),
-            };
-            if let Some(op) = &op.second_operand {
-                match op {
-                    &InputOperand::Placeholder(p) => Some(p),
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        }).unwrap_or(
-            // in this case, no placeholder is employed in the query at all, so we can just return a dummy value
-            Placeholder {
-                value: U256::ZERO,
-                id: F::NEG_ONE,
-            }
+        hash_n_to_hash_no_pad::<_, HashPermutation>(
+            &placeholders_hash
+                .to_vec()
+                .into_iter()
+                .chain(self.min_query.to_fields())
+                .chain(self.max_query.to_fields())
+                .collect_vec(),
         )
     }
 
     /// Utility function to compute the `BasicOperationInputs` corresponding to the set of `operations` specified
     /// as input. The set of `BasicOperationInputs` is padded to `MAX_NUM_OPS` with dummy operations, which is
     /// the expected number of operations expected as input by the circuit.
-    fn compute_operation_inputs<
-        const MAX_NUM_OPS: usize
-    >(
+    fn compute_operation_inputs<const MAX_NUM_OPS: usize>(
         operations: &[BasicOperation],
-        default_placeholder: &Placeholder,
+        placeholder_values: &HashMap<PlaceholderId, U256>,
     ) -> Result<[BasicOperationInputs; MAX_NUM_OPS]> {
+        let default_placeholder = placeholder_values
+            .into_iter()
+            .next()
+            .map(|(id, value)| Placeholder {
+                id: *id,
+                value: *value,
+            })
+            .unwrap_or_default();
         // starting offset in the input values provided to basic operation component where the output values
         // of `operations` will be found. It is computed as follows since these operations will be placed
         // at the end of these functions in the last slots among the `MAX_NUM_OPS` available, as expected
@@ -690,28 +752,28 @@ where
             let num_inputs = start_actual_ops + i;
             let mut compute_op_inputs = |is_first_op: bool| {
                 let operand = if is_first_op {
-                    &op.first_operand
+                    op.first_operand
                 } else {
-                    if let Some(operand) = &op.second_operand {
-                        operand
-                    } else {
-                        // There is no second operand in this operation since it is a unary operation, 
-                        // so just use a dummy one
-                        &InputOperand::Column(0)
-                    }
+                    op.second_operand.unwrap_or_default()
                 };
                 Ok(
                 match operand {
-                    &InputOperand::Placeholder(p) => (
-                        Some(p.value),
-                        Some(p.id),
-                        if is_first_op {
-                            BasicOperationInputs::first_placeholder_offset(num_inputs)
-                        } else {
-                            BasicOperationInputs::second_placeholder_offset(num_inputs)
-                        },
-                    ),
-                    &InputOperand::Constant(val) => {
+                    InputOperand::Placeholder(p) => {
+                        let placeholder_value = match placeholder_values.get(&p) {
+                            Some(value) => *value,
+                            None => bail!("No placeholder value found associated to id {}", p),
+                        };
+                        (
+                            Some(placeholder_value),
+                            Some(p),
+                            if is_first_op {
+                                BasicOperationInputs::first_placeholder_offset(num_inputs)
+                            } else {
+                                BasicOperationInputs::second_placeholder_offset(num_inputs)
+                            },
+                        )
+                    },
+                    InputOperand::Constant(val) => {
                         constant_operand = val;
                         (
                             None,
@@ -719,8 +781,8 @@ where
                             BasicOperationInputs::constant_operand_offset(num_inputs),
                         )
                     },
-                    &InputOperand::Column(index) => {
-                        ensure!(index < MAX_NUM_COLUMNS, 
+                    InputOperand::Column(index) => {
+                        ensure!(index < MAX_NUM_COLUMNS,
                             "column index specified as input for {}-th predicate operation is higher than number of columns", i);
                         (
                             None,
@@ -728,14 +790,14 @@ where
                             BasicOperationInputs::input_value_offset(index),
                         )
                     },
-                    &InputOperand::PreviousValue(index) => {
+                    InputOperand::PreviousValue(index) => {
                         ensure!(index < i,
                             "previous value index specified as input for {}-th predicate operation is higher than the number of values already computed by previous operations", i);
                         (
                             None,
                             None,
                             BasicOperationInputs::input_value_offset(start_actual_ops+index),
-                        )    
+                        )
                     },
                 }
             )};
@@ -764,20 +826,23 @@ where
         }).collect::<Result<Vec<_>>>()?;
         // we pad ops_wires up to `MAX_NUM_OPS` with dummy operations; we pad at
         // the beginning of the array since the circuits expects to find the operation computing
-        // the actual result values as the last of the `MAX_NUM_OPS` operations 
+        // the actual result values as the last of the `MAX_NUM_OPS` operations
         Ok(repeat(
             // dummy operation
-        BasicOperationInputs {
+            BasicOperationInputs {
                 constant_operand: U256::ZERO,
                 placeholder_values: [default_placeholder.value, default_placeholder.value],
                 placeholder_ids: [default_placeholder.id, default_placeholder.id],
                 first_input_selector: F::ZERO,
                 second_input_selector: F::ZERO,
                 op_selector: Operation::EqOp.to_field(),
-            }
-        ).take(MAX_NUM_OPS - operations.len())
+            },
+        )
+        .take(MAX_NUM_OPS - operations.len())
         .chain(ops_wires.into_iter())
-        .collect_vec().try_into().unwrap())
+        .collect_vec()
+        .try_into()
+        .unwrap())
     }
 }
 
@@ -787,67 +852,108 @@ mod tests {
 
     use alloy::primitives::U256;
     use itertools::Itertools;
-    use mp2_common::{array::ToField, poseidon::empty_poseidon_hash, utils::ToFields, C, D, F};
-    use mp2_test::{cells_tree::{compute_cells_tree_hash, TestCell}, circuit::{run_circuit, UserCircuit}, utils::gen_random_u256};
-    use plonky2::{field::types::{Field, Sample}, hash::hashing::hash_n_to_hash_no_pad, iop::witness::PartialWitness, plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut}};
-    use rand::{thread_rng, Rng};
+    use mp2_common::{
+        array::ToField,
+        poseidon::empty_poseidon_hash,
+        utils::{FromFields, ToFields},
+        C, D, F,
+    };
+    use mp2_test::{
+        cells_tree::{compute_cells_tree_hash, TestCell},
+        circuit::{run_circuit, UserCircuit},
+        log::init_logging,
+        utils::gen_random_u256,
+    };
+    use plonky2::{
+        field::types::{Field, Sample},
+        hash::hashing::hash_n_to_hash_no_pad,
+        iop::witness::PartialWitness,
+        plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
+    };
+    use rand::{seq::index, thread_rng, Rng};
 
-    use crate::query::{computational_hash_ids::{AggregationOperation, HashPermutation, Operation}, public_inputs::PublicInputs, universal_circuit::{output_with_aggregation::Circuit, universal_query_circuit::{BasicOperation, InputOperand, OutputItem, Placeholder}, COLUMN_INDEX_NUM}};
+    use crate::query::{
+        computational_hash_ids::{AggregationOperation, HashPermutation, Operation, Output},
+        public_inputs::PublicInputs,
+        universal_circuit::{
+            output_with_aggregation::Circuit,
+            universal_query_circuit::{BasicOperation, InputOperand, OutputItem, Placeholder},
+            COLUMN_INDEX_NUM,
+        },
+    };
 
     use super::{OutputComponent, UniversalQueryCircuitInputs, UniversalQueryCircuitWires};
-    
+
     impl<
-        const MAX_NUM_COLUMNS: usize,
-        const MAX_NUM_PREDICATE_OPS: usize,
-        const MAX_NUM_RESULT_OPS: usize,
-        const MAX_NUM_RESULTS: usize,
-        T: OutputComponent<MAX_NUM_RESULTS>, 
-    > UserCircuit<F, D> for UniversalQueryCircuitInputs<
-        MAX_NUM_COLUMNS,
-        MAX_NUM_PREDICATE_OPS,
-        MAX_NUM_RESULT_OPS,
-        MAX_NUM_RESULTS,
-        T
-    > 
-    where [(); MAX_NUM_RESULTS - 1]: ,
+            const MAX_NUM_COLUMNS: usize,
+            const MAX_NUM_PREDICATE_OPS: usize,
+            const MAX_NUM_RESULT_OPS: usize,
+            const MAX_NUM_RESULTS: usize,
+            T: OutputComponent<MAX_NUM_RESULTS>,
+        > UserCircuit<F, D>
+        for UniversalQueryCircuitInputs<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+            T,
+        >
+    where
+        [(); MAX_NUM_RESULTS - 1]:,
     {
-        type Wires = UniversalQueryCircuitWires<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS, T>;
-    
+        type Wires = UniversalQueryCircuitWires<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+            T,
+        >;
+
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             UniversalQueryCircuitInputs::build(c)
         }
-    
+
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.assign(pw, wires)
         }
     }
 
     // test the following query:
-    // SELECT SUM(C1+C2), AVG(C2*C3), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99
+    // SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99
     #[test]
     fn test_query_with_aggregation() {
+        init_logging();
         const NUM_ACTUAL_COLUMNS: usize = 5;
-        const MAX_NUM_COLUMNS: usize = 20;
-        const MAX_NUM_PREDICATE_OPS: usize = 15;
-        const MAX_NUM_RESULT_OPS: usize = 15;
+        const MAX_NUM_COLUMNS: usize = 30;
+        const MAX_NUM_PREDICATE_OPS: usize = 20;
+        const MAX_NUM_RESULT_OPS: usize = 30;
         const MAX_NUM_RESULTS: usize = 10;
         let rng = &mut thread_rng();
-        let min_query = U256::from(74);
-        let max_query = U256::from(99);
-        let column_values = (0..NUM_ACTUAL_COLUMNS).map(|i|
-            if i == 1 {
-                // ensure that second column value is in the range specified by the query:
-                // we sample a random u256 in range [0, max_query - min_query - 1) and then we
-                // add min_query + 1 
-                let min_query_value = min_query + U256::from(1);
-                gen_random_u256(rng).div_rem(max_query-min_query_value).1 + min_query_value 
-            } else {
-                gen_random_u256(rng)
-            }
-        ).collect_vec();
-        let column_ids = (0..NUM_ACTUAL_COLUMNS).map(|_| 
-            F::rand()
-        ).collect_vec();
+        let min_query = U256::from(75);
+        let max_query = U256::from(98);
+        let column_values = (0..NUM_ACTUAL_COLUMNS)
+            .map(|i| {
+                if i == 1 {
+                    // ensure that second column value is in the range specified by the query:
+                    // we sample a random u256 in range [0, max_query - min_query + 1) and then we
+                    // add min_query
+                    gen_random_u256(rng)
+                        .div_rem(max_query - min_query + U256::from(1))
+                        .1
+                        + min_query
+                } else {
+                    gen_random_u256(rng)
+                }
+            })
+            .collect_vec();
+        let column_ids = (0..NUM_ACTUAL_COLUMNS).map(|_| F::rand()).collect_vec();
+        // define placeholders
+        let first_placeholder = F::from_canonical_usize(1);
+        let second_placeholder = F::from_canonical_usize(2);
+        let placeholder_values = [first_placeholder, second_placeholder]
+            .iter()
+            .map(|id| (*id, gen_random_u256(rng)))
+            .collect();
         // build predicate operations
         let mut predicate_operations = vec![];
         // C5 > 5
@@ -881,11 +987,7 @@ mod tests {
         // C3 == $2
         let placeholder_eq = BasicOperation {
             first_operand: InputOperand::Column(2),
-            second_operand: Some(InputOperand::Placeholder(
-                Placeholder {
-                    value: gen_random_u256(rng),
-                    id: F::from_canonical_usize(2),
-                })),
+            second_operand: Some(InputOperand::Placeholder(second_placeholder)),
             op: Operation::EqOp,
         };
         predicate_operations.push(placeholder_eq);
@@ -905,6 +1007,13 @@ mod tests {
         predicate_operations.push(predicate);
         // result computations operations
         let mut result_operations = vec![];
+        // C2*C3
+        let column_prod = BasicOperation {
+            first_operand: InputOperand::Column(1),
+            second_operand: Some(InputOperand::Column(2)),
+            op: Operation::MulOp,
+        };
+        result_operations.push(column_prod);
         // C1+C2
         let column_add = BasicOperation {
             first_operand: InputOperand::Column(0),
@@ -912,22 +1021,20 @@ mod tests {
             op: Operation::AddOp,
         };
         result_operations.push(column_add);
-        let column_prod = BasicOperation {
-            first_operand: InputOperand::Column(1),
-            second_operand: Some(InputOperand::Column(2)),
-            op: Operation::MulOp,
+        // C1 + C2/(C2*C3)
+        let div = BasicOperation {
+            first_operand: InputOperand::PreviousValue(1),
+            second_operand: Some(InputOperand::PreviousValue(0)),
+            op: Operation::DivOp,
         };
-        result_operations.push(column_prod);
+        result_operations.push(div);
+        // C1 + $1
         let column_placeholder = BasicOperation {
             first_operand: InputOperand::Column(0),
-            second_operand: Some(InputOperand::Placeholder(
-                Placeholder{
-                    value: gen_random_u256(rng),
-                    id: F::ONE,
-                }
-            )),
+            second_operand: Some(InputOperand::Placeholder(first_placeholder)),
             op: Operation::AddOp,
         };
+        // C4 - 2
         result_operations.push(column_placeholder);
         let column_sub_const = BasicOperation {
             first_operand: InputOperand::Column(3),
@@ -939,8 +1046,13 @@ mod tests {
         let is_leaf: bool = rng.gen();
         // output items are all computed values in this query, expect for the last item
         // which is a column
-        let mut output_items = vec![OutputItem::ComputedValue; 4];
-        output_items.push(OutputItem::Column(4));
+        let output_items = vec![
+            OutputItem::ComputedValue(2),
+            OutputItem::ComputedValue(1),
+            OutputItem::ComputedValue(3),
+            OutputItem::ComputedValue(4),
+            OutputItem::Column(4),
+        ];
         let output_ops = [
             AggregationOperation::SumOp.to_field(),
             AggregationOperation::AvgOp.to_field(),
@@ -960,54 +1072,103 @@ mod tests {
             &column_ids,
             &predicate_operations,
             &result_operations,
+            &placeholder_values,
             is_leaf,
             min_query,
             max_query,
             &output_items,
             &output_ops,
-        ).unwrap();
+        )
+        .unwrap();
 
         // computed expected public inputs
         // expected tree hash
-        let cells = column_values.iter().zip(
-            column_ids.iter()
-        ).skip(2)
-        .map(|(value, id)| 
-            TestCell::new(*value, *id)
-        ).collect_vec();
+        let cells = column_values
+            .iter()
+            .zip(column_ids.iter())
+            .skip(2)
+            .map(|(value, id)| TestCell::new(*value, *id))
+            .collect_vec();
         let mut tree_hash = compute_cells_tree_hash(&cells);
         if is_leaf {
-            tree_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(&
-                empty_poseidon_hash().to_vec().into_iter()
-                .chain(empty_poseidon_hash().to_vec())
-                .chain(column_values[1].to_fields())
-                .chain(column_values[1].to_fields())
-                .chain(once(column_ids[1]))
-                .chain(column_values[1].to_fields())
-                .chain(tree_hash.to_vec())
-                .collect_vec()
+            tree_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(
+                &empty_poseidon_hash()
+                    .to_vec()
+                    .into_iter()
+                    .chain(empty_poseidon_hash().to_vec())
+                    .chain(column_values[1].to_fields())
+                    .chain(column_values[1].to_fields())
+                    .chain(once(column_ids[1]))
+                    .chain(column_values[1].to_fields())
+                    .chain(tree_hash.to_vec())
+                    .collect_vec(),
             );
         }
 
         // compute predicate value
-        let (res, overflow) = BasicOperation::compute_operations(
-            &predicate_operations, 
-            &column_values
-        ).unwrap();
+        let (res, predicate_err) = BasicOperation::compute_operations(
+            &predicate_operations,
+            &column_values,
+            &placeholder_values,
+        )
+        .unwrap();
         let predicate_value = match res.last().unwrap() {
             &val if val.is_zero() => F::ZERO,
             &val if val == U256::from(1) => F::ONE,
             _ => panic!("predicate value not Boolean"),
         };
 
+        let (res, result_err) = BasicOperation::compute_operations(
+            &result_operations,
+            &column_values,
+            &placeholder_values,
+        )
+        .unwrap();
+
+        let output_values = output_items
+            .iter()
+            .zip(output_ops.iter())
+            .map(|(item, agg_op)| {
+                let value = match item {
+                    &OutputItem::Column(index) => column_values[index],
+                    &OutputItem::ComputedValue(index) => res[index],
+                };
+                if predicate_value == F::ONE {
+                    value
+                } else {
+                    U256::from_fields(
+                        AggregationOperation::from_fields(&[*agg_op])
+                            .identity_value()
+                            .as_slice(),
+                    )
+                }
+            })
+            .collect_vec();
+
         let placeholder_hash = circuit.compute_placeholder_hash();
+        let computational_hash = UniversalQueryCircuitInputs::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+            Circuit<MAX_NUM_RESULTS>,
+        >::computational_hash(
+            &column_ids,
+            &predicate_operations,
+            &result_operations,
+            &output_items,
+            &output_ops,
+        )
+        .unwrap();
 
         let proof = run_circuit::<F, D, C, _>(circuit);
-        
+
         let pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
         assert_eq!(tree_hash, pi.tree_hash());
-        assert_eq!(predicate_value, pi.num_matching_rows(), 
-            "{:?} {}", column_values, overflow);
+        assert_eq!(output_values[0], pi.first_value_as_u256());
+        assert_eq!(output_values[1..], pi.values()[..output_values.len() - 1]);
+        assert_eq!(output_ops, pi.operation_ids()[..output_ops.len()]);
+        assert_eq!(predicate_value, pi.num_matching_rows());
         assert_eq!(column_values[0], pi.index_value());
         assert_eq!(column_values[1], pi.min_value());
         assert_eq!(column_values[1], pi.max_value());
@@ -1015,5 +1176,7 @@ mod tests {
         assert_eq!(min_query, pi.min_query_value());
         assert_eq!(max_query, pi.max_query_value());
         assert_eq!(placeholder_hash, pi.placeholder_hash());
-    } 
+        assert_eq!(computational_hash, pi.computational_hash());
+        assert_eq!(predicate_err || result_err, pi.overflow_flag());
+    }
 }

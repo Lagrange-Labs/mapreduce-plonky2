@@ -1,4 +1,7 @@
-use std::{array, iter::{once, repeat}};
+use std::{
+    array,
+    iter::{once, repeat},
+};
 
 use alloy::primitives::U256;
 use itertools::Itertools;
@@ -127,14 +130,14 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
 
         let mut output_values = vec![];
 
+        let possible_output_values = column_values
+            .iter()
+            .cloned()
+            .chain(item_values.into_iter())
+            .collect_vec();
+
         for i in 0..MAX_NUM_RESULTS {
-            // choose the value to be returned for the current item among all the possible
-            // extracted columns and the i-th item computed by selected item components
-            let possible_output_values = column_values
-                .iter()
-                .chain(once(&item_values[i]))
-                .cloned()
-                .collect_vec();
+            // ToDo: random accesses over different iterations can be done with a single operation if we introduce an ad-hoc gate
             let output_value = b.random_access_u256(selector[i], &possible_output_values);
 
             // If `predicate_value` is true, then expose the value to be aggregated;
@@ -148,7 +151,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
             output_values.push(actual_output_value);
         }
 
-        let output_hash = (Output::Aggregation).output_computational_hash_circuit(
+        let output_hash = Self::output_variant().output_hash_circuit(
             b,
             predicate_hash,
             column_hash,
@@ -178,33 +181,33 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
             .enumerate()
             .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_valid_outputs));
     }
-    
-    fn new(
-        selector: &[F],
-        ids: &[F],
-        num_outputs: usize,
-    ) -> Result<Self> {
-        ensure!(selector.len() == num_outputs, 
+
+    fn new(selector: &[F], ids: &[F], num_outputs: usize) -> Result<Self> {
+        ensure!(selector.len() == num_outputs,
             "Output component with aggregation: Number of selectors different from number of actual outputs");
-        ensure!(ids.len() == num_outputs, 
+        ensure!(ids.len() == num_outputs,
             "Output component with aggregation: Number of aggregation operations different from number of actual outputs");
-        let selectors = selector.into_iter()
+        let selectors = selector
+            .into_iter()
             .chain(repeat(&F::ZERO))
             .take(MAX_NUM_RESULTS)
             .cloned()
             .collect_vec();
-        let agg_ops = ids.into_iter()
+        let agg_ops = ids
+            .into_iter()
             .chain(repeat(&AggregationOperation::default().to_field()))
             .take(MAX_NUM_RESULTS)
             .cloned()
             .collect_vec();
-        Ok(
-            Self {
-                selector: selectors.try_into().unwrap(),
-                agg_ops: agg_ops.try_into().unwrap(),
-                num_valid_outputs: num_outputs,
-            }
-        )
+        Ok(Self {
+            selector: selectors.try_into().unwrap(),
+            agg_ops: agg_ops.try_into().unwrap(),
+            num_valid_outputs: num_outputs,
+        })
+    }
+
+    fn output_variant() -> Output {
+        Output::Aggregation
     }
 }
 
@@ -236,8 +239,10 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::query::{
-        computational_hash_ids::{AggregationOperation, Output},
-        universal_circuit::universal_query_circuit::{OutputComponent, OutputComponentWires},
+        computational_hash_ids::{AggregationOperation, ComputationalHashCache, Output},
+        universal_circuit::universal_query_circuit::{
+            OutputComponent, OutputComponentWires, OutputItem,
+        },
     };
 
     use super::{Circuit, InputWires};
@@ -384,11 +389,9 @@ mod tests {
             selectors: [usize; ACTUAL_NUM_RESULTS],
             agg_ops: [F; ACTUAL_NUM_RESULTS],
         ) -> Self {
-            let mut possible_input_values = column_values.to_vec();
-            possible_input_values.push(U256::ZERO);
+            let possible_input_values = column_values.into_iter().chain(item_values).collect_vec();
             let output_values = (0..ACTUAL_NUM_RESULTS)
                 .map(|i| {
-                    possible_input_values[MAX_NUM_COLUMNS] = item_values[i];
                     if predicate_value {
                         possible_input_values[selectors[i]]
                     } else if agg_ops[i] == AggregationOperation::MinOp.to_field() {
@@ -398,14 +401,29 @@ mod tests {
                     }
                 })
                 .collect_vec();
-            let output_hash = Output::Aggregation.output_computational_hash(
-                &predicate_hash,
-                &column_hash,
-                &item_hash,
-                &selectors,
-                &agg_ops,
-                ACTUAL_NUM_RESULTS,
-            );
+            let output_items = selectors
+                .iter()
+                .map(|&s| {
+                    if s < MAX_NUM_COLUMNS {
+                        OutputItem::Column(s)
+                    } else {
+                        OutputItem::ComputedValue(s - MAX_NUM_COLUMNS)
+                    }
+                })
+                .collect_vec();
+            let output_hash = Circuit::<MAX_NUM_RESULTS>::output_variant()
+                .output_hash(
+                    &predicate_hash,
+                    &mut ComputationalHashCache::<MAX_NUM_COLUMNS>::new_from_column_hash(
+                        &column_hash,
+                    )
+                    .unwrap(),
+                    &[], // unused since we already place all column hash in the cache
+                    &item_hash,
+                    &output_items,
+                    &agg_ops,
+                )
+                .unwrap();
             Self {
                 column_values,
                 column_hash,
@@ -417,7 +435,8 @@ mod tests {
                     &selectors.into_iter().map(|s| s.to_field()).collect_vec(),
                     &agg_ops,
                     ACTUAL_NUM_RESULTS,
-                    ).unwrap(),
+                )
+                .unwrap(),
                 expected_outputs: output_values.try_into().unwrap(),
                 expected_ops_ids: agg_ops,
                 expected_output_hash: output_hash,
@@ -436,7 +455,7 @@ mod tests {
         let item_values = array::from_fn(|_| gen_random_u256(rng));
         let item_hash = array::from_fn(|_| gen_random_field_hash());
         let predicate_hash = gen_random_field_hash();
-        let selectors = array::from_fn(|_| rng.gen_range(0..MAX_NUM_COLUMNS + 1));
+        let selectors = array::from_fn(|_| rng.gen_range(0..MAX_NUM_COLUMNS + ACTUAL_NUM_RESULTS));
         let agg_ops = array::from_fn(|i| agg_ops[i].to_field());
         let circuit =
             TestOutputComponentInputs::<MAX_NUM_COLUMNS, MAX_NUM_RESULTS, ACTUAL_NUM_RESULTS>::new(

@@ -14,16 +14,19 @@ use mp2_common::{
     CHasher, F,
 };
 use plonky2::{
+    field::types::Field,
     hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    field::types::Field,
 };
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 use serde::{Deserialize, Serialize};
-use std::{array, iter::{self, repeat}};
+use std::{
+    array,
+    iter::{self, repeat},
+};
 
 use super::{
     cells::build_cells_tree,
@@ -130,7 +133,6 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
 
         let u256_zero = b.zero_u256();
         let curve_zero = b.curve_zero();
-        let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
         // Initialize the input wires.
         let input_wires = InputWires {
@@ -140,13 +142,14 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
         };
 
         // Append the column values by a corresponding item value to construct the inputs.
-        let item_index = column_values.len();
-        let mut possible_input_values = column_values.to_vec();
-        possible_input_values.push(u256_zero.clone());
+        let possible_input_values = column_values
+            .iter()
+            .cloned()
+            .chain(item_values)
+            .collect_vec();
 
         // Build the output items to be returned.
         let output_items: [_; MAX_NUM_RESULTS] = array::from_fn(|i| {
-            possible_input_values[item_index] = item_values[i].clone();
             b.random_access_u256(input_wires.selector[i], &possible_input_values)
         });
 
@@ -180,7 +183,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
         let output_values = vec![u256_zero; MAX_NUM_RESULTS - 1];
 
         // Compute the computational hash representing the accumulation of the items.
-        let output_hash = Output::NoAggregation.output_computational_hash_circuit(
+        let output_hash = Self::output_variant().output_hash_circuit(
             b,
             predicate_hash,
             column_hash,
@@ -219,38 +222,43 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
             .enumerate()
             .for_each(|(i, t)| pw.set_bool_target(*t, i < self.valid_num_outputs));
     }
-    
-    fn new(
-        selector: &[F],
-        ids: &[F],
-        num_outputs: usize,
-    ) -> anyhow::Result<Self> {
-        ensure!(selector.len() == num_outputs, 
+
+    fn new(selector: &[F], ids: &[F], num_outputs: usize) -> anyhow::Result<Self> {
+        ensure!(selector.len() == num_outputs,
             "Output component without aggregation: Number of selectors different from number of actual outputs");
-        ensure!(ids.len() == num_outputs, 
+        ensure!(ids.len() == num_outputs,
             "Output component without aggregation: Number of output ids different from number of actual outputs");
-        let selectors = selector.into_iter()
+        let selectors = selector
+            .into_iter()
             .chain(repeat(&F::ZERO))
             .take(MAX_NUM_RESULTS)
             .cloned()
             .collect_vec();
-        let output_ids = ids.into_iter()
+        let output_ids = ids
+            .into_iter()
             .chain(repeat(&F::ZERO))
             .take(MAX_NUM_RESULTS)
             .cloned()
             .collect_vec();
-        Ok(
-            Self {
-                valid_num_outputs: num_outputs,
-                selector: selectors.try_into().unwrap(),
-                ids: output_ids.try_into().unwrap(),
-            }
-        )
+        Ok(Self {
+            valid_num_outputs: num_outputs,
+            selector: selectors.try_into().unwrap(),
+            ids: output_ids.try_into().unwrap(),
+        })
+    }
+
+    fn output_variant() -> Output {
+        Output::NoAggregation
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::query::{
+        computational_hash_ids::ComputationalHashCache,
+        universal_circuit::universal_query_circuit::OutputItem,
+    };
+
     use super::*;
     use alloy::primitives::U256;
     use itertools::Itertools;
@@ -276,8 +284,9 @@ mod tests {
             let mut rng = thread_rng();
 
             // Generate a random index from the length of (Column values + 1 item result).
-            let selector =
-                array::from_fn(|_| F::from_canonical_usize(rng.gen_range(0..=NUM_COLUMNS)));
+            let selector = array::from_fn(|_| {
+                F::from_canonical_usize(rng.gen_range(0..NUM_COLUMNS + valid_num_outputs))
+            });
             let ids = array::from_fn(|_| F::from_canonical_u32(rng.gen()));
 
             Self {
@@ -395,7 +404,6 @@ mod tests {
         ) -> Self {
             let u256_zero = U256::ZERO;
             let curve_zero = Point::NEUTRAL;
-            let empty_hash = empty_poseidon_hash();
             let selectors = c
                 .selector
                 .iter()
@@ -403,16 +411,15 @@ mod tests {
                 .collect_vec();
 
             // Construct the output items to be returned.
-            let item_index = output.column_values.len();
-            let mut possible_input_values = output.column_values.to_vec();
-            possible_input_values.push(u256_zero);
+            let possible_input_values = output
+                .column_values
+                .iter()
+                .chain(&output.item_values)
+                .cloned()
+                .collect_vec();
             let output_items: Vec<_> = (0..c.valid_num_outputs)
                 .into_iter()
-                .map(|i| {
-                    possible_input_values[item_index] =
-                        *output.item_values.get(i).unwrap_or(&u256_zero);
-                    possible_input_values[selectors[i]]
-                })
+                .map(|i| possible_input_values[selectors[i]])
                 .collect();
 
             // Compute the cells tree root hash of the all output items.
@@ -448,14 +455,30 @@ mod tests {
             };
 
             // Compute the computational output hash.
-            let output_hash = Output::NoAggregation.output_computational_hash(
-                &output.predicate_hash,
-                &output.column_hash,
-                &output.item_hash,
-                &selectors,
-                &c.ids,
-                c.valid_num_outputs,
-            );
+            let output_items = selectors
+                .iter()
+                .take(c.valid_num_outputs)
+                .map(|&s| {
+                    if s < NUM_COLUMNS {
+                        OutputItem::Column(s)
+                    } else {
+                        OutputItem::ComputedValue(s - NUM_COLUMNS)
+                    }
+                })
+                .collect_vec();
+            let output_hash = Circuit::<MAX_NUM_RESULTS>::output_variant()
+                .output_hash(
+                    &output.predicate_hash,
+                    &mut ComputationalHashCache::<NUM_COLUMNS>::new_from_column_hash(
+                        &output.column_hash,
+                    )
+                    .unwrap(),
+                    &[], // unused since we already place all column hash in the cache
+                    &output.item_hash,
+                    &output_items,
+                    &c.ids,
+                )
+                .unwrap();
 
             Self {
                 first_output_value,

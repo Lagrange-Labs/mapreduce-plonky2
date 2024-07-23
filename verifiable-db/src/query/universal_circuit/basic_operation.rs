@@ -58,36 +58,27 @@ pub struct BasicOperationInputs {
 
 impl BasicOperationInputs {
     /// Method to return the offset to be employed as input selector in case the
-    /// input operand of the basic operation is the value found in the input_pos 
+    /// input operand of the basic operation is the value found in the input_pos
     /// item of `input_values`
-    pub(crate) fn input_value_offset(
-        input_pos: usize,
-    ) -> usize {
+    pub(crate) fn input_value_offset(input_pos: usize) -> usize {
         input_pos
     }
     /// Method to return the offset to be employed as input selector in case the
     /// input operand of the basic operation is the constant operand
-    pub(crate) fn constant_operand_offset(
-        num_inputs_values: usize
-    ) -> usize {
+    pub(crate) fn constant_operand_offset(num_inputs_values: usize) -> usize {
         num_inputs_values
     }
     /// Method to return the offset to be employed as input selector in case the
     /// input operand of the basic operation is the first placeholder value
-    pub(crate) fn first_placeholder_offset(
-        num_inputs_values: usize,
-    ) -> usize {
-        num_inputs_values+1
+    pub(crate) fn first_placeholder_offset(num_inputs_values: usize) -> usize {
+        num_inputs_values + 1
     }
 
     /// Method to return the offset to be employed as input selector in case the
     /// input operand of the basic operation is the second placeholder value
-    pub(crate) fn second_placeholder_offset(
-        num_inputs_values: usize,
-    ) -> usize {
-        num_inputs_values+2
+    pub(crate) fn second_placeholder_offset(num_inputs_values: usize) -> usize {
+        num_inputs_values + 2
     }
-
 
     pub(crate) fn build(
         b: &mut CircuitBuilder<F, D>,
@@ -274,7 +265,10 @@ mod tests {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::query::computational_hash_ids::Operation;
+    use crate::query::{
+        computational_hash_ids::{ComputationalHashCache, Operation},
+        universal_circuit::universal_query_circuit::{BasicOperation, InputOperand},
+    };
 
     use super::{BasicOperationInputWires, BasicOperationInputs};
 
@@ -379,11 +373,17 @@ mod tests {
         };
 
         // compute expected outputs
-        let first_input = match first_input_selector.to_canonical_u64() as usize {
-            a if a < NUM_INPUTS => input_values[a],
-            a if a == NUM_INPUTS => constant_operand,
-            a if a == NUM_INPUTS + 1 => placeholder_values[0],
-            a if a == NUM_INPUTS + 2 => placeholder_values[1],
+        let (first_input, first_operand) = match first_input_selector.to_canonical_u64() as usize {
+            a if a < NUM_INPUTS => (input_values[a], InputOperand::Column(a)),
+            a if a == NUM_INPUTS => (constant_operand, InputOperand::Constant(constant_operand)),
+            a if a == NUM_INPUTS + 1 => (
+                placeholder_values[0],
+                InputOperand::Placeholder(placeholder_ids[0]),
+            ),
+            a if a == NUM_INPUTS + 2 => (
+                placeholder_values[1],
+                InputOperand::Placeholder(placeholder_ids[1]),
+            ),
             a => panic!(
                 "sampled second input selector too big: max {}, sampled {}",
                 NUM_INPUTS + 2,
@@ -391,11 +391,18 @@ mod tests {
             ),
         };
 
-        let second_input = match second_input_selector.to_canonical_u64() as usize {
-            a if a < NUM_INPUTS => input_values[a],
-            a if a == NUM_INPUTS => constant_operand,
-            a if a == NUM_INPUTS + 1 => placeholder_values[0],
-            a if a == NUM_INPUTS + 2 => placeholder_values[1],
+        let (second_input, second_operand) = match second_input_selector.to_canonical_u64() as usize
+        {
+            a if a < NUM_INPUTS => (input_values[a], InputOperand::Column(a)),
+            a if a == NUM_INPUTS => (constant_operand, InputOperand::Constant(constant_operand)),
+            a if a == NUM_INPUTS + 1 => (
+                placeholder_values[0],
+                InputOperand::Placeholder(placeholder_ids[0]),
+            ),
+            a if a == NUM_INPUTS + 2 => (
+                placeholder_values[1],
+                InputOperand::Placeholder(placeholder_ids[1]),
+            ),
             a => panic!(
                 "sampled second input selector too big: max {}, sampled {}",
                 NUM_INPUTS + 2,
@@ -404,14 +411,17 @@ mod tests {
         };
 
         let (expected_result, arithmetic_error) = compute_result(first_input, second_input);
+        let operation = BasicOperation {
+            first_operand,
+            second_operand: Some(second_operand),
+            op: op_identifier,
+        };
         let expected_hash = Operation::basic_operation_hash(
-            &input_hash,
-            constant_operand,
-            placeholder_ids,
-            first_input_selector,
-            second_input_selector,
-            op_selector,
-        );
+            &mut ComputationalHashCache::<NUM_INPUTS>::new_from_column_hash(&input_hash).unwrap(),
+            &vec![], // unused in this case since we have already inserted all input hash in the cache
+            &operation,
+        )
+        .unwrap();
 
         let test_circuit = TestBasicOperationComponent::<NUM_INPUTS> {
             input_values,
