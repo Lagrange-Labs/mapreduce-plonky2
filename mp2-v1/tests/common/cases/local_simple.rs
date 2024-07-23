@@ -442,13 +442,20 @@ impl TestCase {
             s3: "test".to_string(),
             s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
         };
-        // we fetch it from RPC as we would do in dist system
-        let old_table_values = self.current_table_row_values(ctx).await;
+        // since the table is not created yet, we are giving an empty table row. When making the
+        // diff with the new updated contract storage, the logic will detect it's an initialization
+        // phase
+        let old_table_values = TableRowValues::default();
         self.apply_update_to_contract(ctx, &UpdateSingleStorage::Single(contract_update))
             .await
             .unwrap();
         let new_table_values = self.current_table_row_values(ctx).await;
-        old_table_values.compute_update(&new_table_values)
+        let update = old_table_values.compute_update(&new_table_values);
+        assert!(
+            update.is_init(),
+            "initialization of the contract's table should be init"
+        );
+        update
     }
 
     //let mut rng = thread_rng();
