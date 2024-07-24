@@ -32,12 +32,12 @@ pub struct PublicInputs<'a, T> {
 }
 
 const INDEX_LEN: usize = u256::NUM_LIMBS;
-const H_RANGE: PublicInputRange = 0..NUM_HASH_OUT_ELTS;
-const DM_RANGE: PublicInputRange = H_RANGE.end..H_RANGE.end + NUM_HASH_OUT_ELTS;
-const DV_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + CURVE_TARGET_LEN;
-const Z0_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + INDEX_LEN;
-const ZI_RANGE: PublicInputRange = Z0_RANGE.end..Z0_RANGE.end + INDEX_LEN;
-const O_RANGE: PublicInputRange = ZI_RANGE.end..ZI_RANGE.end + PACKED_HASH_LEN;
+pub(crate) const H_RANGE: PublicInputRange = 0..NUM_HASH_OUT_ELTS;
+pub(crate) const DM_RANGE: PublicInputRange = H_RANGE.end..H_RANGE.end + NUM_HASH_OUT_ELTS;
+pub(crate) const DV_RANGE: PublicInputRange = DM_RANGE.end..DM_RANGE.end + CURVE_TARGET_LEN;
+pub(crate) const Z0_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + INDEX_LEN;
+pub(crate) const ZI_RANGE: PublicInputRange = Z0_RANGE.end..Z0_RANGE.end + INDEX_LEN;
+pub(crate) const O_RANGE: PublicInputRange = ZI_RANGE.end..ZI_RANGE.end + PACKED_HASH_LEN;
 
 impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     const RANGES: &'static [PublicInputRange] =

@@ -1,6 +1,6 @@
 mod api;
 mod circuit;
-mod public_inputs;
+pub(crate) mod public_inputs;
 
 pub use api::{CircuitInput, PublicParameters};
 use plonky2::iop::target::Target;
