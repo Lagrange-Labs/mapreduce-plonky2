@@ -136,7 +136,7 @@ impl<
     /// Return the current root hash of the Merkle tree at the given epoch.
     pub fn root_hash_at(&self, epoch: Epoch) -> Option<V> {
         self.tree
-            .root(&self.storage)
+            .root(&self.view_at(epoch))
             .map(|r| self.storage.data().fetch_at(&r, epoch))
     }
 
@@ -150,10 +150,30 @@ impl<
             .and_then(|ctx| self.try_fetch(k).map(|v| (ctx, v)))
     }
 
+    /// Fetch a value at the given `epoch` from the storage and returns its
+    /// [`NodeContext`] in the tree as well.
+    ///
+    /// Fail if `k` does not exist in the tree.
+    pub fn try_fetch_with_context_at(
+        &self,
+        k: &T::Key,
+        epoch: Epoch,
+    ) -> Option<(NodeContext<T::Key>, V)> {
+        self.tree
+            .node_context(k, &self.view_at(epoch))
+            .and_then(|ctx| self.try_fetch_at(k, epoch).map(|v| (ctx, v)))
+    }
+
     /// Fetch, if it exists, a value from the storage and returns its
     /// [`NodeContext`] in the tree as well.
     pub fn fetch_with_context(&self, k: &T::Key) -> (NodeContext<T::Key>, V) {
         self.try_fetch_with_context(k).unwrap()
+    }
+
+    /// Fetch, if it exists, a value from the storage at the given epoch and
+    /// returns its [`NodeContext`] in the tree as well.
+    pub fn fetch_with_context_at(&self, k: &T::Key, epoch: Epoch) -> (NodeContext<T::Key>, V) {
+        self.try_fetch_with_context_at(k, epoch).unwrap()
     }
 
     /// A reference to the underlying tree.
