@@ -160,20 +160,8 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceLeafCircuit<MAX_NUM_RESULTS> {
             .collect();
         let node_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        // We add the query bounds to the computational and placeholder hashes
-        // only if the current node is in a rows tree.
-        let inputs = computational_hash
-            .to_targets()
-            .into_iter()
-            .chain(min_query_targets.clone())
-            .chain(max_query_targets.clone())
-            .collect();
-        let computational_hash_with_query_bounds = b.hash_n_to_hash_no_pad::<H>(inputs);
-        let new_computational_hash = b.select_hash(
-            is_rows_tree_node,
-            &computational_hash_with_query_bounds,
-            &computational_hash,
-        );
+        // We add the query bounds to the placeholder hash only if the current
+        // node is in a rows tree.
         let inputs = placeholder_hash
             .to_targets()
             .into_iter()
@@ -200,7 +188,7 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceLeafCircuit<MAX_NUM_RESULTS> {
             &min_query_targets,
             &max_query_targets,
             &[ffalse.target],
-            &new_computational_hash.to_targets(),
+            &computational_hash.to_targets(),
             &new_placeholder_hash.to_targets(),
         )
         .register(b);
@@ -402,21 +390,7 @@ mod tests {
         // overflow_flag
         assert!(!pi.overflow_flag());
         // Computational hash
-        {
-            let exp_hash = if is_rows_tree_node {
-                let inputs: Vec<_> = computational_hash
-                    .to_fields()
-                    .into_iter()
-                    .chain(min_query_fields.clone())
-                    .chain(max_query_fields.clone())
-                    .collect();
-                H::hash_no_pad(&inputs)
-            } else {
-                computational_hash
-            };
-
-            assert_eq!(pi.computational_hash(), exp_hash);
-        }
+        assert_eq!(pi.computational_hash(), computational_hash);
         // Placeholder hash
         {
             let exp_hash = if is_rows_tree_node {
