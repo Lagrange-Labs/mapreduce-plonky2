@@ -263,7 +263,11 @@ mod tests {
         circuit::{run_circuit, UserCircuit},
         utils::{gen_random_field_hash, random_vector},
     };
-    use plonky2::{field::types::Field, iop::witness::WitnessWrite, plonk::config::Hasher};
+    use plonky2::{
+        field::types::{Field, Sample},
+        iop::witness::WitnessWrite,
+        plonk::config::Hasher,
+    };
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{prelude::SliceRandom, thread_rng, Rng};
 
@@ -291,8 +295,7 @@ mod tests {
             .choose(&mut rng)
             .unwrap();
         let index_value = U256::from_limbs(rng.gen());
-        let index_ids: Vec<_> = random_vector::<u32>(2).to_fields();
-        let index_ids = index_ids.try_into().unwrap();
+        let index_ids = F::rand_array();
         let [subtree_hash, computational_hash, placeholder_hash] =
             array::from_fn(|_| gen_random_field_hash());
 
