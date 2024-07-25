@@ -1,14 +1,11 @@
 //! Module handling the non-existence intermediate node for query aggregation circuits
 
 use crate::query::{
-    aggregation::output_computation::compute_dummy_output_targets,
-    computational_hash_ids::{AggregationOperation, Identifiers},
-    public_inputs::PublicInputs,
+    aggregation::output_computation::compute_dummy_output_targets, public_inputs::PublicInputs,
 };
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
-    array::ToField,
     hash::hash_maybe_first,
     poseidon::{empty_poseidon_hash, H},
     public_inputs::PublicInputCommon,
@@ -29,7 +26,6 @@ use plonky2::{
     },
     plonk::proof::ProofWithPublicInputsTarget,
 };
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::{array, iter};
@@ -121,9 +117,6 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         let ttrue = b._true();
         let ffalse = b._false();
         let zero = b.zero();
-        let curve_zero = b.curve_zero();
-        let u256_zero = b.zero_u256();
-        let u256_max = b.constant_u256(U256::MAX);
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
         let is_rows_tree_node = b.add_virtual_bool_target_safe();
@@ -141,9 +134,6 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         let [min_query_targets, max_query_targets] =
             [&min_query, &max_query].map(|v| v.to_targets());
         let column_id = b.select(is_rows_tree_node, index_ids[1], index_ids[0]);
-
-        let [op_id, op_min] = [AggregationOperation::IdOp, AggregationOperation::MinOp]
-            .map(|op| b.constant(Identifiers::AggregationOperations(op).to_field()));
 
         // Enforce that the value associated to the current node is out of the range
         // specified by the query:
@@ -328,11 +318,14 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::aggregation::{
-        output_computation::tests::compute_dummy_output_values,
-        tests::random_aggregation_operations,
+    use crate::query::{
+        aggregation::{
+            output_computation::tests::compute_dummy_output_values,
+            tests::random_aggregation_operations,
+        },
+        computational_hash_ids::{AggregationOperation, Identifiers},
     };
-    use mp2_common::{poseidon::H, utils::ToFields, C};
+    use mp2_common::{array::ToField, poseidon::H, utils::ToFields, C};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::{gen_random_field_hash, random_vector},
