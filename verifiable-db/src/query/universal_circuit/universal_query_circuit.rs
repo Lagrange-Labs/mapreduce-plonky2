@@ -5,7 +5,7 @@ use std::{
 };
 
 use alloy::primitives::U256;
-use anyhow::{bail, ensure, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
@@ -14,7 +14,7 @@ use mp2_common::{
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{SelectHashBuilder, ToFields, ToTargets},
+    utils::{SelectHashBuilder, ToBool, ToFields, ToTargets},
     CHasher, D, F,
 };
 use plonky2::{
@@ -96,10 +96,11 @@ impl BasicOperation {
         for (i, op) in operations.iter().enumerate() {
             let get_input_value = |operand| {
                 Ok(match operand {
-                    &InputOperand::Placeholder(p) => match placeholder_values.get(&p) {
-                        Some(value) => *value,
-                        None => bail!("No placeholder value found associated to id {}", p),
-                    },
+                    &InputOperand::Placeholder(p) => {
+                        *placeholder_values.get(&p).ok_or_else(|| {
+                            anyhow!("No placeholder value found associated to id {}", p)
+                        })?
+                    }
                     &InputOperand::Constant(v) => v,
                     &InputOperand::Column(index) => {
                         ensure!(
@@ -152,51 +153,37 @@ impl BasicOperation {
                 Operation::LessThanOrEqOp => U256::from((first_input <= second_input) as u8),
                 Operation::GreaterThanOrEqOp => U256::from((first_input >= second_input) as u8),
                 Operation::AndOp => {
-                    ensure!(
-                        first_input.is_zero() || first_input == U256::from(1),
-                        "first input value to AND op is not Boolean for operation {}",
-                        i
-                    );
-                    ensure!(
-                        second_input.is_zero() || second_input == U256::from(1),
-                        "second input value to AND op is not Boolean for operation {}",
-                        i
-                    );
-                    first_input * second_input
+                    let first_input = first_input
+                        .to_bool()
+                        .context(format!("first input value to AND operation {}: ", i))?;
+                    let second_input = second_input
+                        .to_bool()
+                        .context(format!("second input value to AND operation {}: ", i))?;
+                    U256::from((first_input && second_input) as u8)
                 }
                 Operation::OrOp => {
-                    ensure!(
-                        first_input.is_zero() || first_input == U256::from(1),
-                        "first input value to OR op is not Boolean for operation {}",
-                        i
-                    );
-                    ensure!(
-                        second_input.is_zero() || second_input == U256::from(1),
-                        "second input value to OR op is not Boolean for operation {}",
-                        i
-                    );
-                    first_input + second_input - first_input * second_input
+                    let first_input = first_input
+                        .to_bool()
+                        .context(format!("first input value to OR operation {}: ", i))?;
+                    let second_input = second_input
+                        .to_bool()
+                        .context(format!("second input value to OR operation {}: ", i))?;
+                    U256::from((first_input || second_input) as u8)
                 }
                 Operation::NotOp => {
-                    ensure!(
-                        first_input.is_zero() || first_input == U256::from(1),
-                        "input value to NOT op is not Boolean for operation {}",
-                        i
-                    );
-                    U256::from(1) - first_input
+                    let input_bool = first_input
+                        .to_bool()
+                        .context(format!("input value to NOT operation {}: ", i))?;
+                    U256::from((!input_bool) as u8)
                 }
                 Operation::XorOp => {
-                    ensure!(
-                        first_input.is_zero() || first_input == U256::from(1),
-                        "first input value to XOR op is not Boolean for operation {}",
-                        i
-                    );
-                    ensure!(
-                        second_input.is_zero() || second_input == U256::from(1),
-                        "secondinput value to XOR op is not Boolean for operation {}",
-                        i
-                    );
-                    first_input + second_input - U256::from(2) * first_input * second_input
+                    let first_input = first_input
+                        .to_bool()
+                        .context(format!("first input value to XOR operation {}: ", i))?;
+                    let second_input = second_input
+                        .to_bool()
+                        .context(format!("second input value to XOR operation {}: ", i))?;
+                    U256::from((first_input ^ second_input) as u8)
                 }
             };
             results.push(result);
@@ -276,6 +263,7 @@ pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
         wires: &<Self::Wires as OutputComponentWires>::InputWires,
     );
 
+    /// Return the type of output component, specified as an instance of `Output` enum
     fn output_variant() -> Output;
 }
 /// Trait representing the wires that need to be exposed by an `OutputComponent`
@@ -750,10 +738,8 @@ where
                 Ok(
                 match operand {
                     InputOperand::Placeholder(p) => {
-                        let placeholder_value = match placeholder_values.get(&p) {
-                            Some(value) => *value,
-                            None => bail!("No placeholder value found associated to id {}", p),
-                        };
+                        let placeholder_value = *placeholder_values.get(&p)
+                            .ok_or_else(|| anyhow!("No placeholder value found associated to id {}", p))?;
                         (
                             Some(placeholder_value),
                             Some(p),
@@ -847,7 +833,7 @@ mod tests {
         array::ToField,
         group_hashing::map_to_curve_point,
         poseidon::empty_poseidon_hash,
-        utils::{FromFields, ToFields},
+        utils::{FromFields, ToBool, ToFields},
         C, D, F,
     };
     use mp2_test::{
@@ -1454,11 +1440,7 @@ mod tests {
             &placeholder_values,
         )
         .unwrap();
-        let predicate_value = match res.last().unwrap() {
-            &val if val.is_zero() => F::ZERO,
-            &val if val == U256::from(1) => F::ONE,
-            _ => panic!("predicate value not Boolean"),
-        };
+        let predicate_value = res.last().unwrap().to_bool().unwrap();
 
         let (res, result_err) = BasicOperation::compute_operations(
             &result_operations,
@@ -1479,7 +1461,7 @@ mod tests {
                 TestCell::new(value, *id)
             })
             .collect_vec();
-        let output_acc = if predicate_value == F::ONE {
+        let output_acc = if predicate_value {
             map_to_curve_point(
                 &once(out_cells[0].id)
                     .chain(out_cells[0].value.to_fields())
@@ -1536,7 +1518,7 @@ mod tests {
                 MAX_NUM_RESULTS - 1],
             pi.operation_ids()[1..]
         );
-        assert_eq!(predicate_value, pi.num_matching_rows());
+        assert_eq!(predicate_value, pi.num_matching_rows().to_bool().unwrap());
         assert_eq!(column_values[0], pi.index_value());
         assert_eq!(column_values[1], pi.min_value());
         assert_eq!(column_values[1], pi.max_value());

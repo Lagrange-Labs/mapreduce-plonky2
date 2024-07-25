@@ -1,7 +1,7 @@
 use std::array::from_fn as create_array;
 
-use alloy::primitives::B256;
-use anyhow::Result;
+use alloy::primitives::{B256, U256};
+use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
@@ -457,7 +457,37 @@ impl<'a> ToTargets for &'a HashOutTarget {
 pub trait FromFields<F> {
     fn from_fields(t: &[F]) -> Self;
 }
-/// Trait alias defined to implement `Packer` trait for `RichField`
+
+pub trait ToBool {
+    /// Convert `self` to `bool`, if `self` can be represented as a bool
+    fn to_bool(&self) -> Result<bool>;
+}
+
+impl<F: PackableRichField> ToBool for F {
+    fn to_bool(&self) -> Result<bool> {
+        if *self == F::ZERO {
+            Ok(false)
+        } else if *self == F::ONE {
+            Ok(true)
+        } else {
+            Err(anyhow!("input field element is not a Boolean value"))
+        }
+    }
+}
+
+impl ToBool for U256 {
+    fn to_bool(&self) -> Result<bool> {
+        if *self == U256::ZERO {
+            Ok(false)
+        } else if *self == U256::from(1) {
+            Ok(true)
+        } else {
+            Err(anyhow!("input U256 value is not a Boolean value"))
+        }
+    }
+}
+
+/// Trait alias defined to implement `Packer` and `ToBool` traits for `RichField`
 /// Fields that want to be packed with `Packer` have to implement
 /// this trait (trivial implementation). Currently implemented only
 /// for Goldilocks

@@ -5,7 +5,7 @@ use std::{
 };
 
 use alloy::primitives::U256;
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use itertools::Itertools;
 
 use mp2_common::{
@@ -154,26 +154,19 @@ impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
             column_index < MAX_NUM_COLUMNS,
             "column index bigger than maximum number of columns"
         );
-        Ok(if let Some(hash) = self.0.get(&column_index) {
-            *hash
-        } else {
-            let column_hash = Identifiers::Extraction(Extraction::Column)
-                .prefix_id_hash(vec![column_ids[column_index]]);
-            self.0.insert(column_index, column_hash);
-            column_hash
-        })
+        Ok(*self.0.entry(column_index).or_insert_with(|| {
+            Identifiers::Extraction(Extraction::Column)
+                .prefix_id_hash(vec![column_ids[column_index]])
+        }))
     }
 
     /// Get a previously computed hash for the `op-index`-th operation in a set of operations
     fn get_previous_operation_hash(&self, op_index: usize) -> Result<HashOut<F>> {
         let previous_value_index = op_index + MAX_NUM_COLUMNS;
-        let hash = self.0.get(&previous_value_index);
-        ensure!(
-            hash.is_some(),
+        self.0.get(&previous_value_index).cloned().ok_or(anyhow!(
             "input hash for previous value with index {} not found",
             op_index
-        );
-        Ok(*hash.unwrap())
+        ))
     }
 
     /// Insert the hash computed for the `op-index`-th operation in a set of operations
