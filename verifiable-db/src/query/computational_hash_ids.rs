@@ -5,7 +5,9 @@ use std::{
 };
 
 use alloy::primitives::U256;
+use anyhow::{ensure, Result};
 use itertools::Itertools;
+
 use mp2_common::{
     array::ToField,
     poseidon::{empty_poseidon_hash, H},
@@ -26,8 +28,6 @@ use plonky2::{
 use plonky2_ecgfp5::curve::curve::Point;
 
 use super::universal_circuit::universal_query_circuit::{BasicOperation, InputOperand, OutputItem};
-
-use anyhow::{ensure, Result};
 
 pub enum Identifiers {
     Extraction(Extraction),

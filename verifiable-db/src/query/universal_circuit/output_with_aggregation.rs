@@ -1,6 +1,7 @@
 use std::{array, iter::repeat};
 
 use alloy::primitives::U256;
+use anyhow::{ensure, Result};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
@@ -23,8 +24,6 @@ use serde::{Deserialize, Serialize};
 use crate::query::computational_hash_ids::{AggregationOperation, Output};
 
 use super::universal_query_circuit::{OutputComponent, OutputComponentWires};
-
-use anyhow::{ensure, Result};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for output with aggregation component
@@ -133,7 +132,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
             .collect_vec();
 
         for i in 0..MAX_NUM_RESULTS {
-            // ToDo: random accesses over different iterations can be done with a single operation if we introduce an ad-hoc gate
+            // TODO: random accesses over different iterations can be done with a single operation if we introduce an ad-hoc gate
             let output_value = b.random_access_u256(selector[i], &possible_output_values);
 
             // If `predicate_value` is true, then expose the value to be aggregated;

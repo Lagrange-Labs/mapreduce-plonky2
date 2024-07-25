@@ -5,6 +5,7 @@ use std::{
 };
 
 use alloy::primitives::U256;
+use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
@@ -40,7 +41,6 @@ use super::{
     basic_operation::{BasicOperationInputWires, BasicOperationWires},
     column_extraction::{ColumnExtractionInputWires, ColumnExtractionInputs},
 };
-use anyhow::{bail, ensure, Result};
 
 #[derive(Clone, Copy, Debug, Default)]
 /// Data structure representing a placeholder in the query, given by its value and its identifier
@@ -527,7 +527,6 @@ where
         // last basic operation component among the `MAX_NUM_PREDICATE_OPS` ones employed to evaluate
         // the filtering predicate
         let predicate_value = input_values.last().unwrap().to_bool_target();
-        //b.assert_bool(predicate_value); // ToDo: might be redundant, but it's cheap
         let predicate_hash = input_hash.last().unwrap();
         // initialize input_values and input_hash input vectors for basic operation components employed to
         // compute the results to be returned for the current row
@@ -580,8 +579,6 @@ where
             &predicate_value,
             predicate_hash,
         );
-        // counter of number of matching records, to be exposed as public input
-        //let count = b.select(predicate_value, one, zero);
         // compute overflow flag
         let not_overflow = b.is_equal(num_overflows, zero);
         let overflow = b.not(not_overflow);
