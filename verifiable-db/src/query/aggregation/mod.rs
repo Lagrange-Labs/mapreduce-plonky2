@@ -1,3 +1,4 @@
+mod child_proven_single_path_node;
 mod full_node_index_leaf;
 mod full_node_with_one_child;
 mod full_node_with_two_children;
