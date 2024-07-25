@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn test_query_agg_non_existence_leaf_for_index_node_with_random_ops() {
         // Generate the random operations.
-        let mut ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
+        let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
         test_non_existence_leaf_circuit(false, ops);
     }
