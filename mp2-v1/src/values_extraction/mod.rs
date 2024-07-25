@@ -37,11 +37,10 @@ pub fn identifier_block_column() -> u64 {
 
 /// Calculate `id = Poseidon(slot || contract_address)[0]` for single variable.
 pub fn identifier_single_var_column(slot: u8, contract_address: &Address) -> u64 {
-    // TODO: reput
-    //let packed_contract_address: Vec<_> = contract_address.0.pack(Endianness::Big).to_fields();
+    let packed_contract_address: Vec<_> = contract_address.0.pack(Endianness::Big).to_fields();
 
     let inputs: Vec<_> = iter::once(GFp::from_canonical_u8(slot))
-        //.chain(packed_contract_address)
+        .chain(packed_contract_address)
         .collect();
 
     PoseidonHash::hash_no_pad(&inputs).elements[0].to_canonical_u64()

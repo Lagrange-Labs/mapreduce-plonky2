@@ -82,9 +82,7 @@ impl TableColumns {
                 .iter()
                 .enumerate()
                 .find(|(_, c)| c.identifier == identifier)
-                // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
-                // but we put + 1 because sbbst starts at +1
-                .map(|(i, _)| i+1)
+                .map(|(i, _)| i)
                 .expect("can't find index of identfier"),
         }
     }
@@ -136,6 +134,8 @@ impl Table {
                 .in_transaction(|t| {
                     // if there is no cell, this loop wont run
                     for cell in cells.non_indexed_cells().unwrap_or_default() {
+                        // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
+                        // but we put + 1 because sbbst starts at +1
                         let idx = self.columns.cells_tree_index_of(cell.id);
                         t.store(idx, cell.into())?;
                     }
@@ -178,6 +178,8 @@ impl Table {
         let cell_update = cell_tree
             .in_transaction(|t| {
                 for new_cell in update.updated_cells.iter() {
+                    // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
+                    // but we put + 1 because sbbst starts at +1
                     let cell_key = self.columns.cells_tree_index_of(new_cell.id);
                     if update.init {
                         t.store(cell_key, new_cell.into())?;

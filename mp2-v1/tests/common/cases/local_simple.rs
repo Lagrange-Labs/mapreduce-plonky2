@@ -370,7 +370,7 @@ impl TestCase {
     async fn apply_update_to_contract<P: ProofStorage>(
         &self,
         ctx: &TestContext<P>,
-        update: &UpdateSingleStorage,
+        update: &UpdateSimpleStorage,
     ) -> Result<()> {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -426,7 +426,7 @@ impl TestCase {
                     }
                 };
 
-                let contract_update = UpdateSingleStorage::Single(current_values);
+                let contract_update = UpdateSimpleStorage::Single(current_values);
                 self.apply_update_to_contract(ctx, &contract_update)
                     .await
                     .unwrap();
@@ -457,7 +457,7 @@ impl TestCase {
                 // diff with the new updated contract storage, the logic will detect it's an initialization
                 // phase
                 let old_table_values = TableRowValues::default();
-                self.apply_update_to_contract(ctx, &UpdateSingleStorage::Single(contract_update))
+                self.apply_update_to_contract(ctx, &UpdateSimpleStorage::Single(contract_update))
                     .await
                     .unwrap();
                 let new_table_values = self.current_table_row_values(ctx).await;
@@ -528,7 +528,7 @@ impl TestCase {
 }
 
 #[derive(Clone, Debug)]
-enum UpdateSingleStorage {
+enum UpdateSimpleStorage {
     Single(SimpleSingleValue),
     // MAPPING ...
 }
@@ -545,10 +545,10 @@ pub struct SimpleSingleValue {
 // so we can test the "subsequent block"
 async fn update_contract_data<T: Transport + Clone, P: Provider<T, N>, N: Network>(
     contract: &SimpleInstance<T, P, N>,
-    update: &UpdateSingleStorage,
+    update: &UpdateSimpleStorage,
 ) {
     match update {
-        UpdateSingleStorage::Single(ref single) => update_single_values(contract, single).await,
+        UpdateSimpleStorage::Single(ref single) => update_single_values(contract, single).await,
     }
 }
 
