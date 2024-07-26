@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use alloy::primitives::U256;
 use itertools::Itertools;
-use mp2_common::{utils::ToBool, F};
+use mp2_common::{utils::TryIntoBool, F};
 
 use crate::query::computational_hash_ids::Operation;
 
@@ -124,34 +124,34 @@ impl BasicOperation {
                 Operation::GreaterThanOrEqOp => U256::from((first_input >= second_input) as u8),
                 Operation::AndOp => {
                     let first_input = first_input
-                        .to_bool()
+                        .try_into_bool()
                         .context(format!("first input value to AND operation {}: ", i))?;
                     let second_input = second_input
-                        .to_bool()
+                        .try_into_bool()
                         .context(format!("second input value to AND operation {}: ", i))?;
                     U256::from((first_input && second_input) as u8)
                 }
                 Operation::OrOp => {
                     let first_input = first_input
-                        .to_bool()
+                        .try_into_bool()
                         .context(format!("first input value to OR operation {}: ", i))?;
                     let second_input = second_input
-                        .to_bool()
+                        .try_into_bool()
                         .context(format!("second input value to OR operation {}: ", i))?;
                     U256::from((first_input || second_input) as u8)
                 }
                 Operation::NotOp => {
                     let input_bool = first_input
-                        .to_bool()
+                        .try_into_bool()
                         .context(format!("input value to NOT operation {}: ", i))?;
                     U256::from((!input_bool) as u8)
                 }
                 Operation::XorOp => {
                     let first_input = first_input
-                        .to_bool()
+                        .try_into_bool()
                         .context(format!("first input value to XOR operation {}: ", i))?;
                     let second_input = second_input
-                        .to_bool()
+                        .try_into_bool()
                         .context(format!("second input value to XOR operation {}: ", i))?;
                     U256::from((first_input ^ second_input) as u8)
                 }

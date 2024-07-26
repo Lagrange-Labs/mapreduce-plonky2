@@ -707,7 +707,7 @@ mod tests {
         array::ToField,
         group_hashing::map_to_curve_point,
         poseidon::empty_poseidon_hash,
-        utils::{FromFields, ToBool, ToFields},
+        utils::{FromFields, TryIntoBool, ToFields},
         C, D, F,
     };
     use mp2_test::{
@@ -1004,7 +1004,7 @@ mod tests {
             &placeholder_values,
         )
         .unwrap();
-        let predicate_value = res.last().unwrap().to_bool().unwrap();
+        let predicate_value = res.last().unwrap().try_into_bool().unwrap();
 
         let (res, result_err) = results
             .compute_output_values(&column_values, &placeholder_values)
@@ -1050,7 +1050,7 @@ mod tests {
         assert_eq!(output_values[0], pi.first_value_as_u256());
         assert_eq!(output_values[1..], pi.values()[..output_values.len() - 1]);
         assert_eq!(output_ops, pi.operation_ids()[..output_ops.len()]);
-        assert_eq!(predicate_value, pi.num_matching_rows().to_bool().unwrap());
+        assert_eq!(predicate_value, pi.num_matching_rows().try_into_bool().unwrap());
         assert_eq!(column_values[0], pi.index_value());
         assert_eq!(column_values[1], pi.min_value());
         assert_eq!(column_values[1], pi.max_value());
@@ -1306,7 +1306,7 @@ mod tests {
             &placeholder_values,
         )
         .unwrap();
-        let predicate_value = res.last().unwrap().to_bool().unwrap();
+        let predicate_value = res.last().unwrap().try_into_bool().unwrap();
 
         let (res, result_err) = results
             .compute_output_values(&column_values, &placeholder_values)
@@ -1382,7 +1382,7 @@ mod tests {
                 MAX_NUM_RESULTS - 1],
             pi.operation_ids()[1..]
         );
-        assert_eq!(predicate_value, pi.num_matching_rows().to_bool().unwrap());
+        assert_eq!(predicate_value, pi.num_matching_rows().try_into_bool().unwrap());
         assert_eq!(column_values[0], pi.index_value());
         assert_eq!(column_values[1], pi.min_value());
         assert_eq!(column_values[1], pi.max_value());

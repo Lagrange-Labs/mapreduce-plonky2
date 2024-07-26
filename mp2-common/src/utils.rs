@@ -458,13 +458,13 @@ pub trait FromFields<F> {
     fn from_fields(t: &[F]) -> Self;
 }
 
-pub trait ToBool {
+pub trait TryIntoBool {
     /// Convert `self` to `bool`, if `self` can be represented as a bool
-    fn to_bool(&self) -> Result<bool>;
+    fn try_into_bool(&self) -> Result<bool>;
 }
 
-impl<F: PackableRichField> ToBool for F {
-    fn to_bool(&self) -> Result<bool> {
+impl<F: PackableRichField> TryIntoBool for F {
+    fn try_into_bool(&self) -> Result<bool> {
         if *self == F::ZERO {
             Ok(false)
         } else if *self == F::ONE {
@@ -475,8 +475,8 @@ impl<F: PackableRichField> ToBool for F {
     }
 }
 
-impl ToBool for U256 {
-    fn to_bool(&self) -> Result<bool> {
+impl TryIntoBool for U256 {
+    fn try_into_bool(&self) -> Result<bool> {
         if *self == U256::ZERO {
             Ok(false)
         } else if *self == U256::from(1) {
