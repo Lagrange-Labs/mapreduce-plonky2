@@ -18,17 +18,15 @@ use mp2_common::{
 };
 use plonky2::{
     field::types::Field,
-    hash::{
-        hash_types::{HashOut, HashOutTarget, RichField},
-        hashing::hash_n_to_hash_no_pad,
-    },
+    hash::{hash_types::RichField, hashing::hash_n_to_hash_no_pad},
     iop::target::{BoolTarget, Target},
     plonk::config::{GenericHashOut, Hasher},
 };
 use plonky2_ecgfp5::curve::curve::Point;
 
-use super::universal_circuit::universal_circuit_inputs::{
-    BasicOperation, InputOperand, OutputItem,
+use super::universal_circuit::{
+    universal_circuit_inputs::{BasicOperation, InputOperand, OutputItem},
+    ComputationalHash, ComputationalHashTarget,
 };
 
 pub enum Identifiers {
@@ -66,7 +64,7 @@ impl Identifiers {
                 Identifiers::AggregationOperations(ao) => *ao as usize,
             }
     }
-    pub(crate) fn prefix_id_hash(&self, elements: Vec<F>) -> HashOut<F> {
+    pub(crate) fn prefix_id_hash(&self, elements: Vec<F>) -> ComputationalHash {
         let inputs: Vec<_> = once(self.to_field()).chain(elements).collect();
         H::hash_no_pad(&inputs)
     }
@@ -74,7 +72,7 @@ impl Identifiers {
         &self,
         b: &mut CBuilder,
         elements: Vec<Target>,
-    ) -> HashOutTarget {
+    ) -> ComputationalHashTarget {
         let inputs = once(b.constant(self.to_field())).chain(elements).collect();
         b.hash_n_to_hash_no_pad::<CHasher>(inputs)
     }
@@ -127,10 +125,10 @@ pub(crate) type HashPermutation = <CHasher as Hasher<F>>::Permutation;
 pub(crate) struct ComputationalHashCache<const MAX_NUM_COLUMNS: usize> {
     // cache the computational hash already computed for columns of the table, identified
     // by the column index
-    column_hash: HashMap<usize, HashOut<F>>,
+    column_hash: HashMap<usize, ComputationalHash>,
     // cache the computational hash already computed for operations being performed, identified
     // by the position of the operation in the set of operations
-    operation_hash: HashMap<usize, HashOut<F>>,
+    operation_hash: HashMap<usize, ComputationalHash>,
 }
 
 impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
@@ -142,7 +140,7 @@ impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
         }
     }
     /// Initialize a `ComputationalHashCache ` with a set of computational hash for column
-    pub(crate) fn new_from_column_hash(column_hash: &[HashOut<F>]) -> Result<Self> {
+    pub(crate) fn new_from_column_hash(column_hash: &[ComputationalHash]) -> Result<Self> {
         ensure!(
             column_hash.len() <= MAX_NUM_COLUMNS,
             "Number of input column hash is higher than the maximum number of columns"
@@ -162,7 +160,7 @@ impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
         &mut self,
         column_index: usize,
         column_ids: &[F],
-    ) -> Result<HashOut<F>> {
+    ) -> Result<ComputationalHash> {
         ensure!(
             column_index < MAX_NUM_COLUMNS,
             "column index bigger than maximum number of columns"
@@ -174,7 +172,7 @@ impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
     }
 
     /// Get a previously computed hash for the `op-index`-th operation in a set of operations
-    fn get_previous_operation_hash(&self, op_index: usize) -> Result<HashOut<F>> {
+    fn get_previous_operation_hash(&self, op_index: usize) -> Result<ComputationalHash> {
         self.operation_hash.get(&op_index).cloned().ok_or(anyhow!(
             "input hash for previous value with index {} not found",
             op_index
@@ -182,7 +180,7 @@ impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
     }
 
     /// Insert the hash computed for the `op-index`-th operation in a set of operations
-    fn insert_previous_operation_hash(&mut self, op_index: usize, hash: &HashOut<F>) {
+    fn insert_previous_operation_hash(&mut self, op_index: usize, hash: &ComputationalHash) {
         self.operation_hash.insert(op_index, *hash);
     }
 }
@@ -203,8 +201,8 @@ impl Operation {
         previous_hash: &mut ComputationalHashCache<MAX_NUM_COLUMNS>,
         column_ids: &[F],
         operation: &BasicOperation,
-    ) -> Result<HashOut<F>> {
-        let mut compute_operand_hash = |operand: &InputOperand| -> Result<HashOut<F>> {
+    ) -> Result<ComputationalHash> {
+        let mut compute_operand_hash = |operand: &InputOperand| -> Result<ComputationalHash> {
             Ok(match operand {
                 &InputOperand::Placeholder(p) => hash_n_to_hash_no_pad::<_, HashPermutation>(&[p]),
                 &InputOperand::Constant(value) => {
@@ -241,7 +239,7 @@ impl Operation {
         operations: &[BasicOperation],
         column_ids: &[F],
         previous_hash: &mut ComputationalHashCache<MAX_NUM_COLUMNS>,
-    ) -> Result<Vec<HashOut<F>>> {
+    ) -> Result<Vec<ComputationalHash>> {
         operations
             .iter()
             .enumerate()
@@ -255,13 +253,13 @@ impl Operation {
 
     pub(crate) fn basic_operation_hash_circuit(
         b: &mut CBuilder,
-        input_hash: &[HashOutTarget],
+        input_hash: &[ComputationalHashTarget],
         constant_operand: &UInt256Target,
         placeholder_ids: [Target; 2],
         first_selector: Target,
         second_selector: Target,
         op_selector: Target,
-    ) -> HashOutTarget {
+    ) -> ComputationalHashTarget {
         let constant_operand_hash =
             b.hash_n_to_hash_no_pad::<CHasher>(constant_operand.to_targets());
         let first_placeholder_id_hash =
@@ -320,13 +318,13 @@ impl<F: RichField> ToField<F> for Output {
 impl Output {
     pub(crate) fn output_hash<const MAX_NUM_COLUMNS: usize>(
         &self,
-        predicate_hash: &HashOut<F>,
+        predicate_hash: &ComputationalHash,
         previous_hash: &mut ComputationalHashCache<MAX_NUM_COLUMNS>,
         column_ids: &[F],
-        result_ops_hash: &[HashOut<F>],
+        result_ops_hash: &[ComputationalHash],
         output_items: &[OutputItem],
         output_ids: &[F],
-    ) -> Result<HashOut<F>> {
+    ) -> Result<ComputationalHash> {
         let init_hash = Identifiers::Output(*self).prefix_id_hash(predicate_hash.to_vec());
         output_items.iter().enumerate().fold(
             Ok(init_hash),
@@ -360,12 +358,12 @@ impl Output {
     pub(crate) fn output_hash_circuit<const MAX_NUM_RESULTS: usize>(
         &self,
         b: &mut CBuilder,
-        predicate_hash: &HashOutTarget,
-        possible_output_hash: &[HashOutTarget],
+        predicate_hash: &ComputationalHashTarget,
+        possible_output_hash: &[ComputationalHashTarget],
         selector: &[Target; MAX_NUM_RESULTS],
         output_ids: &[Target; MAX_NUM_RESULTS],
         is_output_valid: &[BoolTarget; MAX_NUM_RESULTS],
-    ) -> HashOutTarget {
+    ) -> ComputationalHashTarget {
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
         let mut output_hash =
             Identifiers::Output(*self).prefix_id_hash_circuit(b, predicate_hash.to_targets());

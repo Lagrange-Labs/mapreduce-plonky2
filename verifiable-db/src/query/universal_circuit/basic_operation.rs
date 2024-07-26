@@ -1,5 +1,3 @@
-use std::iter::repeat;
-
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
@@ -8,7 +6,6 @@ use mp2_common::{
     D, F,
 };
 use plonky2::{
-    hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -19,6 +16,8 @@ use plonky2::{
 use serde::{Deserialize, Serialize};
 
 use crate::query::computational_hash_ids::Operation;
+
+use super::ComputationalHashTarget;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for basic operation component
@@ -44,7 +43,7 @@ pub struct BasicOperationInputWires {
 pub struct BasicOperationWires {
     pub(crate) input_wires: BasicOperationInputWires,
     pub(crate) output_value: UInt256Target,
-    pub(crate) output_hash: HashOutTarget,
+    pub(crate) output_hash: ComputationalHashTarget,
     pub(crate) num_overflows: Target,
 }
 /// Witness input values for basic operation component
@@ -85,7 +84,7 @@ impl BasicOperationInputs {
     pub(crate) fn build(
         b: &mut CircuitBuilder<F, D>,
         input_values: &[UInt256Target],
-        input_hash: &[HashOutTarget],
+        input_hash: &[ComputationalHashTarget],
         num_overflows: Target,
     ) -> BasicOperationWires {
         let zero = b.zero();
@@ -262,7 +261,6 @@ mod tests {
     };
     use plonky2::{
         field::types::{Field, PrimeField64},
-        hash::hash_types::{HashOut, HashOutTarget},
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
@@ -273,7 +271,10 @@ mod tests {
 
     use crate::query::{
         computational_hash_ids::{ComputationalHashCache, Operation},
-        universal_circuit::universal_circuit_inputs::{BasicOperation, InputOperand},
+        universal_circuit::{
+            universal_circuit_inputs::{BasicOperation, InputOperand},
+            ComputationalHash, ComputationalHashTarget,
+        },
     };
 
     use super::{BasicOperationInputWires, BasicOperationInputs};
@@ -281,19 +282,19 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TestBasicOperationComponent<const NUM_INPUTS: usize> {
         input_values: [U256; NUM_INPUTS],
-        input_hash: [HashOut<F>; NUM_INPUTS],
+        input_hash: [ComputationalHash; NUM_INPUTS],
         component: BasicOperationInputs,
         expected_result: U256,
-        expected_hash: HashOut<F>,
+        expected_hash: ComputationalHash,
         num_errors: usize,
     }
 
     struct TestBasicOperationWires<const NUM_INPUTS: usize> {
         input_values: [UInt256Target; NUM_INPUTS],
-        input_hash: [HashOutTarget; NUM_INPUTS],
+        input_hash: [ComputationalHashTarget; NUM_INPUTS],
         component_wires: BasicOperationInputWires,
         expected_result: UInt256Target,
-        expected_hash: HashOutTarget,
+        expected_hash: ComputationalHashTarget,
         num_errors: Target,
     }
 

@@ -1,3 +1,6 @@
+use mp2_common::F;
+use plonky2::hash::hash_types::{HashOut, HashOutTarget};
+
 /// Component implementing the basic operation supported in the universal query circuit, described here
 /// https://www.notion.so/lagrangelabs/Queries-Circuits-2695199166a54954bbc44ad9dc398825?pvs=4#46985c2eb90f4af8aa0805a9203e9efa
 mod basic_operation;
@@ -24,3 +27,11 @@ pub(crate) mod universal_circuit_inputs;
 
 /// Column index number (primary and secondary indexes)
 pub(crate) const COLUMN_INDEX_NUM: usize = 2;
+
+// type alias introduced to specify the semantic of a hash, given that we have many in the query circuits
+pub type ComputationalHash = HashOut<F>;
+pub type PlaceholderHash = HashOut<F>;
+pub type MembershipHash = HashOut<F>;
+pub type ComputationalHashTarget = HashOutTarget;
+pub type PlaceholderHashTarget = HashOutTarget;
+pub type MembershipHashTarget = HashOutTarget;

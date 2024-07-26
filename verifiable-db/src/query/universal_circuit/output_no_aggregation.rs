@@ -12,12 +12,9 @@ use mp2_common::{
     utils::ToTargets,
     F,
 };
-use plonky2::{
-    hash::hash_types::HashOutTarget,
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+use plonky2::iop::{
+    target::{BoolTarget, Target},
+    witness::{PartialWitness, WitnessWrite},
 };
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 use serde::{Deserialize, Serialize};
@@ -29,7 +26,7 @@ use std::{
 use super::{
     cells::build_cells_tree,
     universal_query_circuit::{OutputComponent, OutputComponentWires},
-    COLUMN_INDEX_NUM,
+    ComputationalHashTarget, COLUMN_INDEX_NUM,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -69,7 +66,7 @@ pub struct Wires<const MAX_NUM_RESULTS: usize> {
     /// Remaining output values; for this component, they are basically dummy values
     output_values: Vec<UInt256Target>,
     /// Computational hash representing all the computation done in the query circuit
-    output_hash: HashOutTarget,
+    output_hash: ComputationalHashTarget,
     /// Identifiers of the aggregation operations to be returned as public inputs
     ops_ids: [Target; MAX_NUM_RESULTS],
 }
@@ -106,7 +103,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
         self.output_values.as_slice()
     }
 
-    fn computational_hash(&self) -> HashOutTarget {
+    fn computational_hash(&self) -> ComputationalHashTarget {
         self.output_hash
     }
 
@@ -121,9 +118,9 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
     fn build<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
         possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
-        possible_output_hash: [HashOutTarget; NUM_OUTPUT_VALUES],
+        possible_output_hash: [ComputationalHashTarget; NUM_OUTPUT_VALUES],
         predicate_value: &BoolTarget,
-        predicate_hash: &HashOutTarget,
+        predicate_hash: &ComputationalHashTarget,
     ) -> Self::Wires {
         let u256_zero = b.zero_u256();
         let curve_zero = b.curve_zero();
@@ -242,7 +239,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
 mod tests {
     use crate::query::{
         computational_hash_ids::ComputationalHashCache,
-        universal_circuit::universal_circuit_inputs::OutputItem,
+        universal_circuit::{universal_circuit_inputs::OutputItem, ComputationalHash},
     };
 
     use super::*;
@@ -256,11 +253,7 @@ mod tests {
         cells_tree::{compute_cells_tree_hash, TestCell},
         circuit::{run_circuit, UserCircuit},
     };
-    use plonky2::{
-        field::types::{Field, PrimeField64, Sample},
-        hash::hash_types::HashOut,
-        plonk::config::Hasher,
-    };
+    use plonky2::field::types::{Field, PrimeField64, Sample};
     use plonky2_ecgfp5::{curve::curve::Point, gadgets::curve::PartialWitnessCurve};
     use rand::{thread_rng, Rng};
 
@@ -286,21 +279,21 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TestOutputWires<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> {
         column_values: [UInt256Target; NUM_COLUMNS],
-        column_hash: [HashOutTarget; NUM_COLUMNS],
+        column_hash: [ComputationalHashTarget; NUM_COLUMNS],
         item_values: [UInt256Target; MAX_NUM_RESULTS],
-        item_hash: [HashOutTarget; MAX_NUM_RESULTS],
+        item_hash: [ComputationalHashTarget; MAX_NUM_RESULTS],
         predicate_value: BoolTarget,
-        predicate_hash: HashOutTarget,
+        predicate_hash: ComputationalHashTarget,
     }
 
     #[derive(Clone, Debug)]
     struct TestOutput<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> {
         column_values: [U256; NUM_COLUMNS],
-        column_hash: [HashOut<F>; NUM_COLUMNS],
+        column_hash: [ComputationalHash; NUM_COLUMNS],
         item_values: [U256; MAX_NUM_RESULTS],
-        item_hash: [HashOut<F>; MAX_NUM_RESULTS],
+        item_hash: [ComputationalHash; MAX_NUM_RESULTS],
         predicate_value: bool,
-        predicate_hash: HashOut<F>,
+        predicate_hash: ComputationalHash,
     }
 
     impl<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize>
@@ -311,10 +304,10 @@ mod tests {
             let mut rng = thread_rng();
 
             let column_values = array::from_fn(|_| U256::from_limbs(rng.gen::<[u64; 4]>()));
-            let column_hash = array::from_fn(|_| HashOut::sample(&mut rng));
+            let column_hash = array::from_fn(|_| ComputationalHash::sample(&mut rng));
             let item_values = array::from_fn(|_| U256::from_limbs(rng.gen::<[u64; 4]>()));
-            let item_hash = array::from_fn(|_| HashOut::sample(&mut rng));
-            let predicate_hash = HashOut::sample(&mut rng);
+            let item_hash = array::from_fn(|_| ComputationalHash::sample(&mut rng));
+            let predicate_hash = ComputationalHash::sample(&mut rng);
 
             Self {
                 column_values,
@@ -373,13 +366,13 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TestExpectedWires {
         first_output_value: CurveTarget,
-        output_hash: HashOutTarget,
+        output_hash: ComputationalHashTarget,
     }
 
     #[derive(Clone, Debug)]
     struct TestExpected {
         first_output_value: Point,
-        output_hash: HashOut<F>,
+        output_hash: ComputationalHash,
     }
 
     impl TestExpected {

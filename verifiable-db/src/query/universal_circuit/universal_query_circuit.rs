@@ -19,10 +19,7 @@ use mp2_common::{
 };
 use plonky2::{
     field::types::Field,
-    hash::{
-        hash_types::{HashOut, HashOutTarget},
-        hashing::hash_n_to_hash_no_pad,
-    },
+    hash::hashing::hash_n_to_hash_no_pad,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -45,6 +42,7 @@ use super::{
     universal_circuit_inputs::{
         BasicOperation, InputOperand, Placeholder, PlaceholderId, ResultStructure,
     },
+    ComputationalHash, ComputationalHashTarget, PlaceholderHash,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -94,9 +92,9 @@ pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
     fn build<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
         possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
-        possible_output_hash: [HashOutTarget; NUM_OUTPUT_VALUES],
+        possible_output_hash: [ComputationalHashTarget; NUM_OUTPUT_VALUES],
         predicate_value: &BoolTarget,
-        predicate_hash: &HashOutTarget,
+        predicate_hash: &ComputationalHashTarget,
     ) -> Self::Wires;
 
     fn assign(
@@ -129,7 +127,7 @@ pub(crate) trait OutputComponentWires {
     /// Get the subsequent output values returned by the output component
     fn other_output_values(&self) -> &[UInt256Target];
     /// Get the computational hash returned by the output component
-    fn computational_hash(&self) -> HashOutTarget;
+    fn computational_hash(&self) -> ComputationalHashTarget;
     /// Get the input wires for the output component
     fn input_wires(&self) -> Self::InputWires;
 }
@@ -304,7 +302,6 @@ where
         let is_leaf = b.add_virtual_bool_target_safe();
         let _true = b._true();
         let zero = b.zero();
-        let one = b.one();
         // min and max for secondary indexed column
         let node_min = &column_extraction_wires.input_wires.column_values[1];
         let node_max = node_min;
@@ -428,7 +425,7 @@ where
                 .collect_vec()
                 .try_into()
                 .unwrap();
-        let possible_output_hash: [HashOutTarget; MAX_NUM_COLUMNS + MAX_NUM_RESULTS] =
+        let possible_output_hash: [ComputationalHashTarget; MAX_NUM_COLUMNS + MAX_NUM_RESULTS] =
             column_extraction_wires
                 .column_hash
                 .iter()
@@ -532,7 +529,7 @@ where
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         output_ids: &[F],
-    ) -> Result<HashOut<F>> {
+    ) -> Result<ComputationalHash> {
         let mut cache = ComputationalHashCache::<MAX_NUM_COLUMNS>::new();
         let predicate_ops_hash =
             Operation::operation_hash(predicate_operations, column_ids, &mut cache)?;
@@ -550,7 +547,7 @@ where
     }
 
     /// Compute the placeholder hash for the given instance of `self`
-    pub(crate) fn compute_placeholder_hash(&self) -> HashOut<F> {
+    pub(crate) fn compute_placeholder_hash(&self) -> PlaceholderHash {
         let inputs = self
             .filtering_predicate_inputs
             .iter()

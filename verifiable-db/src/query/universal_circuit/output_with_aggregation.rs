@@ -12,18 +12,18 @@ use mp2_common::{
     u256::{CircuitBuilderU256, UInt256Target},
     F,
 };
-use plonky2::{
-    hash::hash_types::HashOutTarget,
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+use plonky2::iop::{
+    target::{BoolTarget, Target},
+    witness::{PartialWitness, WitnessWrite},
 };
 use serde::{Deserialize, Serialize};
 
 use crate::query::computational_hash_ids::{AggregationOperation, Output};
 
-use super::universal_query_circuit::{OutputComponent, OutputComponentWires};
+use super::{
+    universal_query_circuit::{OutputComponent, OutputComponentWires},
+    ComputationalHashTarget,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for output with aggregation component
@@ -60,7 +60,7 @@ pub struct Wires<const MAX_NUM_RESULTS: usize> {
     /// Output values computed by this component
     output_values: [UInt256Target; MAX_NUM_RESULTS],
     /// Computational hash representing all the computation done in the query circuit
-    output_hash: HashOutTarget,
+    output_hash: ComputationalHashTarget,
 }
 /// Input witness values for output component for queries with result aggregation
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -95,7 +95,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
         &self.output_values[1..]
     }
 
-    fn computational_hash(&self) -> HashOutTarget {
+    fn computational_hash(&self) -> ComputationalHashTarget {
         self.output_hash
     }
 
@@ -110,9 +110,9 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
     fn build<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
         possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
-        possible_output_hash: [HashOutTarget; NUM_OUTPUT_VALUES],
+        possible_output_hash: [ComputationalHashTarget; NUM_OUTPUT_VALUES],
         predicate_value: &BoolTarget,
-        predicate_hash: &HashOutTarget,
+        predicate_hash: &ComputationalHashTarget,
     ) -> Self::Wires {
         let selector = b.add_virtual_target_arr::<MAX_NUM_RESULTS>();
         let agg_ops = b.add_virtual_target_arr::<MAX_NUM_RESULTS>();
@@ -215,7 +215,6 @@ mod tests {
     };
     use plonky2::{
         field::types::Field,
-        hash::hash_types::{HashOut, HashOutTarget},
         iop::{
             target::{BoolTarget, Target},
             witness::{PartialWitness, WitnessWrite},
@@ -229,6 +228,7 @@ mod tests {
         universal_circuit::{
             universal_circuit_inputs::OutputItem,
             universal_query_circuit::{OutputComponent, OutputComponentWires},
+            ComputationalHash, ComputationalHashTarget,
         },
     };
 
@@ -241,15 +241,15 @@ mod tests {
         const ACTUAL_NUM_RESULTS: usize,
     > {
         column_values: [UInt256Target; MAX_NUM_COLUMNS],
-        column_hash: [HashOutTarget; MAX_NUM_COLUMNS],
+        column_hash: [ComputationalHashTarget; MAX_NUM_COLUMNS],
         item_values: [UInt256Target; MAX_NUM_RESULTS],
-        item_hash: [HashOutTarget; MAX_NUM_RESULTS],
+        item_hash: [ComputationalHashTarget; MAX_NUM_RESULTS],
         predicate_value: BoolTarget,
-        predicate_hash: HashOutTarget,
+        predicate_hash: ComputationalHashTarget,
         component: InputWires<MAX_NUM_RESULTS>,
         expected_output_values: [UInt256Target; ACTUAL_NUM_RESULTS],
         expected_ops_ids: [Target; ACTUAL_NUM_RESULTS],
-        expected_output_hash: HashOutTarget,
+        expected_output_hash: ComputationalHashTarget,
     }
     #[derive(Clone, Debug)]
     struct TestOutputComponentInputs<
@@ -258,15 +258,15 @@ mod tests {
         const ACTUAL_NUM_RESULTS: usize,
     > {
         column_values: [U256; MAX_NUM_COLUMNS],
-        column_hash: [HashOut<F>; MAX_NUM_COLUMNS],
+        column_hash: [ComputationalHash; MAX_NUM_COLUMNS],
         item_values: [U256; ACTUAL_NUM_RESULTS],
-        item_hash: [HashOut<F>; ACTUAL_NUM_RESULTS],
+        item_hash: [ComputationalHash; ACTUAL_NUM_RESULTS],
         predicate_value: bool,
-        predicate_hash: HashOut<F>,
+        predicate_hash: ComputationalHash,
         component: Circuit<MAX_NUM_RESULTS>,
         expected_outputs: [U256; ACTUAL_NUM_RESULTS],
         expected_ops_ids: [F; ACTUAL_NUM_RESULTS],
-        expected_output_hash: HashOut<F>,
+        expected_output_hash: ComputationalHash,
     }
 
     impl<
@@ -379,11 +379,11 @@ mod tests {
     {
         fn new(
             column_values: [U256; MAX_NUM_COLUMNS],
-            column_hash: [HashOut<F>; MAX_NUM_COLUMNS],
+            column_hash: [ComputationalHash; MAX_NUM_COLUMNS],
             item_values: [U256; ACTUAL_NUM_RESULTS],
-            item_hash: [HashOut<F>; ACTUAL_NUM_RESULTS],
+            item_hash: [ComputationalHash; ACTUAL_NUM_RESULTS],
             predicate_value: bool,
-            predicate_hash: HashOut<F>,
+            predicate_hash: ComputationalHash,
             selectors: [usize; ACTUAL_NUM_RESULTS],
             agg_ops: [F; ACTUAL_NUM_RESULTS],
         ) -> Self {
