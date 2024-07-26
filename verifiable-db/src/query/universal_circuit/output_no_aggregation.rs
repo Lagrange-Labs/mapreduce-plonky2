@@ -242,7 +242,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
 mod tests {
     use crate::query::{
         computational_hash_ids::ComputationalHashCache,
-        universal_circuit::universal_query_circuit::OutputItem,
+        universal_circuit::universal_circuit_inputs::OutputItem,
     };
 
     use super::*;

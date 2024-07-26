@@ -27,7 +27,9 @@ use plonky2::{
 };
 use plonky2_ecgfp5::curve::curve::Point;
 
-use super::universal_circuit::universal_query_circuit::{BasicOperation, InputOperand, OutputItem};
+use super::universal_circuit::universal_circuit_inputs::{
+    BasicOperation, InputOperand, OutputItem,
+};
 
 pub enum Identifiers {
     Extraction(Extraction),

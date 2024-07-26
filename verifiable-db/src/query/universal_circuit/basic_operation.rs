@@ -273,7 +273,7 @@ mod tests {
 
     use crate::query::{
         computational_hash_ids::{ComputationalHashCache, Operation},
-        universal_circuit::universal_query_circuit::{BasicOperation, InputOperand},
+        universal_circuit::universal_circuit_inputs::{BasicOperation, InputOperand},
     };
 
     use super::{BasicOperationInputWires, BasicOperationInputs};

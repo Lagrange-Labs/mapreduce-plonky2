@@ -226,8 +226,9 @@ mod tests {
 
     use crate::query::{
         computational_hash_ids::{AggregationOperation, ComputationalHashCache, Output},
-        universal_circuit::universal_query_circuit::{
-            OutputComponent, OutputComponentWires, OutputItem,
+        universal_circuit::{
+            universal_circuit_inputs::OutputItem,
+            universal_query_circuit::{OutputComponent, OutputComponentWires},
         },
     };
 
