@@ -212,6 +212,15 @@ pub(crate) struct ResultStructure {
     output_items: Vec<OutputItem>,
 }
 
+impl From<(Vec<BasicOperation>, Vec<OutputItem>)> for ResultStructure {
+    fn from(value: (Vec<BasicOperation>, Vec<OutputItem>)) -> Self {
+        Self {
+            result_operations: value.0,
+            output_items: value.1,
+        }
+    }
+}
+
 impl ResultStructure {
     /// Compute output values to be returned for the current row, employing the provided
     /// `column_values` as the operands for the operations having `InputOperand::Column`
@@ -278,17 +287,18 @@ pub struct UniversalQueryCircuitWires<
 
 /// Trait for the 2 different variants of output components we currently support
 /// in query circuits
-pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
+pub(crate) trait OutputComponent<
+    const MAX_NUM_RESULTS: usize,
+>: Clone
+{
     type Wires: OutputComponentWires;
 
     fn new(selector: &[F], ids: &[F], num_outputs: usize) -> Result<Self>;
 
-    fn build(
+    fn build<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
-        column_values: &[UInt256Target],
-        column_hash: &[HashOutTarget],
-        item_values: [UInt256Target; MAX_NUM_RESULTS],
-        item_hash: [HashOutTarget; MAX_NUM_RESULTS],
+        possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
+        possible_output_hash: [HashOutTarget; NUM_OUTPUT_VALUES],
         predicate_value: &BoolTarget,
         predicate_hash: &HashOutTarget,
     ) -> Self::Wires;
@@ -369,12 +379,17 @@ impl<
     >
 where
     [(); MAX_NUM_RESULTS - 1]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
 {
     /// Instantiate `Self` from the necessary inputs. Note that the following assumptions are expected on the
     /// structure of the inputs:
-    /// - The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation
-    /// - The last `n` operations in `result_operations` are employed as the output values of the corresponding `n`
-    ///   `OutputItem::ComputedValue` found in `output_items`
+    /// - The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation;
+    ///   this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
+    ///   the caller of this method
+    /// - The operations in `result_operations` that compute output values must be placed in the last `MAX_NUM_RESULTS`
+    ///   entries of the `result_operations` found in `results` structure. This is again an assumption we require to
+    ///   properly place the output values in the circuit. Note that this method returns an error if this assumption
+    ///   is not met in the `results` structure provided as input 
     pub(crate) fn new(
         column_values: &[U256],
         column_ids: &[F],
@@ -439,6 +454,16 @@ where
                     &OutputItem::ComputedValue(index) => {
                         ensure!(index < num_result_ops,
                             "an operation computing an output results not found in set of result operations");
+                        // starting index is the minimum index, in the `results.result operations` vector, for an 
+                        // operation that could contain a possible output value. Indeed, since the circuit is 
+                        // expecting the possible output values computed from result operations to be found in the 
+                        // last `MAX_NUM_RESULTS` slots among the `MAX_NUM_RESULT_OPS` instantiated in the circuit, 
+                        // we require that the index of a `ComputedValue` must be one of the last `MAX_NUM_RESULTS` 
+                        // entries of the `results.result_operations` vector. Therefore, `starting_index` is the
+                        // index of the first entry in `result.result_operations` vector that could be employed as
+                        // an outptu value, which correspond to the `MAX_NUM_RESULTS`-th entry from the end of the
+                        // vector (or the first entry if `result.result_operations` has less operations than 
+                        // `MAX_NUM_RESULTS`)
                         let starting_index = if num_result_ops > MAX_NUM_RESULTS {
                             num_result_ops - MAX_NUM_RESULTS
                         } else {
@@ -446,7 +471,13 @@ where
                         };
                         ensure!(index >= starting_index,
                             "an operation computing an output results is not placed in the last {} elements of result operations vector", MAX_NUM_RESULTS);
-                        // the output will be placed in the `num_result_ops - index` last slot in the circuit
+                        // the output will be placed in the `num_result_ops - index` last slot in the set of
+                        // `possible_output_values` provided as input in the circuit to the output component,
+                        // i.e., the input array found in `OutputComponent::build` method.
+                        // Therefore, since the `possible_output_values` array in the circuit has 
+                        // `MAX_NUM_COLUMNS + MAX_NUM_RESULTS` entries, the selector for such output value
+                        // can be computed as the length of `possible_output_values.len() - (num_result_ops - index)`,
+                        // which correspond to the `num_result_ops - index`-th entry from the end of the array  
                         F::from_canonical_usize(MAX_NUM_COLUMNS + MAX_NUM_RESULTS - (num_result_ops - index))
                     },
             })
@@ -548,7 +579,9 @@ where
         // Place the evaluation of the filtering predicate, and the corresponding computational hash, in
         // two variables; the evaluation and the corresponding hash are expected to be the output of the
         // last basic operation component among the `MAX_NUM_PREDICATE_OPS` ones employed to evaluate
-        // the filtering predicate
+        // the filtering predicate. This placement is done in order to have a fixed slot where we can
+        // find the predicate value, without the need for a further random_access operation just to extract
+        // this value from the set of predicate operations
         let predicate_value = input_values.last().unwrap().to_bool_target();
         let predicate_hash = input_hash.last().unwrap();
         // initialize input_values and input_hash input vectors for basic operation components employed to
@@ -584,21 +617,27 @@ where
         // Place the results to be returned for the current row, and the corresponding computational hashes,
         // in the arrays `item_values` and `item_hash`; such results are expected to be found as the last
         // items computed by the last `MAX_NUM_RESULTS` basic operation components among the `MAX_NUM_RESULT_OPS`
-        // ones employed to compute such results
-        let item_values = input_values[input_values.len() - MAX_NUM_RESULTS..]
-            .to_vec()
+        // ones employed to compute such results. This placement is done to have fixed locations in the circuits
+        // where to find the possible values to be exposed as results, thus avoiding `MAX_NUM_RESULTS` random
+        // access operations to extract these possible values from the set of all result operations
+        let item_values = &input_values[input_values.len() - MAX_NUM_RESULTS..];
+        let item_hash = &input_hash[input_hash.len() - MAX_NUM_RESULTS..];
+        let possible_output_values: [UInt256Target; MAX_NUM_COLUMNS + MAX_NUM_RESULTS] = column_extraction_wires.input_wires.column_values.iter()
+            .chain(item_values)
+            .cloned()
+            .collect_vec()
             .try_into()
             .unwrap();
-        let item_hash = input_hash[input_hash.len() - MAX_NUM_RESULTS..]
-            .to_vec()
+        let possible_output_hash: [HashOutTarget; MAX_NUM_COLUMNS + MAX_NUM_RESULTS] = column_extraction_wires.column_hash.iter()
+            .chain(item_hash)
+            .cloned()
+            .collect_vec()
             .try_into()
             .unwrap();
         let output_component_wires = T::build(
             b,
-            column_extraction_wires.input_wires.column_values.as_slice(),
-            column_extraction_wires.column_hash.as_slice(),
-            item_values,
-            item_hash,
+            possible_output_values,
+            possible_output_hash,
             &predicate_value,
             predicate_hash,
         );
@@ -919,6 +958,7 @@ mod tests {
         >
     where
         [(); MAX_NUM_RESULTS - 1]:,
+        [(); MAX_NUM_COLUMNS+MAX_NUM_RESULTS]:,
     {
         type Wires = UniversalQueryCircuitWires<
             MAX_NUM_COLUMNS,
@@ -1114,10 +1154,9 @@ mod tests {
             AggregationOperation::AvgOp.to_field(),
         ];
 
-        let results = ResultStructure {
-            result_operations,
-            output_items,
-        };
+        let results = ResultStructure::from(
+            (result_operations, output_items)
+        );
 
         let circuit = UniversalQueryCircuitInputs::<
             MAX_NUM_COLUMNS,
@@ -1169,11 +1208,7 @@ mod tests {
             &placeholder_values,
         )
         .unwrap();
-        let predicate_value = match res.last().unwrap() {
-            &val if val.is_zero() => F::ZERO,
-            &val if val == U256::from(1) => F::ONE,
-            _ => panic!("predicate value not Boolean"),
-        };
+        let predicate_value = res.last().unwrap().to_bool().unwrap();
 
         let (res, result_err) = results
             .compute_output_values(&column_values, &placeholder_values)
@@ -1183,9 +1218,14 @@ mod tests {
             .iter()
             .zip(output_ops.iter())
             .map(|(value, agg_op)| {
-                if predicate_value == F::ONE {
+                // if predicate_value is satisfied, then the actual output value
+                // is exposed as public input
+                if predicate_value {
                     *value
                 } else {
+                    // otherwise, we just expose identity values for the given aggregation
+                    // operation to ensure that the current record doesn't affect the 
+                    // aggregated result
                     U256::from_fields(
                         AggregationOperation::from_fields(&[*agg_op])
                             .identity_value()
@@ -1214,7 +1254,7 @@ mod tests {
         assert_eq!(output_values[0], pi.first_value_as_u256());
         assert_eq!(output_values[1..], pi.values()[..output_values.len() - 1]);
         assert_eq!(output_ops, pi.operation_ids()[..output_ops.len()]);
-        assert_eq!(predicate_value, pi.num_matching_rows());
+        assert_eq!(predicate_value, pi.num_matching_rows().to_bool().unwrap());
         assert_eq!(column_values[0], pi.index_value());
         assert_eq!(column_values[1], pi.min_value());
         assert_eq!(column_values[1], pi.max_value());
@@ -1418,10 +1458,9 @@ mod tests {
             ]
         };
         let output_ids = vec![F::rand(); output_items.len()];
-        let results = ResultStructure {
-            result_operations,
-            output_items,
-        };
+        let results = ResultStructure::from(
+            (result_operations, output_items)
+        );
 
         let circuit = UniversalQueryCircuitInputs::<
             MAX_NUM_COLUMNS,
@@ -1486,6 +1525,8 @@ mod tests {
             .map(|(value, id)| TestCell::new(*value, *id))
             .collect_vec();
         let output_acc = if predicate_value {
+            // if predicate value is satisfied, then we expose the accumulator of all the output values
+            // to be returned for the current row
             map_to_curve_point(
                 &once(out_cells[0].id)
                     .chain(out_cells[0].value.to_fields())
@@ -1508,6 +1549,9 @@ mod tests {
                     .collect_vec(),
             )
         } else {
+            // otherwise, we expose the neutral point to ensure that the results for
+            // the current record are not included in the accumulator of all the results
+            // of the query
             Point::NEUTRAL
         };
 
@@ -1528,11 +1572,17 @@ mod tests {
         let pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
         assert_eq!(tree_hash, pi.tree_hash());
         assert_eq!(output_acc.to_weierstrass(), pi.first_value_as_curve_point());
+        // The other MAX_NUM_RESULTS -1 output values are dummy ones, as in queries
+        // without aggregation we accumulate all the results in the first output value,
+        // and so we don't care about the other ones
         assert_eq!(array::from_fn(|_| U256::ZERO), pi.values());
         assert_eq!(
             <AggregationOperation as ToField<F>>::to_field(&AggregationOperation::IdOp),
             pi.operation_ids()[0]
         );
+        // aggregation operation in the other MAX_NUM_RESULTS -1 slots are dummy ones, as in queries
+        // without aggregation we accumulate all the results in the first output value,
+        // and so we don't care about the other ones
         assert_eq!(
             [<AggregationOperation as ToField<F>>::to_field(&AggregationOperation::default());
                 MAX_NUM_RESULTS - 1],

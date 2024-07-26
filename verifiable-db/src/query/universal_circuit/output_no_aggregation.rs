@@ -115,19 +115,18 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
     }
 }
 
-impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<MAX_NUM_RESULTS> {
+impl<
+    const MAX_NUM_RESULTS: usize,    
+> OutputComponent<MAX_NUM_RESULTS> for Circuit<MAX_NUM_RESULTS> {
     type Wires = Wires<MAX_NUM_RESULTS>;
 
-    fn build(
+    fn build<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
-        column_values: &[UInt256Target],
-        column_hash: &[HashOutTarget],
-        item_values: [UInt256Target; MAX_NUM_RESULTS],
-        item_hash: [HashOutTarget; MAX_NUM_RESULTS],
+        possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
+        possible_output_hash: [HashOutTarget; NUM_OUTPUT_VALUES],
         predicate_value: &BoolTarget,
         predicate_hash: &HashOutTarget,
     ) -> Self::Wires {
-        assert_eq!(column_values.len(), column_hash.len());
 
         let u256_zero = b.zero_u256();
         let curve_zero = b.curve_zero();
@@ -139,16 +138,9 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
             is_output_valid: [0; MAX_NUM_RESULTS].map(|_| b.add_virtual_bool_target_safe()),
         };
 
-        // Append the column values by a corresponding item value to construct the inputs.
-        let possible_input_values = column_values
-            .iter()
-            .cloned()
-            .chain(item_values)
-            .collect_vec();
-
         // Build the output items to be returned.
         let output_items: [_; MAX_NUM_RESULTS] = array::from_fn(|i| {
-            b.random_access_u256(input_wires.selector[i], &possible_input_values)
+            b.random_access_u256(input_wires.selector[i], &possible_output_values)
         });
 
         // Compute the cells tree of the all output items to be returned for the given record.
@@ -184,8 +176,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
         let output_hash = Self::output_variant().output_hash_circuit(
             b,
             predicate_hash,
-            column_hash,
-            &item_hash,
+            &possible_output_hash,
             &input_wires.selector,
             &input_wires.ids,
             &input_wires.is_output_valid,
@@ -453,6 +444,7 @@ mod tests {
             };
 
             // Compute the computational output hash.
+            // first, we compute the output items from the randomly chosen selectors
             let output_items = selectors
                 .iter()
                 .take(c.valid_num_outputs)
@@ -460,6 +452,9 @@ mod tests {
                     if s < NUM_COLUMNS {
                         OutputItem::Column(s)
                     } else {
+                        // need to subtract `NUM_COLUMNS` since the outputs of result operations that could be used as
+                        // output values are appended to the set of columns in the circuit, so the selector `s` for
+                        // the i-th computed output value will be equal to `s = NUM_COLUMNS+i`
                         OutputItem::ComputedValue(s - NUM_COLUMNS)
                     }
                 })
@@ -512,6 +507,7 @@ mod tests {
 
     impl<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> UserCircuit<F, D>
         for TestOutputNoAggregationCircuit<NUM_COLUMNS, MAX_NUM_RESULTS>
+    where [(); {NUM_COLUMNS+MAX_NUM_RESULTS}]:,
     {
         // Circuit wires + output wires + expected wires
         type Wires = (
@@ -525,12 +521,18 @@ mod tests {
 
             let expected = TestExpected::build(b);
             let output = TestOutput::build(b);
-            let wires = Circuit::build(
+            let possible_output_values = output.column_values.iter()
+                .chain(output.item_values.iter())
+                .cloned()
+                .collect_vec();
+            let possible_output_hash = output.column_hash.iter()
+                .chain(output.item_hash.iter())
+                .cloned()
+                .collect_vec();
+            let wires = Circuit::build::<{NUM_COLUMNS+MAX_NUM_RESULTS}>(
                 b,
-                &output.column_values,
-                &output.column_hash,
-                output.item_values.clone(),
-                output.item_hash.clone(),
+                possible_output_values.try_into().unwrap(),
+                possible_output_hash.try_into().unwrap(),
                 &output.predicate_value,
                 &output.predicate_hash,
             );

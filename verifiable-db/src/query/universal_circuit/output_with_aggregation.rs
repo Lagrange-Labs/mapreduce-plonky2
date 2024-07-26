@@ -107,12 +107,10 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
 impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<MAX_NUM_RESULTS> {
     type Wires = Wires<MAX_NUM_RESULTS>;
 
-    fn build(
+    fn build<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
-        column_values: &[UInt256Target],
-        column_hash: &[HashOutTarget],
-        item_values: [UInt256Target; MAX_NUM_RESULTS],
-        item_hash: [HashOutTarget; MAX_NUM_RESULTS],
+        possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
+        possible_output_hash: [HashOutTarget; NUM_OUTPUT_VALUES],
         predicate_value: &BoolTarget,
         predicate_hash: &HashOutTarget,
     ) -> Self::Wires {
@@ -124,12 +122,6 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
         let min_op_identifier = b.constant(AggregationOperation::MinOp.to_field());
 
         let mut output_values = vec![];
-
-        let possible_output_values = column_values
-            .iter()
-            .cloned()
-            .chain(item_values)
-            .collect_vec();
 
         for i in 0..MAX_NUM_RESULTS {
             // TODO: random accesses over different iterations can be done with a single operation if we introduce an ad-hoc gate
@@ -149,8 +141,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
         let output_hash = Self::output_variant().output_hash_circuit(
             b,
             predicate_hash,
-            column_hash,
-            &item_hash,
+            &possible_output_hash,
             &selector,
             &agg_ops,
             &is_output_valid,
@@ -283,6 +274,7 @@ mod tests {
             const ACTUAL_NUM_RESULTS: usize,
         > UserCircuit<F, D>
         for TestOutputComponentInputs<MAX_NUM_COLUMNS, MAX_NUM_RESULTS, ACTUAL_NUM_RESULTS>
+    where [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
     {
         type Wires = TestOutputComponentWires<MAX_NUM_COLUMNS, MAX_NUM_RESULTS, ACTUAL_NUM_RESULTS>;
 
@@ -291,14 +283,21 @@ mod tests {
             let column_hash = c.add_virtual_hashes(MAX_NUM_COLUMNS);
             let item_values = c.add_virtual_u256_arr::<MAX_NUM_RESULTS>();
             let item_hash = c.add_virtual_hashes(MAX_NUM_RESULTS);
+            let possible_output_values = column_values.iter()
+                .chain(item_values.iter())
+                .cloned()
+                .collect_vec();
+            let possible_output_hash = column_hash.iter()
+                .chain(item_hash.iter())
+                .cloned()
+                .collect_vec();
+
             let predicate_value = c.add_virtual_bool_target_safe();
             let predicate_hash = c.add_virtual_hash();
-            let wires = Circuit::<MAX_NUM_RESULTS>::build(
+            let wires = Circuit::<MAX_NUM_RESULTS>::build::<{MAX_NUM_COLUMNS + MAX_NUM_RESULTS}>(
                 c,
-                &column_values,
-                &column_hash,
-                item_values.clone(),
-                item_hash.clone().try_into().unwrap(),
+                possible_output_values.try_into().unwrap(),
+                possible_output_hash.try_into().unwrap(),
                 &predicate_value,
                 &predicate_hash,
             );
@@ -439,11 +438,13 @@ mod tests {
         }
     }
 
+    const MAX_NUM_COLUMNS: usize = 20;
     fn test_output_component<const MAX_NUM_RESULTS: usize, const ACTUAL_NUM_RESULTS: usize>(
         predicate_value: bool,
         agg_ops: [AggregationOperation; ACTUAL_NUM_RESULTS],
-    ) {
-        const MAX_NUM_COLUMNS: usize = 20;
+    ) 
+    where [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    {
         let rng = &mut thread_rng();
         let column_values = array::from_fn(|_| gen_random_u256(rng));
         let column_hash = array::from_fn(|_| gen_random_field_hash());

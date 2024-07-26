@@ -355,12 +355,13 @@ impl Output {
         })
     }
 
-    pub(crate) fn output_hash_circuit<const MAX_NUM_RESULTS: usize>(
+    pub(crate) fn output_hash_circuit<
+        const MAX_NUM_RESULTS: usize,
+    >(
         &self,
         b: &mut CBuilder,
         predicate_hash: &HashOutTarget,
-        column_hash: &[HashOutTarget],
-        item_hash: &[HashOutTarget; MAX_NUM_RESULTS],
+        possible_output_hash: &[HashOutTarget],
         selector: &[Target; MAX_NUM_RESULTS],
         output_ids: &[Target; MAX_NUM_RESULTS],
         is_output_valid: &[BoolTarget; MAX_NUM_RESULTS],
@@ -368,12 +369,11 @@ impl Output {
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
         let mut output_hash =
             Identifiers::Output(*self).prefix_id_hash_circuit(b, predicate_hash.to_targets());
-        let possible_output_hashes = column_hash
+        let possible_output_hashes = possible_output_hash
             .iter()
-            .chain(item_hash)
             .chain(repeat(&empty_hash))
             .cloned()
-            .take((column_hash.len() + MAX_NUM_RESULTS).next_power_of_two())
+            .take(possible_output_hash.len().next_power_of_two())
             .collect_vec();
         assert!(
             possible_output_hashes.len() <= 64,
