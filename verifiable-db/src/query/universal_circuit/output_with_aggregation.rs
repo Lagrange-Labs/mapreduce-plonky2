@@ -274,7 +274,8 @@ mod tests {
             const ACTUAL_NUM_RESULTS: usize,
         > UserCircuit<F, D>
         for TestOutputComponentInputs<MAX_NUM_COLUMNS, MAX_NUM_RESULTS, ACTUAL_NUM_RESULTS>
-    where [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    where
+        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
     {
         type Wires = TestOutputComponentWires<MAX_NUM_COLUMNS, MAX_NUM_RESULTS, ACTUAL_NUM_RESULTS>;
 
@@ -283,18 +284,20 @@ mod tests {
             let column_hash = c.add_virtual_hashes(MAX_NUM_COLUMNS);
             let item_values = c.add_virtual_u256_arr::<MAX_NUM_RESULTS>();
             let item_hash = c.add_virtual_hashes(MAX_NUM_RESULTS);
-            let possible_output_values = column_values.iter()
+            let possible_output_values = column_values
+                .iter()
                 .chain(item_values.iter())
                 .cloned()
                 .collect_vec();
-            let possible_output_hash = column_hash.iter()
+            let possible_output_hash = column_hash
+                .iter()
                 .chain(item_hash.iter())
                 .cloned()
                 .collect_vec();
 
             let predicate_value = c.add_virtual_bool_target_safe();
             let predicate_hash = c.add_virtual_hash();
-            let wires = Circuit::<MAX_NUM_RESULTS>::build::<{MAX_NUM_COLUMNS + MAX_NUM_RESULTS}>(
+            let wires = Circuit::<MAX_NUM_RESULTS>::build::<{ MAX_NUM_COLUMNS + MAX_NUM_RESULTS }>(
                 c,
                 possible_output_values.try_into().unwrap(),
                 possible_output_hash.try_into().unwrap(),
@@ -442,8 +445,8 @@ mod tests {
     fn test_output_component<const MAX_NUM_RESULTS: usize, const ACTUAL_NUM_RESULTS: usize>(
         predicate_value: bool,
         agg_ops: [AggregationOperation; ACTUAL_NUM_RESULTS],
-    ) 
-    where [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    ) where
+        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
     {
         let rng = &mut thread_rng();
         let column_values = array::from_fn(|_| gen_random_u256(rng));

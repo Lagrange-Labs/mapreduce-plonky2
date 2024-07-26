@@ -115,9 +115,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
     }
 }
 
-impl<
-    const MAX_NUM_RESULTS: usize,    
-> OutputComponent<MAX_NUM_RESULTS> for Circuit<MAX_NUM_RESULTS> {
+impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<MAX_NUM_RESULTS> {
     type Wires = Wires<MAX_NUM_RESULTS>;
 
     fn build<const NUM_OUTPUT_VALUES: usize>(
@@ -127,7 +125,6 @@ impl<
         predicate_value: &BoolTarget,
         predicate_hash: &HashOutTarget,
     ) -> Self::Wires {
-
         let u256_zero = b.zero_u256();
         let curve_zero = b.curve_zero();
 
@@ -507,7 +504,8 @@ mod tests {
 
     impl<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> UserCircuit<F, D>
         for TestOutputNoAggregationCircuit<NUM_COLUMNS, MAX_NUM_RESULTS>
-    where [(); {NUM_COLUMNS+MAX_NUM_RESULTS}]:,
+    where
+        [(); { NUM_COLUMNS + MAX_NUM_RESULTS }]:,
     {
         // Circuit wires + output wires + expected wires
         type Wires = (
@@ -521,15 +519,19 @@ mod tests {
 
             let expected = TestExpected::build(b);
             let output = TestOutput::build(b);
-            let possible_output_values = output.column_values.iter()
+            let possible_output_values = output
+                .column_values
+                .iter()
                 .chain(output.item_values.iter())
                 .cloned()
                 .collect_vec();
-            let possible_output_hash = output.column_hash.iter()
+            let possible_output_hash = output
+                .column_hash
+                .iter()
                 .chain(output.item_hash.iter())
                 .cloned()
                 .collect_vec();
-            let wires = Circuit::build::<{NUM_COLUMNS+MAX_NUM_RESULTS}>(
+            let wires = Circuit::build::<{ NUM_COLUMNS + MAX_NUM_RESULTS }>(
                 b,
                 possible_output_values.try_into().unwrap(),
                 possible_output_hash.try_into().unwrap(),

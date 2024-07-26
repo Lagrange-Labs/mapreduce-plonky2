@@ -287,10 +287,7 @@ pub struct UniversalQueryCircuitWires<
 
 /// Trait for the 2 different variants of output components we currently support
 /// in query circuits
-pub(crate) trait OutputComponent<
-    const MAX_NUM_RESULTS: usize,
->: Clone
-{
+pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
     type Wires: OutputComponentWires;
 
     fn new(selector: &[F], ids: &[F], num_outputs: usize) -> Result<Self>;
@@ -389,7 +386,7 @@ where
     /// - The operations in `result_operations` that compute output values must be placed in the last `MAX_NUM_RESULTS`
     ///   entries of the `result_operations` found in `results` structure. This is again an assumption we require to
     ///   properly place the output values in the circuit. Note that this method returns an error if this assumption
-    ///   is not met in the `results` structure provided as input 
+    ///   is not met in the `results` structure provided as input
     pub(crate) fn new(
         column_values: &[U256],
         column_ids: &[F],
@@ -622,18 +619,25 @@ where
         // access operations to extract these possible values from the set of all result operations
         let item_values = &input_values[input_values.len() - MAX_NUM_RESULTS..];
         let item_hash = &input_hash[input_hash.len() - MAX_NUM_RESULTS..];
-        let possible_output_values: [UInt256Target; MAX_NUM_COLUMNS + MAX_NUM_RESULTS] = column_extraction_wires.input_wires.column_values.iter()
-            .chain(item_values)
-            .cloned()
-            .collect_vec()
-            .try_into()
-            .unwrap();
-        let possible_output_hash: [HashOutTarget; MAX_NUM_COLUMNS + MAX_NUM_RESULTS] = column_extraction_wires.column_hash.iter()
-            .chain(item_hash)
-            .cloned()
-            .collect_vec()
-            .try_into()
-            .unwrap();
+        let possible_output_values: [UInt256Target; MAX_NUM_COLUMNS + MAX_NUM_RESULTS] =
+            column_extraction_wires
+                .input_wires
+                .column_values
+                .iter()
+                .chain(item_values)
+                .cloned()
+                .collect_vec()
+                .try_into()
+                .unwrap();
+        let possible_output_hash: [HashOutTarget; MAX_NUM_COLUMNS + MAX_NUM_RESULTS] =
+            column_extraction_wires
+                .column_hash
+                .iter()
+                .chain(item_hash)
+                .cloned()
+                .collect_vec()
+                .try_into()
+                .unwrap();
         let output_component_wires = T::build(
             b,
             possible_output_values,
@@ -958,7 +962,7 @@ mod tests {
         >
     where
         [(); MAX_NUM_RESULTS - 1]:,
-        [(); MAX_NUM_COLUMNS+MAX_NUM_RESULTS]:,
+        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
     {
         type Wires = UniversalQueryCircuitWires<
             MAX_NUM_COLUMNS,
@@ -1154,9 +1158,7 @@ mod tests {
             AggregationOperation::AvgOp.to_field(),
         ];
 
-        let results = ResultStructure::from(
-            (result_operations, output_items)
-        );
+        let results = ResultStructure::from((result_operations, output_items));
 
         let circuit = UniversalQueryCircuitInputs::<
             MAX_NUM_COLUMNS,
@@ -1224,7 +1226,7 @@ mod tests {
                     *value
                 } else {
                     // otherwise, we just expose identity values for the given aggregation
-                    // operation to ensure that the current record doesn't affect the 
+                    // operation to ensure that the current record doesn't affect the
                     // aggregated result
                     U256::from_fields(
                         AggregationOperation::from_fields(&[*agg_op])
@@ -1458,9 +1460,7 @@ mod tests {
             ]
         };
         let output_ids = vec![F::rand(); output_items.len()];
-        let results = ResultStructure::from(
-            (result_operations, output_items)
-        );
+        let results = ResultStructure::from((result_operations, output_items));
 
         let circuit = UniversalQueryCircuitInputs::<
             MAX_NUM_COLUMNS,

@@ -355,9 +355,7 @@ impl Output {
         })
     }
 
-    pub(crate) fn output_hash_circuit<
-        const MAX_NUM_RESULTS: usize,
-    >(
+    pub(crate) fn output_hash_circuit<const MAX_NUM_RESULTS: usize>(
         &self,
         b: &mut CBuilder,
         predicate_hash: &HashOutTarget,
