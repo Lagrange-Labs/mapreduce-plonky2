@@ -120,7 +120,7 @@ impl<P: ProofStorage> TestContext<P> {
                 // Prove a leaf
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::leaf(
-                        F::from_canonical_u64(cell.id),
+                        cell.id,
                         cell.value,
                     ));
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
@@ -137,7 +137,7 @@ impl<P: ProofStorage> TestContext<P> {
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::partial(
-                        F::from_canonical_u64(cell.id),
+                        cell.id,
                         cell.value,
                         left_proof,
                     ));
@@ -165,7 +165,7 @@ impl<P: ProofStorage> TestContext<P> {
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::full(
-                        F::from_canonical_u64(cell.id),
+                        cell.id,
                         cell.value,
                         [left_proof, right_proof],
                     ));
