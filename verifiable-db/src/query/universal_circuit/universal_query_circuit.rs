@@ -83,6 +83,7 @@ pub(crate) struct BasicOperation {
 impl BasicOperation {
     /// Compute the results of the `operations` provided as input, employing the provided
     /// `column_values` as the operands for the operations having `InputOperand::Column`
+    /// operands and the provided `placeholder_values` for the operations having `InputOperand::Placeholder`
     /// operands. The method returns also a flag which specifies if an arithemtic error
     /// has occurred throughout any of these operations
     pub(crate) fn compute_operations(
@@ -203,6 +204,41 @@ pub(crate) enum OutputItem {
     /// set of result operations
     ComputedValue(usize),
 }
+
+/// Data structure that contains the description of the output items to be returned and the
+/// operations necessary to compute the output items
+pub(crate) struct ResultStructure {
+    result_operations: Vec<BasicOperation>,
+    output_items: Vec<OutputItem>,
+}
+
+impl ResultStructure {
+    /// Compute output values to be returned for the current row, employing the provided
+    /// `column_values` as the operands for the operations having `InputOperand::Column`
+    /// operands, and the provided `placeholder_values` for the operations having `InputOperand::Placeholder`
+    /// operands.
+    pub(crate) fn compute_output_values(
+        &self,
+        column_values: &[U256],
+        placeholder_values: &HashMap<PlaceholderId, U256>,
+    ) -> Result<(Vec<U256>, bool)> {
+        let (res, overflow_err) = BasicOperation::compute_operations(
+            &self.result_operations,
+            column_values,
+            placeholder_values,
+        )?;
+        let results = self
+            .output_items
+            .iter()
+            .map(|item| match item {
+                &OutputItem::Column(index) => column_values[index],
+                &OutputItem::ComputedValue(index) => res[index],
+            })
+            .collect_vec();
+        Ok((results, overflow_err))
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for the universal query circuit
 pub struct UniversalQueryCircuitWires<
@@ -343,12 +379,11 @@ where
         column_values: &[U256],
         column_ids: &[F],
         predicate_operations: &[BasicOperation],
-        result_operations: &[BasicOperation],
         placeholder_values: &HashMap<PlaceholderId, U256>,
         is_leaf: bool,
         min_query: U256,
         max_query: U256,
-        output_items: &[OutputItem],
+        results: &ResultStructure,
         output_ids: &[F],
     ) -> Result<Self> {
         let num_columns = column_values.len();
@@ -380,7 +415,7 @@ where
         let num_predicate_ops = predicate_operations.len();
         ensure!(num_predicate_ops <= MAX_NUM_PREDICATE_OPS,
             "Number of operations to compute filtering predicate is higher than the maximum number allowed");
-        let num_result_ops = result_operations.len();
+        let num_result_ops = results.result_operations.len();
         ensure!(
             num_result_ops <= MAX_NUM_RESULT_OPS,
             "Number of operations to compute results is higher than the maximum number allowed"
@@ -390,10 +425,10 @@ where
             placeholder_values,
         )?;
         let result_ops_inputs = Self::compute_operation_inputs::<MAX_NUM_RESULT_OPS>(
-            result_operations,
+            &results.result_operations,
             placeholder_values,
         )?;
-        let selectors = output_items.iter().enumerate().map(|(i, item)| {
+        let selectors = results.output_items.iter().enumerate().map(|(i, item)| {
             Ok(
                 match item {
                     &OutputItem::Column(index) => {
@@ -653,21 +688,21 @@ where
     pub(crate) fn computational_hash(
         column_ids: &[F],
         predicate_operations: &[BasicOperation],
-        result_operations: &[BasicOperation],
-        output_items: &[OutputItem],
+        results: &ResultStructure,
         output_ids: &[F],
     ) -> Result<HashOut<F>> {
         let mut cache = ComputationalHashCache::<MAX_NUM_COLUMNS>::new();
         let predicate_ops_hash =
             Operation::operation_hash(predicate_operations, column_ids, &mut cache)?;
         let predicate_hash = predicate_ops_hash.last().unwrap();
-        let result_ops_hash = Operation::operation_hash(result_operations, column_ids, &mut cache)?;
+        let result_ops_hash =
+            Operation::operation_hash(&results.result_operations, column_ids, &mut cache)?;
         T::output_variant().output_hash(
             predicate_hash,
             &mut cache,
             column_ids,
             &result_ops_hash,
-            output_items,
+            &results.output_items,
             output_ids,
         )
     }
@@ -857,7 +892,9 @@ mod tests {
         universal_circuit::{
             output_no_aggregation::Circuit as NoAggOutputCircuit,
             output_with_aggregation::Circuit as AggOutputCircuit,
-            universal_query_circuit::{BasicOperation, InputOperand, OutputItem, Placeholder},
+            universal_query_circuit::{
+                BasicOperation, InputOperand, OutputItem, Placeholder, ResultStructure,
+            },
             COLUMN_INDEX_NUM,
         },
     };
@@ -1077,6 +1114,11 @@ mod tests {
             AggregationOperation::AvgOp.to_field(),
         ];
 
+        let results = ResultStructure {
+            result_operations,
+            output_items,
+        };
+
         let circuit = UniversalQueryCircuitInputs::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
@@ -1087,12 +1129,11 @@ mod tests {
             &column_values,
             &column_ids,
             &predicate_operations,
-            &result_operations,
             &placeholder_values,
             is_leaf,
             min_query,
             max_query,
-            &output_items,
+            &results,
             &output_ops,
         )
         .unwrap();
@@ -1134,23 +1175,16 @@ mod tests {
             _ => panic!("predicate value not Boolean"),
         };
 
-        let (res, result_err) = BasicOperation::compute_operations(
-            &result_operations,
-            &column_values,
-            &placeholder_values,
-        )
-        .unwrap();
+        let (res, result_err) = results
+            .compute_output_values(&column_values, &placeholder_values)
+            .unwrap();
 
-        let output_values = output_items
+        let output_values = res
             .iter()
             .zip(output_ops.iter())
-            .map(|(item, agg_op)| {
-                let value = match item {
-                    &OutputItem::Column(index) => column_values[index],
-                    &OutputItem::ComputedValue(index) => res[index],
-                };
+            .map(|(value, agg_op)| {
                 if predicate_value == F::ONE {
-                    value
+                    *value
                 } else {
                     U256::from_fields(
                         AggregationOperation::from_fields(&[*agg_op])
@@ -1169,11 +1203,7 @@ mod tests {
             MAX_NUM_RESULTS,
             AggOutputCircuit<MAX_NUM_RESULTS>,
         >::computational_hash(
-            &column_ids,
-            &predicate_operations,
-            &result_operations,
-            &output_items,
-            &output_ops,
+            &column_ids, &predicate_operations, &results, &output_ops
         )
         .unwrap();
 
@@ -1388,6 +1418,10 @@ mod tests {
             ]
         };
         let output_ids = vec![F::rand(); output_items.len()];
+        let results = ResultStructure {
+            result_operations,
+            output_items,
+        };
 
         let circuit = UniversalQueryCircuitInputs::<
             MAX_NUM_COLUMNS,
@@ -1399,12 +1433,11 @@ mod tests {
             &column_values,
             &column_ids,
             &predicate_operations,
-            &result_operations,
             &placeholder_values,
             is_leaf,
             min_query,
             max_query,
-            &output_items,
+            &results,
             &output_ids,
         )
         .unwrap();
@@ -1442,24 +1475,15 @@ mod tests {
         .unwrap();
         let predicate_value = res.last().unwrap().to_bool().unwrap();
 
-        let (res, result_err) = BasicOperation::compute_operations(
-            &result_operations,
-            &column_values,
-            &placeholder_values,
-        )
-        .unwrap();
+        let (res, result_err) = results
+            .compute_output_values(&column_values, &placeholder_values)
+            .unwrap();
 
         // build cells tree for output items
-        let out_cells = output_items
+        let out_cells = res
             .iter()
             .zip(output_ids.iter())
-            .map(|(item, id)| {
-                let value = match item {
-                    &OutputItem::Column(index) => column_values[index],
-                    &OutputItem::ComputedValue(index) => res[index],
-                };
-                TestCell::new(value, *id)
-            })
+            .map(|(value, id)| TestCell::new(*value, *id))
             .collect_vec();
         let output_acc = if predicate_value {
             map_to_curve_point(
@@ -1495,11 +1519,7 @@ mod tests {
             MAX_NUM_RESULTS,
             NoAggOutputCircuit<MAX_NUM_RESULTS>,
         >::computational_hash(
-            &column_ids,
-            &predicate_operations,
-            &result_operations,
-            &output_items,
-            &output_ids,
+            &column_ids, &predicate_operations, &results, &output_ids
         )
         .unwrap();
 
