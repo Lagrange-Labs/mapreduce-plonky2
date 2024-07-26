@@ -41,20 +41,20 @@ pub struct ChildProvenSinglePathNodeWires<const MAX_NUM_RESULTS: usize> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChildProvenSinglePathNodeCircuit<const MAX_NUM_RESULTS: usize> {
-    // Value stored in the current node
+    /// Value stored in the current node
     pub(crate) value: U256,
-    // Hash of the row/rows tree stored in the current node
+    /// Hash of the row/rows tree stored in the current node
     pub(crate) subtree_hash: HashOut<F>,
-    // Hash of the sibling of the proven node child
+    /// Hash of the sibling of the proven node child
     pub(crate) sibling_hash: HashOut<F>,
-    // Flag indicating whether the proven child is the left child or the right one
+    /// Flag indicating whether the proven child is the left child or the right one
     pub(crate) is_left_child: bool,
-    // Minimum value of the indexed column to be employed to compute the hash of the current node
+    /// Minimum value of the indexed column to be employed to compute the hash of the current node
     pub(crate) unproven_min: U256,
-    // Maximum value of the indexed column to be employed to compute the hash of the current node
+    /// Maximum value of the indexed column to be employed to compute the hash of the current node
     pub(crate) unproven_max: U256,
-    // Boolean flag specifying whether the proof is being generated for a node
-    // in a rows tree of for a node in the index tree
+    /// Boolean flag specifying whether the proof is being generated for a node
+    /// in a rows tree of for a node in the index tree
     pub(crate) is_rows_tree_node: bool,
 }
 
@@ -105,7 +105,11 @@ impl<const MAX_NUM_RESULTS: usize> ChildProvenSinglePathNodeCircuit<MAX_NUM_RESU
             &rest,
         );
 
-        let is_greater_than_max = b.is_less_than_u256(&child_proof.max_query_target(), &value);
+        // if is_left_child:
+        //   value > child_proof.max_query
+        // else:
+        //   value < child_proof.min_query
+        let is_greater_than_max = b.is_greater_than_u256(&value, &child_proof.max_query_target());
         let is_less_than_min = b.is_less_than_u256(&value, &child_proof.min_query_target());
         let condition = b.select(
             is_left_child,
@@ -228,8 +232,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_proven_child_single_path_node_circuit() {
+    fn test_child_proven_single_path_node_circuit(is_rows_tree_node: bool, is_left_child: bool) {
         // Generate the random operations.
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
@@ -247,14 +250,12 @@ mod tests {
         let mut value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let subtree_hash = gen_random_field_hash();
         let sibling_hash = gen_random_field_hash();
-        let is_left_child = rng.gen_bool(0.5);
         let unproven_min = index_value
             .checked_sub(U256::from(100))
             .unwrap_or(index_value);
         let unproven_max = index_value
             .checked_add(U256::from(100))
             .unwrap_or(index_value);
-        let is_rows_tree_node = rng.gen_bool(0.5);
 
         if is_left_child {
             while value <= max_query {
@@ -280,7 +281,7 @@ mod tests {
             child_proof: &child_proof,
         };
 
-        // Prove for the test circuit.
+        // Proof for the test circuit.
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
 
@@ -344,5 +345,22 @@ mod tests {
         assert_eq!(pi.computational_hash(), child_pi.computational_hash());
         // Placeholder hash
         assert_eq!(pi.placeholder_hash(), child_pi.placeholder_hash());
+    }
+
+    #[test]
+    fn test_child_proven_node_for_row_node_with_left_child() {
+        test_child_proven_single_path_node_circuit(true, true);
+    }
+    #[test]
+    fn test_child_proven_node_for_row_node_with_right_child() {
+        test_child_proven_single_path_node_circuit(true, false);
+    }
+    #[test]
+    fn test_child_proven_node_for_index_node_with_left_child() {
+        test_child_proven_single_path_node_circuit(false, true);
+    }
+    #[test]
+    fn test_child_proven_node_for_index_node_with_right_child() {
+        test_child_proven_single_path_node_circuit(false, false);
     }
 }
