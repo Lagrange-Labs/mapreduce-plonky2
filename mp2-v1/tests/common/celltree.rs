@@ -118,11 +118,9 @@ impl<P: ProofStorage> TestContext<P> {
 
             let proof = if context.is_leaf() {
                 // Prove a leaf
-                let inputs =
-                    CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::leaf(
-                        cell.id,
-                        cell.value,
-                    ));
+                let inputs = CircuitInput::CellsTree(
+                    verifiable_db::cells_tree::CircuitInput::leaf(cell.id, cell.value),
+                );
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.right.is_none() {
                 // Prove a partial node
@@ -137,9 +135,7 @@ impl<P: ProofStorage> TestContext<P> {
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::partial(
-                        cell.id,
-                        cell.value,
-                        left_proof,
+                        cell.id, cell.value, left_proof,
                     ));
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {

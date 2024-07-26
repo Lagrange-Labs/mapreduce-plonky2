@@ -1,7 +1,7 @@
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
-use plonky2::{hash::hash_types::HashOut, field::types::Field};
+use plonky2::{field::types::Field, hash::hash_types::HashOut};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set as p, RecursiveCircuits},
@@ -182,10 +182,7 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     pub fn leaf(identifier: u64, value: U256, cells_proof: Vec<u8>) -> Result<Self> {
-        let circuit = LeafCircuit::new(IndexTuple::new(
-            F::from_canonical_u64(identifier), 
-            value
-        ));
+        let circuit = LeafCircuit::new(IndexTuple::new(F::from_canonical_u64(identifier), value));
         Ok(CircuitInput::Leaf {
             witness: circuit,
             cells_proof,
@@ -198,10 +195,8 @@ impl CircuitInput {
         right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let circuit = FullNodeCircuit::from(IndexTuple::new(
-            F::from_canonical_u64(identifier), 
-            value
-        ));
+        let circuit =
+            FullNodeCircuit::from(IndexTuple::new(F::from_canonical_u64(identifier), value));
         Ok(CircuitInput::Full {
             witness: circuit,
             left_proof,
@@ -216,10 +211,7 @@ impl CircuitInput {
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let tuple = IndexTuple::new(
-            F::from_canonical_u64(identifier), 
-            value
-        );
+        let tuple = IndexTuple::new(F::from_canonical_u64(identifier), value);
         let witness = PartialNodeCircuit::new(tuple, is_child_left);
         Ok(CircuitInput::Partial {
             witness,

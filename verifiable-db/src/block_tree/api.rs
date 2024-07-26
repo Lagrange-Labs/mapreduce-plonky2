@@ -12,7 +12,9 @@ use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{default_config, proof::ProofWithVK, types::HashOutput, C, D, F};
 use plonky2::{
-    field::types::Field, hash::{hash_types::HashOut, poseidon::PoseidonHash}, plonk::config::{GenericHashOut, Hasher}
+    field::types::Field,
+    hash::{hash_types::HashOut, poseidon::PoseidonHash},
+    plonk::config::{GenericHashOut, Hasher},
 };
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -283,7 +285,9 @@ mod tests {
     };
     use mp2_test::utils::random_vector;
     use plonky2::{
-        field::types::{PrimeField64, Sample}, hash::hash_types::NUM_HASH_OUT_ELTS, iop::target::Target,
+        field::types::{PrimeField64, Sample},
+        hash::hash_types::NUM_HASH_OUT_ELTS,
+        iop::target::Target,
         plonk::config::Hasher,
     };
     use plonky2_ecgfp5::curve::curve::Point;

@@ -15,13 +15,13 @@ use mp2_common::{
     proof::{ProofInputSerialized, ProofWithVK},
     C, D, F,
 };
+use plonky2::field::types::Field;
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
 };
 use serde::{Deserialize, Serialize};
 use std::array;
-use plonky2::field::types::Field;
 
 type LeafInput = LeafCircuit;
 type ChildInput = ProofInputSerialized<CellNode>;
@@ -38,27 +38,27 @@ pub enum CircuitInput {
 impl CircuitInput {
     /// Create a circuit input for proving a leaf node.
     pub fn leaf(identifier: u64, value: U256) -> Self {
-        CircuitInput::Leaf(LeafCircuit { 
-            identifier: F::from_canonical_u64(identifier), 
-            value 
+        CircuitInput::Leaf(LeafCircuit {
+            identifier: F::from_canonical_u64(identifier),
+            value,
         })
     }
 
     /// Create a circuit input for proving a full node of 2 children.
     pub fn full(identifier: u64, value: U256, child_proofs: [Vec<u8>; 2]) -> Self {
         CircuitInput::FullNode(new_child_input(
-            F::from_canonical_u64(identifier), 
-            value, 
-            child_proofs.to_vec()
+            F::from_canonical_u64(identifier),
+            value,
+            child_proofs.to_vec(),
         ))
     }
 
     /// Create a circuit input for proving a partial node of 1 child.
     pub fn partial(identifier: u64, value: U256, child_proof: Vec<u8>) -> Self {
         CircuitInput::PartialNode(new_child_input(
-            F::from_canonical_u64(identifier), 
-            value, 
-            vec![child_proof]
+            F::from_canonical_u64(identifier),
+            value,
+            vec![child_proof],
         ))
     }
 }
