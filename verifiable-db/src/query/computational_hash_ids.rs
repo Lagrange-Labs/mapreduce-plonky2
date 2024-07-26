@@ -40,16 +40,16 @@ pub enum Identifiers {
 impl Identifiers {
     pub fn offset(&self) -> usize {
         match self {
-            &Identifiers::Extraction(_) => 0,
-            &Identifiers::Operations(_) => {
+            Identifiers::Extraction(_) => 0,
+            Identifiers::Operations(_) => {
                 Identifiers::Extraction(Extraction::default()).offset()
                     + variant_count::<Extraction>()
             }
-            &Identifiers::Output(_) => {
+            Identifiers::Output(_) => {
                 Identifiers::Operations(Operation::default()).offset()
                     + variant_count::<Operation>()
             }
-            &Identifiers::AggregationOperations(_) => {
+            Identifiers::AggregationOperations(_) => {
                 Identifiers::Output(Output::default()).offset() + variant_count::<Output>()
             }
         }
@@ -204,15 +204,15 @@ impl Operation {
     ) -> Result<ComputationalHash> {
         let mut compute_operand_hash = |operand: &InputOperand| -> Result<ComputationalHash> {
             Ok(match operand {
-                &InputOperand::Placeholder(p) => hash_n_to_hash_no_pad::<_, HashPermutation>(&[p]),
-                &InputOperand::Constant(value) => {
+                InputOperand::Placeholder(p) => hash_n_to_hash_no_pad::<_, HashPermutation>(&[*p]),
+                InputOperand::Constant(value) => {
                     hash_n_to_hash_no_pad::<_, HashPermutation>(&value.to_fields())
                 }
-                &InputOperand::Column(index) => {
-                    previous_hash.get_or_compute_column_hash(index, column_ids)?
+                InputOperand::Column(index) => {
+                    previous_hash.get_or_compute_column_hash(*index, column_ids)?
                 }
-                &InputOperand::PreviousValue(op_index) => {
-                    previous_hash.get_previous_operation_hash(op_index)?
+                InputOperand::PreviousValue(op_index) => {
+                    previous_hash.get_previous_operation_hash(*op_index)?
                 }
             })
         };
@@ -325,26 +325,26 @@ impl Output {
         output_ids: &[F],
     ) -> Result<ComputationalHash> {
         let init_hash = Identifiers::Output(*self).prefix_id_hash(predicate_hash.to_vec());
-        output_items.iter().enumerate().fold(
-            Ok(init_hash),
+        output_items.iter().enumerate().try_fold(
+            init_hash,
             |hash, (i, item)| {
                 let output_hash = match item {
-                    &OutputItem::Column(index) => {
-                        ensure!(index < MAX_NUM_COLUMNS,
+                    OutputItem::Column(index) => {
+                        ensure!(*index < MAX_NUM_COLUMNS,
                             "column index in output item higher than maximum number of columns");
                         previous_hash.get_or_compute_column_hash(
-                            index,
+                            *index,
                             column_ids,
                         )?
                     },
-                    &OutputItem::ComputedValue(index) => {
-                        ensure!(index < result_ops_hash.len(),
+                    OutputItem::ComputedValue(index) => {
+                        ensure!(*index < result_ops_hash.len(),
                             "result index in output item higher than the number of computed results");
-                        result_ops_hash[index]
+                        result_ops_hash[*index]
                     },
                 };
                 Ok(hash_n_to_hash_no_pad::<_, HashPermutation>(
-                    &hash?
+                    &hash
                         .to_vec()
                         .into_iter()
                         .chain(once(output_ids[i]))

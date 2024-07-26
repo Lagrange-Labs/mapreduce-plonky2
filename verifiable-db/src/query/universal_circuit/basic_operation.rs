@@ -425,7 +425,7 @@ mod tests {
         };
         let expected_hash = Operation::basic_operation_hash(
             &mut ComputationalHashCache::<NUM_INPUTS>::new_from_column_hash(&input_hash).unwrap(),
-            &vec![], // unused in this case since we have already inserted all input hash in the cache
+            &[], // unused in this case since we have already inserted all input hash in the cache
             &operation,
         )
         .unwrap();

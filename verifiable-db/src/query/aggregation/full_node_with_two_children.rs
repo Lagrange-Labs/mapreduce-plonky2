@@ -205,7 +205,6 @@ mod tests {
             },
             utils::tests::{unify_child_proof, unify_subtree_proof},
         },
-        public_inputs::QueryPublicInputs,
         PI_LEN,
     };
     use mp2_common::{utils::ToFields, C};

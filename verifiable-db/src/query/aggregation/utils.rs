@@ -97,9 +97,7 @@ pub(crate) fn constrain_input_proofs<const S: usize>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::query::{
-        aggregation::tests::random_aggregation_public_inputs, public_inputs::QueryPublicInputs,
-    };
+    use crate::query::public_inputs::QueryPublicInputs;
     use alloy::primitives::U256;
     use mp2_common::utils::ToFields;
 
@@ -115,7 +113,7 @@ pub(crate) mod tests {
             QueryPublicInputs::MinQuery,
             QueryPublicInputs::MaxQuery,
         ]
-        .map(|input| PublicInputs::<F, S>::to_range(input));
+        .map(PublicInputs::<F, S>::to_range);
 
         if is_rows_tree_node {
             // p.MIN_I == MIN_query AND p.MAX_I == MAX_query
@@ -141,7 +139,7 @@ pub(crate) mod tests {
             QueryPublicInputs::MinQuery,
             QueryPublicInputs::MaxQuery,
         ]
-        .map(|input| PublicInputs::<F, S>::to_range(input));
+        .map(PublicInputs::<F, S>::to_range);
 
         // child.MIN_I == MIN_query
         // child.MAX_I == MAX_query

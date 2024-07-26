@@ -151,11 +151,11 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
         let mut inputs: Vec<_> = iter::once(input_wires.ids[0])
             .chain(output_items[0].to_targets())
             .collect();
-        for i in 1..COLUMN_INDEX_NUM {
+        (1..COLUMN_INDEX_NUM).for_each(|i| {
             let item = b.select_u256(input_wires.is_output_valid[i], &output_items[i], &u256_zero);
             inputs.push(input_wires.ids[i]);
             inputs.extend(item.to_targets());
-        }
+        });
         inputs.extend(tree_hash.elements);
         let accumulator = b.map_to_curve_point(&inputs);
 
@@ -244,10 +244,8 @@ mod tests {
 
     use super::*;
     use alloy::primitives::U256;
-    use itertools::Itertools;
     use mp2_common::{
-        group_hashing::map_to_curve_point, poseidon::H, u256::WitnessWriteU256, utils::ToFields, C,
-        D,
+        group_hashing::map_to_curve_point, u256::WitnessWriteU256, utils::ToFields, C, D,
     };
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},
@@ -397,7 +395,6 @@ mod tests {
                 .cloned()
                 .collect_vec();
             let output_items: Vec<_> = (0..c.valid_num_outputs)
-                .into_iter()
                 .map(|i| possible_input_values[selectors[i]])
                 .collect();
 
@@ -498,7 +495,7 @@ mod tests {
     impl<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> UserCircuit<F, D>
         for TestOutputNoAggregationCircuit<NUM_COLUMNS, MAX_NUM_RESULTS>
     where
-        [(); { NUM_COLUMNS + MAX_NUM_RESULTS }]:,
+        [(); NUM_COLUMNS + MAX_NUM_RESULTS]:,
     {
         // Circuit wires + output wires + expected wires
         type Wires = (

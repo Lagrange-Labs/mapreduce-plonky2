@@ -64,26 +64,26 @@ impl BasicOperation {
         let mut arithmetic_error = false;
         let num_columns = column_values.len();
         for (i, op) in operations.iter().enumerate() {
-            let get_input_value = |operand| {
+            let get_input_value = |operand: &InputOperand| {
                 Ok(match operand {
-                    &InputOperand::Placeholder(p) => {
-                        *placeholder_values.get(&p).ok_or_else(|| {
+                    InputOperand::Placeholder(p) => {
+                        *placeholder_values.get(p).ok_or_else(|| {
                             anyhow!("No placeholder value found associated to id {}", p)
                         })?
                     }
-                    &InputOperand::Constant(v) => v,
-                    &InputOperand::Column(index) => {
+                    InputOperand::Constant(v) => *v,
+                    InputOperand::Column(index) => {
                         ensure!(
-                            index < num_columns,
+                            *index < num_columns,
                             "invalid input operation: column index out of range for operation {}",
                             i
                         );
-                        column_values[index]
+                        column_values[*index]
                     }
-                    &InputOperand::PreviousValue(index) => {
-                        ensure!(index < results.len(),
+                    InputOperand::PreviousValue(index) => {
+                        ensure!(*index < results.len(),
                                 "invalid input operation: accessing a value that has not been computed yet in operation {}", i);
-                        results[index]
+                        results[*index]
                     }
                 })
             };
@@ -209,8 +209,8 @@ impl ResultStructure {
             .output_items
             .iter()
             .map(|item| match item {
-                &OutputItem::Column(index) => column_values[index],
-                &OutputItem::ComputedValue(index) => res[index],
+                OutputItem::Column(index) => column_values[*index],
+                OutputItem::ComputedValue(index) => res[*index],
             })
             .collect_vec();
         Ok((results, overflow_err))

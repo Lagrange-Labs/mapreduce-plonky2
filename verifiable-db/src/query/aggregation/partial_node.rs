@@ -292,13 +292,12 @@ mod tests {
             },
             utils::tests::{unify_child_proof, unify_subtree_proof},
         },
-        public_inputs::QueryPublicInputs,
         PI_LEN,
     };
     use mp2_common::{poseidon::H, utils::ToFields, C};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        utils::{gen_random_field_hash, random_vector},
+        utils::gen_random_field_hash,
     };
     use plonky2::{iop::witness::WitnessWrite, plonk::config::Hasher};
     use rand::{thread_rng, Rng};

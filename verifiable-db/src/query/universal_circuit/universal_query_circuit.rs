@@ -184,6 +184,7 @@ where
     ///   entries of the `result_operations` found in `results` structure. This is again an assumption we require to
     ///   properly place the output values in the circuit. Note that this method returns an error if this assumption
     ///   is not met in the `results` structure provided as input
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         column_values: &[U256],
         column_ids: &[F],
@@ -240,13 +241,13 @@ where
         let selectors = results.output_items.iter().enumerate().map(|(i, item)| {
             Ok(
                 match item {
-                    &OutputItem::Column(index) => {
-                        ensure!(index < MAX_NUM_COLUMNS,
+                    OutputItem::Column(index) => {
+                        ensure!(*index < MAX_NUM_COLUMNS,
                         "Column index provided as {}-th output value is higher than the maximum number of columns", i);
-                    F::from_canonical_usize(index)
+                    F::from_canonical_usize(*index)
                     },
-                    &OutputItem::ComputedValue(index) => {
-                        ensure!(index < num_result_ops,
+                    OutputItem::ComputedValue(index) => {
+                        ensure!(*index < num_result_ops,
                             "an operation computing an output results not found in set of result operations");
                         // starting index is the minimum index, in the `results.result operations` vector, for an 
                         // operation that could contain a possible output value. Indeed, since the circuit is 
@@ -263,7 +264,7 @@ where
                         } else {
                             0
                         };
-                        ensure!(index >= starting_index,
+                        ensure!(*index >= starting_index,
                             "an operation computing an output results is not placed in the last {} elements of result operations vector", MAX_NUM_RESULTS);
                         // the output will be placed in the `num_result_ops - index` last slot in the set of
                         // `possible_output_values` provided as input in the circuit to the output component,
@@ -272,7 +273,7 @@ where
                         // `MAX_NUM_COLUMNS + MAX_NUM_RESULTS` entries, the selector for such output value
                         // can be computed as the length of `possible_output_values.len() - (num_result_ops - index)`,
                         // which correspond to the `num_result_ops - index`-th entry from the end of the array  
-                        F::from_canonical_usize(MAX_NUM_COLUMNS + MAX_NUM_RESULTS - (num_result_ops - index))
+                        F::from_canonical_usize(MAX_NUM_COLUMNS + MAX_NUM_RESULTS - (num_result_ops - *index))
                     },
             })
         }).collect::<Result<Vec<_>>>()?;
@@ -707,7 +708,7 @@ mod tests {
         array::ToField,
         group_hashing::map_to_curve_point,
         poseidon::empty_poseidon_hash,
-        utils::{FromFields, TryIntoBool, ToFields},
+        utils::{FromFields, ToFields, TryIntoBool},
         C, D, F,
     };
     use mp2_test::{
@@ -781,7 +782,7 @@ mod tests {
         op: &BasicOperation,
     ) -> Result<usize> {
         previous_ops
-            .into_iter()
+            .iter()
             .find_position(|current_op| *current_op == op)
             .map(|(pos, _)| pos)
             .ok_or(Error::msg("operation {} not found in set of previous ops"))
@@ -831,21 +832,21 @@ mod tests {
             second_operand: Some(InputOperand::Constant(U256::from(5))),
             op: Operation::GreaterThanOp,
         };
-        predicate_operations.push(c5_comparison.clone());
+        predicate_operations.push(c5_comparison);
         // C1*C3
         let column_prod = BasicOperation {
             first_operand: InputOperand::Column(0),
             second_operand: Some(InputOperand::Column(2)),
             op: Operation::MulOp,
         };
-        predicate_operations.push(column_prod.clone());
+        predicate_operations.push(column_prod);
         // C4+C5
         let column_add = BasicOperation {
             first_operand: InputOperand::Column(3),
             second_operand: Some(InputOperand::Column(4)),
             op: Operation::AddOp,
         };
-        predicate_operations.push(column_add.clone());
+        predicate_operations.push(column_add);
         // C1*C3 <= C4 + C5
         let expr_comparison = BasicOperation {
             first_operand: InputOperand::PreviousValue(
@@ -856,14 +857,14 @@ mod tests {
             )),
             op: Operation::LessThanOrEqOp,
         };
-        predicate_operations.push(expr_comparison.clone());
+        predicate_operations.push(expr_comparison);
         // C3 == $2
         let placeholder_eq = BasicOperation {
             first_operand: InputOperand::Column(2),
             second_operand: Some(InputOperand::Placeholder(second_placeholder_id)),
             op: Operation::EqOp,
         };
-        predicate_operations.push(placeholder_eq.clone());
+        predicate_operations.push(placeholder_eq);
         // c5_comparison AND expr_comparison
         let and_comparisons = BasicOperation {
             first_operand: InputOperand::PreviousValue(
@@ -874,7 +875,7 @@ mod tests {
             )),
             op: Operation::AndOp,
         };
-        predicate_operations.push(and_comparisons.clone());
+        predicate_operations.push(and_comparisons);
         // final filtering predicate: and_comparisons OR placeholder_eq
         let predicate = BasicOperation {
             first_operand: InputOperand::PreviousValue(
@@ -894,14 +895,14 @@ mod tests {
             second_operand: Some(InputOperand::Column(2)),
             op: Operation::MulOp,
         };
-        result_operations.push(column_prod.clone());
+        result_operations.push(column_prod);
         // C1+C2
         let column_add = BasicOperation {
             first_operand: InputOperand::Column(0),
             second_operand: Some(InputOperand::Column(1)),
             op: Operation::AddOp,
         };
-        result_operations.push(column_add.clone());
+        result_operations.push(column_add);
         // C1 + C2/(C2*C3)
         let div = BasicOperation {
             first_operand: InputOperand::PreviousValue(
@@ -912,7 +913,7 @@ mod tests {
             )),
             op: Operation::DivOp,
         };
-        result_operations.push(div.clone());
+        result_operations.push(div);
         // C1 + $1
         let column_placeholder = BasicOperation {
             first_operand: InputOperand::Column(0),
@@ -920,13 +921,13 @@ mod tests {
             op: Operation::AddOp,
         };
         // C4 - 2
-        result_operations.push(column_placeholder.clone());
+        result_operations.push(column_placeholder);
         let column_sub_const = BasicOperation {
             first_operand: InputOperand::Column(3),
             second_operand: Some(InputOperand::Constant(U256::from(2))),
             op: Operation::SubOp,
         };
-        result_operations.push(column_sub_const.clone());
+        result_operations.push(column_sub_const);
 
         let is_leaf: bool = rng.gen();
         // output items are all computed values in this query, expect for the last item
@@ -1050,7 +1051,10 @@ mod tests {
         assert_eq!(output_values[0], pi.first_value_as_u256());
         assert_eq!(output_values[1..], pi.values()[..output_values.len() - 1]);
         assert_eq!(output_ops, pi.operation_ids()[..output_ops.len()]);
-        assert_eq!(predicate_value, pi.num_matching_rows().try_into_bool().unwrap());
+        assert_eq!(
+            predicate_value,
+            pi.num_matching_rows().try_into_bool().unwrap()
+        );
         assert_eq!(column_values[0], pi.index_value());
         assert_eq!(column_values[1], pi.min_value());
         assert_eq!(column_values[1], pi.max_value());
@@ -1105,21 +1109,21 @@ mod tests {
             second_operand: Some(InputOperand::Constant(U256::from(42))),
             op: Operation::NeOp,
         };
-        predicate_operations.push(c5_comparison.clone());
+        predicate_operations.push(c5_comparison);
         // C1*C7
         let column_prod = BasicOperation {
             first_operand: InputOperand::Column(0),
             second_operand: Some(InputOperand::Column(6)),
             op: Operation::MulOp,
         };
-        predicate_operations.push(column_prod.clone());
+        predicate_operations.push(column_prod);
         // C4/C6
         let column_div = BasicOperation {
             first_operand: InputOperand::Column(3),
             second_operand: Some(InputOperand::Column(5)),
             op: Operation::DivOp,
         };
-        predicate_operations.push(column_div.clone());
+        predicate_operations.push(column_div);
         // C4/C6 + C5
         let expr_add = BasicOperation {
             first_operand: InputOperand::PreviousValue(
@@ -1128,7 +1132,7 @@ mod tests {
             second_operand: Some(InputOperand::Column(4)),
             op: Operation::AddOp,
         };
-        predicate_operations.push(expr_add.clone());
+        predicate_operations.push(expr_add);
         // C1*C7 <= C4/C6 + C5
         let expr_comparison = BasicOperation {
             first_operand: InputOperand::PreviousValue(
@@ -1139,7 +1143,7 @@ mod tests {
             )),
             op: Operation::LessThanOrEqOp,
         };
-        predicate_operations.push(expr_comparison.clone());
+        predicate_operations.push(expr_comparison);
         // C3 < $2
         let placeholder_cmp = BasicOperation {
             first_operand: InputOperand::Column(2),
@@ -1147,7 +1151,7 @@ mod tests {
             op: Operation::LessThanOp,
         };
         // NOT c5_comparison
-        predicate_operations.push(placeholder_cmp.clone());
+        predicate_operations.push(placeholder_cmp);
         let not_c5 = BasicOperation {
             first_operand: InputOperand::PreviousValue(
                 locate_previous_operation(&predicate_operations, &c5_comparison).unwrap(),
@@ -1155,7 +1159,7 @@ mod tests {
             second_operand: None,
             op: Operation::NotOp,
         };
-        predicate_operations.push(not_c5.clone());
+        predicate_operations.push(not_c5);
         // NOT c5_comparison OR expr_comparison
         let or_comparisons = BasicOperation {
             first_operand: InputOperand::PreviousValue(
@@ -1166,7 +1170,7 @@ mod tests {
             )),
             op: Operation::OrOp,
         };
-        predicate_operations.push(or_comparisons.clone());
+        predicate_operations.push(or_comparisons);
         // final filtering predicate: or_comparisons XOR placeholder_cmp
         let predicate = BasicOperation {
             first_operand: InputOperand::PreviousValue(
@@ -1186,7 +1190,7 @@ mod tests {
             second_operand: Some(InputOperand::Constant(U256::from(45))),
             op: Operation::DivOp,
         };
-        result_operations.push(div_const.clone());
+        result_operations.push(div_const);
         // C1 < C2/45
         let column_cmp = BasicOperation {
             first_operand: InputOperand::Column(0),
@@ -1195,21 +1199,21 @@ mod tests {
             )),
             op: Operation::LessThanOp,
         };
-        result_operations.push(column_cmp.clone());
+        result_operations.push(column_cmp);
         // C3*C4
         let column_prod = BasicOperation {
             first_operand: InputOperand::Column(2),
             second_operand: Some(InputOperand::Column(3)),
             op: Operation::MulOp,
         };
-        result_operations.push(column_prod.clone());
+        result_operations.push(column_prod);
         // C5 - C6
         let column_sub = BasicOperation {
             first_operand: InputOperand::Column(4),
             second_operand: Some(InputOperand::Column(5)),
             op: Operation::SubOp,
         };
-        result_operations.push(column_sub.clone());
+        result_operations.push(column_sub);
         // (C5 - C6) % C1
         let column_mod = BasicOperation {
             first_operand: InputOperand::PreviousValue(
@@ -1218,7 +1222,7 @@ mod tests {
             second_operand: Some(InputOperand::Column(0)),
             op: Operation::AddOp,
         };
-        result_operations.push(column_mod.clone());
+        result_operations.push(column_mod);
         // C3*C4 - $1
         let sub_placeholder = BasicOperation {
             first_operand: InputOperand::PreviousValue(
@@ -1227,7 +1231,7 @@ mod tests {
             second_operand: Some(InputOperand::Placeholder(first_placeholder_id)),
             op: Operation::SubOp,
         };
-        result_operations.push(sub_placeholder.clone());
+        result_operations.push(sub_placeholder);
 
         let is_leaf: bool = rng.gen();
         // output items are all computed values in this query, expect for the last item
@@ -1382,7 +1386,10 @@ mod tests {
                 MAX_NUM_RESULTS - 1],
             pi.operation_ids()[1..]
         );
-        assert_eq!(predicate_value, pi.num_matching_rows().try_into_bool().unwrap());
+        assert_eq!(
+            predicate_value,
+            pi.num_matching_rows().try_into_bool().unwrap()
+        );
         assert_eq!(column_values[0], pi.index_value());
         assert_eq!(column_values[1], pi.min_value());
         assert_eq!(column_values[1], pi.max_value());

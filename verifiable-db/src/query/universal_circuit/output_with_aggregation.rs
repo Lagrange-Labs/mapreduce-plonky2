@@ -224,7 +224,7 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::query::{
-        computational_hash_ids::{AggregationOperation, ComputationalHashCache, Output},
+        computational_hash_ids::{AggregationOperation, ComputationalHashCache},
         universal_circuit::{
             universal_circuit_inputs::OutputItem,
             universal_query_circuit::{OutputComponent, OutputComponentWires},
