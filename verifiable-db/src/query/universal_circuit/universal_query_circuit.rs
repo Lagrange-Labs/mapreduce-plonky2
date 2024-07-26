@@ -817,9 +817,9 @@ mod tests {
             .collect_vec();
         let column_ids = (0..NUM_ACTUAL_COLUMNS).map(|_| F::rand()).collect_vec();
         // define placeholders
-        let first_placeholder = F::from_canonical_usize(1);
-        let second_placeholder = F::from_canonical_usize(2);
-        let placeholder_values = [first_placeholder, second_placeholder]
+        let first_placeholder_id = F::from_canonical_usize(1);
+        let second_placeholder_id = F::from_canonical_usize(2);
+        let placeholder_values = [first_placeholder_id, second_placeholder_id]
             .iter()
             .map(|id| (*id, gen_random_u256(rng)))
             .collect();
@@ -860,7 +860,7 @@ mod tests {
         // C3 == $2
         let placeholder_eq = BasicOperation {
             first_operand: InputOperand::Column(2),
-            second_operand: Some(InputOperand::Placeholder(second_placeholder)),
+            second_operand: Some(InputOperand::Placeholder(second_placeholder_id)),
             op: Operation::EqOp,
         };
         predicate_operations.push(placeholder_eq.clone());
@@ -916,7 +916,7 @@ mod tests {
         // C1 + $1
         let column_placeholder = BasicOperation {
             first_operand: InputOperand::Column(0),
-            second_operand: Some(InputOperand::Placeholder(first_placeholder)),
+            second_operand: Some(InputOperand::Placeholder(first_placeholder_id)),
             op: Operation::AddOp,
         };
         // C4 - 2
@@ -1091,9 +1091,9 @@ mod tests {
             .collect_vec();
         let column_ids = (0..NUM_ACTUAL_COLUMNS).map(|_| F::rand()).collect_vec();
         // define placeholders
-        let first_placeholder = F::from_canonical_usize(1);
-        let second_placeholder = F::from_canonical_usize(2);
-        let placeholder_values = [first_placeholder, second_placeholder]
+        let first_placeholder_id = F::from_canonical_usize(1);
+        let second_placeholder_id = F::from_canonical_usize(2);
+        let placeholder_values = [first_placeholder_id, second_placeholder_id]
             .iter()
             .map(|id| (*id, gen_random_u256(rng)))
             .collect();
@@ -1143,7 +1143,7 @@ mod tests {
         // C3 < $2
         let placeholder_cmp = BasicOperation {
             first_operand: InputOperand::Column(2),
-            second_operand: Some(InputOperand::Placeholder(second_placeholder)),
+            second_operand: Some(InputOperand::Placeholder(second_placeholder_id)),
             op: Operation::LessThanOp,
         };
         // NOT c5_comparison
@@ -1224,7 +1224,7 @@ mod tests {
             first_operand: InputOperand::PreviousValue(
                 locate_previous_operation(&result_operations, &column_prod).unwrap(),
             ),
-            second_operand: Some(InputOperand::Placeholder(first_placeholder)),
+            second_operand: Some(InputOperand::Placeholder(first_placeholder_id)),
             op: Operation::SubOp,
         };
         result_operations.push(sub_placeholder.clone());

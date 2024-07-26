@@ -23,9 +23,13 @@ pub(crate) enum InputOperand {
     Placeholder(PlaceholderId),
     // Input operand is a constant value in the query
     Constant(U256),
-    /// Input operand is a column of the table
+    /// Input operand is a column of the table: the integer stored in this variant is the index
+    /// of the column in the set of columns of the table
     Column(usize),
-    /// Input operand is the output of a previous basic operation
+    /// Input operand is the output of a previous basic operation: the integer stored in this variant
+    /// is the position of this previous operation in the set of operations being computed.
+    /// Note that this must refer to an operation already computed, so it should refer to
+    /// an operation found before the current operation in the set of operations
     PreviousValue(usize),
 }
 

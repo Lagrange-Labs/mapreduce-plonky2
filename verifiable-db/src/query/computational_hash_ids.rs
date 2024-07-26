@@ -223,8 +223,7 @@ impl Operation {
         } else {
             compute_operand_hash(&InputOperand::default())
         }?;
-        let op_identifier =
-            F::from_canonical_usize(Identifiers::Operations(operation.op).position());
+        let op_identifier = Identifiers::Operations(operation.op).to_field();
         Ok(hash_n_to_hash_no_pad::<_, HashPermutation>(
             &once(op_identifier)
                 .chain(first_hash.to_vec())
