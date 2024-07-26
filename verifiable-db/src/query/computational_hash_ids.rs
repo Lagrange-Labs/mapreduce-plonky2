@@ -90,7 +90,7 @@ pub enum Extraction {
     Column,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default, Hash)]
 /// Set of constant identifiers employed in the
 /// computational hash, which is a compact representation
 /// of the query being proven by the query circuits
@@ -122,12 +122,22 @@ impl<F: RichField> ToField<F> for Operation {
 pub(crate) type HashPermutation = <CHasher as Hasher<F>>::Permutation;
 
 /// Data structure to cache previously computed computational hashes
-pub struct ComputationalHashCache<const MAX_NUM_COLUMNS: usize>(HashMap<usize, HashOut<F>>);
+pub(crate) struct ComputationalHashCache<const MAX_NUM_COLUMNS: usize> {
+    // cache the computational hash already computed for columns of the table, identified
+    // by the column index
+    column_hash: HashMap<usize, HashOut<F>>,
+    // cache the computational hash already computed for operations being performed, identified
+    // by the position of the operation in the set of operations
+    operation_hash: HashMap<usize, HashOut<F>>,
+}
 
 impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
     /// Initialize an empty `ComputationalHashCache`
     pub(crate) fn new() -> Self {
-        Self(HashMap::new())
+        Self {
+            column_hash: HashMap::new(),
+            operation_hash: HashMap::new(),
+        }
     }
     /// Initialize a `ComputationalHashCache ` with a set of computational hash for column
     pub(crate) fn new_from_column_hash(column_hash: &[HashOut<F>]) -> Result<Self> {
@@ -135,17 +145,18 @@ impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
             column_hash.len() <= MAX_NUM_COLUMNS,
             "Number of input column hash is higher than the maximum number of columns"
         );
-        Ok(Self(
-            column_hash
+        Ok(Self {
+            column_hash: column_hash
                 .iter()
                 .enumerate()
                 .map(|(i, hash)| (i, *hash))
                 .collect(),
-        ))
+            operation_hash: HashMap::new(),
+        })
     }
     /// Get the column hash for the column with index `column_index`, if available in the cache;
     /// Otherwise, compute this hash from `column_ids` and insert it in the cache
-    fn get_or_insert_column_hash(
+    fn get_or_compute_column_hash(
         &mut self,
         column_index: usize,
         column_ids: &[F],
@@ -154,7 +165,7 @@ impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
             column_index < MAX_NUM_COLUMNS,
             "column index bigger than maximum number of columns"
         );
-        Ok(*self.0.entry(column_index).or_insert_with(|| {
+        Ok(*self.column_hash.entry(column_index).or_insert_with(|| {
             Identifiers::Extraction(Extraction::Column)
                 .prefix_id_hash(vec![column_ids[column_index]])
         }))
@@ -162,8 +173,7 @@ impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
 
     /// Get a previously computed hash for the `op-index`-th operation in a set of operations
     fn get_previous_operation_hash(&self, op_index: usize) -> Result<HashOut<F>> {
-        let previous_value_index = op_index + MAX_NUM_COLUMNS;
-        self.0.get(&previous_value_index).cloned().ok_or(anyhow!(
+        self.operation_hash.get(&op_index).cloned().ok_or(anyhow!(
             "input hash for previous value with index {} not found",
             op_index
         ))
@@ -171,7 +181,7 @@ impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
 
     /// Insert the hash computed for the `op-index`-th operation in a set of operations
     fn insert_previous_operation_hash(&mut self, op_index: usize, hash: &HashOut<F>) {
-        self.0.insert(op_index + MAX_NUM_COLUMNS, *hash);
+        self.operation_hash.insert(op_index, *hash);
     }
 }
 
@@ -199,7 +209,7 @@ impl Operation {
                     hash_n_to_hash_no_pad::<_, HashPermutation>(&value.to_fields())
                 }
                 &InputOperand::Column(index) => {
-                    previous_hash.get_or_insert_column_hash(index, column_ids)?
+                    previous_hash.get_or_compute_column_hash(index, column_ids)?
                 }
                 &InputOperand::PreviousValue(op_index) => {
                     previous_hash.get_previous_operation_hash(op_index)?
@@ -323,7 +333,7 @@ impl Output {
                     &OutputItem::Column(index) => {
                         ensure!(index < MAX_NUM_COLUMNS,
                             "column index in output item higher than maximum number of columns");
-                        previous_hash.get_or_insert_column_hash(
+                        previous_hash.get_or_compute_column_hash(
                             index,
                             column_ids,
                         )?

@@ -51,7 +51,7 @@ pub(crate) struct Placeholder {
 
 pub(crate) type PlaceholderId = F;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// Enumeration representing all the possible types of input operands for a basic operation
 pub(crate) enum InputOperand {
     // Input operand is a placeholder in the query
@@ -70,7 +70,7 @@ impl Default for InputOperand {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// Data structure employed to specify a basic operation to be performed to
 /// compute the query
 pub(crate) struct BasicOperation {
