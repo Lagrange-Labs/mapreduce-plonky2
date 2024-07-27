@@ -15,6 +15,7 @@ use mp2_common::{
     proof::{ProofInputSerialized, ProofWithVK},
     C, D, F,
 };
+use plonky2::field::types::Field;
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
@@ -36,18 +37,29 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     /// Create a circuit input for proving a leaf node.
-    pub fn leaf(identifier: F, value: U256) -> Self {
-        CircuitInput::Leaf(LeafCircuit { identifier, value })
+    pub fn leaf(identifier: u64, value: U256) -> Self {
+        CircuitInput::Leaf(LeafCircuit {
+            identifier: F::from_canonical_u64(identifier),
+            value,
+        })
     }
 
     /// Create a circuit input for proving a full node of 2 children.
-    pub fn full(identifier: F, value: U256, child_proofs: [Vec<u8>; 2]) -> Self {
-        CircuitInput::FullNode(new_child_input(identifier, value, child_proofs.to_vec()))
+    pub fn full(identifier: u64, value: U256, child_proofs: [Vec<u8>; 2]) -> Self {
+        CircuitInput::FullNode(new_child_input(
+            F::from_canonical_u64(identifier),
+            value,
+            child_proofs.to_vec(),
+        ))
     }
 
     /// Create a circuit input for proving a partial node of 1 child.
-    pub fn partial(identifier: F, value: U256, child_proof: Vec<u8>) -> Self {
-        CircuitInput::PartialNode(new_child_input(identifier, value, vec![child_proof]))
+    pub fn partial(identifier: u64, value: U256, child_proof: Vec<u8>) -> Self {
+        CircuitInput::PartialNode(new_child_input(
+            F::from_canonical_u64(identifier),
+            value,
+            vec![child_proof],
+        ))
     }
 }
 
@@ -189,7 +201,7 @@ mod tests {
         poseidon::{empty_poseidon_hash, H},
         utils::{Fieldable, ToFields},
     };
-    use plonky2::plonk::config::Hasher;
+    use plonky2::{field::types::PrimeField64, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use rand::{thread_rng, Rng};
     use serial_test::serial;
@@ -217,10 +229,10 @@ mod tests {
     fn generate_leaf_proof(params: &PublicParameters) -> Vec<u8> {
         // Build the circuit input.
         let mut rng = thread_rng();
-        let identifier = rng.gen::<u32>().to_field();
+        let identifier: F = rng.gen::<u32>().to_field();
         let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let value_fields = value.to_fields();
-        let input = CircuitInput::leaf(identifier, value);
+        let input = CircuitInput::leaf(identifier.to_canonical_u64(), value);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -295,10 +307,10 @@ mod tests {
 
         // Build the circuit input.
         let mut rng = thread_rng();
-        let identifier = rng.gen::<u32>().to_field();
+        let identifier: F = rng.gen::<u32>().to_field();
         let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let packed_value = value.to_fields();
-        let input = CircuitInput::full(identifier, value, child_proofs);
+        let input = CircuitInput::full(identifier.to_canonical_u64(), value, child_proofs);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -349,10 +361,10 @@ mod tests {
 
         // Build the circuit input.
         let mut rng = thread_rng();
-        let identifier = rng.gen::<u32>().to_field();
+        let identifier: F = rng.gen::<u32>().to_field();
         let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let packed_value = value.to_fields();
-        let input = CircuitInput::partial(identifier, value, child_proof);
+        let input = CircuitInput::partial(identifier.to_canonical_u64(), value, child_proof);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();

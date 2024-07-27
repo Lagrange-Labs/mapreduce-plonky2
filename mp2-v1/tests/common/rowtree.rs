@@ -235,7 +235,7 @@ impl<P: ProofStorage> TestContext<P> {
 
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, row) = t.fetch_with_context(&k);
-            let id = F::from_canonical_u64(row.cells.secondary_index().unwrap().id);
+            let id = row.cells.secondary_index().unwrap().id;
             // Sec. index value
             let value = row.cells.secondary_index().unwrap().value;
 

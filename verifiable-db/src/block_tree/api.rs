@@ -10,10 +10,11 @@ use super::{
 };
 use alloy::primitives::U256;
 use anyhow::Result;
-use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
+use mp2_common::{default_config, proof::ProofWithVK, types::HashOutput, C, D, F};
 use plonky2::{
+    field::types::Field,
     hash::{hash_types::HashOut, poseidon::PoseidonHash},
-    plonk::config::Hasher,
+    plonk::config::{GenericHashOut, Hasher},
 };
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -46,10 +47,10 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     /// Create a circuit input for proving a leaf node.
-    pub fn new_leaf(block_id: F, extraction_proof: Vec<u8>, rows_tree_proof: Vec<u8>) -> Self {
+    pub fn new_leaf(block_id: u64, extraction_proof: Vec<u8>, rows_tree_proof: Vec<u8>) -> Self {
         Self::Leaf {
             witness: LeafCircuit {
-                index_identifier: block_id,
+                index_identifier: F::from_canonical_u64(block_id),
             },
             extraction_proof,
             rows_tree_proof,
@@ -58,25 +59,25 @@ impl CircuitInput {
 
     /// Create a circuit input for proving a parent node.
     pub fn new_parent(
-        block_id: F,
+        block_id: u64,
         old_block_number: U256,
         old_min: U256,
         old_max: U256,
-        old_left_child: HashOut<F>,
-        old_right_child: HashOut<F>,
-        old_rows_tree_hash: HashOut<F>,
+        old_left_child: &HashOutput,
+        old_right_child: &HashOutput,
+        old_rows_tree_hash: &HashOutput,
         extraction_proof: Vec<u8>,
         rows_tree_proof: Vec<u8>,
     ) -> Self {
         CircuitInput::Parent {
             witness: ParentCircuit {
-                index_identifier: block_id,
+                index_identifier: F::from_canonical_u64(block_id),
                 old_index_value: old_block_number,
                 old_min,
                 old_max,
-                old_left_child,
-                old_right_child,
-                old_rows_tree_hash,
+                old_left_child: HashOut::<F>::from_bytes(old_left_child.into()),
+                old_right_child: HashOut::<F>::from_bytes(old_right_child.into()),
+                old_rows_tree_hash: HashOut::<F>::from_bytes(old_rows_tree_hash.into()),
             },
             extraction_proof,
             rows_tree_proof,
@@ -85,22 +86,22 @@ impl CircuitInput {
 
     /// Create a circuit input for proving a membership node of 1 child.
     pub fn new_membership(
-        index_identifier: F,
+        index_identifier: u64,
         index_value: U256,
         old_min: U256,
         old_max: U256,
-        left_child: HashOut<F>,
-        rows_tree_hash: HashOut<F>,
+        left_child: &HashOutput,
+        rows_tree_hash: &HashOutput,
         right_child_proof: Vec<u8>,
     ) -> Self {
         CircuitInput::Membership {
             witness: MembershipCircuit {
-                index_identifier,
+                index_identifier: F::from_canonical_u64(index_identifier),
                 index_value,
                 old_min,
                 old_max,
-                left_child,
-                rows_tree_hash,
+                left_child: HashOut::<F>::from_bytes(left_child.into()),
+                rows_tree_hash: HashOut::<F>::from_bytes(rows_tree_hash.into()),
             },
             right_child_proof,
         }
@@ -284,7 +285,9 @@ mod tests {
     };
     use mp2_test::utils::random_vector;
     use plonky2::{
-        field::types::Sample, hash::hash_types::NUM_HASH_OUT_ELTS, iop::target::Target,
+        field::types::{PrimeField64, Sample},
+        hash::hash_types::NUM_HASH_OUT_ELTS,
+        iop::target::Target,
         plonk::config::Hasher,
     };
     use plonky2_ecgfp5::curve::curve::Point;
@@ -371,7 +374,7 @@ mod tests {
                 row_tree::PublicInputs::from_slice(&rows_tree_proof.proof.public_inputs);
 
             let input = CircuitInput::new_leaf(
-                block_id,
+                block_id.to_canonical_u64(),
                 extraction_proof.serialize()?,
                 rows_tree_proof.serialize()?,
             );
@@ -467,13 +470,13 @@ mod tests {
             let old_rows_tree_hash =
                 HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
             let input = CircuitInput::new_parent(
-                block_id,
+                block_id.to_canonical_u64(),
                 old_block_number,
                 old_min,
                 old_max,
-                left_child,
-                right_child,
-                old_rows_tree_hash,
+                &left_child.to_bytes().try_into().unwrap(),
+                &right_child.to_bytes().try_into().unwrap(),
+                &old_rows_tree_hash.to_bytes().try_into().unwrap(),
                 extraction_proof.serialize()?,
                 rows_tree_proof.serialize()?,
             );
@@ -572,12 +575,12 @@ mod tests {
 
             let rows_tree_hash = HashOut::rand();
             let input = CircuitInput::new_membership(
-                index_identifier,
+                index_identifier.to_canonical_u64(),
                 index_number,
                 old_min,
                 old_max,
-                left_child,
-                rows_tree_hash,
+                &left_child.to_bytes().try_into().unwrap(),
+                &rows_tree_hash.to_bytes().try_into().unwrap(),
                 right_child_proof,
             );
 
