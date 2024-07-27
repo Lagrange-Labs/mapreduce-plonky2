@@ -148,6 +148,7 @@ pub struct KeyValueDB {
 
 const BUCKET_NAME: &str = "v1_proof_store_test";
 pub const ENV_PROOF_STORE: &str = "proofs.store";
+pub const DEFAULT_PROOF_STORE_FOLDER: &str = "store/";
 impl KeyValueDB {
     pub fn new_from_env(default: &str) -> Result<Self> {
         let filename = std::env::var(ENV_PROOF_STORE).unwrap_or(default.to_string());
@@ -156,7 +157,9 @@ impl KeyValueDB {
     pub fn new(filename: &Path) -> Result<Self> {
         let cfg = TestContextConfig::init_from_env().context("while parsing configuration")?;
 
-        let path = cfg.params_dir.expect("no params build defined");
+        let path = cfg
+            .params_dir
+            .unwrap_or(DEFAULT_PROOF_STORE_FOLDER.to_string());
         mkdir_all(&path)?;
         let mut path = PathBuf::from(path);
         path.push(filename);
