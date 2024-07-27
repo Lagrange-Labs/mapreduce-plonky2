@@ -155,10 +155,12 @@ impl<const MAX_NUM_RESULTS: usize> SubtreeProvenSinglePathNodeCircuit<MAX_NUM_RE
         // If the current nod is not a rows tree, we need to ensure that
         // the value of the indexed column for all the records stored in the records subtree
         // found in this node is within the range specified by the query
-        let is_greater_or_equal_than_min =
-            b.is_greater_or_equal_than_u256(&index_value, &min_query);
-        let is_less_or_equal_than_max = b.is_less_or_equal_than_u256(&index_value, &max_query);
-        let is_within_range = b.and(is_greater_or_equal_than_min, is_less_or_equal_than_max);
+        // min_query <= index_value <= max_query
+        // -> NOT((index_value < min_query) OR (index_value > max_query))
+        let is_less_than = b.is_less_than_u256(&index_value, &min_query);
+        let is_greater_than = b.is_greater_than_u256(&index_value, &max_query);
+        let is_out_of_range = b.or(is_less_than, is_greater_than);
+        let is_within_range = b.not(is_out_of_range);
 
         // If the current node is in a rows tree, we need to ensure that
         // the query bounds exposed as public inputs are the same as the one exposed
