@@ -136,7 +136,7 @@ impl Table {
                     for cell in cells.non_indexed_cells().unwrap_or_default() {
                         // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
                         // but we put + 1 because sbbst starts at +1
-                        let idx = self.columns.cells_tree_index_of(cell.id);
+                        let idx = self.columns.cells_tree_index_of(cell.id) + 1;
                         t.store(idx, cell.into())?;
                     }
                     Ok(())
@@ -180,7 +180,7 @@ impl Table {
                 for new_cell in update.updated_cells.iter() {
                     // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
                     // but we put + 1 because sbbst starts at +1
-                    let cell_key = self.columns.cells_tree_index_of(new_cell.id);
+                    let cell_key = self.columns.cells_tree_index_of(new_cell.id) + 1;
                     if update.init {
                         t.store(cell_key, new_cell.into())?;
                     } else {
