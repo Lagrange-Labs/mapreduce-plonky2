@@ -139,7 +139,8 @@ impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
             operation_hash: HashMap::new(),
         }
     }
-    /// Initialize a `ComputationalHashCache ` with a set of computational hash for column
+    /// Initialize a `ComputationalHashCache ` with a set of computational hash for the
+    /// columns of the table
     pub(crate) fn new_from_column_hash(column_hash: &[ComputationalHash]) -> Result<Self> {
         ensure!(
             column_hash.len() <= MAX_NUM_COLUMNS,
