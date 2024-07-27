@@ -532,3 +532,18 @@ fn rollback_psql() {
 
     test_rollback(&mut s);
 }
+
+#[test]
+fn context_at() {
+    type Tree = sbbst::Tree;
+    type V = MinMaxi64;
+    type Storage = InMemory<Tree, V>;
+    let mut s =
+        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ()).unwrap();
+
+    s.in_transaction(|s| s.store(1, 1i64.into())).unwrap();
+    s.in_transaction(|s| s.store(2, 2i64.into())).unwrap();
+
+    assert_eq!(s.fetch_with_context_at(&1, 1).0.parent, None);
+    assert_eq!(s.fetch_with_context_at(&1, 2).0.parent, Some(2));
+}
