@@ -6,7 +6,7 @@ use mp2_v1::{api, values_extraction::identifier_block_column};
 use plonky2::{
     field::types::Field,
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
-    plonk::config::Hasher,
+    plonk::config::{GenericHashOut, Hasher},
 };
 use ryhope::{
     storage::{
@@ -158,7 +158,7 @@ impl<P: ProofStorage> TestContext<P> {
                 }
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_leaf(
-                        F::from_canonical_u64(node.identifier),
+                        node.identifier,
                         extraction_proof,
                         row_tree_proof,
                     ),
@@ -196,13 +196,13 @@ impl<P: ProofStorage> TestContext<P> {
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_parent(
                         // TODO: change API to use u64 only
-                        F::from_canonical_u64(node.identifier),
+                        node.identifier,
                         previous_node.value,
                         previous_node.min,
                         previous_node.max,
-                        prev_left_hash,
-                        prev_right_hash,
-                        previous_node.row_tree_hash,
+                        &prev_left_hash.to_bytes().try_into().unwrap(),
+                        &prev_right_hash.to_bytes().try_into().unwrap(),
+                        &previous_node.row_tree_hash.to_bytes().try_into().unwrap(),
                         extraction_proof,
                         row_tree_proof,
                     ),
@@ -227,12 +227,12 @@ impl<P: ProofStorage> TestContext<P> {
                     .expect("previous index proof not found");
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_membership(
-                        F::from_canonical_u64(node.identifier),
+                        node.identifier,
                         node.value,
                         previous_node.min,
                         previous_node.max,
-                        left_node.node_hash,
-                        node.row_tree_hash,
+                        &left_node.node_hash.to_bytes().try_into().unwrap(),
+                        &node.row_tree_hash.to_bytes().try_into().unwrap(),
                         right_proof,
                     ),
                 );

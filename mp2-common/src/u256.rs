@@ -558,14 +558,14 @@ impl UInt256Target {
         // otherwise, prod = quotient*other, as we need to later check that quotient*other + remainder == self
         let mul_input = if let Some(val) = b.target_as_constant(is_div.target) {
             if val == F::ONE {
-                &quotient
+                quotient.clone()
             } else {
-                self
+                self.clone()
             }
         } else {
-            &b.select_u256(is_div, &quotient, self)
+            b.select_u256(is_div, &quotient, self)
         };
-        let (prod, mul_overflow) = b.mul_u256(mul_input, other);
+        let (prod, mul_overflow) = b.mul_u256(&mul_input, other);
         let (computed_dividend, carry) = b.add_u256(&prod, &remainder);
         b.enforce_equal_u256(self, &computed_dividend);
 

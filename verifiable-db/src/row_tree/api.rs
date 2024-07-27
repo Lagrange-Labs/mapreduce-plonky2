@@ -1,7 +1,7 @@
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
-use plonky2::hash::hash_types::HashOut;
+use plonky2::{field::types::Field, hash::hash_types::HashOut};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set as p, RecursiveCircuits},
@@ -181,21 +181,22 @@ pub enum CircuitInput {
 }
 
 impl CircuitInput {
-    pub fn leaf(identifier: F, value: U256, cells_proof: Vec<u8>) -> Result<Self> {
-        let circuit = LeafCircuit::new(IndexTuple::new(identifier, value));
+    pub fn leaf(identifier: u64, value: U256, cells_proof: Vec<u8>) -> Result<Self> {
+        let circuit = LeafCircuit::new(IndexTuple::new(F::from_canonical_u64(identifier), value));
         Ok(CircuitInput::Leaf {
             witness: circuit,
             cells_proof,
         })
     }
     pub fn full(
-        identifier: F,
+        identifier: u64,
         value: U256,
         left_proof: Vec<u8>,
         right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let circuit = FullNodeCircuit::from(IndexTuple::new(identifier, value));
+        let circuit =
+            FullNodeCircuit::from(IndexTuple::new(F::from_canonical_u64(identifier), value));
         Ok(CircuitInput::Full {
             witness: circuit,
             left_proof,
@@ -204,13 +205,13 @@ impl CircuitInput {
         })
     }
     pub fn partial(
-        identifier: F,
+        identifier: u64,
         value: U256,
         is_child_left: bool,
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let tuple = IndexTuple::new(identifier, value);
+        let tuple = IndexTuple::new(F::from_canonical_u64(identifier), value);
         let witness = PartialNodeCircuit::new(tuple, is_child_left);
         Ok(CircuitInput::Partial {
             witness,
@@ -239,7 +240,7 @@ mod test {
     use mp2_test::utils::weierstrass_to_point;
     use partial_node::test::partial_safety_check;
     use plonky2::{
-        field::types::Sample,
+        field::types::{PrimeField64, Sample},
         hash::hash_types::HashOut,
         plonk::{
             circuit_data::VerifierOnlyCircuitData, config::Hasher, proof::ProofWithPublicInputs,
@@ -342,7 +343,7 @@ mod test {
         partial_safety_check(child_min, child_max, tuple.index_value, is_left);
 
         let input = CircuitInput::partial(
-            tuple.index_identifier,
+            tuple.index_identifier.to_canonical_u64(),
             tuple.index_value,
             is_left,
             child_proof_buff.clone(),
@@ -392,7 +393,7 @@ mod test {
     fn generate_full_proof(p: &TestParams, child_proof: [Vec<u8>; 2]) -> Result<Vec<u8>> {
         let tuple = p.full.clone();
         let input = CircuitInput::full(
-            tuple.index_identifier,
+            tuple.index_identifier.to_canonical_u64(),
             tuple.index_value,
             child_proof[0].to_vec(),
             child_proof[1].to_vec(),
@@ -446,7 +447,7 @@ mod test {
         let cells_pi = p.cells_pi();
         //  generate row leaf proof
         let input = CircuitInput::leaf(
-            tuple.index_identifier,
+            tuple.index_identifier.to_canonical_u64(),
             tuple.index_value,
             p.cells_proof_vk().serialize()?,
         )?;
