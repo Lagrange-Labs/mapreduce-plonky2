@@ -13,7 +13,7 @@ pub struct ZkTable {
     pub columns: Vec<ZkColumn>,
 }
 
-/// A scalar value accessible from a contract storate and exposed as a virtual
+/// A scalar value accessible from a contract storage and exposed as a virtual
 /// table column.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZkColumn {
