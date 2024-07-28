@@ -205,7 +205,10 @@ impl Table {
     pub fn apply_row_update(&mut self, updates: RowUpdate) -> Result<RowUpdateResult> {
         let plan = self.row.in_transaction(move |t| {
             for deleted_key in updates.deleted_rows.into_iter() {
-                t.remove(deleted_key)?;
+                match t.try_fetch(&deleted_key) {
+                    Some(_) => t.remove(deleted_key)?,
+                    None => panic!("can't delete a row key that does not exist"),
+                }
             }
             for update in updates.modified_rows.into_iter() {
                 if updates.init {
