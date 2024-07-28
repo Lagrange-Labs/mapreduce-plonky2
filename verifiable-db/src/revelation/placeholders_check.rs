@@ -65,8 +65,8 @@ pub(crate) fn check_placeholders<const PH: usize>(
         // Accumulate the placeholder identifiers and values for computing the
         // placeholder hash.
         let (id, value) = &placeholder_pairs[i];
-        let mut payload = once(*id).chain(value.to_targets()).collect_vec();
-        placeholder_hash_payload.append(&mut payload);
+        let payload = once(*id).chain(value.to_targets());
+        placeholder_hash_payload.extend(payload);
 
         // Pad the placeholder_ids to the next power of two for random_access.
         let mut padded_placeholder_ids = placeholder_ids.to_vec();
@@ -83,7 +83,7 @@ pub(crate) fn check_placeholders<const PH: usize>(
         let expected_id = b.random_access(placeholder_pos[i], padded_placeholder_ids);
         let expected_value = b.random_access_u256(placeholder_pos[i], placeholder_values);
         b.connect(*id, expected_id);
-        b.enforce_equal_u256(&value, &expected_value);
+        b.enforce_equal_u256(value, &expected_value);
 
         // Accumulate the number of placeholders.
         num_placeholders = b.add(num_placeholders, is_placeholder_valid[i].target);
