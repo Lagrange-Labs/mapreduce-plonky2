@@ -157,12 +157,7 @@ where
 
         // Convert the entry count to an Uint256.
         let entry_count = query_proof.num_matching_rows_target();
-        // It must be within the range of Uint32.
-        b.range_check(entry_count, 32);
-        let mut arr = [zero; NUM_LIMBS];
-        // Set in big-endian order.
-        arr[NUM_LIMBS - 1] = entry_count;
-        let entry_count = UInt256Target::from_targets(&arr);
+        let entry_count = UInt256Target::new_from_target(b, entry_count);
 
         // Compute the output results array, and deal with AVG and COUNT operations if any.
         let ops = query_proof.operation_ids_target();
