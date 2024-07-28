@@ -166,19 +166,21 @@ impl TestCase {
             ctx.block_number().await
         );
 
-        let table_row_update = self.subsequent_contract_data(ctx, UpdateType::Rest).await;
-        log::info!(
-            "Applying follow up updates to contract done - now at block {}",
-            ctx.block_number().await
-        );
-        // we first run the initial preprocessing and db creation.
-        // NOTE: we don't show copy on write here - the fact of only reproving what has been
-        // updated, as this is not new from v0.
-        // TODO: implement copy on write mechanism for MPT
-        self.run_mpt_preprocessing(ctx).await?;
-        self.run_lagrange_preprocessing(ctx, vec![table_row_update])
-            .await?;
-
+        let updates = vec![UpdateType::Rest, UpdateType::SecondaryIndex];
+        for ut in updates {
+            let table_row_update = self.subsequent_contract_data(ctx, ut).await;
+            log::info!(
+                "Applying follow up updates to contract done - now at block {}",
+                ctx.block_number().await
+            );
+            // we first run the initial preprocessing and db creation.
+            // NOTE: we don't show copy on write here - the fact of only reproving what has been
+            // updated, as this is not new from v0.
+            // TODO: implement copy on write mechanism for MPT
+            self.run_mpt_preprocessing(ctx).await?;
+            self.run_lagrange_preprocessing(ctx, vec![table_row_update])
+                .await?;
+        }
         Ok(())
     }
 
@@ -197,12 +199,15 @@ impl TestCase {
         // NOTE ONLY the rest of the cells, not including the secondary one !
         let update_cell_tree = self
             .table
-            .apply_cells_update(single_row_update.updated_cells.clone())
+            .apply_cells_update(
+                single_row_update.updated_cells.clone(),
+                single_row_update.init,
+            )
             .expect("can not update cells tree");
         log::info!("Applied updates to cells tree");
         // find the all the cells, updated or not, including the secondary index because this is to
         // store in the row JSON description
-        let row_cells = match single_row_update.is_init() {
+        let cells_collection = match single_row_update.is_init() {
             // initialization time = everything is "updated"
             true => single_row_update.full_collection(),
             false => {
@@ -216,10 +221,11 @@ impl TestCase {
         };
         // prove the new cell tree and get the node row
         let row_payload = ctx
-            .prove_cells_tree(&self.table, row_cells, update_cell_tree)
+            .prove_cells_tree(&self.table, cells_collection, update_cell_tree)
             .await;
         info!("Generated final CELLs tree proofs for single variables");
-        // In the case of the scalars slots, there is a single node in the row tree.
+        // TODO: In the case of the scalars slots, there is a single node in the row tree.
+        // for mappings, this will contains vectors of update
         let rows = RowUpdate {
             init: single_row_update.is_init(),
             modified_rows: vec![Row {
@@ -228,6 +234,11 @@ impl TestCase {
                 k: single_row_update.updated_cells.row_key.clone(),
                 payload: row_payload,
             }],
+            deleted_rows: match single_row_update.updated_secondary {
+                // we give the old row to delete
+                Some((ref old, _)) => vec![old.into()],
+                None => vec![],
+            },
         };
         let updates = self.table.apply_row_update(rows)?;
         info!("Applied updates to row tree");
@@ -420,9 +431,7 @@ impl TestCase {
                         current_values.s4 = Address::from_slice(&thread_rng().gen::<[u8; 20]>());
                     }
                     UpdateType::SecondaryIndex => {
-                        // TODO: not yet fully implemented this part
                         current_values.s2 = U256::from_be_bytes(thread_rng().gen::<[u8; 32]>());
-                        unimplemented!("not yet");
                     }
                 };
 
@@ -594,11 +603,16 @@ impl TableRowValues {
             let cells_update = CellsUpdate {
                 row_key: (&new.current_secondary).into(),
                 updated_cells: new.current_cells.clone(),
-                init: true,
             };
             return TableRowUpdate {
                 updated_cells: cells_update,
-                updated_secondary: Some(new.current_secondary.clone()),
+                updated_secondary: Some((
+                    // NOTE: the "current_secondary" index does not matter in case of init, since
+                    // we only look at the new one.
+                    self.current_secondary.clone(),
+                    new.current_secondary.clone(),
+                )),
+                init: false,
             };
         }
 
@@ -621,6 +635,16 @@ impl TableRowValues {
                 }
             })
             .collect::<Vec<_>>();
+        let cells_update = CellsUpdate {
+            // NOTE: here we MUST give the new row tree key because
+            // (a) in case it didn't change, well, no problem, key is same
+            // (b) in case it changed, the previous key must be deleted from row tree
+            // first, then "insert" the new row, with these cells, this is handled in the
+            // `updated_secondary` field.
+            row_key: (&new.current_secondary).into(),
+            updated_cells,
+        };
+
         assert!(
             self.current_secondary.cell().id == new.current_secondary.cell().id,
             "ids are different between updates?"
@@ -631,23 +655,18 @@ impl TableRowValues {
         );
         let updated_secondary = match self.current_secondary.cell() != new.current_secondary.cell()
         {
-            true => Some(new.current_secondary.clone()),
+            true => Some((
+                // give old value to delete it in the row tree
+                self.current_secondary.clone(),
+                new.current_secondary.clone(),
+            )),
             // no update on the secondary index value
             false => None,
         };
         TableRowUpdate {
-            updated_cells: CellsUpdate {
-                // NOTE: here we MUST give the new row tree key because
-                // (a) in case it didn't change, well, no problem
-                // (b) in case it changed, we will actually have to "delete" the previous key
-                // first, then "insert" the new row
-                // TODO: add the previous one
-                row_key: (&new.current_secondary).into(),
-                updated_cells,
-                init: false,
-            },
-            // TODO: not yet done the "delete then insert" mode
+            updated_cells: cells_update,
             updated_secondary,
+            init: false,
         }
     }
 }
@@ -656,8 +675,14 @@ impl TableRowValues {
 struct TableRowUpdate {
     // WITHOUT the secondary index value
     updated_cells: CellsUpdate,
-    // TODO: in case of updated secondary, we must know the previous secondary value to "delete it"
-    updated_secondary: Option<SecondaryIndexCell>,
+    /// The (old, new) secondary index value. The old is necessary because one must
+    /// first delete the node in the row before inserting the new secondary index value.
+    updated_secondary: Option<(SecondaryIndexCell, SecondaryIndexCell)>,
+    // set this to true to notify to consumers this is the first insert of the row
+    // Useful to know whether this update contains all the cells or the rest of the cells
+    // must be fetching somewhere else.
+    // NOTE: invariant is if init == true => updated_secondary.is_some()
+    pub init: bool,
     // NOTE: in ideal generic world, i.e. CSV, we would need to add primary here
 }
 
@@ -669,12 +694,13 @@ impl TableRowUpdate {
     }
     fn full_collection(&self) -> CellCollection {
         let rest = self.updated_cells.updated_cells.clone();
-        let secondary = self.updated_secondary.clone().unwrap_or_default();
+        // we want the new secondary index value to put inside the CellCollection of the JSON
+        let secondary = self.updated_secondary.clone().unwrap_or_default().1;
         let mut full = vec![secondary.cell()];
         full.extend(rest);
         CellCollection(full)
     }
     fn is_init(&self) -> bool {
-        self.updated_cells.init
+        self.init
     }
 }

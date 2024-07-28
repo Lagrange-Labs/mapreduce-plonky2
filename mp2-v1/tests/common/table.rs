@@ -151,14 +151,18 @@ impl Table {
     // and then once done you can call `apply_index_update`
     // TODO: handle the case where the row secondary index changes, as this requires a deletion
     // then fresh insertion
-    pub fn apply_cells_update(&mut self, update: CellsUpdate) -> Result<CellsUpdateResult> {
+    pub fn apply_cells_update(
+        &mut self,
+        update: CellsUpdate,
+        init: bool,
+    ) -> Result<CellsUpdateResult> {
         // fetch previous row or return 0 cells in case of init
         let previous_cells = self
             .row
             .try_fetch(&update.row_key)
             .map(|row_node| row_node.cells)
             .or_else(|| {
-                if update.init {
+                if init {
                     Some(CellCollection::default())
                 } else {
                     log::error!(
@@ -181,7 +185,7 @@ impl Table {
                     // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
                     // but we put + 1 because sbbst starts at +1
                     let cell_key = self.columns.cells_tree_index_of(new_cell.id) + 1;
-                    if update.init {
+                    if init {
                         t.store(cell_key, new_cell.into())?;
                     } else {
                         t.update(cell_key, new_cell.into())?;
@@ -200,6 +204,9 @@ impl Table {
     // apply the transformation directly to the row tree to get the update plan and the new
     pub fn apply_row_update(&mut self, updates: RowUpdate) -> Result<RowUpdateResult> {
         let plan = self.row.in_transaction(move |t| {
+            for deleted_key in updates.deleted_rows.into_iter() {
+                t.remove(deleted_key)?;
+            }
             for update in updates.modified_rows.into_iter() {
                 if updates.init {
                     t.store(update.k.clone(), update.payload)?;
@@ -241,6 +248,7 @@ pub struct RowUpdate {
     // * added rows
     // * deleted rows
     pub modified_rows: Vec<Row>,
+    pub deleted_rows: Vec<RowTreeKey>,
     pub init: bool,
 }
 
@@ -255,10 +263,6 @@ pub struct CellsUpdate {
     // this must NOT contain the secondary index cell. Otherwise, in case the secondary index cell values
     // did not change, we would not be able to separate the rest from the secondary index cell.
     pub updated_cells: Vec<Cell>,
-    // set this to true to notify to consumers this is the first insert in the cell tree
-    // Useful to know whether this update contains all the cells or the rest of the cells
-    // must be fetching somewhere else.
-    pub init: bool,
     // TODO:
     // * add modified secondary index
     // * add deleted cells
