@@ -673,6 +673,9 @@ pub enum TableRowUpdate {
     Deletion(RowTreeKey),
     /// NOTE : this only includes changes on the regular non indexed cells.
     /// This must NOT include an update on the secondary index value
+    /// A new secondary index value is translated to a deletion and then a new insert
+    /// since that is what must happen at the tree level where we delete the node corresponding to
+    /// the previous secondary index value.
     Update(CellsUpdate),
     /// Used to insert a new row from scratch
     Insertion(CellsUpdate, SecondaryIndexCell),
