@@ -47,7 +47,7 @@ where
     pub(crate) tree_key: RowTreeKey,
 }
 
-#[derive(Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub(crate) struct IndexProofIdentifier<PrimaryIndex> {
     pub(crate) table: TableID,
     pub(crate) tree_key: PrimaryIndex,
@@ -60,7 +60,7 @@ pub(crate) struct IndexProofIdentifier<PrimaryIndex> {
 pub(crate) type BlockPrimaryIndex = <sbbst::Tree as TreeTopology>::Key;
 
 /// Uniquely identifies a proof in the proof storage backend.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProofKey {
     Cell(CellProofIdentifier),
     Row(RowProofIdentifier<BlockPrimaryIndex>),
@@ -69,6 +69,7 @@ pub enum ProofKey {
     ContractExtraction(ContractKey),
     BlockExtraction(BlockPrimaryIndex),
     ValueExtraction((TableID, BlockPrimaryIndex)),
+    #[allow(clippy::upper_case_acronyms)]
     IVC(BlockPrimaryIndex),
 }
 
@@ -125,6 +126,20 @@ impl Hash for ProofKey {
 pub trait ProofStorage {
     fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()>;
     fn get_proof(&self, key: &ProofKey) -> Result<Vec<u8>>;
+    /// Move the proof form the old key to the new key. This is **required** for cells proofs
+    /// when the secondary index value changes.
+    /// If there is no proof at the old key, it simply does nothing.
+    /// Take for example the row [A,b,c,d] where A is
+    /// the secondary index value. Proofs for b c d are stored under a key related to A.
+    /// Imagine now A changes, to F, the row is now [F,b,c,d]. But the proofs of b,c,d are still
+    /// stored under the key related to A. This function must be called to move them from A -> F.
+    /// By safety, the storage should not keep the previous version of the cells proofs (the ones under A)
+    /// otherwse it may cause conflict down the line.
+    /// If there is a new row after being inserted like [A,b,s,t] after, normally this code should
+    /// generate a new proof for b and store it under the old key A, overwriting any previous proof
+    /// if present, but best to be cautious and erase everything, since once a row is deleted, we
+    /// should not need its proofs anymore.
+    fn move_proof(&mut self, old_key: &ProofKey, new_key: &ProofKey) -> Result<()>;
 }
 
 /// This is simply a suggestion but this should be stored on a proper backend of course.
@@ -139,6 +154,14 @@ impl ProofStorage for MemoryProofStorage {
 
     fn get_proof(&self, key: &ProofKey) -> Result<Vec<u8>> {
         self.0.get(key).context("unable to get proof").cloned()
+    }
+
+    fn move_proof(&mut self, old_key: &ProofKey, new_key: &ProofKey) -> Result<()> {
+        match self.0.remove(old_key) {
+            Some(data) => self.store_proof(new_key.clone(), data),
+            // silent update
+            None => Ok(()),
+        }
     }
 }
 use jammdb::{Data, Error, DB};
@@ -191,13 +214,39 @@ impl ProofStorage for KeyValueDB {
         Ok(())
     }
 
+    fn move_proof(&mut self, old_key: &ProofKey, new_key: &ProofKey) -> Result<()> {
+        let store_key = old_key.compute_hash();
+        let data = {
+            // have to it inside a {} since mutable borrow happens at self.db.tx
+            let tx = self.db.tx(true)?;
+            let bucket = tx.get_bucket(BUCKET_NAME)?;
+            match bucket.get(store_key.to_be_bytes()) {
+                Some(d) => match d {
+                    Data::Bucket(_) => bail!("bucket found while required proofs"),
+                    Data::KeyValue(kv) => {
+                        bucket
+                            .delete(store_key.to_be_bytes())
+                            .expect("Can't delete proof from kv storage");
+                        Some(kv.value().to_vec())
+                    }
+                },
+                // silent move
+                None => None,
+            }
+        };
+        match data {
+            Some(d) => self.store_proof(new_key.clone(), d),
+            None => Ok(()),
+        }
+    }
+
     fn get_proof(&self, key: &ProofKey) -> Result<Vec<u8>> {
         let store_key = key.compute_hash();
         let tx = self.db.tx(true)?;
         let bucket = tx.get_bucket(BUCKET_NAME)?;
         let d = bucket
             .get(store_key.to_be_bytes())
-            .context("proof with key {key:?} not found")?;
+            .context(format!("proof with key {:?} not found", key))?;
         match d {
             Data::Bucket(_) => bail!("bucket found while required proofs"),
             Data::KeyValue(kv) => Ok(kv.value().to_vec()),

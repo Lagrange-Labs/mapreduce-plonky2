@@ -187,6 +187,7 @@ impl Table {
             })
             .expect("can't apply cells update");
         Ok(CellsUpdateResult {
+            previous_row_key: update.previous_row_key,
             new_row_key: update.new_row_key,
             to_update: cell_update,
             latest: cell_tree,
@@ -276,6 +277,7 @@ pub struct CellsUpdate {
 // For example one needs to setup the location of the proof, the root hash of the new cells tree.
 // Once that is done, one can call `apply_row_update`
 pub struct CellsUpdateResult {
+    pub previous_row_key: RowTreeKey,
     pub new_row_key: RowTreeKey,
     // give the tree here since we don't really store it so it's easier down the line to pass it
     // around
