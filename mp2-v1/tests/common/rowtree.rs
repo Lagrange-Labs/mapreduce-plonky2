@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::*;
 use mp2_common::{
@@ -105,13 +107,26 @@ impl CellCollection {
         );
         Ok(&self.0[1..])
     }
-    // take all the cells in &self, and replace the ones with same identifier from the updated
-    // cells
-    pub fn update_by(&self, updated_cells: &[Cell]) -> Self {
-        Self(
+    // take all the cells ids on both collections, take the value present in the updated one
+    // if it exists, otherwise take from self.
+    pub fn merge_with_update(&self, updated_cells: &[Cell]) -> Self {
+        let ids =
             self.0
                 .iter()
-                .map(|c| updated_cells.iter().find(|c2| c.id == c2.id).unwrap_or(c))
+                .chain(updated_cells.iter())
+                .fold(HashSet::new(), |mut acc, cell| {
+                    acc.insert(cell.id);
+                    acc
+                });
+        Self(
+            ids.into_iter()
+                .map(|id| {
+                    updated_cells
+                        .iter()
+                        .find(|c| c.id == id)
+                        .or(self.0.iter().find(|c| id == c.id))
+                        .expect("no id found in original or updated cell collection")
+                })
                 .cloned()
                 .collect(),
         )

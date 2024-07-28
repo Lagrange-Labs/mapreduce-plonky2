@@ -664,6 +664,9 @@ impl TableRowValues {
     }
 }
 
+/// The structure representing the updates that have happened on a table
+/// This is computed from the update of a contract in the case of the current test, but
+/// should be given directly in case of CSV file.
 #[derive(Clone, Debug)]
 pub enum TableRowUpdate {
     /// A row to be deleted
@@ -690,6 +693,6 @@ impl TableRowUpdate {
             }
             TableRowUpdate::Update(cells) => cells.updated_cells.clone(),
         };
-        previous.update_by(&new_cells)
+        previous.merge_with_update(&new_cells)
     }
 }
