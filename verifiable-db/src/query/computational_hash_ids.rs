@@ -61,7 +61,7 @@ impl Identifiers {
                 Identifiers::Operations(o) => *o as usize,
                 Identifiers::Output(o) => *o as usize,
                 Identifiers::AggregationOperations(ao) => *ao as usize,
-                Identifiers::PlaceholderIdentifiers(id) => *id as usize,
+                Identifiers::PlaceholderIdentifiers(id) => id.position(),
             }
     }
     pub(crate) fn prefix_id_hash(&self, elements: Vec<F>) -> HashOut<F> {
@@ -331,15 +331,35 @@ impl<F: RichField> ToField<F> for AggregationOperation {
 /// Placeholder identifiers
 #[derive(Clone, Debug, Copy, Default)]
 pub enum PlaceholderIdentifier {
+    // MIN_I1
     #[default]
-    MinQueryOnIdx1, // MIN_I1
-    MaxQueryOnIdx1, // MAX_I1
-    MinQueryOnIdx2, // MIN_I2
-    MaxQueryOnIdx2, // MAX_I2
+    MinQueryOnIdx1,
+    // MAX_I1
+    MaxQueryOnIdx1,
+    // MIN_I2
+    MinQueryOnIdx2,
+    // MAX_I2
+    MaxQueryOnIdx2,
+    // $1, $2 ...
+    GenericPlaceholder(usize),
 }
 
 impl<F: RichField> ToField<F> for PlaceholderIdentifier {
     fn to_field(&self) -> F {
         Identifiers::PlaceholderIdentifiers(*self).to_field()
+    }
+}
+
+impl PlaceholderIdentifier {
+    // <https://doc.rust-lang.org/reference/items/enumerations.html#pointer-casting>
+    pub(crate) fn discriminant(&self) -> usize {
+        unsafe { *(self as *const Self as *const usize) }
+    }
+
+    pub(crate) fn position(&self) -> usize {
+        match self {
+            Self::GenericPlaceholder(i) => self.discriminant() + i,
+            _ => self.discriminant(),
+        }
     }
 }

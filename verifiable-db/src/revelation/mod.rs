@@ -54,8 +54,10 @@ pub(crate) mod tests {
             let rng = &mut thread_rng();
 
             let placeholder_pos = array::from_fn(|_| rng.gen_range(0..PH));
+            // Create an array of sample placeholder identifiers,
+            // will set the first 4 to the query bounds as below.
             let mut placeholder_ids: [F; PH] =
-                random_vector::<u32>(PH).to_fields().try_into().unwrap();
+                array::from_fn(|_| PlaceholderIdentifier::GenericPlaceholder(rng.gen()).to_field());
             let mut placeholder_values = array::from_fn(|_| U256::from_limbs(rng.gen()));
             let mut placeholder_pairs: [_; PH] =
                 array::from_fn(|_| (rng.gen::<u32>().to_field(), U256::from_limbs(rng.gen())));
