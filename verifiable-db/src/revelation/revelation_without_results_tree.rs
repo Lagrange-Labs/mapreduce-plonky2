@@ -166,9 +166,9 @@ where
 
         // Compute the output results array, and deal with AVG and COUNT operations if any.
         let ops = query_proof.operation_ids_target();
+        assert_eq!(ops.len(), S);
         let mut results = Vec::with_capacity(L * S);
-        for i in 0..S {
-            let op = ops[i];
+        ops.into_iter().enumerate().for_each(|(i, op)| {
             let is_op_avg = b.is_equal(op, op_avg);
             let is_op_count = b.is_equal(op, op_count);
             let result = query_proof.value_target_at_index(i);
@@ -180,7 +180,7 @@ where
             let result = b.select_u256(is_op_count, &entry_count, &result);
 
             results.push(result);
-        }
+        });
         results.resize(L * S, u256_zero);
 
         // Pre-compute the final placeholder hash then check it in the
