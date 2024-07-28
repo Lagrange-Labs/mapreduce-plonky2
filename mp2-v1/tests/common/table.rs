@@ -203,6 +203,10 @@ impl Table {
 
     // apply the transformation directly to the row tree to get the update plan and the new
     pub fn apply_row_update(&mut self, updates: RowUpdate) -> Result<RowUpdateResult> {
+        // sanity check on the deletion, can't delete if it's init!
+        if !updates.deleted_rows.is_empty() {
+            assert!(updates.init);
+        }
         let plan = self.row.in_transaction(move |t| {
             for deleted_key in updates.deleted_rows.into_iter() {
                 match t.try_fetch(&deleted_key) {

@@ -229,15 +229,13 @@ impl TestCase {
         let rows = RowUpdate {
             init: single_row_update.is_init(),
             modified_rows: vec![Row {
-                // TODO: this only considers the case where we handle a cells update but not a
-                // secondary index value update
                 k: single_row_update.updated_cells.row_key.clone(),
                 payload: row_payload,
             }],
             deleted_rows: match single_row_update.updated_secondary {
-                // we give the old row to delete
-                Some((ref old, _)) => vec![old.into()],
-                None => vec![],
+                // we give the old row to delete, only in case we're not at init time
+                Some((ref old, _)) if !single_row_update.is_init() => vec![old.into()],
+                _ => vec![],
             },
         };
         let updates = self.table.apply_row_update(rows)?;
