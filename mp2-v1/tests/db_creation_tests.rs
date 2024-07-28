@@ -1,6 +1,7 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
+#![feature(assert_matches)]
 use anyhow::Result;
 
 use common::{

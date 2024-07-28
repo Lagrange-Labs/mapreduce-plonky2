@@ -105,12 +105,13 @@ impl CellCollection {
         );
         Ok(&self.0[1..])
     }
-    // take all the cells in &self, and replace the ones with same identifier from other
-    pub fn replace_by(&self, other: &Self) -> Self {
+    // take all the cells in &self, and replace the ones with same identifier from the updated
+    // cells
+    pub fn update_by(&self, updated_cells: &[Cell]) -> Self {
         Self(
             self.0
                 .iter()
-                .map(|c| other.0.iter().find(|c2| c.id == c2.id).unwrap_or(c))
+                .map(|c| updated_cells.iter().find(|c2| c.id == c2.id).unwrap_or(c))
                 .cloned()
                 .collect(),
         )

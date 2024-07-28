@@ -207,16 +207,18 @@ impl<P: ProofStorage> TestContext<P> {
     /// Generate and prove a [`MerkleCellTree`] encoding the content of the
     /// given slots for the contract located at `contract_address`.
     // NOTE: the 0th column is assumed to be the secondary index.
-    pub async fn prove_cells_tree(
+    pub fn prove_cells_tree(
         &mut self,
         table: &Table,
         // All the new cells expected in the row, INCLUDING the secondary index
+        // Note this is just needed to put inside the returned JSON Row payload, it's not
+        // processed
         all_cells: CellCollection,
         cells_update: CellsUpdateResult,
     ) -> RowPayload {
         let tree_hash = cells_update.latest.root_data().unwrap().hash;
         let root_key = self.prove_cell_tree(
-            cells_update.row_key,
+            cells_update.new_row_key,
             &table.id,
             cells_update.latest,
             cells_update.to_update,
