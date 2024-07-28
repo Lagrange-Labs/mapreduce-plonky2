@@ -440,7 +440,12 @@ impl TestCase {
                     .await
                     .unwrap();
                 let new_table_values = self.current_table_row_values(ctx).await;
-                old_table_values.compute_update(&new_table_values)
+                let update = old_table_values.compute_update(&new_table_values);
+                assert!(
+                    !update.is_init(),
+                    "updating the contract's table should NOT be init"
+                );
+                update
             }
         }
     }
@@ -612,7 +617,7 @@ impl TableRowValues {
                     self.current_secondary.clone(),
                     new.current_secondary.clone(),
                 )),
-                init: false,
+                init: true,
             };
         }
 
