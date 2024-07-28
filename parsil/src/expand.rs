@@ -8,6 +8,8 @@ use sqlparser::ast::{
 
 fn expand_expr(e: &mut Expr) {
     #[allow(non_snake_case)]
+    let TRUE = Expr::Value(Value::Number("1".to_string(), false));
+    #[allow(non_snake_case)]
     let FALSE = Expr::Value(Value::Number("0".to_string(), false));
 
     match e {
@@ -27,60 +29,75 @@ fn expand_expr(e: &mut Expr) {
                 right: Box::new(FALSE.clone()),
             }))
         }
-        // Expand INLIST(expr, list) into (old = list[0] OR old = list[1] OR ...)
         Expr::InList {
             expr,
             list,
             negated,
         } => {
-            let body = Expr::Nested(Box::new(list.into_iter().fold(FALSE.clone(), |ax, l| {
-                Expr::BinaryOp {
-                    left: Box::new(Expr::BinaryOp {
-                        left: Box::new(l.clone()),
-                        op: BinaryOperator::Eq,
-                        right: expr.clone(),
-                    }),
-                    op: BinaryOperator::Or,
-                    right: Box::new(ax),
-                }
-            })));
-
-            if *negated {
-                *e = Expr::UnaryOp {
-                    op: UnaryOperator::Not,
-                    expr: Box::new(body),
-                };
+            *e = if *negated {
+                // NOT INLIST -> old != list[0] AND old != list[1] ... AND TRUE
+                Expr::Nested(Box::new(list.into_iter().fold(TRUE.clone(), |ax, l| {
+                    Expr::BinaryOp {
+                        left: Box::new(Expr::BinaryOp {
+                            left: Box::new(l.clone()),
+                            op: BinaryOperator::NotEq,
+                            right: expr.clone(),
+                        }),
+                        op: BinaryOperator::And,
+                        right: Box::new(ax),
+                    }
+                })))
             } else {
-                *e = body;
+                // INLIST -> old == list[0] OR old == list[1] ... OR FALSE
+                Expr::Nested(Box::new(list.into_iter().fold(FALSE.clone(), |ax, l| {
+                    Expr::BinaryOp {
+                        left: Box::new(Expr::BinaryOp {
+                            left: Box::new(l.clone()),
+                            op: BinaryOperator::Eq,
+                            right: expr.clone(),
+                        }),
+                        op: BinaryOperator::Or,
+                        right: Box::new(ax),
+                    }
+                })))
             }
         }
-        // Expand x BETWEEN a AND b into (x >= a AND x <= b)
         Expr::Between {
             expr,
             negated,
             low,
             high,
         } => {
-            let body = Expr::Nested(Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::BinaryOp {
-                    left: Box::new(*expr.clone()),
-                    op: BinaryOperator::GtEq,
-                    right: Box::new(*low.clone()),
-                }),
-                op: BinaryOperator::And,
-                right: Box::new(Expr::BinaryOp {
-                    left: Box::new(*expr.clone()),
-                    op: BinaryOperator::LtEq,
-                    right: Box::new(*high.clone()),
-                }),
-            }));
-            if *negated {
-                *e = Expr::UnaryOp {
-                    op: UnaryOperator::Not,
-                    expr: Box::new(body),
-                };
+            *e = if *negated {
+                // NOT x BETWEEN a AND b -> x < a OR x > b
+                Expr::Nested(Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::BinaryOp {
+                        left: Box::new(*expr.clone()),
+                        op: BinaryOperator::Lt,
+                        right: Box::new(*low.clone()),
+                    }),
+                    op: BinaryOperator::Or,
+                    right: Box::new(Expr::BinaryOp {
+                        left: Box::new(*expr.clone()),
+                        op: BinaryOperator::Gt,
+                        right: Box::new(*high.clone()),
+                    }),
+                }))
             } else {
-                *e = body;
+                // x BETWEEN a AND b -> x >= a AND x <= b
+                Expr::Nested(Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::BinaryOp {
+                        left: Box::new(*expr.clone()),
+                        op: BinaryOperator::GtEq,
+                        right: Box::new(*low.clone()),
+                    }),
+                    op: BinaryOperator::And,
+                    right: Box::new(Expr::BinaryOp {
+                        left: Box::new(*expr.clone()),
+                        op: BinaryOperator::LtEq,
+                        right: Box::new(*high.clone()),
+                    }),
+                }))
             }
         }
         Expr::BinaryOp { left, right, .. } => {
