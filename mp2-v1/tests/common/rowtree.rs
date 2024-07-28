@@ -88,13 +88,13 @@ impl From<&SecondaryIndexCell> for RowTreeKey {
 // A collection of cells inserted in the JSON.
 // IMPORTANT: This collection MUST CONTAIN the secondary index value, as first element, to easily search
 // in JSONB from the SQL.
-#[derive(From, Into, Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, From, Into, Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CellCollection(pub Vec<Cell>);
 impl CellCollection {
     /// Return the [`Cell`] containing the sec. index of this row.
     pub fn secondary_index(&self) -> Result<&Cell> {
         ensure!(
-            self.0.len() > 0,
+            !self.0.is_empty(),
             "secondary_index() called on empty CellCollection"
         );
         Ok(&self.0[0])
@@ -102,7 +102,7 @@ impl CellCollection {
 
     pub fn non_indexed_cells(&self) -> Result<&[Cell]> {
         ensure!(
-            self.0.len() > 0,
+            !self.0.is_empty(),
             "non_indexed_cells called on empty  CellCollection"
         );
         Ok(&self.0[1..])
@@ -110,22 +110,17 @@ impl CellCollection {
     // take all the cells ids on both collections, take the value present in the updated one
     // if it exists, otherwise take from self.
     pub fn merge_with_update(&self, updated_cells: &[Cell]) -> Self {
-        let ids =
+        if self == &Self::default() {
+            return Self(updated_cells.to_vec());
+        }
+        Self(
             self.0
                 .iter()
-                .chain(updated_cells.iter())
-                .fold(HashSet::new(), |mut acc, cell| {
-                    acc.insert(cell.id);
-                    acc
-                });
-        Self(
-            ids.into_iter()
-                .map(|id| {
+                .map(|previous_cell| {
                     updated_cells
                         .iter()
-                        .find(|c| c.id == id)
-                        .or(self.0.iter().find(|c| id == c.id))
-                        .expect("no id found in original or updated cell collection")
+                        .find(|new_cell| previous_cell.id == new_cell.id)
+                        .unwrap_or(previous_cell)
                 })
                 .cloned()
                 .collect(),
