@@ -139,7 +139,7 @@ impl<const MAX_NUM_RESULTS: usize> FullNodeWithOneChildCircuit<MAX_NUM_RESULTS> 
         // Register the public inputs.
         PublicInputs::<_, MAX_NUM_RESULTS>::new(
             &node_hash.to_targets(),
-            &aggregated_values.as_slice(),
+            aggregated_values.as_slice(),
             &[count],
             subtree_proof.to_ops_raw(),
             subtree_proof.to_index_value_raw(),
@@ -216,7 +216,6 @@ mod tests {
             },
             utils::tests::{unify_child_proof, unify_subtree_proof},
         },
-        public_inputs::QueryPublicInputs,
         PI_LEN,
     };
     use mp2_common::{poseidon::H, utils::ToFields, C};

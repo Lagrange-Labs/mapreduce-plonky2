@@ -1,4 +1,6 @@
-use super::{cells::build_cells_tree, COLUMN_INDEX_NUM};
+use super::{
+    cells::build_cells_tree, ComputationalHashTarget, MembershipHashTarget, COLUMN_INDEX_NUM,
+};
 use crate::query::computational_hash_ids::{Extraction, Identifiers};
 use alloy::primitives::U256;
 use mp2_common::{
@@ -11,12 +13,9 @@ use mp2_common::{
     utils::SelectHashBuilder,
     F,
 };
-use plonky2::{
-    hash::hash_types::HashOutTarget,
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+use plonky2::iop::{
+    target::{BoolTarget, Target},
+    witness::{PartialWitness, WitnessWrite},
 };
 use serde::{Deserialize, Serialize};
 use std::array;
@@ -49,31 +48,31 @@ pub struct ColumnExtractionInputWires<const MAX_NUM_COLUMNS: usize> {
 pub(crate) struct ColumnExtractionWires<const MAX_NUM_COLUMNS: usize> {
     pub(crate) input_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
     /// Hash of the cells tree
-    pub(crate) tree_hash: HashOutTarget,
+    pub(crate) tree_hash: MembershipHashTarget,
     /// Computational hash associated to the extraction of each of the `MAX_NUM_COLUMNS` columns
-    pub(crate) column_hash: [HashOutTarget; MAX_NUM_COLUMNS],
+    pub(crate) column_hash: [ComputationalHashTarget; MAX_NUM_COLUMNS],
 }
 /// Witness input values for column extraction component
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ColumnExtractionInputs<const MAX_NUM_COLUMNS: usize> {
-    real_num_columns: usize,
+    pub(crate) real_num_columns: usize,
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    column_values: [U256; MAX_NUM_COLUMNS],
+    pub(crate) column_values: [U256; MAX_NUM_COLUMNS],
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    column_ids: [F; MAX_NUM_COLUMNS],
+    pub(crate) column_ids: [F; MAX_NUM_COLUMNS],
 }
 
 impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
     pub(crate) fn build(b: &mut CBuilder) -> ColumnExtractionWires<MAX_NUM_COLUMNS> {
         // Initialize the input wires.
         let input_wires = ColumnExtractionInputWires {
-            column_values: b.add_virtual_u256_arr(),
+            column_values: [0; MAX_NUM_COLUMNS].map(|_| b.add_virtual_u256_unsafe()), // should be ok to use unsafe since these values are directly hashed to compute tree hash
             column_ids: b.add_virtual_target_arr(),
             is_real_column: [0; MAX_NUM_COLUMNS].map(|_| b.add_virtual_bool_target_safe()),
         };
@@ -116,7 +115,7 @@ impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
 fn build_column_hash<const MAX_NUM_COLUMNS: usize>(
     b: &mut CBuilder,
     input: &ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
-) -> [HashOutTarget; MAX_NUM_COLUMNS] {
+) -> [ComputationalHashTarget; MAX_NUM_COLUMNS] {
     let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
     array::from_fn(|i| {
@@ -134,19 +133,21 @@ fn build_column_hash<const MAX_NUM_COLUMNS: usize>(
 
 #[cfg(test)]
 mod tests {
+    use crate::query::universal_circuit::{ComputationalHash, MembershipHash};
+
     use super::*;
     use mp2_common::{C, D};
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},
         circuit::{run_circuit, UserCircuit},
     };
-    use plonky2::{field::types::Field, hash::hash_types::HashOut};
+    use plonky2::field::types::Field;
 
     #[derive(Clone, Debug)]
     struct TestColumnExtractionCircuit<const MAX_NUM_COLUMNS: usize> {
         inputs: ColumnExtractionInputs<MAX_NUM_COLUMNS>,
-        column_hash: [HashOut<F>; MAX_NUM_COLUMNS],
-        tree_hash: HashOut<F>,
+        column_hash: [ComputationalHash; MAX_NUM_COLUMNS],
+        tree_hash: MembershipHash,
     }
 
     impl<const MAX_NUM_COLUMNS: usize> UserCircuit<F, D>
@@ -157,8 +158,8 @@ mod tests {
         // + expected output tree hash
         type Wires = (
             ColumnExtractionWires<MAX_NUM_COLUMNS>,
-            [HashOutTarget; MAX_NUM_COLUMNS],
-            HashOutTarget,
+            [ComputationalHashTarget; MAX_NUM_COLUMNS],
+            MembershipHashTarget,
         );
 
         fn build(b: &mut CBuilder) -> Self::Wires {
@@ -223,7 +224,7 @@ mod tests {
     /// Compute the column hashes.
     fn compute_column_hash<const MAX_NUM_COLUMNS: usize>(
         columns: &[TestCell],
-    ) -> [HashOut<F>; MAX_NUM_COLUMNS] {
+    ) -> [ComputationalHash; MAX_NUM_COLUMNS] {
         let empty_hash = empty_poseidon_hash();
 
         array::from_fn(|i| match columns.get(i) {

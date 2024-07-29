@@ -224,7 +224,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             ph: &input[Self::PI_RANGES[12].clone()],
         }
     }
-
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         h: &'a [T],
         v: &'a [T],

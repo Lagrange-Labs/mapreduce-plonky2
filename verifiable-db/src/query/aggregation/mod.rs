@@ -58,7 +58,7 @@ pub(crate) mod tests {
             QueryPublicInputs::ComputationalHash,
             QueryPublicInputs::PlaceholderHash,
         ]
-        .map(|input| PublicInputs::<F, S>::to_range(input));
+        .map(PublicInputs::<F, S>::to_range);
 
         let first_value_start =
             PublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues).start;

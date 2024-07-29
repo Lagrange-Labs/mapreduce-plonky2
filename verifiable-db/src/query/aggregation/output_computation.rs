@@ -163,14 +163,10 @@ pub(crate) mod tests {
             compute_output_item_value, random_aggregation_operations,
             random_aggregation_public_inputs,
         },
-        public_inputs::QueryPublicInputs,
         PI_LEN,
     };
     use mp2_common::{types::CURVE_TARGET_LEN, u256::NUM_LIMBS, utils::ToFields, C, D, F};
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,
         iop::witness::{PartialWitness, WitnessWrite},
@@ -230,7 +226,7 @@ pub(crate) mod tests {
         for TestOutputComputationCircuit<S, PROOF_NUM>
     where
         [(); S - 1]:,
-        [(); { PI_LEN::<S> }]:,
+        [(); PI_LEN::<S>]:,
     {
         // Proof public inputs + expected outputs
         type Wires = ([Vec<Target>; PROOF_NUM], [TestOutputWires; S]);
@@ -271,7 +267,7 @@ pub(crate) mod tests {
             self.proofs
                 .iter()
                 .zip(wires.0.iter())
-                .for_each(|(v, t)| pw.set_target_arr(&t, v));
+                .for_each(|(v, t)| pw.set_target_arr(t, v));
             self.exp_outputs
                 .iter()
                 .zip(wires.1.iter())
