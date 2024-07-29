@@ -20,7 +20,7 @@ use mp2_common::{
     },
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
-    utils::{FromTargets, ToTargets},
+    utils::ToTargets,
     D, F,
 };
 use plonky2::{
@@ -71,9 +71,6 @@ pub struct RevelationWithoutResultsTreeWires<
     )]
     placeholder_pairs: [(Target, UInt256Target); PH],
 }
-
-/*
-*/
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RevelationWithoutResultsTreeCircuit<
