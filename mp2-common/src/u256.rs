@@ -1,6 +1,7 @@
 //! Gadget for U256 arithmetic, with overflow checking
 //!
 
+use itertools::zip_eq;
 use std::{
     array::{self, from_fn as create_array},
     iter::{once, repeat},
@@ -109,6 +110,9 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
     /// Compute a `BoolTarget` being true if and only the 2 input UInt256Target are equal
     fn is_equal_u256(&mut self, left: &UInt256Target, right: &UInt256Target) -> BoolTarget;
 
+    /// Compute a `BoolTarget` being true if and only the UInt256Targets in the slice are all equal
+    fn is_equal_u256_slice(&mut self, slice: &[UInt256Target]) -> BoolTarget;
+
     /// Return  true iff  `left <= right`
     fn is_less_or_equal_than_u256(
         &mut self,
@@ -143,6 +147,33 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
         right: &UInt256Target,
     ) -> UInt256Target;
 
+    /// Select an array of UInt256Targets based on the specified condition
+    fn select_u256_arr<const L: usize>(
+        &mut self,
+        cond: BoolTarget,
+        left: &[UInt256Target; L],
+        right: &[UInt256Target; L],
+    ) -> [UInt256Target; L] {
+        array::from_fn(|i| self.select_u256(cond, &left[i], &right[i]))
+    }
+
+    /// Check if an UInt256Target array is less than the other.
+    fn is_less_than_u256_arr<const L: usize>(
+        &mut self,
+        left: &[UInt256Target; L],
+        right: &[UInt256Target; L],
+    ) -> BoolTarget {
+        self.is_less_than_or_equal_to_u256_arr(left, right).0
+    }
+
+    /// Check if an UInt256Target array is less than or equal to the other.
+    /// It returns two flags: left < right and left == right
+    fn is_less_than_or_equal_to_u256_arr<const L: usize>(
+        &mut self,
+        left: &[UInt256Target; L],
+        right: &[UInt256Target; L],
+    ) -> (BoolTarget, BoolTarget);
+
     /// Return the element in the `inputs` array with position `access_index`
     fn random_access_u256(
         &mut self,
@@ -153,6 +184,10 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
 
 pub trait WitnessWriteU256<F: RichField> {
     fn set_u256_target(&mut self, target: &UInt256Target, value: U256);
+
+    fn set_u256_target_arr(&mut self, targets: &[UInt256Target], values: &[U256]) {
+        zip_eq(targets, values).for_each(|(target, &value)| self.set_u256_target(target, value));
+    }
 }
 
 pub trait WitnessReadU256<F: RichField> {
@@ -421,6 +456,16 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
             })
     }
 
+    fn is_equal_u256_slice(&mut self, slice: &[UInt256Target]) -> BoolTarget {
+        assert!(slice.len() > 1);
+
+        let init = self.is_equal_u256(&slice[0], &slice[1]);
+        slice[1..].windows(2).fold(init, |acc, items| {
+            let is_equal = self.is_equal_u256(&items[0], &items[1]);
+            self.and(acc, is_equal)
+        })
+    }
+
     fn is_less_or_equal_than_u256(
         &mut self,
         left: &UInt256Target,
@@ -484,6 +529,31 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
             )
         });
         UInt256Target(limbs)
+    }
+
+    fn is_less_than_or_equal_to_u256_arr<const L: usize>(
+        &mut self,
+        left: &[UInt256Target; L],
+        right: &[UInt256Target; L],
+    ) -> (BoolTarget, BoolTarget) {
+        let zero = self.zero_u32();
+        let (borrow, sum_limbs) = zip_eq(
+            left.iter().flat_map(|u| u.0),
+            right.iter().flat_map(|u| u.0),
+        )
+        .fold((zero, zero), |(borrow, sum_limbs), (l, r)| {
+            let (res, borrow) = self.sub_u32(l, r, borrow);
+            let (sum_limbs, _) = self.add_u32(sum_limbs, res);
+
+            (borrow, sum_limbs)
+        });
+
+        (
+            // left < right
+            self.is_not_equal(borrow.0, zero.0),
+            // left == right
+            self.is_equal(sum_limbs.0, zero.0),
+        )
     }
 
     fn random_access_u256(
@@ -856,7 +926,10 @@ impl<F: SerializableRichField<D>, const D: usize> SimpleGenerator<F, D> for UInt
 #[cfg(test)]
 mod tests {
 
+    use std::array;
+
     use alloy::primitives::U256;
+    use itertools::zip_eq;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,
@@ -1066,6 +1139,67 @@ mod tests {
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             pw.set_u256_target(&wires, self.0);
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestSliceEqCircuit<const L: usize>([U256; L]);
+
+    impl<const L: usize> UserCircuit<F, D> for TestSliceEqCircuit<L> {
+        type Wires = [UInt256Target; L];
+
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let targets = c.add_virtual_u256_arr();
+
+            let is_eq = c.is_equal_u256_slice(&targets);
+            c.register_public_input(is_eq.target);
+
+            targets
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, targets: &Self::Wires) {
+            pw.set_u256_target_arr(targets, &self.0);
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestArrOperationsCircuit<const L: usize> {
+        left: [U256; L],
+        right: [U256; L],
+    }
+
+    impl<const L: usize> UserCircuit<F, D> for TestArrOperationsCircuit<L> {
+        type Wires = ([UInt256Target; L], [UInt256Target; L]);
+
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let left = c.add_virtual_u256_arr_unsafe();
+            let right = c.add_virtual_u256_arr_unsafe();
+
+            (left, right)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            pw.set_u256_target_arr(&wires.0, &self.left);
+            pw.set_u256_target_arr(&wires.1, &self.right);
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestArrLessThanOrEqualToCircuit<const L: usize>(TestArrOperationsCircuit<L>);
+
+    impl<const L: usize> UserCircuit<F, D> for TestArrLessThanOrEqualToCircuit<L> {
+        type Wires = <TestArrOperationsCircuit<L> as UserCircuit<F, D>>::Wires;
+
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let (left, right) = TestArrOperationsCircuit::build(c);
+            let (is_lt, is_eq) = c.is_less_than_or_equal_to_u256_arr(&left, &right);
+            c.register_public_input(is_lt.target);
+            c.register_public_input(is_eq.target);
+            (left, right)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.0.prove(pw, wires)
         }
     }
 
@@ -1442,5 +1576,51 @@ mod tests {
         let _ = b.add_virtual_u256_arr::<2>();
         let num_gates = b.num_gates() - num_gates;
         assert_eq!(num_gates, 3);
+    }
+
+    #[test]
+    fn test_u256_slice_equal() {
+        let rng = &mut thread_rng();
+        let arr = [0; 5].map(|_| gen_random_u256(rng));
+        let circuit = TestSliceEqCircuit(arr);
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        let is_diff = arr.windows(2).any(|a| a[0] != a[1]);
+        assert_eq!(
+            proof.public_inputs[0],
+            if is_diff { F::ZERO } else { F::ONE }
+        );
+
+        // Check for equivalent.
+        let arr = [gen_random_u256(rng); 10];
+        let circuit = TestSliceEqCircuit(arr);
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        assert_eq!(proof.public_inputs[0], F::ONE);
+    }
+
+    #[test]
+    fn test_u256_arr_is_less_than_or_equal_to() {
+        let rng = &mut thread_rng();
+        let [left, right] = array::from_fn(|_| [0; 5].map(|_| gen_random_u256(rng)));
+        let circuit = TestArrLessThanOrEqualToCircuit(TestArrOperationsCircuit { left, right });
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        let (is_lt, is_eq) = zip_eq(left, right).fold((false, true), |(is_lt, is_eq), (l, r)| {
+            let l = l + if is_lt { U256::from(1) } else { U256::ZERO };
+
+            (l < r, is_eq && l == r)
+        });
+        // is_less_than
+        assert_eq!(proof.public_inputs[0], if is_lt { F::ONE } else { F::ZERO });
+        // is_equal
+        assert_eq!(proof.public_inputs[1], if is_eq { F::ONE } else { F::ZERO });
+
+        // Check for equivalent.
+        let left = [0; 10].map(|_| gen_random_u256(rng));
+        let right = left;
+        let circuit = TestArrLessThanOrEqualToCircuit(TestArrOperationsCircuit { left, right });
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // is_less_than
+        assert_eq!(proof.public_inputs[0], F::ZERO);
+        // is_equal
+        assert_eq!(proof.public_inputs[1], F::ONE);
     }
 }
