@@ -12,7 +12,7 @@ const DIALECT: GenericDialect = GenericDialect {};
 
 pub fn parse(req: &str) -> Result<Query> {
     debug!("Parsing `{req}`");
-    let parsed =
+    let mut parsed =
         Parser::parse_sql(&DIALECT, req).with_context(|| format!("trying to parse `{req}`"))?;
 
     ensure!(
@@ -21,8 +21,8 @@ pub fn parse(req: &str) -> Result<Query> {
         parsed.len()
     );
 
-    if let Statement::Query(query) = &parsed[0] {
-        validate(&query)?;
+    if let Statement::Query(ref mut query) = &mut parsed[0] {
+        validate(query)?;
         Ok(*query.clone())
     } else {
         bail!("expected query, found `{}`", parsed[0])

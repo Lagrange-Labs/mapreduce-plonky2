@@ -1,6 +1,7 @@
 use anyhow::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use sqlparser::ast::{Expr, Ident, TableFactor};
+use std::collections::{HashMap, HashSet};
 
 /// A virtual table representing data extracted from a contract storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,10 +24,75 @@ pub struct ZkColumn {
     pub id: u64,
 }
 
-pub trait ContextProvider {
+/// A [`TableSymbols`] stores the symbols accessible in a table
+pub enum TableSymbols {
+    Normal(String, HashSet<String>),
+    Alias {
+        alias_name: String,
+        real_name: String,
+        columns: HashSet<String>,
+    },
+}
+
+impl TableSymbols {
+    pub fn resolve(&self, symbol: &str) -> Option<(String, String)> {
+        match self {
+            TableSymbols::Normal(me, columns) => {
+                columns.get(symbol).map(|s| (me.clone(), s.to_owned()))
+            }
+            TableSymbols::Alias {
+                real_name, columns, ..
+            } => columns
+                .get(symbol)
+                .map(|s| (real_name.clone(), s.to_owned())),
+        }
+    }
+
+    pub fn resolve_qualified(&self, table: &str, symbol: &str) -> Option<(String, String)> {
+        match self {
+            TableSymbols::Normal(me, columns) => {
+                if me == table {
+                    columns.get(symbol).map(|s| (me.clone(), s.to_owned()))
+                } else {
+                    None
+                }
+            }
+            TableSymbols::Alias {
+                alias_name,
+                real_name,
+                columns,
+            } => {
+                if alias_name == table {
+                    columns
+                        .get(symbol)
+                        .map(|s| (real_name.clone(), s.to_owned()))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+/// The `RootContextProvider` gives access to the root context for symbol
+/// resolution in a query, i.e. the virtual columns representing the indexed
+/// data from the contraact, and available in the JSON payload exposed by
+/// Ryhope.
+pub trait RootContextProvider {
     fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable>;
 
     fn current_block(&self) -> u64;
+}
+
+pub struct EmptyProvider;
+impl RootContextProvider for EmptyProvider {
+    fn fetch_table(&mut self, _table_name: &str) -> Result<ZkTable> {
+        bail!("empty provider")
+    }
+
+    fn current_block(&self) -> u64 {
+        0
+    }
 }
 
 pub struct FileContextProvider {
@@ -40,7 +106,7 @@ impl FileContextProvider {
         })
     }
 }
-impl ContextProvider for FileContextProvider {
+impl RootContextProvider for FileContextProvider {
     fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable> {
         self.tables
             .get(table_name)
@@ -50,5 +116,16 @@ impl ContextProvider for FileContextProvider {
 
     fn current_block(&self) -> u64 {
         2134
+    }
+}
+
+pub struct PgsqlContextProvider {}
+impl RootContextProvider for PgsqlContextProvider {
+    fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable> {
+        todo!()
+    }
+
+    fn current_block(&self) -> u64 {
+        todo!()
     }
 }
