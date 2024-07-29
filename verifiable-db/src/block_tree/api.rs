@@ -54,6 +54,7 @@ impl CircuitInput {
     }
 
     /// Create a circuit input for proving a parent node.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_parent(
         block_id: F,
         old_block_number: U256,

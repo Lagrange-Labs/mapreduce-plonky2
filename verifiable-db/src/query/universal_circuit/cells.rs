@@ -307,4 +307,12 @@ mod tests {
 
         test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
     }
+
+    #[test]
+    fn test_empty_tree() {
+        const MAX_NUM_CELLS: usize = 13;
+        const REAL_NUM_CELLS: usize = 0;
+
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+    }
 }

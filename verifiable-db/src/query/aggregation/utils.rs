@@ -44,8 +44,8 @@ pub(crate) fn constrain_input_proofs<const S: usize>(
     // And assume: is_out_of_range = p.I < MIN_query OR p.I > MAX_query
     // => (1 - is_rows_tree_node) * is_out_of_range = 0
     // => is_out_of_range - is_out_of_range * is_rows_tree_node = 0
-    let is_less_than_min = b.is_less_than_u256(&index_value, &min_query);
-    let is_greater_than_max = b.is_less_than_u256(&max_query, &index_value);
+    let is_less_than_min = b.is_less_than_u256(&index_value, min_query);
+    let is_greater_than_max = b.is_less_than_u256(max_query, &index_value);
     let is_out_of_range = b.or(is_less_than_min, is_greater_than_max);
     let is_false = b.arithmetic(
         F::NEG_ONE,
@@ -77,18 +77,18 @@ pub(crate) fn constrain_input_proofs<const S: usize>(
     // MIN_query = p1.MIN_I == p2.MIN_I ...
     child_proofs
         .iter()
-        .for_each(|p| b.enforce_equal_u256(&min_query, &p.min_query_target()));
+        .for_each(|p| b.enforce_equal_u256(min_query, &p.min_query_target()));
 
     // MAX_query = p1.MAX_I == p2.MAX_I ...
     child_proofs
         .iter()
-        .for_each(|p| b.enforce_equal_u256(&max_query, &p.max_query_target()));
+        .for_each(|p| b.enforce_equal_u256(max_query, &p.max_query_target()));
 
     // if the subtree proof is generated for a rows tree node,
     // the query bounds must be same:
     // is_row_tree_node = is_row_tree_node AND MIN_query == p.MIN_I AND MAX_query == p.MAX_I
-    let is_min_query_equal = b.is_equal_u256(&min_query, &subtree_proof.min_query_target());
-    let is_max_query_equal = b.is_equal_u256(&max_query, &subtree_proof.max_query_target());
+    let is_min_query_equal = b.is_equal_u256(min_query, &subtree_proof.min_query_target());
+    let is_max_query_equal = b.is_equal_u256(max_query, &subtree_proof.max_query_target());
     let is_equal = b.and(is_min_query_equal, is_max_query_equal);
     let is_equal = b.and(is_equal, is_rows_tree_node);
     b.connect(is_equal.target, is_rows_tree_node.target);
@@ -97,9 +97,7 @@ pub(crate) fn constrain_input_proofs<const S: usize>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::query::{
-        aggregation::tests::random_aggregation_public_inputs, public_inputs::QueryPublicInputs,
-    };
+    use crate::query::public_inputs::QueryPublicInputs;
     use alloy::primitives::U256;
     use mp2_common::utils::ToFields;
 
@@ -115,7 +113,7 @@ pub(crate) mod tests {
             QueryPublicInputs::MinQuery,
             QueryPublicInputs::MaxQuery,
         ]
-        .map(|input| PublicInputs::<F, S>::to_range(input));
+        .map(PublicInputs::<F, S>::to_range);
 
         if is_rows_tree_node {
             // p.MIN_I == MIN_query AND p.MAX_I == MAX_query
@@ -141,7 +139,7 @@ pub(crate) mod tests {
             QueryPublicInputs::MinQuery,
             QueryPublicInputs::MaxQuery,
         ]
-        .map(|input| PublicInputs::<F, S>::to_range(input));
+        .map(PublicInputs::<F, S>::to_range);
 
         // child.MIN_I == MIN_query
         // child.MAX_I == MAX_query

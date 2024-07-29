@@ -123,7 +123,7 @@ mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_target_arr(&wires, self.exp_pi);
+            pw.set_target_arr(wires, self.exp_pi);
         }
     }
 

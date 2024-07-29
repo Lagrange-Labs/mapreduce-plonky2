@@ -138,7 +138,7 @@ mod tests {
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.c.assign(pw, &wires.0);
-            pw.set_target_arr(&wires.1, &self.child_pi);
+            pw.set_target_arr(&wires.1, self.child_pi);
         }
     }
 
