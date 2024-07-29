@@ -22,7 +22,7 @@ pub enum QueryPublicInputs {
     TreeHash,
     /// `V`: Set of `S` values representing the cumulative results of the query, where`S` is a parameter
     /// specifying the maximum number of cumulative results we support;
-    /// the first value coudl be either a `u256` or a `CurveTarget`, depending on the query, and so we always
+    /// the first value could be either a `u256` or a `CurveTarget`, depending on the query, and so we always
     /// represent this value with `CURVE_TARGET_LEN` elements; all the other `S-1` values are always `u256`
     OutputValues,
     /// `count`: `F` Number of matching records in the query
