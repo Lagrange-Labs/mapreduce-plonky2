@@ -70,7 +70,7 @@ pub(crate) fn check_placeholders<const PH: usize>(
 
         // Pad the placeholder_ids to the next power of two for random_access.
         let mut padded_placeholder_ids = placeholder_ids.to_vec();
-        let pad_len = placeholder_ids.len().next_power_of_two();
+        let pad_len = PH.next_power_of_two();
         assert!(
             pad_len <= 64,
             "random_access function cannot handle more than 64 elements"
