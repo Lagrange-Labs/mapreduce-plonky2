@@ -284,38 +284,6 @@ where
     }
 }
 
-/// Query proof number = 1, original tree proof number = 1
-pub(crate) const NUM_VERIFIED_PROOFS: usize = 2;
-
-impl<const L: usize, const S: usize, const PH: usize, const PD: usize>
-    CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS> for RevelationWithoutResultsTreeWires<L, S, PH, PD>
-where
-    [(); S - 1]:,
-{
-    type CircuitBuilderParams = ();
-    type Inputs = RevelationWithoutResultsTreeCircuit<L, S, PH, PD>;
-
-    const NUM_PUBLIC_INPUTS: usize = PI_LEN::<L, S, PH, PD>;
-
-    fn circuit_logic(
-        builder: &mut CBuilder,
-        verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_VERIFIED_PROOFS],
-        _builder_parameters: Self::CircuitBuilderParams,
-    ) -> Self {
-        // The first one is the query proof, and the second is the original tree proof.
-        let query_proof = QueryProofPublicInputs::from_slice(&verified_proofs[0].public_inputs);
-        let original_tree_proof =
-            OriginalTreePublicInputs::from_slice(&verified_proofs[1].public_inputs);
-
-        Self::Inputs::build(builder, &query_proof, &original_tree_proof)
-    }
-
-    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
-        inputs.assign(pw, self);
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
