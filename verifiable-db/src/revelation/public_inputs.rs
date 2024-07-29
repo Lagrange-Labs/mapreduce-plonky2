@@ -268,10 +268,17 @@ impl<'a, const L: usize, const S: usize, const PH: usize, const PD: usize>
         *self.to_num_results_raw()
     }
 
-    pub fn result_values_target(&self) -> [UInt256Target; L * S] {
+    pub fn result_values_target(&self) -> [[UInt256Target; S]; L] {
         self.to_result_values_raw()
-            .chunks(NUM_LIMBS)
-            .map(UInt256Target::from_targets)
+            .chunks(NUM_LIMBS * S)
+            .map(|targets| {
+                targets
+                    .chunks(NUM_LIMBS)
+                    .map(UInt256Target::from_targets)
+                    .collect_vec()
+                    .try_into()
+                    .unwrap()
+            })
             .collect_vec()
             .try_into()
             .unwrap()
@@ -330,10 +337,17 @@ impl<'a, const L: usize, const S: usize, const PH: usize, const PD: usize>
         *self.to_num_results_raw()
     }
 
-    pub fn result_values(&self) -> [U256; L * S] {
+    pub fn result_values(&self) -> [[U256; S]; L] {
         self.to_result_values_raw()
-            .chunks(NUM_LIMBS)
-            .map(U256::from_fields)
+            .chunks(NUM_LIMBS * S)
+            .map(|fields| {
+                fields
+                    .chunks(NUM_LIMBS)
+                    .map(U256::from_fields)
+                    .collect_vec()
+                    .try_into()
+                    .unwrap()
+            })
             .collect_vec()
             .try_into()
             .unwrap()
