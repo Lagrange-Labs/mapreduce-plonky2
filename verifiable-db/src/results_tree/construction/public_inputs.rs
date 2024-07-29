@@ -94,15 +94,15 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
     const SIZES: [usize; NUM_PUBLIC_INPUTS] = [
         // Tree hash
         NUM_HASH_OUT_ELTS,
-        // Minmum value
+        // Minimum value
         NUM_LIMBS,
         // Maximum value
         NUM_LIMBS,
-        // Minmum items
+        // Minimum items
         NUM_LIMBS * (S - 2),
         // Maximum items
         NUM_LIMBS * (S - 2),
-        // Minmum counter
+        // Minimum counter
         1,
         // Maximum counter
         1,
