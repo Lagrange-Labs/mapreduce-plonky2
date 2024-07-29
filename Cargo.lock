@@ -997,6 +997,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "camelpaste"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02d88a780e6aa14b75d7be99f374d8b5c315aaf9c12ada1e2b1cb281468584c9"
+
+[[package]]
 name = "camino"
 version = "1.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3347,6 +3353,7 @@ name = "parsil"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camelpaste",
  "clap",
  "log",
  "postgres",

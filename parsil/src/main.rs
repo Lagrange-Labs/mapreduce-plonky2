@@ -3,12 +3,13 @@ use clap::{Parser, Subcommand};
 use parsil::prepare;
 use symbols::FileContextProvider;
 
-mod execute;
 mod expand;
 mod inject;
 mod parser;
+mod resolve;
 mod symbols;
 mod validate;
+mod visitor;
 
 #[derive(Parser)]
 struct Args {
@@ -43,7 +44,7 @@ fn main() -> Result<()> {
         Command::Execute {} => {
             let ctx = FileContextProvider::from_file("tests/context.json")?;
             let query = prepare(&args.request)?;
-            execute::execute(&query, ctx)?;
+            resolve::resolve(&query, ctx)?;
         }
     }
 
