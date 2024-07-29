@@ -511,24 +511,23 @@ mod tests {
 
             // Compute the results array, and deal with AVG and COUNT operations if any.
             let ops = query_pi.operation_ids();
-            let mut exp_results = Vec::with_capacity(L * S);
-            for i in 0..S {
+            let result = array::from_fn(|i| {
                 let value = query_pi.value_at_index(i);
 
                 let op = ops[i];
-                let result = if op == op_avg {
+                if op == op_avg {
                     value.checked_div(entry_count).unwrap_or(U256::ZERO)
                 } else if op == op_count {
                     entry_count
                 } else {
                     value
-                };
+                }
+            });
 
-                exp_results.push(result);
-            }
-            exp_results.resize(L * S, U256::ZERO);
+            let mut exp_results = [[U256::ZERO; S]; L];
+            exp_results[0] = result;
 
-            assert_eq!(pi.result_values().to_vec(), exp_results);
+            assert_eq!(pi.result_values(), exp_results);
         }
         // Padding values
         assert_eq!(pi.padding_values(), [U256::ZERO; PD]);
