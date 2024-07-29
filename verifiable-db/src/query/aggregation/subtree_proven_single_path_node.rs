@@ -184,19 +184,17 @@ impl<const MAX_NUM_RESULTS: usize> SubtreeProvenSinglePathNodeCircuit<MAX_NUM_RE
 
         // Enforce that the subtree rooted in the left child contains
         // only nodes outside of the range specified by the query
-        let left_child_inexists = b.not(left_child_exists);
         let is_less_than_min = b.is_less_than_u256(&left_child_max, &min_query);
-        // NOT(left_child_exists) OR (left_child_max < min_query)
-        let left_condition = b.or(left_child_inexists, is_less_than_min);
-        b.connect(left_condition.target, ttrue.target);
+        let left_condition = b.and(left_child_exists, is_less_than_min);
+        // (left_child_exists AND (left_child_max < min_query)) == left_child_exists
+        b.connect(left_condition.target, left_child_exists.target);
 
         // Enforce that the subtree rooted in the right child contains
         // only nodes outside of the range specified by the query
-        let right_child_inexists = b.not(right_child_exists);
         let is_greater_than_max = b.is_greater_than_u256(&right_child_min, &max_query);
-        // NOT(right_child_exists) OR (right_child_min > max_query)
-        let right_condition = b.or(right_child_inexists, is_greater_than_max);
-        b.connect(right_condition.target, ttrue.target);
+        let right_condition = b.and(right_child_exists, is_greater_than_max);
+        // (right_child_exists AND (right_child_min > min_query)) == right_child_exists
+        b.connect(right_condition.target, right_child_exists.target);
 
         // H(left_child_hash||right_child_hash||node_min||node_max||column_id||node_value||p.H)
         let node_hash_inputs = left_child_hash
