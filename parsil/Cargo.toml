@@ -1,0 +1,22 @@
+[package]
+name = "parsil"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "parsil"
+path = "src/lib.rs"
+
+[[bin]]
+name = "parsil"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap = { version = "4.5.4", features = ["derive"] }
+log.workspace = true
+postgres.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlparser = "0.49.0"
+stderrlog = { version = "0.6.0", default-features = false }

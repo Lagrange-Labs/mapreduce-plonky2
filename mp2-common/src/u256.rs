@@ -49,6 +49,11 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
     /// Add a UInt256Target without any range-check on the limbs
     fn add_virtual_u256_unsafe(&mut self) -> UInt256Target;
 
+    /// Add N `UInt256Target`s without any range-check on each limbs
+    fn add_virtual_u256_arr_unsafe<const N: usize>(&mut self) -> [UInt256Target; N] {
+        array::from_fn(|_| self.add_virtual_u256_unsafe())
+    }
+
     /// Add a UInt256Target while enforcing that all the limbs are range-checked
     fn add_virtual_u256(&mut self) -> UInt256Target;
 

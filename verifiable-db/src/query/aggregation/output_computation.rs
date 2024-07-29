@@ -4,6 +4,7 @@ use crate::query::{
     computational_hash_ids::{AggregationOperation, Identifiers},
     public_inputs::PublicInputs,
 };
+use alloy::primitives::U256;
 use mp2_common::{
     array::ToField,
     group_hashing::CircuitBuilderGroupHashing,
@@ -14,6 +15,46 @@ use mp2_common::{
 use plonky2::iop::target::Target;
 use plonky2_crypto::u32::arithmetic_u32::CircuitBuilderU32;
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
+
+/// Compute the dummy targets for each of the `S` values to be returned as output.
+pub(crate) fn compute_dummy_output_targets<const S: usize>(
+    b: &mut CBuilder,
+    ops: &[Target; S],
+) -> Vec<Target> {
+    let curve_zero = b.curve_zero();
+    let u256_zero = b.zero_u256();
+    let u256_max = b.constant_u256(U256::MAX);
+
+    let [op_id, op_min] = [AggregationOperation::IdOp, AggregationOperation::MinOp]
+        .map(|op| b.constant(Identifiers::AggregationOperations(op).to_field()));
+
+    let mut outputs = vec![];
+    for i in 0..S {
+        // Expose the dummy value, it's zero for all the supported operations,
+        // except for `MIN`, where it's the biggest possible value in domain (U256::MAX).
+        let is_op_min = b.is_equal(ops[i], op_min);
+        let mut output = b.select_u256(is_op_min, &u256_max, &u256_zero).to_targets();
+        if i == 0 {
+            // For the first slot, we need to put the order-agnostic digest
+            // if it's an aggregation operation ID.
+            let is_op_id = b.is_equal(ops[i], op_id);
+            output = b
+                .curve_select(
+                    is_op_id,
+                    curve_zero,
+                    // Pad the current output to `CURVE_TARGET_LEN` for the first item.
+                    CurveTarget::from_targets(&PublicInputs::<_, S>::pad_slice_to_curve_len(
+                        &output,
+                    )),
+                )
+                .to_targets();
+        }
+
+        outputs.append(&mut output);
+    }
+
+    outputs
+}
 
 /// Compute the node output item at the specified index by the proofs,
 /// and return the output item with the overflow number.
@@ -115,26 +156,53 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::query::{
         aggregation::tests::{
             compute_output_item_value, random_aggregation_operations,
             random_aggregation_public_inputs,
         },
-        public_inputs::QueryPublicInputs,
         PI_LEN,
     };
     use mp2_common::{types::CURVE_TARGET_LEN, u256::NUM_LIMBS, utils::ToFields, C, D, F};
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,
         iop::witness::{PartialWitness, WitnessWrite},
     };
+    use plonky2_ecgfp5::curve::curve::Point;
     use std::array;
+
+    /// Compute the dummy values for each of the `S` values to be returned as output.
+    /// It's the test function corresponding to `compute_dummy_output_targets`.
+    pub(crate) fn compute_dummy_output_values<const S: usize>(ops: &[F; S]) -> Vec<F> {
+        let [op_id, op_min] = [AggregationOperation::IdOp, AggregationOperation::MinOp]
+            .map(|op| Identifiers::AggregationOperations(op).to_field());
+
+        let mut outputs = vec![];
+
+        for i in 0..S {
+            let mut output = if ops[i] == op_min {
+                U256::MAX
+            } else {
+                U256::ZERO
+            }
+            .to_fields();
+
+            if i == 0 {
+                output = if ops[i] == op_id {
+                    Point::NEUTRAL.to_fields()
+                } else {
+                    // Pad the current output to `CURVE_TARGET_LEN` for the first item.
+                    PublicInputs::<_, S>::pad_slice_to_curve_len(&output)
+                };
+            }
+            outputs.append(&mut output);
+        }
+
+        outputs
+    }
 
     #[derive(Clone, Debug)]
     struct TestOutput {
@@ -158,7 +226,7 @@ mod tests {
         for TestOutputComputationCircuit<S, PROOF_NUM>
     where
         [(); S - 1]:,
-        [(); { PI_LEN::<S> }]:,
+        [(); PI_LEN::<S>]:,
     {
         // Proof public inputs + expected outputs
         type Wires = ([Vec<Target>; PROOF_NUM], [TestOutputWires; S]);
@@ -199,7 +267,7 @@ mod tests {
             self.proofs
                 .iter()
                 .zip(wires.0.iter())
-                .for_each(|(v, t)| pw.set_target_arr(&t, v));
+                .for_each(|(v, t)| pw.set_target_arr(t, v));
             self.exp_outputs
                 .iter()
                 .zip(wires.1.iter())
