@@ -25,7 +25,7 @@ pub enum ResultsConstructionPublicInputs {
     /// subtree rooted in the current node; values of secondary indexed column are employed for
     /// rows tree nodes, while values of primary indexed column are employed for index tree nodes
     MinValue,
-    /// `max`` : `u256` Maximum value of the indexed column among all the records stored in the
+    /// `max` : `u256` Maximum value of the indexed column among all the records stored in the
     /// subtree rooted in the current node; values of secondary indexed column are employed for
     /// rows tree nodes, while values of primary indexed column are employed for index tree nodes
     MaxValue,
