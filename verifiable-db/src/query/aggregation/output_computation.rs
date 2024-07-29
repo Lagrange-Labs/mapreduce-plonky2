@@ -165,7 +165,7 @@ pub(crate) mod tests {
         },
         PI_LEN,
     };
-    use mp2_common::{types::CURVE_TARGET_LEN, u256::NUM_LIMBS, C, D, F};
+    use mp2_common::{types::CURVE_TARGET_LEN, u256::NUM_LIMBS, utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,
