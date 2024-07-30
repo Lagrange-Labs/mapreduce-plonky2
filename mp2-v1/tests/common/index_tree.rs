@@ -141,21 +141,23 @@ impl<P: ProofStorage> TestContext<P> {
                     node.row_tree_proof_id.primary,
                 )))
                 .expect("should find extraction proof");
+            {
+                // debug sanity checks
+                let row_proof =
+                    ProofWithVK::deserialize(&row_tree_proof).expect("can't deserialize row proof");
+                let row_pi = verifiable_db::row_tree::PublicInputs::from_slice(
+                    &row_proof.proof().public_inputs,
+                );
+                let ext_proof = ProofWithVK::deserialize(&extraction_proof)
+                    .expect("can't deserialize extraction proof");
+                let ext_pi = mp2_v1::final_extraction::PublicInputs::from_slice(
+                    &ext_proof.proof().public_inputs,
+                );
+                assert_eq!(row_pi.rows_digest_field(), ext_pi.value_point());
+            }
             let proof = if context.is_leaf() {
                 info!("NodeIndex Proving --> LEAF");
-                {
-                    let row_proof = ProofWithVK::deserialize(&row_tree_proof)
-                        .expect("can't deserialize row proof");
-                    let row_pi = verifiable_db::row_tree::PublicInputs::from_slice(
-                        &row_proof.proof().public_inputs,
-                    );
-                    let ext_proof = ProofWithVK::deserialize(&extraction_proof)
-                        .expect("can't deserialize extraction proof");
-                    let ext_pi = mp2_v1::final_extraction::PublicInputs::from_slice(
-                        &ext_proof.proof().public_inputs,
-                    );
-                    assert_eq!(row_pi.rows_digest_field(), ext_pi.value_point());
-                }
+
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_leaf(
                         node.identifier,
@@ -166,6 +168,7 @@ impl<P: ProofStorage> TestContext<P> {
                 api::generate_proof(self.params(), inputs)
                     .expect("error while leaf index proof generation")
             } else if context.is_partial() {
+                info!("NodeIndex Proving --> PARTIAL");
                 // a node that was already there before and is in the path of the added node to the
                 // root should always have two children
                 assert_eq!(
