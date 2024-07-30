@@ -717,7 +717,7 @@ impl TestCase {
                     ),
                     (
                         U256::from(12),
-                        Address::from_str("0xbbbbed61bffed1df72f2ceebd965198ad57adffff").unwrap(),
+                        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfeee").unwrap(),
                     ),
                 ];
                 // saving the keys we are tracking in the mapping
