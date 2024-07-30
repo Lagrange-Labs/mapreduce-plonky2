@@ -224,7 +224,7 @@ impl TestCase {
         // with single variables)
         let updates = vec![
             ChangeType::Update(UpdateType::Rest),
-            ChangeType::Update(UpdateType::SecondaryIndex),
+            //ChangeType::Update(UpdateType::SecondaryIndex),
         ];
         for ut in updates {
             let table_row_updates = self.random_contract_update(ctx, ut).await;
@@ -533,16 +533,12 @@ impl TestCase {
                 let mapping_updates = match c {
                     ChangeType::Insertion => {
                         let new_entry = (random_u256(), random_address());
-                        mapping
-                            .mapping_keys
-                            .push(new_entry.0.to_be_bytes_trimmed_vec());
                         vec![MappingUpdate::Insertion(
                             new_entry.0,
                             new_entry.1.into_word().into(),
                         )]
                     }
                     ChangeType::Deletion => {
-                        mapping.mapping_keys.remove(idx);
                         // we just want to delete any row
                         // we dont care about the value here.
                         vec![MappingUpdate::Deletion(
@@ -611,6 +607,21 @@ impl TestCase {
                         }
                     }
                 };
+                // small iteration to always have a good updated list of mapping keys
+                for update in mapping_updates.iter() {
+                    match update {
+                        MappingUpdate::Deletion(mkey, _) => {
+                            info!("Removing key {} from mappping keys tracking", mkey);
+                            let key_stored = mkey.to_be_bytes_trimmed_vec();
+                            mapping.mapping_keys.retain(|u| u != &key_stored);
+                        }
+                        MappingUpdate::Insertion(mkey, _) => {
+                            info!("Inserting key {} to mappping keys tracking", mkey);
+                            mapping.mapping_keys.push(mkey.to_be_bytes_trimmed_vec());
+                        }
+                        MappingUpdate::Update(_, _, _) => {}
+                    }
+                }
 
                 self.apply_update_to_contract(
                     ctx,

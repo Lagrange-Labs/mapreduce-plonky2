@@ -69,7 +69,7 @@ impl<P: ProofStorage> TestContext<P> {
 
         // Initialize the test trie.
         let mut trie = TestStorageTrie::new();
-        info!("Initialized the test storage trie");
+        info!("mapping mpt proving: Initialized the test storage trie");
 
         // Query the slot and add the node path to the trie.
         for mapping_key in mapping_keys {
