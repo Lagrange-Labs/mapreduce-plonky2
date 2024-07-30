@@ -49,7 +49,7 @@ pub enum ResultsConstructionPublicInputs {
     MaxCounter,
     /// `I` : `u256` Value of the primary indexed item for all the rows stored in the subtree rooted
     /// in the current node (meaningful only for nodes of rows trees)
-    IndexValue,
+    PrimaryIndexValue,
     /// `index_ids` : `[2]F` Integer identifiers of the indexed items
     IndexIds,
     /// `no_duplicates` : `bool` flag specifying whether we are building the tree without duplicates or not
@@ -68,7 +68,7 @@ pub struct PublicInputs<'a, T, const S: usize> {
     max_items: &'a [T],
     min_cnt: &'a T,
     max_cnt: &'a T,
-    idx_val: &'a [T],
+    pri_idx_val: &'a [T],
     idx_ids: &'a [T],
     no_dup: &'a T,
     acc: &'a [T],
@@ -85,7 +85,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         Self::to_range(ResultsConstructionPublicInputs::MaxItems),
         Self::to_range(ResultsConstructionPublicInputs::MinCounter),
         Self::to_range(ResultsConstructionPublicInputs::MaxCounter),
-        Self::to_range(ResultsConstructionPublicInputs::IndexValue),
+        Self::to_range(ResultsConstructionPublicInputs::PrimaryIndexValue),
         Self::to_range(ResultsConstructionPublicInputs::IndexIds),
         Self::to_range(ResultsConstructionPublicInputs::NoDuplicates),
         Self::to_range(ResultsConstructionPublicInputs::Accumulator),
@@ -106,7 +106,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         1,
         // Maximum counter
         1,
-        // Index column value
+        // Primary index value
         NUM_LIMBS,
         // Indexed column IDs
         2,
@@ -159,8 +159,8 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         self.max_cnt
     }
 
-    pub(crate) fn to_index_value_raw(&self) -> &[T] {
-        self.idx_val
+    pub(crate) fn to_primary_index_value_raw(&self) -> &[T] {
+        self.pri_idx_val
     }
 
     pub(crate) fn to_index_ids_raw(&self) -> &[T] {
@@ -189,7 +189,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             max_items: &input[Self::PI_RANGES[4].clone()],
             min_cnt: &input[Self::PI_RANGES[5].clone()][0],
             max_cnt: &input[Self::PI_RANGES[6].clone()][0],
-            idx_val: &input[Self::PI_RANGES[7].clone()],
+            pri_idx_val: &input[Self::PI_RANGES[7].clone()],
             idx_ids: &input[Self::PI_RANGES[8].clone()],
             no_dup: &input[Self::PI_RANGES[9].clone()][0],
             acc: &input[Self::PI_RANGES[10].clone()],
@@ -204,7 +204,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         max_items: &'a [T],
         min_cnt: &'a [T],
         max_cnt: &'a [T],
-        idx_val: &'a [T],
+        pri_idx_val: &'a [T],
         idx_ids: &'a [T],
         no_dup: &'a [T],
         acc: &'a [T],
@@ -217,7 +217,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             max_items,
             min_cnt: &min_cnt[0],
             max_cnt: &max_cnt[0],
-            idx_val,
+            pri_idx_val,
             idx_ids,
             no_dup: &no_dup[0],
             acc,
@@ -233,7 +233,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             .chain(self.max_items.iter())
             .chain(once(self.min_cnt))
             .chain(once(self.max_cnt))
-            .chain(self.idx_val.iter())
+            .chain(self.pri_idx_val.iter())
             .chain(self.idx_ids.iter())
             .chain(once(self.no_dup))
             .chain(self.acc.iter())
@@ -253,7 +253,7 @@ impl<'a, const S: usize> PublicInputCommon for PublicInputs<'a, Target, S> {
         cb.register_public_inputs(self.max_items);
         cb.register_public_input(*self.min_cnt);
         cb.register_public_input(*self.max_cnt);
-        cb.register_public_inputs(self.idx_val);
+        cb.register_public_inputs(self.pri_idx_val);
         cb.register_public_inputs(self.idx_ids);
         cb.register_public_input(*self.no_dup);
         cb.register_public_inputs(self.acc);
@@ -299,8 +299,8 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
         *self.to_max_counter_raw()
     }
 
-    pub fn index_value_target(&self) -> UInt256Target {
-        UInt256Target::from_targets(self.to_index_value_raw())
+    pub fn primary_index_value_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_primary_index_value_raw())
     }
 
     pub fn index_ids_target(&self) -> [Target; 2] {
@@ -355,8 +355,8 @@ impl<'a, const S: usize> PublicInputs<'a, F, S> {
         *self.to_max_counter_raw()
     }
 
-    pub fn index_value(&self) -> U256 {
-        U256::from_fields(self.to_index_value_raw())
+    pub fn primary_index_value(&self) -> U256 {
+        U256::from_fields(self.to_primary_index_value_raw())
     }
 
     pub fn index_ids(&self) -> [F; 2] {
@@ -451,8 +451,10 @@ mod tests {
             &[*pis.to_max_counter_raw()],
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(ResultsConstructionPublicInputs::IndexValue)],
-            pis.to_index_value_raw(),
+            &pis_raw[PublicInputs::<F, S>::to_range(
+                ResultsConstructionPublicInputs::PrimaryIndexValue
+            )],
+            pis.to_primary_index_value_raw(),
         );
         assert_eq!(
             &pis_raw[PublicInputs::<F, S>::to_range(ResultsConstructionPublicInputs::IndexIds)],
