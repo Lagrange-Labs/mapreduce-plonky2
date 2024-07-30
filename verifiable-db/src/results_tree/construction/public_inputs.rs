@@ -413,9 +413,15 @@ mod tests {
 
     #[test]
     fn test_results_construction_public_inputs() {
-        let pis_raw: Vec<F> = random_vector::<u32>(PublicInputs::<F, S>::total_len()).to_fields();
-        let pis = PublicInputs::<F, S>::from_slice(pis_raw.as_slice());
+        let pis_raw = random_vector::<u32>(PublicInputs::<F, S>::total_len()).to_fields();
+
+        // use public inputs in circuit
+        let test_circuit = TestPublicInputs { pis: &pis_raw };
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
+        assert_eq!(proof.public_inputs, pis_raw);
+
         // check public inputs are constructed correctly
+        let pis = PublicInputs::<F, S>::from_slice(&proof.public_inputs);
         assert_eq!(
             &pis_raw[PublicInputs::<F, S>::to_range(ResultsConstructionPublicInputs::TreeHash)],
             pis.to_tree_hash_raw(),
@@ -462,9 +468,5 @@ mod tests {
             &pis_raw[PublicInputs::<F, S>::to_range(ResultsConstructionPublicInputs::Accumulator)],
             pis.to_accumulator_raw(),
         );
-        // use public inputs in circuit
-        let test_circuit = TestPublicInputs { pis: &pis_raw };
-        let proof = run_circuit::<F, D, C, _>(test_circuit);
-        assert_eq!(proof.public_inputs, pis_raw);
     }
 }
