@@ -38,7 +38,7 @@ impl AstPass for Expander {
             } => {
                 *e = if *negated {
                     // NOT INLIST -> old != list[0] AND old != list[1] ... AND TRUE
-                    Expr::Nested(Box::new(list.into_iter().fold(TRUE.clone(), |ax, l| {
+                    Expr::Nested(Box::new(list.iter_mut().fold(TRUE.clone(), |ax, l| {
                         Expr::BinaryOp {
                             left: Box::new(Expr::BinaryOp {
                                 left: Box::new(l.clone()),
@@ -51,7 +51,7 @@ impl AstPass for Expander {
                     })))
                 } else {
                     // INLIST -> old == list[0] OR old == list[1] ... OR FALSE
-                    Expr::Nested(Box::new(list.into_iter().fold(FALSE.clone(), |ax, l| {
+                    Expr::Nested(Box::new(list.iter_mut().fold(FALSE.clone(), |ax, l| {
                         Expr::BinaryOp {
                             left: Box::new(Expr::BinaryOp {
                                 left: Box::new(l.clone()),

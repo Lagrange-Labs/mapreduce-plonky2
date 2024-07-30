@@ -4,7 +4,6 @@ use parsil::prepare;
 use symbols::FileContextProvider;
 
 mod expand;
-mod inject;
 mod parser;
 mod resolve;
 mod symbols;

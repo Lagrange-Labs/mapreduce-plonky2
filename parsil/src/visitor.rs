@@ -402,6 +402,9 @@ impl<P: AstPass> Visit<P> for TableWithJoins {
     fn visit(&mut self, pass: &mut P) -> Result<()> {
         pass.pre_table_with_joins(self)?;
         self.relation.visit(pass)?;
+        for j in self.joins.iter_mut() {
+            j.visit(pass)?;
+        }
         pass.post_table_with_joins(self)
     }
 }
@@ -422,15 +425,15 @@ impl<P: AstPass> Visit<P> for Distinct {
 impl<P: AstPass> Visit<P> for Select {
     fn visit(&mut self, pass: &mut P) -> Result<()> {
         pass.pre_select(self)?;
-        if let Some(distinct) = self.distinct.as_mut() {
-            distinct.visit(pass)?;
-        }
-        for p in self.projection.iter_mut() {
-            p.visit(pass)?;
-        }
+
         for f in self.from.iter_mut() {
             f.visit(pass)?;
         }
+
+        if let Some(distinct) = self.distinct.as_mut() {
+            distinct.visit(pass)?;
+        }
+
         if let Some(selection) = self.selection.as_mut() {
             selection.visit(pass)?;
         }
@@ -461,6 +464,12 @@ impl<P: AstPass> Visit<P> for Select {
                     }
                 }
             }
+        }
+
+        // The projection is visited last, as its components may only be
+        // resolved after the other elements have been visited.
+        for p in self.projection.iter_mut() {
+            p.visit(pass)?;
         }
 
         pass.post_select(self)
@@ -583,6 +592,9 @@ impl<P: AstPass> Visit<P> for Query {
         pass.pre_query(self)?;
         if let Some(order_by) = self.order_by.as_mut() {
             order_by.visit(pass)?;
+        }
+        if let Some(limit) = self.limit.as_mut() {
+            limit.visit(pass)?;
         }
         self.body.visit(pass)?;
         pass.post_query(self)
