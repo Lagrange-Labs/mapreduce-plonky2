@@ -411,13 +411,13 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
             }
             (false, false) => (),
         }
-        let _false = self._false();
+        let _true = self._true();
         left.0
             .iter()
             .zip(right.0.iter())
-            .fold(_false, |is_eq, (left_limb, right_limb)| {
+            .fold(_true, |is_eq, (left_limb, right_limb)| {
                 let is_limb_equal = self.is_equal(left_limb.0, right_limb.0);
-                self.or(is_eq, is_limb_equal)
+                self.and(is_eq, is_limb_equal)
             })
     }
 
