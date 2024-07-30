@@ -322,12 +322,9 @@ impl TestCase {
             .expect("can't update index tree");
         info!("Applied updates to index tree for block {current_block}");
         let root_proof_key = ctx.prove_update_index_tree(&self.table, updates.plan).await;
-        info!("Generated final BLOCK tree proofs for single variables");
+        info!("Generated final BLOCK tree proofs for block {current_block}");
         let _ = ctx.prove_ivc(&self.table.id, &self.table.index).await;
-        info!(
-            "Generated final IVC proof for single variable - block {}",
-            ctx.block_number().await
-        );
+        info!("Generated final IVC proof for block {}", current_block,);
 
         Ok(())
     }
@@ -585,7 +582,7 @@ impl TestCase {
                                         // the same mapping value but a different mapping key.
                                         vec![
                                             MappingUpdate::Deletion(current_key, current_value),
-                                            MappingUpdate::Insertion(new_key, new_value),
+                                            MappingUpdate::Insertion(new_key, current_value),
                                         ]
                                     }
                                 }
@@ -856,19 +853,20 @@ impl TestCase {
                         // it's a simple change in the row.
                         let previous_entry = UniqueMappingEntry::new(mkey, old_value);
                         let previous_row_key = previous_entry.to_row_key(&index);
-                        let previous_table_value =
+                        let mut previous_table_value =
                             previous_entry.to_table_row_value(&index, slot, &self.contract_address);
                         let new_entry = UniqueMappingEntry::new(mkey, mvalue);
                         match index {
                             MappingIndex::Key(_) => {
                                 // update the value, key == secondary index so it's a regular
                                 // update
-                                let mut cell = previous_table_value.current_cells[0].clone();
-                                cell.value = *mvalue;
+                                previous_table_value.current_cells[0].value = *mvalue;
                                 let cells_update = CellsUpdate {
                                     previous_row_key: previous_row_key.clone(),
                                     new_row_key: previous_row_key,
-                                    updated_cells: vec![cell],
+                                    updated_cells: vec![
+                                        previous_table_value.current_cells[0].clone()
+                                    ],
                                 };
                                 vec![TableRowUpdate::Update(cells_update)]
                             }
