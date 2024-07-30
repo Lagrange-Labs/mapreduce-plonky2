@@ -90,9 +90,10 @@ impl TestCase {
             slots: SINGLE_SLOTS.to_vec(),
         });
 
+        // + 1 because we are going to deploy some update to contract in a transaction, which for
+        // Anvil means it's a new block
         // TODO: change sbbst such that it doesn't require this max . Though we still need the
         // correct shift.
-        // 2 because 1 tx to deploy contract, another one to call it
         let indexing_genesis_block = ctx.block_number().await + 1;
         let table_id = TableID::new(index_genesis_block, contract_address, &source.slots());
         // Defining the columns structure of the table from the source slots
@@ -145,7 +146,7 @@ impl TestCase {
             contract.address()
         );
         let contract_address = contract.address();
-        let index_genesis_block = ctx.block_number().await;
+        let index_genesis_block = ctx.block_number().await + 1;
         // to toggle off and on
         let value_as_index = true;
         let value_id = identifier_for_mapping_value_column(MAPPING_SLOT, contract_address);
@@ -251,6 +252,7 @@ impl TestCase {
         // example
         updates: Vec<TableRowUpdate>,
     ) -> Result<()> {
+        let current_block = ctx.block_number().await;
         // apply the new cells to the trees
         // NOTE ONLY the rest of the cells, not including the secondary one !
         let rows_update = updates
@@ -299,11 +301,11 @@ impl TestCase {
                 TableRowUpdate::Deletion(k) => TreeRowUpdate::Deletion(k.clone()),
             })
             .collect::<Vec<_>>();
-        info!("Generated final CELLs tree proofs for single variables");
+        info!("Generated final CELLs tree proofs for block {current_block}");
         let updates = self.table.apply_row_update(rows_update)?;
         info!("Applied updates to row tree");
         let index_node = ctx.prove_update_row_tree(&self.table, updates).await;
-        info!("Generated final ROWs tree proofs for single variables");
+        info!("Generated final ROWs tree proofs for block {current_block}");
 
         // NOTE the reason we separate and use block number as IndexTreeKey is because this index
         // could be different if we were using NOT block number. It should be the index of the
@@ -318,7 +320,7 @@ impl TestCase {
             .table
             .apply_index_update(index_update)
             .expect("can't update index tree");
-        info!("Applied updates to index tree");
+        info!("Applied updates to index tree for block {current_block}");
         let root_proof_key = ctx.prove_update_index_tree(&self.table, updates.plan).await;
         info!("Generated final BLOCK tree proofs for single variables");
         let _ = ctx.prove_ivc(&self.table.id, &self.table.index).await;
