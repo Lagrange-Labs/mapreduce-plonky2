@@ -874,6 +874,7 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
 {
     /// Provide input values for universal circuit variant for queries with aggregation operations
+    #[allow(clippy::too_many_arguments)]
     pub fn new_query_with_agg(
         column_values: &[U256],
         column_ids: &[u64],
@@ -883,13 +884,13 @@ where
         min_query: U256,
         max_query: U256,
         results: &ResultStructure,
-        agg_ops_ids: &[usize],
+        agg_ops_ids: &[u64],
     ) -> Result<Self> {
         Ok(CircuitInput::QueryWithAgg(
             UniversalQueryCircuitInputs::new(
                 column_values,
                 column_ids
-                    .into_iter()
+                    .iter()
                     .map(|id| (*id as usize).to_field())
                     .collect_vec()
                     .as_slice(),
@@ -900,14 +901,15 @@ where
                 max_query,
                 results,
                 agg_ops_ids
-                    .into_iter()
-                    .map(|id| id.to_field())
+                    .iter()
+                    .map(|id| (*id as usize).to_field())
                     .collect_vec()
                     .as_slice(),
             )?,
         ))
     }
     /// Provide input values for universal circuit variant for queries without aggregation operations
+    #[allow(clippy::too_many_arguments)]
     pub fn new_query_no_agg(
         column_values: &[U256],
         column_ids: &[u64],
@@ -922,7 +924,7 @@ where
         Ok(CircuitInput::QueryNoAgg(UniversalQueryCircuitInputs::new(
             column_values,
             column_ids
-                .into_iter()
+                .iter()
                 .map(|id| (*id as usize).to_field())
                 .collect_vec()
                 .as_slice(),
@@ -933,7 +935,7 @@ where
             max_query,
             results,
             output_ids
-                .into_iter()
+                .iter()
                 .map(|id| (*id as usize).to_field())
                 .collect_vec()
                 .as_slice(),
@@ -951,7 +953,7 @@ where
         column_ids: &[u64],
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
-        output_ids: &[usize],
+        output_ids: &[u64],
     ) -> Result<ComputationalHash> {
         let mut cache = ComputationalHashCache::<MAX_NUM_COLUMNS>::new();
         let column_ids = column_ids
@@ -971,7 +973,7 @@ where
             &results.output_items,
             output_ids
                 .iter()
-                .map(|id| id.to_field())
+                .map(|id| (*id as usize).to_field())
                 .collect_vec()
                 .as_slice(),
         )
@@ -1258,7 +1260,7 @@ mod tests {
             &results,
             output_ops
                 .iter()
-                .map(|op| op.to_canonical_u64() as usize)
+                .map(|op| op.to_canonical_u64())
                 .collect_vec()
                 .as_slice(),
         )
@@ -1338,7 +1340,7 @@ mod tests {
             &results,
             output_ops
                 .iter()
-                .map(|op| op.to_canonical_u64() as usize)
+                .map(|op| op.to_canonical_u64())
                 .collect_vec()
                 .as_slice(),
         )
@@ -1699,7 +1701,7 @@ mod tests {
             &results,
             output_ids
                 .iter()
-                .map(|id| id.to_canonical_u64() as usize)
+                .map(|id| id.to_canonical_u64())
                 .collect_vec()
                 .as_slice(),
         )
