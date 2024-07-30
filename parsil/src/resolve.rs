@@ -550,6 +550,7 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
     }
 }
 
+/// Convert a query so that it can be executed on a ryhope-generated db.
 pub fn resolve<C: RootContextProvider>(q: &Query, context: C) -> Result<Vec<Symbol>> {
     let mut converted_query = q.clone();
     let mut resolver = Resolver::new(context);

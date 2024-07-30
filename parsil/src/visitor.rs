@@ -15,7 +15,7 @@ use sqlparser::ast::{
 /// Example:
 ///
 /// ```ignore
-/// visit_for!(Query)
+/// visit_for!(Query Statement)
 /// ```
 ///
 /// will expand to:
@@ -27,45 +27,55 @@ use sqlparser::ast::{
 /// fn post_query(&mut self, query: &mut Query) -> Result<()> {
 ///     Ok(())
 /// }
+/// fn pre_statement(&mut self, statement: &mut Statement) -> Result<()> {
+///     Ok(())
+/// }
+/// fn post_statement(&mut self, statement: &mut Statement) -> Result<()> {
+///     Ok(())
+/// }
 /// ```
 macro_rules! visit_for {
-    ($type: ident) => {
-        camelpaste::item! {
-            #[allow(unused)]
-            fn [<pre_ $type:snake>](&mut self, [<$type:snake>]: &mut $type) -> Result<()> {
-                Ok(())
-            }
+    ( $( $type: ident )* ) => {
+        $(
+            camelpaste::item! {
+                #[allow(unused)]
+                fn [<pre_ $type:snake>](&mut self, [<$type:snake>]: &mut $type) -> Result<()> {
+                    Ok(())
+                }
 
-            #[allow(unused)]
-            fn [<post_ $type:snake>](&mut self, [<$type:snake>]: &mut $type) -> Result<()> {
-                Ok(())
+                #[allow(unused)]
+                fn [<post_ $type:snake>](&mut self, [<$type:snake>]: &mut $type) -> Result<()> {
+                    Ok(())
+                }
             }
-        }
+        )*
     };
 }
 
 pub trait AstPass {
-    visit_for!(BinaryOperator);
-    visit_for!(Distinct);
-    visit_for!(Expr);
-    visit_for!(FunctionArg);
-    visit_for!(FunctionArguments);
-    visit_for!(Ident);
-    visit_for!(Join);
-    visit_for!(JoinConstraint);
-    visit_for!(JoinOperator);
-    visit_for!(OrderBy);
-    visit_for!(OrderByExpr);
-    visit_for!(Query);
-    visit_for!(Select);
-    visit_for!(SelectItem);
-    visit_for!(SetExpr);
-    visit_for!(Statement);
-    visit_for!(TableFactor);
-    visit_for!(TableWithJoins);
-    visit_for!(UnaryOperator);
-    visit_for!(Values);
-    visit_for!(WindowSpec);
+    visit_for!(
+            BinaryOperator
+            Distinct
+            Expr
+            FunctionArg
+            FunctionArguments
+            Ident
+            Join
+            JoinConstraint
+            JoinOperator
+            OrderBy
+            OrderByExpr
+            Query
+            Select
+            SelectItem
+            SetExpr
+            Statement
+            TableFactor
+            TableWithJoins
+            UnaryOperator
+            Values
+            WindowSpec
+    );
 }
 
 pub trait Visit<P: AstPass> {
