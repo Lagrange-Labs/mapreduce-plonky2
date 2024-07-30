@@ -64,9 +64,9 @@ impl TestCase {
     pub(crate) async fn new_local_simple_contract<P: ProofStorage>(
         ctx: &TestContext<P>,
     ) -> Result<Vec<Self>> {
-        let single = Self::single_value_test_case(ctx).await?;
-        //let mapping = Self::mapping_test_case(ctx).await?;
-        Ok(vec![single])
+        //let single = Self::single_value_test_case(ctx).await?;
+        let mapping = Self::mapping_test_case(ctx).await?;
+        Ok(vec![mapping])
     }
 
     pub(crate) async fn single_value_test_case<P: ProofStorage>(
