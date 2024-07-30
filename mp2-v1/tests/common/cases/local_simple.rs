@@ -499,7 +499,8 @@ impl TestCase {
             // NOTE 1: The first part is just trying to construct the right input to simulate any
             // changes on a mapping. This is mostly irrelevant for dist system but needs to
             // manually construct our test cases here. The second part is more interesting as it looks at "what to do
-            // when receiving an update from scrapper".
+            // when receiving an update from scrapper". The core of the function is in
+            // `from_mapping_to_table_update`
             //
             // NOTE 2: Thhis implementation tries to emulate as much as possible what happens in dist
             // system. TO compute the set of updates, it first simulate an update on the contract
@@ -540,13 +541,12 @@ impl TestCase {
                         // we just want to delete any row
                         // we dont care about the value here.
                         vec![MappingUpdate::Deletion(
-                            U256::from_be_slice(&mkey),
+                            U256::from_be_slice(mkey),
                             random_u256(),
                         )]
                     }
                     ChangeType::Update(u) => {
-                        let query =
-                            ProofQuery::new_mapping_slot(address.clone(), slot, mkey.to_owned());
+                        let query = ProofQuery::new_mapping_slot(*address, slot, mkey.to_owned());
                         let response = ctx
                             .query_mpt_proof(
                                 &query,
@@ -607,7 +607,6 @@ impl TestCase {
                     }
                 };
 
-                let previous_entries = self.current_mapping_entries(ctx).await;
                 self.apply_update_to_contract(
                     ctx,
                     &UpdateSimpleStorage::Mapping(mapping_updates.clone()),
@@ -617,66 +616,7 @@ impl TestCase {
                 // NOTE HERE is the interesting bit for dist system as this is the logic to execute
                 // on receiving updates from scapper. This only needs to have the relevant
                 // information from update and it will translate that to changes in the tree.
-                for mapping_change in mapping_updates {
-                    let _ = match mapping_change {
-                        MappingUpdate::Deletion(mkey, mvalue) => {
-                            // find the associated row key tree to that value
-                            // HERE: there are multiple possibilities:
-                            // * search for the entry at the previous block instead
-                            // * passing inside the deletion the value deleted as well, so we can
-                            // reconstruct the row key
-                            // * or have this extra list of mapping keys
-                            let entry = UniqueMappingEntry::from((mkey, mvalue));
-                            vec![TableRowUpdate::Deletion(entry.to_row_key(&index_type))]
-                        }
-                        MappingUpdate::Insertion(mkey, mvalue) => {
-                            // we transform the mapping entry into the "table notion" of row
-                            let entry = UniqueMappingEntry::from((mkey, mvalue));
-                            let (cells, index) = entry.to_update(&index_type, slot as u8, address);
-                            vec![TableRowUpdate::Insertion(cells, index)]
-                        }
-                        MappingUpdate::Update(mkey, old_value, mvalue) => {
-                            // TRICKY: here we must _find_ the current mapping entry
-                            // being targeted to transform it to the table notion
-                            // if the secondary index is the mapping value, that means
-                            // we need to delete a row and insert a new row
-                            // If the secondary index is the mapping key, then it's easy,
-                            // it's a simple change in the row.
-                            let previous_entry = UniqueMappingEntry::from((mkey, old_value));
-                            let previous_row_key = previous_entry.to_row_key(&index_type);
-                            let previous_table_value =
-                                previous_entry.to_table_row_value(&index_type, slot as u8, address);
-                            let new_entry = UniqueMappingEntry::from((mkey, mvalue));
-                            match index_type {
-                                MappingIndex::Key(_) => {
-                                    // update the value, key == secondary index so it's a regular
-                                    // update
-                                    let mut cell = previous_table_value.current_cells[0].clone();
-                                    cell.value = mvalue;
-                                    let cells_update = CellsUpdate {
-                                        previous_row_key: previous_row_key.clone(),
-                                        new_row_key: previous_row_key,
-                                        updated_cells: vec![cell],
-                                    };
-                                    vec![TableRowUpdate::Update(cells_update)]
-                                }
-                                MappingIndex::Value(_) => {
-                                    // here we need to delete the previous entry
-                                    // then to insert a new one
-                                    let key_to_delete: RowTreeKey =
-                                        previous_table_value.current_secondary.into();
-                                    let (cells, index) =
-                                        new_entry.to_update(&index_type, slot as u8, address);
-                                    vec![
-                                        TableRowUpdate::Deletion(key_to_delete),
-                                        TableRowUpdate::Insertion(cells, index),
-                                    ]
-                                }
-                            }
-                        }
-                    };
-                }
-                vec![]
+                self.mapping_to_table_update(mapping_updates, index_type, slot as u8)
             }
             TableSourceSlot::SingleValues(_) => {
                 // we can take the first one since we're asking for single value and there is only
@@ -728,7 +668,9 @@ impl TestCase {
     ) -> Vec<TableRowUpdate> {
         match self.source {
             TableSourceSlot::Mapping((ref mut mapping, _)) => {
-                let update = [
+                let index = mapping.index.clone();
+                let slot = mapping.slot.clone();
+                let init_state = [
                     (
                         U256::from(10),
                         Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
@@ -745,37 +687,23 @@ impl TestCase {
                 ];
                 // saving the keys we are tracking in the mapping
                 mapping.mapping_keys.extend(
-                    update
+                    init_state
                         .iter()
                         .map(|u| u.0.to_be_bytes_trimmed_vec())
                         .collect::<Vec<_>>(),
                 );
+                let mapping_updates = init_state
+                    .iter()
+                    .map(|u| MappingUpdate::Insertion(u.0.clone(), u.1.into_word().into()))
+                    .collect::<Vec<_>>();
 
                 self.apply_update_to_contract(
                     ctx,
-                    &UpdateSimpleStorage::Mapping(
-                        update
-                            .iter()
-                            .map(|(a, b)| {
-                                MappingUpdate::Insertion(a.to_owned(), b.into_word().into())
-                            })
-                            .collect::<Vec<_>>(),
-                    ),
+                    &UpdateSimpleStorage::Mapping(mapping_updates.clone()),
                 )
                 .await
                 .unwrap();
-                // Note it's ok to call that here since self.source.mapping have been updated with
-                // all the keys to track. In dist system, this thing should be done by QE <->
-                // Scrapper communication.
-                let new_table_values = self.current_table_row_values(ctx).await;
-                // Specially for initialization it's ok to compute update as the diff between the
-                // two but for general mapping update, it's not as trivial.
-                let updates = new_table_values
-                    .into_iter()
-                    .flat_map(|row| TableRowValues::default().compute_update(&row))
-                    .collect::<Vec<_>>();
-
-                updates
+                self.mapping_to_table_update(mapping_updates, index, slot)
             }
             TableSourceSlot::SingleValues(_) => {
                 let contract_update = SimpleSingleValue {
@@ -876,12 +804,98 @@ impl TestCase {
                         rest_cells.push(cell);
                     }
                 }
-                return vec![TableRowValues {
+                vec![TableRowValues {
                     current_cells: rest_cells,
                     current_secondary: secondary_cell.unwrap(),
-                }];
+                }]
             }
         }
+    }
+
+    fn mapping_to_table_update(
+        &self,
+        updates: Vec<MappingUpdate>,
+        index: MappingIndex,
+        slot: u8,
+    ) -> Vec<TableRowUpdate> {
+        updates
+            .iter()
+            .flat_map(|mapping_change| {
+                match mapping_change {
+                    MappingUpdate::Deletion(mkey, mvalue) => {
+                        // find the associated row key tree to that value
+                        // HERE: there are multiple possibilities:
+                        // * search for the entry at the previous block instead
+                        // * passing inside the deletion the value deleted as well, so we can
+                        // reconstruct the row key
+                        // * or have this extra list of mapping keys
+                        let entry = UniqueMappingEntry::new(mkey, mvalue);
+                        vec![TableRowUpdate::Deletion(entry.to_row_key(&index))]
+                    }
+                    MappingUpdate::Insertion(mkey, mvalue) => {
+                        // we transform the mapping entry into the "table notion" of row
+                        let entry = UniqueMappingEntry::new(mkey, mvalue);
+                        let (cells, index) =
+                            entry.to_update(&index, slot, &self.contract_address, None);
+                        vec![TableRowUpdate::Insertion(cells, index)]
+                    }
+                    MappingUpdate::Update(mkey, old_value, mvalue) => {
+                        // TRICKY: here we must _find_ the current mapping entry
+                        // being targeted to transform it to the table notion
+                        // if the secondary index is the mapping value, that means
+                        // we need to delete a row and insert a new row
+                        // If the secondary index is the mapping key, then it's easy,
+                        // it's a simple change in the row.
+                        let previous_entry = UniqueMappingEntry::new(mkey, old_value);
+                        let previous_row_key = previous_entry.to_row_key(&index);
+                        let previous_table_value =
+                            previous_entry.to_table_row_value(&index, slot, &self.contract_address);
+                        let new_entry = UniqueMappingEntry::new(mkey, mvalue);
+                        match index {
+                            MappingIndex::Key(_) => {
+                                // update the value, key == secondary index so it's a regular
+                                // update
+                                let mut cell = previous_table_value.current_cells[0].clone();
+                                cell.value = *mvalue;
+                                let cells_update = CellsUpdate {
+                                    previous_row_key: previous_row_key.clone(),
+                                    new_row_key: previous_row_key,
+                                    updated_cells: vec![cell],
+                                };
+                                vec![TableRowUpdate::Update(cells_update)]
+                            }
+                            MappingIndex::Value(_) => {
+                                // here we need to delete the previous entry
+                                // then to insert a new one
+                                let key_to_delete: RowTreeKey =
+                                    previous_table_value.current_secondary.into();
+                                let (cells, index) = new_entry.to_update(
+                                    &index,
+                                    slot,
+                                    &self.contract_address,
+                                    // NOTE: here we provide the previous key such that we can
+                                    // reconstruct the cells tree as it was before and then apply
+                                    // the update and put it in a new row. Otherwise we don't know
+                                    // the update plan since we don't have a base tree to deal
+                                    // with.
+                                    // Anther more important reason maybe is that in general, for
+                                    // multiple columns values, we need to know the previous
+                                    // columns value and "merge" it with the update to get the
+                                    // updated new row. For mapping, not very relevant since there
+                                    // is only one cell since only two columns (outside of the
+                                    // block)
+                                    Some(key_to_delete.clone()),
+                                );
+                                vec![
+                                    TableRowUpdate::Deletion(key_to_delete),
+                                    TableRowUpdate::Insertion(cells, index),
+                                ]
+                            }
+                        }
+                    }
+                }
+            })
+            .collect::<Vec<_>>()
     }
 }
 

@@ -43,15 +43,22 @@ enum MappingIndex {
 }
 
 impl UniqueMappingEntry {
+    pub fn new(k: &U256, v: &U256) -> Self {
+        Self {
+            key: k.clone(),
+            value: v.clone(),
+        }
+    }
     pub fn to_update(
         &self,
         index: &MappingIndex,
         slot: u8,
         contract: &Address,
+        previous_row_key: Option<RowTreeKey>,
     ) -> (CellsUpdate, SecondaryIndexCell) {
         let row_value = self.to_table_row_value(&index, slot, &contract);
         let cells_update = CellsUpdate {
-            previous_row_key: Default::default(),
+            previous_row_key: previous_row_key.unwrap_or_default(),
             new_row_key: self.to_row_key(index),
             updated_cells: row_value.current_cells,
         };
@@ -69,21 +76,21 @@ impl UniqueMappingEntry {
         // we construct the two associated cells in the table. One of them will become
         // a SecondaryIndexCell depending on the secondary index type we have chosen
         // for this mapping.
-        let extract_key = MappingIndex::Key(identifier_for_mapping_key_column(slot, &contract));
+        let extract_key = MappingIndex::Key(identifier_for_mapping_key_column(slot, contract));
         let key_cell = self.to_cell(extract_key);
-        let extract_key = MappingIndex::Key(identifier_for_mapping_value_column(slot, &contract));
+        let extract_key = MappingIndex::Value(identifier_for_mapping_value_column(slot, contract));
         let value_cell = self.to_cell(extract_key);
         // then we look at which one is must be the secondary cell
         let (secondary, rest) = match index {
-            // by definition, mapping key is unique, so there is no need for a specific
-            // nonce for the tree in that case
             MappingIndex::Key(_) => (
+                // by definition, mapping key is unique, so there is no need for a specific
+                // nonce for the tree in that case
                 SecondaryIndexCell::new_from(key_cell, U256::from(0)),
                 value_cell,
             ),
-            // Here we take the tuple (value,key) as uniquely identifying a row in the
-            // table
             MappingIndex::Value(_) => {
+                // Here we take the tuple (value,key) as uniquely identifying a row in the
+                // table
                 (SecondaryIndexCell::new_from(value_cell, self.key), key_cell)
             }
         };
@@ -97,13 +104,13 @@ impl UniqueMappingEntry {
     // we want to extract
     fn to_cell(&self, index: MappingIndex) -> Cell {
         match index {
-            MappingIndex::Value(id) => Cell {
-                id,
-                value: self.value,
-            },
             MappingIndex::Key(id) => Cell {
                 id,
                 value: self.key,
+            },
+            MappingIndex::Value(id) => Cell {
+                id,
+                value: self.value,
             },
         }
     }
@@ -111,10 +118,12 @@ impl UniqueMappingEntry {
     fn to_row_key(&self, index: &MappingIndex) -> RowTreeKey {
         match index {
             MappingIndex::Key(_) => RowTreeKey {
+                // tree key indexed by mapping key
                 value: self.key.into(),
                 rest: self.value.to_nonce(),
             },
             MappingIndex::Value(_) => RowTreeKey {
+                // tree key indexed by mapping value
                 value: self.value.into(),
                 rest: self.key.to_nonce(),
             },
