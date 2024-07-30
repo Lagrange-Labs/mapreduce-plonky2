@@ -3,12 +3,12 @@ members = [
   "gnark-utils",
   # "groth16-framework", // temporary move out of workspace since we haven't yet v1 circuits to be proven with groth16
   "mp2-common",
-  "mp2-test",
+#  "mp2-test",
   "mp2-v1",
   "parsil",
   "ryhope",
   "recursion-framework",
-  "verifiable-db",
+#  "verifiable-db"
 ]
 resolver = "2"
 

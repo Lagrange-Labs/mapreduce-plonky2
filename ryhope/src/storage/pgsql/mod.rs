@@ -11,9 +11,14 @@ use super::{FromSettings, TransactionalStorage, TreeStorage};
 use anyhow::*;
 use itertools::Itertools;
 use log::*;
-use postgres::{Client, NoTls};
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, fmt::Debug, hash::Hash, rc::Rc};
+use async_trait::async_trait;
+use bb8_postgres::PostgresConnectionManager;
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use tokio_postgres::NoTls;
+use crate::storage::pgsql::storages::DBPool;
 
 mod storages;
 
@@ -78,15 +83,19 @@ impl ToFromBytea for usize {
 }
 
 /// Characterize a type that may be used as node payload.
+#[async_trait]
 pub trait PayloadInDb: Clone + Sync + Debug + Serialize + for<'a> Deserialize<'a> {}
 impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> PayloadInDb for T {}
 
 /// If it exists, remove the given table from the current database.
-fn delete_storage_table(db: &mut Client, table: &str) -> Result<()> {
-    db.execute(&format!("DROP TABLE IF EXISTS {}", table), &[])
+async fn delete_storage_table(db: DBPool, table: &str) -> Result<()> {
+    let connection = db.get().await.unwrap();
+    connection.execute(&format!("DROP TABLE IF EXISTS {}", table), &[])
+        .await
         .with_context(|| format!("unable to delete table `{table}`"))
         .map(|_| ())?;
-    db.execute(&format!("DROP TABLE IF EXISTS {}_meta", table), &[])
+    connection.execute(&format!("DROP TABLE IF EXISTS {}_meta", table), &[])
+        .await
         .with_context(|| format!("unable to delete table `{table}`"))
         .map(|_| ())
 }
@@ -110,7 +119,7 @@ impl<T: Clone> CachedValue<T> {
         }
     }
 }
-impl<T: Clone + Debug> std::fmt::Debug for CachedValue<T> {
+impl<T: Clone + Debug> Debug for CachedValue<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CachedValue::Read(r) => write!(f, "R:{:?}", r),
@@ -128,16 +137,17 @@ pub struct SqlStorageSettings {
     pub table: String,
 }
 
-pub struct PgsqlStorage<T: TreeTopology, V: PayloadInDb>
+pub struct PgsqlStorage<T: TreeTopology, V>
 where
+    V: PayloadInDb + Send + Sync,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
-    NodeConnector: DbConnector<T::Key, T::Node>,
+    NodeConnector: DbConnector<T::Key, T::Node>
 {
     /// The table in which this tree will be stored
     table: String,
     /// A connection to the PostgreSQL server
-    db: Rc<RefCell<Client>>,
+    db: DBPool,
     /// The current epoch
     epoch: i64,
     /// Tree state information
@@ -150,44 +160,52 @@ where
     in_tx: bool,
 }
 
-impl<T: TreeTopology, V: PayloadInDb> FromSettings<T::State> for PgsqlStorage<T, V>
+#[async_trait]
+impl<T, V> FromSettings<T::State> for PgsqlStorage<T, V>
 where
+    T: TreeTopology,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
+    T::State: Sync + Clone,
+    V: PayloadInDb + Send + Sync,
     NodeConnector: DbConnector<T::Key, T::Node>,
 {
     type Settings = SqlStorageSettings;
 
-    fn from_settings(
+    async fn from_settings(
         init_settings: InitSettings<T::State>,
         storage_settings: Self::Settings,
     ) -> Result<Self> {
         match init_settings {
             InitSettings::MustExist => {
-                Self::load_existing(&storage_settings.db_url, storage_settings.table)
+                Self::load_existing(&storage_settings.db_url, storage_settings.table).await
             }
             InitSettings::MustNotExist(tree_state) => {
-                Self::create_new(&storage_settings.db_url, storage_settings.table, tree_state)
+                Self::create_new(&storage_settings.db_url, storage_settings.table, tree_state).await
             }
             InitSettings::Reset(tree_settings) => Self::reset(
                 &storage_settings.db_url,
                 storage_settings.table,
                 tree_settings,
-            ),
+            ).await,
         }
     }
 }
 
 /// Return, if it exists, the current epoch for a given table pair.
-fn fetch_current_epoch(db: &mut Client, table: &str) -> Result<i64> {
-    db.query_one(&format!("SELECT MAX(valid_until) FROM {table}_meta",), &[])
+async fn fetch_current_epoch(db: DBPool, table: &str) -> Result<i64> {
+    let connection = db.get().await.unwrap();
+    connection.query_one(&format!("SELECT MAX(valid_until) FROM {table}_meta",), &[])
+        .await
         .map(|r| r.get(0))
         .context("while fetching current epoch")
 }
 
-impl<T: TreeTopology, V: PayloadInDb> PgsqlStorage<T, V>
+impl<T, V> PgsqlStorage<T, V>
 where
+    T: TreeTopology,
     T::Key: ToFromBytea,
+    V: PayloadInDb + Send,
     T::Node: Sync + Clone,
     T::State: Sync + Clone,
     NodeConnector: DbConnector<T::Key, T::Node>,
@@ -195,27 +213,26 @@ where
     /// Create a new tree storage and its associated table in the specified table.
     ///
     /// Will fail if the table already exists.
-    pub fn create_new(db_url: &str, table: String, tree_state: T::State) -> Result<Self> {
+    pub async fn create_new(db_url: &str, table: String, tree_state: T::State) -> Result<Self> {
         debug!("connecting to {db_url}...");
-        let mut db = Client::connect(db_url, NoTls)?;
+        let db_pool = Self::init_db_pool(db_url).await?;
         debug!("connection successful.");
 
         ensure!(
-            fetch_current_epoch(&mut db, &table).is_err(),
+            fetch_current_epoch(db_pool.clone(), &table).await.is_err(),
             "table `{table}` already exists"
         );
-        Self::create_storage_table(&mut db, &table)?;
+        Self::create_storage_table(db_pool.clone(), &table).await?;
 
-        let db = Rc::new(RefCell::new(db));
         let epoch = 0;
         let r = Self {
             table: table.clone(),
-            db: db.clone(),
+            db: db_pool.clone(),
             epoch,
             in_tx: false,
-            nodes: CachedDbKvStore::new(epoch, table.clone(), db.clone()),
-            state: CachedDbStore::with_value(epoch, table.clone(), db.clone(), tree_state),
-            data: CachedDbKvStore::new(epoch, table.clone(), db.clone()),
+            nodes: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
+            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state),
+            data: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
         };
         Ok(r)
     }
@@ -223,24 +240,23 @@ where
     /// Initialize the storage backend from an existing table in database.
     ///
     /// Fails if the specified table does not exist.
-    pub fn load_existing(db_url: &str, table: String) -> Result<Self> {
+    pub async fn load_existing(db_url: &str, table: String) -> Result<Self> {
         debug!("connecting to {db_url}...");
-        let mut db = Client::connect(db_url, NoTls)?;
+        let db_pool = Self::init_db_pool(db_url).await?;
         debug!("connection successful.");
 
-        let latest_epoch = fetch_current_epoch(&mut db, &table)
+        let latest_epoch = fetch_current_epoch(db_pool.clone(), &table)
+            .await
             .with_context(|| format!("table `{table}` does not exist"))?;
         info!("latest epoch is {latest_epoch}");
 
-        let db = Rc::new(RefCell::new(db));
-
         let r = Self {
             table: table.clone(),
-            db: db.clone(),
+            db: db_pool.clone(),
             epoch: latest_epoch,
-            state: CachedDbStore::new(latest_epoch, table.clone(), db.clone()),
-            nodes: CachedDbKvStore::new(latest_epoch, table.clone(), db.clone()),
-            data: CachedDbKvStore::new(latest_epoch, table.clone(), db.clone()),
+            state: CachedDbStore::new(latest_epoch, table.clone(), db_pool.clone()),
+            nodes: CachedDbKvStore::new(latest_epoch, table.clone(), db_pool.clone()),
+            data: CachedDbKvStore::new(latest_epoch, table.clone(), db_pool.clone()),
             in_tx: false,
         };
 
@@ -249,28 +265,41 @@ where
 
     /// Create a new tree storage and its associated table in the specified
     /// table, deleting it if it already exists.
-    pub fn reset(db_url: &str, table: String, tree_state: T::State) -> Result<Self> {
-        info!("connecting to {db_url}...");
-        let mut db = Client::connect(db_url, NoTls)?;
-        info!("connection successful.");
+    pub async fn reset(db_url: &str, table: String, tree_state: T::State) -> Result<Self> {
+        debug!("connecting to {db_url}...");
+        let db_pool = Self::init_db_pool(db_url).await?;
+        debug!("connection successful.");
 
-        delete_storage_table(&mut db, &table)?;
-        Self::create_storage_table(&mut db, &table)?;
-        let db = Rc::new(RefCell::new(db));
+        delete_storage_table(db_pool.clone(), &table).await?;
+        Self::create_storage_table(db_pool.clone(), &table).await?;
         let epoch = 0;
 
         let r = Self {
             table: table.clone(),
-            db: db.clone(),
+            db: db_pool.clone(),
             epoch,
-            state: CachedDbStore::with_value(epoch, table.clone(), db.clone(), tree_state),
-            nodes: CachedDbKvStore::new(epoch, table.clone(), db.clone()),
-            data: CachedDbKvStore::new(epoch, table.clone(), db.clone()),
+            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state),
+            nodes: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
+            data: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
             in_tx: false,
         };
 
         Ok(r)
     }
+
+    /// Initialize a DB pool.
+    pub async fn init_db_pool(db_url: &str) -> Result<DBPool> {
+        let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
+            .with_context(|| format!("while connecting to postgreSQL with `{}`", db_url))?;
+
+        let db_pool = DBPool::builder()
+            .build(db_manager)
+            .await
+            .context("while creating the db_pool")?;
+
+        Ok(db_pool)
+    }
+
 
     /// Create the tables required to store the a tree. For a given tree, two
     /// tables are required: the node table and the meta table. The node table,
@@ -295,7 +324,7 @@ where
     ///     the tree at the given epoch range.
     ///
     /// Will fail if the CREATE is not valid (e.g. the table already exists)
-    fn create_storage_table(db: &mut Client, table: &str) -> Result<()> {
+    async fn create_storage_table(db: DBPool, table: &str) -> Result<()> {
         let node_columns = <NodeConnector as DbConnector<T::Key, T::Node>>::columns()
             .iter()
             .chain(<PayloadConnector as DbConnector<T::Key, V>>::columns().iter())
@@ -303,7 +332,8 @@ where
             .join("\n");
 
         // The main table will store all the tree nodes and their payload.
-        db.execute(
+        let connection = db.get().await.unwrap();
+        connection.execute(
             &format!(
                 "CREATE TABLE {table} (
                    key          BYTEA NOT NULL,
@@ -313,12 +343,12 @@ where
                    UNIQUE (key, valid_from))"
             ),
             &[],
-        )
+        ).await
         .map(|_| ())
         .with_context(|| format!("unable to create table `{table}`"))?;
 
         // The meta table will store everything related to the tree itself.
-        db.execute(
+        connection.execute(
             &format!(
                 "CREATE TABLE {table}_meta (
                    valid_from   BIGINT NOT NULL UNIQUE,
@@ -327,11 +357,12 @@ where
             ),
             &[],
         )
+            .await
         .map(|_| ())
         .with_context(|| format!("unable to create table `{table}_meta`"))
     }
 
-    fn update_all(&self, db_tx: &mut postgres::Transaction) -> Result<()> {
+    async fn update_all(&self, db_tx: &tokio_postgres::Transaction<'_>) -> Result<()> {
         let update_all = format!(
             "UPDATE {} SET valid_until=$1 WHERE valid_until=$2",
             self.table
@@ -339,14 +370,15 @@ where
 
         db_tx
             .query(&update_all, &[&(&self.epoch + 1), &self.epoch])
+            .await
             .context("while updating timestamps")
             .map(|_| ())
     }
 
     /// Roll-back to `self.epoch` the lifetime of a row having already been extended to `self.epoch + 1`.
-    fn rollback_one_row(
+    async fn rollback_one_row(
         &self,
-        db_tx: &mut postgres::Transaction,
+        db_tx: &tokio_postgres::Transaction<'_>,
         key: &T::Key,
     ) -> Result<Option<(T::Node, V)>> {
         let rows = db_tx.query(
@@ -357,7 +389,7 @@ where
                 self.epoch + 1
             ),
             &[&key.to_bytea()],
-        )?;
+        ).await?;
 
         Ok(if rows.is_empty() {
             // The row may not exist
@@ -373,16 +405,19 @@ where
     }
 
     /// Birth a new node at the new epoch
-    fn new_node(&self, db_tx: &mut postgres::Transaction, k: &T::Key, n: T::Node) -> Result<()> {
-        NodeConnector::insert_in_tx(db_tx, &self.table, k, self.epoch + 1, n)
+    async fn new_node(&self, db_tx: &tokio_postgres::Transaction<'_>, k: &T::Key, n: T::Node) -> Result<()> {
+        NodeConnector::insert_in_tx(db_tx, &self.table, k, self.epoch + 1, n).await
     }
 }
 
+
+#[async_trait]
 impl<T: TreeTopology, V: PayloadInDb> TransactionalStorage for PgsqlStorage<T, V>
 where
+    V: Send + Sync,
     T::Key: ToFromBytea,
-    T::Node: Sync + Clone,
-    T::State: Sync + Clone,
+    T::Node: Send + Sync + Clone,
+    T::State: Send + Sync + Clone,
     NodeConnector: DbConnector<T::Key, T::Node>,
 {
     fn start_transaction(&mut self) -> Result<()> {
@@ -392,7 +427,7 @@ where
         Ok(())
     }
 
-    fn commit_transaction(&mut self) -> Result<()> {
+    async fn commit_transaction(&mut self) -> Result<()> {
         ensure!(self.in_tx, "not in a transaction");
 
         // The putative new stamps if everything goes well
@@ -401,42 +436,49 @@ where
         {
             // Open a PgSQL transaction, as we want the batch to be atomically
             // successful or failed.
-            let mut db = self.db.borrow_mut();
-            let mut db_tx = db.transaction().expect("unable to create DB transaction");
+            let mut connection = self.db.get().await.unwrap();
+            let mut db_tx = connection.transaction().await.expect("unable to create DB transaction");
 
             // Pre-emptively extend by 1 the lifetime of the currently alive rows;
             // those that should not be alive in the next epoch will be rolled back
             // later.
-            self.update_all(&mut db_tx)?;
+            self.update_all(&mut db_tx).await?;
 
             // First, handle the corner case of nodes whose payload only have been
             // updated, that will be the only ones appearing in the data cache but
             // not in the node cache.
             // Some read may have been performed outside of a transaction; just ignore them.
-            for (k, v) in self
+
+            let mut not_in_nodes_cache = vec![];
+            let nodes_cache = self
                 .data
                 .cache
-                .borrow()
-                .iter()
-                .filter(|(k, _)| !self.nodes.cache.borrow().contains_key(k))
-            {
+                .read()
+                .await;
+            for (k, v) in nodes_cache.iter() {
+                if !self.nodes.cache.read().await.contains_key(k) {
+                    not_in_nodes_cache.push((k, v));
+                }
+            }
+
+            for (k, v) in not_in_nodes_cache {
                 if let Some(CachedValue::Written(v)) = v {
                     // rollback the old value if any
-                    let previous_payload = self.rollback_one_row(&mut db_tx, k)?.unwrap();
+                    let previous_payload = self.rollback_one_row(&mut db_tx, k).await?.unwrap();
                     // write the new value
-                    self.new_node(&mut db_tx, k, previous_payload.0)?;
+                    self.new_node(&mut db_tx, k, previous_payload.0).await?;
                     PayloadConnector::set_at_in_tx(
                         &mut db_tx,
                         &self.table,
                         k,
                         self.epoch + 1,
                         v.to_owned(),
-                    )?;
+                    ).await?;
                 }
             }
 
             // Then generically process all the other touched nodes.
-            for (k, v) in self.nodes.cache.borrow().iter() {
+            for (k, v) in self.nodes.cache.read().await.iter() {
                 match v {
                     Some(cv) => match cv {
                         // read-only accesses during this transaction, nothing to do
@@ -445,17 +487,18 @@ where
                         // duplicated/updated and rolled-back
                         CachedValue::Written(node) => {
                             // rollback the old value if any
-                            let previous_payload = self.rollback_one_row(&mut db_tx, k)?;
+                            let previous_payload = self.rollback_one_row(&mut db_tx, k).await?;
                             let old_payload = previous_payload.as_ref().map(|x| x.1.clone());
                             let maybe_new_payload = self
                                 .data
                                 .cache
-                                .borrow()
+                                .read()
+                                .await
                                 .get(k)
                                 .and_then(|v| v.as_ref().map(|cv| cv.value().to_owned()));
 
                             // insert the new row representing the new state of the key...
-                            self.new_node(&mut db_tx, k, node.to_owned())?;
+                            self.new_node(&mut db_tx, k, node.to_owned()).await?;
 
                             // ... and carry over its associated payload and hash.
 
@@ -473,32 +516,35 @@ where
                                 k,
                                 new_epoch,
                                 payload,
-                            )?;
+                            ).await?;
                         }
                     },
                     // k has been deleted; simply roll-back the lifetime of its row.
                     None => {
-                        self.rollback_one_row(&mut db_tx, k)?;
+                        self.rollback_one_row(&db_tx, k).await?;
                     }
                 }
             }
 
             // Atomically execute the PgSQL transaction
-            db_tx.commit().context("while committing transaction")?;
+            db_tx.commit().await.context("while committing transaction")?;
         }
 
         // Prepare the internal state for a new transaction
         self.in_tx = false;
         self.epoch = new_epoch;
-        self.state.commit_transaction()?;
+        self.state.commit_transaction().await?;
         self.data.new_epoch();
         self.nodes.new_epoch();
         Ok(())
     }
 }
 
-impl<T: TreeTopology, V: PayloadInDb> TreeStorage<T> for PgsqlStorage<T, V>
+#[async_trait]
+impl<T, V> TreeStorage<T> for PgsqlStorage<T, V>
 where
+    T: TreeTopology,
+    V: PayloadInDb + Send,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     T::State: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
@@ -526,23 +572,25 @@ where
         &mut self.nodes
     }
 
-    fn born_at(&self, epoch: Epoch) -> Vec<T::Key> {
-        self.db
-            .borrow_mut()
+    async fn born_at(&self, epoch: Epoch) -> Vec<T::Key> {
+        let connection = self.db.get().await.unwrap();
+        connection
             .query(
                 &format!("SELECT key FROM {} WHERE valid_from=$1", self.table),
                 &[&epoch],
             )
+            .await
             .expect("while fetching newborns from database")
             .iter()
             .map(|r| T::Key::from_bytea(r.get::<_, Vec<u8>>(0)))
             .collect::<Vec<_>>()
     }
 
-    fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
-        self.state.rollback_to(epoch)?;
-        self.nodes.rollback_to(epoch)?;
-        self.data.rollback_to(epoch)?;
+    async fn rollback_to(&mut self, epoch: Epoch) -> Result<()>
+    {
+        self.state.rollback_to(epoch).await?;
+        self.nodes.rollback_to(epoch).await?;
+        self.data.rollback_to(epoch).await?;
         self.epoch = epoch;
 
         // Ensure epochs coherence
@@ -551,11 +599,15 @@ where
         assert_eq!(self.state.current_epoch(), self.epoch);
 
         Ok(())
+
     }
 }
 
-impl<T: TreeTopology, V: PayloadInDb> PayloadStorage<T::Key, V> for PgsqlStorage<T, V>
+#[async_trait]
+impl<T, V> PayloadStorage<T::Key, V> for PgsqlStorage<T, V>
 where
+    T: TreeTopology,
+    V: PayloadInDb + Send,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     T::State: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
