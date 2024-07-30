@@ -2,14 +2,19 @@
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
 use anyhow::{bail, Result};
+use itertools::Unique;
 use log::{debug, info};
-use mp2_v1::values_extraction::{identifier_block_column, identifier_single_var_column};
+use mp2_v1::values_extraction::{
+    identifier_block_column, identifier_for_mapping_key_column,
+    identifier_for_mapping_value_column, identifier_single_var_column,
+};
 use rand::{thread_rng, Rng};
 use ryhope::{storage::RoEpochKvStorage, tree::TreeTopology};
 use serde::Deserialize;
 
 use crate::common::{
-    bindings::simple::Simple,
+    bindings::simple::Simple::{self, MappingChange, MappingOperation},
+    cases::{random_address, random_u256, MappingIndex},
     celltree::{Cell, TreeCell},
     proof_storage::{BlockPrimaryIndex, ProofKey, ProofStorage},
     rowtree::{CellCollection, Row, RowTreeKey, SecondaryIndexCell},
@@ -22,7 +27,8 @@ use crate::common::{
 
 use super::{
     super::bindings::simple::Simple::SimpleInstance, ContractExtractionArgs, LengthExtractionArgs,
-    MappingKey, MappingValuesExtractionArgs, SingleValuesExtractionArgs, TableSourceSlot, TestCase,
+    MappingValuesExtractionArgs, SingleValuesExtractionArgs, TableSourceSlot, TestCase,
+    UniqueMappingEntry,
 };
 use alloy::{
     contract::private::{Network, Provider, Transport},
@@ -31,7 +37,7 @@ use alloy::{
     providers::ProviderBuilder,
 };
 use mp2_common::{
-    eth::{ProofQuery, StorageSlot},
+    eth::{left_pad32, ProofQuery, StorageSlot},
     proof::ProofWithVK,
     F,
 };
@@ -44,12 +50,6 @@ const INDEX_SLOT: u8 = 1;
 
 /// Test slot for mapping values extraction
 const MAPPING_SLOT: u8 = 4;
-
-/// Test mapping addresses (keys) for mapping values extraction
-const MAPPING_ADDRESSES: [&str; LENGTH_VALUE as usize] = [
-    "0x3bf5733f695b2527acc7bd4c5350e57acfd9fbb5",
-    "0x6cac7190535f4908d0524e7d55b3750376ea1ef7",
-];
 
 /// Test slot for length extraction
 const LENGTH_SLOT: u8 = 1;
@@ -64,6 +64,14 @@ impl TestCase {
     pub(crate) async fn new_local_simple_contract<P: ProofStorage>(
         ctx: &TestContext<P>,
     ) -> Result<Vec<Self>> {
+        let single = Self::single_value_test_case(ctx).await?;
+        let mapping = Self::mapping_test_case(ctx).await?;
+        Ok(vec![single])
+    }
+
+    pub(crate) async fn single_value_test_case<P: ProofStorage>(
+        ctx: &TestContext<P>,
+    ) -> Result<Self> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -76,6 +84,8 @@ impl TestCase {
             contract.address()
         );
         let contract_address = contract.address();
+        let index_genesis_block = ctx.block_number().await;
+
         let source = TableSourceSlot::SingleValues(SingleValuesExtractionArgs {
             slots: SINGLE_SLOTS.to_vec(),
         });
@@ -83,12 +93,8 @@ impl TestCase {
         // TODO: change sbbst such that it doesn't require this max . Though we still need the
         // correct shift.
         // 2 because 1 tx to deploy contract, another one to call it
-        // TODO WARNING: this won't work with mappings, needs refactor somewhere
         let indexing_genesis_block = ctx.block_number().await + 1;
-        let table_id = TableID::new(indexing_genesis_block, contract_address, &source.slots());
-        // simply a mapping we need keep around to make sure we always give the right update to the
-        // tree since it is not aware of the slots (this is blockchain specific info).
-        let mut mapping = HashMap::default();
+        let table_id = TableID::new(index_genesis_block, contract_address, &source.slots());
         // Defining the columns structure of the table from the source slots
         // This is depending on what is our data source, mappings and CSV both have their o
         // own way of defining their table.
@@ -108,7 +114,6 @@ impl TestCase {
                     _ if *slot == INDEX_SLOT => None,
                     _ => {
                         let identifier = identifier_single_var_column(*slot, contract_address);
-                        mapping.insert(*slot, identifier);
                         Some(TableColumn {
                             identifier,
                             index: IndexType::None,
@@ -117,36 +122,79 @@ impl TestCase {
                 })
                 .collect::<Vec<_>>(),
         };
-        mapping.insert(INDEX_SLOT, columns.secondary_column().identifier);
-        let single = Self {
-            slots_to_id: mapping,
+        Ok(Self {
             source: source.clone(),
             table: Table::new(indexing_genesis_block, table_id, columns),
             contract_address: *contract_address,
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
             },
-        };
-        //let mapping = Self {
-        //    contract_extraction: ContractExtractionArgs {
-        //        slot: StorageSlot::Simple(CONTRACT_SLOT),
-        //    },
-        //    contract_address: *contract_address,
-        //    source: TableSourceSlot::Mapping((
-        //        MappingValuesExtractionArgs {
-        //            slot: MAPPING_SLOT,
-        //            mapping_keys: test_mapping_keys(),
-        //        },
-        //        Some(LengthExtractionArgs {
-        //            slot: LENGTH_SLOT,
-        //            value: LENGTH_VALUE,
-        //        }),
-        //    )),
-        //};
+        })
+    }
 
-        // Right now only single values. Moving to mapping values in subsequent PR
-        //Ok(vec![single, mapping])
-        Ok(vec![single])
+    pub(crate) async fn mapping_test_case<P: ProofStorage>(ctx: &TestContext<P>) -> Result<Self> {
+        // Create a provider with the wallet for contract deployment and interaction.
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let contract = Simple::deploy(&provider).await.unwrap();
+        info!(
+            "Deployed Simple contract at address: {}",
+            contract.address()
+        );
+        let contract_address = contract.address();
+        let index_genesis_block = ctx.block_number().await;
+
+        let mapping_args = MappingValuesExtractionArgs {
+            slot: MAPPING_SLOT,
+            index: MappingIndex::Value(identifier_for_mapping_value_column(
+                MAPPING_SLOT,
+                contract_address,
+            )),
+            // at the beginning there is no mapping key inserted
+            // NOTE: This array is _one_ way to handle mapping updates. Another one could be that
+            // during updates, the scrapper gives the previous value and the new value for updates.
+            // That's really the main information missing that can avoid storing this array.
+            mapping_keys: vec![],
+        };
+
+        let source = TableSourceSlot::Mapping((
+            mapping_args,
+            Some(LengthExtractionArgs {
+                slot: LENGTH_SLOT,
+                value: LENGTH_VALUE,
+            }),
+        ));
+
+        let table_id = TableID::new(index_genesis_block, contract_address, &source.slots());
+        // Defining the columns structure of the table from the source slots
+        // This is depending on what is our data source, mappings and CSV both have their o
+        // own way of defining their table.
+        let columns = TableColumns {
+            primary: TableColumn {
+                identifier: identifier_block_column(),
+                index: IndexType::Primary,
+            },
+            secondary: TableColumn {
+                identifier: identifier_for_mapping_key_column(MAPPING_SLOT, contract_address),
+                index: IndexType::Secondary,
+            },
+            rest: vec![TableColumn {
+                identifier: identifier_for_mapping_value_column(MAPPING_SLOT, contract_address),
+                index: IndexType::None,
+            }],
+        };
+        let table = Table::new(index_genesis_block, table_id, columns);
+        Ok(Self {
+            contract_extraction: ContractExtractionArgs {
+                slot: StorageSlot::Simple(CONTRACT_SLOT),
+            },
+            contract_address: *contract_address,
+            source,
+            table,
+        })
     }
 
     pub async fn run<P: ProofStorage>(&mut self, ctx: &mut TestContext<P>) -> Result<()> {
@@ -167,7 +215,10 @@ impl TestCase {
             ctx.block_number().await
         );
 
-        let updates = vec![UpdateType::Rest, UpdateType::SecondaryIndex];
+        let updates = vec![
+            ChangeType::Update(UpdateType::Rest),
+            ChangeType::Update(UpdateType::SecondaryIndex),
+        ];
         for ut in updates {
             let table_row_updates = self.random_contract_update(ctx, ut).await;
             log::info!(
@@ -392,7 +443,7 @@ impl TestCase {
             .on_http(ctx.rpc_url.parse().unwrap());
 
         let contract = Simple::new(self.contract_address, &provider);
-        update_contract_data(&contract, update).await;
+        update.apply_to(&contract).await;
         info!("Updated contract with new values {:?}", update);
         Ok(())
     }
@@ -417,25 +468,217 @@ impl TestCase {
     }
 
     async fn random_contract_update<P: ProofStorage>(
-        &self,
+        &mut self,
         ctx: &mut TestContext<P>,
-        u: UpdateType,
+        c: ChangeType,
     ) -> Vec<TableRowUpdate> {
+        let old_table_values = self.current_table_row_values(ctx).await;
         match self.source {
-            TableSourceSlot::Mapping(_) => unimplemented!("yet"),
+            // NOTE 1: The first part is just trying to construct the right input to simulate any
+            // changes on a mapping. This is mostly irrelevant for dist system but needs to
+            // manually construct our test cases here. The second part is more interesting as it looks at "what to do
+            // when receiving an update from scrapper".
+            //
+            // NOTE 2: Thhis implementation tries to emulate as much as possible what happens in dist
+            // system. TO compute the set of updates, it first simulate an update on the contract
+            // and creates the signal "MappingUpdate" corresponding to the update. From that point
+            // onwards, the table row updates are manually created.
+            // Note this can actually lead to more work than necessary in some cases.
+            // Take an example where the mapping is storing (10->A), (11->A), and where the
+            // secondary index value is the value, i.e. A.
+            // Our table initially looks like `A | 10`, `A | 11`.
+            // Imagine an update where we want to change the first row to `A | 12`. In the "table"
+            // world, this is only a simple update of a simple cell, no index even involved. But
+            // from the perspective of mapping, the "scrapper" can only tells us :
+            // * Key 10 has been deleted
+            // * Key 12 has been added with value A
+            // In the backend, we translate that in the "table world" to a deletion and an insertion.
+            // Having such optimization could be done later on, need to properly evaluate the cost
+            // of it.
+            TableSourceSlot::Mapping((ref mut mapping, _)) => {
+                let idx = thread_rng().gen_range(0..mapping.mapping_keys.len());
+                let mkey = &mapping.mapping_keys[idx];
+                let slot = mapping.slot as usize;
+                let index_type = mapping.index.clone();
+                let address = &self.contract_address.clone();
+
+                let mapping_updates = match c {
+                    ChangeType::Insertion => {
+                        let new_entry = (random_u256(), random_address());
+                        mapping
+                            .mapping_keys
+                            .push(new_entry.0.to_be_bytes_trimmed_vec());
+                        vec![MappingUpdate::Insertion(
+                            new_entry.0,
+                            new_entry.1.into_word().into(),
+                        )]
+                    }
+                    ChangeType::Deletion => {
+                        // we just want to delete any row
+                        // we dont care about the value here.
+                        vec![MappingUpdate::Deletion(
+                            U256::from_be_slice(&mkey),
+                            random_u256(),
+                        )]
+                    }
+                    ChangeType::Update(u) => {
+                        let query =
+                            ProofQuery::new_mapping_slot(address.clone(), slot, mkey.to_owned());
+                        let response = ctx
+                            .query_mpt_proof(
+                                &query,
+                                BlockNumberOrTag::Number(ctx.block_number().await),
+                            )
+                            .await;
+                        let current_key = U256::from_be_slice(mkey);
+                        let current_value = response.storage_proof[0].value;
+                        let new_key = random_u256();
+                        let new_value = random_address().into_word().into();
+                        match u {
+                            // update the non-indexed column
+                            UpdateType::Rest => {
+                                // check which one it is and change accordingly
+                                match index_type {
+                                    MappingIndex::Key(_) => {
+                                        // we simply change the mapping value since the key is the secondary index
+                                        vec![MappingUpdate::Update(
+                                            current_key,
+                                            current_value,
+                                            new_value,
+                                        )]
+                                    }
+                                    MappingIndex::Value(_) => {
+                                        // TRICKY: in this case, the mapping key must change. But from the
+                                        // onchain perspective, it means it's first a deletion of
+                                        // the mapping entry, with the insertion of a new one with
+                                        // the same mapping value but a different mapping key.
+                                        vec![
+                                            MappingUpdate::Deletion(current_key, current_value),
+                                            MappingUpdate::Insertion(new_key, new_value),
+                                        ]
+                                    }
+                                }
+                            }
+                            UpdateType::SecondaryIndex => {
+                                match index_type {
+                                    MappingIndex::Key(_) => {
+                                        // TRICKY: if the mapping key changes, it's a deletion then
+                                        // insertion
+                                        vec![
+                                            MappingUpdate::Deletion(current_key, current_value),
+                                            // we insert the same value but with a new mapping key
+                                            MappingUpdate::Insertion(new_key, current_value),
+                                        ]
+                                    }
+                                    MappingIndex::Value(_) => {
+                                        // if the value changes, it's a simple update in mapping
+                                        vec![MappingUpdate::Update(
+                                            current_key,
+                                            current_value,
+                                            new_value,
+                                        )]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                let previous_entries = self.current_mapping_entries(ctx).await;
+                self.apply_update_to_contract(
+                    ctx,
+                    &UpdateSimpleStorage::Mapping(mapping_updates.clone()),
+                )
+                .await
+                .unwrap();
+                // NOTE HERE is the interesting bit for dist system as this is the logic to execute
+                // on receiving updates from scapper. This only needs to have the relevant
+                // information from update and it will translate that to changes in the tree.
+                for mapping_change in mapping_updates {
+                    let _ = match mapping_change {
+                        MappingUpdate::Deletion(mkey, mvalue) => {
+                            // find the associated row key tree to that value
+                            // HERE: there are multiple possibilities:
+                            // * search for the entry at the previous block instead
+                            // * passing inside the deletion the value deleted as well, so we can
+                            // reconstruct the row key
+                            // * or have this extra list of mapping keys
+                            let entry = UniqueMappingEntry::from((mkey, mvalue));
+                            vec![TableRowUpdate::Deletion(entry.to_row_key(&index_type))]
+                        }
+                        MappingUpdate::Insertion(mkey, mvalue) => {
+                            // we transform the mapping entry into the "table notion" of row
+                            let entry = UniqueMappingEntry::from((mkey, mvalue));
+                            let (cells, index) = entry.to_update(&index_type, slot as u8, address);
+                            vec![TableRowUpdate::Insertion(cells, index)]
+                        }
+                        MappingUpdate::Update(mkey, old_value, mvalue) => {
+                            // TRICKY: here we must _find_ the current mapping entry
+                            // being targeted to transform it to the table notion
+                            // if the secondary index is the mapping value, that means
+                            // we need to delete a row and insert a new row
+                            // If the secondary index is the mapping key, then it's easy,
+                            // it's a simple change in the row.
+                            let previous_entry = UniqueMappingEntry::from((mkey, old_value));
+                            let previous_row_key = previous_entry.to_row_key(&index_type);
+                            let previous_table_value =
+                                previous_entry.to_table_row_value(&index_type, slot as u8, address);
+                            let new_entry = UniqueMappingEntry::from((mkey, mvalue));
+                            match index_type {
+                                MappingIndex::Key(_) => {
+                                    // update the value, key == secondary index so it's a regular
+                                    // update
+                                    let mut cell = previous_table_value.current_cells[0].clone();
+                                    cell.value = mvalue;
+                                    let cells_update = CellsUpdate {
+                                        previous_row_key: previous_row_key.clone(),
+                                        new_row_key: previous_row_key,
+                                        updated_cells: vec![cell],
+                                    };
+                                    vec![TableRowUpdate::Update(cells_update)]
+                                }
+                                MappingIndex::Value(_) => {
+                                    // here we need to delete the previous entry
+                                    // then to insert a new one
+                                    let key_to_delete: RowTreeKey =
+                                        previous_table_value.current_secondary.into();
+                                    let (cells, index) =
+                                        new_entry.to_update(&index_type, slot as u8, address);
+                                    vec![
+                                        TableRowUpdate::Deletion(key_to_delete),
+                                        TableRowUpdate::Insertion(cells, index),
+                                    ]
+                                }
+                            }
+                        }
+                    };
+                }
+                vec![]
+            }
             TableSourceSlot::SingleValues(_) => {
-                let old_table_values = self.current_table_row_values(ctx).await;
+                // we can take the first one since we're asking for single value and there is only
+                // one row
+                let old_table_values = &old_table_values[0];
                 let mut current_values = self
                     .current_single_values(ctx)
                     .await
                     .expect("can't get current values");
-                match u {
-                    UpdateType::Rest => {
-                        current_values.s4 = Address::from_slice(&thread_rng().gen::<[u8; 20]>());
+                match c {
+                    ChangeType::Deletion => {
+                        panic!("can't remove a single row from blockchain data over single values")
                     }
-                    UpdateType::SecondaryIndex => {
-                        current_values.s2 = U256::from_be_bytes(thread_rng().gen::<[u8; 32]>());
+                    ChangeType::Insertion => {
+                        panic!("can't add a new row for blockchain data over single values")
                     }
+                    ChangeType::Update(u) => match u {
+                        UpdateType::Rest => {
+                            current_values.s4 =
+                                Address::from_slice(&thread_rng().gen::<[u8; 20]>());
+                        }
+                        UpdateType::SecondaryIndex => {
+                            current_values.s2 = U256::from_be_bytes(thread_rng().gen::<[u8; 32]>());
+                        }
+                    },
                 };
 
                 let contract_update = UpdateSimpleStorage::Single(current_values);
@@ -443,7 +686,11 @@ impl TestCase {
                     .await
                     .unwrap();
                 let new_table_values = self.current_table_row_values(ctx).await;
-                old_table_values.compute_update(&new_table_values)
+                assert!(
+                    new_table_values.len() == 0,
+                    "there should be only a single row for single case"
+                );
+                old_table_values.compute_update(&new_table_values[0])
             }
         }
     }
@@ -453,11 +700,60 @@ impl TestCase {
     ///  3. get new table values
     ///  4. compute the diff, i.e. the update to apply to the table and the trees
     async fn init_contract_data<P: ProofStorage>(
-        &self,
+        &mut self,
         ctx: &mut TestContext<P>,
     ) -> Vec<TableRowUpdate> {
         match self.source {
-            TableSourceSlot::Mapping(_) => unimplemented!("yet"),
+            TableSourceSlot::Mapping((ref mut mapping, _)) => {
+                let update = [
+                    (
+                        U256::from(10),
+                        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
+                    ),
+                    (
+                        // NOTE: here is the same address but for different mapping key (10,11)
+                        U256::from(11),
+                        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
+                    ),
+                    (
+                        U256::from(12),
+                        Address::from_str("0xbbbbed61bffed1df72f2ceebd965198ad57adffff").unwrap(),
+                    ),
+                ];
+                // saving the keys we are tracking in the mapping
+                mapping.mapping_keys.extend(
+                    update
+                        .iter()
+                        .map(|u| u.0.to_be_bytes_trimmed_vec())
+                        .collect::<Vec<_>>(),
+                );
+
+                self.apply_update_to_contract(
+                    ctx,
+                    &UpdateSimpleStorage::Mapping(
+                        update
+                            .iter()
+                            .map(|(a, b)| {
+                                MappingUpdate::Insertion(a.to_owned(), b.into_word().into())
+                            })
+                            .collect::<Vec<_>>(),
+                    ),
+                )
+                .await
+                .unwrap();
+                // Note it's ok to call that here since self.source.mapping have been updated with
+                // all the keys to track. In dist system, this thing should be done by QE <->
+                // Scrapper communication.
+                let new_table_values = self.current_table_row_values(ctx).await;
+                // Specially for initialization it's ok to compute update as the diff between the
+                // two but for general mapping update, it's not as trivial.
+                let updates = new_table_values
+                    .into_iter()
+                    .flat_map(|row| TableRowValues::default().compute_update(&row))
+                    .collect::<Vec<_>>();
+
+                updates
+            }
             TableSourceSlot::SingleValues(_) => {
                 let contract_update = SimpleSingleValue {
                     s1: true,
@@ -473,7 +769,11 @@ impl TestCase {
                     .await
                     .unwrap();
                 let new_table_values = self.current_table_row_values(ctx).await;
-                let update = old_table_values.compute_update(&new_table_values);
+                assert!(
+                    new_table_values.len() == 1,
+                    "single variable case should only have one row"
+                );
+                let update = old_table_values.compute_update(&new_table_values[0]);
                 assert!(update.len() == 1, "one row at a time");
                 assert_matches!(
                     update[0],
@@ -485,30 +785,52 @@ impl TestCase {
         }
     }
 
-    //let mut rng = thread_rng();
-    //for addr in MAPPING_ADDRESSES {
-    //    let b = contract.setMapping(
-    //        Address::from_str(addr).unwrap(),
-    //        U256::from(rng.gen::<u64>()),
-    //    );
-    //    b.send().await.unwrap().watch().await.unwrap();
-    //}
+    async fn current_mapping_entries<P: ProofStorage>(
+        &self,
+        ctx: &mut TestContext<P>,
+    ) -> Vec<UniqueMappingEntry> {
+        match self.source {
+            TableSourceSlot::Mapping((ref mapping, _)) => {
+                let mut updates = Vec::new();
+                for mkey in mapping.mapping_keys.iter() {
+                    // for each mapping key we track, we fetch the associated value
+                    let query = ProofQuery::new_mapping_slot(
+                        self.contract_address,
+                        mapping.slot as usize,
+                        mkey.to_owned(),
+                    );
+                    let response = ctx
+                        .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
+                        .await;
+                    let unique_entry = UniqueMappingEntry::from((
+                        response.storage_proof[0].key.0.into(),
+                        response.storage_proof[0].value,
+                    ));
+                    updates.push(unique_entry);
+                }
+                updates
+            }
+            _ => panic!("invalid case"),
+        }
+    }
 
-    //// addToArray(uint256 value)
-    //for _ in 0..=LENGTH_VALUE {
-    //    let b = contract.addToArray(U256::from(rng.gen::<u64>()));
-    //    b.send().await.unwrap().watch().await.unwrap();
-    //}
-    //
     // construct a row of the table from the actual value in the contract by fetching from MPT
     async fn current_table_row_values<P: ProofStorage>(
         &self,
         ctx: &mut TestContext<P>,
-    ) -> TableRowValues {
-        let mut secondary_cell = None;
-        let rest_cells = match self.source {
-            TableSourceSlot::Mapping(_) => unimplemented!("to come"),
+    ) -> Vec<TableRowValues> {
+        match self.source {
+            TableSourceSlot::Mapping((ref mapping, _)) => {
+                let unique_entries = self.current_mapping_entries(ctx).await;
+                unique_entries
+                    .iter()
+                    .map(|u| {
+                        u.to_table_row_value(&mapping.index, mapping.slot, &self.contract_address)
+                    })
+                    .collect::<Vec<_>>()
+            }
             TableSourceSlot::SingleValues(ref args) => {
+                let mut secondary_cell = None;
                 let mut rest_cells = Vec::new();
                 for slot in args.slots.iter() {
                     let query = ProofQuery::new_simple_slot(self.contract_address, *slot as usize);
@@ -526,17 +848,16 @@ impl TestCase {
                     if *slot == INDEX_SLOT {
                         // we put 0 since we know there are no other rows with that secondary value since we are dealing
                         // we single values, so only 1 row.
-                        secondary_cell = Some(SecondaryIndexCell::new(cell, 0));
+                        secondary_cell = Some(SecondaryIndexCell::new_from(cell, 0));
                     } else {
                         rest_cells.push(cell);
                     }
                 }
-                rest_cells
+                return vec![TableRowValues {
+                    current_cells: rest_cells,
+                    current_secondary: secondary_cell.unwrap(),
+                }];
             }
-        };
-        TableRowValues {
-            current_cells: rest_cells,
-            current_secondary: secondary_cell.unwrap(),
         }
     }
 }
@@ -544,8 +865,14 @@ impl TestCase {
 #[derive(Clone, Debug)]
 enum UpdateSimpleStorage {
     Single(SimpleSingleValue),
-    // MAPPING ...
+    Mapping(Vec<MappingUpdate>),
 }
+
+// Note right now we only support changing one entry inside a single block since Anvil
+// creates a new block per transaction.
+// If we need more, we need to modify contract to support a vector of changes.
+// That's ok as long as we do a single update
+pub type SimpleMapping = Vec<(U256, Address)>;
 
 #[derive(Clone, Debug)]
 pub struct SimpleSingleValue {
@@ -555,35 +882,64 @@ pub struct SimpleSingleValue {
     pub(crate) s4: Address,
 }
 
-// This function applies the update in _one_ transaction so that Anvil only moves by one block
-// so we can test the "subsequent block"
-async fn update_contract_data<T: Transport + Clone, P: Provider<T, N>, N: Network>(
-    contract: &SimpleInstance<T, P, N>,
-    update: &UpdateSimpleStorage,
-) {
-    match update {
-        UpdateSimpleStorage::Single(ref single) => update_single_values(contract, single).await,
+impl UpdateSimpleStorage {
+    // This function applies the update in _one_ transaction so that Anvil only moves by one block
+    // so we can test the "subsequent block"
+    async fn apply_to<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+        &self,
+        contract: &SimpleInstance<T, P, N>,
+    ) {
+        match self {
+            UpdateSimpleStorage::Single(ref single) => {
+                Self::update_single_values(contract, single).await
+            }
+            UpdateSimpleStorage::Mapping(ref updates) => {
+                Self::update_mapping_values(contract, updates).await
+            }
+        }
+    }
+
+    async fn update_single_values<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+        contract: &SimpleInstance<T, P, N>,
+        values: &SimpleSingleValue,
+    ) {
+        let b = contract.setSimples(values.s1, values.s2, values.s3.clone(), values.s4);
+        b.send().await.unwrap().watch().await.unwrap();
+        log::info!("Updated simple contract single values");
+    }
+
+    async fn update_mapping_values<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+        contract: &SimpleInstance<T, P, N>,
+        values: &[MappingUpdate],
+    ) {
+        let contract_changes = values
+            .iter()
+            .map(|tuple| {
+                let op: MappingOperation = tuple.into();
+                let (k, v) = match tuple {
+                    MappingUpdate::Deletion(k, _) => (k.clone(), random_address()),
+                    MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => {
+                        (k.clone(), Address::from_slice(&v.to_be_bytes_trimmed_vec()))
+                    }
+                };
+                MappingChange {
+                    key: k,
+                    value: v,
+                    operation: op.into(),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let b = contract.changeMapping(contract_changes);
+        b.send().await.unwrap().watch().await.unwrap();
+        log::info!("Updated simple contract single values");
     }
 }
 
-async fn update_single_values<T: Transport + Clone, P: Provider<T, N>, N: Network>(
-    contract: &SimpleInstance<T, P, N>,
-    values: &SimpleSingleValue,
-) {
-    let b = contract.setSimples(values.s1, values.s2, values.s3.clone(), values.s4);
-    b.send().await.unwrap().watch().await.unwrap();
-    log::info!("Updated simple contract single values");
-}
-
-/// Convert the test mapping addresses to mapping keys.
-fn test_mapping_keys() -> Vec<MappingKey> {
-    MAPPING_ADDRESSES
-        .iter()
-        .map(|address| {
-            let address = Address::from_str(address).unwrap();
-            address.into_word().to_vec()
-        })
-        .collect()
+enum ChangeType {
+    Deletion,
+    Insertion,
+    Update(UpdateType),
 }
 
 enum UpdateType {
@@ -594,10 +950,10 @@ enum UpdateType {
 /// Represents in a generic way the value present in a row from a table
 /// TODO: add the first index in generic way as well for CSV
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
-struct TableRowValues {
+pub struct TableRowValues {
     // cells without the secondary index
-    current_cells: Vec<Cell>,
-    current_secondary: SecondaryIndexCell,
+    pub current_cells: Vec<Cell>,
+    pub current_secondary: SecondaryIndexCell,
 }
 
 impl TableRowValues {
@@ -648,7 +1004,7 @@ impl TableRowValues {
             "ids are different between updates?"
         );
         assert!(
-            self.current_secondary.unique_index() == new.current_secondary.unique_index(),
+            self.current_secondary.rest() == new.current_secondary.rest(),
             "computing update from different row"
         );
         match self.current_secondary.cell() != new.current_secondary.cell() {
@@ -697,5 +1053,27 @@ impl TableRowUpdate {
             TableRowUpdate::Update(cells) => cells.updated_cells.clone(),
         };
         previous.merge_with_update(&new_cells)
+    }
+}
+
+/// Represents the update that can come from the chain
+#[derive(Clone, Debug)]
+enum MappingUpdate {
+    // key, value
+    Deletion(U256, U256),
+    // key, previous_value, new_value
+    Update(U256, U256, U256),
+    // key, value
+    Insertion(U256, U256),
+}
+
+/// passing form the rust type to the solidity type
+impl From<&MappingUpdate> for MappingOperation {
+    fn from(value: &MappingUpdate) -> Self {
+        Self::from(match value {
+            MappingUpdate::Deletion(_, _) => 0,
+            MappingUpdate::Update(_, _, _) => 1,
+            MappingUpdate::Insertion(_, _) => 2,
+        })
     }
 }

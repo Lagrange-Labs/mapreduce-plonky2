@@ -3,8 +3,12 @@ use std::collections::HashSet;
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::*;
 use mp2_common::{
-    poseidon::empty_poseidon_hash, proof::ProofWithVK, types::HashOutput, utils::ToFields, CHasher,
-    F,
+    poseidon::empty_poseidon_hash,
+    proof::ProofWithVK,
+    serialization::{deserialize, serialize, FromBytes, ToBytes},
+    types::HashOutput,
+    utils::ToFields,
+    CHasher, F,
 };
 use mp2_v1::api::{self, CircuitInput};
 use plonky2::{
@@ -38,41 +42,49 @@ use super::{
 };
 use derive_more::{From, Into};
 
+pub type RowTreeKeyNonce = Vec<u8>;
+
+pub trait ToNonce {
+    fn to_nonce(&self) -> RowTreeKeyNonce;
+}
+
 /// A unique identifier of a secondary-indexed row, from the secondary index value and an unique
 /// index since secondary index does not have to be unique.
 /// THis struct is kept in the JSON row as the "tree key".
 #[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RowTreeKey {
     /// Value of the secondary index of the row
-    pub value: U256,
-    /// Enumerated index of the row in the virtual table
-    /// Useful when multiple rows share the same value, this idx must be different
-    /// In case of unique values, 0 can be used.
-    pub idx: usize,
+    /// NOTE: just a private wrapper type to ensure we always serialize in the smallest vector the
+    /// U256 in the backend. Once could directly impl serde:: traits on the wrapper as well but
+    /// it's easy to use the function "serialize" once the struct implements the ToBytes trait.
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    pub value: VectorU256,
+    /// An value such that the pair (value,rest) is unique accross all rows
+    pub rest: RowTreeKeyNonce,
 }
 
 /// Simply a struct useful to transmit around when dealing with the secondary index value, since
-/// the unique index must be kept around as well. It is not saved anywhere nor proven.
+/// the unique nonce must be kept around as well. It is not saved anywhere nor proven.
 #[derive(PartialEq, Eq, Default, Debug, Clone)]
-pub struct SecondaryIndexCell(Cell, usize);
+pub struct SecondaryIndexCell(Cell, RowTreeKeyNonce);
 impl SecondaryIndexCell {
-    pub fn new(c: Cell, idx: usize) -> Self {
-        Self(c, idx)
-    }
-    pub fn unique_index(&self) -> usize {
-        self.1
+    pub fn new_from<T: ToNonce>(c: Cell, nonce: T) -> Self {
+        Self(c, nonce.to_nonce())
     }
 
     pub fn cell(&self) -> Cell {
         self.0.clone()
+    }
+    pub fn rest(&self) -> RowTreeKeyNonce {
+        self.1.clone()
     }
 }
 
 impl From<SecondaryIndexCell> for RowTreeKey {
     fn from(value: SecondaryIndexCell) -> Self {
         RowTreeKey {
-            value: value.0.value,
-            idx: value.1,
+            value: value.0.value.into(),
+            rest: value.1,
         }
     }
 }
@@ -80,8 +92,8 @@ impl From<SecondaryIndexCell> for RowTreeKey {
 impl From<&SecondaryIndexCell> for RowTreeKey {
     fn from(value: &SecondaryIndexCell) -> Self {
         RowTreeKey {
-            value: value.0.value.clone(),
-            idx: value.1,
+            value: value.0.value.into(),
+            rest: value.1.clone(),
         }
     }
 }
@@ -397,5 +409,42 @@ impl<P: ProofStorage> TestContext<P> {
             row_tree_hash: table.row.root_data().unwrap().hash,
             ..Default::default()
         }
+    }
+}
+
+impl ToNonce for usize {
+    fn to_nonce(&self) -> RowTreeKeyNonce {
+        self.to_be_bytes().to_vec()
+    }
+}
+
+impl ToNonce for Vec<u8> {
+    fn to_nonce(&self) -> RowTreeKeyNonce {
+        self.to_owned()
+    }
+}
+
+impl ToNonce for U256 {
+    fn to_nonce(&self) -> RowTreeKeyNonce {
+        // we don't need to keep all the bytes, only the ones that matter.
+        // Since we are storing this inside psql, any storage saving is good to take !
+        self.to_be_bytes_trimmed_vec()
+    }
+}
+
+#[derive(Clone, Hash, Debug, PartialOrd, PartialEq, Ord, Eq, Default, From)]
+pub struct VectorU256(pub U256);
+
+impl ToBytes for VectorU256 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.0.to_be_bytes_trimmed_vec()
+    }
+}
+
+impl FromBytes for VectorU256 {
+    fn from_bytes(
+        bytes: &[u8],
+    ) -> std::result::Result<Self, mp2_common::serialization::SerializationError> {
+        std::result::Result::Ok(VectorU256(U256::from_be_slice(bytes)))
     }
 }
