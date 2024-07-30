@@ -65,7 +65,7 @@ impl TestCase {
         ctx: &TestContext<P>,
     ) -> Result<Vec<Self>> {
         let single = Self::single_value_test_case(ctx).await?;
-        let mapping = Self::mapping_test_case(ctx).await?;
+        //let mapping = Self::mapping_test_case(ctx).await?;
         Ok(vec![single])
     }
 
@@ -687,7 +687,7 @@ impl TestCase {
                     .unwrap();
                 let new_table_values = self.current_table_row_values(ctx).await;
                 assert!(
-                    new_table_values.len() == 0,
+                    new_table_values.len() == 1,
                     "there should be only a single row for single case"
                 );
                 old_table_values.compute_update(&new_table_values[0])
