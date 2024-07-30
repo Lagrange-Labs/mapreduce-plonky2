@@ -1,6 +1,14 @@
 use anyhow::Result;
 
-use crate::prepare;
+use crate::{prepare, resolve::resolve, symbols::FileContextProvider};
+
+/// NOTE: queries that may bother us in the future
+const CAREFUL: &[&str] = &[
+    // What to do if b.t is longer than a.x?
+    "SELECT x, (SELECT t AS tt FROM b) FROM a;",
+    // Double aliasing
+    "SELECT pipo.not_tt FROM (SELECT t AS tt FROM b) AS pipo (not_tt);",
+];
 
 #[test]
 fn must_accept() -> Result<()> {
@@ -9,6 +17,7 @@ fn must_accept() -> Result<()> {
         "SELECT q FROM pipo WHERE block = 3",
         "SELECT q FROM pipo WHERE block IN (1, 2, 4)",
         "SELECT q FROM pipo WHERE NOT block BETWEEN 12 AND 15",
+        "SELECT foo, 39, bar FROM table2 AS tt (a, b)",
     ] {
         prepare(q)?;
     }
@@ -18,12 +27,10 @@ fn must_accept() -> Result<()> {
 #[test]
 fn must_reject() {
     for q in [
-        // Funcalls unsupported
-        "SELECT q FROM t WHERE SOME_FUNC(q)",
         // Bitwise operators unsupported
-        "SELECT a & b FROM t WHERE SOME_FUNC(q)",
-        "SELECT a | b FROM t WHERE SOME_FUNC(q)",
-        "SELECT a ^ b FROM t WHERE SOME_FUNC(q)",
+        "SELECT a & b FROM t",
+        "SELECT a | b FROM t",
+        "SELECT a ^ b FROM t",
         // *LIKE unsupported
         "SELECT x FROM t WHERE x LIKE 'adsf%'",
         "SELECT x FROM t WHERE x ILIKE 'adsf%'",
@@ -41,4 +48,29 @@ fn must_reject() {
     ] {
         assert!(dbg!(prepare(q)).is_err())
     }
+}
+
+#[test]
+fn must_resolve() -> Result<()> {
+    for q in [
+        "SELECT foo FROM table2",
+        "SELECT foo FROM table2 WHERE bar < 3",
+        "SELECT foo, * FROM table2",
+        "SELECT AVG(foo) FROM table2 WHERE block BETWEEN 43 and 68",
+    ] {
+        let ctx = FileContextProvider::from_file("tests/context.json")?;
+        let query = prepare(q)?;
+        resolve(&query, ctx)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn ref_query() -> Result<()> {
+    let q = "SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99";
+    let query = prepare(q)?;
+    let ctx = FileContextProvider::from_file("tests/context.json")?;
+    let exposed = resolve(&query, ctx)?;
+    assert_eq!(exposed.len(), 5);
+    Ok(())
 }

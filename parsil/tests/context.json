@@ -1,6 +1,6 @@
 [
     {
-        "name": "mytable",
+        "name": "table1",
         "id": 123456789,
         "columns": [
             {
@@ -9,6 +9,58 @@
             },
             {
                 "name": "pipo",
+                "id": 45678
+            }
+        ]
+    },
+    {
+        "name": "table2",
+        "id": 123456,
+        "columns": [
+            {
+                "name": "block",
+                "id": 1
+            },
+            {
+                "name": "foo",
+                "id": 45678
+            },
+            {
+                "name": "bar",
+                "id": 45678
+            }
+        ]
+    },
+    {
+        "name": "T",
+        "id": 94230,
+        "columns": [
+            {
+                "name": "block",
+                "id": 1
+            },
+            {
+                "name": "C1",
+                "id": 45678
+            },
+            {
+                "name": "C2",
+                "id": 45678
+            },
+            {
+                "name": "C3",
+                "id": 45678
+            },
+            {
+                "name": "C4",
+                "id": 45678
+            },
+            {
+                "name": "C5",
+                "id": 45678
+            },
+            {
+                "name": "C6",
                 "id": 45678
             }
         ]

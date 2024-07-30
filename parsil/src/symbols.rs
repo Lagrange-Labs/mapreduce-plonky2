@@ -1,7 +1,6 @@
 use anyhow::*;
 use serde::{Deserialize, Serialize};
-use sqlparser::ast::{Expr, Ident, TableFactor};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// A virtual table representing data extracted from a contract storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,52 +23,49 @@ pub struct ZkColumn {
     pub id: u64,
 }
 
-/// A [`TableSymbols`] stores the symbols accessible in a table
-pub enum TableSymbols {
-    Normal(String, HashSet<String>),
-    Alias {
-        alias_name: String,
-        real_name: String,
-        columns: HashSet<String>,
-    },
+/// A [`Handle`] defines an identifier in a SQL expression.
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+pub enum Handle {
+    /// A free-standing identifier, e.g. `price`
+    Simple(String),
+    /// A fully-qualified identifier, e.g. `contract2.price`
+    Qualified { table: String, name: String },
 }
-
-impl TableSymbols {
-    pub fn resolve(&self, symbol: &str) -> Option<(String, String)> {
-        match self {
-            TableSymbols::Normal(me, columns) => {
-                columns.get(symbol).map(|s| (me.clone(), s.to_owned()))
-            }
-            TableSymbols::Alias {
-                real_name, columns, ..
-            } => columns
-                .get(symbol)
-                .map(|s| (real_name.clone(), s.to_owned())),
+impl Handle {
+    /// Return whether two handles could refer to the same symbol.
+    pub fn matches(&self, other: &Handle) -> bool {
+        match (self, other) {
+            (Handle::Simple(n1), Handle::Simple(n2)) => n1 == n2,
+            (Handle::Simple(_), Handle::Qualified { table, name }) => todo!(),
+            (Handle::Qualified { name, .. }, Handle::Simple(n)) => name == n,
+            (
+                Handle::Qualified { table, name },
+                Handle::Qualified {
+                    table: table2,
+                    name: name2,
+                },
+            ) => table == table2 && name == name2,
         }
     }
 
-    pub fn resolve_qualified(&self, table: &str, symbol: &str) -> Option<(String, String)> {
+    /// Rewrite this handle to make it refer to the given table name.
+    pub fn move_to_table(&mut self, table: &str) {
         match self {
-            TableSymbols::Normal(me, columns) => {
-                if me == table {
-                    columns.get(symbol).map(|s| (me.clone(), s.to_owned()))
-                } else {
-                    None
+            Handle::Simple(name) => {
+                *self = Handle::Qualified {
+                    table: table.to_owned(),
+                    name: name.clone(),
                 }
             }
-            TableSymbols::Alias {
-                alias_name,
-                real_name,
-                columns,
-            } => {
-                if alias_name == table {
-                    columns
-                        .get(symbol)
-                        .map(|s| (real_name.clone(), s.to_owned()))
-                } else {
-                    None
-                }
-            }
+            Handle::Qualified { table, .. } => *table = table.clone(),
+        }
+    }
+}
+impl std::fmt::Display for Handle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Handle::Simple(name) => write!(f, "{}", name),
+            Handle::Qualified { table, name } => write!(f, "{}.{}", table, name),
         }
     }
 }
@@ -79,8 +75,10 @@ impl TableSymbols {
 /// data from the contraact, and available in the JSON payload exposed by
 /// Ryhope.
 pub trait RootContextProvider {
+    /// Return, if it exists, the structure of the given virtual table.
     fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable>;
 
+    /// Return the current block number
     fn current_block(&self) -> u64;
 }
 

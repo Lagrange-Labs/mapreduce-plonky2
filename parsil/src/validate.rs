@@ -1,8 +1,7 @@
 use anyhow::*;
 use sqlparser::ast::{
-    BinaryOperator, Expr, GroupByExpr, JoinConstraint, JoinOperator, OrderBy, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, TableFactor, TableWithJoins, UnaryOperator, Value,
-    WildcardAdditionalOptions,
+    BinaryOperator, Expr, GroupByExpr, JoinOperator, OrderBy, OrderByExpr, Query, Select,
+    SelectItem, SetExpr, TableFactor, UnaryOperator, Value,
 };
 
 use crate::visitor::{AstPass, Visit};
@@ -50,7 +49,8 @@ impl AstPass for Validator {
             | Expr::BinaryOp { .. }
             | Expr::UnaryOp { .. }
             | Expr::Nested(_)
-            | Expr::Tuple(_) => {}
+            | Expr::Tuple(_)
+            | Expr::Function(_) => {}
 
             Expr::Value(v) => match v {
                 Value::Placeholder(_) | Value::Number(_, _) | Value::Boolean(_) => {}
@@ -73,6 +73,7 @@ impl AstPass for Validator {
                 | Value::Null => bail!("{v}: unsupported type of value"),
             },
             Expr::Subquery(s) => {
+                // NOTE: here to enable nested queries
                 bail!("{s}: nested selects not supported");
             }
 
@@ -115,7 +116,6 @@ impl AstPass for Validator {
             | Expr::IntroducedString { .. }
             | Expr::TypedString { .. }
             | Expr::MapAccess { .. }
-            | Expr::Function(_)
             | Expr::Exists { .. }
             | Expr::Case { .. }
             | Expr::Named { .. }
@@ -133,6 +133,14 @@ impl AstPass for Validator {
 
     fn pre_select_item(&mut self, p: &mut SelectItem) -> Result<()> {
         match p {
+            SelectItem::Wildcard(w) => {
+                ensure!(w.opt_ilike.is_none(), "ILIKE is not supported");
+                ensure!(w.opt_exclude.is_none(), "EXCLUDE is not supported");
+                ensure!(w.opt_except.is_none(), "EXCEPT is not supported");
+                ensure!(w.opt_replace.is_none(), "REPLACE is not supported");
+                ensure!(w.opt_rename.is_none(), "RENAME is not supported");
+                Ok(())
+            }
             SelectItem::QualifiedWildcard(_, _) => bail!("{p}: not supported"),
             _ => Ok(()),
         }
@@ -140,17 +148,19 @@ impl AstPass for Validator {
 
     fn pre_table_factor(&mut self, j: &mut TableFactor) -> Result<()> {
         match j {
-            // TODO: add symbol resolution
             TableFactor::Table { .. } => Ok(()),
-            TableFactor::Derived { .. }
-            | TableFactor::TableFunction { .. }
+            TableFactor::Derived { .. } => {
+                // NOTE: when the time comes, let us be careful of LATERAL joins
+                bail!("{j}: nested selects not supported");
+            }
+            TableFactor::TableFunction { .. }
             | TableFactor::Function { .. }
             | TableFactor::UNNEST { .. }
             | TableFactor::JsonTable { .. }
             | TableFactor::NestedJoin { .. }
             | TableFactor::Pivot { .. }
             | TableFactor::Unpivot { .. }
-            | TableFactor::MatchRecognize { .. } => bail!("{}: unsupported relation", j),
+            | TableFactor::MatchRecognize { .. } => bail!("{:#?}: unsupported relation", j),
         }
     }
 
@@ -239,16 +249,6 @@ impl AstPass for Validator {
         ensure!(q.for_clause.is_none(), "FOR is an MSSQL extension");
         Ok(())
     }
-}
-
-fn validate_wildcard(w: &WildcardAdditionalOptions) -> Result<()> {
-    ensure!(w.opt_ilike.is_none(), "ILIKE is not supported");
-    ensure!(w.opt_exclude.is_none(), "EXCLUDE is not supported");
-    ensure!(w.opt_except.is_none(), "EXCEPT is not supported");
-    ensure!(w.opt_replace.is_none(), "REPLACE is not supported");
-    ensure!(w.opt_rename.is_none(), "RENAME is not supported");
-
-    Ok(())
 }
 
 /// Ensure that a top-level [`Query`] is compatible with the currently

@@ -2,13 +2,13 @@ use anyhow::*;
 use log::*;
 use sqlparser::{
     ast::{Query, Statement},
-    dialect::GenericDialect,
+    dialect::AnsiDialect,
     parser::Parser,
 };
 
 use crate::validate::validate;
 
-const DIALECT: GenericDialect = GenericDialect {};
+const DIALECT: AnsiDialect = AnsiDialect {};
 
 pub fn parse(req: &str) -> Result<Query> {
     debug!("Parsing `{req}`");

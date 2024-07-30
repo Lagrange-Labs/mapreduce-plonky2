@@ -2,7 +2,6 @@ use anyhow::Result;
 use sqlparser::ast::Query;
 
 mod expand;
-mod inject;
 mod parser;
 mod resolve;
 mod symbols;
