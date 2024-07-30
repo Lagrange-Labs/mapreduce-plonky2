@@ -6,11 +6,10 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, CURVE_TARGET_LEN},
     u256::{UInt256Target, NUM_LIMBS},
-    utils::{FromFields, FromTargets},
+    utils::{FromFields, FromTargets, TryIntoBool},
     F,
 };
 use plonky2::{
-    field::types::Field,
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::target::{BoolTarget, Target},
 };
@@ -364,14 +363,9 @@ impl<'a, const S: usize> PublicInputs<'a, F, S> {
     }
 
     pub fn no_duplicates_flag(&self) -> bool {
-        let no_duplicates = *self.to_no_duplicates_raw();
-        if no_duplicates == F::ONE {
-            return true;
-        }
-        if no_duplicates == F::ZERO {
-            return false;
-        }
-        unreachable!("no_duplicates flag public input different from 0 or 1")
+        (*self.to_no_duplicates_raw())
+            .try_into_bool()
+            .expect("no_duplicates flag public input different from 0 or 1")
     }
 
     pub fn accumulator(&self) -> WeierstrassPoint {
