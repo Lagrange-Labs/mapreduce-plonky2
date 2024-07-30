@@ -146,13 +146,18 @@ impl TestCase {
         );
         let contract_address = contract.address();
         let index_genesis_block = ctx.block_number().await;
+        // to toggle off and on
+        let value_as_index = true;
+        let value_id = identifier_for_mapping_value_column(MAPPING_SLOT, contract_address);
+        let key_id = identifier_for_mapping_key_column(MAPPING_SLOT, contract_address);
+        let (index_identifier, mapping_index, cell_identifier) = match value_as_index {
+            true => (value_id, MappingIndex::Value(value_id), key_id),
+            false => (key_id, MappingIndex::Key(key_id), value_id),
+        };
 
         let mapping_args = MappingValuesExtractionArgs {
             slot: MAPPING_SLOT,
-            index: MappingIndex::Value(identifier_for_mapping_value_column(
-                MAPPING_SLOT,
-                contract_address,
-            )),
+            index: mapping_index,
             // at the beginning there is no mapping key inserted
             // NOTE: This array is a convenience to handle smart contract updates
             // manually, but does not need to be stored explicitely by dist system.
@@ -177,11 +182,11 @@ impl TestCase {
                 index: IndexType::Primary,
             },
             secondary: TableColumn {
-                identifier: identifier_for_mapping_key_column(MAPPING_SLOT, contract_address),
+                identifier: index_identifier,
                 index: IndexType::Secondary,
             },
             rest: vec![TableColumn {
-                identifier: identifier_for_mapping_value_column(MAPPING_SLOT, contract_address),
+                identifier: cell_identifier,
                 index: IndexType::None,
             }],
         };
@@ -670,7 +675,7 @@ impl TestCase {
         match self.source {
             TableSourceSlot::Mapping((ref mut mapping, _)) => {
                 let index = mapping.index.clone();
-                let slot = mapping.slot.clone();
+                let slot = mapping.slot;
                 let init_state = [
                     (
                         U256::from(10),
