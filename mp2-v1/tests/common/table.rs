@@ -174,6 +174,7 @@ impl Table {
         let cell_update = cell_tree
             .in_transaction(|t| {
                 for new_cell in update.updated_cells.iter() {
+                    println!(" --- TREE: inserting rest-cell: {:?}", new_cell);
                     // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
                     // but we put + 1 because sbbst starts at +1
                     let cell_key = self.columns.cells_tree_index_of(new_cell.id) + 1;

@@ -44,10 +44,7 @@ enum MappingIndex {
 
 impl UniqueMappingEntry {
     pub fn new(k: &U256, v: &U256) -> Self {
-        Self {
-            key: k.clone(),
-            value: v.clone(),
-        }
+        Self { key: *k, value: *v }
     }
     pub fn to_update(
         &self,
@@ -56,7 +53,7 @@ impl UniqueMappingEntry {
         contract: &Address,
         previous_row_key: Option<RowTreeKey>,
     ) -> (CellsUpdate, SecondaryIndexCell) {
-        let row_value = self.to_table_row_value(&index, slot, &contract);
+        let row_value = self.to_table_row_value(index, slot, contract);
         let cells_update = CellsUpdate {
             previous_row_key: previous_row_key.unwrap_or_default(),
             new_row_key: self.to_row_key(index),
@@ -94,6 +91,10 @@ impl UniqueMappingEntry {
                 (SecondaryIndexCell::new_from(value_cell, self.key), key_cell)
             }
         };
+        println!(
+            " --- MAPPING: secondary index {:?}  -- cell {:?}",
+            secondary, rest
+        );
         TableRowValues {
             current_cells: vec![rest],
             current_secondary: secondary,

@@ -154,9 +154,8 @@ impl TestCase {
                 contract_address,
             )),
             // at the beginning there is no mapping key inserted
-            // NOTE: This array is _one_ way to handle mapping updates. Another one could be that
-            // during updates, the scrapper gives the previous value and the new value for updates.
-            // That's really the main information missing that can avoid storing this array.
+            // NOTE: This array is a convenience to handle smart contract updates
+            // manually, but does not need to be stored explicitely by dist system.
             mapping_keys: vec![],
         };
 
@@ -215,6 +214,8 @@ impl TestCase {
             ctx.block_number().await
         );
 
+        // TODO: run a specific set of changes just for mapping with deletion (can't delete a row
+        // with single variables)
         let updates = vec![
             ChangeType::Update(UpdateType::Rest),
             ChangeType::Update(UpdateType::SecondaryIndex),
@@ -905,12 +906,6 @@ enum UpdateSimpleStorage {
     Mapping(Vec<MappingUpdate>),
 }
 
-// Note right now we only support changing one entry inside a single block since Anvil
-// creates a new block per transaction.
-// If we need more, we need to modify contract to support a vector of changes.
-// That's ok as long as we do a single update
-pub type SimpleMapping = Vec<(U256, Address)>;
-
 #[derive(Clone, Debug)]
 pub struct SimpleSingleValue {
     pub(crate) s1: bool,
@@ -954,9 +949,9 @@ impl UpdateSimpleStorage {
             .map(|tuple| {
                 let op: MappingOperation = tuple.into();
                 let (k, v) = match tuple {
-                    MappingUpdate::Deletion(k, _) => (k.clone(), random_address()),
+                    MappingUpdate::Deletion(k, _) => (*k, random_address()),
                     MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => {
-                        (k.clone(), Address::from_slice(&v.to_be_bytes_trimmed_vec()))
+                        (*k, Address::from_slice(&v.to_be_bytes_trimmed_vec()))
                     }
                 };
                 MappingChange {
