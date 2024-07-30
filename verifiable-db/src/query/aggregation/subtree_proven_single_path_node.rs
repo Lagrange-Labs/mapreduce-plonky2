@@ -152,11 +152,11 @@ impl<const MAX_NUM_RESULTS: usize> SubtreeProvenSinglePathNodeCircuit<MAX_NUM_RE
         let node_min = b.select_u256(left_child_exists, &left_child_min, &node_value);
         let node_max = b.select_u256(right_child_exists, &right_child_max, &node_value);
 
-        // If the current nod is not a rows tree, we need to ensure that
-        // the value of the indexed column for all the records stored in the records subtree
-        // found in this node is within the range specified by the query
-        // min_query <= index_value <= max_query
-        // -> NOT((index_value < min_query) OR (index_value > max_query))
+        // If the current node is not a rows tree, we need to ensure that
+        // the value of the primary indexed column for all the records stored in the rows tree
+        // found in this node is within the range specified by the query:
+        // min_i1 <= index_value <= max_i1
+        // -> NOT((index_value < min_i1) OR (index_value > max_i1))
         let is_less_than = b.is_less_than_u256(&index_value, &min_query);
         let is_greater_than = b.is_greater_than_u256(&index_value, &max_query);
         let is_out_of_range = b.or(is_less_than, is_greater_than);
