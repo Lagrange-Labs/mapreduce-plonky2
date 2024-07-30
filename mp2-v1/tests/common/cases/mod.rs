@@ -167,7 +167,11 @@ pub(crate) struct MappingValuesExtractionArgs {
     /// Mapping slot number
     pub(crate) slot: u8,
     pub(crate) index: MappingIndex,
-    /// Mapping keys
+    /// Mapping keys: they are useful for two things:
+    /// * doing some controlled changes on the smart contract, since if we want to do an update we
+    /// need to know an existing key
+    /// * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
+    /// (yet), we're just recomputing all the proofs at every block and we need the keys for that.
     pub(crate) mapping_keys: Vec<Vec<u8>>,
 }
 

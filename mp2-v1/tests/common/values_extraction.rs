@@ -58,12 +58,11 @@ impl<P: ProofStorage> TestContext<P> {
     /// Generate the Values Extraction (C.1) proof for mapping variables.
     pub(crate) async fn prove_mapping_values_extraction(
         &self,
-        contract_address: &str,
+        contract_address: &Address,
         slot: u8,
         mapping_keys: Vec<MappingKey>,
-    ) -> ProofWithVK {
+    ) -> Vec<u8> {
         let slot = slot as usize;
-        let contract_address = Address::from_str(contract_address).unwrap();
 
         let first_mapping_key = mapping_keys[0].clone();
         let storage_slot_number = mapping_keys.len();
@@ -75,7 +74,8 @@ impl<P: ProofStorage> TestContext<P> {
         // Query the slot and add the node path to the trie.
         for mapping_key in mapping_keys {
             info!("Query the mapping slot ({slot}, {mapping_key:?})");
-            let query = ProofQuery::new_mapping_slot(contract_address, slot, mapping_key.clone());
+            let query =
+                ProofQuery::new_mapping_slot(contract_address.clone(), slot, mapping_key.clone());
             let response = self
                 .query_mpt_proof(&query, BlockNumberOrTag::Number(self.block_number().await))
                 .await;
@@ -113,6 +113,6 @@ impl<P: ProofStorage> TestContext<P> {
             assert_eq!(ptr, F::NEG_ONE);
         }
 
-        proof
+        proof.serialize().expect("can't serialize mpt proof")
     }
 }

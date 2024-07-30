@@ -378,11 +378,40 @@ impl TestCase {
         };
 
         let table_id = &self.table.id;
-        match self.source {
-            TableSourceSlot::Mapping(_) => panic!("not yet implemented"),
+        // we construct the proof key for both mappings and single variable in the same way since
+        // it is derived from the table id which should be different for any tables we create.
+        let proof_key = ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex));
+        let (value_proof, compound, length) = match self.source {
+            // first lets do without length
+            TableSourceSlot::Mapping((ref mapping, _)) => {
+                let mapping_root_proof = match ctx.storage.get_proof(&proof_key) {
+                    Ok(p) => p,
+                    Err(_) => {
+                        let mapping_values_proof = ctx
+                            .prove_mapping_values_extraction(
+                                &self.contract_address,
+                                mapping.slot,
+                                mapping.mapping_keys.clone(),
+                            )
+                            .await;
+
+                        ctx.storage
+                            .store_proof(proof_key, mapping_values_proof.clone())?;
+                        info!("Generated Values Extraction (C.1) proof for single variables");
+                        {
+                            let pproof = ProofWithVK::deserialize(&mapping_values_proof).unwrap();
+                            let pi = mp2_v1::values_extraction::PublicInputs::new(
+                                &pproof.proof().public_inputs,
+                            );
+                            println!("[--] FINAL MPT DIGEST VALUE --> {:?} ", pi.values_digest());
+                        }
+                        mapping_values_proof
+                    }
+                };
+                // it's a compoound value type of proof since we're not using the length
+                (mapping_root_proof, true, None)
+            }
             TableSourceSlot::SingleValues(ref args) => {
-                let proof_key =
-                    ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex));
                 let single_value_proof = match ctx.storage.get_proof(&proof_key) {
                     Ok(p) => p,
                     Err(_) => {
@@ -402,31 +431,24 @@ impl TestCase {
                         single_values_proof
                     }
                 };
-                // final extraction for single variables combining the different proofs generated before
-                let final_key =
-                    ProofKey::FinalExtraction((table_id.clone(), bn as BlockPrimaryIndex));
-                match ctx.storage.get_proof(&final_key) {
-                    Ok(proof) => proof,
-                    Err(_) => {
-                        let proof = ctx
-                            .prove_final_extraction(
-                                contract_proof,
-                                single_value_proof,
-                                block_proof,
-                                false,
-                                None,
-                            )
-                            .await
-                            .unwrap();
-                        ctx.storage.store_proof(final_key, proof.clone())?;
-                        debug!("SAVING final extraction key from {table_id:?} and {bn}");
-                        info!("Generated Final Extraction (C.5.1) proof for single variables");
-                        proof
-                    }
-                }
+                // we're just proving a single set of a value
+                (single_value_proof, false, None)
             }
         };
-
+        // final extraction for single variables combining the different proofs generated before
+        let final_key = ProofKey::FinalExtraction((table_id.clone(), bn as BlockPrimaryIndex));
+        // no need to generate it if it's already present
+        if ctx.storage.get_proof(&final_key).is_err() {
+            let proof = ctx
+                .prove_final_extraction(contract_proof, value_proof, block_proof, compound, length)
+                .await
+                .unwrap();
+            ctx.storage
+                .store_proof(final_key, proof.clone())
+                .expect("unable to save in storage?");
+            debug!("SAVING final extraction key from {table_id:?} and {bn}");
+            info!("Generated Final Extraction (C.5.1) proof for single variables");
+        }
         info!("Generated ALL Single Variables MPT preprocessing proofs");
         Ok(())
     }
@@ -497,7 +519,7 @@ impl TestCase {
             // of it.
             TableSourceSlot::Mapping((ref mut mapping, _)) => {
                 let idx = thread_rng().gen_range(0..mapping.mapping_keys.len());
-                let mkey = &mapping.mapping_keys[idx];
+                let mkey = &mapping.mapping_keys[idx].clone();
                 let slot = mapping.slot as usize;
                 let index_type = mapping.index.clone();
                 let address = &self.contract_address.clone();
@@ -514,6 +536,7 @@ impl TestCase {
                         )]
                     }
                     ChangeType::Deletion => {
+                        mapping.mapping_keys.remove(idx);
                         // we just want to delete any row
                         // we dont care about the value here.
                         vec![MappingUpdate::Deletion(
