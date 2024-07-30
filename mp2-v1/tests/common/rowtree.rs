@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::*;
+use log::debug;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
     proof::ProofWithVK,
@@ -370,7 +371,7 @@ impl<P: ProofStorage> TestContext<P> {
             let pproof = ProofWithVK::deserialize(&p).unwrap();
             let pi =
                 verifiable_db::row_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
-            println!(
+            debug!(
                 "[--] FINAL MERKLE DIGEST VALUE --> {:?} ",
                 pi.rows_digest_field()
             );

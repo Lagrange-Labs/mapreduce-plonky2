@@ -5,7 +5,7 @@ use alloy::{
     primitives::{Address, U256},
 };
 use anyhow::*;
-use log::info;
+use log::{debug, info};
 use mp2_common::{
     eth::ProofQuery,
     poseidon::{empty_poseidon_hash, H},
@@ -181,8 +181,8 @@ impl<P: ProofStorage> TestContext<P> {
             let pproof = ProofWithVK::deserialize(&proof).unwrap();
             let pi =
                 verifiable_db::cells_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
-            println!(
-                "[+] [+] SLOT identifier {:?} -> value {} value.digest() = {:?}",
+            debug!(
+                "[+] [+] Merkle SLOT identifier {:?} -> value {} value.digest() = {:?}",
                 cell.id,
                 cell.value,
                 pi.digest_point()

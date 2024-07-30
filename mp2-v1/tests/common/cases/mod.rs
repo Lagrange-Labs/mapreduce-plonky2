@@ -2,6 +2,7 @@
 
 use alloy::primitives::{Address, U256};
 use local_simple::TableRowValues;
+use log::debug;
 use mp2_common::eth::StorageSlot;
 use mp2_test::utils::random_vector;
 use mp2_v1::values_extraction::{
@@ -15,7 +16,7 @@ use super::{
     table::{CellsUpdate, Table},
 };
 
-pub(crate) mod local_simple;
+pub mod local_simple;
 
 /// The key,value such that the combination is unique. This can be turned into a RowTreeKey.
 /// to store in the row tree.
@@ -91,7 +92,7 @@ impl UniqueMappingEntry {
                 (SecondaryIndexCell::new_from(value_cell, self.key), key_cell)
             }
         };
-        println!(
+        debug!(
             " --- MAPPING: secondary index {:?}  -- cell {:?}",
             secondary, rest
         );

@@ -107,7 +107,6 @@ impl Table {
             (),
         )
         .unwrap();
-        println!("genesis_block = {genesis_block}");
         let index_tree = MerkleIndexTree::new(
             //InitSettings::Reset(sbbst::Tree::empty()),
             InitSettings::Reset(sbbst::Tree::with_shift((genesis_block - 1) as usize)),

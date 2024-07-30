@@ -2,9 +2,12 @@
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
 #![feature(assert_matches)]
+use std::future::Future;
+
 use anyhow::Result;
 
 use common::{
+    cases::local_simple::{ChangeType, UpdateType},
     context,
     proof_storage::{KeyValueDB, MemoryProofStorage, ProofKey},
     TestCase, TestContext,
@@ -14,13 +17,6 @@ use test_log::test;
 
 pub(crate) mod common;
 
-// TODO: move to local_simple logic
-//async fn prove_mappings_with_length(
-//    ctx: &TestContext,
-//    t: &TestCase,
-//    contract_proof: &ProofWithVK,
-//    block_proof: &[u8],
-//    mapping_values_proof: &ProofWithVK,
 //) {
 //    let length_proof = ctx
 //        .prove_length_extraction(
@@ -40,24 +36,6 @@ pub(crate) mod common;
 //    );
 //    info!("Generated Final Extraction (C.5.1) proof for mapping (with length slot check)");
 //}
-//
-//async fn prove_mappings_without_length(
-//    ctx: &TestContext,
-//    _t: &TestCase,
-//    contract_proof: &ProofWithVK,
-//    block_proof: &[u8],
-//    mapping_values_proof: &ProofWithVK,
-//) {
-//    // final extraction for mappings without length slots
-//    let _ = ctx.prove_final_extraction(
-//        contract_proof.serialize().unwrap(),
-//        mapping_values_proof.serialize().unwrap(),
-//        block_proof.to_vec(),
-//        true,
-//        None,
-//    );
-//    info!("Generated Final Extraction (C.5.1) proof for mapping (without length slot check)");
-//}
 
 #[test(tokio::test)]
 async fn db_creation_integrated_tests() -> Result<()> {
@@ -76,42 +54,18 @@ async fn db_creation_integrated_tests() -> Result<()> {
     ctx.build_params().unwrap();
 
     info!("Params built");
-    let cases = TestCase::new_local_simple_contract(&ctx).await?;
-    info!("Test Cases deployed");
-    // Prove for each test case.
-    for mut case in cases.into_iter() {
-        case.run(&mut ctx).await?;
-    }
-    ////
-    //// Prove mapping slots
-    ////
-    //let mapping_values_proof = ctx
-    //    .prove_mapping_values_extraction(
-    //        &t.contract_address,
-    //        t.values_extraction_mapping.slot,
-    //        t.values_extraction_mapping.mapping_keys.clone(),
-    //    )
-    //    .await;
-    //info!("Generated Values Extraction (C.1) proof for mapping variable");
-
-    //// // Prove mappings slots with length check
-    //prove_mappings_with_length(
-    //    ctx,
-    //    t,
-    //    &contract_proof,
-    //    &serialize_proof(&block_proof).unwrap(),
-    //    &mapping_values_proof,
-    //)
-    //.await;
-
-    //// // Prove mappings slots without length check
-    //prove_mappings_without_length(
-    //    ctx,
-    //    t,
-    //    &contract_proof,
-    //    &serialize_proof(&block_proof).unwrap(),
-    //    &mapping_values_proof,
-    //)
-    //.await;
+    let mut single = TestCase::single_value_test_case(&ctx).await?;
+    let changes = vec![
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::SecondaryIndex),
+    ];
+    single.run(&mut ctx, changes.clone()).await?;
+    let mut mapping = TestCase::mapping_test_case(&ctx).await?;
+    let changes = vec![
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::SecondaryIndex),
+    ];
+    mapping.run(&mut ctx, changes).await?;
     Ok(())
 }

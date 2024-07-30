@@ -202,7 +202,11 @@ impl TestCase {
         })
     }
 
-    pub async fn run<P: ProofStorage>(&mut self, ctx: &mut TestContext<P>) -> Result<()> {
+    pub async fn run<P: ProofStorage>(
+        &mut self,
+        ctx: &mut TestContext<P>,
+        changes: Vec<ChangeType>,
+    ) -> Result<()> {
         // Call the contract function to set the test data.
         // TODO: make it return an update for a full table, right now it's only for one row.
         // to make when we deal with mappings
@@ -220,13 +224,7 @@ impl TestCase {
             ctx.block_number().await
         );
 
-        // TODO: run a specific set of changes just for mapping with deletion (can't delete a row
-        // with single variables)
-        let updates = vec![
-            ChangeType::Update(UpdateType::Rest),
-            //ChangeType::Update(UpdateType::SecondaryIndex),
-        ];
-        for ut in updates {
+        for ut in changes {
             let table_row_updates = self.random_contract_update(ctx, ut).await;
             log::info!(
                 "Applying follow up updates to contract done - now at block {}",
@@ -408,7 +406,7 @@ impl TestCase {
                             let pi = mp2_v1::values_extraction::PublicInputs::new(
                                 &pproof.proof().public_inputs,
                             );
-                            println!("[--] FINAL MPT DIGEST VALUE --> {:?} ", pi.values_digest());
+                            debug!("[--] FINAL MPT DIGEST VALUE --> {:?} ", pi.values_digest());
                         }
                         mapping_values_proof
                     }
@@ -431,7 +429,7 @@ impl TestCase {
                             let pi = mp2_v1::values_extraction::PublicInputs::new(
                                 &pproof.proof().public_inputs,
                             );
-                            println!("[--] FINAL MPT DIGEST VALUE --> {:?} ", pi.values_digest());
+                            debug!("[--] FINAL MPT DIGEST VALUE --> {:?} ", pi.values_digest());
                         }
                         single_values_proof
                     }
@@ -984,13 +982,15 @@ impl UpdateSimpleStorage {
     }
 }
 
-enum ChangeType {
+#[derive(Clone, Debug)]
+pub enum ChangeType {
     Deletion,
     Insertion,
     Update(UpdateType),
 }
 
-enum UpdateType {
+#[derive(Clone, Debug)]
+pub enum UpdateType {
     SecondaryIndex,
     Rest,
 }

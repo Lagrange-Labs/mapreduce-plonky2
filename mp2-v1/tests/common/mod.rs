@@ -2,7 +2,7 @@
 use anyhow::Result;
 mod bindings;
 mod block_extraction;
-mod cases;
+pub mod cases;
 pub mod celltree;
 pub mod context;
 mod contract_extraction;

@@ -5,6 +5,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
 };
+use log::debug;
 use mp2_common::{
     eth::{left_pad32, ProofQuery, StorageSlot},
     mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
@@ -221,7 +222,7 @@ impl TrieNode {
         let pi = mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
         let list: Vec<Vec<u8>> = rlp::decode_list(&node);
         let value: Vec<u8> = rlp::decode(&list[1]).unwrap();
-        println!(
+        debug!(
             "[+] [+] MPT SLOT {:?} identifier {:?} -> value {:?} value.digest() = {:?}",
             slot.slot(),
             identifier_single_var_column(slot.slot(), &Address::new(thread_rng().gen())),
