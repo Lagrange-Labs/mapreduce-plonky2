@@ -531,10 +531,18 @@ impl TestCase {
                 let slot = mapping.slot as usize;
                 let index_type = mapping.index.clone();
                 let address = &self.contract_address.clone();
+                // for ease of debugging, just take incremental keys
+                let new_key = mapping
+                    .mapping_keys
+                    .iter()
+                    .map(|k| U256::from_be_slice(k))
+                    .max()
+                    .unwrap()
+                    + U256::from(1);
 
                 let mapping_updates = match c {
                     ChangeType::Insertion => {
-                        let new_entry = (random_u256(), random_address());
+                        let new_entry = (new_key, random_address());
                         vec![MappingUpdate::Insertion(
                             new_entry.0,
                             new_entry.1.into_word().into(),
@@ -558,7 +566,6 @@ impl TestCase {
                             .await;
                         let current_key = U256::from_be_slice(mkey);
                         let current_value = response.storage_proof[0].value;
-                        let new_key = random_u256();
                         let new_value = random_address().into_word().into();
                         match u {
                             // update the non-indexed column

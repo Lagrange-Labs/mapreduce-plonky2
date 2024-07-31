@@ -207,7 +207,7 @@ impl Table {
         self.row
             .in_transaction(move |t| {
                 for update in updates {
-                    info!("Apply update to row tree: {:?}", update);
+                    debug!("Apply update to row tree: {:?}", update);
                     match update {
                         TreeRowUpdate::Update(row) => t.update(row.k, row.payload)?,
                         TreeRowUpdate::Deletion(row_key) => match t.try_fetch(&row_key) {

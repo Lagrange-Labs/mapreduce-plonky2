@@ -223,9 +223,8 @@ impl TrieNode {
         let list: Vec<Vec<u8>> = rlp::decode_list(&node);
         let value: Vec<u8> = rlp::decode(&list[1]).unwrap();
         debug!(
-            "[+] [+] MPT SLOT {:?} identifier {:?} -> value {:?} value.digest() = {:?}",
+            "[+] [+] MPT SLOT {:?} -> value {:?} value.digest() = {:?}",
             slot.slot(),
-            identifier_single_var_column(slot.slot(), &Address::new(thread_rng().gen())),
             U256::from_be_slice(&value),
             pi.values_digest()
         );

@@ -76,7 +76,6 @@ impl<P: ProofStorage> TestContext<P> {
 
         // Query the slot and add the node path to the trie.
         for mapping_key in mapping_keys {
-            info!("Query the mapping slot ({slot}, {mapping_key:?})");
             let query =
                 ProofQuery::new_mapping_slot(contract_address.clone(), slot, mapping_key.clone());
             let response = self
@@ -93,8 +92,9 @@ impl<P: ProofStorage> TestContext<P> {
 
             let sslot = StorageSlot::Mapping(mapping_key.clone(), slot);
             info!(
-                "Save the mapping key {:?} on slot {} to the test storage trie",
+                "Save the mapping key {:?} (value {}) on slot {} to the test storage trie",
                 U256::from_be_slice(&mapping_key),
+                response.storage_proof[0].value,
                 slot
             );
 

@@ -93,7 +93,7 @@ impl UniqueMappingEntry {
             }
         };
         debug!(
-            " --- MAPPING: secondary index {:?}  -- cell {:?}",
+            " --- MAPPING: to row: secondary index {:?}  -- cell {:?}",
             secondary, rest
         );
         TableRowValues {
