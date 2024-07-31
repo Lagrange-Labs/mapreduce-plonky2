@@ -457,11 +457,11 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     // --------------------------------------------------------------------------
     // Private methods
     // --------------------------------------------------------------------------
-    fn rec_print<S: TreeStorage<Tree<K>>>(i: &K, d: usize, s: &S) {
-        async move {
+    async fn rec_print<S: TreeStorage<Tree<K>>>(i: &K, d: usize, s: &S) {
+        Box::pin(async move {
             let n = &s.nodes().fetch(i).await;
             if let Some(left) = n.left() {
-                Self::rec_print(left, d + 1, s);
+                Self::rec_print(left, d + 1, s).await;
             }
             println!(
                 "{}{:?}/{} ({})",
@@ -474,10 +474,9 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 n.subtree_size
             );
             if let Some(right) = n.right() {
-                Self::rec_print(right, d + 1, s);
+                Self::rec_print(right, d + 1, s).await;
             }
-        }
-        .boxed();
+        }).await;
     }
 
     /// Insert the key `k` in the tree. If it already exists, do nothing if
@@ -884,7 +883,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
 {
     async fn print<S: TreeStorage<Tree<K>>>(&self, s: &S) {
         if let Some(root) = s.state().fetch().await.root.as_ref() {
-            Self::rec_print(root, 0, s);
+            Self::rec_print(root, 0, s).await;
         } else {
             println!("EMPTY TREE");
         }
