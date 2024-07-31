@@ -18,7 +18,7 @@ use mp2_common::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
     F,
 };
@@ -148,6 +148,8 @@ where
         let [op_avg, op_count] = [AggregationOperation::AvgOp, AggregationOperation::CountOp]
             .map(|op| b.constant(op.to_field()));
 
+        let mut overflow = query_proof.overflow_flag_target().target;
+
         // Convert the entry count to an Uint256.
         let entry_count = query_proof.num_matching_rows_target();
         let entry_count = UInt256Target::new_from_target(b, entry_count);
@@ -162,12 +164,16 @@ where
             let result = query_proof.value_target_at_index(i);
 
             // Compute the AVG result (and it's set to zero if the divisor is zero).
-            let (avg_result, _, _) = b.div_u256(&result, &entry_count);
+            let (avg_result, _, is_divisor_zero) = b.div_u256(&result, &entry_count);
 
             let result = b.select_u256(is_op_avg, &avg_result, &result);
             let result = b.select_u256(is_op_count, &entry_count, &result);
 
             results.push(result);
+
+            // Accumulate overflow.
+            let is_overflow = b.and(is_op_avg, is_divisor_zero);
+            overflow = b.add(overflow, is_overflow.target);
         });
         results.resize(L * S, u256_zero);
 
@@ -219,6 +225,8 @@ where
             .collect_vec();
         let results_slice = results.iter().flat_map(ToTargets::to_targets).collect_vec();
 
+        let overflow = b.is_not_equal(overflow, zero).target;
+
         // Register the public innputs.
         PublicInputs::<_, L, S, PH>::new(
             &original_tree_proof.block_hash(),
@@ -226,7 +234,7 @@ where
             &[num_placeholders],
             &placeholder_values_slice,
             &[query_proof.num_matching_rows_target()],
-            &[query_proof.overflow_flag_target().target],
+            &[overflow],
             // The aggregation query proof only has one result.
             &[one],
             &results_slice,
@@ -460,7 +468,10 @@ mod tests {
         // Entry count
         assert_eq!(pi.entry_count(), entry_count);
         // overflow flag
-        assert_eq!(pi.overflow_flag(), query_pi.overflow_flag());
+        assert_eq!(
+            pi.overflow_flag(),
+            query_pi.overflow_flag() || entry_count == F::ZERO
+        );
         // Result values
         {
             // Convert the entry count to an Uint256.
