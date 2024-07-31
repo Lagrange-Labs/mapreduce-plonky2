@@ -262,7 +262,9 @@ impl ProofStorage for KeyValueDB {
                 row_key.primary, row_key.tree_key
             );
         }
+        println!("??PRECOMMIT with latest BLOCK");
         tx.commit()?;
+        println!("COMMIT DONE with latest BLOCK");
         Ok(())
     }
 
