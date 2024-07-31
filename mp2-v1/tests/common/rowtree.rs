@@ -276,10 +276,12 @@ impl<P: ProofStorage> TestContext<P> {
             // Sec. index value
             let value = row.cells.secondary_index().unwrap().value;
 
+            debug!("Before fetching cell proof");
             let cell_tree_proof = self
                 .storage
                 .get_proof_exact(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
                 .expect("should find cell root proof");
+            debug!("After fetching cell proof");
             let proof = if context.is_leaf() {
                 // Prove a leaf
                 let inputs = CircuitInput::RowsTree(
@@ -376,8 +378,9 @@ impl<P: ProofStorage> TestContext<P> {
                 .store_proof(ProofKey::Row(new_proof_key), proof)
                 .expect("storing should work");
 
-            debug!("Finished row tree key proving {k:?}");
+            debug!("??Finished row tree key proving {k:?}");
             workplan.done(&k).unwrap();
+            debug!("Finished row tree key proving {k:?}");
         }
         let root = t.root().unwrap();
         let root_proof_key = RowProofIdentifier {
