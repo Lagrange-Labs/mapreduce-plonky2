@@ -887,7 +887,7 @@ impl TestCase {
                                 // then to insert a new one
                                 let key_to_delete: RowTreeKey =
                                     previous_table_value.current_secondary.into();
-                                let (cells, index) = new_entry.to_update(
+                                let (mut cells, index) = new_entry.to_update(
                                     &index,
                                     slot,
                                     &self.contract_address,
@@ -904,6 +904,9 @@ impl TestCase {
                                     // block)
                                     Some(key_to_delete.clone()),
                                 );
+                                // NOTE: in this case, only the secondary index is changing so we
+                                // should not have to provide any updated cells
+                                cells.updated_cells = vec![];
                                 vec![
                                     TableRowUpdate::Deletion(key_to_delete),
                                     TableRowUpdate::Insertion(cells, index),
