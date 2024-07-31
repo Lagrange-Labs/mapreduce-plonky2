@@ -35,7 +35,7 @@ pub struct IndexNode {
     // information that must be filled manually
     pub identifier: u64,
     pub value: U256,
-    pub row_tree_proof_id: RowProofIdentifier,
+    pub row_tree_proof_id: RowProofIdentifier<BlockPrimaryIndex>,
     pub row_tree_hash: HashOut<F>,
     // information filled during aggregation inside ryhope
     pub node_hash: HashOut<F>,
@@ -283,14 +283,15 @@ impl<P: ProofStorage> TestContext<P> {
 
     pub(crate) async fn prove_update_index_tree(
         &mut self,
+        bn: BlockPrimaryIndex,
         table: &Table,
         ut: UpdateTree<IndexTreeKey>,
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let row_tree_root = table.row.root().unwrap();
-        // i.e. this is assuming latest state since it fetches the latest row root proof
         let row_root_proof_key = RowProofIdentifier {
             table: table.id.clone(),
             tree_key: row_tree_root,
+            primary: bn,
         };
 
         let row_tree_proof = self

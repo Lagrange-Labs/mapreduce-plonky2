@@ -46,8 +46,9 @@ pub(crate) struct CellProofIdentifier {
 /// tree for block 4 can require searching for a node whose proof has been generated at block 2
 /// TODO: make it nice with lifetimes, and easier constructor
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub(crate) struct RowProofIdentifier {
+pub(crate) struct RowProofIdentifier<PrimaryIndex> {
     pub(crate) table: TableID,
+    pub(crate) primary: PrimaryIndex,
     pub(crate) tree_key: RowTreeKey,
 }
 
@@ -67,7 +68,7 @@ pub(crate) type BlockPrimaryIndex = <sbbst::Tree as TreeTopology>::Key;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProofKey {
     Cell(CellProofIdentifier),
-    Row(RowProofIdentifier),
+    Row(RowProofIdentifier<BlockPrimaryIndex>),
     Index(IndexProofIdentifier<BlockPrimaryIndex>),
     FinalExtraction((TableID, BlockPrimaryIndex)),
     ContractExtraction(ContractKey),

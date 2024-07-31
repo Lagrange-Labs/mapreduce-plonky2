@@ -1,7 +1,10 @@
 //! Test utilities for Contract Extraction (C.3)
 
-use super::{proof_storage::ProofStorage, TestContext};
-use alloy::{eips::BlockNumberOrTag, primitives::Address};
+use super::{
+    proof_storage::{BlockPrimaryIndex, ProofStorage},
+    TestContext,
+};
+use alloy::{eips::BlockNumberOrTag, primitives::Address, rpc::types::Block};
 use eth_trie::Nibbles;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
@@ -26,11 +29,11 @@ impl<P: ProofStorage> TestContext<P> {
         &self,
         contract_address: &Address,
         slot: StorageSlot,
-        block_number: u64,
+        block_number: BlockPrimaryIndex,
     ) -> Vec<u8> {
         // Query the block for checking the block hash.
         let block = self
-            .query_block_at(BlockNumberOrTag::Number(block_number))
+            .query_block_at(BlockNumberOrTag::Number(block_number as u64))
             .await;
 
         // Query the MPT proof from RPC.
@@ -41,7 +44,7 @@ impl<P: ProofStorage> TestContext<P> {
             }
         };
         let res = self
-            .query_mpt_proof(&query, BlockNumberOrTag::Number(block_number))
+            .query_mpt_proof(&query, BlockNumberOrTag::Number(block_number as u64))
             .await;
 
         // Get the storage root hash, and check it with `keccak(storage_root)`,

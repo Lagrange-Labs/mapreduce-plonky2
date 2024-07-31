@@ -246,16 +246,17 @@ pub async fn build_row_tree(rows: &[Row]) -> Result<(MerkleRowTree, UpdateTree<R
 impl<P: ProofStorage> TestContext<P> {
     /// Given a row tree (i.e. secondary index tree) and its update tree, prove
     /// it.
-    pub async fn prove_row_tree(
+    pub fn prove_row_tree(
         &mut self,
+        // required to fetch the right row tree proofs during the update, since the key
+        // itself is not enough, since there might be multiple proofs with the same key but not
+        // for the same block (i.e. not the same data)
+        primary: BlockPrimaryIndex,
         table: &Table,
         ut: UpdateTree<<RowTree as TreeTopology>::Key>,
-    ) -> Result<RowProofIdentifier> {
+    ) -> Result<RowProofIdentifier<BlockPrimaryIndex>> {
         let t = &table.row;
         let mut workplan = ut.into_workplan();
-        // THIS can panic but for block number it should be fine on 64bit platforms...
-        // unwrap is safe since we know it is really a block number and not set to Latest or stg
-        let block_key = self.block_number().await as BlockPrimaryIndex;
 
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, row) = t.fetch_with_context(&k);
@@ -277,6 +278,7 @@ impl<P: ProofStorage> TestContext<P> {
             } else if context.is_partial() {
                 let proof_key = RowProofIdentifier {
                     table: table.id.clone(),
+                    primary,
                     tree_key: context
                         .left
                         .as_ref()
@@ -309,10 +311,12 @@ impl<P: ProofStorage> TestContext<P> {
             } else {
                 let left_proof_key = RowProofIdentifier {
                     table: table.id.clone(),
+                    primary,
                     tree_key: context.left.unwrap(),
                 };
                 let right_proof_key = RowProofIdentifier {
                     table: table.id.clone(),
+                    primary,
                     tree_key: context.right.unwrap(),
                 };
                 let cell_tree_proof = self
@@ -343,6 +347,7 @@ impl<P: ProofStorage> TestContext<P> {
             };
             let new_proof_key = RowProofIdentifier {
                 table: table.id.clone(),
+                primary,
                 tree_key: k.clone(),
             };
 
@@ -355,6 +360,7 @@ impl<P: ProofStorage> TestContext<P> {
         let root = t.root().unwrap();
         let root_proof_key = RowProofIdentifier {
             table: table.id.clone(),
+            primary,
             tree_key: root,
         };
 
@@ -380,12 +386,13 @@ impl<P: ProofStorage> TestContext<P> {
     /// NOTE:we are simplifying a bit here as we assume the construction of the index tree
     /// is from (a) the block and (b) only one by one, i.e. there is only one IndexNode to return
     /// that have to be inserted. For CSV case, it should return a vector of new inserted nodes.
-    pub async fn prove_update_row_tree(
+    pub fn prove_update_row_tree(
         &mut self,
+        primary: BlockPrimaryIndex,
         table: &Table,
         update: RowUpdateResult,
     ) -> Result<IndexNode> {
-        let root_proof_key = self.prove_row_tree(table, update.updates).await?;
+        let root_proof_key = self.prove_row_tree(primary, table, update.updates)?;
         let row_tree_proof = self
             .storage
             .get_proof(&ProofKey::Row(root_proof_key.clone()))
@@ -400,7 +407,7 @@ impl<P: ProofStorage> TestContext<P> {
         );
         Ok(IndexNode {
             identifier: table.columns.primary_column().identifier,
-            value: U256::from(self.block_number().await),
+            value: U256::from(primary),
             row_tree_proof_id: root_proof_key,
             row_tree_hash: table.row.root_data().unwrap().hash,
             ..Default::default()

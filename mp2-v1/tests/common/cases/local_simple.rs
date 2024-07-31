@@ -35,6 +35,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
     providers::ProviderBuilder,
+    rpc::types::Block,
 };
 use mp2_common::{
     eth::{left_pad32, ProofQuery, StorageSlot},
@@ -212,30 +213,26 @@ impl TestCase {
         // to make when we deal with mappings
         let table_row_updates = self.init_contract_data(ctx).await;
         log::info!("Applying initial updates to contract done");
+        let bn = ctx.block_number().await as BlockPrimaryIndex;
 
         // we first run the initial preprocessing and db creation.
-        self.run_mpt_preprocessing(ctx).await?;
+        self.run_mpt_preprocessing(ctx, bn).await?;
         // then we run the creation of our tree
-        self.run_lagrange_preprocessing(ctx, table_row_updates)
+        self.run_lagrange_preprocessing(ctx, bn, table_row_updates)
             .await?;
 
-        log::info!(
-            "FIRST block {} finished proving. Moving on to update",
-            ctx.block_number().await
-        );
+        log::info!("FIRST block {bn} finished proving. Moving on to update",);
 
         for ut in changes {
             let table_row_updates = self.random_contract_update(ctx, ut).await;
-            log::info!(
-                "Applying follow up updates to contract done - now at block {}",
-                ctx.block_number().await
-            );
+            let bn = ctx.block_number().await as BlockPrimaryIndex;
+            log::info!("Applying follow up updates to contract done - now at block {bn}",);
             // we first run the initial preprocessing and db creation.
             // NOTE: we don't show copy on write here - the fact of only reproving what has been
             // updated, as this is not new from v0.
             // TODO: implement copy on write mechanism for MPT
-            self.run_mpt_preprocessing(ctx).await?;
-            self.run_lagrange_preprocessing(ctx, table_row_updates)
+            self.run_mpt_preprocessing(ctx, bn).await?;
+            self.run_lagrange_preprocessing(ctx, bn, table_row_updates)
                 .await?;
         }
         Ok(())
@@ -246,6 +243,7 @@ impl TestCase {
     async fn run_lagrange_preprocessing<P: ProofStorage>(
         &mut self,
         ctx: &mut TestContext<P>,
+        bn: BlockPrimaryIndex,
         // Note there is only one entry for a single variable update, but multiple for mappings for
         // example
         updates: Vec<TableRowUpdate>,
@@ -303,8 +301,7 @@ impl TestCase {
         let updates = self.table.apply_row_update(rows_update)?;
         info!("Applied updates to row tree");
         let index_node = ctx
-            .prove_update_row_tree(&self.table, updates)
-            .await
+            .prove_update_row_tree(bn, &self.table, updates)
             .expect("unable to prove row tree");
         info!("Generated final ROWs tree proofs for block {current_block}");
 
@@ -322,7 +319,9 @@ impl TestCase {
             .apply_index_update(index_update)
             .expect("can't update index tree");
         info!("Applied updates to index tree for block {current_block}");
-        let root_proof_key = ctx.prove_update_index_tree(&self.table, updates.plan).await;
+        let root_proof_key = ctx
+            .prove_update_index_tree(bn, &self.table, updates.plan)
+            .await;
         info!("Generated final BLOCK tree proofs for block {current_block}");
         let _ = ctx.prove_ivc(&self.table.id, &self.table.index).await;
         info!("Generated final IVC proof for block {}", current_block,);
@@ -331,10 +330,12 @@ impl TestCase {
     }
 
     // separate function only dealing with preprocessing MPT proofs
-    async fn run_mpt_preprocessing<P: ProofStorage>(&self, ctx: &mut TestContext<P>) -> Result<()> {
-        let bn = ctx.block_number().await;
-        let contract_proof_key =
-            ProofKey::ContractExtraction((self.contract_address, bn as BlockPrimaryIndex));
+    async fn run_mpt_preprocessing<P: ProofStorage>(
+        &self,
+        ctx: &mut TestContext<P>,
+        bn: BlockPrimaryIndex,
+    ) -> Result<()> {
+        let contract_proof_key = ProofKey::ContractExtraction((self.contract_address, bn));
         let contract_proof = match ctx.storage.get_proof(&contract_proof_key) {
             Ok(proof) => {
                 info!(
