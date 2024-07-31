@@ -525,7 +525,8 @@ impl TestCase {
             // Having such optimization could be done later on, need to properly evaluate the cost
             // of it.
             TableSourceSlot::Mapping((ref mut mapping, _)) => {
-                let idx = thread_rng().gen_range(0..mapping.mapping_keys.len());
+                //let idx = thread_rng().gen_range(0..mapping.mapping_keys.len());
+                let idx = mapping.mapping_keys.len() - 1;
                 let mkey = &mapping.mapping_keys[idx].clone();
                 let slot = mapping.slot as usize;
                 let index_type = mapping.index.clone();
