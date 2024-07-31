@@ -154,11 +154,11 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs
     }
 
     pub(crate) fn to_query_limit_raw(&self) -> &T {
-        &self.query_limit
+        self.query_limit
     }
 
     pub(crate) fn to_query_offset_raw(&self) -> &T {
-        &self.query_offset
+        self.query_offset
     }
 
     pub fn from_slice(input: &'a [T]) -> Self {

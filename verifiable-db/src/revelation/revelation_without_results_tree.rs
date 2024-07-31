@@ -378,7 +378,7 @@ mod tests {
             QueryPublicInputs::MaxQuery,
             QueryPublicInputs::PlaceholderHash,
         ]
-        .map(|input| QueryProofPublicInputs::<F, S>::to_range(input));
+        .map(QueryProofPublicInputs::<F, S>::to_range);
 
         // Set the count, minimum, maximum query and the placeholder hash.
         [
