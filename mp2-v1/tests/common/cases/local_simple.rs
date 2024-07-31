@@ -336,7 +336,7 @@ impl TestCase {
         bn: BlockPrimaryIndex,
     ) -> Result<()> {
         let contract_proof_key = ProofKey::ContractExtraction((self.contract_address, bn));
-        let contract_proof = match ctx.storage.get_proof(&contract_proof_key) {
+        let contract_proof = match ctx.storage.get_proof_exact(&contract_proof_key) {
             Ok(proof) => {
                 info!(
                     "Loaded Contract Extraction (C.3) proof for block number {}",
@@ -365,7 +365,7 @@ impl TestCase {
         // We look if block proof has already been generated for this block
         // since it is the same between proofs
         let block_proof_key = ProofKey::BlockExtraction(bn as BlockPrimaryIndex);
-        let block_proof = match ctx.storage.get_proof(&block_proof_key) {
+        let block_proof = match ctx.storage.get_proof_exact(&block_proof_key) {
             Ok(proof) => {
                 info!(
                     "Loaded Block Extraction (C.4) proof for block number {}",
@@ -391,7 +391,7 @@ impl TestCase {
         let (value_proof, compound, length) = match self.source {
             // first lets do without length
             TableSourceSlot::Mapping((ref mapping, _)) => {
-                let mapping_root_proof = match ctx.storage.get_proof(&proof_key) {
+                let mapping_root_proof = match ctx.storage.get_proof_exact(&proof_key) {
                     Ok(p) => p,
                     Err(_) => {
                         let mapping_values_proof = ctx
@@ -419,7 +419,7 @@ impl TestCase {
                 (mapping_root_proof, true, None)
             }
             TableSourceSlot::SingleValues(ref args) => {
-                let single_value_proof = match ctx.storage.get_proof(&proof_key) {
+                let single_value_proof = match ctx.storage.get_proof_exact(&proof_key) {
                     Ok(p) => p,
                     Err(_) => {
                         let single_values_proof = ctx
@@ -445,7 +445,7 @@ impl TestCase {
         // final extraction for single variables combining the different proofs generated before
         let final_key = ProofKey::FinalExtraction((table_id.clone(), bn as BlockPrimaryIndex));
         // no need to generate it if it's already present
-        if ctx.storage.get_proof(&final_key).is_err() {
+        if ctx.storage.get_proof_exact(&final_key).is_err() {
             let proof = ctx
                 .prove_final_extraction(contract_proof, value_proof, block_proof, compound, length)
                 .await

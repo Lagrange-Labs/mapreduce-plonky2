@@ -130,7 +130,13 @@ impl Hash for ProofKey {
 }
 pub trait ProofStorage {
     fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()>;
-    fn get_proof(&self, key: &ProofKey) -> Result<Vec<u8>>;
+    fn get_proof_exact(&self, key: &ProofKey) -> Result<Vec<u8>>;
+    // Returns the latest proof that have been generated for the given row tree key. That means the
+    // primary field on the row tree key is not relevant in this method, since it will always try
+    // to find the _latest_ which may not be the same as the one given here.
+    // TODO: probably refactor this whole mechanism outside of storage, and potentially put primary
+    // index outside of row tree key since it's weird call here.
+    fn get_proof_latest(&self, key: &RowProofIdentifier<BlockPrimaryIndex>) -> Result<Vec<u8>>;
     /// Move the proof form the old key to the new key. This is **required** for cells proofs
     /// when the secondary index value changes.
     /// If there is no proof at the old key, it simply does nothing.
@@ -157,8 +163,18 @@ impl ProofStorage for MemoryProofStorage {
         Ok(())
     }
 
-    fn get_proof(&self, key: &ProofKey) -> Result<Vec<u8>> {
+    fn get_proof_exact(&self, key: &ProofKey) -> Result<Vec<u8>> {
         self.0.get(key).context("unable to get proof").cloned()
+    }
+    fn get_proof_latest(&self, key: &RowProofIdentifier<BlockPrimaryIndex>) -> Result<Vec<u8>> {
+        for i in key.primary..0 {
+            let mut nkey = key.clone();
+            nkey.primary = i;
+            if let Ok(p) = self.get_proof_exact(&ProofKey::Row(nkey)) {
+                return Ok(p);
+            }
+        }
+        bail!("couldn't find proof with such identifier");
     }
 
     fn move_proof(&mut self, old_key: &ProofKey, new_key: &ProofKey) -> Result<()> {
@@ -209,14 +225,43 @@ impl KeyValueDB {
     }
 }
 
+/// Bucket storing the last block number "proven" for each row tree key
+/// This allows when proving the update to fetch row tree proofs that already have been proven many
+/// blocks ago.
+const ROW_BUCKET_NAME: &str = "row_proof_id";
+
 impl ProofStorage for KeyValueDB {
     fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()> {
         let store_key = key.compute_hash();
         let tx = self.db.tx(true)?;
         let bucket = tx.get_bucket(BUCKET_NAME)?;
         bucket.put(store_key.to_be_bytes(), proof)?;
+        if let ProofKey::Row(row_key) = key {
+            let row_bucket = tx.get_bucket(ROW_BUCKET_NAME)?;
+            // store the latest primary index key for which this tree key have been proven
+            // TODO: use a proper hash, no need to store in raw everything
+            row_bucket.put(row_key.tree_key.to_bytes()?, row_key.primary.to_be_bytes())?;
+        }
         tx.commit()?;
         Ok(())
+    }
+
+    fn get_proof_latest(&self, key: &RowProofIdentifier<BlockPrimaryIndex>) -> Result<Vec<u8>> {
+        let tx = self.db.tx(true)?;
+        let row_bucket = tx.get_bucket(ROW_BUCKET_NAME)?;
+        let raw = match row_bucket.get(key.tree_key.to_bytes()?) {
+            Some(d) => match d {
+                Data::Bucket(_) => bail!("bucket found while required proofs"),
+                Data::KeyValue(kv) => kv.value().to_vec(),
+            },
+            None => bail!("bucket not found, data not found"),
+        };
+        // now that we have the block number of the latest row tree proof with the given row tree
+        // key, we can fetch that proof !
+        let block_number = BlockPrimaryIndex::from_be_bytes(raw.try_into().unwrap());
+        let mut new_key = key.clone();
+        new_key.primary = block_number;
+        self.get_proof_exact(&ProofKey::Row(new_key))
     }
 
     fn move_proof(&mut self, old_key: &ProofKey, new_key: &ProofKey) -> Result<()> {
@@ -245,7 +290,7 @@ impl ProofStorage for KeyValueDB {
         }
     }
 
-    fn get_proof(&self, key: &ProofKey) -> Result<Vec<u8>> {
+    fn get_proof_exact(&self, key: &ProofKey) -> Result<Vec<u8>> {
         let store_key = key.compute_hash();
         let tx = self.db.tx(true)?;
         let bucket = tx.get_bucket(BUCKET_NAME)?;

@@ -64,6 +64,18 @@ pub struct RowTreeKey {
     pub rest: RowTreeKeyNonce,
 }
 
+impl RowTreeKey {
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let b = bincode::serialize(self)?;
+        Ok(b)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let s = bincode::deserialize(bytes)?;
+        Ok(s)
+    }
+}
+
 /// Simply a struct useful to transmit around when dealing with the secondary index value, since
 /// the unique nonce must be kept around as well. It is not saved anywhere nor proven.
 #[derive(PartialEq, Eq, Default, Debug, Clone)]
@@ -266,7 +278,7 @@ impl<P: ProofStorage> TestContext<P> {
 
             let cell_tree_proof = self
                 .storage
-                .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
+                .get_proof_exact(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
                 .expect("should find cell root proof");
             let proof = if context.is_leaf() {
                 // Prove a leaf
@@ -287,14 +299,16 @@ impl<P: ProofStorage> TestContext<P> {
                         .unwrap(),
                 };
                 // Prove a partial node
+                // NOTE: we need to find the latest one generated for that rowtreekey
+                // and we don't know which block is it, it is not necessarily the current block!
                 let child_proof = self
                     .storage
-                    .get_proof(&ProofKey::Row(proof_key))
+                    .get_proof_latest(&proof_key)
                     .expect("UT guarantees proving in order");
 
                 let cell_tree_proof = self
                     .storage
-                    .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id))
+                    .get_proof_exact(&ProofKey::Cell(row.cell_tree_root_proof_id))
                     .expect("should find cells tree root proof");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::partial(
@@ -321,17 +335,20 @@ impl<P: ProofStorage> TestContext<P> {
                 };
                 let cell_tree_proof = self
                     .storage
-                    .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
+                    .get_proof_exact(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
                     .expect("should find cells tree root proof");
 
-                // Prove a full node.
+                // Prove a full node: fetch the row proofs of the children
+                // NOTE: these row proofs may have been generated at any block in the past.
+                // Therefore we need to search for the _latest_ one since that is the one of
+                // interest to us.
                 let left_proof = self
                     .storage
-                    .get_proof(&ProofKey::Row(left_proof_key))
+                    .get_proof_latest(&left_proof_key)
                     .expect("UT guarantees proving in order");
                 let right_proof = self
                     .storage
-                    .get_proof(&ProofKey::Row(right_proof_key))
+                    .get_proof_latest(&right_proof_key)
                     .expect("UT guarantees proving in order");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::full(
@@ -366,7 +383,7 @@ impl<P: ProofStorage> TestContext<P> {
 
         let p = self
             .storage
-            .get_proof(&ProofKey::Row(root_proof_key.clone()))
+            .get_proof_exact(&ProofKey::Row(root_proof_key.clone()))
             .expect("row tree root proof absent");
         {
             let pproof = ProofWithVK::deserialize(&p).unwrap();
@@ -395,7 +412,7 @@ impl<P: ProofStorage> TestContext<P> {
         let root_proof_key = self.prove_row_tree(primary, table, update.updates)?;
         let row_tree_proof = self
             .storage
-            .get_proof(&ProofKey::Row(root_proof_key.clone()))
+            .get_proof_exact(&ProofKey::Row(root_proof_key.clone()))
             .unwrap();
 
         let tree_hash = table.row.root_data().unwrap().hash;

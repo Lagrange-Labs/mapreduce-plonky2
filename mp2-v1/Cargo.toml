@@ -41,3 +41,4 @@ mp2_test = { path = "../mp2-test" }
 envconfig = "0.10.0"
 test-log = "0.2.16"
 jammdb = "0.11.0"
+bincode.workspace = true

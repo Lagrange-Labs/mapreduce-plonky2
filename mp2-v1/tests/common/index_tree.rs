@@ -127,7 +127,7 @@ impl<P: ProofStorage> TestContext<P> {
             let (context, node) = t.fetch_with_context(&k);
             let row_tree_proof = self
                 .storage
-                .get_proof(&ProofKey::Row(node.row_tree_proof_id.clone()))
+                .get_proof_exact(&ProofKey::Row(node.row_tree_proof_id.clone()))
                 .expect("should find row proof");
             // extraction proof is done once per block, so its key can just be block based
             debug!(
@@ -136,7 +136,7 @@ impl<P: ProofStorage> TestContext<P> {
             );
             let extraction_proof = self
                 .storage
-                .get_proof(&ProofKey::FinalExtraction((
+                .get_proof_exact(&ProofKey::FinalExtraction((
                     table_id.clone(),
                     // NOTE: important to take the final extraction corresponding to the index
                     // being proven which is not the latest one always. In update tree, many nodes
@@ -238,7 +238,7 @@ impl<P: ProofStorage> TestContext<P> {
                 let right_key = context.right.expect("should always be a right child");
                 let right_proof = self
                     .storage
-                    .get_proof(&ProofKey::Index(IndexProofIdentifier {
+                    .get_proof_exact(&ProofKey::Index(IndexProofIdentifier {
                         table: table_id.clone(),
                         tree_key: right_key,
                     }))
@@ -276,7 +276,7 @@ impl<P: ProofStorage> TestContext<P> {
         // just checking the storage is there
         let _ = self
             .storage
-            .get_proof(&ProofKey::Index(root_proof_key.clone()))
+            .get_proof_exact(&ProofKey::Index(root_proof_key.clone()))
             .unwrap();
         root_proof_key
     }
@@ -296,7 +296,7 @@ impl<P: ProofStorage> TestContext<P> {
 
         let row_tree_proof = self
             .storage
-            .get_proof(&ProofKey::Row(row_root_proof_key.clone()))
+            .get_proof_exact(&ProofKey::Row(row_root_proof_key.clone()))
             .unwrap();
         let row_tree_hash = verifiable_db::row_tree::extract_hash_from_proof(&row_tree_proof)
             .expect("can't find hash?");

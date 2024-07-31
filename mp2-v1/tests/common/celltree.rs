@@ -136,7 +136,7 @@ impl<P: ProofStorage> TestContext<P> {
                 };
                 let left_proof = self
                     .storage
-                    .get_proof(&ProofKey::Cell(proof_key))
+                    .get_proof_exact(&ProofKey::Cell(proof_key))
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::partial(
@@ -158,11 +158,11 @@ impl<P: ProofStorage> TestContext<P> {
 
                 let left_proof = self
                     .storage
-                    .get_proof(&ProofKey::Cell(left_proof_key))
+                    .get_proof_exact(&ProofKey::Cell(left_proof_key))
                     .expect("UT guarantees proving in order");
                 let right_proof = self
                     .storage
-                    .get_proof(&ProofKey::Cell(right_proof_key))
+                    .get_proof_exact(&ProofKey::Cell(right_proof_key))
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::full(
@@ -204,7 +204,7 @@ impl<P: ProofStorage> TestContext<P> {
         // just checking the storage is there
         let _ = self
             .storage
-            .get_proof(&ProofKey::Cell(root_proof_key.clone()))
+            .get_proof_exact(&ProofKey::Cell(root_proof_key.clone()))
             .unwrap();
         root_proof_key
     }
@@ -232,7 +232,7 @@ impl<P: ProofStorage> TestContext<P> {
         );
         let cell_root_proof = self
             .storage
-            .get_proof(&ProofKey::Cell(root_key.clone()))
+            .get_proof_exact(&ProofKey::Cell(root_key.clone()))
             .unwrap();
         let proved_hash = cell_tree_proof_to_hash(&cell_root_proof);
         assert_eq!(
