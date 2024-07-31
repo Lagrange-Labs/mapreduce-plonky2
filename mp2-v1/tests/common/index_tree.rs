@@ -160,7 +160,8 @@ impl<P: ProofStorage> TestContext<P> {
                 assert_eq!(
                     row_pi.rows_digest_field(),
                     ext_pi.value_point(),
-                    "values extracted vs value in db don't match"
+                    "values extracted vs value in db don't match (left row, right mpt (block {})",
+                    node.value.to::<u64>()
                 );
             }
             let proof = if context.is_leaf() {
