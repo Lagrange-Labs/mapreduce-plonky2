@@ -281,9 +281,15 @@ impl ProofStorage for KeyValueDB {
         // now that we have the block number of the latest row tree proof with the given row tree
         // key, we can fetch that proof !
         let block_number = BlockPrimaryIndex::from_be_bytes(raw.try_into().unwrap());
+        println!(
+            "GET_PROOF_LATEST: found latest block number {}",
+            block_number
+        );
         let mut new_key = key.clone();
         new_key.primary = block_number;
-        self.get_proof_exact(&ProofKey::Row(new_key))
+        let out = self.get_proof_exact(&ProofKey::Row(new_key))?;
+        println!("GET_PROOF_LATEST: after finding the full row key");
+        Ok(out)
     }
 
     fn move_proof(&mut self, old_key: &ProofKey, new_key: &ProofKey) -> Result<()> {
