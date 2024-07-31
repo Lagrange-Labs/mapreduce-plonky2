@@ -452,10 +452,9 @@ impl TestCase {
             ctx.storage
                 .store_proof(final_key, proof.clone())
                 .expect("unable to save in storage?");
-            debug!("SAVING final extraction key from {table_id:?} and {bn}");
-            info!("Generated Final Extraction (C.5.1) proof for single variables");
+            info!("Generated Final Extraction (C.5.1) proof for block {bn}");
         }
-        info!("Generated ALL Single Variables MPT preprocessing proofs");
+        info!("Generated ALL MPT preprocessing proofs for block {bn}");
         Ok(())
     }
 
@@ -995,6 +994,32 @@ impl UpdateSimpleStorage {
 
         let b = contract.changeMapping(contract_changes);
         b.send().await.unwrap().watch().await.unwrap();
+        {
+            // sanity check
+            for op in values {
+                match op {
+                    MappingUpdate::Deletion(k, _) => {
+                        let res = contract.m1(*k).call().await.unwrap();
+                        debug!(
+                            "KEY deleted on contract -> new value = {}",
+                            res._0.into_word()
+                        );
+                    }
+                    MappingUpdate::Insertion(k, v) => {
+                        let res = contract.m1(*k).call().await.unwrap();
+                        let newv: U256 = res._0.into_word().into();
+                        let is_correct = newv == *v;
+                        debug!("KEY Inserted, new value valid ? {is_correct}");
+                    }
+                    MappingUpdate::Update(k, _, v) => {
+                        let res = contract.m1(*k).call().await.unwrap();
+                        let newv: U256 = res._0.into_word().into();
+                        let is_correct = newv == *v;
+                        debug!("KEY Updated, new value valid ? {is_correct}");
+                    }
+                }
+            }
+        }
         log::info!("Updated simple contract single values");
     }
 }

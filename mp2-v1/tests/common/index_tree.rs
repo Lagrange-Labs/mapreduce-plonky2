@@ -138,9 +138,11 @@ impl<P: ProofStorage> TestContext<P> {
                 .storage
                 .get_proof(&ProofKey::FinalExtraction((
                     table_id.clone(),
-                    // TODO fix this, we should be able to store historical proofs, even rows tree
-                    //node.row_tree_proof_id.primary,
-                    self.block_number().await as BlockPrimaryIndex,
+                    // NOTE: important to take the final extraction corresponding to the index
+                    // being proven which is not the latest one always. In update tree, many nodes
+                    // may need to be proven again, historical nodes, since their children might
+                    // have changed.
+                    node.value.to(),
                 )))
                 .expect("should find extraction proof");
             {
