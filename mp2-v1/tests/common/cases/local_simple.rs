@@ -547,11 +547,23 @@ impl TestCase {
                         )]
                     }
                     ChangeType::Deletion => {
-                        // we just want to delete any row
-                        // we dont care about the value here.
+                        // NOTE: We care about the value here since that allows _us_ to pinpoint the
+                        // correct row in the table and delete it since for a mpping, we uniquely
+                        // identify row per (mapping_key,mapping_value) (in the order dictated by
+                        // the secondary index)
+                        // --> therefore we simply lookup the current value. In dist system, the
+                        // scrapper will give that info already
+                        let query = ProofQuery::new_mapping_slot(*address, slot, mkey.clone());
+                        let res = ctx
+                            .query_mpt_proof(
+                                &query,
+                                BlockNumberOrTag::Number(ctx.block_number().await),
+                            )
+                            .await;
+                        let old_value = res.storage_proof[0].value;
                         vec![MappingUpdate::Deletion(
                             U256::from_be_slice(mkey),
-                            random_u256(),
+                            old_value,
                         )]
                     }
                     ChangeType::Update(u) => {
@@ -1000,22 +1012,21 @@ impl UpdateSimpleStorage {
                 match op {
                     MappingUpdate::Deletion(k, _) => {
                         let res = contract.m1(*k).call().await.unwrap();
-                        debug!(
-                            "KEY deleted on contract -> new value = {}",
-                            res._0.into_word()
-                        );
+                        let vu: U256 = res._0.into_word().into();
+                        let is_correct = vu == U256::from(0);
+                        assert!(is_correct, "key deletion not correct on contract");
                     }
                     MappingUpdate::Insertion(k, v) => {
                         let res = contract.m1(*k).call().await.unwrap();
                         let newv: U256 = res._0.into_word().into();
                         let is_correct = newv == *v;
-                        debug!("KEY Inserted, new value valid ? {is_correct}");
+                        assert!(is_correct, "key insertion not correct on contract");
                     }
                     MappingUpdate::Update(k, _, v) => {
                         let res = contract.m1(*k).call().await.unwrap();
                         let newv: U256 = res._0.into_word().into();
                         let is_correct = newv == *v;
-                        debug!("KEY Updated, new value valid ? {is_correct}");
+                        assert!(is_correct, "KEY Updated, new value valid ? {is_correct}");
                     }
                 }
             }
