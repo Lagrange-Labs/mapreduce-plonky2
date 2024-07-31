@@ -42,13 +42,13 @@
   languages.rust.enable = true;
 
   # https://devenv.sh/pre-commit-hooks/
-  pre-commit.hooks = {
-    # cargo-check.enable = true;
-    check-merge-conflicts.enable = true;
-    # clippy.enable = true;
-    # commitizen.enable = true;
-    rustfmt.enable = true;
-  };
+  # pre-commit.hooks = {
+  #   # cargo-check.enable = true;
+  #   check-merge-conflicts.enable = true;
+  #   # clippy.enable = true;
+  #   # commitizen.enable = true;
+  #   rustfmt.enable = true;
+  # };
 
   # https://devenv.sh/processes/
   # processes.ping.exec = "ping example.com";
