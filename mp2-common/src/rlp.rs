@@ -250,15 +250,6 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
     }
 }
 
-/// Decodes a list of two elements.
-pub(crate) fn decode_tuple<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    data: &[Target],
-    data_offset: Target,
-) -> RlpList<2> {
-    decode_fixed_list::<F, D, 2>(b, data, data_offset)
-}
-
 /// Decodes the header of the list, and then decodes the first N items of the list.
 /// The offsets decoded in the returned list are starting from the 0-index of `data`
 /// not from the `offset` index.

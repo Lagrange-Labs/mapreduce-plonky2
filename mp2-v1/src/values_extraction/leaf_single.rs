@@ -40,15 +40,6 @@ where
     id: Target,
 }
 
-impl<const N: usize> LeafSingleWires<N>
-where
-    [(); PAD_LEN(N)]:,
-{
-    pub fn slot(&self) -> Target {
-        self.slot.slot
-    }
-}
-
 /// Circuit to prove the correct derivation of the MPT key from a simple slot
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeafSingleCircuit<const NODE_LEN: usize> {

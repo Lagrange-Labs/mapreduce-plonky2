@@ -22,7 +22,7 @@ pub enum QueryPublicInputs {
     TreeHash,
     /// `V`: Set of `S` values representing the cumulative results of the query, where`S` is a parameter
     /// specifying the maximum number of cumulative results we support;
-    /// the first value coudl be either a `u256` or a `CurveTarget`, depending on the query, and so we always
+    /// the first value could be either a `u256` or a `CurveTarget`, depending on the query, and so we always
     /// represent this value with `CURVE_TARGET_LEN` elements; all the other `S-1` values are always `u256`
     OutputValues,
     /// `count`: `F` Number of matching records in the query
@@ -224,7 +224,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             ph: &input[Self::PI_RANGES[12].clone()],
         }
     }
-
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         h: &'a [T],
         v: &'a [T],
@@ -324,6 +324,18 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
             .unwrap()
     }
 
+    /// Return the value as a `UInt256Target` at the specified index
+    pub fn value_target_at_index(&self, i: usize) -> UInt256Target
+    where
+        [(); S - 1]:,
+    {
+        if i == 0 {
+            self.first_value_as_u256_target()
+        } else {
+            self.values_target()[i - 1].clone()
+        }
+    }
+
     pub fn num_matching_rows_target(&self) -> Target {
         *self.to_count_raw()
     }
@@ -390,6 +402,18 @@ impl<'a, const S: usize> PublicInputs<'a, F, S> {
             .collect_vec()
             .try_into()
             .unwrap()
+    }
+
+    /// Return the value as a UInt256 at the specified index
+    pub fn value_at_index(&self, i: usize) -> U256
+    where
+        [(); S - 1]:,
+    {
+        if i == 0 {
+            self.first_value_as_u256()
+        } else {
+            self.values()[i - 1]
+        }
     }
 
     pub fn num_matching_rows(&self) -> F {
@@ -460,7 +484,7 @@ mod tests {
         plonk::circuit_builder::CircuitBuilder,
     };
 
-    use crate::simple_query_circuits::public_inputs::QueryPublicInputs;
+    use crate::query::public_inputs::QueryPublicInputs;
 
     use super::PublicInputs;
 

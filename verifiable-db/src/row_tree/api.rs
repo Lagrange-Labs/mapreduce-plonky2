@@ -8,8 +8,6 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::cells_tree;
-
 use super::{
     full_node::{self, FullNodeCircuit},
     leaf::{self, LeafCircuit},
@@ -39,7 +37,6 @@ pub struct PublicParameters {
 }
 
 const ROW_IO_LEN: usize = super::public_inputs::TOTAL_LEN;
-const CELL_IO_LEN: usize = cells_tree::PublicInputs::<F>::TOTAL_LEN;
 
 impl PublicParameters {
     pub fn build(cells_set: &RecursiveCircuits<F, C, D>) -> Self {
@@ -228,7 +225,7 @@ pub fn extract_hash_from_proof(proof: &[u8]) -> Result<HashOut<F>> {
 
 #[cfg(test)]
 mod test {
-    use crate::row_tree::public_inputs::PublicInputs;
+    use crate::{cells_tree, row_tree::public_inputs::PublicInputs};
 
     use super::*;
     use mp2_common::{
@@ -237,7 +234,7 @@ mod test {
         utils::ToFields,
         F,
     };
-    use mp2_test::utils::weierstrass_to_point;
+    use mp2_test::{log::init_logging, utils::weierstrass_to_point};
     use partial_node::test::partial_safety_check;
     use plonky2::{
         field::types::{PrimeField64, Sample},
@@ -248,6 +245,8 @@ mod test {
     };
     use plonky2_ecgfp5::curve::curve::Point;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
+
+    const CELL_IO_LEN: usize = cells_tree::PublicInputs::<F>::TOTAL_LEN;
 
     struct TestParams {
         cells_test: TestingRecursiveCircuits<F, C, D, CELL_IO_LEN>,
@@ -313,7 +312,7 @@ mod test {
 
     #[test]
     fn test_rows_tree_api() -> Result<()> {
-        env_logger::init();
+        init_logging();
         log::info!("Generating parameters");
         let params = TestParams::build()?;
         log::info!("Generating leaf proof 1");

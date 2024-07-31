@@ -1,33 +1,32 @@
-use crate::simple_query_circuits::computational_hash_ids::{
-    AggregationOperation, Identifiers, Output,
-};
+use crate::query::computational_hash_ids::{AggregationOperation, Identifiers, Output};
+use anyhow::ensure;
+use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     group_hashing::CircuitBuilderGroupHashing,
-    poseidon::empty_poseidon_hash,
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
-    utils::{SelectHashBuilder, ToTargets},
-    CHasher, F,
+    utils::ToTargets,
+    F,
 };
-use plonky2::{
-    hash::hash_types::HashOutTarget,
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+use plonky2::iop::{
+    target::{BoolTarget, Target},
+    witness::{PartialWitness, WitnessWrite},
 };
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 use serde::{Deserialize, Serialize};
-use std::{array, iter};
+use std::{
+    array,
+    iter::{self, repeat},
+};
 
 use super::{
     cells::build_cells_tree,
     universal_query_circuit::{OutputComponent, OutputComponentWires},
-    COLUMN_INDEX_NUM,
+    ComputationalHashTarget, COLUMN_INDEX_NUM,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -67,7 +66,7 @@ pub struct Wires<const MAX_NUM_RESULTS: usize> {
     /// Remaining output values; for this component, they are basically dummy values
     output_values: Vec<UInt256Target>,
     /// Computational hash representing all the computation done in the query circuit
-    output_hash: HashOutTarget,
+    output_hash: ComputationalHashTarget,
     /// Identifiers of the aggregation operations to be returned as public inputs
     ops_ids: [Target; MAX_NUM_RESULTS],
 }
@@ -92,46 +91,39 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
 
     type InputWires = InputWires<MAX_NUM_RESULTS>;
 
-    fn get_ops_ids(&self) -> &[Target] {
+    fn ops_ids(&self) -> &[Target] {
         self.ops_ids.as_slice()
     }
 
-    fn get_first_output_value(&self) -> Self::FirstT {
+    fn first_output_value(&self) -> Self::FirstT {
         self.first_output_value
     }
 
-    fn get_other_output_values(&self) -> &[UInt256Target] {
+    fn other_output_values(&self) -> &[UInt256Target] {
         self.output_values.as_slice()
     }
 
-    fn get_computational_hash(&self) -> HashOutTarget {
+    fn computational_hash(&self) -> ComputationalHashTarget {
         self.output_hash
     }
 
-    fn get_input_wires(&self) -> Self::InputWires {
+    fn input_wires(&self) -> Self::InputWires {
         self.input_wires.clone()
     }
 }
 
-impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> {
+impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<MAX_NUM_RESULTS> {
     type Wires = Wires<MAX_NUM_RESULTS>;
 
-    fn build(
+    fn build<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
-        column_values: &[UInt256Target],
-        column_hash: &[HashOutTarget],
-        item_values: &[UInt256Target],
-        item_hash: &[HashOutTarget],
+        possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
+        possible_output_hash: [ComputationalHashTarget; NUM_OUTPUT_VALUES],
         predicate_value: &BoolTarget,
-        predicate_hash: &HashOutTarget,
+        predicate_hash: &ComputationalHashTarget,
     ) -> Self::Wires {
-        assert_eq!(column_values.len(), column_hash.len());
-        assert_eq!(item_values.len(), MAX_NUM_RESULTS);
-        assert_eq!(item_hash.len(), MAX_NUM_RESULTS);
-
         let u256_zero = b.zero_u256();
         let curve_zero = b.curve_zero();
-        let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
         // Initialize the input wires.
         let input_wires = InputWires {
@@ -140,15 +132,9 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
             is_output_valid: [0; MAX_NUM_RESULTS].map(|_| b.add_virtual_bool_target_safe()),
         };
 
-        // Append the column values by a corresponding item value to construct the inputs.
-        let item_index = column_values.len();
-        let mut possible_input_values = column_values.to_vec();
-        possible_input_values.push(u256_zero.clone());
-
         // Build the output items to be returned.
         let output_items: [_; MAX_NUM_RESULTS] = array::from_fn(|i| {
-            possible_input_values[item_index] = item_values[i].clone();
-            b.random_access_u256(input_wires.selector[i], &possible_input_values)
+            b.random_access_u256(input_wires.selector[i], &possible_output_values)
         });
 
         // Compute the cells tree of the all output items to be returned for the given record.
@@ -165,11 +151,11 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         let mut inputs: Vec<_> = iter::once(input_wires.ids[0])
             .chain(output_items[0].to_targets())
             .collect();
-        for i in 1..COLUMN_INDEX_NUM {
+        (1..COLUMN_INDEX_NUM).for_each(|i| {
             let item = b.select_u256(input_wires.is_output_valid[i], &output_items[i], &u256_zero);
             inputs.push(input_wires.ids[i]);
             inputs.extend(item.to_targets());
-        }
+        });
         inputs.extend(tree_hash.elements);
         let accumulator = b.map_to_curve_point(&inputs);
 
@@ -181,35 +167,14 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
         let output_values = vec![u256_zero; MAX_NUM_RESULTS - 1];
 
         // Compute the computational hash representing the accumulation of the items.
-        let mut output_hash = Identifiers::Output(Output::NoAggregation)
-            .prefix_id_hash_circuit(b, predicate_hash.elements.to_vec());
-        let item_index = column_hash.len();
-        let mut possible_input_hash = column_hash.to_vec();
-        possible_input_hash.push(empty_hash);
-        let pad_len = possible_input_hash.len().next_power_of_two();
-        assert!(
-            pad_len <= 64,
-            "random_access function cannot handle more than 64 elements"
+        let output_hash = Self::output_variant().output_hash_circuit(
+            b,
+            predicate_hash,
+            &possible_output_hash,
+            &input_wires.selector,
+            &input_wires.ids,
+            &input_wires.is_output_valid,
         );
-        possible_input_hash.resize(pad_len, empty_hash);
-
-        for i in 0..MAX_NUM_RESULTS {
-            possible_input_hash[item_index] = item_hash[i].clone();
-            let input_hash =
-                b.random_access_hash(input_wires.selector[i], possible_input_hash.clone());
-
-            // new_hash = H(output_hash || ids[i] || input_hash)
-            let inputs = output_hash
-                .elements
-                .into_iter()
-                .chain(iter::once(input_wires.ids[i]))
-                .chain(input_hash.elements)
-                .collect();
-            let new_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
-
-            // Update the computational hash only if it's a valid output.
-            output_hash = b.select_hash(input_wires.is_output_valid[i], &new_hash, &output_hash);
-        }
 
         // For the no aggregation operations, the first value in V contains the
         // accumulator, while the other slots are filled by the dummy zero values.
@@ -240,25 +205,53 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent for Circuit<MAX_NUM_RESULTS> 
             .enumerate()
             .for_each(|(i, t)| pw.set_bool_target(*t, i < self.valid_num_outputs));
     }
+
+    fn new(selector: &[F], ids: &[F], num_outputs: usize) -> anyhow::Result<Self> {
+        ensure!(selector.len() == num_outputs,
+            "Output component without aggregation: Number of selectors different from number of actual outputs");
+        ensure!(ids.len() == num_outputs,
+            "Output component without aggregation: Number of output ids different from number of actual outputs");
+        let selectors = selector
+            .iter()
+            .chain(repeat(&F::default()))
+            .take(MAX_NUM_RESULTS)
+            .cloned()
+            .collect_vec();
+        let output_ids = ids
+            .iter()
+            .chain(repeat(&F::default()))
+            .take(MAX_NUM_RESULTS)
+            .cloned()
+            .collect_vec();
+        Ok(Self {
+            valid_num_outputs: num_outputs,
+            selector: selectors.try_into().unwrap(),
+            ids: output_ids.try_into().unwrap(),
+        })
+    }
+
+    fn output_variant() -> Output {
+        Output::NoAggregation
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::query::{
+        computational_hash_ids::ComputationalHashCache,
+        universal_circuit::{universal_circuit_inputs::OutputItem, ComputationalHash},
+    };
+
     use super::*;
     use alloy::primitives::U256;
     use mp2_common::{
-        group_hashing::map_to_curve_point, poseidon::H, u256::WitnessWriteU256, utils::ToFields, C,
-        D,
+        group_hashing::map_to_curve_point, u256::WitnessWriteU256, utils::ToFields, C, D,
     };
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},
         circuit::{run_circuit, UserCircuit},
     };
-    use plonky2::{
-        field::types::{Field, PrimeField64, Sample},
-        hash::hash_types::HashOut,
-        plonk::config::Hasher,
-    };
+    use plonky2::field::types::{Field, PrimeField64, Sample};
     use plonky2_ecgfp5::{curve::curve::Point, gadgets::curve::PartialWitnessCurve};
     use rand::{thread_rng, Rng};
 
@@ -268,8 +261,9 @@ mod tests {
             let mut rng = thread_rng();
 
             // Generate a random index from the length of (Column values + 1 item result).
-            let selector =
-                array::from_fn(|_| F::from_canonical_usize(rng.gen_range(0..=NUM_COLUMNS)));
+            let selector = array::from_fn(|_| {
+                F::from_canonical_usize(rng.gen_range(0..NUM_COLUMNS + valid_num_outputs))
+            });
             let ids = array::from_fn(|_| F::from_canonical_u32(rng.gen()));
 
             Self {
@@ -283,21 +277,21 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TestOutputWires<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> {
         column_values: [UInt256Target; NUM_COLUMNS],
-        column_hash: [HashOutTarget; NUM_COLUMNS],
+        column_hash: [ComputationalHashTarget; NUM_COLUMNS],
         item_values: [UInt256Target; MAX_NUM_RESULTS],
-        item_hash: [HashOutTarget; MAX_NUM_RESULTS],
+        item_hash: [ComputationalHashTarget; MAX_NUM_RESULTS],
         predicate_value: BoolTarget,
-        predicate_hash: HashOutTarget,
+        predicate_hash: ComputationalHashTarget,
     }
 
     #[derive(Clone, Debug)]
     struct TestOutput<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> {
         column_values: [U256; NUM_COLUMNS],
-        column_hash: [HashOut<F>; NUM_COLUMNS],
+        column_hash: [ComputationalHash; NUM_COLUMNS],
         item_values: [U256; MAX_NUM_RESULTS],
-        item_hash: [HashOut<F>; MAX_NUM_RESULTS],
+        item_hash: [ComputationalHash; MAX_NUM_RESULTS],
         predicate_value: bool,
-        predicate_hash: HashOut<F>,
+        predicate_hash: ComputationalHash,
     }
 
     impl<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize>
@@ -308,10 +302,10 @@ mod tests {
             let mut rng = thread_rng();
 
             let column_values = array::from_fn(|_| U256::from_limbs(rng.gen::<[u64; 4]>()));
-            let column_hash = array::from_fn(|_| HashOut::sample(&mut rng));
+            let column_hash = array::from_fn(|_| ComputationalHash::sample(&mut rng));
             let item_values = array::from_fn(|_| U256::from_limbs(rng.gen::<[u64; 4]>()));
-            let item_hash = array::from_fn(|_| HashOut::sample(&mut rng));
-            let predicate_hash = HashOut::sample(&mut rng);
+            let item_hash = array::from_fn(|_| ComputationalHash::sample(&mut rng));
+            let predicate_hash = ComputationalHash::sample(&mut rng);
 
             Self {
                 column_values,
@@ -370,13 +364,13 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TestExpectedWires {
         first_output_value: CurveTarget,
-        output_hash: HashOutTarget,
+        output_hash: ComputationalHashTarget,
     }
 
     #[derive(Clone, Debug)]
     struct TestExpected {
         first_output_value: Point,
-        output_hash: HashOut<F>,
+        output_hash: ComputationalHash,
     }
 
     impl TestExpected {
@@ -387,19 +381,21 @@ mod tests {
         ) -> Self {
             let u256_zero = U256::ZERO;
             let curve_zero = Point::NEUTRAL;
-            let empty_hash = empty_poseidon_hash();
+            let selectors = c
+                .selector
+                .iter()
+                .map(|s| s.to_canonical_u64() as usize)
+                .collect_vec();
 
             // Construct the output items to be returned.
-            let item_index = output.column_values.len();
-            let mut possible_input_values = output.column_values.to_vec();
-            possible_input_values.push(u256_zero);
+            let possible_input_values = output
+                .column_values
+                .iter()
+                .chain(&output.item_values)
+                .cloned()
+                .collect_vec();
             let output_items: Vec<_> = (0..c.valid_num_outputs)
-                .into_iter()
-                .map(|i| {
-                    possible_input_values[item_index] =
-                        *output.item_values.get(i).unwrap_or(&u256_zero);
-                    possible_input_values[c.selector[i].to_canonical_u64() as usize]
-                })
+                .map(|i| possible_input_values[selectors[i]])
                 .collect();
 
             // Compute the cells tree root hash of the all output items.
@@ -435,25 +431,34 @@ mod tests {
             };
 
             // Compute the computational output hash.
-            let mut output_hash = Identifiers::Output(Output::NoAggregation)
-                .prefix_id_hash(output.predicate_hash.elements.to_vec());
-            let item_index = output.column_hash.len();
-            let mut possible_input_hash = output.column_hash.to_vec();
-            possible_input_hash.push(*empty_hash);
-            for i in 0..c.valid_num_outputs {
-                possible_input_hash[item_index] =
-                    output.item_hash.get(i).unwrap_or(&empty_hash).clone();
-                let input_hash = possible_input_hash[c.selector[i].to_canonical_u64() as usize];
-
-                // new_hash = H(output_hash || ids[i] || input_hash)
-                let inputs: Vec<_> = output_hash
-                    .elements
-                    .into_iter()
-                    .chain(iter::once(cells[i].id))
-                    .chain(input_hash.elements)
-                    .collect();
-                output_hash = H::hash_no_pad(&inputs);
-            }
+            // first, we compute the output items from the randomly chosen selectors
+            let output_items = selectors
+                .iter()
+                .take(c.valid_num_outputs)
+                .map(|&s| {
+                    if s < NUM_COLUMNS {
+                        OutputItem::Column(s)
+                    } else {
+                        // need to subtract `NUM_COLUMNS` since the outputs of result operations that could be used as
+                        // output values are appended to the set of columns in the circuit, so the selector `s` for
+                        // the i-th computed output value will be equal to `s = NUM_COLUMNS+i`
+                        OutputItem::ComputedValue(s - NUM_COLUMNS)
+                    }
+                })
+                .collect_vec();
+            let output_hash = Circuit::<MAX_NUM_RESULTS>::output_variant()
+                .output_hash(
+                    &output.predicate_hash,
+                    &mut ComputationalHashCache::<NUM_COLUMNS>::new_from_column_hash(
+                        &output.column_hash,
+                    )
+                    .unwrap(),
+                    &[], // unused since we already place all column hash in the cache
+                    &output.item_hash,
+                    &output_items,
+                    &c.ids,
+                )
+                .unwrap();
 
             Self {
                 first_output_value,
@@ -489,6 +494,8 @@ mod tests {
 
     impl<const NUM_COLUMNS: usize, const MAX_NUM_RESULTS: usize> UserCircuit<F, D>
         for TestOutputNoAggregationCircuit<NUM_COLUMNS, MAX_NUM_RESULTS>
+    where
+        [(); NUM_COLUMNS + MAX_NUM_RESULTS]:,
     {
         // Circuit wires + output wires + expected wires
         type Wires = (
@@ -502,12 +509,22 @@ mod tests {
 
             let expected = TestExpected::build(b);
             let output = TestOutput::build(b);
-            let wires = Circuit::build(
+            let possible_output_values = output
+                .column_values
+                .iter()
+                .chain(output.item_values.iter())
+                .cloned()
+                .collect_vec();
+            let possible_output_hash = output
+                .column_hash
+                .iter()
+                .chain(output.item_hash.iter())
+                .cloned()
+                .collect_vec();
+            let wires = Circuit::build::<{ NUM_COLUMNS + MAX_NUM_RESULTS }>(
                 b,
-                &output.column_values,
-                &output.column_hash,
-                &output.item_values,
-                &output.item_hash,
+                possible_output_values.try_into().unwrap(),
+                possible_output_hash.try_into().unwrap(),
                 &output.predicate_value,
                 &output.predicate_hash,
             );

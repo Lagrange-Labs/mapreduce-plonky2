@@ -46,7 +46,7 @@ pub mod test {
         const TOTAL_LEN: usize = Self::TOTAL_LEN;
 
         fn from_slice(s: &'a [Target]) -> Self {
-            PublicInputs::from_slice(&s)
+            PublicInputs::from_slice(s)
         }
 
         fn commitment(&self) -> Vec<Target> {

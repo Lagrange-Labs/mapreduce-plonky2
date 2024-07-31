@@ -49,6 +49,11 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
     /// Add a UInt256Target without any range-check on the limbs
     fn add_virtual_u256_unsafe(&mut self) -> UInt256Target;
 
+    /// Add N `UInt256Target`s without any range-check on each limbs
+    fn add_virtual_u256_arr_unsafe<const N: usize>(&mut self) -> [UInt256Target; N] {
+        array::from_fn(|_| self.add_virtual_u256_unsafe())
+    }
+
     /// Add a UInt256Target while enforcing that all the limbs are range-checked
     fn add_virtual_u256(&mut self) -> UInt256Target;
 
@@ -64,6 +69,9 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
 
     /// Returns the constant target representing 1_u256
     fn one_u256(&mut self) -> UInt256Target;
+
+    /// Returns the constant target representing the `U256` `value` provided as input
+    fn constant_u256(&mut self, value: U256) -> UInt256Target;
 
     /// Add 2 UInt256Target, returning the addition modulo 2^256 and the carry
     fn add_u256(
@@ -107,6 +115,20 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
         left: &UInt256Target,
         right: &UInt256Target,
     ) -> BoolTarget;
+
+    /// Compute a `BoolTarget` being true if and only `left > right`
+    fn is_greater_than_u256(&mut self, left: &UInt256Target, right: &UInt256Target) -> BoolTarget {
+        self.is_less_than_u256(right, left)
+    }
+
+    /// Compute a `BoolTarget` being true if and only `left >= right`
+    fn is_greater_or_equal_than_u256(
+        &mut self,
+        left: &UInt256Target,
+        right: &UInt256Target,
+    ) -> BoolTarget {
+        self.is_less_or_equal_than_u256(right, left)
+    }
 
     /// Compute a `BoolTarget` being true if and only if the input UInt256Target is zero
     fn is_zero(&mut self, target: &UInt256Target) -> BoolTarget;
@@ -350,13 +372,52 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
     }
 
     fn is_equal_u256(&mut self, left: &UInt256Target, right: &UInt256Target) -> BoolTarget {
-        let _false = self._false();
+        // optimization: we first check if `left` or `right` are constants
+        let left_constant_limbs = left
+            .0
+            .iter()
+            .filter_map(|limb| self.target_as_constant(limb.0))
+            .collect_vec();
+        let is_left_constant = left_constant_limbs.len() == NUM_LIMBS;
+        let right_constant_limbs = right
+            .0
+            .iter()
+            .filter_map(|limb| self.target_as_constant(limb.0))
+            .collect_vec();
+        let is_right_constant = right_constant_limbs.len() == NUM_LIMBS;
+        match (is_left_constant, is_right_constant) {
+            (true, true) => {
+                let left_val = U256::from_fields(&left_constant_limbs);
+                let right_val = U256::from_fields(&right_constant_limbs);
+                if left_val == right_val {
+                    return self._true();
+                } else {
+                    return self._false();
+                }
+            }
+            (true, false) => {
+                // if left == 0, then it is more efficient to use `is_zero` method
+                let left_val = U256::from_fields(&left_constant_limbs);
+                if left_val.is_zero() {
+                    return self.is_zero(right);
+                }
+            }
+            (false, true) => {
+                // if right == 0, then it is more efficient to use `is_zero` method
+                let right_val = U256::from_fields(&right_constant_limbs);
+                if right_val.is_zero() {
+                    return self.is_zero(left);
+                }
+            }
+            (false, false) => (),
+        }
+        let _true = self._true();
         left.0
             .iter()
             .zip(right.0.iter())
-            .fold(_false, |is_eq, (left_limb, right_limb)| {
+            .fold(_true, |is_eq, (left_limb, right_limb)| {
                 let is_limb_equal = self.is_equal(left_limb.0, right_limb.0);
-                self.or(is_eq, is_limb_equal)
+                self.and(is_eq, is_limb_equal)
             })
     }
 
@@ -365,9 +426,11 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
         left: &UInt256Target,
         right: &UInt256Target,
     ) -> BoolTarget {
-        let a = self.is_less_than_u256(left, right);
-        let b = self.is_equal_u256(left, right);
-        self.or(a, b)
+        // left <= right iff left - right requires a borrow or left - right == 0
+        let (res, borrow) = self.sub_u256(left, right);
+        let less_than = BoolTarget::new_unsafe(borrow.0);
+        let is_eq = self.is_zero(&res);
+        self.or(less_than, is_eq)
     }
 
     fn is_zero(&mut self, target: &UInt256Target) -> BoolTarget {
@@ -393,7 +456,33 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
         left: &UInt256Target,
         right: &UInt256Target,
     ) -> UInt256Target {
-        let limbs = create_array(|i| U32Target(self.select(cond, left.0[i].0, right.0[i].0)));
+        // first check if `cond` is a constant
+        match self.target_as_constant(cond.target) {
+            Some(val) if val == F::ZERO => return right.clone(),
+            Some(val) if val == F::ONE => return left.clone(),
+            _ => (),
+        };
+        let limbs = create_array(|i| {
+            U32Target(
+                // check if either left or right is the 0 constant, as we can save an arithemtic operation
+                match (
+                    self.target_as_constant(left.0[i].0),
+                    self.target_as_constant(right.0[i].0),
+                ) {
+                    (Some(val), _) if val == F::ZERO =>
+                    // if left == 0, then out = (1-cond)*right
+                    {
+                        self.arithmetic(F::NEG_ONE, F::ONE, cond.target, right.0[i].0, right.0[i].0)
+                    }
+                    (_, Some(val)) if val == F::ZERO =>
+                    // if right == 0, then out = cond*left
+                    {
+                        self.mul(cond.target, left.0[i].0)
+                    }
+                    _ => self.select(cond, left.0[i].0, right.0[i].0),
+                },
+            )
+        });
         UInt256Target(limbs)
     }
 
@@ -418,6 +507,15 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
                 .collect_vec();
             U32Target(self.random_access(access_index, ith_limbs))
         }))
+    }
+
+    fn constant_u256(&mut self, value: U256) -> UInt256Target {
+        let value_be_targets = value
+            .to_fields()
+            .into_iter()
+            .map(|limb| self.constant(limb))
+            .collect_vec();
+        UInt256Target::from_targets(value_be_targets.as_slice())
     }
 }
 

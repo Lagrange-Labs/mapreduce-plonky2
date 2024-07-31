@@ -17,7 +17,7 @@ use crate::{
     MAX_BRANCH_NODE_LEN,
 };
 
-use super::{api::compute_metadata_digest, LeafLengthCircuit, PublicInputs};
+use super::{api::utils::compute_metadata_digest, LeafLengthCircuit, PublicInputs};
 
 #[test]
 fn prove_and_verify_length_extraction_circuit_for_pudgy() {

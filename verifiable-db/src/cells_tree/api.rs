@@ -293,16 +293,11 @@ mod tests {
         // Parse the child public inputs.
         let child_pis: Vec<_> = child_proofs
             .iter()
-            .map(|proof| {
-                ProofWithVK::deserialize(&proof)
-                    .unwrap()
-                    .proof
-                    .public_inputs
-            })
+            .map(|proof| ProofWithVK::deserialize(proof).unwrap().proof.public_inputs)
             .collect();
         let child_pis: Vec<_> = child_pis
             .iter()
-            .map(|pi| PublicInputs::from_slice(&pi))
+            .map(|pi| PublicInputs::from_slice(pi))
             .collect();
 
         // Build the circuit input.

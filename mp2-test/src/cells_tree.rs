@@ -71,6 +71,15 @@ impl TestCell {
         }
     }
 
+    /// Build new `TestCell` from `value` and `id`
+    pub fn new(value: U256, id: F) -> Self {
+        Self {
+            id,
+            value,
+            hash: HashOut::default(),
+        }
+    }
+
     /// Build the test cell target.
     pub fn build(b: &mut CBuilder) -> TestCellTarget {
         let id = b.add_virtual_target();
@@ -126,6 +135,9 @@ pub fn build_cell_tree(
 
 /// Compute the expected root hash of constructed cell tree.
 pub fn compute_cells_tree_hash(cells: &[TestCell]) -> HashOut<F> {
+    if cells.len() == 0 {
+        return *empty_poseidon_hash();
+    }
     let cell_tree = build_cell_tree(cells).unwrap().0;
 
     cell_tree.root_data().unwrap().hash
