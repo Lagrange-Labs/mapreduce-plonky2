@@ -315,7 +315,7 @@ impl<
         S: TransactionalStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
     > MerkleTreeKvDb<T, V, S>
 {
-    fn print_tree(&self) {
+    pub fn print_tree(&self) {
         self.tree.print(&self.storage)
     }
 }

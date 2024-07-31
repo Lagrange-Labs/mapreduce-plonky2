@@ -4,15 +4,23 @@
 #![feature(assert_matches)]
 use std::future::Future;
 
+use alloy::primitives::U256;
 use anyhow::Result;
 
 use common::{
     cases::local_simple::{ChangeType, UpdateType},
+    celltree::Cell,
     context,
     proof_storage::{KeyValueDB, MemoryProofStorage, ProofKey},
+    rowtree::{CellCollection, MerkleRowTree, Row, RowPayload, RowTreeKey},
     TestCase, TestContext,
 };
 use log::info;
+use ryhope::{
+    storage::{EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
+    tree::scapegoat::{self, Alpha},
+    InitSettings,
+};
 use test_log::test;
 
 pub(crate) mod common;
@@ -68,5 +76,55 @@ async fn db_creation_integrated_tests() -> Result<()> {
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
     mapping.run(&mut ctx, changes).await?;
+    Ok(())
+}
+
+#[test]
+fn ryhope_scapegoat() -> Result<()> {
+    // creates a scapegoat row tree with
+    // * 3 initial entries
+    // * 2 insertion
+    // * 1 deletion
+    // make sure the tree at the end is correct, only includes the value that we want.
+    let rows = (0..5)
+        .map(|i| Row {
+            k: RowTreeKey {
+                value: U256::from(i).into(),
+                ..Default::default()
+            },
+            payload: RowPayload {
+                cells: CellCollection(vec![Cell {
+                    id: i,
+                    value: U256::from(i),
+                }]),
+                ..Default::default()
+            },
+        })
+        .collect::<Vec<_>>();
+    let mut row_tree = MerkleRowTree::new(
+        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
+        (),
+    )
+    .unwrap();
+    row_tree.in_transaction(|t| {
+        for i in 0..3 {
+            t.store(rows[i].k.clone(), rows[i].payload.clone())?;
+        }
+        Ok(())
+    })?;
+    row_tree.in_transaction(|t| {
+        t.store(rows[3].k.clone(), rows[3].payload.clone())?;
+        t.store(rows[4].k.clone(), rows[4].payload.clone())?;
+        Ok(())
+    })?;
+    row_tree.in_transaction(|t| {
+        t.remove(rows[4].k.clone())?;
+        Ok(())
+    })?;
+    row_tree.try_fetch(&rows[0].k).expect("should be there");
+    row_tree.try_fetch(&rows[1].k).expect("should be there");
+    row_tree.try_fetch(&rows[2].k).expect("should be there");
+    row_tree.try_fetch(&rows[3].k).expect("should be there");
+    assert!(row_tree.try_fetch(&rows[4].k).is_none());
     Ok(())
 }

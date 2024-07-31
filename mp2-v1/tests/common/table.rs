@@ -6,6 +6,7 @@ use ryhope::{
     tree::{
         sbbst,
         scapegoat::{self, Alpha},
+        PrintableTree,
     },
     InitSettings,
 };
@@ -204,7 +205,8 @@ impl Table {
 
     // apply the transformation directly to the row tree to get the update plan and the new
     pub fn apply_row_update(&mut self, updates: Vec<TreeRowUpdate>) -> Result<RowUpdateResult> {
-        self.row
+        let out = self
+            .row
             .in_transaction(move |t| {
                 for update in updates {
                     debug!("Apply update to row tree: {:?}", update);
@@ -220,7 +222,12 @@ impl Table {
                 }
                 Ok(())
             })
-            .map(|plan| RowUpdateResult { updates: plan })
+            .map(|plan| RowUpdateResult { updates: plan });
+        {
+            // debugging
+            self.row.print_tree();
+        }
+        out
     }
 
     // apply the transformation on the index tree and returns the new nodes to prove

@@ -143,7 +143,7 @@ impl CellCollection {
 
 /// An utility wrapper to pass around that connects what we put in the JSON description and
 /// the actual row key used to insert in the tree
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Row {
     /// A key *uniquely* representing this row in the row tree.
     /// NOTE: this key is **not** the index as understood in the crypto
@@ -154,7 +154,7 @@ pub struct Row {
 }
 /// Represent a row in one of the virtual tables stored in the zkDB; which
 /// encapsulates its cells and the tree they form.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RowPayload {
     pub cells: CellCollection,
     /// Storing the full identifier of the cells proof of the root of the cells tree.

@@ -25,7 +25,7 @@ type ContractKey = (Address, BlockPrimaryIndex);
 /// WARNING: Therefore, if we create a new cell proof for the same row, i.e. when that cell value
 /// changed, the proof will be overwritten in the storage. This is something "ok" for this
 /// integrated test but needs to be carefully evaluated when running into production.
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub(crate) struct CellProofIdentifier {
     pub(crate) table: TableID,
     pub(crate) secondary: RowTreeKey,
