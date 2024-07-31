@@ -500,7 +500,6 @@ impl TestCase {
         ctx: &mut TestContext<P>,
         c: ChangeType,
     ) -> Vec<TableRowUpdate> {
-        let old_table_values = self.current_table_row_values(ctx).await;
         match self.source {
             // NOTE 1: The first part is just trying to construct the right input to simulate any
             // changes on a mapping. This is mostly irrelevant for dist system but needs to
@@ -644,6 +643,7 @@ impl TestCase {
                 self.mapping_to_table_update(mapping_updates, index_type, slot as u8)
             }
             TableSourceSlot::SingleValues(_) => {
+                let old_table_values = self.current_table_row_values(ctx).await;
                 // we can take the first one since we're asking for single value and there is only
                 // one row
                 let old_table_values = &old_table_values[0];
