@@ -304,15 +304,19 @@ impl<P: ProofStorage> TestContext<P> {
                 // Prove a partial node
                 // NOTE: we need to find the latest one generated for that rowtreekey
                 // and we don't know which block is it, it is not necessarily the current block!
+                debug!("BEFORE fetching child proof for partial node");
                 let child_proof = self
                     .storage
                     .get_proof_latest(&proof_key)
                     .expect("UT guarantees proving in order");
+                debug!("AFTER fetching child proof for partial node");
 
                 let cell_tree_proof = self
                     .storage
                     .get_proof_exact(&ProofKey::Cell(row.cell_tree_root_proof_id))
                     .expect("should find cells tree root proof");
+
+                debug!("AFTER fetching cell tree proof for partial node");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::partial(
                         id,
@@ -346,10 +350,12 @@ impl<P: ProofStorage> TestContext<P> {
                 // NOTE: these row proofs may have been generated at any block in the past.
                 // Therefore we need to search for the _latest_ one since that is the one of
                 // interest to us.
+                debug!("BEFORE fetching LEFT row tree proof for full node");
                 let left_proof = self
                     .storage
                     .get_proof_latest(&left_proof_key)
                     .expect("UT guarantees proving in order");
+                debug!("BEFORE fetching RIGHT row tree proof for full node");
                 let right_proof = self
                     .storage
                     .get_proof_latest(&right_proof_key)
