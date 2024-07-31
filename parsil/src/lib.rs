@@ -18,7 +18,6 @@ mod visitor;
 /// Return an error if any of these steps failed.
 pub fn prepare(query: &str) -> Result<Query> {
     let mut query = parser::parse(query)?;
-    validate::validate(&mut query)?;
     expand::expand(&mut query);
     Ok(query)
 }

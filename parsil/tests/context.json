@@ -5,11 +5,13 @@
         "columns": [
             {
                 "name": "block",
-                "id": 1
+                "id": 1,
+                "is_primary_index": true
             },
             {
                 "name": "pipo",
-                "id": 45678
+                "id": 45678,
+                "is_primary_index": false
             }
         ]
     },
@@ -19,15 +21,18 @@
         "columns": [
             {
                 "name": "block",
-                "id": 1
+                "id": 1,
+                "is_primary_index": true
             },
             {
                 "name": "foo",
-                "id": 45678
+                "id": 45678,
+                "is_primary_index": false
             },
             {
                 "name": "bar",
-                "id": 45678
+                "id": 45678,
+                "is_primary_index": false
             }
         ]
     },
@@ -37,31 +42,38 @@
         "columns": [
             {
                 "name": "block",
-                "id": 1
+                "id": 1,
+                "is_primary_index": true
             },
             {
                 "name": "C1",
-                "id": 45678
+                "id": 45678,
+                "is_primary_index": false
             },
             {
                 "name": "C2",
-                "id": 45678
+                "id": 45678,
+                "is_primary_index": false
             },
             {
                 "name": "C3",
-                "id": 45678
+                "id": 45678,
+                "is_primary_index": false
             },
             {
                 "name": "C4",
-                "id": 45678
+                "id": 45678,
+                "is_primary_index": false
             },
             {
                 "name": "C5",
-                "id": 45678
+                "id": 45678,
+                "is_primary_index": false
             },
             {
                 "name": "C6",
-                "id": 45678
+                "id": 45678,
+                "is_primary_index": false
             }
         ]
     }
