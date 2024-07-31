@@ -62,7 +62,7 @@ pub(crate) mod tests {
             let mut placeholder_ids: [F; PH] =
                 array::from_fn(|_| PlaceholderIdentifier::GenericPlaceholder(rng.gen()).to_field());
             let mut placeholder_values = array::from_fn(|_| U256::from_limbs(rng.gen()));
-            let placeholder_pos = array::from_fn(|_| rng.gen_range(0..PP));
+            let placeholder_pos = array::from_fn(|_| rng.gen_range(0..PH));
             let mut placeholder_pairs: [_; PP] =
                 array::from_fn(|_| (rng.gen::<u32>().to_field(), U256::from_limbs(rng.gen())));
 
