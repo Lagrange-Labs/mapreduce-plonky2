@@ -286,6 +286,7 @@ impl<P: ProofStorage> TestContext<P> {
                     verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
                         .unwrap(),
                 );
+                debug!("Before proving leaf node row tree key");
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.is_partial() {
                 let proof_key = RowProofIdentifier {
@@ -321,6 +322,7 @@ impl<P: ProofStorage> TestContext<P> {
                     .unwrap(),
                 );
 
+                debug!("Before proving partial node row tree key");
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
                 let left_proof_key = RowProofIdentifier {
@@ -360,6 +362,7 @@ impl<P: ProofStorage> TestContext<P> {
                     )
                     .unwrap(),
                 );
+                debug!("Before proving full node row tree key");
                 api::generate_proof(self.params(), inputs).expect("while proving full node")
             };
             let new_proof_key = RowProofIdentifier {
@@ -368,10 +371,12 @@ impl<P: ProofStorage> TestContext<P> {
                 tree_key: k.clone(),
             };
 
+            debug!("Before storing row tree key proving {k:?}");
             self.storage
                 .store_proof(ProofKey::Row(new_proof_key), proof)
                 .expect("storing should work");
 
+            debug!("Finished row tree key proving {k:?}");
             workplan.done(&k).unwrap();
         }
         let root = t.root().unwrap();
