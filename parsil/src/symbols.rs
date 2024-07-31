@@ -21,6 +21,8 @@ pub struct ZkColumn {
     pub name: String,
     /// This column identifier in the circuits
     pub id: u64,
+    /// Whether this column is the cryptographic primary index
+    pub is_primary_index: bool,
 }
 
 /// A [`Handle`] defines an identifier in a SQL expression.
@@ -36,7 +38,7 @@ impl Handle {
     pub fn matches(&self, other: &Handle) -> bool {
         match (self, other) {
             (Handle::Simple(n1), Handle::Simple(n2)) => n1 == n2,
-            (Handle::Simple(_), Handle::Qualified { table, name }) => todo!(),
+            (Handle::Simple(_), Handle::Qualified { .. }) => false,
             (Handle::Qualified { name, .. }, Handle::Simple(n)) => name == n,
             (
                 Handle::Qualified { table, name },

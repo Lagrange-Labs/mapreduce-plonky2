@@ -4,9 +4,9 @@
 use anyhow::*;
 use sqlparser::ast::{
     BinaryOperator, Distinct, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
-    FunctionArguments, GroupByExpr, Ident, Join, JoinConstraint, JoinOperator,
-    NamedWindowDefinition, NamedWindowExpr, OrderBy, OrderByExpr, Query, Select, SelectItem,
-    SetExpr, Statement, TableFactor, TableWithJoins, UnaryOperator, Values, WindowSpec, WindowType,
+    FunctionArguments, GroupByExpr, Join, JoinConstraint, JoinOperator, NamedWindowDefinition,
+    NamedWindowExpr, Offset, OrderBy, OrderByExpr, Query, Select, SelectItem, SetExpr, Statement,
+    TableFactor, TableWithJoins, UnaryOperator, Values, WindowSpec, WindowType,
 };
 
 /// From an AST node type, generate two default empty visitor methods for pre_
@@ -59,10 +59,10 @@ pub trait AstPass {
             Expr
             FunctionArg
             FunctionArguments
-            Ident
             Join
             JoinConstraint
             JoinOperator
+            Offset
             OrderBy
             OrderByExpr
             Query
@@ -81,12 +81,6 @@ pub trait AstPass {
 pub trait Visit<P: AstPass> {
     fn visit(&mut self, pass: &mut P) -> Result<()>;
 }
-impl<P: AstPass> Visit<P> for Ident {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
-        pass.pre_ident(self)?;
-        pass.post_ident(self)
-    }
-}
 impl<P: AstPass> Visit<P> for WindowSpec {
     fn visit(&mut self, pass: &mut P) -> Result<()> {
         pass.pre_window_spec(self)?;
@@ -94,6 +88,13 @@ impl<P: AstPass> Visit<P> for WindowSpec {
             e.visit(pass)?
         }
         pass.post_window_spec(self)
+    }
+}
+impl<P: AstPass> Visit<P> for Offset {
+    fn visit(&mut self, pass: &mut P) -> Result<()> {
+        pass.pre_offset(self)?;
+        self.value.visit(pass)?;
+        pass.post_offset(self)
     }
 }
 impl<P: AstPass> Visit<P> for FunctionArguments {
@@ -464,15 +465,7 @@ impl<P: AstPass> Visit<P> for Select {
         for NamedWindowDefinition(_, window_expr) in self.named_window.iter_mut() {
             match window_expr {
                 NamedWindowExpr::NamedWindow(_) => todo!(),
-                NamedWindowExpr::WindowSpec(spec) => {
-                    for p in spec.partition_by.iter_mut() {
-                        p.visit(pass)?;
-                    }
-
-                    for o in spec.partition_by.iter_mut() {
-                        o.visit(pass)?;
-                    }
-                }
+                NamedWindowExpr::WindowSpec(spec) => spec.visit(pass)?,
             }
         }
 
@@ -571,7 +564,7 @@ impl<P: AstPass> Visit<P> for Statement {
             | Statement::Load { .. }
             | Statement::Directory { .. } => {}
         }
-        pass.pre_statement(self)?;
+        pass.post_statement(self)?;
         Ok(())
     }
 }
@@ -600,13 +593,13 @@ impl<P: AstPass> Visit<P> for SetExpr {
 impl<P: AstPass> Visit<P> for Query {
     fn visit(&mut self, pass: &mut P) -> Result<()> {
         pass.pre_query(self)?;
+        self.body.visit(pass)?;
         if let Some(order_by) = self.order_by.as_mut() {
             order_by.visit(pass)?;
         }
         if let Some(limit) = self.limit.as_mut() {
             limit.visit(pass)?;
         }
-        self.body.visit(pass)?;
         pass.post_query(self)
     }
 }

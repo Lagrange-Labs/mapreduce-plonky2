@@ -48,6 +48,8 @@ fn must_reject() {
         // No ALL/ANY
         "SELECT a FROM t WHERE a = ALL (SELECT b FROM u)",
         "SELECT a FROM t WHERE a < ANY (SELECT b FROM u)",
+        // Too many ORDER BY
+        "SELECT * FROM t ORDER BY a, b, c",
     ] {
         assert!(dbg!(prepare(q)).is_err())
     }
@@ -60,6 +62,8 @@ fn must_resolve() -> Result<()> {
         "SELECT foo FROM table2 WHERE bar < 3",
         "SELECT foo, * FROM table2",
         "SELECT AVG(foo) FROM table2 WHERE block BETWEEN 43 and 68",
+        "SELECT foo, bar FROM table2 ORDER BY bar",
+        "SELECT foo, bar FROM table2 ORDER BY foo, bar",
     ] {
         let ctx = FileContextProvider::from_file("tests/context.json")?;
         let query = prepare(q)?;

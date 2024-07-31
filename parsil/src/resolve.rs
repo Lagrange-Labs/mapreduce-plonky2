@@ -8,12 +8,37 @@
 //!    individual column for each covered block number.
 use anyhow::*;
 use log::warn;
-use sqlparser::ast::{Expr, Function, Ident, Query, Select, SelectItem, TableAlias, TableFactor};
+use sqlparser::ast::{
+    Expr, Function, Ident, Query, Select, SelectItem, SetExpr, TableAlias, TableFactor,
+};
 
 use crate::{
     symbols::{Handle, RootContextProvider},
     visitor::{AstPass, Visit},
 };
+
+struct Leafer<'a, C: RootContextProvider> {
+    resolver: &'a Resolver<C>,
+    leafs: Vec<Symbol>,
+}
+impl<'a, C: RootContextProvider> Leafer<'a, C> {
+    fn new(resolver: &'a Resolver<C>) -> Self {
+        Self {
+            resolver,
+            leafs: Vec::new(),
+        }
+    }
+}
+impl<'a, C: RootContextProvider> AstPass for Leafer<'a, C> {
+    fn pre_expr(&mut self, expr: &mut Expr) -> Result<()> {
+        match expr {
+            Expr::Identifier(e) => self.leafs.push(self.resolver.resolve_freestanding(e)?),
+            Expr::CompoundIdentifier(c) => self.leafs.push(self.resolver.resolve_compound(c)?),
+            _ => {}
+        }
+        Ok(())
+    }
+}
 
 /// A [`Symbol`] is anything that can be referenced from an SQL expression.
 #[derive(Debug, Clone)]
@@ -26,6 +51,8 @@ pub enum Symbol {
         target: Handle,
         /// Cryptographic ID of the column in the circuits
         id: u64,
+        ///
+        is_primary_index: bool,
     },
     /// An alias is validated as existing, but is not replaced; as substitution
     /// will take place in its own definition
@@ -355,6 +382,13 @@ impl<C: RootContextProvider> Resolver<C> {
 }
 
 impl<C: RootContextProvider> AstPass for Resolver<C> {
+    fn pre_expr(&mut self, expr: &mut Expr) -> Result<()> {
+        match expr {
+            Expr::BinaryOp { left, op, right } => {}
+            _ => {}
+        }
+        Ok(())
+    }
     fn post_expr(&mut self, e: &mut Expr) -> Result<()> {
         match e {
             // Identifier must be converted to JSON accesses into the ryhope tables.
@@ -366,10 +400,7 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
                                 [Ident::new(table), Ident::new("payload")].to_vec(),
                             )),
                             op: sqlparser::ast::BinaryOperator::Arrow,
-                            right: Box::new(Expr::Identifier(Ident {
-                                value: name.to_owned(),
-                                quote_style: None,
-                            })),
+                            right: Box::new(Expr::Identifier(Ident::with_quote('\'', name))),
                         }
                     } else {
                         unreachable!()
@@ -385,10 +416,7 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
                                 [Ident::new(table), Ident::new("payload")].to_vec(),
                             )),
                             op: sqlparser::ast::BinaryOperator::Arrow,
-                            right: Box::new(Expr::Identifier(Ident {
-                                value: name.to_owned(),
-                                quote_style: None,
-                            })),
+                            right: Box::new(Expr::Identifier(Ident::with_quote('\'', name))),
                         }
                     } else {
                         unreachable!()
@@ -466,6 +494,7 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
                                 name: column.name.clone(),
                             },
                             id: column.id,
+                            is_primary_index: column.is_primary_index,
                         };
 
                         self.contexts
@@ -535,20 +564,120 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
     /// All the [`SelectItem`] in the SELECT clause are exposed to the current
     /// context parent.
     fn pre_select_item(&mut self, select_item: &mut SelectItem) -> Result<()> {
+        let provided = match select_item {
+            SelectItem::ExprWithAlias { expr, alias } => Symbol::NamedExpression {
+                name: Handle::Simple(alias.value.clone()),
+                e: expr.clone(),
+            },
+            SelectItem::UnnamedExpr(e) => match e {
+                Expr::Identifier(i) => self.resolve_freestanding(i)?,
+                Expr::CompoundIdentifier(is) => self.resolve_compound(is)?,
+                _ => Symbol::Expression(e.clone()),
+            },
+            SelectItem::Wildcard(_) => Symbol::Wildcard,
+            SelectItem::QualifiedWildcard(_, _) => unreachable!(),
+        };
         self.contexts[*self.pointer.last().unwrap()]
             .provides
-            .push(match select_item {
-                SelectItem::ExprWithAlias { expr, alias } => Symbol::NamedExpression {
-                    name: Handle::Simple(alias.value.clone()),
-                    e: expr.clone(),
-                },
-                SelectItem::Wildcard(_) => Symbol::Wildcard,
-                SelectItem::QualifiedWildcard(_, _) => unreachable!(),
-                SelectItem::UnnamedExpr(e) => Symbol::Expression(e.clone()),
-            });
+            .push(provided);
         Ok(())
     }
 }
+
+// /// Wrap an existing query to demultiplicate and annotate each row with `block`
+// /// ranging from `valid_from` to `valid_until`.
+// fn expand_block_range(mut q: Query) -> Query {
+//     // Save the original projection queried by the user
+//     if let SetExpr::Select(ref mut select) = &mut *q.body {
+//         // Filter out `block` if it has explicitely been selected by the user,
+//         // it will be injected back later
+//         select.projection.retain(|p| match p {
+//             SelectItem::UnnamedExpr(e) => match e {
+//                 Expr::Identifier(id) => id.value != "block",
+//                 _ => true,
+//             },
+//             SelectItem::ExprWithAlias { expr, alias } => todo!(),
+//             _ => true,
+//         });
+//         for additional_column in ["valid_from", "valid_until"] {
+//             select
+//                 .projection
+//                 .push(SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(
+//                     additional_column,
+//                 ))));
+//         }
+//     } else {
+//         unreachable!()
+//     };
+
+//     Query {
+//         with: None,
+//         body: Box::new(SetExpr::Select(Box::new(Select {
+//             distinct: None,
+//             top: None,
+//             projection: vec![
+//                 SelectItem::Wildcard(WildcardAdditionalOptions::default()),
+//                 SelectItem::ExprWithAlias {
+//                     expr: Expr::Function(Function {
+//                         name: ObjectName(vec![Ident::new("generate_series")]),
+//                         parameters: FunctionArguments::None,
+//                         args: FunctionArguments::List(FunctionArgumentList {
+//                             duplicate_treatment: None,
+//                             args: vec![
+//                                 FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
+//                                     Ident::new("valid_from"),
+//                                 ))),
+//                                 FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
+//                                     Ident::new("valid_until"),
+//                                 ))),
+//                             ],
+//                             clauses: vec![],
+//                         }),
+//                         filter: None,
+//                         null_treatment: None,
+//                         over: None,
+//                         within_group: vec![],
+//                     }),
+//                     alias: Ident::new("block"),
+//                 },
+//             ],
+//             into: None,
+//             from: vec![TableWithJoins {
+//                 relation: TableFactor::Derived {
+//                     lateral: false,
+//                     subquery: Box::new(q),
+//                     alias: Some(TableAlias {
+//                         name: Ident::new("user_query"),
+//                         columns: vec![],
+//                     }),
+//                 },
+//                 joins: vec![],
+//             }],
+//             lateral_views: vec![],
+//             prewhere: None,
+//             selection: None,
+//             group_by: GroupByExpr::Expressions(vec![], vec![]),
+//             cluster_by: vec![],
+//             distribute_by: vec![],
+//             sort_by: vec![],
+//             having: None,
+//             named_window: vec![],
+//             qualify: None,
+//             window_before_qualify: false,
+//             value_table_mode: None,
+//             connect_by: None,
+//         }))),
+//         order_by: None,
+//         limit: None,
+//         limit_by: vec![],
+//         offset: None,
+//         fetch: None,
+//         locks: vec![],
+//         for_clause: None,
+//         settings: None,
+//         format_clause: None,
+//     }
+// }
 
 /// Convert a query so that it can be executed on a ryhope-generated db.
 pub fn resolve<C: RootContextProvider>(q: &Query, context: C) -> Result<Vec<Symbol>> {
@@ -561,5 +690,6 @@ pub fn resolve<C: RootContextProvider>(q: &Query, context: C) -> Result<Vec<Symb
 
     let exposed = resolver.reachable(0)?;
     println!("Exposed at the top level: {:?}", exposed);
+    // println!("Final query:\n>> {}", expand_block_range(converted_query));
     Ok(exposed)
 }

@@ -1,12 +1,46 @@
+use std::hash::{DefaultHasher, Hasher};
+
 use anyhow::*;
 use sqlparser::ast::{
-    BinaryOperator, Expr, GroupByExpr, JoinOperator, OrderBy, OrderByExpr, Query, Select,
-    SelectItem, SetExpr, TableFactor, UnaryOperator, Value,
+    BinaryOperator, Distinct, Expr, GroupByExpr, JoinOperator, Offset, OffsetRows, OrderBy,
+    OrderByExpr, Query, Select, SelectItem, SetExpr, TableFactor, UnaryOperator, Value,
 };
 
-use crate::visitor::{AstPass, Visit};
+use crate::{
+    exprhash::DefaultExprHasher,
+    visitor::{AstPass, Visit},
+};
 
+#[derive(Default)]
 struct Validator;
+impl Validator {
+    fn for_query(query: &mut Query) -> Result<Self> {
+        if let SetExpr::Select(ref mut select) = *query.body {
+            ensure!(
+                select.projection.iter().all(|s| !matches!(
+                    s,
+                    SelectItem::UnnamedExpr(Expr::Function(_))
+                        | SelectItem::ExprWithAlias {
+                            expr: Expr::Function(_),
+                            ..
+                        }
+                )) | select.projection.iter().all(|s| matches!(
+                    s,
+                    SelectItem::UnnamedExpr(Expr::Function(_))
+                        | SelectItem::ExprWithAlias {
+                            expr: Expr::Function(_),
+                            ..
+                        }
+                )),
+                "query projection must not mix aggregates and scalars"
+            );
+        } else {
+            bail!("query body should be a SELECT statement")
+        }
+
+        Ok(Self::default())
+    }
+}
 impl AstPass for Validator {
     fn pre_unary_operator(&mut self, unary_operator: &mut UnaryOperator) -> Result<()> {
         match unary_operator {
@@ -182,8 +216,21 @@ impl AstPass for Validator {
         }
     }
 
+    fn pre_distinct(&mut self, distinct: &mut Distinct) -> Result<()> {
+        match distinct {
+            Distinct::Distinct => Ok(()),
+            Distinct::On(_) => bail!("`DISTINCT ON` unsupported"),
+        }
+    }
+
+    fn pre_offset(&mut self, offset: &mut Offset) -> Result<()> {
+        match offset.rows {
+            OffsetRows::None => Ok(()),
+            OffsetRows::Row | OffsetRows::Rows => bail!("{}: unsupported", offset),
+        }
+    }
+
     fn pre_select(&mut self, s: &mut Select) -> Result<()> {
-        ensure!(s.distinct.is_none(), "DISTINCT is not supported");
         ensure!(s.top.is_none(), "TOP is an MSSQL syntax");
         ensure!(s.into.is_none(), "{s}: SELECT ... INTO not supported");
         ensure!(s.lateral_views.is_empty(), "LATERAL VIEW unsupported");
@@ -226,6 +273,10 @@ impl AstPass for Validator {
 
     fn pre_order_by(&mut self, o: &mut OrderBy) -> Result<()> {
         ensure!(
+            o.exprs.len() <= 2,
+            "ORDER BY only supports up to 2 criterions"
+        );
+        ensure!(
             o.interpolate.is_none(),
             "{:?}: unsupported clickhouse extension",
             o.interpolate
@@ -244,9 +295,9 @@ impl AstPass for Validator {
     fn pre_query(&mut self, q: &mut Query) -> Result<()> {
         ensure!(q.with.is_none(), "CTEs are not supported");
         ensure!(q.limit_by.is_empty(), "LIMIT BY not supported");
-        ensure!(q.offset.is_none(), "OFFSET is an Oracle syntax");
         ensure!(q.locks.is_empty(), "locks not supported");
         ensure!(q.for_clause.is_none(), "FOR is an MSSQL extension");
+        ensure!(q.fetch.is_none(), "FETCH is an MSSQL extension");
         Ok(())
     }
 }
@@ -254,27 +305,6 @@ impl AstPass for Validator {
 /// Ensure that a top-level [`Query`] is compatible with the currently
 /// implemented subset of SQL.
 pub fn validate(query: &mut Query) -> Result<()> {
-    if let SetExpr::Select(ref select) = *query.body {
-        ensure!(
-            select.projection.iter().all(|s| !matches!(
-                s,
-                SelectItem::UnnamedExpr(Expr::Function(_))
-                    | SelectItem::ExprWithAlias {
-                        expr: Expr::Function(_),
-                        ..
-                    }
-            )) | select.projection.iter().all(|s| matches!(
-                s,
-                SelectItem::UnnamedExpr(Expr::Function(_))
-                    | SelectItem::ExprWithAlias {
-                        expr: Expr::Function(_),
-                        ..
-                    }
-            )),
-            "query projection must not mix aggregates and scalars"
-        )
-    } else {
-        bail!("query body should be a SELECT statement")
-    }
-    query.visit(&mut Validator)
+    let mut validator = Validator::for_query(query)?;
+    query.visit(&mut validator)
 }
