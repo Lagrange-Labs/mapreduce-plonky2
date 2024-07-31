@@ -132,7 +132,7 @@ impl<P: ProofStorage> TestContext<P> {
             // extraction proof is done once per block, so its key can just be block based
             debug!(
                 "trying to LOAD the extraction proof from {table_id:?} - index value {}",
-                added_index.value
+                node.value.to::<U256>()
             );
             let extraction_proof = self
                 .storage
@@ -165,7 +165,10 @@ impl<P: ProofStorage> TestContext<P> {
                 );
             }
             let proof = if context.is_leaf() {
-                info!("NodeIndex Proving --> LEAF");
+                info!(
+                    "NodeIndex Proving --> LEAF (node {})",
+                    node.value.to::<U256>()
+                );
 
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_leaf(
@@ -177,7 +180,10 @@ impl<P: ProofStorage> TestContext<P> {
                 api::generate_proof(self.params(), inputs)
                     .expect("error while leaf index proof generation")
             } else if context.is_partial() {
-                info!("NodeIndex Proving --> PARTIAL");
+                info!(
+                    "NodeIndex Proving --> PARTIAL (node {})",
+                    node.value.to::<U256>()
+                );
                 // a node that was already there before and is in the path of the added node to the
                 // root should always have two children
                 assert_eq!(
