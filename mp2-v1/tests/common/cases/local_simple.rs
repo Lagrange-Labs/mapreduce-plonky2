@@ -403,7 +403,7 @@ impl TestCase {
 
                         ctx.storage
                             .store_proof(proof_key, mapping_values_proof.clone())?;
-                        info!("Generated Values Extraction (C.1) proof for single variables");
+                        info!("Generated Values Extraction (C.1) proof for mapping slots");
                         {
                             let pproof = ProofWithVK::deserialize(&mapping_values_proof).unwrap();
                             let pi = mp2_v1::values_extraction::PublicInputs::new(
@@ -620,6 +620,7 @@ impl TestCase {
                             info!("Inserting key {} to mappping keys tracking", mkey);
                             mapping.mapping_keys.push(mkey.to_be_bytes_trimmed_vec());
                         }
+                        // the mapping key doesn't change here so no need to update the list
                         MappingUpdate::Update(_, _, _) => {}
                     }
                 }

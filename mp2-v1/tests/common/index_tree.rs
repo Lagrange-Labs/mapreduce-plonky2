@@ -155,7 +155,11 @@ impl<P: ProofStorage> TestContext<P> {
                 let ext_pi = mp2_v1::final_extraction::PublicInputs::from_slice(
                     &ext_proof.proof().public_inputs,
                 );
-                assert_eq!(row_pi.rows_digest_field(), ext_pi.value_point());
+                assert_eq!(
+                    row_pi.rows_digest_field(),
+                    ext_pi.value_point(),
+                    "values extracted vs value in db don't match"
+                );
             }
             let proof = if context.is_leaf() {
                 info!("NodeIndex Proving --> LEAF");
