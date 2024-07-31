@@ -41,6 +41,9 @@ pub(crate) struct CellProofIdentifier {
 /// overwrite preious proofs. Dist system could store the whole history as long as they correctly
 /// pick the latest one when doing a tree update. See `prove_row_tree` function for more details.
 /// _previous proofs_ ,
+/// NOTE2: Ideally we would keep all proof history in case something goes wrong. In that case, when
+/// building the row tree, one must have the ability to "search back in time". i.e. proving row
+/// tree for block 4 can require searching for a node whose proof has been generated at block 2
 /// TODO: make it nice with lifetimes, and easier constructor
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub(crate) struct RowProofIdentifier {
