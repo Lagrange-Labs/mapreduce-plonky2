@@ -6,17 +6,17 @@ use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    InitSettings,
-    MerkleTreeKvDb,
-    NodePayload, storage::{
-        EpochKvStorage,
+    storage::{
         memory::InMemory,
-        PayloadStorage, pgsql::{PgsqlStorage, SqlStorageSettings}, RoEpochKvStorage, TreeStorage,
-    }, tree::{
-        PrintableTree,
-        sbbst,
-        scapegoat::{self, Alpha}, TreeTopology,
+        pgsql::{PgsqlStorage, SqlStorageSettings},
+        EpochKvStorage, PayloadStorage, RoEpochKvStorage, TreeStorage,
     },
+    tree::{
+        sbbst,
+        scapegoat::{self, Alpha},
+        PrintableTree, TreeTopology,
+    },
+    InitSettings, MerkleTreeKvDb, NodePayload,
 };
 
 use super::TreeTransactionalStorage;
@@ -40,7 +40,8 @@ async fn storage_in_memory() -> Result<()> {
     let mut s = MerkleTreeKvDb::<TestTree, V, Storage>::new(
         InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
         (),
-    ).await?;
+    )
+    .await?;
 
     with_storage(&mut s).await?;
 
@@ -88,7 +89,8 @@ async fn storage_in_pgsql() -> Result<()> {
             db_url: db_url(),
             table: "simple".to_string(),
         },
-    ).await?;
+    )
+    .await?;
     with_storage(&mut s).await?;
     println!("Old one");
     s.print_tree().await;
@@ -99,12 +101,16 @@ async fn storage_in_pgsql() -> Result<()> {
             db_url: db_url(),
             table: "simple".to_string(),
         },
-    ).await?;
+    )
+    .await?;
     println!("New one");
     s2.print_tree().await;
 
     assert_eq!(s2.root_data().await, s.root_data().await);
-    assert_eq!(s.tree().size(&mut s2.storage).await, s2.tree().size(&s2.storage).await);
+    assert_eq!(
+        s.tree().size(&mut s2.storage).await,
+        s2.tree().size(&s2.storage).await
+    );
 
     for i in 1..=6 {
         println!("\nEpoch = {i}");
@@ -214,22 +220,31 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
             db_url: db_url(),
             table: "simple_sbbst".to_string(),
         },
-    ).await?;
+    )
+    .await?;
 
-    s_psql.in_transaction(|t| Box::pin(async {
-        for k in 1..10 {
-            t.store(k, format!("Node-{k}").into()).await?;
-        }
-        Ok(())
-    })).await?;
+    s_psql
+        .in_transaction(|t| {
+            Box::pin(async {
+                for k in 1..10 {
+                    t.store(k, format!("Node-{k}").into()).await?;
+                }
+                Ok(())
+            })
+        })
+        .await?;
 
-    s_psql.in_transaction(|t| Box::pin(async {
-        t.update(3, "coucou".into()).await.unwrap();
-        t.update(8, "cava".into()).await.unwrap();
-        t.update(2, "bien".into()).await.unwrap();
+    s_psql
+        .in_transaction(|t| {
+            Box::pin(async {
+                t.update(3, "coucou".into()).await.unwrap();
+                t.update(8, "cava".into()).await.unwrap();
+                t.update(2, "bien".into()).await.unwrap();
 
-        Ok(())
-    })).await?;
+                Ok(())
+            })
+        })
+        .await?;
 
     println!("Old one");
     s_psql.print_tree().await;
@@ -240,7 +255,8 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
             db_url: db_url(),
             table: "simple_sbbst".to_string(),
         },
-    ).await?;
+    )
+    .await?;
     println!("New one");
     s2.print_tree().await;
     let string = s_psql.root_data().await.unwrap().h;
@@ -258,64 +274,95 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
     let mut s_ram = MerkleTreeKvDb::<TestTree, V, RamStorage>::new(
         InitSettings::Reset(sbbst::Tree::empty()),
         (),
-    ).await?;
-    s_ram.in_transaction(|t| Box::pin(async {
-        for k in 1..10 {
-            t.store(k, format!("Node-{k}").into()).await?;
-        }
-        Ok(())
-    })).await?;
-    s_ram.in_transaction(|t| Box::pin(async {
-        t.update(3, "coucou".into()).await.unwrap();
-        t.update(8, "cava".into()).await.unwrap();
-        t.update(2, "bien".into()).await.unwrap();
+    )
+    .await?;
+    s_ram
+        .in_transaction(|t| {
+            Box::pin(async {
+                for k in 1..10 {
+                    t.store(k, format!("Node-{k}").into()).await?;
+                }
+                Ok(())
+            })
+        })
+        .await?;
+    s_ram
+        .in_transaction(|t| {
+            Box::pin(async {
+                t.update(3, "coucou".into()).await.unwrap();
+                t.update(8, "cava".into()).await.unwrap();
+                t.update(2, "bien".into()).await.unwrap();
 
-        Ok(())
-    })).await?;
+                Ok(())
+            })
+        })
+        .await?;
     s_ram.print_tree().await;
 
-    assert_eq!(s2.root_data().await.unwrap().h, s_ram.root_data().await.unwrap().h);
+    assert_eq!(
+        s2.root_data().await.unwrap().h,
+        s_ram.root_data().await.unwrap().h
+    );
 
     Ok(())
 }
 
 async fn with_storage<S: TreeTransactionalStorage<String, usize> + Send>(s: &mut S) -> Result<()> {
-    s.in_transaction(|t| Box::pin(async {
-        for k in "les sanglots longs des violons de automne blessent mon coeur langueur monotone"
-            .split_whitespace()
-        {
-            t.store(k.to_string(), k.len()).await.unwrap();
-        }
-        Ok(())
-    })).await?;
+    s.in_transaction(|t| {
+        Box::pin(async {
+            for k in
+                "les sanglots longs des violons de automne blessent mon coeur langueur monotone"
+                    .split_whitespace()
+            {
+                t.store(k.to_string(), k.len()).await.unwrap();
+            }
+            Ok(())
+        })
+    })
+    .await?;
 
-    s.in_transaction(|t| Box::pin(async {
-        t.remove("blessent".to_string()).await.unwrap();
-        Ok(())
-    })).await?;
+    s.in_transaction(|t| {
+        Box::pin(async {
+            t.remove("blessent".to_string()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await?;
 
-    s.in_transaction(|t| Box::pin(async {
-        t.remove("les".to_string()).await.unwrap();
-        Ok(())
-    })).await?;
+    s.in_transaction(|t| {
+        Box::pin(async {
+            t.remove("les".to_string()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await?;
 
-    s.in_transaction(|t| Box::pin(async {
-        t.remove("sanglots".to_string()).await.unwrap();
-        Ok(())
-    })).await?;
+    s.in_transaction(|t| {
+        Box::pin(async {
+            t.remove("sanglots".to_string()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await?;
 
-    s.in_transaction(|t| Box::pin(async {
-        t.update("longs".to_string(), 95000).await.unwrap();
-        t.update("des".to_string(), 36000).await.unwrap();
-        t.remove("des".to_string()).await.unwrap();
-        Ok(())
-    })).await?;
+    s.in_transaction(|t| {
+        Box::pin(async {
+            t.update("longs".to_string(), 95000).await.unwrap();
+            t.update("des".to_string(), 36000).await.unwrap();
+            t.remove("des".to_string()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await?;
 
-    s.in_transaction( |t| Box::pin(async {
-        t.remove("automne".to_string()).await.unwrap();
-        t.remove("mon".to_string()).await.unwrap();
-        Ok(())
-    })).await?;
+    s.in_transaction(|t| {
+        Box::pin(async {
+            t.remove("automne".to_string()).await.unwrap();
+            t.remove("mon".to_string()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await?;
 
     Ok(())
 }
@@ -331,13 +378,17 @@ async fn hashes() -> Result<()> {
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
         (),
-    ).await?;
+    )
+    .await?;
 
-    s.in_transaction(|s| Box::pin(async {
-        s.store(2, "cava".into()).await?;
-        s.store(1, "coucou".into()).await?;
-        s.store(3, "bien".into()).await
-    })).await?;
+    s.in_transaction(|s| {
+        Box::pin(async {
+            s.store(2, "cava".into()).await?;
+            s.store(1, "coucou".into()).await?;
+            s.store(3, "bien".into()).await
+        })
+    })
+    .await?;
 
     assert_eq!(s.storage.data().fetch(&1).await.h, sha256::digest("coucou"));
     assert_eq!(
@@ -360,7 +411,8 @@ async fn sbbst_requires_sequential_keys() -> Result<()> {
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::with_shift_and_capacity(10, 0)),
         (),
-    ).await?;
+    )
+    .await?;
 
     s.start_transaction().await?;
     assert!(s.store(2, 2).await.is_err());
@@ -385,16 +437,20 @@ async fn thousand_rows() -> Result<()> {
             db_url: db_url(),
             table: "thousand".to_string(),
         },
-    ).await?;
+    )
+    .await?;
 
     let mut rng = rand::rngs::StdRng::seed_from_u64(0xc0c0);
 
-    s.in_transaction(|s|Box::pin( async {
-        for i in 0..1000 {
-            s.store(i, (10 * i).try_into().unwrap()).await?;
-        }
-        Ok(())
-    })).await?;
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for i in 0..1000 {
+                s.store(i, (10 * i).try_into().unwrap()).await?;
+            }
+            Ok(())
+        })
+    })
+    .await?;
     assert_eq!(s.size().await, 1000);
 
     let to_remove = (0..100)
@@ -403,15 +459,19 @@ async fn thousand_rows() -> Result<()> {
 
     let to_remove_copy = to_remove.clone();
 
-    let mt = s.in_transaction(|s| Box::pin( {
-        let value = to_remove_copy.clone();
-        async move{
-            for k in value.iter() {
-                s.remove(*k).await?;
-            }
-            Ok(())
-        }
-    })).await?;
+    let mt = s
+        .in_transaction(|s| {
+            Box::pin({
+                let value = to_remove_copy.clone();
+                async move {
+                    for k in value.iter() {
+                        s.remove(*k).await?;
+                    }
+                    Ok(())
+                }
+            })
+        })
+        .await?;
     mt.print();
 
     assert_eq!(s.size().await, 1000 - to_remove.len());
@@ -432,17 +492,22 @@ async fn aggregation_memory() -> Result<()> {
     type Storage = InMemory<Tree, V>;
 
     let mut s =
-        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(sbbst::Tree::empty()), ()).await?;
+        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(sbbst::Tree::empty()), ())
+            .await?;
 
-    s.in_transaction(|s| Box::pin(async {
-        for i in 0..30 {
-            s.store(
-                i + 1,
-                MinMaxi64((i + 1).try_into().unwrap(), i as i64, i as i64),
-            ).await?;
-        }
-        Ok(())
-    })).await?;
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for i in 0..30 {
+                s.store(
+                    i + 1,
+                    MinMaxi64((i + 1).try_into().unwrap(), i as i64, i as i64),
+                )
+                .await?;
+            }
+            Ok(())
+        })
+    })
+    .await?;
 
     let tree = s.tree();
     let root = tree.root(&s.storage).await.unwrap();
@@ -464,18 +529,22 @@ async fn aggregation_pgsql() -> Result<()> {
             db_url: db_url(),
             table: "agg".to_string(),
         },
-    ).await?;
+    )
+    .await?;
 
-    s.in_transaction(|s| Box::pin(async {
-        for i in 0..30 {
-            s.store(
-                i + 1,
-                MinMaxi64((i + 1).try_into().unwrap(), i as i64, i as i64),
-            ).await?;
-        }
-        Ok(())
-    })).await?;
-
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for i in 0..30 {
+                s.store(
+                    i + 1,
+                    MinMaxi64((i + 1).try_into().unwrap(), i as i64, i as i64),
+                )
+                .await?;
+            }
+            Ok(())
+        })
+    })
+    .await?;
 
     let root_payload = s.fetch(&s.tree().root(&s.storage).await.unwrap()).await;
     assert_eq!(root_payload.1, 1);
@@ -483,15 +552,23 @@ async fn aggregation_pgsql() -> Result<()> {
     Ok(())
 }
 
-async fn test_rollback<S: EpochKvStorage<i64, MinMaxi64> + TreeTransactionalStorage<i64, MinMaxi64> + Send + std::marker::Sync>(
+async fn test_rollback<
+    S: EpochKvStorage<i64, MinMaxi64>
+        + TreeTransactionalStorage<i64, MinMaxi64>
+        + Send
+        + std::marker::Sync,
+>(
     s: &mut S,
 ) {
     for i in 0..3 {
-        s.in_transaction(|s| Box::pin(async move {
-            s.store(2 * i, (2 * i).into()).await?;
-            s.store(2 * i + 1, (2 * i + 1).into()).await?;
-            Ok(())
-        })).await
+        s.in_transaction(|s| {
+            Box::pin(async move {
+                s.store(2 * i, (2 * i).into()).await?;
+                s.store(2 * i + 1, (2 * i + 1).into()).await?;
+                Ok(())
+            })
+        })
+        .await
         .unwrap();
     }
 
@@ -536,7 +613,7 @@ async fn rollback_memory() {
         InitSettings::Reset(Tree::empty(Alpha::new(0.7))),
         (),
     )
-        .await
+    .await
     .expect("unable to initialize tree");
 
     test_rollback(&mut s).await;
@@ -556,7 +633,7 @@ async fn rollback_psql() {
             table: "rollback".to_string(),
         },
     )
-        .await
+    .await
     .expect("unable to initialize tree");
 
     test_rollback(&mut s).await;
@@ -567,11 +644,26 @@ async fn context_at() {
     type Tree = sbbst::Tree;
     type V = MinMaxi64;
     type Storage = InMemory<Tree, V>;
-    let mut s =
-        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ()).await.unwrap();
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ())
+        .await
+        .unwrap();
 
-    s.in_transaction(|s| Box::pin( async { s.store(1, 1i64.into()).await.unwrap(); Ok(()) })).await.unwrap();
-    s.in_transaction(|s| Box::pin( async { s.store(2, 2i64.into()).await.unwrap(); Ok(()) })).await.unwrap();
+    s.in_transaction(|s| {
+        Box::pin(async {
+            s.store(1, 1i64.into()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+    s.in_transaction(|s| {
+        Box::pin(async {
+            s.store(2, 2i64.into()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
 
     assert_eq!(s.fetch_with_context_at(&1, 1).await.0.parent, None);
     assert_eq!(s.fetch_with_context_at(&1, 2).await.0.parent, Some(2));

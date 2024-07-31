@@ -1,10 +1,10 @@
 use anyhow::Result;
 
-use crate::{InitSettings, MerkleTreeKvDb};
-use crate::storage::{memory::InMemory, RoEpochKvStorage, TreeTransactionalStorage};
 use crate::storage::Operation;
-use crate::tree::{scapegoat, scapegoat::Alpha};
+use crate::storage::{memory::InMemory, RoEpochKvStorage, TreeTransactionalStorage};
 use crate::tree::PrintableTree;
+use crate::tree::{scapegoat, scapegoat::Alpha};
+use crate::{InitSettings, MerkleTreeKvDb};
 
 #[tokio::test]
 async fn run() -> Result<()> {
@@ -17,7 +17,8 @@ async fn run() -> Result<()> {
     let mut tree = MerkleTreeKvDb::<RowTree, V, Storage>::new(
         InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.5))),
         (),
-    ).await?;
+    )
+    .await?;
 
     println!("Insertion of some (key,value) pairs");
     println!(
@@ -30,7 +31,8 @@ async fn run() -> Result<()> {
             Operation::Insert(1, 1),
             Operation::Insert(2, 2),
             Operation::Insert(3, 3),
-        ]).await
+        ])
+        .await
         .expect("this should work");
 
     let first_stamp = tree.current_epoch();

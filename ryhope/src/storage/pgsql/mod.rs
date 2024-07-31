@@ -8,17 +8,17 @@ use self::storages::{
 
 use super::{EpochKvStorage, EpochStorage, PayloadStorage};
 use super::{FromSettings, TransactionalStorage, TreeStorage};
+use crate::storage::pgsql::storages::DBPool;
 use anyhow::*;
-use itertools::Itertools;
-use log::*;
-use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, fmt::Debug, hash::Hash, rc::Rc};
 use async_trait::async_trait;
 use bb8_postgres::PostgresConnectionManager;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use itertools::Itertools;
+use log::*;
+use serde::{Deserialize, Serialize};
+use std::{cell::RefCell, fmt::Debug, hash::Hash, rc::Rc};
 use tokio_postgres::NoTls;
-use crate::storage::pgsql::storages::DBPool;
 
 mod storages;
 
@@ -90,11 +90,13 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> PayloadInDb 
 /// If it exists, remove the given table from the current database.
 async fn delete_storage_table(db: DBPool, table: &str) -> Result<()> {
     let connection = db.get().await.unwrap();
-    connection.execute(&format!("DROP TABLE IF EXISTS {}", table), &[])
+    connection
+        .execute(&format!("DROP TABLE IF EXISTS {}", table), &[])
         .await
         .with_context(|| format!("unable to delete table `{table}`"))
         .map(|_| ())?;
-    connection.execute(&format!("DROP TABLE IF EXISTS {}_meta", table), &[])
+    connection
+        .execute(&format!("DROP TABLE IF EXISTS {}_meta", table), &[])
         .await
         .with_context(|| format!("unable to delete table `{table}`"))
         .map(|_| ())
@@ -142,7 +144,7 @@ where
     V: PayloadInDb + Send + Sync,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
-    NodeConnector: DbConnector<T::Key, T::Node>
+    NodeConnector: DbConnector<T::Key, T::Node>,
 {
     /// The table in which this tree will be stored
     table: String,
@@ -183,11 +185,14 @@ where
             InitSettings::MustNotExist(tree_state) => {
                 Self::create_new(&storage_settings.db_url, storage_settings.table, tree_state).await
             }
-            InitSettings::Reset(tree_settings) => Self::reset(
-                &storage_settings.db_url,
-                storage_settings.table,
-                tree_settings,
-            ).await,
+            InitSettings::Reset(tree_settings) => {
+                Self::reset(
+                    &storage_settings.db_url,
+                    storage_settings.table,
+                    tree_settings,
+                )
+                .await
+            }
         }
     }
 }
@@ -195,7 +200,8 @@ where
 /// Return, if it exists, the current epoch for a given table pair.
 async fn fetch_current_epoch(db: DBPool, table: &str) -> Result<i64> {
     let connection = db.get().await.unwrap();
-    connection.query_one(&format!("SELECT MAX(valid_until) FROM {table}_meta",), &[])
+    connection
+        .query_one(&format!("SELECT MAX(valid_until) FROM {table}_meta",), &[])
         .await
         .map(|r| r.get(0))
         .context("while fetching current epoch")
@@ -300,7 +306,6 @@ where
         Ok(db_pool)
     }
 
-
     /// Create the tables required to store the a tree. For a given tree, two
     /// tables are required: the node table and the meta table. The node table,
     /// named as given, contains all the states of the tree nodes across the
@@ -333,33 +338,36 @@ where
 
         // The main table will store all the tree nodes and their payload.
         let connection = db.get().await.unwrap();
-        connection.execute(
-            &format!(
-                "CREATE TABLE {table} (
+        connection
+            .execute(
+                &format!(
+                    "CREATE TABLE {table} (
                    key          BYTEA NOT NULL,
                    valid_from   BIGINT NOT NULL,
                    valid_until  BIGINT DEFAULT -1,
                    {node_columns}
                    UNIQUE (key, valid_from))"
-            ),
-            &[],
-        ).await
-        .map(|_| ())
-        .with_context(|| format!("unable to create table `{table}`"))?;
+                ),
+                &[],
+            )
+            .await
+            .map(|_| ())
+            .with_context(|| format!("unable to create table `{table}`"))?;
 
         // The meta table will store everything related to the tree itself.
-        connection.execute(
-            &format!(
-                "CREATE TABLE {table}_meta (
+        connection
+            .execute(
+                &format!(
+                    "CREATE TABLE {table}_meta (
                    valid_from   BIGINT NOT NULL UNIQUE,
                    valid_until  BIGINT DEFAULT -1,
                    payload      JSONB)"
-            ),
-            &[],
-        )
+                ),
+                &[],
+            )
             .await
-        .map(|_| ())
-        .with_context(|| format!("unable to create table `{table}_meta`"))
+            .map(|_| ())
+            .with_context(|| format!("unable to create table `{table}_meta`"))
     }
 
     async fn update_all(&self, db_tx: &tokio_postgres::Transaction<'_>) -> Result<()> {
@@ -381,15 +389,17 @@ where
         db_tx: &tokio_postgres::Transaction<'_>,
         key: &T::Key,
     ) -> Result<Option<(T::Node, V)>> {
-        let rows = db_tx.query(
-            &format!(
-                "UPDATE {} SET valid_until={} WHERE key=$1 AND valid_until={} RETURNING *",
-                self.table,
-                self.epoch,
-                self.epoch + 1
-            ),
-            &[&key.to_bytea()],
-        ).await?;
+        let rows = db_tx
+            .query(
+                &format!(
+                    "UPDATE {} SET valid_until={} WHERE key=$1 AND valid_until={} RETURNING *",
+                    self.table,
+                    self.epoch,
+                    self.epoch + 1
+                ),
+                &[&key.to_bytea()],
+            )
+            .await?;
 
         Ok(if rows.is_empty() {
             // The row may not exist
@@ -405,11 +415,15 @@ where
     }
 
     /// Birth a new node at the new epoch
-    async fn new_node(&self, db_tx: &tokio_postgres::Transaction<'_>, k: &T::Key, n: T::Node) -> Result<()> {
+    async fn new_node(
+        &self,
+        db_tx: &tokio_postgres::Transaction<'_>,
+        k: &T::Key,
+        n: T::Node,
+    ) -> Result<()> {
         NodeConnector::insert_in_tx(db_tx, &self.table, k, self.epoch + 1, n).await
     }
 }
-
 
 #[async_trait]
 impl<T: TreeTopology, V: PayloadInDb> TransactionalStorage for PgsqlStorage<T, V>
@@ -437,7 +451,10 @@ where
             // Open a PgSQL transaction, as we want the batch to be atomically
             // successful or failed.
             let mut connection = self.db.get().await.unwrap();
-            let mut db_tx = connection.transaction().await.expect("unable to create DB transaction");
+            let mut db_tx = connection
+                .transaction()
+                .await
+                .expect("unable to create DB transaction");
 
             // Pre-emptively extend by 1 the lifetime of the currently alive rows;
             // those that should not be alive in the next epoch will be rolled back
@@ -450,11 +467,7 @@ where
             // Some read may have been performed outside of a transaction; just ignore them.
 
             let mut not_in_nodes_cache = vec![];
-            let nodes_cache = self
-                .data
-                .cache
-                .read()
-                .await;
+            let nodes_cache = self.data.cache.read().await;
             for (k, v) in nodes_cache.iter() {
                 if !self.nodes.cache.read().await.contains_key(k) {
                     not_in_nodes_cache.push((k, v));
@@ -473,7 +486,8 @@ where
                         k,
                         self.epoch + 1,
                         v.to_owned(),
-                    ).await?;
+                    )
+                    .await?;
                 }
             }
 
@@ -516,7 +530,8 @@ where
                                 k,
                                 new_epoch,
                                 payload,
-                            ).await?;
+                            )
+                            .await?;
                         }
                     },
                     // k has been deleted; simply roll-back the lifetime of its row.
@@ -527,7 +542,10 @@ where
             }
 
             // Atomically execute the PgSQL transaction
-            db_tx.commit().await.context("while committing transaction")?;
+            db_tx
+                .commit()
+                .await
+                .context("while committing transaction")?;
         }
 
         // Prepare the internal state for a new transaction
@@ -586,8 +604,7 @@ where
             .collect::<Vec<_>>()
     }
 
-    async fn rollback_to(&mut self, epoch: Epoch) -> Result<()>
-    {
+    async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
         self.state.rollback_to(epoch).await?;
         self.nodes.rollback_to(epoch).await?;
         self.data.rollback_to(epoch).await?;
@@ -599,7 +616,6 @@ where
         assert_eq!(self.state.current_epoch(), self.epoch);
 
         Ok(())
-
     }
 }
 

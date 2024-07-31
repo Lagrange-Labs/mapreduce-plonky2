@@ -2,12 +2,12 @@ use super::PrintableTree;
 use super::{MutableTree, NodeContext, NodePath, TreeTopology};
 use crate::storage::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TreeStorage};
 use anyhow::*;
-use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, fmt::Debug, hash::Hash, marker::PhantomData};
-use std::collections::HashMap;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::{cmp::Ordering, fmt::Debug, hash::Hash, marker::PhantomData};
 
 /// The representation of a fraction as its numerator and denominator, allowing
 /// for efficient generation of the fraction and its inverse.
@@ -140,9 +140,9 @@ pub struct State<K> {
     alpha: Alpha,
 }
 
-pub struct Tree<K: Debug + Sync + Send + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a>>(
-    PhantomData<K>,
-);
+pub struct Tree<
+    K: Debug + Sync + Send + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a>,
+>(PhantomData<K>);
 impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send> Default
     for Tree<K>
 {
@@ -151,7 +151,9 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     }
 }
 
-impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send> Tree<K> {
+impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send>
+    Tree<K>
+{
     pub fn empty(alpha: Alpha) -> State<K> {
         State {
             node_count: 0,
@@ -160,7 +162,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         }
     }
 
-   fn rec_depth<'a, S: TreeStorage<Tree<K>> + Sync>(k: &'a K, s: &'a S) -> BoxFuture<'a, usize> {
+    fn rec_depth<'a, S: TreeStorage<Tree<K>> + Sync>(k: &'a K, s: &'a S) -> BoxFuture<'a, usize> {
         async move {
             let n = &s.nodes().fetch(k).await;
             let depth_l = if let Some(left) = n.left.as_ref() {
@@ -174,7 +176,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 0
             };
             depth_l.max(depth_r)
-        }.boxed()
+        }
+        .boxed()
     }
 
     /// Return the depth of the tree, _i.e._ the longest path from the root to a leaf.
@@ -189,7 +192,11 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     /// Insert the key `k` in the tree.
     ///
     /// Fail if `k` is already present in the tree.
-    pub async fn insert<S: TreeStorage<Tree<K>>>(&mut self, k: K, nodes: &mut S) -> Result<NodePath<K>> {
+    pub async fn insert<S: TreeStorage<Tree<K>>>(
+        &mut self,
+        k: K,
+        nodes: &mut S,
+    ) -> Result<NodePath<K>> {
         self._insert(k, false, nodes).await
     }
 
@@ -266,7 +273,11 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
 
     /// Return, if it exists, the path leading from the tree root to the node
     /// containing `k`.
-    pub async fn find_with_path<S: TreeStorage<Tree<K>>>(&self, k: &K, s: &S) -> Option<NodePath<K>> {
+    pub async fn find_with_path<S: TreeStorage<Tree<K>>>(
+        &self,
+        k: &K,
+        s: &S,
+    ) -> Option<NodePath<K>> {
         let mut path = Vec::with_capacity(self.size(s).await.ilog2() as usize);
 
         if let Some(root) = s.state().fetch().await.root.as_ref() {
@@ -338,14 +349,18 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                                 if min_parent_idx == to_remove {
                                     to_remove_right_child = unlink_new_child.cloned();
                                 } else {
-                                    s.nodes_mut().update_with(min_parent_idx.to_owned(), |n| {
-                                        n.left = unlink_new_child.cloned();
-                                        n.subtree_size -= 1;
-                                    }).await;
+                                    s.nodes_mut()
+                                        .update_with(min_parent_idx.to_owned(), |n| {
+                                            n.left = unlink_new_child.cloned();
+                                            n.subtree_size -= 1;
+                                        })
+                                        .await;
                                     if let Some(u) = unlink_new_child {
-                                        s.nodes_mut().update_with(u.to_owned(), |n| {
-                                            n.parent = Some(min_parent_idx.to_owned())
-                                        }).await;
+                                        s.nodes_mut()
+                                            .update_with(u.to_owned(), |n| {
+                                                n.parent = Some(min_parent_idx.to_owned())
+                                            })
+                                            .await;
                                     }
                                 }
                                 break;
@@ -355,10 +370,13 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                                     to_remove_right_child = None;
                                 } else {
                                     s.nodes_mut()
-                                        .update_with(min_parent_idx.to_owned(), |n| n.left = None).await;
-                                    s.nodes_mut().update_with(min_parent_idx.to_owned(), |n| {
-                                        n.subtree_size -= 1
-                                    }).await;
+                                        .update_with(min_parent_idx.to_owned(), |n| n.left = None)
+                                        .await;
+                                    s.nodes_mut()
+                                        .update_with(min_parent_idx.to_owned(), |n| {
+                                            n.subtree_size -= 1
+                                        })
+                                        .await;
                                 }
                                 break;
                             }
@@ -367,18 +385,22 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 }
 
                 let min_node_sub_tree_size = s.nodes().fetch(&to_remove).await.subtree_size - 1;
-                s.nodes_mut().update_with(min_idx.to_owned(), |min_node| {
-                    min_node.right = to_remove_right_child.clone();
-                    min_node.left = to_remove_left_child.cloned();
-                    min_node.subtree_size = min_node_sub_tree_size;
-                }).await;
+                s.nodes_mut()
+                    .update_with(min_idx.to_owned(), |min_node| {
+                        min_node.right = to_remove_right_child.clone();
+                        min_node.left = to_remove_left_child.cloned();
+                        min_node.subtree_size = min_node_sub_tree_size;
+                    })
+                    .await;
                 if let Some(i) = to_remove_right_child {
                     s.nodes_mut()
-                        .update_with(i.to_owned(), |n| n.parent = Some(min_idx.to_owned())).await
+                        .update_with(i.to_owned(), |n| n.parent = Some(min_idx.to_owned()))
+                        .await
                 }
                 if let Some(i) = to_remove_left_child {
                     s.nodes_mut()
-                        .update_with(i.to_owned(), |n| n.parent = Some(min_idx.to_owned())).await
+                        .update_with(i.to_owned(), |n| n.parent = Some(min_idx.to_owned()))
+                        .await
                 }
 
                 Some(min_idx)
@@ -388,17 +410,20 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         let dirties = match to_remove_context.ascendance.last() {
             Some(parent) => {
                 {
-                    s.nodes_mut().update_with(parent.to_owned(), |parent_node| {
-                        if parent_node.left().map(|l| *l == to_remove).unwrap_or(false) {
-                            parent_node.left = new_child.clone();
-                        } else {
-                            parent_node.right = new_child.clone();
-                        }
-                    }).await;
+                    s.nodes_mut()
+                        .update_with(parent.to_owned(), |parent_node| {
+                            if parent_node.left().map(|l| *l == to_remove).unwrap_or(false) {
+                                parent_node.left = new_child.clone();
+                            } else {
+                                parent_node.right = new_child.clone();
+                            }
+                        })
+                        .await;
                 }
                 if let Some(ref i) = new_child {
                     s.nodes_mut()
-                        .update_with(i.to_owned(), |n| n.parent = Some(parent.to_owned())).await;
+                        .update_with(i.to_owned(), |n| n.parent = Some(parent.to_owned()))
+                        .await;
                     // NOTE: optimality would require to remove unchanged leaf nodes
                     self.descendants(new_child.as_ref().unwrap(), s).await
                 } else {
@@ -409,7 +434,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 s.state_mut().update(|r| r.root = new_child.clone()).await;
                 if let Some(new_child_k) = new_child.as_ref() {
                     s.nodes_mut()
-                        .update_with(new_child_k.to_owned(), |n| n.parent = None).await;
+                        .update_with(new_child_k.to_owned(), |n| n.parent = None)
+                        .await;
                 }
                 new_child.map(|n| vec![n]).unwrap_or_default()
             }
@@ -421,7 +447,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         for ancestor in to_remove_context.ascendance {
             debug_assert!(s.nodes().fetch(&ancestor).await.subtree_size > 1);
             s.nodes_mut()
-                .update_with(ancestor.to_owned(), |n| n.subtree_size -= 1).await;
+                .update_with(ancestor.to_owned(), |n| n.subtree_size -= 1)
+                .await;
         }
 
         Ok(dirties)
@@ -449,7 +476,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
             if let Some(right) = n.right() {
                 Self::rec_print(right, d + 1, s);
             }
-        }.boxed();
+        }
+        .boxed();
     }
 
     /// Insert the key `k` in the tree. If it already exists, do nothing if
@@ -461,7 +489,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         s: &mut S,
     ) -> Result<NodePath<K>> {
         let path = if let Some(root) = s.state().fetch().await.root.as_ref() {
-            let mut path = Vec::with_capacity(s.state().fetch().await.node_count.max(1).ilog2() as usize);
+            let mut path =
+                Vec::with_capacity(s.state().fetch().await.node_count.max(1).ilog2() as usize);
             let mut cursor = root.to_owned();
             loop {
                 let n = s.nodes().fetch(&cursor).await;
@@ -473,11 +502,14 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                             cursor = left.to_owned();
                         } else {
                             s.nodes_mut()
-                                .update_with(cursor.to_owned(), |n| n.left = Some(k.clone())).await;
-                            s.nodes_mut().store(
-                                k.clone(),
-                                Node::new_with_parent(k.clone(), cursor.to_owned()),
-                            ).await?;
+                                .update_with(cursor.to_owned(), |n| n.left = Some(k.clone()))
+                                .await;
+                            s.nodes_mut()
+                                .store(
+                                    k.clone(),
+                                    Node::new_with_parent(k.clone(), cursor.to_owned()),
+                                )
+                                .await?;
                             break;
                         }
                     }
@@ -498,11 +530,14 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                             cursor = right.to_owned();
                         } else {
                             s.nodes_mut()
-                                .update_with(cursor.to_owned(), |n| n.right = Some(k.clone())).await;
-                            s.nodes_mut().store(
-                                k.clone(),
-                                Node::new_with_parent(k.clone(), cursor.to_owned()),
-                            ).await?;
+                                .update_with(cursor.to_owned(), |n| n.right = Some(k.clone()))
+                                .await;
+                            s.nodes_mut()
+                                .store(
+                                    k.clone(),
+                                    Node::new_with_parent(k.clone(), cursor.to_owned()),
+                                )
+                                .await?;
                             break;
                         }
                     }
@@ -512,31 +547,38 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
             // If the insert is successful, update the sub-tree sizes
             for p in path.iter() {
                 s.nodes_mut()
-                    .update_with(p.to_owned(), |n| n.subtree_size += 1).await;
+                    .update_with(p.to_owned(), |n| n.subtree_size += 1)
+                    .await;
             }
             s.state_mut().update(|r| r.node_count += 1).await;
 
-            if path.len() > self.depth_criterion(s.state().fetch().await.node_count, s).await {
-               if let Some(scapegoat) = self.find_scapegoat(&path, s).await {
-                   let mut keys = vec![];
-                   let nodes = self.rebalance_at(scapegoat, s).await;
-                   for n in nodes{
-                       let key = s.nodes().fetch(&n).await.k.to_owned();
-                       keys.push(key);
-                   }
-                   keys
-               } else {
-                   vec![]
-               }
+            if path.len()
+                > self
+                    .depth_criterion(s.state().fetch().await.node_count, s)
+                    .await
+            {
+                if let Some(scapegoat) = self.find_scapegoat(&path, s).await {
+                    let mut keys = vec![];
+                    let nodes = self.rebalance_at(scapegoat, s).await;
+                    for n in nodes {
+                        let key = s.nodes().fetch(&n).await.k.to_owned();
+                        keys.push(key);
+                    }
+                    keys
+                } else {
+                    vec![]
+                }
             } else {
                 path
             }
         } else {
             s.nodes_mut().store(k.clone(), Node::new(k.clone())).await?;
-            s.state_mut().update(|r| {
-                r.root = Some(k.clone());
-                r.node_count += 1;
-            }).await;
+            s.state_mut()
+                .update(|r| {
+                    r.root = Some(k.clone());
+                    r.node_count += 1;
+                })
+                .await;
             vec![]
         };
         Ok(NodePath {
@@ -557,9 +599,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
             let key = s.nodes().fetch(n).await.k.to_owned();
             keys.insert(n.clone(), key);
         }
-        sub_nodes.sort_unstable_by(|i, j| {
-            keys.get(i).unwrap().cmp(keys.get(j).unwrap())
-        });
+        sub_nodes.sort_unstable_by(|i, j| keys.get(i).unwrap().cmp(keys.get(j).unwrap()));
         self.rebuild_at(&from, &sub_nodes, s).await;
         sub_nodes
     }
@@ -599,9 +639,14 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         // Update tree root or subtree parent
         if let Some(root_idx) = s.state().fetch().await.root.as_ref() {
             if sorted_nodes.contains(root_idx) {
-                s.state_mut().update(|r| r.root = Some(new_root.to_owned())).await;
+                s.state_mut()
+                    .update(|r| r.root = Some(new_root.to_owned()))
+                    .await;
             } else {
-                let old_subtree_root = self.context(&s.nodes().fetch(&from.id).await.k, s).await.unwrap();
+                let old_subtree_root = self
+                    .context(&s.nodes().fetch(&from.id).await.k, s)
+                    .await
+                    .unwrap();
                 if let Some(parent_idx) = old_subtree_root.parent.clone() {
                     s.nodes_mut()
                         .update_with(parent_idx.clone(), |parent_node| {
@@ -610,10 +655,13 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                             } else {
                                 parent_node.left = Some(new_root.to_owned());
                             }
-                        }).await;
-                    s.nodes_mut().update_with(new_root.to_owned(), |n| {
-                        n.parent = Some(parent_idx.to_owned())
-                    }).await;
+                        })
+                        .await;
+                    s.nodes_mut()
+                        .update_with(new_root.to_owned(), |n| {
+                            n.parent = Some(parent_idx.to_owned())
+                        })
+                        .await;
                 }
             }
         }
@@ -632,12 +680,16 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 let child_section =
                     NodeSection::from_bounds(parent_section.start, parent_section.mid - 1);
                 let child_idx = &sorted_nodes[child_section.mid];
-                s.nodes_mut().update_with(parent_idx.to_owned(), |n| {
-                    n.left = Some(child_idx.to_owned())
-                }).await;
-                s.nodes_mut().update_with(child_idx.to_owned(), |n| {
-                    n.parent = Some(parent_idx.to_owned())
-                }).await;
+                s.nodes_mut()
+                    .update_with(parent_idx.to_owned(), |n| {
+                        n.left = Some(child_idx.to_owned())
+                    })
+                    .await;
+                s.nodes_mut()
+                    .update_with(child_idx.to_owned(), |n| {
+                        n.parent = Some(parent_idx.to_owned())
+                    })
+                    .await;
                 ax.push((child_section.mid, child_section));
             }
 
@@ -646,18 +698,24 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 let child_section =
                     NodeSection::from_bounds(parent_section.mid + 1, parent_section.end);
                 let child_idx = &sorted_nodes[child_section.mid];
-                s.nodes_mut().update_with(parent_idx.to_owned(), |n| {
-                    n.right = Some(child_idx.to_owned())
-                }).await;
-                s.nodes_mut().update_with(child_idx.to_owned(), |n| {
-                    n.parent = Some(parent_idx.to_owned())
-                }).await;
+                s.nodes_mut()
+                    .update_with(parent_idx.to_owned(), |n| {
+                        n.right = Some(child_idx.to_owned())
+                    })
+                    .await;
+                s.nodes_mut()
+                    .update_with(child_idx.to_owned(), |n| {
+                        n.parent = Some(parent_idx.to_owned())
+                    })
+                    .await;
                 ax.push((child_section.mid, child_section));
             }
 
-            s.nodes_mut().update_with(parent_idx.to_owned(), |n| {
-                n.subtree_size = parent_section.end - parent_section.start + 1
-            }).await;
+            s.nodes_mut()
+                .update_with(parent_idx.to_owned(), |n| {
+                    n.subtree_size = parent_section.end - parent_section.start + 1
+                })
+                .await;
         }
     }
 
@@ -669,7 +727,11 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     ) -> Option<NodeUpstream<K>> {
         for (i, p) in path.iter().enumerate().skip(1) {
             let len = path.len() - 1;
-            if len > self.depth_criterion(s.nodes().fetch(p).await.subtree_size, s).await {
+            if len
+                > self
+                    .depth_criterion(s.nodes().fetch(p).await.subtree_size, s)
+                    .await
+            {
                 let direction = if s
                     .nodes()
                     .fetch(&path[i - 1])
@@ -692,7 +754,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         None
     }
 
-   async fn _recompute_subtree_sizes<S: TreeStorage<Tree<K>>>(k: &K, s: &mut S) -> usize {
+    async fn _recompute_subtree_sizes<S: TreeStorage<Tree<K>>>(k: &K, s: &mut S) -> usize {
         let n_k = s.nodes().fetch(k).await.clone();
 
         let left_size = {
@@ -712,11 +774,16 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         let subtree_size = 1 + left_size + right_size;
 
         s.nodes_mut()
-            .update_with(k.to_owned(), |n| n.subtree_size = subtree_size).await;
+            .update_with(k.to_owned(), |n| n.subtree_size = subtree_size)
+            .await;
         subtree_size
     }
 
-    async fn depth_criterion<S: TreeStorage<Tree<K>>>(&self, node_count: usize, s: &mut S) -> usize {
+    async fn depth_criterion<S: TreeStorage<Tree<K>>>(
+        &self,
+        node_count: usize,
+        s: &mut S,
+    ) -> usize {
         (node_count as f32)
             .log(s.state().fetch().await.alpha.inverse())
             .floor() as usize
@@ -726,7 +793,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
 #[async_trait]
 impl<K: Sync + Debug + Ord + Clone + Hash + Serialize + for<'a> Deserialize<'a>> TreeTopology
     for Tree<K>
-    where K: Sync + Send
+where
+    K: Sync + Send,
 {
     type Key = K;
     type Node = Node<K>;
@@ -756,8 +824,12 @@ impl<K: Sync + Debug + Ord + Clone + Hash + Serialize + for<'a> Deserialize<'a>>
         self.find_with_path(n, s).await
     }
 
-    async fn children<S: TreeStorage<Tree<K>>>(&self, k: &K, s: &S) -> Option<(Option<K>, Option<K>)> {
-        if let Some(node) = s.nodes().try_fetch(k).await{
+    async fn children<S: TreeStorage<Tree<K>>>(
+        &self,
+        k: &K,
+        s: &S,
+    ) -> Option<(Option<K>, Option<K>)> {
+        if let Some(node) = s.nodes().try_fetch(k).await {
             let left_child = if let Some(left) = node.left {
                 Some(s.nodes().fetch(&left).await.k.clone())
             } else {
@@ -794,8 +866,8 @@ impl<K: Sync + Debug + Ord + Clone + Hash + Serialize + for<'a> Deserialize<'a>>
 }
 
 #[async_trait]
-impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send> MutableTree
-    for Tree<K>
+impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send>
+    MutableTree for Tree<K>
 {
     async fn insert<S: TreeStorage<Tree<K>>>(&mut self, k: K, s: &mut S) -> Result<NodePath<K>> {
         self.insert(k, s).await
@@ -807,8 +879,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
 }
 
 #[async_trait]
-impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send> PrintableTree
-    for Tree<K>
+impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send>
+    PrintableTree for Tree<K>
 {
     async fn print<S: TreeStorage<Tree<K>>>(&self, s: &S) {
         if let Some(root) = s.state().fetch().await.root.as_ref() {

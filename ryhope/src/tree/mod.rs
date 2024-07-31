@@ -64,7 +64,11 @@ pub trait TreeTopology: Default + Send + Sync {
     ) -> Option<(Option<Self::Key>, Option<Self::Key>)>;
 
     /// Returns the [`NodePath`] from the root of the tree to `k`.
-    async fn lineage<S: TreeStorage<Self>>(&self, k: &Self::Key, s: &S) -> Option<NodePath<Self::Key>>;
+    async fn lineage<S: TreeStorage<Self>>(
+        &self,
+        k: &Self::Key,
+        s: &S,
+    ) -> Option<NodePath<Self::Key>>;
 
     /// Return the union of the lineages of all the `ns`
     async fn ascendance<S: TreeStorage<Self>>(
@@ -105,7 +109,11 @@ pub trait MutableTree: TreeTopology {
     /// Remove the given key from the tree; fail if it is already present.
     ///
     /// Return the `Key`s of the nodes affected by the deletion.
-    async fn delete<S: TreeStorage<Self>>(&mut self, k: &Self::Key, s: &mut S) -> Result<Vec<Self::Key>>;
+    async fn delete<S: TreeStorage<Self>>(
+        &mut self,
+        k: &Self::Key,
+        s: &mut S,
+    ) -> Result<Vec<Self::Key>>;
 }
 
 /// A data structure encompassing the immediate neighborhood of a node.

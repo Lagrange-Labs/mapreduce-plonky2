@@ -1,12 +1,12 @@
+use crate::{tree::TreeTopology, Epoch};
 use anyhow::*;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},
     hash::Hash,
 };
-use futures::future::BoxFuture;
-use futures::FutureExt;
-use crate::{tree::TreeTopology, Epoch};
 
 use super::TreeStorage;
 
@@ -47,7 +47,7 @@ impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
         }
     }
 
-    fn rec_build<'a, T: TreeTopology<Key=K> , S: TreeStorage<T>>(
+    fn rec_build<'a, T: TreeTopology<Key = K>, S: TreeStorage<T>>(
         &'a mut self,
         t: &'a T,
         current: &'a K,
@@ -73,7 +73,8 @@ impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
                 self.nodes[new_i].children.insert(c_i);
             }
             new_i
-        }.boxed()
+        }
+        .boxed()
     }
 
     /// Instantiate a new `UpdateTree` mirroring the integrality of the provided tree.

@@ -85,7 +85,8 @@ mod scapegoat {
             + std::fmt::Debug
             + Sync
             + Serialize
-            + for<'a> Deserialize<'a> + Send,
+            + for<'a> Deserialize<'a>
+            + Send,
     >(
         a: Alpha,
     ) -> (scapegoat::Tree<K>, InMemory<scapegoat::Tree<K>, ()>) {

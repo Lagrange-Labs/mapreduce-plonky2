@@ -1,12 +1,12 @@
-use std::{fmt::Debug, hash::Hash};
 use std::future::Future;
+use std::{fmt::Debug, hash::Hash};
 
 use anyhow::*;
 use async_trait::async_trait;
 use futures::future::{BoxFuture, FutureExt};
 use serde::{Deserialize, Serialize};
 
-use crate::{Epoch, InitSettings, tree::TreeTopology};
+use crate::{tree::TreeTopology, Epoch, InitSettings};
 
 use self::updatetree::UpdateTree;
 
@@ -88,8 +88,10 @@ pub trait PayloadStorage<K: Hash + Eq + Send + Sync, V: Send + Sync> {
 }
 
 #[async_trait]
-pub trait EpochStorage<T: Debug + Send  + Sync + Clone + Serialize + for<'a> Deserialize<'a>>: TransactionalStorage
-    where Self: Send + Sync
+pub trait EpochStorage<T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>>:
+    TransactionalStorage
+where
+    Self: Send + Sync,
 {
     /// Return the current epoch of the storage
     fn current_epoch(&self) -> Epoch;
@@ -125,8 +127,9 @@ pub trait EpochStorage<T: Debug + Send  + Sync + Clone + Serialize + for<'a> Des
 /// data in the storage.
 #[async_trait]
 pub trait RoEpochKvStorage<K: Eq + Hash, V>
-    where K:  Send + Sync,
-          V:  Send + Sync
+where
+    K: Send + Sync,
+    V: Send + Sync,
 {
     /// Return the current time stamp of the storage
     fn current_epoch(&self) -> Epoch;
@@ -172,7 +175,8 @@ pub trait RoEpochKvStorage<K: Eq + Hash, V>
 /// A versioned KV storage only allowed to mutate entries only in the current
 /// epoch.
 #[async_trait]
-pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>: RoEpochKvStorage<K, V>
+pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>:
+    RoEpochKvStorage<K, V>
 {
     /// Within a transaction, delete the existing storage entry at `k`.
     ///
@@ -189,11 +193,10 @@ pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>: RoEpochKvS
     /// persist the updated value.
     ///
     /// Fail if `k` does not exist.
-    async fn update_with<F: Fn(&mut V)+ Send + Sync>(&mut self, k: K, updater: F)
+    async fn update_with<F: Fn(&mut V) + Send + Sync>(&mut self, k: K, updater: F)
     where
         Self: Sync,
         K: Sync + 'async_trait,
-
     {
         let mut v = self.fetch(&k).await;
         updater(&mut v);
@@ -228,7 +231,10 @@ pub trait TransactionalStorage {
     /// Execute the given function acting on `Self` within a transaction.
     ///
     /// Will fail if the transaction failed.
-    async fn in_transaction<F: Fn(&mut Self) -> BoxFuture<'_, Result< ()>> + Send>(&mut self, f: F) -> Result<()> {
+    async fn in_transaction<F: Fn(&mut Self) -> BoxFuture<'_, Result<()>> + Send>(
+        &mut self,
+        f: F,
+    ) -> Result<()> {
         self.start_transaction()?;
         f(self).await?;
         self.commit_transaction().await
@@ -237,7 +243,9 @@ pub trait TransactionalStorage {
 
 /// Similar to [`TransactionalStorage`], but returns a [`Minitree`] of the
 /// affected [`Key`]s on transaction commit.
-pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send + Sync>: EpochKvStorage<K, V> {
+pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send + Sync>:
+    EpochKvStorage<K, V>
+{
     /// Start a new transaction, defining a transition between the storage at
     /// two epochs.
     async fn start_transaction(&mut self) -> Result<()>;
@@ -253,9 +261,10 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
     ///
     /// Will fail if the transaction failed.
 
-    async fn in_transaction<F: Fn(&mut Self) -> BoxFuture<'_, Result< ()>> + Sync>(&mut self, f: F) -> Result<UpdateTree<K>>
-
-    {
+    async fn in_transaction<F: Fn(&mut Self) -> BoxFuture<'_, Result<()>> + Sync>(
+        &mut self,
+        f: F,
+    ) -> Result<UpdateTree<K>> {
         self.start_transaction().await?;
         f(self).await?;
         self.commit_transaction().await

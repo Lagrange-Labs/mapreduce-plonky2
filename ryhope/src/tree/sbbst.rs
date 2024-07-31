@@ -49,14 +49,14 @@
 //! parent = parent(s_tree, n)
 //! while parent > max(tree)
 //!   parent = parent(s_tree, parent)
+use super::{MutableTree, NodeContext, NodePath, TreeTopology};
 use crate::storage::{EpochKvStorage, EpochStorage, TreeStorage};
 use crate::tree::PrintableTree;
 use anyhow::*;
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use async_trait::async_trait;
 use futures::FutureExt;
-use super::{MutableTree, NodeContext, NodePath, TreeTopology};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// Represents a user-facing index, in the shift+1..max range.
 pub type NodeIdx = usize;
@@ -245,7 +245,7 @@ async fn children_inner<S: TreeStorage<Tree>>(
     n: &InnerIdx,
     s: &S,
 ) -> Option<(Option<InnerIdx>, Option<InnerIdx>)> {
-    if let Some((maybe_left, maybe_right)) =  children_inner_in_saturated(n){
+    if let Some((maybe_left, maybe_right)) = children_inner_in_saturated(n) {
         let has_left = maybe_left.0 <= inner_max(s).await.0;
         let left_child = if has_left { Some(maybe_left) } else { None };
 
@@ -272,8 +272,7 @@ async fn children_inner<S: TreeStorage<Tree>>(
             right_child = children_inner_in_saturated(&c).map(|(l, _r)| l);
         }
 
-
-        return Some((left_child, right_child))
+        return Some((left_child, right_child));
     }
     None
 }
@@ -303,11 +302,7 @@ impl TreeTopology for Tree {
         inner_max(s).await.0
     }
 
-    async fn ascendance<S: TreeStorage<Tree>>(
-        &self,
-        ns: &[Self::Key],
-        s: &S,
-    ) -> HashSet<NodeIdx> {
+    async fn ascendance<S: TreeStorage<Tree>>(&self, ns: &[Self::Key], s: &S) -> HashSet<NodeIdx> {
         let mut ascendance = HashSet::new();
         let inner_max = inner_max(s).await;
         for n in ns {
@@ -369,8 +364,16 @@ impl TreeTopology for Tree {
         s: &S,
     ) -> Option<(Option<NodeIdx>, Option<NodeIdx>)> {
         if let Some((l, r)) = children_inner(&inner_idx(*n, s).await, s).await {
-            let l_option = if let Some(l) = l { Some(outer_idx(l, s).await) } else { None };
-            let r_option = if let Some(r) = r { Some(outer_idx(r, s).await) } else { None };
+            let l_option = if let Some(l) = l {
+                Some(outer_idx(l, s).await)
+            } else {
+                None
+            };
+            let r_option = if let Some(r) = r {
+                Some(outer_idx(r, s).await)
+            } else {
+                None
+            };
             Some((l_option, r_option))
         } else {
             None
@@ -410,10 +413,12 @@ impl TreeTopology for Tree {
             } else {
                 None
             }
-        }.boxed().await
+        }
+        .boxed()
+        .await
     }
 
-   async fn contains<S: TreeStorage<Tree>>(&self, k: &NodeIdx, s: &S) -> bool {
+    async fn contains<S: TreeStorage<Tree>>(&self, k: &NodeIdx, s: &S) -> bool {
         inner_idx(*k, s).await <= inner_max(s).await
     }
 }
@@ -421,7 +426,11 @@ impl TreeTopology for Tree {
 #[async_trait]
 impl MutableTree for Tree {
     // The SBBST only support appending exactly after the current largest key.
-    async fn insert<S: TreeStorage<Tree>>(&mut self, k: NodeIdx, s: &mut S) -> Result<NodePath<NodeIdx>> {
+    async fn insert<S: TreeStorage<Tree>>(
+        &mut self,
+        k: NodeIdx,
+        s: &mut S,
+    ) -> Result<NodePath<NodeIdx>> {
         ensure!(
             k >= shift(s).await,
             "invalid insert in SBST: index `{k}` smaller than origin `{}`",
@@ -442,11 +451,14 @@ impl MutableTree for Tree {
         Ok(self.lineage(&k, s).await.unwrap())
     }
 
-    async fn delete<S: TreeStorage<Tree>>(&mut self, _k: &NodeIdx, _: &mut S) -> Result<Vec<NodeIdx>> {
+    async fn delete<S: TreeStorage<Tree>>(
+        &mut self,
+        _k: &NodeIdx,
+        _: &mut S,
+    ) -> Result<Vec<NodeIdx>> {
         unreachable!("SBBST does not support deletion")
     }
 }
-
 
 #[async_trait]
 impl PrintableTree for Tree {

@@ -1,13 +1,13 @@
-use std::{collections::HashMap, fmt::Debug};
 use std::collections::HashSet;
 use std::hash::Hash;
+use std::{collections::HashMap, fmt::Debug};
 
 use anyhow::*;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::{Epoch, InitSettings};
 use crate::tree::TreeTopology;
+use crate::{Epoch, InitSettings};
 
 use super::{
     EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
@@ -25,8 +25,8 @@ use super::{
 /// behavior of a freshly created, empty tree, that has a non-null, initial
 /// state.
 pub struct VersionedStorage<T>
-    where
-        T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>
+where
+    T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
     /// Whether a transaction has been started and not yet commited.
     in_tx: bool,
@@ -34,8 +34,8 @@ pub struct VersionedStorage<T>
     ts: Vec<Option<T>>,
 }
 impl<T> VersionedStorage<T>
-    where
-        T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>
+where
+    T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
     fn new(initial_state: T) -> Self {
         Self {
@@ -47,8 +47,8 @@ impl<T> VersionedStorage<T>
 
 #[async_trait]
 impl<T> TransactionalStorage for VersionedStorage<T>
-    where
-        T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>
+where
+    T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
     fn start_transaction(&mut self) -> Result<()> {
         ensure!(!self.in_tx, "already in a trnsaction");
@@ -70,8 +70,8 @@ impl<T> TransactionalStorage for VersionedStorage<T>
 
 #[async_trait]
 impl<T> EpochStorage<T> for VersionedStorage<T>
-    where
-        T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>
+where
+    T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
     fn current_epoch(&self) -> Epoch {
         (self.ts.len() - 1).try_into().unwrap()
@@ -132,8 +132,9 @@ impl<K: Debug, V: Debug> VersionedKvStorage<K, V> {
 
 #[async_trait]
 impl<K, V> RoEpochKvStorage<K, V> for VersionedKvStorage<K, V>
-    where K: Hash + Eq + Clone + Debug + Send + Sync,
-          V: Clone + Debug + Send + Sync
+where
+    K: Hash + Eq + Clone + Debug + Send + Sync,
+    V: Clone + Debug + Send + Sync,
 {
     fn current_epoch(&self) -> Epoch {
         // There is a 1-1 mapping between the epoch and the position in the list of
@@ -178,8 +179,9 @@ impl<K, V> RoEpochKvStorage<K, V> for VersionedKvStorage<K, V>
 
 #[async_trait]
 impl<K, V> EpochKvStorage<K, V> for VersionedKvStorage<K, V>
-where K: Hash + Eq + Clone + Debug + Send + Sync,
-      V: Clone + Debug + Send + Sync
+where
+    K: Hash + Eq + Clone + Debug + Send + Sync,
+    V: Clone + Debug + Send + Sync,
 {
     async fn remove(&mut self, k: K) -> Result<()> {
         ensure!(self.try_fetch(&k).await.is_some(), "key not found");
@@ -314,9 +316,9 @@ where
 
 #[async_trait]
 impl<T, V> TransactionalStorage for InMemory<T, V>
-    where
-        T: TreeTopology,
-        V: Clone + Debug + Send + Sync
+where
+    T: TreeTopology,
+    V: Clone + Debug + Send + Sync,
 {
     fn start_transaction(&mut self) -> Result<()> {
         ensure!(!self.in_tx, "already in a transaction");
