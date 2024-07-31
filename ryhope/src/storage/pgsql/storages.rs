@@ -509,8 +509,8 @@ where
             let read_guard = self.cache.read().await;
             let value = read_guard.get(k).cloned();
             drop(read_guard);
-            if let Some(Some(CachedValue::Read(v))) = value {
-                Some(v.clone())
+            if let Some(Some(cached_value)) = value {
+                Some(cached_value.into_value())
             } else {
                 if let Some(value) = F::fetch_at(self.db.clone(), &self.table, k, epoch)
                     .await
