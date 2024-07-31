@@ -225,7 +225,9 @@ impl Table {
             .map(|plan| RowUpdateResult { updates: plan });
         {
             // debugging
+            println!("\n+++++++++++++++++++++++++++++++++\n");
             self.row.print_tree();
+            println!("\n+++++++++++++++++++++++++++++++++\n");
         }
         out
     }
