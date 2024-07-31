@@ -166,7 +166,10 @@ impl Table {
         // reconstruct the _current_ cell tree before update
         // note we ignore the update plan here since we assume it already has been proven
         // or is empty
-        println!("BEFORE construct cell tree");
+        println!(
+            "BEFORE construct cell tree - previous_cells {:?}",
+            previous_cells
+        );
         let mut cell_tree = self.construct_cell_tree(&previous_cells);
         println!("BEFORE update cell tree");
         // apply updates and save the update plan for the new values
