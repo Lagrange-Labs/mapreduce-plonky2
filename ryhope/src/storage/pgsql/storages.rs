@@ -481,11 +481,15 @@ impl<K, V, F> RoEpochKvStorage<K, V>
         if epoch == self.current_epoch() {
             // Directly returns the value if it is already in cache, fetch it from
             // the DB otherwise.
-            if let Some(Some(CachedValue::Read(v))) = self.cache.read().await.get(k) {
+            let read_guard = self.cache.read().await;
+            let value = read_guard.get(k).cloned();
+            drop(read_guard);
+            if let Some(Some(CachedValue::Read(v))) = value {
                 Some(v.clone())
             } else {
                 if let Some(value) = F::fetch_at(self.db.clone(), &self.table, k, epoch).await.unwrap() {
-                    self.cache.write().await.insert(k.clone(), Some(CachedValue::Read(value.clone())));
+                    let mut write_guard = self.cache.write().await;
+                    write_guard.insert(k.clone(), Some(CachedValue::Read(value.clone())));
                     Some(value)
                 }else {
                     None

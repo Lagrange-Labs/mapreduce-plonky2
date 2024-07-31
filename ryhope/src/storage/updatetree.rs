@@ -37,7 +37,7 @@ impl<K: Clone + Hash + Eq> UpdateTreeNode<K> {
     }
 }
 
-impl<K: Clone + Hash + Eq + std::marker::Sync + std::marker::Send> UpdateTree<K> {
+impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
     /// Create an empty `UpdateTree`.
     fn empty(epoch: Epoch) -> Self {
         Self {

@@ -207,7 +207,6 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         let mut r = vec![from.to_owned()];
 
         while let Some(i) = todo.pop() {
-            println!("cursor15: ");
             if let Some(left) = s.nodes().fetch(&i).await.left() {
                 todo.push(left.to_owned());
                 r.push(left.to_owned());
@@ -470,10 +469,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 match k.cmp(&n.k) {
                     Ordering::Less => {
                         if let Some(left) = n.left() {
-                            println!("cursor1: {:?}", cursor);
                             cursor = left.to_owned();
                         } else {
-                            println!("cursor2: {:?}", cursor);
                             s.nodes_mut()
                                 .update_with(cursor.to_owned(), |n| n.left = Some(k.clone())).await;
                             s.nodes_mut().store(
@@ -485,7 +482,6 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                     }
                     Ordering::Equal => {
                         if can_replace {
-                            println!("cursor3: {:?}", cursor);
                             path.pop().unwrap();
                             // No re-balancing is guaranteed
                             return Ok(NodePath {
@@ -498,10 +494,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                     }
                     Ordering::Greater => {
                         if let Some(right) = n.right() {
-                            println!("cursor4: {:?}", cursor);
                             cursor = right.to_owned();
                         } else {
-                            println!("cursor5: {:?}", cursor);
                             s.nodes_mut()
                                 .update_with(cursor.to_owned(), |n| n.right = Some(k.clone())).await;
                             s.nodes_mut().store(
@@ -516,34 +510,27 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
 
             // If the insert is successful, update the sub-tree sizes
             for p in path.iter() {
-                println!("cursor6: {:?}", cursor);
                 s.nodes_mut()
                     .update_with(p.to_owned(), |n| n.subtree_size += 1).await;
             }
             s.state_mut().update(|r| r.node_count += 1).await;
 
             if path.len() > self.depth_criterion(s.state().fetch().await.node_count, s).await {
-                println!("cursor7: {:?}", cursor);
                if let Some(scapegoat) = self.find_scapegoat(&path, s).await {
-                   println!("cursor12: {:?}", cursor);
                    let mut keys = vec![];
                    let nodes = self.rebalance_at(scapegoat, s).await;
                    for n in nodes{
-                       println!("cursor8: {:?}", cursor);
                        let key = s.nodes().fetch(&n).await.k.to_owned();
                        keys.push(key);
                    }
                    keys
                }else{
-                   println!("cursor9: {:?}", cursor);
                      vec![]
                }
             } else {
-                println!("cursor10: {:?}", cursor);
                 path
             }
         } else {
-            println!("cursor11: ");
             s.nodes_mut().store(k.clone(), Node::new(k.clone())).await?;
             s.state_mut().update(|r| {
                 r.root = Some(k.clone());
@@ -563,9 +550,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         from: NodeUpstream<K>,
         s: &mut S,
     ) -> Vec<K> {
-        println!("cursor13: ");
         let sub_nodes = self.descendants(&from.id, s).await;
-        println!("cursor14: ");
         let mut all_keys = vec![];
         for n in &sub_nodes {
             let key = s.nodes().fetch(n).await.k.to_owned();
@@ -820,6 +805,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     }
 }
 
+#[async_trait]
 impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send> PrintableTree
     for Tree<K>
 {

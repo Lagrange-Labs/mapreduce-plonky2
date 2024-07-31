@@ -35,7 +35,7 @@ mod sbbst {
 
     #[tokio::test]
     async fn medium() {
-        let (t, mut s) = sbbst_in_memory(0, 6);
+        let (t, s) = sbbst_in_memory(0, 6);
         assert_eq!(t.parent(5, &s).await, Some(6));
         assert_eq!(t.parent(6, &s).await, Some(4));
         assert_eq!(t.parent(2, &s).await, Some(4));
@@ -85,7 +85,7 @@ mod scapegoat {
             + std::fmt::Debug
             + Sync
             + Serialize
-            + for<'a> Deserialize<'a> + std::marker::Send,
+            + for<'a> Deserialize<'a> + Send,
     >(
         a: Alpha,
     ) -> (scapegoat::Tree<K>, InMemory<scapegoat::Tree<K>, ()>) {

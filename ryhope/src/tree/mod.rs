@@ -138,6 +138,7 @@ impl<K> NodeContext<K> {
     }
 }
 
+#[async_trait]
 pub trait PrintableTree: TreeTopology {
     async fn print<S: TreeStorage<Self>>(&self, s: &S);
 }

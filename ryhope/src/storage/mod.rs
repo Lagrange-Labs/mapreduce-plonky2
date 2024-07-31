@@ -258,13 +258,7 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
     {
         self.start_transaction().await?;
         f(self).await?;
-        println!("COMMITING");
-        let result = self.commit_transaction().await;
-        if let Err(e) = &result {
-            println!("ERROR: {:?}", e);
-        }
-        println!("COMMITED");
-        result
+        self.commit_transaction().await
     }
 
     /// Consume an iterator of [`Operation<K>`] and apply all of them within a

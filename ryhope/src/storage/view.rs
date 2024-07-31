@@ -1,12 +1,12 @@
 //! This module offers facilities to “time-travel”, i.e. access the successive
 //! states of a tree at given epochs.
-use anyhow::*;
-use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
-use std::sync::Arc;
+
+use anyhow::*;
 use async_trait::async_trait;
-use tokio::sync::RwLock;
-use crate::{tree::TreeTopology, Epoch};
+use serde::{Deserialize, Serialize};
+
+use crate::{Epoch, tree::TreeTopology};
 
 use super::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TransactionalStorage, TreeStorage};
 

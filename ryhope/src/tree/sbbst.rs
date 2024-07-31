@@ -447,6 +447,8 @@ impl MutableTree for Tree {
     }
 }
 
+
+#[async_trait]
 impl PrintableTree for Tree {
     async fn print<S: TreeStorage<Tree>>(&self, s: &S) {
         let max_layer = inner_root(s).await.0.trailing_zeros();

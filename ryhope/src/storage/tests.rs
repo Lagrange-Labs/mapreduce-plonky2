@@ -92,47 +92,47 @@ async fn storage_in_pgsql() -> Result<()> {
     ).await?;
     with_storage(&mut s).await?;
     println!("Old one");
-    // s.print_tree().await;
-    //
-    // let mut s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
-    //     InitSettings::MustExist,
-    //     SqlStorageSettings {
-    //         db_url: db_url(),
-    //         table: "simple".to_string(),
-    //     },
-    // ).await?;
-    // println!("New one");
-    // s2.print_tree().await;
-    //
-    // assert_eq!(s2.root_data().await, s.root_data().await);
-    // assert_eq!(s.tree().size(&mut s2.storage).await, s2.tree().size(&s2.storage).await);
-    //
-    // for i in 1..=6 {
-    //     println!("\nEpoch = {i}");
-    //     let mut ss = s.view_at(i);
-    //     s.tree().print(&mut ss).await;
-    //     s.diff_at(i).await.unwrap().print();
-    //
-    //     match i {
-    //         1 => {
-    //             assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
-    //         }
-    //         2 => {
-    //             assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
-    //         }
-    //         3 => {
-    //             assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_none())
-    //         }
-    //         4 => {}
-    //         5 => {
-    //             assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_some())
-    //         }
-    //         6 => {
-    //             assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_none())
-    //         }
-    //         _ => {}
-    //     }
-    // }
+    s.print_tree().await;
+
+    let mut s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
+        InitSettings::MustExist,
+        SqlStorageSettings {
+            db_url: db_url(),
+            table: "simple".to_string(),
+        },
+    ).await?;
+    println!("New one");
+    s2.print_tree().await;
+
+    assert_eq!(s2.root_data().await, s.root_data().await);
+    assert_eq!(s.tree().size(&mut s2.storage).await, s2.tree().size(&s2.storage).await);
+
+    for i in 1..=6 {
+        println!("\nEpoch = {i}");
+        let mut ss = s.view_at(i);
+        s.tree().print(&mut ss).await;
+        s.diff_at(i).await.unwrap().print();
+
+        match i {
+            1 => {
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
+            }
+            2 => {
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
+            }
+            3 => {
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_none())
+            }
+            4 => {}
+            5 => {
+                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_some())
+            }
+            6 => {
+                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_none())
+            }
+            _ => {}
+        }
+    }
 
     Ok(())
 }
@@ -224,55 +224,58 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
         Ok(())
     })).await?;
 
-    // s_psql.in_transaction(|t| Box::pin(async {
-    //     t.update(3, "coucou".into()).await.unwrap();
-    //     t.update(8, "cava".into()).await.unwrap();
-    //     t.update(2, "bien".into()).await.unwrap();
-    //
-    //     Ok(())
-    // })).await?;
-    //
-    // println!("Old one");
-    // s_psql.print_tree();
-    //
-    // let mut s2 = MerkleTreeKvDb::<TestTree, V, SqlStorage>::new(
-    //     InitSettings::MustExist,
-    //     SqlStorageSettings {
-    //         db_url: db_url(),
-    //         table: "simple_sbbst".to_string(),
-    //     },
-    // ).await?;
-    // println!("New one");
-    // s2.print_tree().await;
-    // assert_eq!(s_psql.root_data().await.unwrap().h, s2.root_data().await.unwrap().h);
-    //
-    // for i in 1..=2 {
-    //     println!("\nEpoch = {i}");
-    //     let mut ss = s2.view_at(i);
-    //     s2.tree().print(&mut ss).await;
-    //     s_psql.diff_at(i).await.unwrap().print();
-    // }
-    //
-    // let mut s_ram = MerkleTreeKvDb::<TestTree, V, RamStorage>::new(
-    //     InitSettings::Reset(sbbst::Tree::empty()),
-    //     (),
-    // ).await?;
-    // s_ram.in_transaction(|t| Box::pin(async {
-    //     for k in 1..10 {
-    //         t.store(k, format!("Node-{k}").into()).await?;
-    //     }
-    //     Ok(())
-    // })).await?;
-    // s_ram.in_transaction(|t| Box::pin(async {
-    //     t.update(3, "coucou".into()).await.unwrap();
-    //     t.update(8, "cava".into()).await.unwrap();
-    //     t.update(2, "bien".into()).await.unwrap();
-    //
-    //     Ok(())
-    // })).await?;
-    // s_ram.print_tree().await;
-    //
-    // assert_eq!(s2.root_data().await.unwrap().h, s_ram.root_data().await.unwrap().h);
+    s_psql.in_transaction(|t| Box::pin(async {
+        t.update(3, "coucou".into()).await.unwrap();
+        t.update(8, "cava".into()).await.unwrap();
+        t.update(2, "bien".into()).await.unwrap();
+
+        Ok(())
+    })).await?;
+
+    println!("Old one");
+    s_psql.print_tree().await;
+
+    let mut s2 = MerkleTreeKvDb::<TestTree, V, SqlStorage>::new(
+        InitSettings::MustExist,
+        SqlStorageSettings {
+            db_url: db_url(),
+            table: "simple_sbbst".to_string(),
+        },
+    ).await?;
+    println!("New one");
+    s2.print_tree().await;
+    let string = s_psql.root_data().await.unwrap().h;
+    println!("Root hash = {string}");
+    let string1 = s2.root_data().await.unwrap().h;
+    assert_eq!(string, string1);
+
+    for i in 1..=2 {
+        println!("\nEpoch = {i}");
+        let mut ss = s2.view_at(i);
+        s2.tree().print(&mut ss).await;
+        s_psql.diff_at(i).await.unwrap().print();
+    }
+
+    let mut s_ram = MerkleTreeKvDb::<TestTree, V, RamStorage>::new(
+        InitSettings::Reset(sbbst::Tree::empty()),
+        (),
+    ).await?;
+    s_ram.in_transaction(|t| Box::pin(async {
+        for k in 1..10 {
+            t.store(k, format!("Node-{k}").into()).await?;
+        }
+        Ok(())
+    })).await?;
+    s_ram.in_transaction(|t| Box::pin(async {
+        t.update(3, "coucou".into()).await.unwrap();
+        t.update(8, "cava".into()).await.unwrap();
+        t.update(2, "bien".into()).await.unwrap();
+
+        Ok(())
+    })).await?;
+    s_ram.print_tree().await;
+
+    assert_eq!(s2.root_data().await.unwrap().h, s_ram.root_data().await.unwrap().h);
 
     Ok(())
 }
@@ -282,45 +285,38 @@ async fn with_storage<S: TreeTransactionalStorage<String, usize> + Send>(s: &mut
         for k in "les sanglots longs des violons de automne blessent mon coeur langueur monotone"
             .split_whitespace()
         {
-            println!("Storing {k}");
-            if let Err(e) = t.store(k.to_string(), k.len()).await {
-                println!("{:?}", e);
-            }
+            t.store(k.to_string(), k.len()).await.unwrap();
         }
         Ok(())
     })).await?;
 
-    // s.in_transaction(|t| Box::pin(async {
-    //     if let Err(e) = t.remove("blessent".to_string()).await{
-    //         println!("{:?}", e);
-    //     }
-    //     Ok(())
-    // })).await?;
-    //
-    // s.in_transaction(|t| Box::pin(async {
-    //     if let Err(e) = t.remove("les".to_string()).await{
-    //         println!("{:?}", e);
-    //     }
-    //     Ok(())
-    // })).await?;
-    //
-    // s.in_transaction(|t| Box::pin(async {
-    //     t.remove("sanglots".to_string()).await.unwrap();
-    //     Ok(())
-    // })).await?;
-    //
-    // s.in_transaction(|t| Box::pin(async {
-    //     t.update("longs".to_string(), 95000).await.unwrap();
-    //     t.update("des".to_string(), 36000).await.unwrap();
-    //     t.remove("des".to_string()).await.unwrap();
-    //     Ok(())
-    // })).await?;
-    //
-    // s.in_transaction( |t| Box::pin(async {
-    //     t.remove("automne".to_string()).await.unwrap();
-    //     t.remove("mon".to_string()).await.unwrap();
-    //     Ok(())
-    // })).await?;
+    s.in_transaction(|t| Box::pin(async {
+        t.remove("blessent".to_string()).await.unwrap();
+        Ok(())
+    })).await?;
+
+    s.in_transaction(|t| Box::pin(async {
+        t.remove("les".to_string()).await.unwrap();
+        Ok(())
+    })).await?;
+
+    s.in_transaction(|t| Box::pin(async {
+        t.remove("sanglots".to_string()).await.unwrap();
+        Ok(())
+    })).await?;
+
+    s.in_transaction(|t| Box::pin(async {
+        t.update("longs".to_string(), 95000).await.unwrap();
+        t.update("des".to_string(), 36000).await.unwrap();
+        t.remove("des".to_string()).await.unwrap();
+        Ok(())
+    })).await?;
+
+    s.in_transaction( |t| Box::pin(async {
+        t.remove("automne".to_string()).await.unwrap();
+        t.remove("mon".to_string()).await.unwrap();
+        Ok(())
+    })).await?;
 
     Ok(())
 }
@@ -334,7 +330,7 @@ async fn hashes() -> Result<()> {
     type Storage = InMemory<Tree, V>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
-        InitSettings::Reset(scapegoat::Tree::empty(Alpha::fully_balanced())),
+        InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
         (),
     ).await?;
 
@@ -363,7 +359,7 @@ async fn sbbst_requires_sequential_keys() -> Result<()> {
     type Storage = InMemory<Tree, V>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
-        InitSettings::Reset(sbbst::Tree::with_shift_and_capacity(10, 0)),
+        InitSettings::Reset(Tree::with_shift_and_capacity(10, 0)),
         (),
     ).await?;
 
@@ -385,7 +381,7 @@ async fn thousand_rows() -> Result<()> {
     type Storage = PgsqlStorage<Tree, V>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
-        InitSettings::Reset(scapegoat::Tree::empty(Alpha::fully_balanced())),
+        InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
         SqlStorageSettings {
             db_url: db_url(),
             table: "thousand".to_string(),

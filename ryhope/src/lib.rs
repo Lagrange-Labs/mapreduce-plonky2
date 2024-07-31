@@ -64,7 +64,7 @@ pub struct MerkleTreeKvDb<
     // Tree type
     T: TreeTopology + MutableTree,
     // Node payload
-    V: NodePayload + std::marker::Send + std::marker::Sync,
+    V: NodePayload + Send + Sync,
     // Tree & data storage
     S: TransactionalStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State> + std::marker::Send + std::marker::Sync,
 > {
@@ -78,8 +78,8 @@ pub struct MerkleTreeKvDb<
     _p: PhantomData<V>,
 }
 impl<
-        T: TreeTopology + MutableTree + std::marker::Send ,
-        V: NodePayload + std::marker::Send + std::marker::Sync,
+        T: TreeTopology + MutableTree + Send ,
+        V: NodePayload + Send + Sync,
         S: TransactionalStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
     > MerkleTreeKvDb<T, V, S>
 {
@@ -136,10 +136,9 @@ impl<
 
     /// Return the current root hash of the Merkle tree.
     pub async fn root_data(&self) -> Option<V> {
-        if let Some(root) = self.tree
-            .root(&self.storage)
-            .await {
-            Some(self.storage.data().fetch(&root).await)
+        if let Some(root) = self.tree.root(&self.storage).await {
+            let root = self.storage.data().fetch(&root).await;
+            Some(root)
         } else {
             None
         }
@@ -298,7 +297,6 @@ impl<
     }
 
     async fn store(&mut self, k: T::Key, value: V) -> Result<()> {
-        println!("Inserting key: {:?}", k);
         let ds = self.tree.insert(k.clone(), &mut self.storage).await?;
         self.dirty.extend(ds.into_full_path());
         self.storage.data_mut().store(k, value).await
@@ -338,7 +336,7 @@ impl<
 
         let plan = update_tree.clone().into_workplan();
 
-        // self.aggregate(plan.clone()).await?;
+        self.aggregate(plan.clone()).await?;
         self.storage.commit_transaction().await?;
 
         Ok(update_tree)
