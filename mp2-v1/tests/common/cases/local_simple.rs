@@ -302,7 +302,10 @@ impl TestCase {
         info!("Generated final CELLs tree proofs for block {current_block}");
         let updates = self.table.apply_row_update(rows_update)?;
         info!("Applied updates to row tree");
-        let index_node = ctx.prove_update_row_tree(&self.table, updates).await;
+        let index_node = ctx
+            .prove_update_row_tree(&self.table, updates)
+            .await
+            .expect("unable to prove row tree");
         info!("Generated final ROWs tree proofs for block {current_block}");
 
         // NOTE the reason we separate and use block number as IndexTreeKey is because this index

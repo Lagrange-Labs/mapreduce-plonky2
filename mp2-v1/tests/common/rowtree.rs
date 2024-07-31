@@ -250,7 +250,7 @@ impl<P: ProofStorage> TestContext<P> {
         &mut self,
         table: &Table,
         ut: UpdateTree<<RowTree as TreeTopology>::Key>,
-    ) -> RowProofIdentifier<BlockPrimaryIndex> {
+    ) -> Result<RowProofIdentifier> {
         let t = &table.row;
         let mut workplan = ut.into_workplan();
         // THIS can panic but for block number it should be fine on 64bit platforms...
@@ -277,7 +277,6 @@ impl<P: ProofStorage> TestContext<P> {
             } else if context.is_partial() {
                 let proof_key = RowProofIdentifier {
                     table: table.id.clone(),
-                    primary: block_key,
                     tree_key: context
                         .left
                         .as_ref()
@@ -310,12 +309,10 @@ impl<P: ProofStorage> TestContext<P> {
             } else {
                 let left_proof_key = RowProofIdentifier {
                     table: table.id.clone(),
-                    primary: block_key,
                     tree_key: context.left.unwrap(),
                 };
                 let right_proof_key = RowProofIdentifier {
                     table: table.id.clone(),
-                    primary: block_key,
                     tree_key: context.right.unwrap(),
                 };
                 let cell_tree_proof = self
@@ -346,7 +343,6 @@ impl<P: ProofStorage> TestContext<P> {
             };
             let new_proof_key = RowProofIdentifier {
                 table: table.id.clone(),
-                primary: block_key,
                 tree_key: k.clone(),
             };
 
@@ -359,7 +355,6 @@ impl<P: ProofStorage> TestContext<P> {
         let root = t.root().unwrap();
         let root_proof_key = RowProofIdentifier {
             table: table.id.clone(),
-            primary: block_key,
             tree_key: root,
         };
 
@@ -376,7 +371,7 @@ impl<P: ProofStorage> TestContext<P> {
                 pi.rows_digest_field()
             );
         }
-        root_proof_key
+        Ok(root_proof_key)
     }
 
     /// Build and prove the row tree from the [`Row`]s and the secondary index
@@ -389,8 +384,8 @@ impl<P: ProofStorage> TestContext<P> {
         &mut self,
         table: &Table,
         update: RowUpdateResult,
-    ) -> IndexNode {
-        let root_proof_key = self.prove_row_tree(table, update.updates).await;
+    ) -> Result<IndexNode> {
+        let root_proof_key = self.prove_row_tree(table, update.updates).await?;
         let row_tree_proof = self
             .storage
             .get_proof(&ProofKey::Row(root_proof_key.clone()))
@@ -403,13 +398,13 @@ impl<P: ProofStorage> TestContext<P> {
             tree_hash, proved_hash,
             "mismatch between row tree root hash as computed by ryhope and mp2",
         );
-        IndexNode {
+        Ok(IndexNode {
             identifier: table.columns.primary_column().identifier,
             value: U256::from(self.block_number().await),
             row_tree_proof_id: root_proof_key,
             row_tree_hash: table.row.root_data().unwrap().hash,
             ..Default::default()
-        }
+        })
     }
 }
 

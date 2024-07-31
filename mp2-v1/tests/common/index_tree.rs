@@ -35,7 +35,7 @@ pub struct IndexNode {
     // information that must be filled manually
     pub identifier: u64,
     pub value: U256,
-    pub row_tree_proof_id: RowProofIdentifier<BlockPrimaryIndex>,
+    pub row_tree_proof_id: RowProofIdentifier,
     pub row_tree_hash: HashOut<F>,
     // information filled during aggregation inside ryhope
     pub node_hash: HashOut<F>,
@@ -115,7 +115,7 @@ impl<P: ProofStorage> TestContext<P> {
     /// NOTE: we require the added_index information because we need to distinguish if a new node
     /// added has a leaf or a as parent. The rest of the nodes in the update tree are to be proven
     /// by the "membership" circuit. So we need to differentiate between the two cases.
-    pub fn prove_index_tree(
+    pub async fn prove_index_tree(
         &mut self,
         table_id: &TableID,
         t: &MerkleIndexTree,
@@ -131,14 +131,16 @@ impl<P: ProofStorage> TestContext<P> {
                 .expect("should find row proof");
             // extraction proof is done once per block, so its key can just be block based
             debug!(
-                "trying to LOAD the extraction proof from {table_id:?} and {}",
-                node.row_tree_proof_id.primary
+                "trying to LOAD the extraction proof from {table_id:?} - index value {}",
+                added_index.value
             );
             let extraction_proof = self
                 .storage
                 .get_proof(&ProofKey::FinalExtraction((
                     table_id.clone(),
-                    node.row_tree_proof_id.primary,
+                    // TODO fix this, we should be able to store historical proofs, even rows tree
+                    //node.row_tree_proof_id.primary,
+                    self.block_number().await as BlockPrimaryIndex,
                 )))
                 .expect("should find extraction proof");
             {
@@ -272,9 +274,9 @@ impl<P: ProofStorage> TestContext<P> {
         ut: UpdateTree<IndexTreeKey>,
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let row_tree_root = table.row.root().unwrap();
+        // i.e. this is assuming latest state since it fetches the latest row root proof
         let row_root_proof_key = RowProofIdentifier {
             table: table.id.clone(),
-            primary: self.block_number().await as BlockPrimaryIndex,
             tree_key: row_tree_root,
         };
 
@@ -293,5 +295,6 @@ impl<P: ProofStorage> TestContext<P> {
         };
         info!("Generated index tree");
         self.prove_index_tree(&table.id, &table.index, ut, &node)
+            .await
     }
 }

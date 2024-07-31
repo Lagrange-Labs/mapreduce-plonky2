@@ -33,17 +33,18 @@ pub(crate) struct CellProofIdentifier {
 }
 
 /// This is the identifier we are storing row tree proof in storage under. This identifier needs
-/// to be unique accross all tables and all blocks. Remember the identifier that the tree uses
-/// is not global, so two nodes in the row tree with different value could have the same tree
-/// identifier since they are not shared, they are isolated trees.
+/// to be unique accross all tables.
+/// NOTE: The block number in this test is not stored as part of the identifier. Doing so would
+/// require to have a "queue" of proofs for the same tree key. Since having access to historical proofs made
+/// on the same tree key but at older blocks is not really useful, this test choose to only keep
+/// the latest one. By not having the block number, redoing a proof for the same tree key will
+/// overwrite preious proofs. Dist system could store the whole history as long as they correctly
+/// pick the latest one when doing a tree update. See `prove_row_tree` function for more details.
+/// _previous proofs_ ,
 /// TODO: make it nice with lifetimes, and easier constructor
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub(crate) struct RowProofIdentifier<PrimaryIndex>
-where
-    PrimaryIndex: std::hash::Hash + PartialEq + Eq,
-{
+pub(crate) struct RowProofIdentifier {
     pub(crate) table: TableID,
-    pub(crate) primary: PrimaryIndex,
     pub(crate) tree_key: RowTreeKey,
 }
 
@@ -63,7 +64,7 @@ pub(crate) type BlockPrimaryIndex = <sbbst::Tree as TreeTopology>::Key;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProofKey {
     Cell(CellProofIdentifier),
-    Row(RowProofIdentifier<BlockPrimaryIndex>),
+    Row(RowProofIdentifier),
     Index(IndexProofIdentifier<BlockPrimaryIndex>),
     FinalExtraction((TableID, BlockPrimaryIndex)),
     ContractExtraction(ContractKey),
