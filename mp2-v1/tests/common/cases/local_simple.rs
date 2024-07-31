@@ -575,9 +575,8 @@ impl TestCase {
                                     }
                                     MappingIndex::Value(_) => {
                                         // TRICKY: in this case, the mapping key must change. But from the
-                                        // onchain perspective, it means it's first a deletion of
-                                        // the mapping entry, with the insertion of a new one with
-                                        // the same mapping value but a different mapping key.
+                                        // onchain perspective, it means a transfer
+                                        // mapping(old_key -> new_key,value)
                                         vec![
                                             MappingUpdate::Deletion(current_key, current_value),
                                             MappingUpdate::Insertion(new_key, current_value),

@@ -3,7 +3,10 @@
 use std::str::FromStr;
 
 use super::{proof_storage::ProofStorage, storage_trie::TestStorageTrie, TestContext};
-use alloy::{eips::BlockNumberOrTag, primitives::Address};
+use alloy::{
+    eips::BlockNumberOrTag,
+    primitives::{Address, U256},
+};
 use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
@@ -88,10 +91,14 @@ impl<P: ProofStorage> TestContext<P> {
                 .map(|node| node.to_vec())
                 .collect();
 
-            let slot = StorageSlot::Mapping(mapping_key, slot);
-            info!("Save the mapping slot {slot:?} to the test storage trie");
+            let sslot = StorageSlot::Mapping(mapping_key.clone(), slot);
+            info!(
+                "Save the mapping key {:?} on slot {} to the test storage trie",
+                U256::from_be_slice(&mapping_key),
+                slot
+            );
 
-            trie.add_slot(slot, nodes);
+            trie.add_slot(sslot, nodes);
         }
 
         info!("Prove the test storage trie including the mapping slots ({slot}, ...)");
