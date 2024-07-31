@@ -537,6 +537,12 @@ impl TestCase {
                     .max()
                     .unwrap()
                     + U256::from(1);
+                let query = ProofQuery::new_mapping_slot(*address, slot, mkey.to_owned());
+                let response = ctx
+                    .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
+                    .await;
+                let current_value = response.storage_proof[0].value;
+                let current_key = U256::from_be_slice(mkey);
 
                 let mapping_updates = match c {
                     ChangeType::Insertion => {
@@ -551,31 +557,9 @@ impl TestCase {
                         // correct row in the table and delete it since for a mpping, we uniquely
                         // identify row per (mapping_key,mapping_value) (in the order dictated by
                         // the secondary index)
-                        // --> therefore we simply lookup the current value. In dist system, the
-                        // scrapper will give that info already
-                        let query = ProofQuery::new_mapping_slot(*address, slot, mkey.clone());
-                        let res = ctx
-                            .query_mpt_proof(
-                                &query,
-                                BlockNumberOrTag::Number(ctx.block_number().await),
-                            )
-                            .await;
-                        let old_value = res.storage_proof[0].value;
-                        vec![MappingUpdate::Deletion(
-                            U256::from_be_slice(mkey),
-                            old_value,
-                        )]
+                        vec![MappingUpdate::Deletion(current_key, current_value)]
                     }
                     ChangeType::Update(u) => {
-                        let query = ProofQuery::new_mapping_slot(*address, slot, mkey.to_owned());
-                        let response = ctx
-                            .query_mpt_proof(
-                                &query,
-                                BlockNumberOrTag::Number(ctx.block_number().await),
-                            )
-                            .await;
-                        let current_key = U256::from_be_slice(mkey);
-                        let current_value = response.storage_proof[0].value;
                         let new_value = random_address().into_word().into();
                         match u {
                             // update the non-indexed column
