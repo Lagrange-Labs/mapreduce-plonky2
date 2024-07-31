@@ -254,9 +254,27 @@ impl AstPass for Validator {
 /// Ensure that a top-level [`Query`] is compatible with the currently
 /// implemented subset of SQL.
 pub fn validate(query: &mut Query) -> Result<()> {
-    ensure!(
-        matches!(*query.body, SetExpr::Select(_)),
-        "query body should be a SELECT statement"
-    );
+    if let SetExpr::Select(ref select) = *query.body {
+        ensure!(
+            select.projection.iter().all(|s| !matches!(
+                s,
+                SelectItem::UnnamedExpr(Expr::Function(_))
+                    | SelectItem::ExprWithAlias {
+                        expr: Expr::Function(_),
+                        ..
+                    }
+            )) | select.projection.iter().all(|s| matches!(
+                s,
+                SelectItem::UnnamedExpr(Expr::Function(_))
+                    | SelectItem::ExprWithAlias {
+                        expr: Expr::Function(_),
+                        ..
+                    }
+            )),
+            "query projection must not mix aggregates and scalars"
+        )
+    } else {
+        bail!("query body should be a SELECT statement")
+    }
     query.visit(&mut Validator)
 }

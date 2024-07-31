@@ -14,7 +14,8 @@ const CAREFUL: &[&str] = &[
 fn must_accept() -> Result<()> {
     for q in [
         "SELECT 25",
-        "SELECT q FROM pipo WHERE block = 3",
+        "SELECT q, r FROM pipo WHERE block = 3",
+        "SELECT AVG(q), MIN(r) FROM pipo WHERE block = 3",
         "SELECT q FROM pipo WHERE block IN (1, 2, 4)",
         "SELECT q FROM pipo WHERE NOT block BETWEEN 12 AND 15",
         "SELECT foo, 39, bar FROM table2 AS tt (a, b)",
@@ -27,6 +28,8 @@ fn must_accept() -> Result<()> {
 #[test]
 fn must_reject() {
     for q in [
+        // Mixing aggregates and scalars
+        "SELECT q, MIN(r) FROM pipo WHERE block = 3",
         // Bitwise operators unsupported
         "SELECT a & b FROM t",
         "SELECT a | b FROM t",
