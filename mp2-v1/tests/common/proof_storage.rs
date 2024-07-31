@@ -166,6 +166,8 @@ impl ProofStorage for MemoryProofStorage {
     fn get_proof_exact(&self, key: &ProofKey) -> Result<Vec<u8>> {
         self.0.get(key).context("unable to get proof").cloned()
     }
+    // stupid dumb implementation
+    // TODO: remove this struct/implementation  alltogether ?
     fn get_proof_latest(&self, key: &RowProofIdentifier<BlockPrimaryIndex>) -> Result<Vec<u8>> {
         for i in key.primary..0 {
             let mut nkey = key.clone();
@@ -190,9 +192,14 @@ pub struct KeyValueDB {
     db: DB,
 }
 
+/// Bucket storing the last block number "proven" for each row tree key
+/// This allows when proving the update to fetch row tree proofs that already have been proven many
+/// blocks ago.
+const ROW_BUCKET_NAME: &str = "row_proof_id";
 const BUCKET_NAME: &str = "v1_proof_store_test";
 pub const ENV_PROOF_STORE: &str = "proofs.store";
 pub const DEFAULT_PROOF_STORE_FOLDER: &str = "store/";
+
 impl KeyValueDB {
     pub fn new_from_env(default: &str) -> Result<Self> {
         let filename = std::env::var(ENV_PROOF_STORE).unwrap_or(default.to_string());
@@ -220,15 +227,19 @@ impl KeyValueDB {
                 }
             }
         }
+        match tx.create_bucket(ROW_BUCKET_NAME) {
+            Ok(_) => log::info!("Created bucket {ROW_BUCKET_NAME} into store row block info"),
+            Err(e) => match e {
+                Error::BucketExists => {
+                    log::info!("Opening already existing bucket {ROW_BUCKET_NAME} into store db")
+                }
+                _ => panic!("Error creating row bucket: {e}"),
+            },
+        }
         tx.commit()?;
         Ok(Self { db })
     }
 }
-
-/// Bucket storing the last block number "proven" for each row tree key
-/// This allows when proving the update to fetch row tree proofs that already have been proven many
-/// blocks ago.
-const ROW_BUCKET_NAME: &str = "row_proof_id";
 
 impl ProofStorage for KeyValueDB {
     fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()> {
