@@ -137,9 +137,11 @@ where
         // `num_placeholders += is_placeholder_valid` in `check_placeholders` function.
         let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_unsafe());
         let [placeholder_pos, placeholder_ids] = array::from_fn(|_| b.add_virtual_target_arr());
-        // Initialize `placeholder_values` and `placeholder_pairs` as unsafe, since they're
-        // compared and used to compute the placeholder hash in `check_placeholders` function.
-        let placeholder_values = array::from_fn(|_| b.add_virtual_u256_unsafe());
+        // `placeholder_values` are exposed as public inputs to the Solidity constract
+        // which will not do range-check.
+        let placeholder_values = array::from_fn(|_| b.add_virtual_u256());
+        // Initialize `placeholder_pairs` as unsafe, since they're compared and used to
+        // compute the placeholder hash in `check_placeholders` function.
         let placeholder_pairs =
             array::from_fn(|_| (b.add_virtual_target(), b.add_virtual_u256_unsafe()));
 
