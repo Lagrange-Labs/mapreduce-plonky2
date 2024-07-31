@@ -19,8 +19,7 @@ use std::iter::once;
 
 // L: maximum number of results
 // S: maximum number of items in each result
-// PH: maximum number of placeholders
-// PD: maximum number of paddings
+// PH: maximum number of unique placeholder IDs and values bound for query
 pub enum RevelationPublicInputs {
     /// `H`: Hash (keccak) - Hash of the blockchain corresponding to the latest
     /// block inserted in the tree employed for this query
@@ -45,16 +44,17 @@ pub enum RevelationPublicInputs {
     /// `result_values` : [[Uint256; S]; L] - Two-dimensional array of L results of
     /// the query and each result has S values
     ResultValues,
-    /// `padding_values` : [Uint256; PD] - Dummy values to be added as public inputs
-    PaddingValues,
+    /// `query_limit` : F - Limit value specified in the query
+    QueryLimit,
+    /// `query_offset` : F - Offset value specified in the query
+    QueryOffset,
 }
 
 // L: maximum number of results
 // S: maximum number of items in each result
-// PH: maximum number of placeholders
-// PD: maximum number of paddings
+// PH: maximum number of unique placeholder IDs and values bound for query
 #[derive(Clone, Debug)]
-pub struct PublicInputs<'a, T, const L: usize, const S: usize, const PH: usize, const PD: usize> {
+pub struct PublicInputs<'a, T, const L: usize, const S: usize, const PH: usize> {
     original_block_hash: &'a [T],
     computational_hash: &'a [T],
     num_placeholders: &'a T,
@@ -63,14 +63,13 @@ pub struct PublicInputs<'a, T, const L: usize, const S: usize, const PH: usize, 
     overflow: &'a T,
     num_results: &'a T,
     result_values: &'a [T],
-    padding_values: &'a [T],
+    query_limit: &'a T,
+    query_offset: &'a T,
 }
 
-const NUM_PUBLIC_INPUTS: usize = RevelationPublicInputs::PaddingValues as usize + 1;
+const NUM_PUBLIC_INPUTS: usize = RevelationPublicInputs::QueryOffset as usize + 1;
 
-impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize, const PD: usize>
-    PublicInputs<'a, T, L, S, PH, PD>
-{
+impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, T, L, S, PH> {
     const PI_RANGES: [PublicInputRange; NUM_PUBLIC_INPUTS] = [
         Self::to_range(RevelationPublicInputs::OriginalBlockHash),
         Self::to_range(RevelationPublicInputs::ComputationalHash),
@@ -80,7 +79,8 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize, const PD: us
         Self::to_range(RevelationPublicInputs::Overflow),
         Self::to_range(RevelationPublicInputs::NumResults),
         Self::to_range(RevelationPublicInputs::ResultValues),
-        Self::to_range(RevelationPublicInputs::PaddingValues),
+        Self::to_range(RevelationPublicInputs::QueryLimit),
+        Self::to_range(RevelationPublicInputs::QueryOffset),
     ];
 
     const SIZES: [usize; NUM_PUBLIC_INPUTS] = [
@@ -100,8 +100,10 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize, const PD: us
         1,
         // Result values of the query
         NUM_LIMBS * L * S,
-        // Padding values of the public inputs
-        NUM_LIMBS * PD,
+        // Limit value specified in the query
+        1,
+        // Offset value specified in the query
+        1,
     ];
 
     pub(crate) const fn to_range(pi: RevelationPublicInputs) -> PublicInputRange {
@@ -116,7 +118,7 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize, const PD: us
     }
 
     pub(crate) const fn total_len() -> usize {
-        Self::to_range(RevelationPublicInputs::PaddingValues).end
+        Self::to_range(RevelationPublicInputs::QueryOffset).end
     }
 
     pub(crate) fn to_original_block_hash_raw(&self) -> &[T] {
@@ -151,8 +153,12 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize, const PD: us
         self.result_values
     }
 
-    pub(crate) fn to_padding_values_raw(&self) -> &[T] {
-        self.padding_values
+    pub(crate) fn to_query_limit_raw(&self) -> &T {
+        &self.query_limit
+    }
+
+    pub(crate) fn to_query_offset_raw(&self) -> &T {
+        &self.query_offset
     }
 
     pub fn from_slice(input: &'a [T]) -> Self {
@@ -171,7 +177,8 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize, const PD: us
             overflow: &input[Self::PI_RANGES[5].clone()][0],
             num_results: &input[Self::PI_RANGES[6].clone()][0],
             result_values: &input[Self::PI_RANGES[7].clone()],
-            padding_values: &input[Self::PI_RANGES[8].clone()],
+            query_limit: &input[Self::PI_RANGES[8].clone()][0],
+            query_offset: &input[Self::PI_RANGES[9].clone()][0],
         }
     }
 
@@ -184,7 +191,8 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize, const PD: us
         overflow: &'a [T],
         num_results: &'a [T],
         result_values: &'a [T],
-        padding_values: &'a [T],
+        query_limit: &'a [T],
+        query_offset: &'a [T],
     ) -> Self {
         Self {
             original_block_hash,
@@ -195,7 +203,8 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize, const PD: us
             overflow: &overflow[0],
             num_results: &num_results[0],
             result_values,
-            padding_values,
+            query_limit: &query_limit[0],
+            query_offset: &query_offset[0],
         }
     }
 
@@ -209,14 +218,15 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize, const PD: us
             .chain(once(self.overflow))
             .chain(once(self.num_results))
             .chain(self.result_values.iter())
-            .chain(self.padding_values.iter())
+            .chain(once(self.query_limit))
+            .chain(once(self.query_offset))
             .cloned()
             .collect_vec()
     }
 }
 
-impl<'a, const L: usize, const S: usize, const PH: usize, const PD: usize> PublicInputCommon
-    for PublicInputs<'a, Target, L, S, PH, PD>
+impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputCommon
+    for PublicInputs<'a, Target, L, S, PH>
 {
     const RANGES: &'static [PublicInputRange] = &Self::PI_RANGES;
 
@@ -229,13 +239,12 @@ impl<'a, const L: usize, const S: usize, const PH: usize, const PD: usize> Publi
         cb.register_public_input(*self.overflow);
         cb.register_public_input(*self.num_results);
         cb.register_public_inputs(self.result_values);
-        cb.register_public_inputs(self.padding_values);
+        cb.register_public_input(*self.query_limit);
+        cb.register_public_input(*self.query_offset);
     }
 }
 
-impl<'a, const L: usize, const S: usize, const PH: usize, const PD: usize>
-    PublicInputs<'a, Target, L, S, PH, PD>
-{
+impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, Target, L, S, PH> {
     pub fn original_block_hash_target(&self) -> [Target; PACKED_HASH_LEN] {
         self.to_original_block_hash_raw().try_into().unwrap()
     }
@@ -285,19 +294,16 @@ impl<'a, const L: usize, const S: usize, const PH: usize, const PD: usize>
             .unwrap()
     }
 
-    pub fn padding_values_target(&self) -> [UInt256Target; PD] {
-        self.to_padding_values_raw()
-            .chunks(NUM_LIMBS)
-            .map(UInt256Target::from_targets)
-            .collect_vec()
-            .try_into()
-            .unwrap()
+    pub fn query_limit_target(&self) -> Target {
+        *self.to_query_limit_raw()
+    }
+
+    pub fn query_offset_target(&self) -> Target {
+        *self.to_query_offset_raw()
     }
 }
 
-impl<'a, const L: usize, const S: usize, const PH: usize, const PD: usize>
-    PublicInputs<'a, F, L, S, PH, PD>
-{
+impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, F, L, S, PH> {
     pub fn original_block_hash(&self) -> [F; PACKED_HASH_LEN] {
         self.to_original_block_hash_raw().try_into().unwrap()
     }
@@ -354,13 +360,12 @@ impl<'a, const L: usize, const S: usize, const PH: usize, const PD: usize>
             .unwrap()
     }
 
-    pub fn padding_values(&self) -> [U256; PD] {
-        self.to_padding_values_raw()
-            .chunks(NUM_LIMBS)
-            .map(U256::from_fields)
-            .collect_vec()
-            .try_into()
-            .unwrap()
+    pub fn query_limit(&self) -> F {
+        *self.to_query_limit_raw()
+    }
+
+    pub fn query_offset(&self) -> F {
+        *self.to_query_offset_raw()
     }
 }
 
@@ -379,20 +384,19 @@ mod tests {
         },
         plonk::circuit_builder::CircuitBuilder,
     };
+    use std::slice;
 
     // L: maximum number of results
     // S: maximum number of items in each result
-    // PH: maximum number of placeholders
-    // PD: maximum number of paddings
+    // PH: maximum number of unique placeholder IDs and values bound for query
     const L: usize = 5;
     const S: usize = 10;
     const PH: usize = 10;
-    const PD: usize = 10;
 
-    type PI<'a> = PublicInputs<'a, F, L, S, PH, PD>;
-    type PITargets<'a> = PublicInputs<'a, Target, L, S, PH, PD>;
+    type PI<'a> = PublicInputs<'a, F, L, S, PH>;
+    type PITargets<'a> = PublicInputs<'a, Target, L, S, PH>;
 
-    const PI_LEN: usize = crate::revelation::PI_LEN::<L, S, PH, PD>;
+    const PI_LEN: usize = crate::revelation::PI_LEN::<L, S, PH>;
 
     #[derive(Clone, Debug)]
     struct TestPublicInputs<'a> {
@@ -435,7 +439,7 @@ mod tests {
         );
         assert_eq!(
             &pis_raw[PI::to_range(RevelationPublicInputs::NumPlaceholders)],
-            &[*pis.to_num_placeholders_raw()],
+            slice::from_ref(pis.to_num_placeholders_raw()),
         );
         assert_eq!(
             &pis_raw[PI::to_range(RevelationPublicInputs::PlaceholderValues)],
@@ -443,23 +447,23 @@ mod tests {
         );
         assert_eq!(
             &pis_raw[PI::to_range(RevelationPublicInputs::EntryCount)],
-            &[*pis.to_entry_count_raw()],
+            slice::from_ref(pis.to_entry_count_raw()),
         );
         assert_eq!(
             &pis_raw[PI::to_range(RevelationPublicInputs::Overflow)],
-            &[*pis.to_overflow_raw()],
+            slice::from_ref(pis.to_overflow_raw()),
         );
         assert_eq!(
             &pis_raw[PI::to_range(RevelationPublicInputs::NumResults)],
-            &[*pis.to_num_results_raw()],
+            slice::from_ref(pis.to_num_results_raw()),
         );
         assert_eq!(
             &pis_raw[PI::to_range(RevelationPublicInputs::ResultValues)],
             pis.to_result_values_raw(),
         );
         assert_eq!(
-            &pis_raw[PI::to_range(RevelationPublicInputs::PaddingValues)],
-            pis.to_padding_values_raw(),
+            &pis_raw[PI::to_range(RevelationPublicInputs::QueryLimit)],
+            slice::from_ref(pis.to_query_limit_raw()),
         );
     }
 }

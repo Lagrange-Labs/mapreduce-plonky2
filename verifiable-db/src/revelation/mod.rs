@@ -10,12 +10,11 @@ pub use public_inputs::PublicInputs;
 
 // L: maximum number of results
 // S: maximum number of items in each result
-// PH: maximum number of placeholders
-// PD: maximum number of paddings
+// PH: maximum number of unique placeholder IDs and values bound for query
 // Without this skipping config, the generic parameter was deleted when `cargo fmt`.
 #[rustfmt::skip]
-pub(crate) const PI_LEN<const L: usize, const S: usize, const PH: usize, const PD: usize>: usize =
-    PublicInputs::<F, L, S, PH, PD>::total_len();
+pub(crate) const PI_LEN<const L: usize, const S: usize, const PH: usize>: usize =
+    PublicInputs::<F, L, S, PH>::total_len();
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -24,20 +23,21 @@ pub(crate) mod tests {
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{array::ToField, poseidon::H, utils::ToFields};
-    use mp2_test::utils::random_vector;
     use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
     use std::{array, iter::once};
 
-    /// Placeholders for testing
+    // Placeholders for testing
+    // PH: maximum number of unique placeholder IDs and values bound for query
+    // PP: maximum number of placeholders present in query (may be duplicate, PP >= PH)
     #[derive(Clone, Debug)]
-    pub(crate) struct TestPlaceholders<const PH: usize> {
+    pub(crate) struct TestPlaceholders<const PH: usize, const PP: usize> {
         // Input arguments for `check_placeholders` function
         pub(crate) num_placeholders: usize,
-        pub(crate) placeholder_pos: [usize; PH],
         pub(crate) placeholder_ids: [F; PH],
         pub(crate) placeholder_values: [U256; PH],
-        pub(crate) placeholder_pairs: [(F, U256); PH],
+        pub(crate) placeholder_pos: [usize; PP],
+        pub(crate) placeholder_pairs: [(F, U256); PP],
         pub(crate) final_placeholder_hash: HashOut<F>,
         // Output result for `check_placeholders` function
         pub(crate) placeholder_ids_hash: HashOut<F>,
@@ -47,19 +47,19 @@ pub(crate) mod tests {
         pub(crate) max_query: U256,
     }
 
-    impl<const PH: usize> TestPlaceholders<PH> {
+    impl<const PH: usize, const PP: usize> TestPlaceholders<PH, PP> {
         /// Create the testing placeholders. It has the similar logic as
         /// `check_placeholders` for building the testing data.
         pub(crate) fn sample(num_placeholders: usize) -> Self {
             let rng = &mut thread_rng();
 
-            let placeholder_pos = array::from_fn(|_| rng.gen_range(0..PH));
             // Create an array of sample placeholder identifiers,
             // will set the first 4 to the query bounds as below.
             let mut placeholder_ids: [F; PH] =
                 array::from_fn(|_| PlaceholderIdentifier::GenericPlaceholder(rng.gen()).to_field());
             let mut placeholder_values = array::from_fn(|_| U256::from_limbs(rng.gen()));
-            let mut placeholder_pairs: [_; PH] =
+            let placeholder_pos = array::from_fn(|_| rng.gen_range(0..PP));
+            let mut placeholder_pairs: [_; PP] =
                 array::from_fn(|_| (rng.gen::<u32>().to_field(), U256::from_limbs(rng.gen())));
 
             // Set the first 4 placeholder identifiers as below constants.
@@ -73,6 +73,7 @@ pub(crate) mod tests {
             .enumerate()
             .for_each(|(i, id)| placeholder_ids[i] = id.to_field());
 
+            // TODO:: delete
             // Set the last invalid items found in placeholder_ids and
             // placeholder_values to placeholder_ids[0] and
             // placeholder_values[0] respectively.
@@ -126,9 +127,9 @@ pub(crate) mod tests {
 
             Self {
                 num_placeholders,
-                placeholder_pos,
                 placeholder_ids,
                 placeholder_values,
+                placeholder_pos,
                 placeholder_pairs,
                 final_placeholder_hash,
                 placeholder_ids_hash,

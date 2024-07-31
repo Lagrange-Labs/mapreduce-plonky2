@@ -31,25 +31,20 @@ use std::array;
 
 // L: maximum number of results
 // S: maximum number of items in each result
-// PH: maximum number of placeholders
-// PD: maximum number of paddings
+// PH: maximum number of unique placeholder IDs and values bound for query
+// PP: maximum number of placeholders present in query (may be duplicate, PP >= PH)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RevelationWithoutResultsTreeWires<
     const L: usize,
     const S: usize,
     const PH: usize,
-    const PD: usize,
+    const PP: usize,
 > {
     #[serde(
         serialize_with = "serialize_array",
         deserialize_with = "deserialize_array"
     )]
     is_placeholder_valid: [BoolTarget; PH],
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    placeholder_pos: [Target; PH],
     #[serde(
         serialize_with = "serialize_array",
         deserialize_with = "deserialize_array"
@@ -61,10 +56,15 @@ pub struct RevelationWithoutResultsTreeWires<
     )]
     placeholder_values: [UInt256Target; PH],
     #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
+    placeholder_pos: [Target; PP],
+    #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    placeholder_pairs: [(Target, UInt256Target); PH],
+    placeholder_pairs: [(Target, UInt256Target); PP],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -72,17 +72,10 @@ pub struct RevelationWithoutResultsTreeCircuit<
     const L: usize,
     const S: usize,
     const PH: usize,
-    const PD: usize,
+    const PP: usize,
 > {
     /// Real number of the valid placeholders
     pub(crate) num_placeholders: usize,
-    /// The Position in `placeholder_ids` and `placeholder_values` arrays of the
-    /// corresponding pair in `placeholder_pairs`
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) placeholder_pos: [usize; PH],
     /// Array of the placeholder identifiers that can be employed in the query:
     /// - The first 4 items are expected to be constant identifiers of the query
     ///   bounds `MIN_I1, MAX_I1` and  `MIN_I2, MAX_I2`
@@ -108,17 +101,24 @@ pub struct RevelationWithoutResultsTreeCircuit<
         deserialize_with = "deserialize_long_array"
     )]
     pub(crate) placeholder_values: [U256; PH],
+    /// The Position in `placeholder_ids` and `placeholder_values` arrays of the
+    /// corresponding pair in `placeholder_pairs`
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
+    pub(crate) placeholder_pos: [usize; PP],
     /// Pairs of the placeholder identifiers and values employed in the
     /// universal query circuit operations
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    pub(crate) placeholder_pairs: [(F, U256); PH],
+    pub(crate) placeholder_pairs: [(F, U256); PP],
 }
 
-impl<const L: usize, const S: usize, const PH: usize, const PD: usize>
-    RevelationWithoutResultsTreeCircuit<L, S, PH, PD>
+impl<const L: usize, const S: usize, const PH: usize, const PP: usize>
+    RevelationWithoutResultsTreeCircuit<L, S, PH, PP>
 where
     [(); S - 1]:,
 {
@@ -128,16 +128,17 @@ where
         query_proof: &QueryProofPublicInputs<Target, S>,
         // proof of construction of the original tree in the pre-processing stage (IVC proof)
         original_tree_proof: &OriginalTreePublicInputs<Target>,
-    ) -> RevelationWithoutResultsTreeWires<L, S, PH, PD> {
+    ) -> RevelationWithoutResultsTreeWires<L, S, PH, PP> {
         let zero = b.zero();
         let one = b.one();
         let u256_zero = b.zero_u256();
 
         let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_safe());
-        let [placeholder_pos, placeholder_ids] = array::from_fn(|_| b.add_virtual_target_arr());
+        let placeholder_ids = b.add_virtual_target_arr();
         // `placeholder_values` are exposed as public inputs to the Solidity constract
         // which will not do range-check.
         let placeholder_values = array::from_fn(|_| b.add_virtual_u256());
+        let placeholder_pos = b.add_virtual_target_arr();
         // Initialize `placeholder_pairs` as unsafe, since they're compared and used to
         // compute the placeholder hash in `check_placeholders` function.
         let placeholder_pairs =
@@ -186,9 +187,9 @@ where
         let (num_placeholders, placeholder_ids_hash) = check_placeholders(
             b,
             &is_placeholder_valid,
-            &placeholder_pos,
             &placeholder_ids,
             &placeholder_values,
+            &placeholder_pos,
             &placeholder_pairs,
             &final_placeholder_hash,
         );
@@ -212,9 +213,6 @@ where
             .collect();
         let computational_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        // Construct the padding values with all zero.
-        let padding_values = vec![zero; PD * NUM_LIMBS];
-
         let placeholder_values_slice = placeholder_values
             .iter()
             .flat_map(ToTargets::to_targets)
@@ -222,7 +220,7 @@ where
         let results_slice = results.iter().flat_map(ToTargets::to_targets).collect_vec();
 
         // Register the public innputs.
-        PublicInputs::<_, L, S, PH, PD>::new(
+        PublicInputs::<_, L, S, PH>::new(
             &original_tree_proof.block_hash(),
             &computational_hash.to_targets(),
             &[num_placeholders],
@@ -232,15 +230,16 @@ where
             // The aggregation query proof only has one result.
             &[one],
             &results_slice,
-            &padding_values,
+            &[zero],
+            &[zero],
         )
         .register(b);
 
         RevelationWithoutResultsTreeWires {
             is_placeholder_valid,
-            placeholder_pos,
             placeholder_ids,
             placeholder_values,
+            placeholder_pos,
             placeholder_pairs,
         }
     }
@@ -248,26 +247,21 @@ where
     fn assign(
         &self,
         pw: &mut PartialWitness<F>,
-        wires: &RevelationWithoutResultsTreeWires<L, S, PH, PD>,
+        wires: &RevelationWithoutResultsTreeWires<L, S, PH, PP>,
     ) {
         wires
             .is_placeholder_valid
             .iter()
             .enumerate()
             .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_placeholders));
-        let placeholder_pos = array::from_fn(|i| self.placeholder_pos[i].to_field());
-        [
-            (wires.placeholder_pos, placeholder_pos),
-            (wires.placeholder_ids, self.placeholder_ids),
-        ]
-        .iter()
-        .for_each(|(t, v)| pw.set_target_arr(t, v));
+        pw.set_target_arr(&wires.placeholder_ids, &self.placeholder_ids);
         wires
             .placeholder_values
             .iter()
             .zip(self.placeholder_values)
             .for_each(|(t, v)| pw.set_u256_target(t, v));
-
+        let placeholder_pos: [_; PP] = array::from_fn(|i| self.placeholder_pos[i].to_field());
+        pw.set_target_arr(&wires.placeholder_pos, &placeholder_pos);
         wires
             .placeholder_pairs
             .iter()
@@ -295,17 +289,21 @@ mod tests {
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
-    use plonky2::{field::types::PrimeField64, plonk::config::Hasher};
+    use plonky2::{
+        field::types::{Field, PrimeField64},
+        plonk::config::Hasher,
+    };
     use rand::{thread_rng, Rng};
 
     // L: maximum number of results
     // S: maximum number of items in each result
-    // PH: maximum number of placeholders
-    // PD: maximum number of paddings
+    // PH: maximum number of unique placeholder IDs and values bound for query
+    // PP: maximum number of placeholders present in query (may be duplicate, PP >= PH)
     const L: usize = 5;
     const S: usize = 10;
     const PH: usize = 10;
-    const PD: usize = 10;
+    // TODO: fix > PH
+    const PP: usize = 10;
 
     // Real number of the placeholders
     const NUM_PLACEHOLDERS: usize = 5;
@@ -313,13 +311,13 @@ mod tests {
     const QUERY_PI_LEN: usize = crate::query::PI_LEN::<S>;
     const ORIGINAL_TREE_PI_LEN: usize = OriginalTreePublicInputs::<Target>::TOTAL_LEN;
 
-    impl From<&TestPlaceholders<PH>> for RevelationWithoutResultsTreeCircuit<L, S, PH, PD> {
-        fn from(test_placeholders: &TestPlaceholders<PH>) -> Self {
+    impl From<&TestPlaceholders<PH, PP>> for RevelationWithoutResultsTreeCircuit<L, S, PH, PP> {
+        fn from(test_placeholders: &TestPlaceholders<PH, PP>) -> Self {
             Self {
                 num_placeholders: test_placeholders.num_placeholders,
-                placeholder_pos: test_placeholders.placeholder_pos,
                 placeholder_ids: test_placeholders.placeholder_ids,
                 placeholder_values: test_placeholders.placeholder_values,
+                placeholder_pos: test_placeholders.placeholder_pos,
                 placeholder_pairs: test_placeholders.placeholder_pairs,
             }
         }
@@ -327,7 +325,7 @@ mod tests {
 
     #[derive(Clone, Debug)]
     struct TestRevelationWithoutResultsTreeCircuit<'a> {
-        c: RevelationWithoutResultsTreeCircuit<L, S, PH, PD>,
+        c: RevelationWithoutResultsTreeCircuit<L, S, PH, PP>,
         query_proof: &'a [F],
         original_tree_proof: &'a [F],
     }
@@ -335,7 +333,7 @@ mod tests {
     impl<'a> UserCircuit<F, D> for TestRevelationWithoutResultsTreeCircuit<'a> {
         // Circuit wires + query proof + original tree proof (IVC proof)
         type Wires = (
-            RevelationWithoutResultsTreeWires<L, S, PH, PD>,
+            RevelationWithoutResultsTreeWires<L, S, PH, PP>,
             Vec<Target>,
             Vec<Target>,
         );
@@ -363,7 +361,7 @@ mod tests {
     fn random_query_proof(
         entry_count: u32,
         ops: &[F; S],
-        test_placeholders: &TestPlaceholders<PH>,
+        test_placeholders: &TestPlaceholders<PH, PP>,
     ) -> Vec<F> {
         let [mut proof] = random_aggregation_public_inputs(ops);
 
@@ -426,7 +424,7 @@ mod tests {
 
         // Prove for the test circuit.
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        let pi = PublicInputs::<_, L, S, PH, PD>::from_slice(&proof.public_inputs);
+        let pi = PublicInputs::<_, L, S, PH>::from_slice(&proof.public_inputs);
 
         let entry_count = query_pi.num_matching_rows();
 
@@ -492,8 +490,10 @@ mod tests {
 
             assert_eq!(pi.result_values(), exp_results);
         }
-        // Padding values
-        assert_eq!(pi.padding_values(), [U256::ZERO; PD]);
+        // Query limit
+        assert_eq!(pi.query_limit(), F::ZERO);
+        // Query offset
+        assert_eq!(pi.query_offset(), F::ZERO);
     }
 
     #[test]

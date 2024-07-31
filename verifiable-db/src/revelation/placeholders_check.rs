@@ -16,17 +16,21 @@ use plonky2::{
 };
 use std::{array, iter::once};
 
-/// Check that the placeholder identifiers and values employed to compute the
-/// `final_placeholder_hash` are found in placeholder_ids and placeholder_values
-/// arrays, and return the `num_placeholders` and the `placeholder_ids_hash`.
-/// PH: maximum number of placeholders
-pub(crate) fn check_placeholders<const PH: usize>(
+/// This gadget checks that the placeholders identifiers and values employed to
+/// compute the `final_placeholder_hash` are found in placeholder_ids and
+/// placeholder_values arrays respectively.
+/// This method also computes the hash of the placeholder_ids, which is needed
+/// to compute the public inputs of the proof, and the number of actual
+/// placeholders expected for the query.
+/// The general idea is to give the individual placeholders values, which might
+/// repetition in the query, and recompute the placeholder hash from these values.
+pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
     b: &mut CBuilder,
     is_placeholder_valid: &[BoolTarget; PH],
-    placeholder_pos: &[Target; PH],
     placeholder_ids: &[Target; PH],
     placeholder_values: &[UInt256Target; PH],
-    placeholder_pairs: &[(Target, UInt256Target); PH],
+    placeholder_pos: &[Target; PP],
+    placeholder_pairs: &[(Target, UInt256Target); PP],
     final_placeholder_hash: &HashOutTarget,
 ) -> (Target, HashOutTarget) {
     // Check the first 4 placeholder identifiers as constants.
@@ -43,6 +47,7 @@ pub(crate) fn check_placeholders<const PH: usize>(
         b.connect(placeholder_ids[i], expected_id);
     });
 
+    // TODO: update
     let mut num_placeholders = b.zero();
     let mut placeholder_hash_payload = vec![];
     for i in 0..PH {
@@ -131,24 +136,25 @@ mod tests {
     };
 
     #[derive(Clone, Debug)]
-    pub(crate) struct TestPlaceholdersWires<const PH: usize> {
+    pub(crate) struct TestPlaceholdersWires<const PH: usize, const PP: usize> {
         is_placeholder_valid: [BoolTarget; PH],
-        placeholder_pos: [Target; PH],
         placeholder_ids: [Target; PH],
         placeholder_values: [UInt256Target; PH],
-        placeholder_pairs: [(Target, UInt256Target); PH],
+        placeholder_pos: [Target; PP],
+        placeholder_pairs: [(Target, UInt256Target); PP],
         final_placeholder_hash: HashOutTarget,
         exp_placeholder_ids_hash: HashOutTarget,
         exp_num_placeholders: Target,
     }
 
-    impl<const PH: usize> UserCircuit<F, D> for TestPlaceholders<PH> {
-        type Wires = TestPlaceholdersWires<PH>;
+    impl<const PH: usize, const PP: usize> UserCircuit<F, D> for TestPlaceholders<PH, PP> {
+        type Wires = TestPlaceholdersWires<PH, PP>;
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_unsafe());
-            let [placeholder_pos, placeholder_ids] = array::from_fn(|_| b.add_virtual_target_arr());
+            let placeholder_ids = b.add_virtual_target_arr();
             let placeholder_values = array::from_fn(|_| b.add_virtual_u256_unsafe());
+            let placeholder_pos = b.add_virtual_target_arr();
             let placeholder_pairs =
                 array::from_fn(|_| (b.add_virtual_target(), b.add_virtual_u256_unsafe()));
             let [final_placeholder_hash, exp_placeholder_ids_hash] =
@@ -159,9 +165,9 @@ mod tests {
             let (num_placeholders, placeholder_ids_hash) = check_placeholders(
                 b,
                 &is_placeholder_valid,
-                &placeholder_pos,
                 &placeholder_ids,
                 &placeholder_values,
+                &placeholder_pos,
                 &placeholder_pairs,
                 &final_placeholder_hash,
             );
@@ -172,9 +178,9 @@ mod tests {
 
             Self::Wires {
                 is_placeholder_valid,
-                placeholder_pos,
                 placeholder_ids,
                 placeholder_values,
+                placeholder_pos,
                 placeholder_pairs,
                 final_placeholder_hash,
                 exp_placeholder_ids_hash,
@@ -188,20 +194,15 @@ mod tests {
                 .iter()
                 .enumerate()
                 .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_placeholders));
-            let placeholder_pos =
-                array::from_fn(|i| F::from_canonical_usize(self.placeholder_pos[i]));
-            [
-                (wires.placeholder_pos, placeholder_pos),
-                (wires.placeholder_ids, self.placeholder_ids),
-            ]
-            .iter()
-            .for_each(|(t, v)| pw.set_target_arr(t, v));
+            pw.set_target_arr(&wires.placeholder_ids, &self.placeholder_ids);
             wires
                 .placeholder_values
                 .iter()
                 .zip(self.placeholder_values)
                 .for_each(|(t, v)| pw.set_u256_target(t, v));
-
+            let placeholder_pos: [_; PP] =
+                array::from_fn(|i| F::from_canonical_usize(self.placeholder_pos[i]));
+            pw.set_target_arr(&wires.placeholder_pos, &placeholder_pos);
             wires
                 .placeholder_pairs
                 .iter()
@@ -225,11 +226,13 @@ mod tests {
 
     #[test]
     fn test_revelation_placeholders_check() {
-        const PH: usize = 20;
+        const PH: usize = 10;
+        // TODO: fix > PH
+        const PP: usize = 10;
         const NUM_PLACEHOLDERS: usize = 10;
 
         // Generate the testing placeholders.
-        let test_circuit: TestPlaceholders<PH> = TestPlaceholders::sample(NUM_PLACEHOLDERS);
+        let test_circuit: TestPlaceholders<PH, PP> = TestPlaceholders::sample(NUM_PLACEHOLDERS);
 
         // Prove for the test circuit.
         run_circuit::<F, D, C, _>(test_circuit);
