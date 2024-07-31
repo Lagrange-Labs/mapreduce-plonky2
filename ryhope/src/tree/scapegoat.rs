@@ -4,6 +4,7 @@ use crate::storage::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TreeStorage
 use anyhow::*;
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, hash::Hash, marker::PhantomData};
+use std::collections::HashMap;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -524,8 +525,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                        keys.push(key);
                    }
                    keys
-               }else{
-                     vec![]
+               } else {
+                   vec![]
                }
             } else {
                 path
@@ -550,15 +551,17 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         from: NodeUpstream<K>,
         s: &mut S,
     ) -> Vec<K> {
-        let sub_nodes = self.descendants(&from.id, s).await;
-        let mut all_keys = vec![];
+        let mut sub_nodes = self.descendants(&from.id, s).await;
+        let mut keys = HashMap::with_capacity(sub_nodes.len());
         for n in &sub_nodes {
             let key = s.nodes().fetch(n).await.k.to_owned();
-            all_keys.push(key);
+            keys.insert(n.clone(), key);
         }
-        all_keys.sort_unstable_by(|i, j| i.cmp(j));
-        self.rebuild_at(&from, &all_keys, s).await;
-        all_keys
+        sub_nodes.sort_unstable_by(|i, j| {
+            keys.get(i).unwrap().cmp(keys.get(j).unwrap())
+        });
+        self.rebuild_at(&from, &sub_nodes, s).await;
+        sub_nodes
     }
 
     /// Given a subtree root `from` and a list of nodes sorted by their keys,
@@ -742,9 +745,7 @@ impl<K: Sync + Debug + Ord + Clone + Hash + Serialize + for<'a> Deserialize<'a>>
     }
 
     async fn parent<S: TreeStorage<Tree<K>>>(&self, n: K, s: &S) -> Option<K> {
-        if let Some(parent) = self.context(&n, s).await
-            .unwrap()
-            .parent {
+        if let Some(parent) = self.context(&n, s).await.unwrap().parent {
             Some(s.nodes().fetch(&parent).await.k.to_owned())
         } else {
             None

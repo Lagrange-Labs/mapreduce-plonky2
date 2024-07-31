@@ -309,9 +309,9 @@ impl TreeTopology for Tree {
         s: &S,
     ) -> HashSet<NodeIdx> {
         let mut ascendance = HashSet::new();
+        let inner_max = inner_max(s).await;
         for n in ns {
             let inner_idx = inner_idx(*n, s).await;
-            let inner_max = inner_max(s).await;
             if inner_idx <= inner_max {
                 if let Some(lineage) = lineage_inner(&inner_idx, s).await {
                     for n in lineage.into_full_path() {

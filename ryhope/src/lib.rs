@@ -116,7 +116,7 @@ impl<
             for c in c.iter_children() {
                 if let Some(k) = c {
                     child_data.push(Some(self.storage.data().fetch(k).await));
-                }else{
+                } else {
                     child_data.push(None);
                 }
             }

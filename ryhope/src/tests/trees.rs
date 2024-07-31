@@ -20,14 +20,14 @@ mod sbbst {
 
     #[tokio::test]
     async fn tiny() {
-        let (t, mut s) = sbbst_in_memory(0, 2);
+        let (t, s) = sbbst_in_memory(0, 2);
         assert_eq!(t.parent(1, &s).await, Some(2));
         assert_eq!(t.parent(2, &s).await, None);
     }
 
     #[tokio::test]
     async fn triangular() {
-        let (t, mut s) = sbbst_in_memory(0, 3);
+        let (t, s) = sbbst_in_memory(0, 3);
         assert_eq!(t.parent(1, &s).await, Some(2));
         assert_eq!(t.parent(2, &s).await, None);
         assert_eq!(t.parent(3, &s).await, Some(2));

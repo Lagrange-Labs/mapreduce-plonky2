@@ -13,7 +13,7 @@ use super::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TransactionalStorage
 /// An epoch-locked, read-only, view over an [`EpochStorage`].
 pub struct StorageView<
     's,
-    T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + std::marker::Send,
+    T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + Send,
     S: EpochStorage<T>,
 >(
     /// The wrapped [`EpochStorage`]
@@ -25,7 +25,7 @@ pub struct StorageView<
 );
 
 #[async_trait]
-impl<'s, T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + std::marker::Send, S: EpochStorage<T> + Sync>
+impl<'s, T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + Send, S: EpochStorage<T> + Sync>
     TransactionalStorage for StorageView<'s, T, S>
 
     where T: Send
@@ -40,7 +40,7 @@ impl<'s, T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + std::ma
 }
 
 #[async_trait]
-impl<'s, T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + std::marker::Send, S: EpochStorage<T> + Sync>
+impl<'s, T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + Send, S: EpochStorage<T> + Sync>
     EpochStorage<T> for StorageView<'s, T, S>
 
     where T: Send
@@ -84,7 +84,7 @@ pub struct KvStorageAt<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>
 );
 
 #[async_trait]
-impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + std::marker::Sync> RoEpochKvStorage<T::Key, T::Node>
+impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStorage<T::Key, T::Node>
     for KvStorageAt<'a, T, S>
 {
     fn current_epoch(&self) -> Epoch {
@@ -112,7 +112,7 @@ impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + std::marker::Sy
 }
 
 #[async_trait]
-impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + std::marker::Sync> EpochKvStorage<T::Key, T::Node>
+impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> EpochKvStorage<T::Key, T::Node>
     for KvStorageAt<'a, T, S>
 {
     async fn remove(&mut self, _: T::Key) -> Result<()> {

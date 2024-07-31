@@ -12,9 +12,9 @@ use tokio_postgres;
 use tokio_postgres::{NoTls, Row};
 
 use crate::{
-    Epoch,
     storage::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TransactionalStorage},
     tree::scapegoat,
+    Epoch,
 };
 
 use super::{CachedValue, ToFromBytea};
@@ -27,7 +27,7 @@ pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 pub trait DbConnector<K, V>
 where
     K: ToFromBytea,
-    V: Clone  + Send + Sync
+    V: Clone + Send + Sync,
 {
     /// Return a list of pairs column name, SQL type required by the connector.
     fn columns() -> &'static [(&'static str, &'static str)];
@@ -39,7 +39,10 @@ where
         _k: &K,
         _birth_epoch: Epoch,
         _v: V,
-    ) -> Result<()> where V: 'async_trait {
+    ) -> Result<()>
+    where
+        V: 'async_trait,
+    {
         unreachable!()
     }
 
@@ -51,7 +54,10 @@ where
         _k: &K,
         _epoch: Epoch,
         _v: V,
-    ) -> Result<()> where V: 'async_trait{
+    ) -> Result<()>
+    where
+        V: 'async_trait,
+    {
         unreachable!()
     }
 
@@ -69,7 +75,7 @@ impl<K, V> DbConnector<K, V> for PayloadConnector
 where
     K: ToFromBytea,
     V: Serialize + for<'a> Deserialize<'a> + Clone + Send + Sync + Debug,
-    K: Send + Sync
+    K: Send + Sync,
 {
     fn columns() -> &'static [(&'static str, &'static str)] {
         &[("payload", "JSONB")]
@@ -77,20 +83,21 @@ where
 
     async fn fetch_at(db: DBPool, table: &str, k: &K, epoch: Epoch) -> Result<Option<V>> {
         let connection = db.get().await.unwrap();
-        connection.query(
-            &format!(
+        connection
+            .query(
+                &format!(
                 "SELECT payload FROM {} WHERE key=$1 AND valid_from <= $2 AND $2 <= valid_until",
                 table
             ),
-            &[&(k.to_bytea()), &epoch],
-        )
-        .await
-        .context("while fetching payload from database")
-        .and_then(|rows| match rows.len() {
-            0 => Ok(None),
-            1 => Ok(Some(rows[0].get::<_, Json<V>>(0).0)),
-            _ => bail!("internal coherency error: {:?}", rows),
-        })
+                &[&(k.to_bytea()), &epoch],
+            )
+            .await
+            .context("while fetching payload from database")
+            .and_then(|rows| match rows.len() {
+                0 => Ok(None),
+                1 => Ok(Some(rows[0].get::<_, Json<V>>(0).0)),
+                _ => bail!("internal coherency error: {:?}", rows),
+            })
     }
 
     fn from_row(row: &Row) -> Result<V> {
@@ -105,7 +112,10 @@ where
         k: &K,
         epoch: Epoch,
         v: V,
-    ) -> Result<()> where V: 'async_trait {
+    ) -> Result<()>
+    where
+        V: 'async_trait,
+    {
         db_tx
             .execute(
                 &format!(
@@ -134,20 +144,21 @@ where
 
     async fn fetch_at(db: DBPool, table: &str, k: &K, epoch: Epoch) -> Result<Option<()>> {
         let connection = db.get().await.unwrap();
-        connection.query(
-            &format!(
-                "SELECT * FROM {} WHERE key=$1 AND valid_from<=$2 AND $2<=valid_until",
-                table
-            ),
-            &[&k.to_bytea(), &epoch],
-        )
+        connection
+            .query(
+                &format!(
+                    "SELECT * FROM {} WHERE key=$1 AND valid_from<=$2 AND $2<=valid_until",
+                    table
+                ),
+                &[&k.to_bytea(), &epoch],
+            )
             .await
-        .context("while fetching node")
-        .and_then(|rows| match rows.len() {
-            0 => Ok(None),
-            1 => Ok(Some(())),
-            _ => bail!("internal coherency error"),
-        })
+            .context("while fetching node")
+            .and_then(|rows| match rows.len() {
+                0 => Ok(None),
+                1 => Ok(Some(())),
+                _ => bail!("internal coherency error"),
+            })
     }
 
     fn from_row(_r: &Row) -> Result<()> {
@@ -179,7 +190,8 @@ where
 
 #[async_trait]
 impl<K> DbConnector<K, scapegoat::Node<K>> for NodeConnector
-    where K: ToFromBytea + Send + Sync
+where
+    K: ToFromBytea + Send + Sync,
 {
     fn columns() -> &'static [(&'static str, &'static str)] {
         &[
@@ -197,30 +209,31 @@ impl<K> DbConnector<K, scapegoat::Node<K>> for NodeConnector
         epoch: Epoch,
     ) -> Result<Option<scapegoat::Node<K>>> {
         let connection = db.get().await.unwrap();
-        connection.query(
-            &format!(
-                "SELECT parent, left_child, right_child, subtree_size FROM {}
+        connection
+            .query(
+                &format!(
+                    "SELECT parent, left_child, right_child, subtree_size FROM {}
                  WHERE key=$1 AND valid_from<=$2 AND $2<=valid_until",
-                table
-            ),
-            &[&k.to_bytea(), &epoch],
-        )
-        .await
-        .context("while fetching node")
-        .and_then(|rows| match rows.len() {
-            0 => Ok(None),
-            1 => {
-                let r = &rows[0];
-                Ok(Some(scapegoat::Node {
-                    k: k.to_owned(),
-                    parent: r.get::<_, Option<Vec<u8>>>(0).map(|p| K::from_bytea(p)),
-                    left: r.get::<_, Option<Vec<u8>>>(1).map(|p| K::from_bytea(p)),
-                    right: r.get::<_, Option<Vec<u8>>>(2).map(|p| K::from_bytea(p)),
-                    subtree_size: r.get::<_, i64>(3).try_into()?,
-                }))
-            }
-            _ => bail!("internal coherency error"),
-        })
+                    table
+                ),
+                &[&k.to_bytea(), &epoch],
+            )
+            .await
+            .context("while fetching node")
+            .and_then(|rows| match rows.len() {
+                0 => Ok(None),
+                1 => {
+                    let r = &rows[0];
+                    Ok(Some(scapegoat::Node {
+                        k: k.to_owned(),
+                        parent: r.get::<_, Option<Vec<u8>>>(0).map(|p| K::from_bytea(p)),
+                        left: r.get::<_, Option<Vec<u8>>>(1).map(|p| K::from_bytea(p)),
+                        right: r.get::<_, Option<Vec<u8>>>(2).map(|p| K::from_bytea(p)),
+                        subtree_size: r.get::<_, i64>(3).try_into()?,
+                    }))
+                }
+                _ => bail!("internal coherency error"),
+            })
     }
 
     fn from_row(r: &Row) -> Result<scapegoat::Node<K>> {
@@ -304,7 +317,8 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
 
 #[async_trait]
 impl<T> TransactionalStorage for CachedDbStore<T>
-    where T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync
+where
+    T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
 {
     fn start_transaction(&mut self) -> Result<()> {
         ensure!(!self.in_tx, "already in a transaction");
@@ -319,22 +333,26 @@ impl<T> TransactionalStorage for CachedDbStore<T>
         let connection = self.db.get().await.unwrap();
         if self.dirty {
             let state = self.cache.read().await.clone();
-            connection.query(
-                &format!(
-                    "INSERT INTO {}_meta (valid_from, valid_until, payload)
+            connection
+                .query(
+                    &format!(
+                        "INSERT INTO {}_meta (valid_from, valid_until, payload)
                      VALUES ($1, $1, $2)",
-                    self.table
-                ),
-                &[&(self.epoch + 1), &Json(state)],
-            ).await?;
+                        self.table
+                    ),
+                    &[&(self.epoch + 1), &Json(state)],
+                )
+                .await?;
         } else {
-            connection.query(
-                &format!(
-                    "UPDATE {}_meta SET valid_until = $1 + 1 WHERE valid_until = $1",
-                    self.table
-                ),
-                &[&(self.epoch)],
-            ).await?;
+            connection
+                .query(
+                    &format!(
+                        "UPDATE {}_meta SET valid_until = $1 + 1 WHERE valid_until = $1",
+                        self.table
+                    ),
+                    &[&(self.epoch)],
+                )
+                .await?;
         }
 
         self.epoch += 1;
@@ -346,7 +364,8 @@ impl<T> TransactionalStorage for CachedDbStore<T>
 
 #[async_trait]
 impl<T> EpochStorage<T> for CachedDbStore<T>
- where T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a> + Send
+where
+    T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a> + Send,
 {
     async fn fetch(&self) -> T {
         if self.cache.read().await.is_none() {
@@ -403,20 +422,27 @@ impl<T> EpochStorage<T> for CachedDbStore<T>
 
         let _ = self.cache.get_mut().take();
         let mut connection = self.db.get().await.unwrap();
-        let mut db_tx = connection.transaction().await.expect("unable to create DB transaction");
+        let mut db_tx = connection
+            .transaction()
+            .await
+            .expect("unable to create DB transaction");
         // Roll back all living nodes by 1
-        db_tx.query(
-            &format!(
-                "UPDATE {}_meta SET valid_until = $1 WHERE valid_until > $1",
-                self.table
-            ),
-            &[&new_epoch],
-        ).await?;
+        db_tx
+            .query(
+                &format!(
+                    "UPDATE {}_meta SET valid_until = $1 WHERE valid_until > $1",
+                    self.table
+                ),
+                &[&new_epoch],
+            )
+            .await?;
         // Delete nodes that would not have been born yet
-        db_tx.query(
-            &format!("DELETE FROM {}_meta WHERE valid_from > $1", self.table),
-            &[&new_epoch],
-        ).await?;
+        db_tx
+            .query(
+                &format!("DELETE FROM {}_meta WHERE valid_from > $1", self.table),
+                &[&new_epoch],
+            )
+            .await?;
         db_tx.commit().await?;
         self.epoch = new_epoch;
 
@@ -428,10 +454,10 @@ impl<T> EpochStorage<T> for CachedDbStore<T>
 /// during the current transaction, while falling back to the given database
 /// when referring to older epochs.
 pub struct CachedDbKvStore<K, V, F>
-    where
-        K: ToFromBytea + Send + Sync,
-          V: Clone + Send + Sync,
-          F: DbConnector<K, V>
+where
+    K: ToFromBytea + Send + Sync,
+    V: Clone + Send + Sync,
+    F: DbConnector<K, V>,
 {
     /// The latest *commited* epoch
     epoch: Epoch,
@@ -444,10 +470,10 @@ pub struct CachedDbKvStore<K, V, F>
     _p: PhantomData<F>,
 }
 impl<K, V, F> CachedDbKvStore<K, V, F>
-    where
-        K: ToFromBytea + Send + Sync,
-        V: Clone + Send + Sync,
-        F: DbConnector<K, V>
+where
+    K: ToFromBytea + Send + Sync,
+    V: Clone + Send + Sync,
+    F: DbConnector<K, V>,
 {
     pub fn new(epoch: Epoch, table: String, db: DBPool) -> Self {
         CachedDbKvStore {
@@ -466,18 +492,17 @@ impl<K, V, F> CachedDbKvStore<K, V, F>
 }
 
 #[async_trait]
-impl<K, V, F> RoEpochKvStorage<K, V>
-    for CachedDbKvStore<K, V, F>
-    where
-        K: ToFromBytea + Send + Sync,
-        V: Clone + Send + Sync,
-        F: DbConnector<K, V> + Sync
+impl<K, V, F> RoEpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
+where
+    K: ToFromBytea + Send + Sync,
+    V: Clone + Send + Sync,
+    F: DbConnector<K, V> + Sync,
 {
     fn current_epoch(&self) -> Epoch {
         self.epoch
     }
 
-   async fn try_fetch_at(&self, k: &K, epoch: Epoch) -> Option<V>{
+    async fn try_fetch_at(&self, k: &K, epoch: Epoch) -> Option<V> {
         if epoch == self.current_epoch() {
             // Directly returns the value if it is already in cache, fetch it from
             // the DB otherwise.
@@ -487,16 +512,21 @@ impl<K, V, F> RoEpochKvStorage<K, V>
             if let Some(Some(CachedValue::Read(v))) = value {
                 Some(v.clone())
             } else {
-                if let Some(value) = F::fetch_at(self.db.clone(), &self.table, k, epoch).await.unwrap() {
+                if let Some(value) = F::fetch_at(self.db.clone(), &self.table, k, epoch)
+                    .await
+                    .unwrap()
+                {
                     let mut write_guard = self.cache.write().await;
                     write_guard.insert(k.clone(), Some(CachedValue::Read(value.clone())));
                     Some(value)
-                }else {
+                } else {
                     None
                 }
             }
         } else {
-            F::fetch_at(self.db.clone(), &self.table, k, epoch).await.unwrap()
+            F::fetch_at(self.db.clone(), &self.table, k, epoch)
+                .await
+                .unwrap()
         }
     }
 
@@ -522,10 +552,10 @@ impl<K, V, F> RoEpochKvStorage<K, V>
 
 #[async_trait]
 impl<K, V, F: DbConnector<K, V> + Send + Sync> EpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
-    where
-        K: ToFromBytea + Send + Sync,
-        V: Clone  + Send + Sync,
-        F: DbConnector<K, V> + Send + Sync
+where
+    K: ToFromBytea + Send + Sync,
+    V: Clone + Send + Sync,
+    F: DbConnector<K, V> + Send + Sync,
 {
     // Operations are stored in the cache; persistence to the DB only occurs on
     // transaction commiting.
@@ -533,8 +563,7 @@ impl<K, V, F: DbConnector<K, V> + Send + Sync> EpochKvStorage<K, V> for CachedDb
         // If the operation is already present from a read, replace it with the
         // new value.
         self.cache
-            .write()
-            .await
+            .get_mut()
             .insert(k, Some(CachedValue::Written(new_value)));
         Ok(())
     }
@@ -543,14 +572,13 @@ impl<K, V, F: DbConnector<K, V> + Send + Sync> EpochKvStorage<K, V> for CachedDb
         // If the operation is already present from a read, replace it with the
         // new value.
         self.cache
-            .write()
-            .await
+            .get_mut()
             .insert(k, Some(CachedValue::Written(value)));
         Ok(())
     }
 
     async fn remove(&mut self, k: K) -> Result<()> {
-        self.cache.write().await.insert(k, None);
+        self.cache.get_mut().insert(k, None);
         Ok(())
     }
 
@@ -565,20 +593,27 @@ impl<K, V, F: DbConnector<K, V> + Send + Sync> EpochKvStorage<K, V> for CachedDb
 
         self.cache.get_mut().clear();
         let mut connection = self.db.get().await.unwrap();
-        let mut db_tx = connection.transaction().await.expect("unable to create DB transaction");
+        let mut db_tx = connection
+            .transaction()
+            .await
+            .expect("unable to create DB transaction");
         // Roll back all living nodes by 1
-        db_tx.query(
-            &format!(
-                "UPDATE {} SET valid_until = $1 WHERE valid_until > $1",
-                self.table
-            ),
-            &[&new_epoch],
-        ).await?;
+        db_tx
+            .query(
+                &format!(
+                    "UPDATE {} SET valid_until = $1 WHERE valid_until > $1",
+                    self.table
+                ),
+                &[&new_epoch],
+            )
+            .await?;
         // Delete nodes that would not have been born yet
-        db_tx.query(
-            &format!("DELETE FROM {} WHERE valid_from > $1", self.table),
-            &[&new_epoch],
-        ).await?;
+        db_tx
+            .query(
+                &format!("DELETE FROM {} WHERE valid_from > $1", self.table),
+                &[&new_epoch],
+            )
+            .await?;
         db_tx.commit().await?;
         self.epoch = new_epoch;
 
