@@ -251,7 +251,16 @@ impl ProofStorage for KeyValueDB {
             let row_bucket = tx.get_bucket(ROW_BUCKET_NAME)?;
             // store the latest primary index key for which this tree key have been proven
             // TODO: use a proper hash, no need to store in raw everything
+            println!(
+                "??STORING latest block number {} for row tree key {:?}",
+                row_key.primary, row_key.tree_key
+            );
+
             row_bucket.put(row_key.tree_key.to_bytes()?, row_key.primary.to_be_bytes())?;
+            println!(
+                "STORED latest block number {} for row tree key {:?}",
+                row_key.primary, row_key.tree_key
+            );
         }
         tx.commit()?;
         Ok(())
