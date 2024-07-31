@@ -133,9 +133,7 @@ where
         let one = b.one();
         let u256_zero = b.zero_u256();
 
-        // Initialize `is_placeholder_valid` as unsafe, since it's used to compute
-        // `num_placeholders += is_placeholder_valid` in `check_placeholders` function.
-        let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_unsafe());
+        let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_safe());
         let [placeholder_pos, placeholder_ids] = array::from_fn(|_| b.add_virtual_target_arr());
         // `placeholder_values` are exposed as public inputs to the Solidity constract
         // which will not do range-check.
