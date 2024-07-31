@@ -22,8 +22,7 @@ use crate::{
 use super::TreeTransactionalStorage;
 
 fn db_url() -> String {
-    // std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string())
-    "postgresql://postgres:zkmrzkmr@127.0.0.1:5432/distributed_query".to_string()
+    std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string())
 }
 
 impl NodePayload for usize {}
