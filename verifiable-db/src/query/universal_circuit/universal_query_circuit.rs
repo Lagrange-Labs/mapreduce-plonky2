@@ -16,7 +16,7 @@ use mp2_common::{
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{SelectHashBuilder, ToFields, ToTargets},
+    utils::{Fieldable, SelectHashBuilder, ToFields, ToTargets},
     CHasher, C, D, F,
 };
 use plonky2::{
@@ -55,7 +55,7 @@ use super::{
     output_no_aggregation::Circuit as NoAggOutputCircuit,
     output_with_aggregation::Circuit as AggOutputCircuit,
     universal_circuit_inputs::{
-        BasicOperation, InputOperand, Placeholder, PlaceholderId, ResultStructure,
+        BasicOperation, ColumnCell, InputOperand, Placeholder, PlaceholderId, ResultStructure,
     },
     ComputationalHash, ComputationalHashTarget, PlaceholderHash,
 };
@@ -199,38 +199,31 @@ where
     ///   entries of the `result_operations` found in `results` structure. This is again an assumption we require to
     ///   properly place the output values in the circuit. Note that this method returns an error if this assumption
     ///   is not met in the `results` structure provided as input
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        column_values: &[U256],
-        column_ids: &[F],
+        column_cells: &[ColumnCell],
         predicate_operations: &[BasicOperation],
         placeholder_values: &HashMap<PlaceholderId, U256>,
         is_leaf: bool,
         min_query: U256,
         max_query: U256,
         results: &ResultStructure,
-        output_ids: &[F],
     ) -> Result<Self> {
-        let num_columns = column_values.len();
-        ensure!(
-            column_ids.len() == num_columns,
-            "column_ids and column_values have different length"
-        );
+        let num_columns = column_cells.len();
         ensure!(
             num_columns <= MAX_NUM_COLUMNS,
             "number of columns is higher than the maximum value allowed"
         );
-        let padded_column_values = column_values
+        let padded_column_values = column_cells
             .iter()
-            .chain(repeat(&U256::ZERO))
+            .map(|cell| cell.value)
+            .chain(repeat(U256::ZERO))
             .take(MAX_NUM_COLUMNS)
-            .cloned()
             .collect_vec();
-        let padded_column_ids = column_ids
+        let padded_column_ids = column_cells
             .iter()
-            .chain(repeat(&F::NEG_ONE))
+            .map(|cell| cell.id)
+            .chain(repeat(F::NEG_ONE))
             .take(MAX_NUM_COLUMNS)
-            .cloned()
             .collect_vec();
         let column_extraction_inputs = ColumnExtractionInputs::<MAX_NUM_COLUMNS> {
             real_num_columns: num_columns,
@@ -292,7 +285,8 @@ where
                     },
             })
         }).collect::<Result<Vec<_>>>()?;
-        let output_component_inputs = T::new(&selectors, output_ids, output_ids.len())?;
+        let output_component_inputs =
+            T::new(&selectors, &results.output_ids, results.output_ids.len())?;
 
         Ok(Self {
             column_extraction_inputs,
@@ -874,71 +868,45 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
 {
     /// Provide input values for universal circuit variant for queries with aggregation operations
-    #[allow(clippy::too_many_arguments)]
     pub fn new_query_with_agg(
-        column_values: &[U256],
-        column_ids: &[u64],
+        column_cells: &[ColumnCell],
         predicate_operations: &[BasicOperation],
         placeholder_values: &HashMap<PlaceholderId, U256>,
         is_leaf: bool,
-        min_query: U256,
-        max_query: U256,
+        min_query_secondary: U256,
+        max_query_secondary: U256,
         results: &ResultStructure,
-        agg_ops_ids: &[u64],
     ) -> Result<Self> {
         Ok(CircuitInput::QueryWithAgg(
             UniversalQueryCircuitInputs::new(
-                column_values,
-                column_ids
-                    .iter()
-                    .map(|id| (*id as usize).to_field())
-                    .collect_vec()
-                    .as_slice(),
+                column_cells,
                 predicate_operations,
                 placeholder_values,
                 is_leaf,
-                min_query,
-                max_query,
+                min_query_secondary,
+                max_query_secondary,
                 results,
-                agg_ops_ids
-                    .iter()
-                    .map(|id| (*id as usize).to_field())
-                    .collect_vec()
-                    .as_slice(),
             )?,
         ))
     }
     /// Provide input values for universal circuit variant for queries without aggregation operations
-    #[allow(clippy::too_many_arguments)]
     pub fn new_query_no_agg(
-        column_values: &[U256],
-        column_ids: &[u64],
+        column_cells: &[ColumnCell],
         predicate_operations: &[BasicOperation],
         placeholder_values: &HashMap<PlaceholderId, U256>,
         is_leaf: bool,
-        min_query: U256,
-        max_query: U256,
+        min_query_secondary: U256,
+        max_query_secondary: U256,
         results: &ResultStructure,
-        output_ids: &[u64],
     ) -> Result<Self> {
         Ok(CircuitInput::QueryNoAgg(UniversalQueryCircuitInputs::new(
-            column_values,
-            column_ids
-                .iter()
-                .map(|id| (*id as usize).to_field())
-                .collect_vec()
-                .as_slice(),
+            column_cells,
             predicate_operations,
             placeholder_values,
             is_leaf,
-            min_query,
-            max_query,
+            min_query_secondary,
+            max_query_secondary,
             results,
-            output_ids
-                .iter()
-                .map(|id| (*id as usize).to_field())
-                .collect_vec()
-                .as_slice(),
         )?))
     }
 
@@ -953,13 +921,9 @@ where
         column_ids: &[u64],
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
-        output_ids: &[u64],
     ) -> Result<ComputationalHash> {
         let mut cache = ComputationalHashCache::<MAX_NUM_COLUMNS>::new();
-        let column_ids = column_ids
-            .iter()
-            .map(|id| (*id as usize).to_field())
-            .collect_vec();
+        let column_ids = column_ids.iter().map(|id| id.to_field()).collect_vec();
         let predicate_ops_hash =
             Operation::operation_hash(predicate_operations, &column_ids, &mut cache)?;
         let predicate_hash = predicate_ops_hash.last().unwrap();
@@ -971,11 +935,7 @@ where
             &column_ids,
             &result_ops_hash,
             &results.output_items,
-            output_ids
-                .iter()
-                .map(|id| (*id as usize).to_field())
-                .collect_vec()
-                .as_slice(),
+            &results.output_ids,
         )
     }
 }
@@ -1015,7 +975,9 @@ mod tests {
         universal_circuit::{
             output_no_aggregation::Circuit as NoAggOutputCircuit,
             output_with_aggregation::Circuit as AggOutputCircuit,
-            universal_circuit_inputs::{BasicOperation, InputOperand, OutputItem, ResultStructure},
+            universal_circuit_inputs::{
+                BasicOperation, ColumnCell, InputOperand, OutputItem, ResultStructure,
+            },
             universal_query_circuit::Parameters,
             COLUMN_INDEX_NUM,
         },
@@ -1102,6 +1064,11 @@ mod tests {
             })
             .collect_vec();
         let column_ids = (0..NUM_ACTUAL_COLUMNS).map(|_| F::rand()).collect_vec();
+        let column_cells = column_values
+            .iter()
+            .zip(column_ids.iter())
+            .map(|(&value, &id)| ColumnCell { value, id })
+            .collect_vec();
         // define placeholders
         let first_placeholder_id = F::from_canonical_usize(1);
         let second_placeholder_id = F::from_canonical_usize(2);
@@ -1238,7 +1205,14 @@ mod tests {
             AggregationOperation::AvgOp.to_field(),
         ];
 
-        let results = ResultStructure::from((result_operations, output_items));
+        let results = ResultStructure::from((
+            result_operations,
+            output_items,
+            output_ops
+                .iter()
+                .map(|op| op.to_canonical_u64())
+                .collect_vec(),
+        ));
 
         let input = CircuitInput::<
             MAX_NUM_COLUMNS,
@@ -1246,23 +1220,13 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >::new_query_with_agg(
-            &column_values,
-            column_ids
-                .iter()
-                .map(|id| id.to_canonical_u64())
-                .collect_vec()
-                .as_slice(),
+            &column_cells,
             &predicate_operations,
             &placeholder_values,
             is_leaf,
             min_query,
             max_query,
             &results,
-            output_ops
-                .iter()
-                .map(|op| op.to_canonical_u64())
-                .collect_vec()
-                .as_slice(),
         )
         .unwrap();
 
@@ -1338,11 +1302,6 @@ mod tests {
                 .as_slice(),
             &predicate_operations,
             &results,
-            output_ops
-                .iter()
-                .map(|op| op.to_canonical_u64())
-                .collect_vec()
-                .as_slice(),
         )
         .unwrap();
         let proof = if build_parameters {
@@ -1419,6 +1378,11 @@ mod tests {
             })
             .collect_vec();
         let column_ids = (0..NUM_ACTUAL_COLUMNS).map(|_| F::rand()).collect_vec();
+        let column_cells = column_values
+            .iter()
+            .zip(column_ids.iter())
+            .map(|(&value, &id)| ColumnCell { value, id })
+            .collect_vec();
         // define placeholders
         let first_placeholder_id = F::from_canonical_usize(1);
         let second_placeholder_id = F::from_canonical_usize(2);
@@ -1583,7 +1547,14 @@ mod tests {
             ]
         };
         let output_ids = vec![F::rand(); output_items.len()];
-        let results = ResultStructure::from((result_operations, output_items));
+        let results = ResultStructure::from((
+            result_operations,
+            output_items,
+            output_ids
+                .iter()
+                .map(|id| id.to_canonical_u64())
+                .collect_vec(),
+        ));
 
         let input = CircuitInput::<
             MAX_NUM_COLUMNS,
@@ -1591,23 +1562,13 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >::new_query_no_agg(
-            &column_values,
-            column_ids
-                .iter()
-                .map(|id| id.to_canonical_u64())
-                .collect_vec()
-                .as_slice(),
+            &column_cells,
             &predicate_operations,
             &placeholder_values,
             is_leaf,
             min_query,
             max_query,
             &results,
-            output_ids
-                .iter()
-                .map(|id| id.to_canonical_u64())
-                .collect_vec()
-                .as_slice(),
         )
         .unwrap();
 
@@ -1699,11 +1660,6 @@ mod tests {
                 .as_slice(),
             &predicate_operations,
             &results,
-            output_ids
-                .iter()
-                .map(|id| id.to_canonical_u64())
-                .collect_vec()
-                .as_slice(),
         )
         .unwrap();
 

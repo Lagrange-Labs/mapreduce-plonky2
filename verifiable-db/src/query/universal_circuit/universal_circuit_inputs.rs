@@ -1,24 +1,28 @@
 use anyhow::{anyhow, ensure, Context, Result};
+use serde::de::value;
 use std::collections::HashMap;
 
 use alloy::primitives::U256;
 use itertools::Itertools;
-use mp2_common::{utils::TryIntoBool, F};
+use mp2_common::{
+    utils::{Fieldable, TryIntoBool},
+    F,
+};
 
 use crate::query::computational_hash_ids::Operation;
 
 #[derive(Clone, Copy, Debug, Default)]
 /// Data structure representing a placeholder in the query, given by its value and its identifier
-pub(crate) struct Placeholder {
+pub struct Placeholder {
     pub(crate) value: U256,
     pub(crate) id: PlaceholderId,
 }
 
-pub(crate) type PlaceholderId = F;
+pub type PlaceholderId = F;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// Enumeration representing all the possible types of input operands for a basic operation
-pub(crate) enum InputOperand {
+pub enum InputOperand {
     // Input operand is a placeholder in the query
     Placeholder(PlaceholderId),
     // Input operand is a constant value in the query
@@ -42,7 +46,7 @@ impl Default for InputOperand {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// Data structure employed to specify a basic operation to be performed to
 /// compute the query
-pub(crate) struct BasicOperation {
+pub struct BasicOperation {
     pub(crate) first_operand: InputOperand,
     /// Can be None in case of unary operation
     pub(crate) second_operand: Option<InputOperand>,
@@ -176,16 +180,19 @@ pub(crate) enum OutputItem {
 
 /// Data structure that contains the description of the output items to be returned and the
 /// operations necessary to compute the output items
-pub(crate) struct ResultStructure {
+pub struct ResultStructure {
     pub(crate) result_operations: Vec<BasicOperation>,
     pub(crate) output_items: Vec<OutputItem>,
+    pub(crate) output_ids: Vec<F>,
 }
 
-impl From<(Vec<BasicOperation>, Vec<OutputItem>)> for ResultStructure {
-    fn from(value: (Vec<BasicOperation>, Vec<OutputItem>)) -> Self {
+impl From<(Vec<BasicOperation>, Vec<OutputItem>, Vec<u64>)> for ResultStructure {
+    fn from(value: (Vec<BasicOperation>, Vec<OutputItem>, Vec<u64>)) -> Self {
+        let ids = value.2.into_iter().map(|id| id.to_field()).collect_vec();
         Self {
             result_operations: value.0,
             output_items: value.1,
+            output_ids: ids,
         }
     }
 }
@@ -214,5 +221,19 @@ impl ResultStructure {
             })
             .collect_vec();
         Ok((results, overflow_err))
+    }
+}
+
+pub struct ColumnCell {
+    pub(crate) value: U256,
+    pub(crate) id: F,
+}
+
+impl ColumnCell {
+    pub fn new(id: u64, value: U256) -> Self {
+        Self {
+            value,
+            id: id.to_field(),
+        }
     }
 }
