@@ -40,10 +40,10 @@ pub enum RevelationPublicInputs {
     /// `overflow` : F - Boolean flag specifying whether an overflow errors
     /// occurred during arithmetic operations
     Overflow,
-    /// `num_results`: F - number of actual results found in the results array
+    /// `num_results`: F - Number of actual results found in the results array
     NumResults,
-    /// `result_values` : [Uint256; L * S] - Array of L results of the query and
-    /// each result has S values
+    /// `result_values` : [[Uint256; S]; L] - Two-dimensional array of L results of
+    /// the query and each result has S values
     ResultValues,
     /// `padding_values` : [Uint256; PD] - Dummy values to be added as public inputs
     PaddingValues,
@@ -416,10 +416,15 @@ mod tests {
 
     #[test]
     fn test_revelation_public_inputs() {
-        let pis_raw: Vec<_> = random_vector::<u32>(PI_LEN).to_fields();
-        let pis = PI::from_slice(pis_raw.as_slice());
+        let pis_raw = random_vector::<u32>(PI_LEN).to_fields();
+
+        // Use the public inputs in test circuit.
+        let test_circuit = TestPublicInputs { pis: &pis_raw };
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
+        assert_eq!(proof.public_inputs, pis_raw);
 
         // Check if the public inputs are constructed correctly.
+        let pis = PI::from_slice(&proof.public_inputs);
         assert_eq!(
             &pis_raw[PI::to_range(RevelationPublicInputs::OriginalBlockHash)],
             pis.to_original_block_hash_raw(),
@@ -456,10 +461,5 @@ mod tests {
             &pis_raw[PI::to_range(RevelationPublicInputs::PaddingValues)],
             pis.to_padding_values_raw(),
         );
-
-        // Use the public inputs in test circuit.
-        let test_circuit = TestPublicInputs { pis: &pis_raw };
-        let proof = run_circuit::<F, D, C, _>(test_circuit);
-        assert_eq!(proof.public_inputs, pis_raw);
     }
 }
