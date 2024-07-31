@@ -22,7 +22,11 @@ pub(crate) mod tests {
     use crate::query::computational_hash_ids::PlaceholderIdentifier;
     use alloy::primitives::U256;
     use itertools::Itertools;
-    use mp2_common::{array::ToField, poseidon::H, utils::ToFields};
+    use mp2_common::{
+        array::ToField,
+        poseidon::{empty_poseidon_hash, H},
+        utils::ToFields,
+    };
     use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
     use std::{array, iter::once};
@@ -73,7 +77,6 @@ pub(crate) mod tests {
             .enumerate()
             .for_each(|(i, id)| placeholder_ids[i] = id.to_field());
 
-            // TODO:: delete
             // Set the last invalid items found in placeholder_ids and
             // placeholder_values to placeholder_ids[0] and
             // placeholder_values[0] respectively.
@@ -82,8 +85,17 @@ pub(crate) mod tests {
                 placeholder_values[i] = placeholder_values[0];
             }
 
+            // Compute the hash of placeholder identifiers.
+            let placeholder_ids_hash = placeholder_ids[0..num_placeholders].iter().fold(
+                *empty_poseidon_hash(),
+                |acc, id| {
+                    let inputs = acc.to_fields().into_iter().chain(once(*id)).collect_vec();
+                    H::hash_no_pad(&inputs)
+                },
+            );
+
             let mut placeholder_hash_payload = vec![];
-            for i in 0..PH {
+            for i in 0..PP {
                 // Set the entry of placeholder_pairs to
                 // (placeholder_ids[placeholder_pos[i]], placeholder_values[placeholder_pos[i]]).
                 let pos = placeholder_pos[i];
@@ -118,10 +130,6 @@ pub(crate) mod tests {
                 .chain(max_i1.to_fields())
                 .collect_vec();
             let final_placeholder_hash = H::hash_no_pad(&inputs);
-
-            // Compute the hash of placeholder identifiers:
-            // H(placeholders_ids[0] || ...)
-            let placeholder_ids_hash = H::hash_no_pad(&placeholder_ids);
 
             let [min_query, max_query] = [*min_i1, *max_i1];
 

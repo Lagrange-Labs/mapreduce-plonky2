@@ -5,10 +5,10 @@ use crate::query::computational_hash_ids::PlaceholderIdentifier;
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
-    poseidon::H,
+    poseidon::{empty_poseidon_hash, H},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
-    utils::ToTargets,
+    utils::{SelectHashBuilder, ToTargets},
 };
 use plonky2::{
     hash::hash_types::HashOutTarget,
@@ -47,9 +47,8 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
         b.connect(placeholder_ids[i], expected_id);
     });
 
-    // TODO: update
     let mut num_placeholders = b.zero();
-    let mut placeholder_hash_payload = vec![];
+    let mut placeholder_ids_hash = b.constant_hash(*empty_poseidon_hash());
     for i in 0..PH {
         // Enforce that the last invalid items found in placeholder_ids and
         // placeholder_values are the same as placeholder_ids[0] and
@@ -67,6 +66,23 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
         b.connect(current_id, placeholder_ids[i]);
         b.enforce_equal_u256(&current_value, &placeholder_values[i]);
 
+        // Accumulate the number of placeholders.
+        num_placeholders = b.add(num_placeholders, is_placeholder_valid[i].target);
+
+        // Add current placeholder id to placeholder_ids_hash if the current placeholder is valid.
+        let inputs = placeholder_ids_hash
+            .to_targets()
+            .into_iter()
+            .chain(placeholder_ids[i].to_targets())
+            .collect();
+        let new_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
+        placeholder_ids_hash =
+            b.select_hash(is_placeholder_valid[i], &new_hash, &placeholder_ids_hash);
+    }
+
+    // Check the placeholder hash of proof is computed only from expected placeholder values.
+    let mut placeholder_hash_payload = vec![];
+    for i in 0..PP {
         // Accumulate the placeholder identifiers and values for computing the
         // placeholder hash.
         let (id, value) = &placeholder_pairs[i];
@@ -89,9 +105,6 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
         let expected_value = b.random_access_u256(placeholder_pos[i], placeholder_values);
         b.connect(*id, expected_id);
         b.enforce_equal_u256(value, &expected_value);
-
-        // Accumulate the number of placeholders.
-        num_placeholders = b.add(num_placeholders, is_placeholder_valid[i].target);
     }
 
     // Re-compute the placeholder hash from placeholder_pairs and minmum,
@@ -116,10 +129,6 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
         .collect_vec();
     let expected_final_placeholder_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
     b.connect_hashes(*final_placeholder_hash, expected_final_placeholder_hash);
-
-    // Compute the hash of placeholder identifiers:
-    // H(placeholders_ids[0] || ...)
-    let placeholder_ids_hash = b.hash_n_to_hash_no_pad::<H>(placeholder_ids.to_vec());
 
     (num_placeholders, placeholder_ids_hash)
 }
@@ -227,8 +236,7 @@ mod tests {
     #[test]
     fn test_revelation_placeholders_check() {
         const PH: usize = 10;
-        // TODO: fix > PH
-        const PP: usize = 10;
+        const PP: usize = 20;
         const NUM_PLACEHOLDERS: usize = 10;
 
         // Generate the testing placeholders.

@@ -302,8 +302,7 @@ mod tests {
     const L: usize = 5;
     const S: usize = 10;
     const PH: usize = 10;
-    // TODO: fix > PH
-    const PP: usize = 10;
+    const PP: usize = 20;
 
     // Real number of the placeholders
     const NUM_PLACEHOLDERS: usize = 5;
