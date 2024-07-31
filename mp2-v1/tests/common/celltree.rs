@@ -261,7 +261,11 @@ impl<P: ProofStorage> TestContext<P> {
         cells_update: &CellsUpdateResult,
     ) -> Result<()> {
         if cells_update.previous_row_key == cells_update.new_row_key {
-            // nothing to do here, all proofs are already under the correct row
+            info!("NOT moving cells tree since previous row key does not change");
+            return Ok(());
+        }
+        if cells_update.previous_row_key == Default::default() {
+            info!("NOT moving cells tree since it is a first time insertion");
             return Ok(());
         }
 
