@@ -236,8 +236,21 @@ mod tests {
     }
 
     #[test]
-    fn test_revelation_placeholders_check() {
+    fn test_revelation_placeholders_check_with_all_valid_placeholders() {
         const PH: usize = 10;
+        const PP: usize = 20;
+        const NUM_PLACEHOLDERS: usize = 10;
+
+        // Generate the testing placeholders.
+        let test_circuit: TestPlaceholders<PH, PP> = TestPlaceholders::sample(NUM_PLACEHOLDERS);
+
+        // Prove for the test circuit.
+        run_circuit::<F, D, C, _>(test_circuit);
+    }
+
+    #[test]
+    fn test_revelation_placeholders_check_including_invalid_placeholders() {
+        const PH: usize = 15;
         const PP: usize = 20;
         const NUM_PLACEHOLDERS: usize = 10;
 
