@@ -906,6 +906,9 @@ impl TestCase {
                                 );
                                 // NOTE: in this case, only the secondary index is changing so we
                                 // should not have to provide any updated cells
+                                // The insertion logic takes care of loading the cells tree from
+                                // the previous row tree key so it'll load up the current values
+                                // and they're not changing.
                                 cells.updated_cells = vec![];
                                 vec![
                                     TableRowUpdate::Deletion(key_to_delete),
