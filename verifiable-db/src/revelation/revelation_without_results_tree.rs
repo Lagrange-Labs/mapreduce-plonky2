@@ -6,10 +6,9 @@ use crate::{
         computational_hash_ids::AggregationOperation,
         public_inputs::PublicInputs as QueryProofPublicInputs,
     },
-    revelation::{placeholders_check::check_placeholders, PublicInputs, PI_LEN},
+    revelation::{placeholders_check::check_placeholders, PublicInputs},
 };
 use alloy::primitives::U256;
-use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
@@ -21,16 +20,12 @@ use mp2_common::{
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
     utils::ToTargets,
-    D, F,
+    F,
 };
-use plonky2::{
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
-    plonk::proof::ProofWithPublicInputsTarget,
+use plonky2::iop::{
+    target::{BoolTarget, Target},
+    witness::{PartialWitness, WitnessWrite},
 };
-use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::array;
 
@@ -295,7 +290,7 @@ mod tests {
         },
         revelation::tests::TestPlaceholders,
     };
-    use mp2_common::{utils::ToFields, C};
+    use mp2_common::{utils::ToFields, C, D};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
@@ -514,8 +509,9 @@ mod tests {
     // Test for COUNT operation.
     #[test]
     fn test_revelation_without_results_tree_for_op_count() {
-        // Initialize the all operations as COUNT.
-        let ops: [_; S] = [AggregationOperation::CountOp.to_field(); S];
+        // Set the first operation to COUNT.
+        let mut ops: [_; S] = random_aggregation_operations();
+        ops[0] = AggregationOperation::CountOp.to_field();
 
         test_revelation_without_results_tree_circuit(&ops, None);
     }
@@ -523,8 +519,9 @@ mod tests {
     // Test for AVG operation.
     #[test]
     fn test_revelation_without_results_tree_for_op_avg() {
-        // Initialize the all operations as AVG.
-        let ops: [_; S] = [AggregationOperation::AvgOp.to_field(); S];
+        // Set the first operation to AVG.
+        let mut ops: [_; S] = random_aggregation_operations();
+        ops[0] = AggregationOperation::AvgOp.to_field();
 
         test_revelation_without_results_tree_circuit(&ops, None);
     }
@@ -532,8 +529,9 @@ mod tests {
     // Test for AVG operation with zero entry count.
     #[test]
     fn test_revelation_without_results_tree_for_op_avg_with_no_entries() {
-        // Initialize the all operations as AVG.
-        let ops: [_; S] = [AggregationOperation::AvgOp.to_field(); S];
+        // Set the first operation to AVG.
+        let mut ops: [_; S] = random_aggregation_operations();
+        ops[0] = AggregationOperation::AvgOp.to_field();
 
         test_revelation_without_results_tree_circuit(&ops, Some(0));
     }
