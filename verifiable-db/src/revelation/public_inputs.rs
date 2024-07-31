@@ -34,7 +34,8 @@ pub enum RevelationPublicInputs {
     /// `placeholder_values` : [Uint256; PH] - Array corresponding to the
     /// placeholder values employed for the current query
     PlaceholderValues,
-    /// `entry_count`: F - Number of matching entries found by the query
+    /// `entry_count`: F - Number of matching entries found by the query.
+    /// NOTE: it's considered as an Uint32 for now (cannot be out of range of Uint32).
     EntryCount,
     /// `overflow` : F - Boolean flag specifying whether an overflow errors
     /// occurred during arithmetic operations
