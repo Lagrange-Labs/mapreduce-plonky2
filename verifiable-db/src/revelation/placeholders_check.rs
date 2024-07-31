@@ -91,18 +91,20 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
 
         // Pad the placeholder_ids to the next power of two for random_access.
         let mut padded_placeholder_ids = placeholder_ids.to_vec();
+        let mut padded_placeholder_values = placeholder_values.to_vec();
         let pad_len = PH.next_power_of_two();
         assert!(
             pad_len <= 64,
             "random_access function cannot handle more than 64 elements"
         );
         padded_placeholder_ids.resize(pad_len, placeholder_ids[0]);
+        padded_placeholder_values.resize(pad_len, placeholder_values[0].clone());
 
         // Check that the pair (id, value) found in the current entry of
         // placeholder_pairs is same as:
         // (placeholder_ids[placeholder_pos[i]], placeholder_values[placeholder_pos[i]])
         let expected_id = b.random_access(placeholder_pos[i], padded_placeholder_ids);
-        let expected_value = b.random_access_u256(placeholder_pos[i], placeholder_values);
+        let expected_value = b.random_access_u256(placeholder_pos[i], &padded_placeholder_values);
         b.connect(*id, expected_id);
         b.enforce_equal_u256(value, &expected_value);
     }
