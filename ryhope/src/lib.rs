@@ -70,8 +70,8 @@ pub struct MerkleTreeKvDb<
         + TreeStorage<T>
         + PayloadStorage<T::Key, V>
         + FromSettings<T::State>
-        + std::marker::Send
-        + std::marker::Sync,
+        + Send
+        + Sync,
 > {
     /// The tree where the key hierarchy will be stored
     tree: T,

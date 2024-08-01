@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    marker::PhantomData,
+};
 
 use anyhow::*;
 use async_trait::async_trait;
@@ -6,7 +10,10 @@ use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use futures::FutureExt;
 use postgres_types::Json;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use tokio::sync::RwLock;
 use tokio_postgres;
 use tokio_postgres::{NoTls, Row};
@@ -86,9 +93,9 @@ where
         connection
             .query(
                 &format!(
-                "SELECT payload FROM {} WHERE key=$1 AND valid_from <= $2 AND $2 <= valid_until",
-                table
-            ),
+                    "SELECT payload FROM {} WHERE key=$1 AND valid_from <= $2 AND $2 <= valid_until",
+                    table
+                ),
                 &[&(k.to_bytea()), &epoch],
             )
             .await

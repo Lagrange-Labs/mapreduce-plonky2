@@ -1,6 +1,9 @@
 use crate::storage::RoEpochKvStorage;
 use crate::tree::TreeTopology;
-use crate::{Epoch, InitSettings};
+use crate::{
+    Epoch,
+    InitSettings,
+};
 
 use self::storages::{
     CachedDbKvStore, CachedDbStore, DbConnector, NodeConnector, PayloadConnector,
@@ -12,12 +15,18 @@ use crate::storage::pgsql::storages::DBPool;
 use anyhow::*;
 use async_trait::async_trait;
 use bb8_postgres::PostgresConnectionManager;
-use futures::future::BoxFuture;
-use futures::FutureExt;
+use futures::{
+    future::BoxFuture,
+    FutureExt,
+};
 use itertools::Itertools;
 use log::*;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, fmt::Debug, hash::Hash, rc::Rc};
+use std::{
+    cell::RefCell,
+    fmt::Debug,
+    hash::Hash, rc::Rc
+};
 use tokio_postgres::NoTls;
 
 mod storages;
@@ -84,8 +93,8 @@ impl ToFromBytea for usize {
 
 /// Characterize a type that may be used as node payload.
 #[async_trait]
-pub trait PayloadInDb: Clone + Sync + Debug + Serialize + for<'a> Deserialize<'a> {}
-impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> PayloadInDb for T {}
+pub trait PayloadInDb: Clone + Send + Sync + Debug + Serialize + for<'a> Deserialize<'a> {}
+impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> PayloadInDb for T {}
 
 /// If it exists, remove the given table from the current database.
 async fn delete_storage_table(db: DBPool, table: &str) -> Result<()> {
@@ -191,7 +200,7 @@ where
                     storage_settings.table,
                     tree_settings,
                 )
-                .await
+                    .await
             }
         }
     }
@@ -201,7 +210,7 @@ where
 async fn fetch_current_epoch(db: DBPool, table: &str) -> Result<i64> {
     let connection = db.get().await.unwrap();
     connection
-        .query_one(&format!("SELECT MAX(valid_until) FROM {table}_meta",), &[])
+        .query_one(&format!("SELECT MAX(valid_until) FROM {table}_meta", ), &[])
         .await
         .map(|r| r.get(0))
         .context("while fetching current epoch")
@@ -211,7 +220,7 @@ impl<T, V> PgsqlStorage<T, V>
 where
     T: TreeTopology,
     T::Key: ToFromBytea,
-    V: PayloadInDb + Send,
+    V: PayloadInDb,
     T::Node: Sync + Clone,
     T::State: Sync + Clone,
     NodeConnector: DbConnector<T::Key, T::Node>,
@@ -487,7 +496,7 @@ where
                         self.epoch + 1,
                         v.to_owned(),
                     )
-                    .await?;
+                        .await?;
                 }
             }
 
@@ -531,7 +540,7 @@ where
                                 new_epoch,
                                 payload,
                             )
-                            .await?;
+                                .await?;
                         }
                     },
                     // k has been deleted; simply roll-back the lifetime of its row.

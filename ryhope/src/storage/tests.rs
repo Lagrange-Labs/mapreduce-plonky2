@@ -556,7 +556,7 @@ async fn test_rollback<
     S: EpochKvStorage<i64, MinMaxi64>
         + TreeTransactionalStorage<i64, MinMaxi64>
         + Send
-        + std::marker::Sync,
+        + Sync,
 >(
     s: &mut S,
 ) {
