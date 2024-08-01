@@ -313,7 +313,10 @@ impl<P: ProofStorage> TestContext<P> {
                     .storage
                     .get_proof_latest(&proof_key)
                     .expect("UT guarantees proving in order");
-                debug!("AFTER fetching child proof for partial node - found at block {obn}");
+                debug!(
+                    "AFTER fetching child proof for partial node - found at block {:?}",
+                    obn.primary
+                );
 
                 debug!("AFTER fetching cell tree proof for partial node");
                 let inputs = CircuitInput::RowsTree(
@@ -353,7 +356,10 @@ impl<P: ProofStorage> TestContext<P> {
                     .storage
                     .get_proof_latest(&left_proof_key)
                     .expect("UT guarantees proving in order");
-                debug!("AFTER fetching LEFT row tree proof for full node - FOUND block {lbn}");
+                debug!(
+                    "AFTER fetching LEFT row tree proof for full node - FOUND block {}",
+                    lbn.primary
+                );
                 debug!(
                     "BEFORE fetching RIGHT row tree {:?} for full node {:?}",
                     right_proof_key, k
@@ -362,7 +368,10 @@ impl<P: ProofStorage> TestContext<P> {
                     .storage
                     .get_proof_latest(&right_proof_key)
                     .expect("UT guarantees proving in order");
-                debug!("AFTER fetching RIGHT row tree proof for full node - FOUND block {rbn}");
+                debug!(
+                    "AFTER fetching RIGHT row tree proof for full node - FOUND block {}",
+                    rbn.primary
+                );
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::full(
                         id,
@@ -396,12 +405,12 @@ impl<P: ProofStorage> TestContext<P> {
             tree_key: root,
         };
 
-        let (p, index) = self
+        let (p, key_found) = self
             .storage
             .get_proof_latest(&root_proof_key)
             .expect("row tree root proof absent");
 
-        if index == primary {
+        if key_found == root_proof_key {
             let pproof = ProofWithVK::deserialize(&p).unwrap();
             let pi =
                 verifiable_db::row_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
@@ -410,9 +419,12 @@ impl<P: ProofStorage> TestContext<P> {
                 pi.rows_digest_field()
             );
         } else {
-            debug!("[--] No updates to compute! (last root on block {index}");
+            debug!(
+                "[--] No updates to compute! (last root on block {}",
+                key_found.primary
+            );
         }
-        Ok(root_proof_key)
+        Ok(key_found)
     }
 
     /// Build and prove the row tree from the [`Row`]s and the secondary index
