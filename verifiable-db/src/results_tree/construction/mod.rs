@@ -113,7 +113,7 @@ pub(crate) mod tests {
                     // pC.max_items < pR.min_items
                     items[0] = items[0].checked_sub(one).unwrap();
                 }
-                // Also set pC.max_items = pR.min_items if the above condition didn't satify (for false case).
+                // Also set pC.max_items = pR.min_items if the above condition didn't satisfy (for false case).
                 proof[max_items_range]
                     .copy_from_slice(&items.iter().flat_map(|item| item.to_fields()).collect_vec());
             } else {
@@ -128,7 +128,7 @@ pub(crate) mod tests {
                     // pC.min_items > pR.max_items
                     items[0] = items[0].checked_add(one).unwrap();
                 }
-                // Also set pC.min_items = pR.max_items if the above condition didn't satify (for false case).
+                // Also set pC.min_items = pR.max_items if the above condition didn't satisfy (for false case).
                 proof[min_items_range]
                     .copy_from_slice(&items.iter().flat_map(|item| item.to_fields()).collect_vec());
             }
