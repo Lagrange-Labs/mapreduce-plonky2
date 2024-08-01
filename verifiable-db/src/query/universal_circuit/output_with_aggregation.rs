@@ -412,7 +412,8 @@ mod tests {
             let output_hash = Circuit::<MAX_NUM_RESULTS>::output_variant()
                 .output_hash(
                     &predicate_hash,
-                    &mut ComputationalHashCache::<MAX_NUM_COLUMNS>::new_from_column_hash(
+                    &mut ComputationalHashCache::new_from_column_hash(
+                        MAX_NUM_COLUMNS,
                         &column_hash,
                     )
                     .unwrap(),

@@ -1,5 +1,4 @@
 use anyhow::{anyhow, ensure, Context, Result};
-use serde::de::value;
 use std::collections::HashMap;
 
 use alloy::primitives::U256;
@@ -9,7 +8,7 @@ use mp2_common::{
     F,
 };
 
-use crate::query::computational_hash_ids::Operation;
+use crate::query::computational_hash_ids::{Operation, Output};
 
 #[derive(Clone, Copy, Debug, Default)]
 /// Data structure representing a placeholder in the query, given by its value and its identifier
@@ -169,7 +168,7 @@ impl BasicOperation {
 
 #[derive(Clone, Copy, Debug)]
 /// Enumeration representing the type of output values that can be returned for each row
-pub(crate) enum OutputItem {
+pub enum OutputItem {
     /// Output value is a column of the table
     Column(usize),
     /// Output value is computed in one of the `MAX_NUM_RESULT_OPS` operations; the numeric value
@@ -184,17 +183,7 @@ pub struct ResultStructure {
     pub(crate) result_operations: Vec<BasicOperation>,
     pub(crate) output_items: Vec<OutputItem>,
     pub(crate) output_ids: Vec<F>,
-}
-
-impl From<(Vec<BasicOperation>, Vec<OutputItem>, Vec<u64>)> for ResultStructure {
-    fn from(value: (Vec<BasicOperation>, Vec<OutputItem>, Vec<u64>)) -> Self {
-        let ids = value.2.into_iter().map(|id| id.to_field()).collect_vec();
-        Self {
-            result_operations: value.0,
-            output_items: value.1,
-            output_ids: ids,
-        }
-    }
+    pub(crate) output_variant: Output,
 }
 
 impl ResultStructure {
@@ -221,6 +210,35 @@ impl ResultStructure {
             })
             .collect_vec();
         Ok((results, overflow_err))
+    }
+
+    pub fn new_for_query_with_aggregation(
+        result_operations: Vec<BasicOperation>,
+        output_items: Vec<OutputItem>,
+        aggregation_op_ids: Vec<u64>,
+    ) -> Self {
+        Self {
+            result_operations,
+            output_items,
+            output_ids: aggregation_op_ids
+                .into_iter()
+                .map(|id| id.to_field())
+                .collect_vec(),
+            output_variant: Output::Aggregation,
+        }
+    }
+
+    pub fn new_for_query_no_aggregation(
+        result_operations: Vec<BasicOperation>,
+        output_items: Vec<OutputItem>,
+        output_ids: Vec<u64>,
+    ) -> Self {
+        Self {
+            result_operations,
+            output_items,
+            output_ids: output_ids.into_iter().map(|id| id.to_field()).collect_vec(),
+            output_variant: Output::NoAggregation,
+        }
     }
 }
 

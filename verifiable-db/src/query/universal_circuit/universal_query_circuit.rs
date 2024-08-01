@@ -16,7 +16,7 @@ use mp2_common::{
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{Fieldable, SelectHashBuilder, ToFields, ToTargets},
+    utils::{SelectHashBuilder, ToFields, ToTargets},
     CHasher, C, D, F,
 };
 use plonky2::{
@@ -41,7 +41,7 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    computational_hash_ids::{ComputationalHashCache, HashPermutation, Operation, Output},
+    computational_hash_ids::{HashPermutation, Operation, Output},
     public_inputs::PublicInputs,
     universal_circuit::{
         basic_operation::BasicOperationInputs, universal_circuit_inputs::OutputItem,
@@ -57,7 +57,7 @@ use super::{
     universal_circuit_inputs::{
         BasicOperation, ColumnCell, InputOperand, Placeholder, PlaceholderId, ResultStructure,
     },
-    ComputationalHash, ComputationalHashTarget, PlaceholderHash,
+    ComputationalHashTarget, PlaceholderHash,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -99,7 +99,7 @@ pub struct UniversalQueryCircuitWires<
 
 /// Trait for the 2 different variants of output components we currently support
 /// in query circuits
-pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
+pub trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
     type Wires: OutputComponentWires;
 
     fn new(selector: &[F], ids: &[F], num_outputs: usize) -> Result<Self>;
@@ -123,7 +123,7 @@ pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
 }
 /// Trait representing the wires that need to be exposed by an `OutputComponent`
 /// employed in query circuits
-pub(crate) trait OutputComponentWires {
+pub trait OutputComponentWires {
     /// Associated type specifying the type of the first output value computed by this output
     /// component; this type varies depending on the particular component:
     /// - It is a `CurveTarget` in the output component for queries without aggregation operations
@@ -534,8 +534,8 @@ where
             .assign(pw, &wires.output_component_wires);
     }
 
-    /// Compute the placeholder hash for the given instance of `self`
-    pub(crate) fn compute_placeholder_hash(&self) -> PlaceholderHash {
+    /// Utility method to compute the placeholder hash for `self` without including the query bounds on secondary index
+    pub(crate) fn placeholder_hash_without_query_bounds(&self) -> PlaceholderHash {
         let inputs = self
             .filtering_predicate_inputs
             .iter()
@@ -554,7 +554,12 @@ where
                     .collect_vec()
             }))
             .collect_vec();
-        let placeholders_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(&inputs);
+        hash_n_to_hash_no_pad::<_, HashPermutation>(&inputs)
+    }
+
+    /// Compute the placeholder hash for the given instance of `self`
+    pub(crate) fn placeholder_hash(&self) -> PlaceholderHash {
+        let placeholders_hash = self.placeholder_hash_without_query_bounds();
         // add query bounds to placeholder hash
         hash_n_to_hash_no_pad::<_, HashPermutation>(
             &placeholders_hash
@@ -728,110 +733,9 @@ where
         Ok(())
     }
 }
-/// Circuit paramaters for universal query circuit variants
-pub struct Parameters<
-    const MAX_NUM_COLUMNS: usize,
-    const MAX_NUM_PREDICATE_OPS: usize,
-    const MAX_NUM_RESULT_OPS: usize,
-    const MAX_NUM_RESULTS: usize,
-> where
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
-    [(); MAX_NUM_RESULTS - 1]:,
-{
-    circuit_with_agg: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        0,
-        UniversalQueryCircuitWires<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-            AggOutputCircuit<MAX_NUM_RESULTS>,
-        >,
-    >,
-    circuit_no_agg: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        0,
-        UniversalQueryCircuitWires<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-            NoAggOutputCircuit<MAX_NUM_RESULTS>,
-        >,
-    >,
-    circuit_set: RecursiveCircuits<F, C, D>,
-}
-
-const QUERY_CIRCUIT_SET_SIZE: usize = 2;
-
-impl<
-        const MAX_NUM_COLUMNS: usize,
-        const MAX_NUM_PREDICATE_OPS: usize,
-        const MAX_NUM_RESULT_OPS: usize,
-        const MAX_NUM_RESULTS: usize,
-    > Parameters<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS>
-where
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
-    [(); MAX_NUM_RESULTS - 1]:,
-    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
-    [(); { PI_LEN::<MAX_NUM_RESULTS> }]:,
-{
-    /// Build `Parameters` for query circuits
-    pub fn build() -> Self {
-        let builder =
-            CircuitWithUniversalVerifierBuilder::<F, D, { PI_LEN::<MAX_NUM_RESULTS> }>::new::<C>(
-                default_config(),
-                QUERY_CIRCUIT_SET_SIZE,
-            );
-        let circuit_with_agg = builder.build_circuit(());
-        let circuit_no_agg = builder.build_circuit(());
-
-        let circuits = vec![
-            prepare_recursive_circuit_for_circuit_set(&circuit_with_agg),
-            prepare_recursive_circuit_for_circuit_set(&circuit_no_agg),
-        ];
-
-        let circuit_set = RecursiveCircuits::new(circuits);
-
-        Self {
-            circuit_with_agg,
-            circuit_no_agg,
-            circuit_set,
-        }
-    }
-
-    pub fn generate_proof(
-        &self,
-        input: CircuitInput<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-        >,
-    ) -> Result<Vec<u8>> {
-        let proof = ProofWithVK::from(match input {
-            CircuitInput::QueryWithAgg(input) => (
-                self.circuit_set
-                    .generate_proof(&self.circuit_with_agg, [], [], input)?,
-                self.circuit_with_agg.circuit_data().verifier_only.clone(),
-            ),
-            CircuitInput::QueryNoAgg(input) => (
-                self.circuit_set
-                    .generate_proof(&self.circuit_no_agg, [], [], input)?,
-                self.circuit_no_agg.circuit_data().verifier_only.clone(),
-            ),
-        });
-        proof.serialize()
-    }
-}
 
 /// Inputs for the 2 variant of universal query circuit
-pub enum CircuitInput<
+pub enum UniversalCircuitInput<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
     const MAX_NUM_RESULT_OPS: usize,
@@ -862,13 +766,19 @@ impl<
         const MAX_NUM_PREDICATE_OPS: usize,
         const MAX_NUM_RESULT_OPS: usize,
         const MAX_NUM_RESULTS: usize,
-    > CircuitInput<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS>
+    >
+    UniversalCircuitInput<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULTS,
+    >
 where
     [(); MAX_NUM_RESULTS - 1]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
 {
     /// Provide input values for universal circuit variant for queries with aggregation operations
-    pub fn new_query_with_agg(
+    pub(crate) fn new_query_with_agg(
         column_cells: &[ColumnCell],
         predicate_operations: &[BasicOperation],
         placeholder_values: &HashMap<PlaceholderId, U256>,
@@ -877,7 +787,7 @@ where
         max_query_secondary: U256,
         results: &ResultStructure,
     ) -> Result<Self> {
-        Ok(CircuitInput::QueryWithAgg(
+        Ok(UniversalCircuitInput::QueryWithAgg(
             UniversalQueryCircuitInputs::new(
                 column_cells,
                 predicate_operations,
@@ -890,7 +800,7 @@ where
         ))
     }
     /// Provide input values for universal circuit variant for queries without aggregation operations
-    pub fn new_query_no_agg(
+    pub(crate) fn new_query_no_agg(
         column_cells: &[ColumnCell],
         predicate_operations: &[BasicOperation],
         placeholder_values: &HashMap<PlaceholderId, U256>,
@@ -899,44 +809,24 @@ where
         max_query_secondary: U256,
         results: &ResultStructure,
     ) -> Result<Self> {
-        Ok(CircuitInput::QueryNoAgg(UniversalQueryCircuitInputs::new(
-            column_cells,
-            predicate_operations,
-            placeholder_values,
-            is_leaf,
-            min_query_secondary,
-            max_query_secondary,
-            results,
-        )?))
+        Ok(UniversalCircuitInput::QueryNoAgg(
+            UniversalQueryCircuitInputs::new(
+                column_cells,
+                predicate_operations,
+                placeholder_values,
+                is_leaf,
+                min_query_secondary,
+                max_query_secondary,
+                results,
+            )?,
+        ))
     }
 
     pub(crate) fn placeholder_hash(&self) -> PlaceholderHash {
         match self {
-            CircuitInput::QueryWithAgg(c) => c.compute_placeholder_hash(),
-            CircuitInput::QueryNoAgg(c) => c.compute_placeholder_hash(),
+            UniversalCircuitInput::QueryWithAgg(c) => c.placeholder_hash(),
+            UniversalCircuitInput::QueryNoAgg(c) => c.placeholder_hash(),
         }
-    }
-
-    pub(crate) fn computational_hash<T: OutputComponent<MAX_NUM_RESULTS>>(
-        column_ids: &[u64],
-        predicate_operations: &[BasicOperation],
-        results: &ResultStructure,
-    ) -> Result<ComputationalHash> {
-        let mut cache = ComputationalHashCache::<MAX_NUM_COLUMNS>::new();
-        let column_ids = column_ids.iter().map(|id| id.to_field()).collect_vec();
-        let predicate_ops_hash =
-            Operation::operation_hash(predicate_operations, &column_ids, &mut cache)?;
-        let predicate_hash = predicate_ops_hash.last().unwrap();
-        let result_ops_hash =
-            Operation::operation_hash(&results.result_operations, &column_ids, &mut cache)?;
-        T::output_variant().output_hash(
-            predicate_hash,
-            &mut cache,
-            &column_ids,
-            &result_ops_hash,
-            &results.output_items,
-            &results.output_ids,
-        )
     }
 }
 
@@ -970,7 +860,11 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::query::{
-        computational_hash_ids::{AggregationOperation, HashPermutation, Identifiers, Operation},
+        aggregation::QueryBounds,
+        api::{CircuitInput, Parameters},
+        computational_hash_ids::{
+            AggregationOperation, HashPermutation, Identifiers, Operation, Output,
+        },
         public_inputs::PublicInputs,
         universal_circuit::{
             output_no_aggregation::Circuit as NoAggOutputCircuit,
@@ -978,15 +872,15 @@ mod tests {
             universal_circuit_inputs::{
                 BasicOperation, ColumnCell, InputOperand, OutputItem, ResultStructure,
             },
-            universal_query_circuit::Parameters,
-            COLUMN_INDEX_NUM,
+            ComputationalHash, COLUMN_INDEX_NUM,
         },
     };
 
     use anyhow::{Error, Result};
 
     use super::{
-        CircuitInput, OutputComponent, UniversalQueryCircuitInputs, UniversalQueryCircuitWires,
+        OutputComponent, UniversalCircuitInput, UniversalQueryCircuitInputs,
+        UniversalQueryCircuitWires,
     };
 
     impl<
@@ -1205,28 +1099,32 @@ mod tests {
             AggregationOperation::AvgOp.to_field(),
         ];
 
-        let results = ResultStructure::from((
+        let results = ResultStructure::new_for_query_with_aggregation(
             result_operations,
             output_items,
             output_ops
                 .iter()
                 .map(|op| op.to_canonical_u64())
                 .collect_vec(),
-        ));
+        );
 
         let input = CircuitInput::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
-        >::new_query_with_agg(
+        >::new_universal_circuit(
             &column_cells,
             &predicate_operations,
+            &results,
             &placeholder_values,
             is_leaf,
-            min_query,
-            max_query,
-            &results,
+            &QueryBounds::new(
+                U256::default(), // dummy values for primary index, we don't care here
+                U256::default(),
+                Some(min_query),
+                Some(max_query),
+            ),
         )
         .unwrap();
 
@@ -1288,22 +1186,28 @@ mod tests {
             })
             .collect_vec();
 
-        let placeholder_hash = input.placeholder_hash();
-        let computational_hash = CircuitInput::<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-        >::computational_hash::<AggOutputCircuit<MAX_NUM_RESULTS>>(
-            column_ids
-                .iter()
-                .map(|id| id.to_canonical_u64())
-                .collect_vec()
-                .as_slice(),
-            &predicate_operations,
-            &results,
-        )
-        .unwrap();
+        let circuit = if let CircuitInput::UniversalCircuit(UniversalCircuitInput::QueryWithAgg(
+            c,
+        )) = &input
+        {
+            c
+        } else {
+            unreachable!()
+        };
+        let placeholder_hash = circuit.placeholder_hash();
+        let computational_hash = ComputationalHash::from_bytes(
+            (&Identifiers::computational_hash_universal_circuit(
+                column_ids
+                    .iter()
+                    .map(|id| id.to_canonical_u64())
+                    .collect_vec()
+                    .as_slice(),
+                &predicate_operations,
+                &results,
+            )
+            .unwrap())
+                .into(),
+        );
         let proof = if build_parameters {
             let params = Parameters::build();
             params
@@ -1312,12 +1216,7 @@ mod tests {
                 .and_then(|p| Ok(p.proof().clone()))
                 .unwrap()
         } else {
-            let circuit = if let CircuitInput::QueryWithAgg(c) = input {
-                c
-            } else {
-                unreachable!()
-            };
-            run_circuit::<F, D, C, _>(circuit)
+            run_circuit::<F, D, C, _>(circuit.clone())
         };
 
         let pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
@@ -1547,28 +1446,32 @@ mod tests {
             ]
         };
         let output_ids = vec![F::rand(); output_items.len()];
-        let results = ResultStructure::from((
+        let results = ResultStructure::new_for_query_no_aggregation(
             result_operations,
             output_items,
             output_ids
                 .iter()
                 .map(|id| id.to_canonical_u64())
                 .collect_vec(),
-        ));
+        );
 
         let input = CircuitInput::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
-        >::new_query_no_agg(
+        >::new_universal_circuit(
             &column_cells,
             &predicate_operations,
+            &results,
             &placeholder_values,
             is_leaf,
-            min_query,
-            max_query,
-            &results,
+            &QueryBounds::new(
+                U256::default(), // dummy values for primary index, we don't care here
+                U256::default(),
+                Some(min_query),
+                Some(max_query),
+            ),
         )
         .unwrap();
 
@@ -1646,22 +1549,26 @@ mod tests {
             Point::NEUTRAL
         };
 
-        let placeholder_hash = input.placeholder_hash();
-        let computational_hash = CircuitInput::<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-        >::computational_hash::<NoAggOutputCircuit<MAX_NUM_RESULTS>>(
-            column_ids
-                .iter()
-                .map(|id| id.to_canonical_u64())
-                .collect_vec()
-                .as_slice(),
-            &predicate_operations,
-            &results,
-        )
-        .unwrap();
+        let circuit =
+            if let CircuitInput::UniversalCircuit(UniversalCircuitInput::QueryNoAgg(c)) = &input {
+                c
+            } else {
+                unreachable!()
+            };
+        let placeholder_hash = circuit.placeholder_hash();
+        let computational_hash = ComputationalHash::from_bytes(
+            (&Identifiers::computational_hash_universal_circuit(
+                column_ids
+                    .iter()
+                    .map(|id| id.to_canonical_u64())
+                    .collect_vec()
+                    .as_slice(),
+                &predicate_operations,
+                &results,
+            )
+            .unwrap())
+                .into(),
+        );
 
         let proof = if build_parameters {
             let params = Parameters::build();
@@ -1671,12 +1578,7 @@ mod tests {
                 .and_then(|p| Ok(p.proof().clone()))
                 .unwrap()
         } else {
-            let circuit = if let CircuitInput::QueryNoAgg(c) = input {
-                c
-            } else {
-                unreachable!()
-            };
-            run_circuit::<F, D, C, _>(circuit)
+            run_circuit::<F, D, C, _>(circuit.clone())
         };
 
         let pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
