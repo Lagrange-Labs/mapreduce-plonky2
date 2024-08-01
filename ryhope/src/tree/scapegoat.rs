@@ -3,6 +3,7 @@ use super::{MutableTree, NodeContext, NodePath, TreeTopology};
 use crate::storage::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TreeStorage};
 use anyhow::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::{cmp::Ordering, fmt::Debug, hash::Hash, marker::PhantomData};
 
 /// The representation of a fraction as its numerator and denominator, allowing
@@ -309,6 +310,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         let binding = s.nodes().fetch(&to_remove);
         let to_remove_left_child = binding.left();
         let mut to_remove_right_child = s.nodes().fetch(&to_remove).right().cloned();
+        let mut dirties = HashSet::new();
 
         let new_child = match (to_remove_left_child, to_remove_right_child.as_ref()) {
             (None, None) => None,
@@ -335,6 +337,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                                         n.left = unlink_new_child.cloned();
                                         n.subtree_size -= 1;
                                     });
+                                    dirties.insert(min_parent_idx.to_owned());
+
                                     if let Some(u) = unlink_new_child {
                                         s.nodes_mut().update_with(u.to_owned(), |n| {
                                             n.parent = Some(min_parent_idx.to_owned())
@@ -352,6 +356,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                                     s.nodes_mut().update_with(min_parent_idx.to_owned(), |n| {
                                         n.subtree_size -= 1
                                     });
+                                    dirties.insert(min_parent_idx.to_owned());
                                 }
                                 break;
                             }
@@ -365,20 +370,21 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                     min_node.left = to_remove_left_child.cloned();
                     min_node.subtree_size = min_node_sub_tree_size;
                 });
+                dirties.insert(min_idx.clone());
                 if let Some(i) = to_remove_right_child {
                     s.nodes_mut()
-                        .update_with(i.to_owned(), |n| n.parent = Some(min_idx.to_owned()))
+                        .update_with(i.to_owned(), |n| n.parent = Some(min_idx.to_owned()));
                 }
                 if let Some(i) = to_remove_left_child {
                     s.nodes_mut()
-                        .update_with(i.to_owned(), |n| n.parent = Some(min_idx.to_owned()))
+                        .update_with(i.to_owned(), |n| n.parent = Some(min_idx.to_owned()));
                 }
 
                 Some(min_idx)
             }
         };
 
-        let dirties = match to_remove_context.ascendance.last() {
+        match to_remove_context.ascendance.last() {
             Some(parent) => {
                 {
                     s.nodes_mut().update_with(parent.to_owned(), |parent_node| {
@@ -392,10 +398,6 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 if let Some(ref i) = new_child {
                     s.nodes_mut()
                         .update_with(i.to_owned(), |n| n.parent = Some(parent.to_owned()));
-                    // NOTE: optimality would require to remove unchanged leaf nodes
-                    self.descendants(new_child.as_ref().unwrap(), s)
-                } else {
-                    vec![]
                 }
             }
             None => {
@@ -404,11 +406,10 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                     s.nodes_mut()
                         .update_with(new_child_k.to_owned(), |n| n.parent = None);
                 }
-                new_child.map(|n| vec![n]).unwrap_or_default()
             }
         };
 
-        s.nodes_mut().remove(to_remove)?;
+        s.nodes_mut().remove(to_remove.clone())?;
         s.state_mut().update(|r| r.node_count -= 1);
 
         for ancestor in to_remove_context.ascendance {
@@ -417,7 +418,10 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 .update_with(ancestor.to_owned(), |n| n.subtree_size -= 1);
         }
 
-        Ok(dirties)
+        Ok(dbg!(dirties)
+            .into_iter()
+            .filter(|n| *n != to_remove)
+            .collect())
     }
 
     // --------------------------------------------------------------------------
@@ -510,10 +514,11 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
             if path.len() > self.depth_criterion(s.state().fetch().node_count, s) {
                 self.find_scapegoat(&path, s)
                     .map(|scapegoat| {
-                        self.rebalance_at(scapegoat, s)
+                        dbg!(self
+                            .rebalance_at(scapegoat, s)
                             .into_iter()
                             .map(|n| s.nodes().fetch(&n).k.to_owned())
-                            .collect()
+                            .collect())
                     })
                     .unwrap_or_default()
             } else {

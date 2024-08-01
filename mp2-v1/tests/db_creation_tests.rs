@@ -139,9 +139,8 @@ fn ryhope_scapegoat() -> Result<()> {
         t.store(r15, payload.clone())?;
         Ok(())
     })?;
-    println!("++++++++++++++++++++++++++");
+    println!("BEFORE");
     row_tree.print_tree();
-    println!("++++++++++++++++++++++++++");
     // Deletion RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [11] }
     // Insertion(Row { k: RowTreeKey { value: VectorU256(97094728283605215696305910369622631687767667916), rest: [11] }
     let r11bis = RowTreeKey {
@@ -155,8 +154,10 @@ fn ryhope_scapegoat() -> Result<()> {
         t.store(r11bis, payload.clone())?;
         Ok(())
     })?;
-    println!("------------------------");
+    println!("AFTER");
+    row_tree.print_tree();
+    println!("UT: ------------------------");
     ut.print();
-    println!("------------------------");
+    println!("----------------------------");
     Ok(())
 }
