@@ -4,7 +4,6 @@ use anyhow::*;
 use async_trait::async_trait;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
-use futures::FutureExt;
 use postgres_types::Json;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -422,7 +421,7 @@ where
 
         let _ = self.cache.get_mut().take();
         let mut connection = self.db.get().await.unwrap();
-        let mut db_tx = connection
+        let db_tx = connection
             .transaction()
             .await
             .expect("unable to create DB transaction");
@@ -511,17 +510,15 @@ where
             drop(read_guard);
             if let Some(Some(cached_value)) = value {
                 Some(cached_value.into_value())
+            } else if let Some(value) = F::fetch_at(self.db.clone(), &self.table, k, epoch)
+                .await
+                .unwrap()
+            {
+                let mut write_guard = self.cache.write().await;
+                write_guard.insert(k.clone(), Some(CachedValue::Read(value.clone())));
+                Some(value)
             } else {
-                if let Some(value) = F::fetch_at(self.db.clone(), &self.table, k, epoch)
-                    .await
-                    .unwrap()
-                {
-                    let mut write_guard = self.cache.write().await;
-                    write_guard.insert(k.clone(), Some(CachedValue::Read(value.clone())));
-                    Some(value)
-                } else {
-                    None
-                }
+                None
             }
         } else {
             F::fetch_at(self.db.clone(), &self.table, k, epoch)
@@ -593,7 +590,7 @@ where
 
         self.cache.get_mut().clear();
         let mut connection = self.db.get().await.unwrap();
-        let mut db_tx = connection
+        let db_tx = connection
             .transaction()
             .await
             .expect("unable to create DB transaction");

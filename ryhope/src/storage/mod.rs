@@ -1,9 +1,8 @@
-use std::future::Future;
 use std::{fmt::Debug, hash::Hash};
 
 use anyhow::*;
 use async_trait::async_trait;
-use futures::future::{BoxFuture, FutureExt};
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
 use crate::{tree::TreeTopology, Epoch, InitSettings};

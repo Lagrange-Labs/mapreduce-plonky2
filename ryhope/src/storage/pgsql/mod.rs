@@ -1,6 +1,8 @@
 use crate::storage::RoEpochKvStorage;
 use crate::tree::TreeTopology;
 use crate::{Epoch, InitSettings};
+use std::fmt::Debug;
+use std::hash::Hash;
 
 use self::storages::{
     CachedDbKvStore, CachedDbStore, DbConnector, NodeConnector, PayloadConnector,
@@ -12,11 +14,9 @@ use crate::storage::pgsql::storages::DBPool;
 use anyhow::*;
 use async_trait::async_trait;
 use bb8_postgres::PostgresConnectionManager;
-use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::*;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, fmt::Debug, hash::Hash, rc::Rc};
 use tokio_postgres::NoTls;
 
 mod storages;
@@ -450,7 +450,7 @@ where
             // Open a PgSQL transaction, as we want the batch to be atomically
             // successful or failed.
             let mut connection = self.db.get().await.unwrap();
-            let mut db_tx = connection
+            let db_tx = connection
                 .transaction()
                 .await
                 .expect("unable to create DB transaction");
@@ -458,7 +458,7 @@ where
             // Pre-emptively extend by 1 the lifetime of the currently alive rows;
             // those that should not be alive in the next epoch will be rolled back
             // later.
-            self.update_all(&mut db_tx).await?;
+            self.update_all(&db_tx).await?;
 
             // First, handle the corner case of nodes whose payload only have been
             // updated, that will be the only ones appearing in the data cache but
@@ -476,11 +476,11 @@ where
             for (k, v) in not_in_nodes_cache {
                 if let Some(CachedValue::Written(v)) = v {
                     // rollback the old value if any
-                    let previous_payload = self.rollback_one_row(&mut db_tx, k).await?.unwrap();
+                    let previous_payload = self.rollback_one_row(&db_tx, k).await?.unwrap();
                     // write the new value
-                    self.new_node(&mut db_tx, k, previous_payload.0).await?;
+                    self.new_node(&db_tx, k, previous_payload.0).await?;
                     PayloadConnector::set_at_in_tx(
-                        &mut db_tx,
+                        &db_tx,
                         &self.table,
                         k,
                         self.epoch + 1,
@@ -500,7 +500,7 @@ where
                         // duplicated/updated and rolled-back
                         CachedValue::Written(node) => {
                             // rollback the old value if any
-                            let previous_payload = self.rollback_one_row(&mut db_tx, k).await?;
+                            let previous_payload = self.rollback_one_row(&db_tx, k).await?;
                             let old_payload = previous_payload.as_ref().map(|x| x.1.clone());
                             let maybe_new_payload = self
                                 .data
@@ -511,7 +511,7 @@ where
                                 .and_then(|v| v.as_ref().map(|cv| cv.value().to_owned()));
 
                             // insert the new row representing the new state of the key...
-                            self.new_node(&mut db_tx, k, node.to_owned()).await?;
+                            self.new_node(&db_tx, k, node.to_owned()).await?;
 
                             // ... and carry over its associated payload and hash.
 
@@ -524,7 +524,7 @@ where
                                 .expect("both old and new payloads are both None");
 
                             PayloadConnector::set_at_in_tx(
-                                &mut db_tx,
+                                &db_tx,
                                 &self.table,
                                 k,
                                 new_epoch,

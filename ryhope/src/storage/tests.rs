@@ -249,7 +249,7 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
     println!("Old one");
     s_psql.print_tree().await;
 
-    let mut s2 = MerkleTreeKvDb::<TestTree, V, SqlStorage>::new(
+    let s2 = MerkleTreeKvDb::<TestTree, V, SqlStorage>::new(
         InitSettings::MustExist,
         SqlStorageSettings {
             db_url: db_url(),
