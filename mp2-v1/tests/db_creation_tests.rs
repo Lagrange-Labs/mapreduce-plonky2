@@ -63,11 +63,11 @@ async fn db_creation_integrated_tests() -> Result<()> {
 
     info!("Params built");
     let mut single = TestCase::single_value_test_case(&ctx).await?;
-    //let changes = vec![
-    //    ChangeType::Update(UpdateType::Rest),
-    //    ChangeType::Update(UpdateType::SecondaryIndex),
-    //];
-    //single.run(&mut ctx, changes.clone()).await?;
+    let changes = vec![
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::SecondaryIndex),
+    ];
+    single.run(&mut ctx, changes.clone()).await?;
     let mut mapping = TestCase::mapping_test_case(&ctx).await?;
     let changes = vec![
         ChangeType::Insertion,

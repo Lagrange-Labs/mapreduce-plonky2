@@ -525,7 +525,9 @@ impl TestCase {
             // of it.
             TableSourceSlot::Mapping((ref mut mapping, _)) => {
                 //let idx = thread_rng().gen_range(0..mapping.mapping_keys.len());
-                let idx = mapping.mapping_keys.len() - 1;
+                //let idx = mapping.mapping_keys.len() - 1;
+                // easier to debug
+                let idx = 0;
                 let mkey = &mapping.mapping_keys[idx].clone();
                 let slot = mapping.slot as usize;
                 let index_type = mapping.index.clone();

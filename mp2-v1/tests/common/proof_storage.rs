@@ -136,7 +136,10 @@ pub trait ProofStorage {
     // to find the _latest_ which may not be the same as the one given here.
     // TODO: probably refactor this whole mechanism outside of storage, and potentially put primary
     // index outside of row tree key since it's weird call here.
-    fn get_proof_latest(&self, key: &RowProofIdentifier<BlockPrimaryIndex>) -> Result<Vec<u8>>;
+    fn get_proof_latest(
+        &self,
+        key: &RowProofIdentifier<BlockPrimaryIndex>,
+    ) -> Result<(Vec<u8>, BlockPrimaryIndex)>;
     /// Move the proof form the old key to the new key. This is **required** for cells proofs
     /// when the secondary index value changes.
     /// If there is no proof at the old key, it simply does nothing.
@@ -168,12 +171,15 @@ impl ProofStorage for MemoryProofStorage {
     }
     // stupid dumb implementation
     // TODO: remove this struct/implementation  alltogether ?
-    fn get_proof_latest(&self, key: &RowProofIdentifier<BlockPrimaryIndex>) -> Result<Vec<u8>> {
+    fn get_proof_latest(
+        &self,
+        key: &RowProofIdentifier<BlockPrimaryIndex>,
+    ) -> Result<(Vec<u8>, BlockPrimaryIndex)> {
         for i in key.primary..0 {
             let mut nkey = key.clone();
             nkey.primary = i;
             if let Ok(p) = self.get_proof_exact(&ProofKey::Row(nkey)) {
-                return Ok(p);
+                return Ok((p, i));
             }
         }
         bail!("couldn't find proof with such identifier");
@@ -266,7 +272,10 @@ impl ProofStorage for KeyValueDB {
         Ok(())
     }
 
-    fn get_proof_latest(&self, key: &RowProofIdentifier<BlockPrimaryIndex>) -> Result<Vec<u8>> {
+    fn get_proof_latest(
+        &self,
+        key: &RowProofIdentifier<BlockPrimaryIndex>,
+    ) -> Result<(Vec<u8>, BlockPrimaryIndex)> {
         let tx = self.db.tx(false)?;
         let row_bucket = tx.get_bucket(ROW_BUCKET_NAME)?;
         let raw = match row_bucket.get(key.tree_key.to_bytes()?) {
@@ -288,7 +297,7 @@ impl ProofStorage for KeyValueDB {
         println!("GET_PROOF_LATEST: before fetching the full row key proof");
         let out = self.get_proof_exact(&ProofKey::Row(new_key))?;
         println!("GET_PROOF_LATEST: after finding the full row key");
-        Ok(out)
+        Ok((out, block_number))
     }
 
     fn move_proof(&mut self, old_key: &ProofKey, new_key: &ProofKey) -> Result<()> {

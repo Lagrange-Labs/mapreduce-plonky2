@@ -304,12 +304,15 @@ impl<P: ProofStorage> TestContext<P> {
                 // Prove a partial node
                 // NOTE: we need to find the latest one generated for that rowtreekey
                 // and we don't know which block is it, it is not necessarily the current block!
-                debug!("BEFORE fetching child proof for partial node");
-                let child_proof = self
+                debug!(
+                    "BEFORE fetching child proof for partial node {:?}",
+                    proof_key
+                );
+                let (child_proof, obn) = self
                     .storage
                     .get_proof_latest(&proof_key)
                     .expect("UT guarantees proving in order");
-                debug!("AFTER fetching child proof for partial node");
+                debug!("AFTER fetching child proof for partial node - found at block {obn}");
 
                 let cell_tree_proof = self
                     .storage
@@ -351,15 +354,17 @@ impl<P: ProofStorage> TestContext<P> {
                 // Therefore we need to search for the _latest_ one since that is the one of
                 // interest to us.
                 debug!("BEFORE fetching LEFT row tree proof for full node");
-                let left_proof = self
+                let (left_proof, lbn) = self
                     .storage
                     .get_proof_latest(&left_proof_key)
                     .expect("UT guarantees proving in order");
+                debug!("AFTER fetching LEFT row tree proof for full node - FOUND block {lbn}");
                 debug!("BEFORE fetching RIGHT row tree proof for full node");
-                let right_proof = self
+                let (right_proof, rbn) = self
                     .storage
                     .get_proof_latest(&right_proof_key)
                     .expect("UT guarantees proving in order");
+                debug!("AFTER fetching RIGHT row tree proof for full node - FOUND block {rbn}");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::full(
                         id,
