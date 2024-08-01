@@ -6,6 +6,7 @@ mod non_existence_inter;
 mod non_existence_leaf;
 mod output_computation;
 mod partial_node;
+mod subtree_proven_single_path_node;
 mod utils;
 
 #[cfg(test)]
