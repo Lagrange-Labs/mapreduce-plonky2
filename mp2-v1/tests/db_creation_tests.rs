@@ -17,7 +17,10 @@ use common::{
 };
 use log::info;
 use ryhope::{
-    storage::{EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
+    storage::{
+        updatetree::{UpdatePlan, UpdateTree},
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
+    },
     tree::scapegoat::{self, Alpha},
     InitSettings,
 };
@@ -154,6 +157,133 @@ fn ryhope_scapegoat() -> Result<()> {
         t.store(r11bis, payload.clone())?;
         Ok(())
     })?;
+    println!("AFTER");
+    row_tree.print_tree();
+    println!("UT: ------------------------");
+    ut.print();
+    println!("----------------------------");
+    Ok(())
+}
+
+#[test]
+fn ryhope_scapegoat2() -> Result<()> {
+    let mut row_tree = MerkleRowTree::new(
+        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
+        (),
+    )
+    .unwrap();
+    let cell = Cell {
+        id: 10,
+        value: U256::from(10),
+    };
+    let payload = RowPayload {
+        cells: CellCollection(vec![cell.clone(), cell.clone(), cell.clone()]),
+        ..Default::default()
+    };
+    // RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [10] }/None (3)
+    //   |RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [11] }/RowTreeKey { value: , rest: [10] } (2)
+    //   |  |RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398834414), rest: [12] }/RowTreeKey { value: , rest: [11] } (1)
+    let r10 = RowTreeKey {
+        value: U256::from_str_radix("1056494154592187365319695072752373049978398833853", 10)
+            .unwrap()
+            .into(),
+        rest: vec![10],
+    };
+    let r11 = RowTreeKey {
+        value: U256::from_str_radix("1056494154592187365319695072752373049978398833853", 10)
+            .unwrap()
+            .into(),
+        rest: vec![11],
+    };
+    let r12 = RowTreeKey {
+        value: U256::from_str_radix("1056494154592187365319695072752373049978398834414", 10)
+            .unwrap()
+            .into(),
+        rest: vec![12],
+    };
+    enum Update {
+        Insert(RowTreeKey),
+        Deletion(RowTreeKey),
+    }
+    let mut apply_update =
+        |tree: &mut MerkleRowTree, updates: Vec<Update>| -> Result<UpdateTree<RowTreeKey>> {
+            tree.in_transaction(|t| {
+                for u in updates {
+                    match u {
+                        Update::Insert(k) => {
+                            t.store(k, payload.clone())?;
+                        }
+                        Update::Deletion(k) => {
+                            t.remove(k)?;
+                        }
+                    }
+                }
+                Ok(())
+            })
+        };
+    println!("block 2");
+    apply_update(
+        &mut row_tree,
+        vec![
+            Update::Insert(r10.clone()),
+            Update::Insert(r11.clone()),
+            Update::Insert(r12),
+        ],
+    )?;
+
+    println!("block 3");
+    // Insertion(Row { k: RowTreeKey { value: VectorU256(131889689160155728452442635557830924454313873897), rest: [13] },
+    let r13 = RowTreeKey {
+        value: U256::from_str_radix("131889689160155728452442635557830924454313873897", 10)
+            .unwrap()
+            .into(),
+        rest: vec![13],
+    };
+    apply_update(&mut row_tree, vec![Update::Insert(r13)])?;
+
+    // Insertion(Row { k: RowTreeKey { value: VectorU256(760593967277233584130757083408460933562276361544), rest: [14] }, :
+    println!("block 4");
+    let r14 = RowTreeKey {
+        value: U256::from_str_radix("760593967277233584130757083408460933562276361544", 10)
+            .unwrap()
+            .into(),
+        rest: vec![14],
+    };
+    apply_update(&mut row_tree, vec![Update::Insert(r14)])?;
+    // Deletion(RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [10] })
+    // Insertion(Row { k: RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [15]
+    println!("block 5");
+    let r15 = RowTreeKey {
+        value: U256::from_str_radix("1056494154592187365319695072752373049978398833853", 10)
+            .unwrap()
+            .into(),
+        rest: vec![15],
+    };
+    apply_update(
+        &mut row_tree,
+        vec![Update::Deletion(r10), Update::Insert(r15)],
+    )?;
+
+    //  Deletion(RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [11] })
+    // Insertion(Row { k: RowTreeKey { value: VectorU256(252811549864805747143179347346470204140167719177), rest: [11] },
+    println!("block 6");
+    let r11_bis = RowTreeKey {
+        value: U256::from_str_radix("252811549864805747143179347346470204140167719177", 10)
+            .unwrap()
+            .into(),
+        rest: vec![11],
+    };
+
+    apply_update(
+        &mut row_tree,
+        vec![Update::Deletion(r11), Update::Insert(r11_bis.clone())],
+    )?;
+    // Deletion(RowTreeKey { value: VectorU256(252811549864805747143179347346470204140167719177), rest: [11] }
+    println!("block 7");
+    println!("BEFORE");
+    row_tree.print_tree();
+    let ut = apply_update(&mut row_tree, vec![Update::Deletion(r11_bis)])?;
+
     println!("AFTER");
     row_tree.print_tree();
     println!("UT: ------------------------");
