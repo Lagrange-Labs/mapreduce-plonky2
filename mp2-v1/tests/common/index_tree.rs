@@ -85,8 +85,8 @@ pub type IndexTreeKey = <IndexTree as TreeTopology>::Key;
 type IndexStorage = InMemory<IndexTree, IndexNode>;
 pub type MerkleIndexTree = MerkleTreeKvDb<IndexTree, IndexNode, IndexStorage>;
 
-pub fn build_initial_index_tree(
-    index: &IndexNode,
+pub async fn build_initial_index_tree(
+    index: IndexNode,
 ) -> Result<(MerkleIndexTree, UpdateTree<IndexTreeKey>)> {
     let block_usize: BlockPrimaryIndex = index.value.try_into().unwrap();
 
@@ -97,12 +97,16 @@ pub fn build_initial_index_tree(
         InitSettings::Reset(sbbst::Tree::with_shift_and_capacity(block_usize - 1, 0)),
         (),
     )
+    .await
     .unwrap();
     let update_tree = index_tree
         .in_transaction(|t| {
-            t.store(index.value.to(), index.clone())?;
-            Ok(())
+            Box::pin(async move {
+                t.store(index.value.to(), index.clone()).await?;
+                Ok(())
+            })
         })
+        .await
         .context("while filling up index tree")?;
     Ok((index_tree, update_tree))
 }
@@ -111,7 +115,7 @@ impl TestContext {
     /// NOTE: we require the added_index information because we need to distinguish if a new node
     /// added has a leaf or a as parent. The rest of the nodes in the update tree are to be proven
     /// by the "membership" circuit. So we need to differentiate between the two cases.
-    pub fn prove_index_tree<P: ProofStorage>(
+    pub async fn prove_index_tree<P: ProofStorage>(
         &self,
         table_id: &TableID,
         t: &MerkleIndexTree,
@@ -121,7 +125,7 @@ impl TestContext {
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(k)) = workplan.next() {
-            let (context, node) = t.fetch_with_context(&k);
+            let (context, node) = t.fetch_with_context(&k).await;
             let row_tree_proof = storage
                 .get_proof(&ProofKey::Row(node.row_tree_proof_id.clone()))
                 .expect("should find row proof");
@@ -156,14 +160,14 @@ impl TestContext {
                 // It's ok to fetch the node at the same epoch because for the block tree
                 // we know it's the left children now so the min and max didn't change, we
                 // didn't insert anything new below
-                let (prev_ctx, previous_node) = t.fetch_with_context(previous_key);
+                let (prev_ctx, previous_node) = t.fetch_with_context(previous_key).await;
                 let prev_left_hash = match prev_ctx.left {
-                    Some(kk) => t.fetch(&kk).node_hash,
+                    Some(kk) => t.fetch(&kk).await.node_hash,
                     None => *empty_poseidon_hash(),
                 };
 
                 let prev_right_hash = match prev_ctx.right {
-                    Some(kk) => t.fetch(&kk).node_hash,
+                    Some(kk) => t.fetch(&kk).await.node_hash,
                     None => *empty_poseidon_hash(),
                 };
 
@@ -186,9 +190,9 @@ impl TestContext {
                 // here we are simply proving the new updated nodes from the new node to
                 // the root. We fetch the same node but at the previous version of the
                 // tree to prove the update.
-                let previous_node = t.fetch_at(&k, t.current_epoch() - 1);
+                let previous_node = t.fetch_at(&k, t.current_epoch() - 1).await;
                 let left_key = context.left.expect("should always be a left child");
-                let left_node = t.fetch(&left_key);
+                let left_node = t.fetch(&left_key).await;
                 // this should be one of the nodes we just proved in this loop before
                 let right_key = context.right.expect("should always be a right child");
                 let right_proof = storage
@@ -221,7 +225,7 @@ impl TestContext {
 
             workplan.done(&k).unwrap();
         }
-        let root = t.root().unwrap();
+        let root = t.root().await.unwrap();
         let root_proof_key = IndexProofIdentifier {
             table: table_id.clone(),
             tree_key: root,
@@ -234,7 +238,7 @@ impl TestContext {
         root_proof_key
     }
 
-    pub(crate) fn build_and_prove_index_tree<P: ProofStorage>(
+    pub(crate) async fn build_and_prove_index_tree<P: ProofStorage>(
         &self,
         table: &TableID,
         storage: &mut P,
@@ -252,8 +256,11 @@ impl TestContext {
             row_tree_hash,
             ..Default::default()
         };
-        let (tree, update) = build_initial_index_tree(&node).expect("can't build index tree");
+        let (tree, update) = build_initial_index_tree(node.clone())
+            .await
+            .expect("can't build index tree");
         info!("Generated index tree");
         self.prove_index_tree(table, &tree, update, &node, storage)
+            .await
     }
 }

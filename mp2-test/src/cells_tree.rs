@@ -111,31 +111,36 @@ impl NodePayload for TestCell {
 
 // NOTE: this is not really aync for now, but will be in the future when Ryhope
 // turns async.
-pub fn build_cell_tree(
-    row: &[TestCell],
+pub async fn build_cell_tree(
+    row: Vec<TestCell>,
 ) -> Result<(MerkleCellTree, UpdateTree<<CellTree as TreeTopology>::Key>)> {
-    let mut cell_tree = MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap();
+    let mut cell_tree = MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ())
+        .await
+        .unwrap();
     let update_tree = cell_tree
         .in_transaction(|t| {
-            for (i, cell) in row.iter().enumerate() {
-                // SBBST starts at 1, not 0. Note though this index is not important
-                // since at no point we are looking up value per index in the cells
-                // tree we always look at the entire row at the row tree level.
-                t.store(i + 1, cell.to_owned())?;
-            }
-            Ok(())
+            Box::pin(async move {
+                for (i, cell) in row.into_iter().enumerate() {
+                    // SBBST starts at 1, not 0. Note though this index is not important
+                    // since at no point we are looking up value per index in the cells
+                    // tree we always look at the entire row at the row tree level.
+                    t.store(i + 1, cell.to_owned()).await?;
+                }
+                Ok(())
+            })
         })
+        .await
         .context("while building tree")?;
 
     Ok((cell_tree, update_tree))
 }
 
 /// Compute the expected root hash of constructed cell tree.
-pub fn compute_cells_tree_hash(cells: &[TestCell]) -> HashOut<F> {
+pub async fn compute_cells_tree_hash(cells: Vec<TestCell>) -> HashOut<F> {
     if cells.len() == 0 {
         return *empty_poseidon_hash();
     }
-    let cell_tree = build_cell_tree(cells).unwrap().0;
+    let cell_tree = build_cell_tree(cells).await.unwrap().0;
 
-    cell_tree.root_data().unwrap().hash
+    cell_tree.root_data().await.unwrap().hash
 }

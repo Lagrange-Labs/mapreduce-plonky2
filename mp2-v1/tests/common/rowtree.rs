@@ -173,20 +173,24 @@ pub type MerkleRowTree = MerkleTreeKvDb<RowTree, Row, RowStorage>;
 
 /// Given a list of row, build the Merkle tree of the secondary index and
 /// returns it along its update tree.
-pub async fn build_row_tree(rows: &[Row]) -> Result<(MerkleRowTree, UpdateTree<RowTreeKey>)> {
+pub async fn build_row_tree(rows: Vec<Row>) -> Result<(MerkleRowTree, UpdateTree<RowTreeKey>)> {
     let mut row_tree = MerkleRowTree::new(
         InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
         (),
     )
+    .await
     .context("while creating row tree instance")?;
 
     let update_tree = row_tree
         .in_transaction(|t| {
-            for row in rows.iter() {
-                t.store(row.k.to_owned(), row.to_owned())?;
-            }
-            Ok(())
+            Box::pin(async move {
+                for row in rows.iter() {
+                    t.store(row.k.to_owned(), row.to_owned()).await?;
+                }
+                Ok(())
+            })
         })
+        .await
         .context("while filling row tree initial state")?;
 
     Ok((row_tree, update_tree))
@@ -209,7 +213,7 @@ impl TestContext {
             self.block_number.as_number().unwrap().try_into().unwrap();
 
         while let Some(Next::Ready(k)) = workplan.next() {
-            let (context, row) = t.fetch_with_context(&k);
+            let (context, row) = t.fetch_with_context(&k).await;
             // NOTE: the sec. index. is assumed to be in the first position
             // Sec. index identifier
             let id = row.secondary_index().id;
@@ -303,7 +307,7 @@ impl TestContext {
 
             workplan.done(&k).unwrap();
         }
-        let root = t.root().unwrap();
+        let root = t.root().await.unwrap();
         let root_proof_key = RowProofIdentifier {
             table: table_id.clone(),
             primary: block_key,
@@ -324,24 +328,29 @@ impl TestContext {
         rows: &[Row],
         storage: &mut P,
     ) -> RowProofIdentifier<BlockPrimaryIndex> {
-        let (row_tree, row_tree_ut) = build_row_tree(rows)
-            .await
-            .expect("failed to create row tree");
-        let root_proof_key = self
-            .prove_row_tree(table_id, &row_tree, row_tree_ut, storage)
-            .await;
-        let row_tree_proof = storage
-            .get_proof(&ProofKey::Row(root_proof_key.clone()))
-            .unwrap();
+        unimplemented!("async ryhope");
 
-        let tree_hash = row_tree.root_data().unwrap().hash;
-        let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
+        #[cfg(foo_bar)]
+        {
+            let (row_tree, row_tree_ut) = build_row_tree(rows)
+                .await
+                .expect("failed to create row tree");
+            let root_proof_key = self
+                .prove_row_tree(table_id, &row_tree, row_tree_ut, storage)
+                .await;
+            let row_tree_proof = storage
+                .get_proof(&ProofKey::Row(root_proof_key.clone()))
+                .unwrap();
 
-        assert_eq!(
-            tree_hash, proved_hash,
-            "mismatch between row tree root hash as computed by ryhope and mp2",
-        );
+            let tree_hash = row_tree.root_data().unwrap().hash;
+            let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
 
-        root_proof_key
+            assert_eq!(
+                tree_hash, proved_hash,
+                "mismatch between row tree root hash as computed by ryhope and mp2",
+            );
+
+            root_proof_key
+        }
     }
 }

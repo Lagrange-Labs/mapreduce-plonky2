@@ -61,7 +61,7 @@ impl TestContext {
         let mut workplan = ut.into_workplan();
 
         while let Some(Next::Ready(k)) = workplan.next() {
-            let (context, cell) = t.fetch_with_context(&k);
+            let (context, cell) = t.fetch_with_context(&k).await;
 
             let proof = if context.is_leaf() {
                 // Prove a leaf
@@ -123,7 +123,7 @@ impl TestContext {
 
             workplan.done(&k).unwrap();
         }
-        let root = t.root().unwrap();
+        let root = t.root().await.unwrap();
         let root_proof_key = CellProofIdentifier {
             table: table_id.clone(),
             primary: block_key,
@@ -148,15 +148,16 @@ impl TestContext {
     ) -> Row {
         let cells = self.build_cells(contract_address, slots).await;
         // NOTE: the sec. index slot is assumed to be the first.
-        let (cell_tree, cell_tree_ut) =
-            build_cell_tree(&cells[1..]).expect("failed to create cell tree");
+        let (cell_tree, cell_tree_ut) = build_cell_tree(cells[1..].to_vec())
+            .await
+            .expect("failed to create cell tree");
         let root_key = self
             .prove_cell_tree(table_id, &cell_tree, cell_tree_ut, storage)
             .await;
         let cell_root_proof = storage
             .get_proof(&ProofKey::Cell(root_key.clone()))
             .unwrap();
-        let tree_hash = cell_tree.root_data().unwrap().hash;
+        let tree_hash = cell_tree.root_data().await.unwrap().hash;
         let proved_hash = cell_tree_proof_to_hash(&cell_root_proof);
         assert_eq!(
             tree_hash, proved_hash,

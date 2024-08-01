@@ -1,11 +1,12 @@
+use crate::{tree::TreeTopology, Epoch};
 use anyhow::*;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},
     hash::Hash,
 };
-
-use crate::{tree::TreeTopology, Epoch};
 
 use super::TreeStorage;
 
@@ -36,7 +37,7 @@ impl<K: Clone + Hash + Eq> UpdateTreeNode<K> {
     }
 }
 
-impl<K: Clone + Hash + Eq> UpdateTree<K> {
+impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
     /// Create an empty `UpdateTree`.
     fn empty(epoch: Epoch) -> Self {
         Self {
@@ -46,42 +47,45 @@ impl<K: Clone + Hash + Eq> UpdateTree<K> {
         }
     }
 
-    fn rec_build<T: TreeTopology<Key = K>, S: TreeStorage<T>>(
-        &mut self,
-        t: &T,
-        current: &K,
-        nodes: &S,
-    ) -> usize {
-        let context = t.node_context(current, nodes).unwrap();
-        let new_i = self.nodes.len();
-        self.idx.insert(current.clone(), new_i);
-        // Important here to push the top node first, as the UpdateTree expects
-        // nodes[0] to be the implicit root.
-        self.nodes.push(UpdateTreeNode {
-            parent: context
-                .parent
-                .clone()
-                .map(|p| self.idx.get(&p).unwrap())
-                .copied(),
-            children: Default::default(),
-            k: current.to_owned(),
-        });
-        for c in context.iter_children().flatten() {
-            let c_i = self.rec_build(t, c, nodes);
-            self.nodes[new_i].children.insert(c_i);
+    fn rec_build<'a, T: TreeTopology<Key = K>, S: TreeStorage<T>>(
+        &'a mut self,
+        t: &'a T,
+        current: &'a K,
+        nodes: &'a S,
+    ) -> BoxFuture<'a, usize> {
+        async move {
+            let context = t.node_context(current, nodes).await.unwrap();
+            let new_i = self.nodes.len();
+            self.idx.insert(current.clone(), new_i);
+            // Important here to push the top node first, as the UpdateTree expects
+            // nodes[0] to be the implicit root.
+            self.nodes.push(UpdateTreeNode {
+                parent: context
+                    .parent
+                    .clone()
+                    .map(|p| self.idx.get(&p).unwrap())
+                    .copied(),
+                children: Default::default(),
+                k: current.to_owned(),
+            });
+            for c in context.iter_children().flatten() {
+                let c_i = self.rec_build(t, c, nodes).await;
+                self.nodes[new_i].children.insert(c_i);
+            }
+            new_i
         }
-        new_i
+        .boxed()
     }
 
     /// Instantiate a new `UpdateTree` mirroring the integrality of the provided tree.
-    pub fn from_tree<T: TreeTopology<Key = K>, S: TreeStorage<T>>(
+    pub async fn from_tree<T: TreeTopology<Key = K> + Sync, S: TreeStorage<T>>(
         t: &T,
         s: &S,
         epoch: Epoch,
     ) -> Self {
         let mut r = Self::empty(epoch);
-        if let Some(root) = t.root(s) {
-            r.rec_build(t, &root, s);
+        if let Some(root) = t.root(s).await {
+            r.rec_build(t, &root, s).await;
         }
         r
     }
@@ -317,11 +321,11 @@ mod test {
         }
     }
 
-    #[test]
-    fn from_tree() {
+    #[tokio::test]
+    async fn from_tree() {
         let t = sbbst::Tree;
         let storage = InMemory::<sbbst::Tree, ()>::new(sbbst::Tree::with_capacity(10));
-        let ut = UpdateTree::from_tree(&t, &storage, 1);
+        let ut = UpdateTree::from_tree(&t, &storage, 1).await;
         ut.print();
     }
 }
