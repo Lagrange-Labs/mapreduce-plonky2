@@ -272,7 +272,6 @@ impl<P: ProofStorage> TestContext<P> {
         ut.print();
         println!(" --- AFTER WORKPLAN ---");
         let mut workplan = ut.into_workplan();
-
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, row) = t.fetch_with_context(&k);
             let id = row.cells.secondary_index().unwrap().id;
@@ -397,11 +396,12 @@ impl<P: ProofStorage> TestContext<P> {
             tree_key: root,
         };
 
-        let p = self
+        let (p, index) = self
             .storage
-            .get_proof_exact(&ProofKey::Row(root_proof_key.clone()))
+            .get_proof_latest(&root_proof_key)
             .expect("row tree root proof absent");
-        {
+
+        if index == primary {
             let pproof = ProofWithVK::deserialize(&p).unwrap();
             let pi =
                 verifiable_db::row_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
@@ -409,6 +409,8 @@ impl<P: ProofStorage> TestContext<P> {
                 "[--] FINAL MERKLE DIGEST VALUE --> {:?} ",
                 pi.rows_digest_field()
             );
+        } else {
+            debug!("[--] No updates to compute! (last root on block {index}");
         }
         Ok(root_proof_key)
     }
