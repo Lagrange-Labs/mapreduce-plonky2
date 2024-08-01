@@ -554,13 +554,10 @@ impl TestCase {
                 let current_value = response.storage_proof[0].value;
                 let current_key = U256::from_be_slice(mkey);
 
+                let new_value: U256 = random_address().into_word().into();
                 let mapping_updates = match c {
                     ChangeType::Insertion => {
-                        let new_entry = (new_key, random_address());
-                        vec![MappingUpdate::Insertion(
-                            new_entry.0,
-                            new_entry.1.into_word().into(),
-                        )]
+                        vec![MappingUpdate::Insertion(new_key, new_value)]
                     }
                     ChangeType::Deletion => {
                         // NOTE: We care about the value here since that allows _us_ to pinpoint the
@@ -570,7 +567,6 @@ impl TestCase {
                         vec![MappingUpdate::Deletion(current_key, current_value)]
                     }
                     ChangeType::Update(u) => {
-                        let new_value = random_address().into_word().into();
                         match u {
                             // update the non-indexed column
                             UpdateType::Rest => {

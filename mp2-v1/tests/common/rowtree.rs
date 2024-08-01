@@ -268,6 +268,9 @@ impl<P: ProofStorage> TestContext<P> {
         ut: UpdateTree<<RowTree as TreeTopology>::Key>,
     ) -> Result<RowProofIdentifier<BlockPrimaryIndex>> {
         let t = &table.row;
+        println!(" --- BEFORE WORKPLAN ---");
+        ut.print();
+        println!(" --- AFTER WORKPLAN ---");
         let mut workplan = ut.into_workplan();
 
         while let Some(Next::Ready(k)) = workplan.next() {

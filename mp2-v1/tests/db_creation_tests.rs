@@ -71,6 +71,7 @@ async fn db_creation_integrated_tests() -> Result<()> {
     let mut mapping = TestCase::mapping_test_case(&ctx).await?;
     let changes = vec![
         ChangeType::Insertion,
+        ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
         ChangeType::Deletion,
         ChangeType::Update(UpdateType::SecondaryIndex),
@@ -81,11 +82,12 @@ async fn db_creation_integrated_tests() -> Result<()> {
 
 #[test]
 fn ryhope_scapegoat() -> Result<()> {
-    // creates a scapegoat row tree with
-    // * 3 initial entries
-    // * 2 insertion
-    // * 1 deletion
-    // make sure the tree at the end is correct, only includes the value that we want.
+    enum Op {
+        Insertion,
+        Deletion,
+        Update,
+    }
+    let ops = vec![vec![Op::Insertion, Op::Insertion, Op::Insertion]];
     let rows = (0..5)
         .map(|i| Row {
             k: RowTreeKey {
