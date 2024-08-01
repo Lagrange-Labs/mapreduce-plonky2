@@ -863,65 +863,32 @@ impl TestCase {
                         vec![TableRowUpdate::Insertion(cells, index)]
                     }
                     MappingUpdate::Update(mkey, old_value, mvalue) => {
-                        // TRICKY: here we must _find_ the current mapping entry
-                        // being targeted to transform it to the table notion
-                        // if the secondary index is the mapping value, that means
-                        // we need to delete a row and insert a new row
-                        // If the secondary index is the mapping key, then it's easy,
-                        // it's a simple change in the row.
+                        // NOTE: we need here to (a) delete current row and (b) insert new row
+                        // Regardless of the change if it's on the mapping key or value, since a
+                        // row is uniquely identified by its pair (key,value) then if one of those
+                        // change, that means the row tree key needs to change as well, i.e. it's a
+                        // deletion and addition.
                         let previous_entry = UniqueMappingEntry::new(mkey, old_value);
                         let previous_row_key = previous_entry.to_row_key(&index);
-                        let mut previous_table_value =
-                            previous_entry.to_table_row_value(&index, slot, &self.contract_address);
                         let new_entry = UniqueMappingEntry::new(mkey, mvalue);
-                        match index {
-                            MappingIndex::Key(_) => {
-                                // update the value, key == secondary index so it's a regular
-                                // update
-                                previous_table_value.current_cells[0].value = *mvalue;
-                                let cells_update = CellsUpdate {
-                                    previous_row_key: previous_row_key.clone(),
-                                    new_row_key: previous_row_key,
-                                    updated_cells: vec![
-                                        previous_table_value.current_cells[0].clone()
-                                    ],
-                                };
-                                vec![TableRowUpdate::Update(cells_update)]
-                            }
-                            MappingIndex::Value(_) => {
-                                // here we need to delete the previous entry
-                                // then to insert a new one
-                                let key_to_delete: RowTreeKey =
-                                    previous_table_value.current_secondary.into();
-                                let (mut cells, index) = new_entry.to_update(
-                                    &index,
-                                    slot,
-                                    &self.contract_address,
-                                    // NOTE: here we provide the previous key such that we can
-                                    // reconstruct the cells tree as it was before and then apply
-                                    // the update and put it in a new row. Otherwise we don't know
-                                    // the update plan since we don't have a base tree to deal
-                                    // with.
-                                    // Anther more important reason maybe is that in general, for
-                                    // multiple columns values, we need to know the previous
-                                    // columns value and "merge" it with the update to get the
-                                    // updated new row. For mapping, not very relevant since there
-                                    // is only one cell since only two columns (outside of the
-                                    // block)
-                                    Some(key_to_delete.clone()),
-                                );
-                                // NOTE: in this case, only the secondary index is changing so we
-                                // should not have to provide any updated cells
-                                // The insertion logic takes care of loading the cells tree from
-                                // the previous row tree key so it'll load up the current values
-                                // and they're not changing.
-                                cells.updated_cells = vec![];
-                                vec![
-                                    TableRowUpdate::Deletion(key_to_delete),
-                                    TableRowUpdate::Insertion(cells, index),
-                                ]
-                            }
-                        }
+                        let (cells, index) = new_entry.to_update(
+                            &index,
+                            slot,
+                            &self.contract_address,
+                            // NOTE: here we provide the previous key such that we can
+                            // reconstruct the cells tree as it was before and then apply
+                            // the update and put it in a new row. Otherwise we don't know
+                            // the update plan since we don't have a base tree to deal
+                            // with.
+                            // In the case the key is the cell, that's good, we don't need to do
+                            // anything to the tree then since the doesn't change.
+                            // In the case it's the value, then we'll have to reprove the cell.
+                            Some(previous_row_key.clone()),
+                        );
+                        vec![
+                            TableRowUpdate::Deletion(previous_row_key),
+                            TableRowUpdate::Insertion(cells, index),
+                        ]
                     }
                 }
             })
