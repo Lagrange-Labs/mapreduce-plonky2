@@ -276,19 +276,18 @@ impl<P: ProofStorage> TestContext<P> {
             // Sec. index value
             let value = row.cells.secondary_index().unwrap().value;
 
-            debug!("Before fetching cell proof");
             let cell_tree_proof = self
                 .storage
                 .get_proof_exact(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
                 .expect("should find cell root proof");
-            debug!("After fetching cell proof");
+            debug!("After fetching cell proof for row key {:?}", k);
             let proof = if context.is_leaf() {
                 // Prove a leaf
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
                         .unwrap(),
                 );
-                debug!("Before proving leaf node row tree key");
+                debug!("Before proving leaf node row tree key {:?}", k);
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.is_partial() {
                 let proof_key = RowProofIdentifier {
@@ -305,19 +304,14 @@ impl<P: ProofStorage> TestContext<P> {
                 // NOTE: we need to find the latest one generated for that rowtreekey
                 // and we don't know which block is it, it is not necessarily the current block!
                 debug!(
-                    "BEFORE fetching child proof for partial node {:?}",
-                    proof_key
+                    "BEFORE fetching child proof of node {:?} for partial node {:?}",
+                    proof_key, k,
                 );
                 let (child_proof, obn) = self
                     .storage
                     .get_proof_latest(&proof_key)
                     .expect("UT guarantees proving in order");
                 debug!("AFTER fetching child proof for partial node - found at block {obn}");
-
-                let cell_tree_proof = self
-                    .storage
-                    .get_proof_exact(&ProofKey::Cell(row.cell_tree_root_proof_id))
-                    .expect("should find cells tree root proof");
 
                 debug!("AFTER fetching cell tree proof for partial node");
                 let inputs = CircuitInput::RowsTree(
@@ -344,22 +338,24 @@ impl<P: ProofStorage> TestContext<P> {
                     primary,
                     tree_key: context.right.unwrap(),
                 };
-                let cell_tree_proof = self
-                    .storage
-                    .get_proof_exact(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
-                    .expect("should find cells tree root proof");
 
                 // Prove a full node: fetch the row proofs of the children
                 // NOTE: these row proofs may have been generated at any block in the past.
                 // Therefore we need to search for the _latest_ one since that is the one of
                 // interest to us.
-                debug!("BEFORE fetching LEFT row tree proof for full node");
+                debug!(
+                    "BEFORE fetching LEFT row tree {:?} proof for full node {:?}",
+                    left_proof_key, k
+                );
                 let (left_proof, lbn) = self
                     .storage
                     .get_proof_latest(&left_proof_key)
                     .expect("UT guarantees proving in order");
                 debug!("AFTER fetching LEFT row tree proof for full node - FOUND block {lbn}");
-                debug!("BEFORE fetching RIGHT row tree proof for full node");
+                debug!(
+                    "BEFORE fetching RIGHT row tree {:?} for full node {:?}",
+                    right_proof_key, k
+                );
                 let (right_proof, rbn) = self
                     .storage
                     .get_proof_latest(&right_proof_key)
@@ -375,7 +371,7 @@ impl<P: ProofStorage> TestContext<P> {
                     )
                     .unwrap(),
                 );
-                debug!("Before proving full node row tree key");
+                debug!("Before proving full node row tree key {:?}", k);
                 api::generate_proof(self.params(), inputs).expect("while proving full node")
             };
             let new_proof_key = RowProofIdentifier {
@@ -384,14 +380,12 @@ impl<P: ProofStorage> TestContext<P> {
                 tree_key: k.clone(),
             };
 
-            debug!("Before storing row tree key proving {k:?}");
             self.storage
                 .store_proof(ProofKey::Row(new_proof_key), proof)
                 .expect("storing should work");
 
-            debug!("??Finished row tree key proving {k:?}");
-            workplan.done(&k).unwrap();
             debug!("Finished row tree key proving {k:?}");
+            workplan.done(&k).unwrap();
         }
         let root = t.root().unwrap();
         let root_proof_key = RowProofIdentifier {
