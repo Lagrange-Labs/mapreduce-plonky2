@@ -74,10 +74,10 @@ async fn db_creation_integrated_tests() -> Result<()> {
     let mut mapping = TestCase::mapping_test_case(&ctx).await?;
     let changes = vec![
         ChangeType::Insertion,
-        ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
-        ChangeType::Deletion,
+        ChangeType::Insertion,
         ChangeType::Update(UpdateType::SecondaryIndex),
+        ChangeType::Deletion,
     ];
     mapping.run(&mut ctx, changes).await?;
     Ok(())
