@@ -262,14 +262,12 @@ impl ProofStorage for KeyValueDB {
                 row_key.primary, row_key.tree_key
             );
         }
-        println!("??PRECOMMIT with latest BLOCK");
         tx.commit()?;
-        println!("COMMIT DONE with latest BLOCK");
         Ok(())
     }
 
     fn get_proof_latest(&self, key: &RowProofIdentifier<BlockPrimaryIndex>) -> Result<Vec<u8>> {
-        let tx = self.db.tx(true)?;
+        let tx = self.db.tx(false)?;
         let row_bucket = tx.get_bucket(ROW_BUCKET_NAME)?;
         let raw = match row_bucket.get(key.tree_key.to_bytes()?) {
             Some(d) => match d {
@@ -287,6 +285,7 @@ impl ProofStorage for KeyValueDB {
         );
         let mut new_key = key.clone();
         new_key.primary = block_number;
+        println!("GET_PROOF_LATEST: before fetching the full row key proof");
         let out = self.get_proof_exact(&ProofKey::Row(new_key))?;
         println!("GET_PROOF_LATEST: after finding the full row key");
         Ok(out)
@@ -320,7 +319,7 @@ impl ProofStorage for KeyValueDB {
 
     fn get_proof_exact(&self, key: &ProofKey) -> Result<Vec<u8>> {
         let store_key = key.compute_hash();
-        let tx = self.db.tx(true)?;
+        let tx = self.db.tx(false)?;
         let bucket = tx.get_bucket(BUCKET_NAME)?;
         let d = bucket
             .get(store_key.to_be_bytes())
