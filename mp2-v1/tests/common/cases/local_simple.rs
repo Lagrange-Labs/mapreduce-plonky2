@@ -871,7 +871,8 @@ impl TestCase {
                         let previous_entry = UniqueMappingEntry::new(mkey, old_value);
                         let previous_row_key = previous_entry.to_row_key(&index);
                         let new_entry = UniqueMappingEntry::new(mkey, mvalue);
-                        let (cells, index) = new_entry.to_update(
+
+                        let (mut cells, index) = new_entry.to_update(
                             &index,
                             slot,
                             &self.contract_address,
@@ -885,6 +886,21 @@ impl TestCase {
                             // In the case it's the value, then we'll have to reprove the cell.
                             Some(previous_row_key.clone()),
                         );
+                        match index {
+                            MappingIndex::Key(_) => {
+                                // in this case, the mapping value changed, so the cells changed so
+                                // we start from scratch (since)
+                                cells.previous_row_key = Default::default();
+                            }
+                            MappingIndex::Value(_) => {
+                                // This is a bit hacky way but essentially it means that there is
+                                // no update in the cells tree to apply, even tho it's still a new
+                                // insertion of a new row, since we pick up the cells tree form the
+                                // previous location, and that cells tree didn't change (since it's
+                                // based on the mapping key), then no need to update anything.
+                                cells.updated_cells = vec![];
+                            }
+                        }
                         vec![
                             TableRowUpdate::Deletion(previous_row_key),
                             TableRowUpdate::Insertion(cells, index),
