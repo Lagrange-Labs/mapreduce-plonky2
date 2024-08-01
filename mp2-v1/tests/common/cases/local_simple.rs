@@ -556,6 +556,7 @@ impl TestCase {
 
                 let new_value: U256 = random_address().into_word().into();
                 let mapping_updates = match c {
+                    ChangeType::None => vec![],
                     ChangeType::Insertion => {
                         vec![MappingUpdate::Insertion(new_key, new_value)]
                     }
@@ -668,6 +669,7 @@ impl TestCase {
                             current_values.s2 = U256::from_be_bytes(thread_rng().gen::<[u8; 32]>());
                         }
                     },
+                    ChangeType::None => {}
                 };
 
                 let contract_update = UpdateSimpleStorage::Single(current_values);
@@ -1019,6 +1021,7 @@ pub enum ChangeType {
     Deletion,
     Insertion,
     Update(UpdateType),
+    None,
 }
 
 #[derive(Clone, Debug)]
@@ -1095,7 +1098,12 @@ impl TableRowValues {
                 TableRowUpdate::Insertion(cells_update, new.current_secondary.clone()),
             ],
             // no update on the secondary index value
-            false => vec![TableRowUpdate::Update(cells_update)],
+            false if !cells_update.updated_cells.is_empty() => {
+                vec![TableRowUpdate::Update(cells_update)]
+            }
+            false => {
+                vec![]
+            }
         }
     }
 }

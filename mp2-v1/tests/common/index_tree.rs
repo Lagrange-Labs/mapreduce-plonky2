@@ -294,16 +294,18 @@ impl<P: ProofStorage> TestContext<P> {
             primary: bn,
         };
 
-        let row_tree_proof = self
+        let (row_tree_proof, latest_root_key) = self
             .storage
-            .get_proof_exact(&ProofKey::Row(row_root_proof_key.clone()))
+            .get_proof_latest(&row_root_proof_key.clone())
             .unwrap();
         let row_tree_hash = verifiable_db::row_tree::extract_hash_from_proof(&row_tree_proof)
             .expect("can't find hash?");
         let node = IndexNode {
             identifier: identifier_block_column(),
-            value: U256::from(self.block_number().await),
-            row_tree_proof_id: row_root_proof_key.clone(),
+            value: U256::from(bn),
+            // NOTE: here we put the latest key found, since it may have been generated at a
+            // previous block than the current one.
+            row_tree_proof_id: latest_root_key.clone(),
             row_tree_hash,
             ..Default::default()
         };
