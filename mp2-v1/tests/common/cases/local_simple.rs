@@ -259,9 +259,16 @@ impl TestCase {
                         .table
                         .apply_cells_update(new_cells.clone(), TreeUpdateType::Insertion)
                         .expect("can't insert in cells tree");
-                    // no cells before, i.e. we return the same cells
-                    let new_cell_collection =
-                        row_update.updated_cells_collection(&CellCollection::default());
+                    // it may be an insertion where the cells already existed before ("delete  +
+                    // insertio" = update on secondary index value) so we first fetch the previous
+                    // cells collection and merge with the new one. THis allows us to not having
+                    // the reprove the cells tree from scratch in that case !
+                    // NOTE: this assume we go over the current row tree
+                    let previous_cells = match new_cells.previous_row_key == Default::default() {
+                        true => self.table.row.fetch(&new_cells.previous_row_key).cells,
+                        false => CellCollection::default(),
+                    };
+                    let new_cell_collection = row_update.updated_cells_collection(&previous_cells);
                     let new_row_key = tree_update.new_row_key.clone();
                     let row_payload =
                         ctx.prove_cells_tree(&self.table, new_cell_collection, tree_update);
@@ -592,7 +599,7 @@ impl TestCase {
                                 match index_type {
                                     MappingIndex::Key(_) => {
                                         // TRICKY: if the mapping key changes, it's a deletion then
-                                        // insertion
+                                        // insertion from onchain perspective
                                         vec![
                                             MappingUpdate::Deletion(current_key, current_value),
                                             // we insert the same value but with a new mapping key
@@ -889,7 +896,8 @@ impl TestCase {
                         match index {
                             MappingIndex::Key(_) => {
                                 // in this case, the mapping value changed, so the cells changed so
-                                // we start from scratch (since)
+                                // we need to start from scratch. Telling there was no previous row
+                                // key means it's treated as a full new cells tree.
                                 cells.previous_row_key = Default::default();
                             }
                             MappingIndex::Value(_) => {
@@ -898,6 +906,11 @@ impl TestCase {
                                 // insertion of a new row, since we pick up the cells tree form the
                                 // previous location, and that cells tree didn't change (since it's
                                 // based on the mapping key), then no need to update anything.
+                                // TODO: maybe make a better API to express the different
+                                // possibilities:
+                                // * insertion with new cells tree
+                                // * insertion without modification to cells tree
+                                // * update with modification to cells tree (default)
                                 cells.updated_cells = vec![];
                             }
                         };

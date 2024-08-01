@@ -310,7 +310,10 @@ impl<P: ProofStorage> TestContext<P> {
                 .collect::<Vec<_>>();
             to_move = new_nodes;
         }
-        info!("Moved all cells tree proof to new row key");
+        info!(
+            "Moved all cells tree proof from old {:?} to new {:?}",
+            cells_update.previous_row_key, cells_update.new_row_key
+        );
         Ok(())
     }
 }

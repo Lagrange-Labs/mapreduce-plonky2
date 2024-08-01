@@ -1,6 +1,7 @@
 use alloy::primitives::Address;
 use anyhow::Result;
 use log::{debug, info};
+use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
     tree::{
@@ -173,7 +174,14 @@ impl Table {
             previous_cells
         );
         let mut cell_tree = self.construct_cell_tree(&previous_cells);
-        println!("BEFORE update cell tree");
+        println!(
+            "BEFORE update cell tree -> going over {} new updated cells",
+            update.updated_cells.len()
+        );
+        println!(
+            "Cell trees root hash before updates: {:?}",
+            hex::encode(cell_tree.root_data().unwrap().hash.to_bytes())
+        );
         // apply updates and save the update plan for the new values
         let cell_update = cell_tree
             .in_transaction(|t| {
@@ -195,6 +203,10 @@ impl Table {
                 Ok(())
             })
             .expect("can't apply cells update");
+        println!(
+            "Cell trees root hash after updates: {:?}",
+            hex::encode(cell_tree.root_data().unwrap().hash.to_bytes())
+        );
         Ok(CellsUpdateResult {
             previous_row_key: update.previous_row_key,
             new_row_key: update.new_row_key,
