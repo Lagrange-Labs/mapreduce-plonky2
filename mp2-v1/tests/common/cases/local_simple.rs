@@ -264,7 +264,7 @@ impl TestCase {
                     // cells collection and merge with the new one. THis allows us to not having
                     // the reprove the cells tree from scratch in that case !
                     // NOTE: this assume we go over the current row tree
-                    let previous_cells = match new_cells.previous_row_key == Default::default() {
+                    let previous_cells = match new_cells.previous_row_key != Default::default() {
                         true => self.table.row.fetch(&new_cells.previous_row_key).cells,
                         false => CellCollection::default(),
                     };
