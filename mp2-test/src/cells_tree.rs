@@ -105,25 +105,35 @@ impl NodePayload for TestCell {
 pub fn build_cell_tree(
     row: &[TestCell],
 ) -> Result<(MerkleCellTree, UpdateTree<<CellTree as TreeTopology>::Key>)> {
-    let mut cell_tree = MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap();
-    let update_tree = cell_tree
-        .in_transaction(|t| {
-            for (i, cell) in row.iter().enumerate() {
-                // SBBST starts at 1, not 0. Note though this index is not important
-                // since at no point we are looking up value per index in the cells
-                // tree we always look at the entire row at the row tree level.
-                t.store(i + 1, cell.to_owned())?;
-            }
-            Ok(())
-        })
-        .context("while building tree")?;
+    unimplemented!("async ryhope");
 
-    Ok((cell_tree, update_tree))
+    #[cfg(foo_bar)]
+    {
+        let mut cell_tree =
+            MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap();
+        let update_tree = cell_tree
+            .in_transaction(|t| {
+                for (i, cell) in row.iter().enumerate() {
+                    // SBBST starts at 1, not 0. Note though this index is not important
+                    // since at no point we are looking up value per index in the cells
+                    // tree we always look at the entire row at the row tree level.
+                    t.store(i + 1, cell.to_owned())?;
+                }
+                Ok(())
+            })
+            .context("while building tree")?;
+
+        Ok((cell_tree, update_tree))
+    }
 }
 
 /// Compute the expected root hash of constructed cell tree.
 pub fn compute_cells_tree_hash(cells: &[TestCell]) -> HashOut<F> {
-    let cell_tree = build_cell_tree(cells).unwrap().0;
+    unimplemented!("async ryhope");
+    #[cfg(foo_bar)]
+    {
+        let cell_tree = build_cell_tree(cells).unwrap().0;
 
-    cell_tree.root_data().unwrap().hash
+        cell_tree.root_data().unwrap().hash
+    }
 }

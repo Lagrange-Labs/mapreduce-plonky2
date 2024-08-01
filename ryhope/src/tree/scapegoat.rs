@@ -476,7 +476,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
             if let Some(right) = n.right() {
                 Self::rec_print(right, d + 1, s).await;
             }
-        }).await;
+        })
+        .await;
     }
 
     /// Insert the key `k` in the tree. If it already exists, do nothing if
@@ -672,7 +673,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 .update_with(parent_idx.to_owned(), |parent_node| {
                     parent_node.left = None;
                     parent_node.right = None;
-                }).await;
+                })
+                .await;
 
             // Set left child
             if parent_section.start < parent_section.mid {
