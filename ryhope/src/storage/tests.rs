@@ -553,10 +553,7 @@ async fn aggregation_pgsql() -> Result<()> {
 }
 
 async fn test_rollback<
-    S: EpochKvStorage<i64, MinMaxi64>
-        + TreeTransactionalStorage<i64, MinMaxi64>
-        + Send
-        + Sync,
+    S: EpochKvStorage<i64, MinMaxi64> + TreeTransactionalStorage<i64, MinMaxi64> + Send + Sync,
 >(
     s: &mut S,
 ) {

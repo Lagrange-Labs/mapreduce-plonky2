@@ -85,38 +85,37 @@ pub type IndexTreeKey = <IndexTree as TreeTopology>::Key;
 type IndexStorage = InMemory<IndexTree, IndexNode>;
 pub type MerkleIndexTree = MerkleTreeKvDb<IndexTree, IndexNode, IndexStorage>;
 
-pub fn build_initial_index_tree(
-    index: &IndexNode,
+pub async fn build_initial_index_tree(
+    index: IndexNode,
 ) -> Result<(MerkleIndexTree, UpdateTree<IndexTreeKey>)> {
-    unimplemented!("async ryhope");
+    let block_usize: BlockPrimaryIndex = index.value.try_into().unwrap();
 
-    #[cfg(foo_bar)]
-    {
-        let block_usize: BlockPrimaryIndex = index.value.try_into().unwrap();
-
-        // should always be one anyway since we iterate over blocks one by one
-        // but in the case of general index we might create multiple nodes
-        // at the same time
-        let mut index_tree = MerkleIndexTree::new(
-            InitSettings::Reset(sbbst::Tree::with_shift_and_capacity(block_usize - 1, 0)),
-            (),
-        )
-        .unwrap();
-        let update_tree = index_tree
-            .in_transaction(|t| {
-                t.store(index.value.to(), index.clone())?;
+    // should always be one anyway since we iterate over blocks one by one
+    // but in the case of general index we might create multiple nodes
+    // at the same time
+    let mut index_tree = MerkleIndexTree::new(
+        InitSettings::Reset(sbbst::Tree::with_shift_and_capacity(block_usize - 1, 0)),
+        (),
+    )
+    .await
+    .unwrap();
+    let update_tree = index_tree
+        .in_transaction(|t| {
+            Box::pin(async move {
+                t.store(index.value.to(), index.clone()).await?;
                 Ok(())
             })
-            .context("while filling up index tree")?;
-        Ok((index_tree, update_tree))
-    }
+        })
+        .await
+        .context("while filling up index tree")?;
+    Ok((index_tree, update_tree))
 }
 
 impl TestContext {
     /// NOTE: we require the added_index information because we need to distinguish if a new node
     /// added has a leaf or a as parent. The rest of the nodes in the update tree are to be proven
     /// by the "membership" circuit. So we need to differentiate between the two cases.
-    pub fn prove_index_tree<P: ProofStorage>(
+    pub async fn prove_index_tree<P: ProofStorage>(
         &self,
         table_id: &TableID,
         t: &MerkleIndexTree,
@@ -124,127 +123,122 @@ impl TestContext {
         added_index: &IndexNode,
         storage: &mut P,
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
-        unimplemented!("async ryhope");
-
-        #[cfg(foo_bar)]
-        {
-            let mut workplan = ut.into_workplan();
-            while let Some(Next::Ready(k)) = workplan.next() {
-                let (context, node) = t.fetch_with_context(&k);
-                let row_tree_proof = storage
-                    .get_proof(&ProofKey::Row(node.row_tree_proof_id.clone()))
-                    .expect("should find row proof");
-                // extraction proof is done once per block, so its key can just be block based
-                let extraction_proof = storage
-                    .get_proof(&ProofKey::Extraction(node.row_tree_proof_id.primary))
-                    .expect("should find extraction proof");
-                let proof = if context.is_leaf() {
-                    let inputs = api::CircuitInput::BlockTree(
-                        verifiable_db::block_tree::CircuitInput::new_leaf(
-                            node.identifier,
-                            extraction_proof,
-                            row_tree_proof,
-                        ),
-                    );
-                    api::generate_proof(self.params(), inputs)
-                        .expect("error while leaf index proof generation")
-                } else if context.is_partial() {
-                    // a node that was already there before and is in the path of the added node to the
-                    // root should always have two children
-                    assert_eq!(
-                        added_index.value, node.value,
-                        "a changed node should never be a partial node"
-                    );
-                    // we know it's a new node, and a new node becomes the parent of a previous
-                    // node, and this previous node is always the left children.
-                    let previous_key = context
-                        .iter_children()
-                        .next()
-                        .expect("should find1 a children")
-                        .expect("should be one at least");
-                    // It's ok to fetch the node at the same epoch because for the block tree
-                    // we know it's the left children now so the min and max didn't change, we
-                    // didn't insert anything new below
-                    let (prev_ctx, previous_node) = t.fetch_with_context(previous_key);
-                    let prev_left_hash = match prev_ctx.left {
-                        Some(kk) => t.fetch(&kk).node_hash,
-                        None => *empty_poseidon_hash(),
-                    };
-
-                    let prev_right_hash = match prev_ctx.right {
-                        Some(kk) => t.fetch(&kk).node_hash,
-                        None => *empty_poseidon_hash(),
-                    };
-
-                    let inputs = api::CircuitInput::BlockTree(
-                        verifiable_db::block_tree::CircuitInput::new_parent(
-                            node.identifier,
-                            previous_node.value,
-                            previous_node.min,
-                            previous_node.max,
-                            prev_left_hash,
-                            prev_right_hash,
-                            previous_node.row_tree_hash,
-                            extraction_proof,
-                            row_tree_proof,
-                        ),
-                    );
-                    api::generate_proof(self.params(), inputs)
-                        .expect("error while leaf index proof generation")
-                } else {
-                    // here we are simply proving the new updated nodes from the new node to
-                    // the root. We fetch the same node but at the previous version of the
-                    // tree to prove the update.
-                    let previous_node = t.fetch_at(&k, t.current_epoch() - 1);
-                    let left_key = context.left.expect("should always be a left child");
-                    let left_node = t.fetch(&left_key);
-                    // this should be one of the nodes we just proved in this loop before
-                    let right_key = context.right.expect("should always be a right child");
-                    let right_proof = storage
-                        .get_proof(&ProofKey::Index(IndexProofIdentifier {
-                            table: table_id.clone(),
-                            tree_key: right_key,
-                        }))
-                        .expect("previous index proof not found");
-                    let inputs = api::CircuitInput::BlockTree(
-                        verifiable_db::block_tree::CircuitInput::new_membership(
-                            node.identifier,
-                            node.value,
-                            previous_node.min,
-                            previous_node.max,
-                            left_node.node_hash,
-                            node.row_tree_hash,
-                            right_proof,
-                        ),
-                    );
-                    api::generate_proof(self.params(), inputs)
-                        .expect("error while membership index proof generation")
+        let mut workplan = ut.into_workplan();
+        while let Some(Next::Ready(k)) = workplan.next() {
+            let (context, node) = t.fetch_with_context(&k).await;
+            let row_tree_proof = storage
+                .get_proof(&ProofKey::Row(node.row_tree_proof_id.clone()))
+                .expect("should find row proof");
+            // extraction proof is done once per block, so its key can just be block based
+            let extraction_proof = storage
+                .get_proof(&ProofKey::Extraction(node.row_tree_proof_id.primary))
+                .expect("should find extraction proof");
+            let proof = if context.is_leaf() {
+                let inputs = api::CircuitInput::BlockTree(
+                    verifiable_db::block_tree::CircuitInput::new_leaf(
+                        node.identifier,
+                        extraction_proof,
+                        row_tree_proof,
+                    ),
+                );
+                api::generate_proof(self.params(), inputs)
+                    .expect("error while leaf index proof generation")
+            } else if context.is_partial() {
+                // a node that was already there before and is in the path of the added node to the
+                // root should always have two children
+                assert_eq!(
+                    added_index.value, node.value,
+                    "a changed node should never be a partial node"
+                );
+                // we know it's a new node, and a new node becomes the parent of a previous
+                // node, and this previous node is always the left children.
+                let previous_key = context
+                    .iter_children()
+                    .next()
+                    .expect("should find1 a children")
+                    .expect("should be one at least");
+                // It's ok to fetch the node at the same epoch because for the block tree
+                // we know it's the left children now so the min and max didn't change, we
+                // didn't insert anything new below
+                let (prev_ctx, previous_node) = t.fetch_with_context(previous_key).await;
+                let prev_left_hash = match prev_ctx.left {
+                    Some(kk) => t.fetch(&kk).await.node_hash,
+                    None => *empty_poseidon_hash(),
                 };
-                let proof_key = IndexProofIdentifier {
-                    table: table_id.clone(),
-                    tree_key: k,
-                };
-                storage
-                    .store_proof(ProofKey::Index(proof_key), proof)
-                    .expect("unable to store index tree proof");
 
-                workplan.done(&k).unwrap();
-            }
-            let root = t.root().unwrap();
-            let root_proof_key = IndexProofIdentifier {
-                table: table_id.clone(),
-                tree_key: root,
+                let prev_right_hash = match prev_ctx.right {
+                    Some(kk) => t.fetch(&kk).await.node_hash,
+                    None => *empty_poseidon_hash(),
+                };
+
+                let inputs = api::CircuitInput::BlockTree(
+                    verifiable_db::block_tree::CircuitInput::new_parent(
+                        node.identifier,
+                        previous_node.value,
+                        previous_node.min,
+                        previous_node.max,
+                        prev_left_hash,
+                        prev_right_hash,
+                        previous_node.row_tree_hash,
+                        extraction_proof,
+                        row_tree_proof,
+                    ),
+                );
+                api::generate_proof(self.params(), inputs)
+                    .expect("error while leaf index proof generation")
+            } else {
+                // here we are simply proving the new updated nodes from the new node to
+                // the root. We fetch the same node but at the previous version of the
+                // tree to prove the update.
+                let previous_node = t.fetch_at(&k, t.current_epoch() - 1).await;
+                let left_key = context.left.expect("should always be a left child");
+                let left_node = t.fetch(&left_key).await;
+                // this should be one of the nodes we just proved in this loop before
+                let right_key = context.right.expect("should always be a right child");
+                let right_proof = storage
+                    .get_proof(&ProofKey::Index(IndexProofIdentifier {
+                        table: table_id.clone(),
+                        tree_key: right_key,
+                    }))
+                    .expect("previous index proof not found");
+                let inputs = api::CircuitInput::BlockTree(
+                    verifiable_db::block_tree::CircuitInput::new_membership(
+                        node.identifier,
+                        node.value,
+                        previous_node.min,
+                        previous_node.max,
+                        left_node.node_hash,
+                        node.row_tree_hash,
+                        right_proof,
+                    ),
+                );
+                api::generate_proof(self.params(), inputs)
+                    .expect("error while membership index proof generation")
             };
+            let proof_key = IndexProofIdentifier {
+                table: table_id.clone(),
+                tree_key: k,
+            };
+            storage
+                .store_proof(ProofKey::Index(proof_key), proof)
+                .expect("unable to store index tree proof");
 
-            // just checking the storage is there
-            let _ = storage
-                .get_proof(&ProofKey::Index(root_proof_key.clone()))
-                .unwrap();
-            root_proof_key
+            workplan.done(&k).unwrap();
         }
+        let root = t.root().await.unwrap();
+        let root_proof_key = IndexProofIdentifier {
+            table: table_id.clone(),
+            tree_key: root,
+        };
+
+        // just checking the storage is there
+        let _ = storage
+            .get_proof(&ProofKey::Index(root_proof_key.clone()))
+            .unwrap();
+        root_proof_key
     }
 
-    pub(crate) fn build_and_prove_index_tree<P: ProofStorage>(
+    pub(crate) async fn build_and_prove_index_tree<P: ProofStorage>(
         &self,
         table: &TableID,
         storage: &mut P,
@@ -262,8 +256,11 @@ impl TestContext {
             row_tree_hash,
             ..Default::default()
         };
-        let (tree, update) = build_initial_index_tree(&node).expect("can't build index tree");
+        let (tree, update) = build_initial_index_tree(node.clone())
+            .await
+            .expect("can't build index tree");
         info!("Generated index tree");
         self.prove_index_tree(table, &tree, update, &node, storage)
+            .await
     }
 }

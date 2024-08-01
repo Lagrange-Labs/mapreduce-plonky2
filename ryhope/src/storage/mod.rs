@@ -261,7 +261,7 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
     ///
     /// Will fail if the transaction failed.
 
-    async fn in_transaction<F: Fn(&mut Self) -> BoxFuture<'_, Result<()>> + Sync>(
+    async fn in_transaction<F: FnOnce(&mut Self) -> BoxFuture<'_, Result<()>> + Sync>(
         &mut self,
         f: F,
     ) -> Result<UpdateTree<K>> {

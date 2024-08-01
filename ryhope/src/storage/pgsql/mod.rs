@@ -1,9 +1,6 @@
 use crate::storage::RoEpochKvStorage;
 use crate::tree::TreeTopology;
-use crate::{
-    Epoch,
-    InitSettings,
-};
+use crate::{Epoch, InitSettings};
 
 use self::storages::{
     CachedDbKvStore, CachedDbStore, DbConnector, NodeConnector, PayloadConnector,
@@ -15,18 +12,11 @@ use crate::storage::pgsql::storages::DBPool;
 use anyhow::*;
 use async_trait::async_trait;
 use bb8_postgres::PostgresConnectionManager;
-use futures::{
-    future::BoxFuture,
-    FutureExt,
-};
+use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::*;
 use serde::{Deserialize, Serialize};
-use std::{
-    cell::RefCell,
-    fmt::Debug,
-    hash::Hash, rc::Rc
-};
+use std::{cell::RefCell, fmt::Debug, hash::Hash, rc::Rc};
 use tokio_postgres::NoTls;
 
 mod storages;
@@ -200,7 +190,7 @@ where
                     storage_settings.table,
                     tree_settings,
                 )
-                    .await
+                .await
             }
         }
     }
@@ -210,7 +200,7 @@ where
 async fn fetch_current_epoch(db: DBPool, table: &str) -> Result<i64> {
     let connection = db.get().await.unwrap();
     connection
-        .query_one(&format!("SELECT MAX(valid_until) FROM {table}_meta", ), &[])
+        .query_one(&format!("SELECT MAX(valid_until) FROM {table}_meta",), &[])
         .await
         .map(|r| r.get(0))
         .context("while fetching current epoch")
@@ -496,7 +486,7 @@ where
                         self.epoch + 1,
                         v.to_owned(),
                     )
-                        .await?;
+                    .await?;
                 }
             }
 
@@ -540,7 +530,7 @@ where
                                 new_epoch,
                                 payload,
                             )
-                                .await?;
+                            .await?;
                         }
                     },
                     // k has been deleted; simply roll-back the lifetime of its row.

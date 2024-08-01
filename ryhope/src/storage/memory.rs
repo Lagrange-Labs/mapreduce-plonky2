@@ -258,7 +258,7 @@ impl<T: TreeTopology, V: Debug + Sync> FromSettings<T::State> for InMemory<T, V>
 impl<T, V> TreeStorage<T> for InMemory<T, V>
 where
     T: TreeTopology,
-    T::Node: Clone + Sync,
+    T::Node: Clone,
     V: Clone + Debug + Sync + Send,
 {
     type StateStorage = VersionedStorage<<T as TreeTopology>::State>;

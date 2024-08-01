@@ -173,28 +173,27 @@ pub type MerkleRowTree = MerkleTreeKvDb<RowTree, Row, RowStorage>;
 
 /// Given a list of row, build the Merkle tree of the secondary index and
 /// returns it along its update tree.
-pub async fn build_row_tree(rows: &[Row]) -> Result<(MerkleRowTree, UpdateTree<RowTreeKey>)> {
-    unimplemented!("async ryhope");
+pub async fn build_row_tree(rows: Vec<Row>) -> Result<(MerkleRowTree, UpdateTree<RowTreeKey>)> {
+    let mut row_tree = MerkleRowTree::new(
+        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
+        (),
+    )
+    .await
+    .context("while creating row tree instance")?;
 
-    #[cfg(foo_bar)]
-    {
-        let mut row_tree = MerkleRowTree::new(
-            InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
-            (),
-        )
-        .context("while creating row tree instance")?;
-
-        let update_tree = row_tree
-            .in_transaction(|t| {
+    let update_tree = row_tree
+        .in_transaction(|t| {
+            Box::pin(async move {
                 for row in rows.iter() {
-                    t.store(row.k.to_owned(), row.to_owned())?;
+                    t.store(row.k.to_owned(), row.to_owned()).await?;
                 }
                 Ok(())
             })
-            .context("while filling row tree initial state")?;
+        })
+        .await
+        .context("while filling row tree initial state")?;
 
-        Ok((row_tree, update_tree))
-    }
+    Ok((row_tree, update_tree))
 }
 
 impl TestContext {
@@ -207,123 +206,118 @@ impl TestContext {
         ut: UpdateTree<<RowTree as TreeTopology>::Key>,
         storage: &mut P,
     ) -> RowProofIdentifier<BlockPrimaryIndex> {
-        unimplemented!("async ryhope");
+        let mut workplan = ut.into_workplan();
+        // THIS can panic but for block number it should be fine on 64bit platforms...
+        // unwrap is safe since we know it is really a block number and not set to Latest or stg
+        let block_key: BlockPrimaryIndex =
+            self.block_number.as_number().unwrap().try_into().unwrap();
 
-        #[cfg(foo_bar)]
-        {
-            let mut workplan = ut.into_workplan();
-            // THIS can panic but for block number it should be fine on 64bit platforms...
-            // unwrap is safe since we know it is really a block number and not set to Latest or stg
-            let block_key: BlockPrimaryIndex =
-                self.block_number.as_number().unwrap().try_into().unwrap();
+        while let Some(Next::Ready(k)) = workplan.next() {
+            let (context, row) = t.fetch_with_context(&k).await;
+            // NOTE: the sec. index. is assumed to be in the first position
+            // Sec. index identifier
+            let id = row.secondary_index().id;
+            // Sec. index value
+            let value = row.secondary_index().value;
 
-            while let Some(Next::Ready(k)) = workplan.next() {
-                let (context, row) = t.fetch_with_context(&k);
-                // NOTE: the sec. index. is assumed to be in the first position
-                // Sec. index identifier
-                let id = row.secondary_index().id;
-                // Sec. index value
-                let value = row.secondary_index().value;
-
-                let cell_tree_proof = storage
-                    .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
-                    .expect("should find cell root proof");
-                let proof = if context.is_leaf() {
-                    // Prove a leaf
-                    let inputs = CircuitInput::RowsTree(
-                        verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
-                            .unwrap(),
-                    );
-                    api::generate_proof(self.params(), inputs).expect("while proving leaf")
-                } else if context.is_partial() {
-                    let proof_key = RowProofIdentifier {
-                        table: table_id.clone(),
-                        primary: block_key,
-                        tree_key: context
-                            .left
-                            .as_ref()
-                            .or(context.right.as_ref())
-                            .cloned()
-                            .unwrap(),
-                    };
-                    // Prove a partial node
-                    let child_proof = storage
-                        .get_proof(&ProofKey::Row(proof_key))
-                        .expect("UT guarantees proving in order");
-
-                    let cell_tree_proof = storage
-                        .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id))
-                        .expect("should find cells tree root proof");
-                    let inputs = CircuitInput::RowsTree(
-                        verifiable_db::row_tree::CircuitInput::partial(
-                            id,
-                            value,
-                            context.left.is_some(),
-                            child_proof,
-                            cell_tree_proof,
-                        )
+            let cell_tree_proof = storage
+                .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
+                .expect("should find cell root proof");
+            let proof = if context.is_leaf() {
+                // Prove a leaf
+                let inputs = CircuitInput::RowsTree(
+                    verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
                         .unwrap(),
-                    );
-
-                    api::generate_proof(self.params(), inputs).expect("while proving partial node")
-                } else {
-                    let left_proof_key = RowProofIdentifier {
-                        table: table_id.clone(),
-                        primary: block_key,
-                        tree_key: context.left.unwrap(),
-                    };
-                    let right_proof_key = RowProofIdentifier {
-                        table: table_id.clone(),
-                        primary: block_key,
-                        tree_key: context.right.unwrap(),
-                    };
-                    let cell_tree_proof = storage
-                        .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
-                        .expect("should find cells tree root proof");
-
-                    // Prove a full node.
-                    let left_proof = storage
-                        .get_proof(&ProofKey::Row(left_proof_key))
-                        .expect("UT guarantees proving in order");
-                    let right_proof = storage
-                        .get_proof(&ProofKey::Row(right_proof_key))
-                        .expect("UT guarantees proving in order");
-                    let inputs = CircuitInput::RowsTree(
-                        verifiable_db::row_tree::CircuitInput::full(
-                            id,
-                            value,
-                            left_proof,
-                            right_proof,
-                            cell_tree_proof,
-                        )
-                        .unwrap(),
-                    );
-                    api::generate_proof(self.params(), inputs).expect("while proving full node")
-                };
-                let new_proof_key = RowProofIdentifier {
+                );
+                api::generate_proof(self.params(), inputs).expect("while proving leaf")
+            } else if context.is_partial() {
+                let proof_key = RowProofIdentifier {
                     table: table_id.clone(),
                     primary: block_key,
-                    tree_key: k.clone(),
+                    tree_key: context
+                        .left
+                        .as_ref()
+                        .or(context.right.as_ref())
+                        .cloned()
+                        .unwrap(),
                 };
+                // Prove a partial node
+                let child_proof = storage
+                    .get_proof(&ProofKey::Row(proof_key))
+                    .expect("UT guarantees proving in order");
 
-                storage
-                    .store_proof(ProofKey::Row(new_proof_key), proof)
-                    .expect("storing should work");
+                let cell_tree_proof = storage
+                    .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id))
+                    .expect("should find cells tree root proof");
+                let inputs = CircuitInput::RowsTree(
+                    verifiable_db::row_tree::CircuitInput::partial(
+                        id,
+                        value,
+                        context.left.is_some(),
+                        child_proof,
+                        cell_tree_proof,
+                    )
+                    .unwrap(),
+                );
 
-                workplan.done(&k).unwrap();
-            }
-            let root = t.root().unwrap();
-            let root_proof_key = RowProofIdentifier {
+                api::generate_proof(self.params(), inputs).expect("while proving partial node")
+            } else {
+                let left_proof_key = RowProofIdentifier {
+                    table: table_id.clone(),
+                    primary: block_key,
+                    tree_key: context.left.unwrap(),
+                };
+                let right_proof_key = RowProofIdentifier {
+                    table: table_id.clone(),
+                    primary: block_key,
+                    tree_key: context.right.unwrap(),
+                };
+                let cell_tree_proof = storage
+                    .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
+                    .expect("should find cells tree root proof");
+
+                // Prove a full node.
+                let left_proof = storage
+                    .get_proof(&ProofKey::Row(left_proof_key))
+                    .expect("UT guarantees proving in order");
+                let right_proof = storage
+                    .get_proof(&ProofKey::Row(right_proof_key))
+                    .expect("UT guarantees proving in order");
+                let inputs = CircuitInput::RowsTree(
+                    verifiable_db::row_tree::CircuitInput::full(
+                        id,
+                        value,
+                        left_proof,
+                        right_proof,
+                        cell_tree_proof,
+                    )
+                    .unwrap(),
+                );
+                api::generate_proof(self.params(), inputs).expect("while proving full node")
+            };
+            let new_proof_key = RowProofIdentifier {
                 table: table_id.clone(),
                 primary: block_key,
-                tree_key: root,
+                tree_key: k.clone(),
             };
 
             storage
-                .get_proof(&ProofKey::Row(root_proof_key.clone()))
-                .expect("row tree root proof absent");
-            root_proof_key
+                .store_proof(ProofKey::Row(new_proof_key), proof)
+                .expect("storing should work");
+
+            workplan.done(&k).unwrap();
         }
+        let root = t.root().await.unwrap();
+        let root_proof_key = RowProofIdentifier {
+            table: table_id.clone(),
+            primary: block_key,
+            tree_key: root,
+        };
+
+        storage
+            .get_proof(&ProofKey::Row(root_proof_key.clone()))
+            .expect("row tree root proof absent");
+        root_proof_key
     }
 
     /// Build and prove the row tree from the [`Row`]s and the secondary index
