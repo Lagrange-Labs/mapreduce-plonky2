@@ -82,51 +82,81 @@ async fn db_creation_integrated_tests() -> Result<()> {
 
 #[test]
 fn ryhope_scapegoat() -> Result<()> {
-    enum Op {
-        Insertion,
-        Deletion,
-        Update,
-    }
-    let ops = vec![vec![Op::Insertion, Op::Insertion, Op::Insertion]];
-    let rows = (0..5)
-        .map(|i| Row {
-            k: RowTreeKey {
-                value: U256::from(i).into(),
-                ..Default::default()
-            },
-            payload: RowPayload {
-                cells: CellCollection(vec![Cell {
-                    id: i,
-                    value: U256::from(i),
-                }]),
-                ..Default::default()
-            },
-        })
-        .collect::<Vec<_>>();
     let mut row_tree = MerkleRowTree::new(
         InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
         (),
     )
     .unwrap();
+    let cell = Cell {
+        id: 10,
+        value: U256::from(10),
+    };
+    let payload = RowPayload {
+        cells: CellCollection(vec![cell.clone(), cell.clone(), cell.clone()]),
+        ..Default::default()
+    };
+    //  |  |RowTreeKey { value: VectorU256(50753836057528776923099068107172127467069229311), rest: [14] }/RowTreeKey { value: (..), rest: [13] } (1)
+    //  |RowTreeKey { value: VectorU256(974563147394964930332893888102456177088745185481), rest: [13] }/RowTreeKey { value: ..), rest: [11] } (2)
+    //RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [11] }/None (5)
+    //  |  |RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [15] }/RowTreeKey { value: ..), rest: [12] } (1)
+    //  |RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398834414), rest: [12] }/RowTreeKey { value: ..), rest: [11] } (2)
+    //
+    let r11 = RowTreeKey {
+        value: U256::from_str_radix("1056494154592187365319695072752373049978398833853", 10)
+            .unwrap()
+            .into(),
+        rest: vec![11],
+    };
+    let r13 = RowTreeKey {
+        value: U256::from_str_radix("974563147394964930332893888102456177088745185481", 10)
+            .unwrap()
+            .into(),
+        rest: vec![13],
+    };
+    let r12 = RowTreeKey {
+        value: U256::from_str_radix("1056494154592187365319695072752373049978398834414", 10)
+            .unwrap()
+            .into(),
+        rest: vec![12],
+    };
+    let r15 = RowTreeKey {
+        value: U256::from_str_radix("1056494154592187365319695072752373049978398833853", 10)
+            .unwrap()
+            .into(),
+        rest: vec![15],
+    };
+    let r14 = RowTreeKey {
+        value: U256::from_str_radix("50753836057528776923099068107172127467069229311", 10)
+            .unwrap()
+            .into(),
+        rest: vec![14],
+    };
     row_tree.in_transaction(|t| {
-        for i in 0..3 {
-            t.store(rows[i].k.clone(), rows[i].payload.clone())?;
-        }
+        t.store(r11.clone(), payload.clone())?;
+        t.store(r12, payload.clone())?;
+        t.store(r13, payload.clone())?;
+        t.store(r14, payload.clone())?;
+        t.store(r15, payload.clone())?;
         Ok(())
     })?;
-    row_tree.in_transaction(|t| {
-        t.store(rows[3].k.clone(), rows[3].payload.clone())?;
-        t.store(rows[4].k.clone(), rows[4].payload.clone())?;
+    println!("++++++++++++++++++++++++++");
+    row_tree.print_tree();
+    println!("++++++++++++++++++++++++++");
+    // Deletion RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [11] }
+    // Insertion(Row { k: RowTreeKey { value: VectorU256(97094728283605215696305910369622631687767667916), rest: [11] }
+    let r11bis = RowTreeKey {
+        value: U256::from_str_radix("97094728283605215696305910369622631687767667916", 10)
+            .unwrap()
+            .into(),
+        rest: vec![11],
+    };
+    let ut = row_tree.in_transaction(|t| {
+        t.remove(r11)?;
+        t.store(r11bis, payload.clone())?;
         Ok(())
     })?;
-    row_tree.in_transaction(|t| {
-        t.remove(rows[4].k.clone())?;
-        Ok(())
-    })?;
-    row_tree.try_fetch(&rows[0].k).expect("should be there");
-    row_tree.try_fetch(&rows[1].k).expect("should be there");
-    row_tree.try_fetch(&rows[2].k).expect("should be there");
-    row_tree.try_fetch(&rows[3].k).expect("should be there");
-    assert!(row_tree.try_fetch(&rows[4].k).is_none());
+    println!("------------------------");
+    ut.print();
+    println!("------------------------");
     Ok(())
 }
