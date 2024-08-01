@@ -178,15 +178,15 @@ impl Table {
             "BEFORE update cell tree -> going over {} new updated cells",
             update.updated_cells.len()
         );
-        println!(
-            "Cell trees root hash before updates: {:?}",
-            hex::encode(
-                cell_tree
-                    .root_data()
-                    .map(|root| root.hash.to_bytes())
-                    .unwrap_or_default()
-            )
-        );
+        //println!(
+        //    "Cell trees root hash before updates: {:?}",
+        //    hex::encode(
+        //        cell_tree
+        //            .root_data()
+        //            .map(|root| root.hash.to_bytes())
+        //            .unwrap_or_default()
+        //    )
+        //);
         // apply updates and save the update plan for the new values
         let cell_update = cell_tree
             .in_transaction(|t| {
