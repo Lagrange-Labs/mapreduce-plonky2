@@ -433,6 +433,8 @@ mod tests {
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::<_, L, S, PH>::from_slice(&proof.public_inputs);
 
+        // Initialize the overflow flag to false.
+        let mut overflow = false;
         let entry_count = query_pi.num_matching_rows();
 
         // Check the public inputs.
@@ -467,11 +469,6 @@ mod tests {
         );
         // Entry count
         assert_eq!(pi.entry_count(), entry_count);
-        // overflow flag
-        assert_eq!(
-            pi.overflow_flag(),
-            query_pi.overflow_flag() || entry_count == F::ZERO
-        );
         // Result values
         {
             // Convert the entry count to an Uint256.
@@ -487,7 +484,14 @@ mod tests {
 
                 let op = ops[i];
                 if op == op_avg {
-                    value.checked_div(entry_count).unwrap_or(U256::ZERO)
+                    match value.checked_div(entry_count) {
+                        Some(dividend) => dividend,
+                        None => {
+                            // Set the overflow flag to true if the divisor is zero.
+                            overflow = true;
+                            U256::ZERO
+                        }
+                    }
                 } else if op == op_count {
                     entry_count
                 } else {
@@ -500,6 +504,8 @@ mod tests {
 
             assert_eq!(pi.result_values(), exp_results);
         }
+        // overflow flag
+        assert_eq!(pi.overflow_flag(), query_pi.overflow_flag() || overflow);
         // Query limit
         assert_eq!(pi.query_limit(), F::ZERO);
         // Query offset
