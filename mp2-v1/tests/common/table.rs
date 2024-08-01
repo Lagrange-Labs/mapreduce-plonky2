@@ -180,7 +180,12 @@ impl Table {
         );
         println!(
             "Cell trees root hash before updates: {:?}",
-            hex::encode(cell_tree.root_data().unwrap().hash.to_bytes())
+            hex::encode(
+                cell_tree
+                    .root_data()
+                    .map(|root| root.hash.to_bytes())
+                    .unwrap_or_default()
+            )
         );
         // apply updates and save the update plan for the new values
         let cell_update = cell_tree
@@ -300,6 +305,12 @@ pub struct CellsUpdate {
     // did not change, we would not be able to separate the rest from the secondary index cell.
     // NOTE: In the case of initialization time, this contains the initial cells of the row
     pub updated_cells: Vec<Cell>,
+}
+
+impl CellsUpdate {
+    pub fn is_fresh_insert(&self) -> bool {
+        self.previous_row_key == Default::default()
+    }
 }
 
 // Contains the data necessary to start proving the update of the cells tree
