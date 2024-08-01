@@ -399,6 +399,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                     s.nodes_mut()
                         .update_with(i.to_owned(), |n| n.parent = Some(parent.to_owned()));
                 }
+                dirties.insert(parent.clone());
             }
             None => {
                 s.state_mut().update(|r| r.root = new_child.clone());
@@ -418,10 +419,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 .update_with(ancestor.to_owned(), |n| n.subtree_size -= 1);
         }
 
-        Ok(dbg!(dirties)
-            .into_iter()
-            .filter(|n| *n != to_remove)
-            .collect())
+        Ok(dirties.into_iter().filter(|n| *n != to_remove).collect())
     }
 
     // --------------------------------------------------------------------------
@@ -514,11 +512,10 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
             if path.len() > self.depth_criterion(s.state().fetch().node_count, s) {
                 self.find_scapegoat(&path, s)
                     .map(|scapegoat| {
-                        dbg!(self
-                            .rebalance_at(scapegoat, s)
+                        self.rebalance_at(scapegoat, s)
                             .into_iter()
                             .map(|n| s.nodes().fetch(&n).k.to_owned())
-                            .collect())
+                            .collect()
                     })
                     .unwrap_or_default()
             } else {
