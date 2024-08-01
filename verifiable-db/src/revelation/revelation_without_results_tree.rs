@@ -301,7 +301,7 @@ mod tests {
         field::types::{Field, PrimeField64},
         plonk::config::Hasher,
     };
-    use rand::{thread_rng, Rng};
+    use rand::{prelude::SliceRandom, thread_rng, Rng};
 
     // L: maximum number of results
     // S: maximum number of items in each result
@@ -548,6 +548,21 @@ mod tests {
         // Set the first operation to AVG.
         let mut ops: [_; S] = random_aggregation_operations();
         ops[0] = AggregationOperation::AvgOp.to_field();
+
+        test_revelation_without_results_tree_circuit(&ops, Some(0));
+    }
+
+    // Test for no AVG operation with zero entry count.
+    #[test]
+    fn test_revelation_without_results_tree_for_no_op_avg_with_no_entries() {
+        // Initialize the all operations to SUM or COUNT (not AVG).
+        let mut rng = thread_rng();
+        let ops = array::from_fn(|_| {
+            [AggregationOperation::SumOp, AggregationOperation::CountOp]
+                .choose(&mut rng)
+                .unwrap()
+                .to_field()
+        });
 
         test_revelation_without_results_tree_circuit(&ops, Some(0));
     }
