@@ -6,11 +6,10 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, CURVE_TARGET_LEN},
     u256::{UInt256Target, NUM_LIMBS},
-    utils::{FromFields, FromTargets},
+    utils::{FromFields, FromTargets, TryIntoBool},
     F,
 };
 use plonky2::{
-    field::types::Field,
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::target::{BoolTarget, Target},
 };
@@ -224,7 +223,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             ph: &input[Self::PI_RANGES[12].clone()],
         }
     }
-
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         h: &'a [T],
         v: &'a [T],
@@ -449,14 +448,9 @@ impl<'a, const S: usize> PublicInputs<'a, F, S> {
     }
 
     pub fn overflow_flag(&self) -> bool {
-        let overflow = *self.to_overflow_raw();
-        if overflow == F::ONE {
-            return true;
-        }
-        if overflow == F::ZERO {
-            return false;
-        }
-        unreachable!("overflow flag public input different from 0 or 1")
+        (*self.to_overflow_raw())
+            .try_into_bool()
+            .expect("overflow flag public input different from 0 or 1")
     }
 
     pub fn computational_hash(&self) -> HashOut<F> {

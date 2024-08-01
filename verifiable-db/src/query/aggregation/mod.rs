@@ -6,6 +6,7 @@ mod non_existence_inter;
 mod non_existence_leaf;
 mod output_computation;
 mod partial_node;
+mod subtree_proven_single_path_node;
 mod utils;
 
 #[cfg(test)]
@@ -58,7 +59,7 @@ pub(crate) mod tests {
             QueryPublicInputs::ComputationalHash,
             QueryPublicInputs::PlaceholderHash,
         ]
-        .map(|input| PublicInputs::<F, S>::to_range(input));
+        .map(PublicInputs::<F, S>::to_range);
 
         let first_value_start =
             PublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues).start;
