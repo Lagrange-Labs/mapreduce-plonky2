@@ -872,7 +872,7 @@ impl TestCase {
                         let previous_row_key = previous_entry.to_row_key(&index);
                         let new_entry = UniqueMappingEntry::new(mkey, mvalue);
 
-                        let (mut cells, index) = new_entry.to_update(
+                        let (mut cells, secondary_index) = new_entry.to_update(
                             &index,
                             slot,
                             &self.contract_address,
@@ -900,10 +900,10 @@ impl TestCase {
                                 // based on the mapping key), then no need to update anything.
                                 cells.updated_cells = vec![];
                             }
-                        }
+                        };
                         vec![
                             TableRowUpdate::Deletion(previous_row_key),
-                            TableRowUpdate::Insertion(cells, index),
+                            TableRowUpdate::Insertion(cells, secondary_index),
                         ]
                     }
                 }
