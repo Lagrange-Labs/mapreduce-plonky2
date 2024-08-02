@@ -3,6 +3,15 @@ name = "parsil"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "parsil"
+path = "src/lib.rs"
+
+[[bin]]
+name = "parsil"
+path = "src/main.rs"
+required-features = ["cli"]
+
 [dependencies]
 anyhow.workspace = true
 log.workspace = true
@@ -16,7 +25,3 @@ stderrlog = { version = "0.6.0", default-features = false, optional = true }
 [features]
 cli = ["dep:stderrlog", "dep:clap"]
 
-[[bin]]
-name = "parsil"
-path = "src/main.rs"
-required-features = ["cli"]
