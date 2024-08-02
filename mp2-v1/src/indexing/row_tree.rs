@@ -1,6 +1,7 @@
 use alloy::primitives::U256;
-use anyhow::{ensure, Result};
-use derive_more::From;
+use anyhow::Result;
+use derive_more::{Deref, From};
+use hashbrown::HashMap;
 use mp2_common::{
     poseidon::{empty_poseidon_hash, H},
     types::HashOutput,
@@ -15,7 +16,10 @@ use plonky2::{
 use ryhope::{storage::memory::InMemory, tree::scapegoat, MerkleTreeKvDb, NodePayload};
 use serde::{Deserialize, Serialize};
 
-use super::cell_tree::{Cell, CellTreeKey};
+use super::{
+    cell_tree::{Cell, CellTreeKey},
+    ColumnID,
+};
 
 pub type RowTree = scapegoat::Tree<RowTreeKey>;
 type RowStorage = InMemory<RowTree, RowPayload>;
@@ -63,41 +67,28 @@ impl RowTreeKey {
 // A collection of cells inserted in the JSON.
 // IMPORTANT: This collection MUST CONTAIN the secondary index value, as first element, to easily search
 // in JSONB from the SQL.
-#[derive(Eq, PartialEq, From, Default, Debug, Clone, Serialize, Deserialize)]
-pub struct CellCollection(pub Vec<Cell>);
+#[derive(Eq, PartialEq, Deref, From, Default, Debug, Clone, Serialize, Deserialize)]
+pub struct CellCollection(pub HashMap<ColumnID, U256>);
 impl CellCollection {
-    /// Return the [`Cell`] containing the sec. index of this row.
-    pub fn secondary_index(&self) -> Result<&Cell> {
-        ensure!(
-            !self.0.is_empty(),
-            "secondary_index() called on empty CellCollection"
-        );
-        Ok(&self.0[0])
-    }
-
-    pub fn non_indexed_cells(&self) -> Result<&[Cell]> {
-        ensure!(
-            !self.0.is_empty(),
-            "non_indexed_cells called on empty  CellCollection"
-        );
-        Ok(&self.0[1..])
+    pub fn from_cells(cells: &[Cell]) -> Self {
+        Self(cells.iter().map(|c| (c.id, c.value)).collect())
     }
     // take all the cells ids on both collections, take the value present in the updated one
     // if it exists, otherwise take from self.
     pub fn merge_with_update(&self, updated_cells: &[Cell]) -> Self {
         if self == &Self::default() {
-            return Self(updated_cells.to_vec());
+            return Self::from_cells(updated_cells);
         }
         Self(
             self.0
                 .iter()
-                .map(|previous_cell| {
+                .map(|(id, previous_value)| {
                     updated_cells
                         .iter()
-                        .find(|new_cell| previous_cell.id == new_cell.id)
-                        .unwrap_or(previous_cell)
+                        .find(|new_cell| *id == new_cell.id)
+                        .map(|c| (c.id, c.value))
+                        .unwrap_or_else(|| (*id, *previous_value))
                 })
-                .cloned()
                 .collect(),
         )
     }
@@ -118,21 +109,61 @@ pub struct Row {
 /// encapsulates its cells and the tree they form.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RowPayload {
-    pub cells: CellCollection,
+    /// Map from column id to value
+    /// This includes the
+    pub cells: HashMap<ColumnID, U256>,
+    /// The ID of the secondary index column.
+    /// NOTE: the reason we have this here is because when computing the hash, we need to know
+    /// which value to lookup in the hashmap. The reason we have a hashmap is to be easily
+    /// searchable from JSONB in PSQL.
+    /// TODO: The real nice solution could be to allow a "context" in the ryhope NodePayload trait
+    /// such that we can extract that information from the context. Currently this info needs to be
+    /// stored in the JSONB because we have no other source of information.
+    pub secondary_index: ColumnID,
     /// Storing the hash of the root of the cells tree. One could get it as well from the proof
     /// but it requires loading the proof, so when building the hashing structure it's best
     /// to keep it at hand directly.
     pub cell_tree_root_hash: HashOutput,
     /// Information needed to retrieve the cells root proof belonging to this row
-    pub cells_root_proof_primary: U256,
+    pub cell_root_proof_primary: U256,
     /// Information needed to retrieve the cells root proof belonging to this row
-    pub cells_root_proof_key: CellTreeKey,
+    pub cell_root_proof_key: CellTreeKey,
     /// Min sec. index value of the subtree below this node
     pub min: U256,
     /// Max sec. index value "  "   "       "     "    "
     pub max: U256,
     /// Hash of this node
     pub hash: HashOutput,
+}
+
+impl RowPayload {
+    /// Construct a row payload from
+    /// * the collection of cells, which MUST include the value of the secondary index
+    /// * the hash of the cells tree associated to that row
+    /// * the primary index value when that cells tree root proof was generated. In most cases, the
+    ///     primary value is the block index. The block would refer to the last time the cells tree
+    ///     changed for that row.
+    /// * The key of the root of the cells tree.
+    pub fn new(
+        cells: Vec<Cell>,
+        secondary_index: ColumnID,
+        cell_tree_hash: HashOutput,
+        cells_proof_primary: &[u8],
+        cells_root_key: CellTreeKey,
+    ) -> Self {
+        RowPayload {
+            cells: cells.iter().map(|c| (c.id, c.value)).collect(),
+            secondary_index,
+            cell_tree_root_hash: cell_tree_hash,
+            cell_root_proof_primary: U256::from_be_slice(cells_proof_primary),
+            cell_root_proof_key: cells_root_key,
+            ..Default::default()
+        }
+    }
+
+    pub fn secondary_index_value(&self) -> U256 {
+        self.cells[&self.secondary_index]
+    }
 }
 
 impl NodePayload for RowPayload {
@@ -142,18 +173,18 @@ impl NodePayload for RowPayload {
 
         let (left_hash, right_hash) = match [&children[0], &children[1]] {
             [None, None] => {
-                self.min = self.cells.secondary_index().unwrap().value;
-                self.max = self.cells.secondary_index().unwrap().value;
+                self.min = self.secondary_index_value();
+                self.max = self.secondary_index_value();
                 (*empty_poseidon_hash(), *empty_poseidon_hash())
             }
             [None, Some(right)] => {
-                self.min = self.cells.secondary_index().unwrap().value;
+                self.min = self.secondary_index_value();
                 self.max = right.max;
                 (*empty_poseidon_hash(), HashOut::from_bytes(&right.hash.0))
             }
             [Some(left), None] => {
                 self.min = left.min;
-                self.max = self.cells.secondary_index().unwrap().value;
+                self.max = self.secondary_index_value();
                 (HashOut::from_bytes(&left.hash.0), *empty_poseidon_hash())
             }
             [Some(left), Some(right)] => {
@@ -174,9 +205,9 @@ impl NodePayload for RowPayload {
                     // P(max)
                     .chain(self.max.to_fields())
                     // P(id)
-                    .chain(std::iter::once(F::from_canonical_u64(self.cells.secondary_index().unwrap().id)))
+                    .chain(std::iter::once(F::from_canonical_u64(self.secondary_index)))
                     // P(value)
-                    .chain(self.cells.secondary_index().unwrap().value.to_fields())
+                    .chain(self.secondary_index_value().to_fields())
                     // P(cell_tree_hash)
                     .chain(self.cell_tree_root_hash.0.to_fields())
                     .collect::<Vec<_>>();
