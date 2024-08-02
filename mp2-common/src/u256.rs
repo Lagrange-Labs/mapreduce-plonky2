@@ -167,7 +167,7 @@ pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
     }
 
     /// Check if an UInt256Target array is less than or equal to the other.
-    /// The comparison relationship is defined as follows. First, concatenate all the items, 
+    /// The comparison relationship is defined as follows. First, concatenate all the items,
     /// each in its little-endian bit representation, and then interpret the resulting
     /// `L*256` bits as the little-endian representation of an `L*256` bits integer.
     /// Being `l` the integer obtained from bits in `left`, and `r` the integer obtained from bits in `right`, the comparison is defined as `l < r` or `l==r`
