@@ -2,6 +2,7 @@
 
 use crate::{array::Array, D};
 use anyhow::ensure;
+use derive_more::Deref;
 use plonky2::{
     field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},
     iop::target::Target,
@@ -56,7 +57,7 @@ pub type PackedMappingKeyTarget = Array<U32Target, PACKED_MAPPING_KEY_LEN>;
 
 /// Regular hash output function - it can be generated from field elements using
 /// poseidon with the output serialized or via regular hash functions.
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, Deref)]
 pub struct HashOutput(pub [u8; 32]);
 
 /// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
