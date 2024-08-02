@@ -32,8 +32,9 @@ use super::{
         partial_node::{
             self, PartialNodeCircuit, PartialNodeWires, NUM_VERIFIED_PROOFS as NUM_PROOFS_PN,
         },
-        CommonInputs, NodeInfo, NonExistenceInput, OneProvenChildNodeInput, ProvenSubtree,
-        QueryBounds, QueryHashNonExistenceCircuits, SinglePathInput, TwoProvenChildNodeInput,
+        ChildProof, CommonInputs, NodeInfo, NonExistenceInput, OneProvenChildNodeInput,
+        QueryBounds, QueryHashNonExistenceCircuits, SinglePathInput, SubProof,
+        TwoProvenChildNodeInput,
     },
     computational_hash_ids::{AggregationOperation, HashPermutation, Output},
     universal_circuit::{
@@ -194,16 +195,16 @@ where
     ) -> Result<Self> {
         Ok(CircuitInput::OneProvenChildNode(OneProvenChildNodeInput {
             unproven_child,
-            proven_child_left,
-            proven_child_proof: ProofWithVK::deserialize(&proven_child_proof)?,
+            proven_child_proof: ChildProof {
+                proof: ProofWithVK::deserialize(&proven_child_proof)?,
+                is_left_child: proven_child_left,
+            },
             embedded_tree_proof: ProofWithVK::deserialize(&embedded_tree_proof)?,
             common: CommonInputs::new(is_rows_tree_node, query_bounds),
         }))
     }
     /// Initialize input to prove a single path node from the following inputs:
-    /// - `input_proof`: Proof of either a child node or of the embedded tree stored in the current node
-    /// - `proven_tree`: Enum specifiyng whether `input_proof` refers to the left child, the right child or
-    ///     the embedded tree stored in the current node
+    /// - `subtree_proof`: Proof of either a child node or of the embedded tree stored in the current node
     /// - `left_child`: Data about the left child of the current node, if any; must be `None` if the node has
     ///     no left child
     /// - `right_child`: Data about the right child of the current node, if any; must be `None` if the node has
@@ -212,8 +213,7 @@ where
     /// - `is_rows_tree_node`: flag specifying whether the full node belongs to the rows tree or to the index tree
     /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
     pub fn new_single_path(
-        input_proof: Vec<u8>,
-        proven_tree: ProvenSubtree,
+        subtree_proof: SubProof,
         left_child: Option<NodeInfo>,
         right_child: Option<NodeInfo>,
         node_info: NodeInfo,
@@ -224,8 +224,7 @@ where
             left_child,
             right_child,
             node_info,
-            input_proof: ProofWithVK::deserialize(&input_proof)?,
-            proven_tree,
+            subtree_proof,
             common: CommonInputs::new(is_rows_tree_node, query_bounds),
         }))
     }
@@ -538,19 +537,22 @@ where
             }
             CircuitInput::OneProvenChildNode(OneProvenChildNodeInput {
                 unproven_child,
-                proven_child_left,
                 proven_child_proof,
                 embedded_tree_proof,
                 common,
             }) => {
-                let (child_proof, child_vk) = proven_child_proof.into();
+                let ChildProof {
+                    proof,
+                    is_left_child,
+                } = proven_child_proof;
+                let (child_proof, child_vk) = proof.into();
                 let (embedded_proof, embedded_vk) = embedded_tree_proof.into();
                 match unproven_child {
                     Some(child_node) => {
                         // the node has 2 children, so we use the partial node circuit
                         let input = PartialNodeCircuit {
                             is_rows_tree_node: common.is_rows_tree_node,
-                            is_left_child: proven_child_left,
+                            is_left_child,
                             sibling_tree_hash: child_node.embedded_tree_hash,
                             sibling_child_hashes: child_node.child_hashes,
                             sibling_value: child_node.value,
@@ -573,7 +575,7 @@ where
                         // the node has 1 child, so use the circuit for full node with 1 child
                         let input = FullNodeWithOneChildCircuit {
                             is_rows_tree_node: common.is_rows_tree_node,
-                            is_left_child: proven_child_left,
+                            is_left_child,
                             min_query: common.min_query,
                             max_query: common.max_query,
                         };
@@ -593,34 +595,34 @@ where
                 left_child,
                 right_child,
                 node_info,
-                input_proof,
-                proven_tree,
+                subtree_proof,
                 common,
             }) => {
-                let (proof, vk) = input_proof.into();
                 let left_child_exists = left_child.is_some();
                 let right_child_exists = right_child.is_some();
                 let left_child_data = left_child.unwrap_or_default();
                 let right_child_data = right_child.unwrap_or_default();
-                if !(left_child_exists || right_child_exists) {
-                    // leaf node, so call full node circuit for leaf node
-                    ensure!(!common.is_rows_tree_node, "providing single-path input for a rows tree node leaf, call universal circuit instead");
-                    let input = FullNodeIndexLeafCircuit {
-                        min_query: common.min_query,
-                        max_query: common.max_query,
-                    };
-                    (
-                        self.circuit_set.generate_proof(
-                            &self.full_node_leaf,
-                            [proof],
-                            [&vk],
-                            input,
-                        )?,
-                        self.full_node_leaf.get_verifier_data().clone(),
-                    )
-                } else {
-                    match proven_tree {
-                        ProvenSubtree::Embedded => {
+
+                match subtree_proof {
+                    SubProof::Embedded(input_proof) => {
+                        let (proof, vk) = input_proof.into();
+                        if !(left_child_exists || right_child_exists) {
+                            // leaf node, so call full node circuit for leaf node
+                            ensure!(!common.is_rows_tree_node, "providing single-path input for a rows tree node leaf, call universal circuit instead");
+                            let input = FullNodeIndexLeafCircuit {
+                                min_query: common.min_query,
+                                max_query: common.max_query,
+                            };
+                            (
+                                self.circuit_set.generate_proof(
+                                    &self.full_node_leaf,
+                                    [proof],
+                                    [&vk],
+                                    input,
+                                )?,
+                                self.full_node_leaf.get_verifier_data().clone(),
+                            )
+                        } else {
                             // the input proof refers to the embedded tree stored in the node
                             let input = EmbeddedTreeProvenSinglePathNodeCircuit {
                                 left_child_min: left_child_data.min,
@@ -649,31 +651,35 @@ where
                                 self.single_path_embedded_tree.get_verifier_data().clone(),
                             )
                         }
-                        ProvenSubtree::Child(is_left) => {
-                            // the input proof refers to a child of the node
-                            let input = ChildProvenSinglePathNodeCircuit {
-                                value: node_info.value,
-                                subtree_hash: node_info.embedded_tree_hash,
-                                sibling_hash: if is_left {
-                                    node_info.child_hashes[1] // set the hash of the right child, since proven child is left
-                                } else {
-                                    node_info.child_hashes[0] // set the hash of the left child, since proven child is right
-                                },
-                                is_left_child: is_left,
-                                unproven_min: node_info.min,
-                                unproven_max: node_info.max,
-                                is_rows_tree_node: common.is_rows_tree_node,
-                            };
-                            (
-                                self.circuit_set.generate_proof(
-                                    &self.single_path_proven_child,
-                                    [proof],
-                                    [&vk],
-                                    input,
-                                )?,
-                                self.single_path_proven_child.get_verifier_data().clone(),
-                            )
-                        }
+                    }
+                    SubProof::Child(ChildProof {
+                        proof,
+                        is_left_child,
+                    }) => {
+                        // the input proof refers to a child of the node
+                        let (proof, vk) = proof.into();
+                        let input = ChildProvenSinglePathNodeCircuit {
+                            value: node_info.value,
+                            subtree_hash: node_info.embedded_tree_hash,
+                            sibling_hash: if is_left_child {
+                                node_info.child_hashes[1] // set the hash of the right child, since proven child is left
+                            } else {
+                                node_info.child_hashes[0] // set the hash of the left child, since proven child is right
+                            },
+                            is_left_child,
+                            unproven_min: node_info.min,
+                            unproven_max: node_info.max,
+                            is_rows_tree_node: common.is_rows_tree_node,
+                        };
+                        (
+                            self.circuit_set.generate_proof(
+                                &self.single_path_proven_child,
+                                [proof],
+                                [&vk],
+                                input,
+                            )?,
+                            self.single_path_proven_child.get_verifier_data().clone(),
+                        )
                     }
                 }
             }

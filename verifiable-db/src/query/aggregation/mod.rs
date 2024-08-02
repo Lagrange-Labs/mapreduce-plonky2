@@ -60,10 +60,20 @@ impl QueryBounds {
 /// Data structure containing all the information needed as input by aggregation circuits for a single node of the tree
 #[derive(Clone, Debug, Default)]
 pub struct NodeInfo {
+    /// The hash of the embedded tree at this node. It can be the hash of the row tree if this node is a node in
+    /// the index tree, or it can be a hash of the cells tree if this node is a node in a rows tree
     pub(crate) embedded_tree_hash: HashOut<F>,
+    /// Hashes of the children of the current node, first left child and then right child hash. The hash of left/right child
+    /// is the empty hash (i.e., H("")) if there is no corresponding left/right child for the current node
     pub(crate) child_hashes: [HashOut<F>; 2],
+    /// value stored in the node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
     pub(crate) value: U256,
+    /// minimum value associated to the current node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
     pub(crate) min: U256,
+    /// minimum value associated to the current node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
     pub(crate) max: U256,
 }
 
@@ -122,37 +132,78 @@ impl CommonInputs {
 /// Input data structure for circuits employed for nodes where both the children and the embedded tree are proven
 #[derive(Clone, Debug)]
 pub struct TwoProvenChildNodeInput {
+    /// Proof for the left child of the node being proven
     pub(crate) left_child_proof: ProofWithVK,
+    /// Proof for the right child of the node being proven
     pub(crate) right_child_proof: ProofWithVK,
+    /// Proof for the embedded tree stored in the current node
     pub(crate) embedded_tree_proof: ProofWithVK,
+    /// Common inputs shared across all the circuits
     pub(crate) common: CommonInputs,
 }
 /// Input data structure for circuits employed for nodes where one child and the embedded tree are proven
 #[derive(Clone, Debug)]
 pub struct OneProvenChildNodeInput {
+    /// Data related to the child not associated with a proof, if any
     pub(crate) unproven_child: Option<NodeInfo>,
-    pub(crate) proven_child_left: bool,
-    pub(crate) proven_child_proof: ProofWithVK,
+    /// Proof for the proven child
+    pub(crate) proven_child_proof: ChildProof,
+    /// Proof for the embedded tree stored in the current node
     pub(crate) embedded_tree_proof: ProofWithVK,
+    /// Common inputs shared across all the circuits
     pub(crate) common: CommonInputs,
 }
 #[derive(Clone, Debug)]
-/// Enum employed to specify whether a proof refers to the left child, the right child or the embedded tree
-pub enum ProvenSubtree {
+/// Data structure representing a proof for a child node
+pub struct ChildProof {
+    /// Actual proof
+    pub(crate) proof: ProofWithVK,
+    /// Flag specifying whether the child associated with `proof`` is the left or right child of its parent
+    pub(crate) is_left_child: bool,
+}
+
+impl ChildProof {
+    pub fn new(proof: Vec<u8>, is_left_child: bool) -> Result<ChildProof> {
+        Ok(Self {
+            proof: ProofWithVK::deserialize(&proof)?,
+            is_left_child,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+/// Enum employed to specify whether a proof refers to a child node or the embedded tree stored in a node
+pub enum SubProof {
     /// Proof refer to a child: the wrapped flag specify whether it is the left child or not
-    Child(bool),
+    Child(ChildProof),
     /// Proof refer to the embedded tree stored in the node
-    Embedded,
+    Embedded(ProofWithVK),
+}
+
+impl SubProof {
+    /// Initialize a new `SubProof::Child`
+    pub fn new_child_proof(proof: Vec<u8>, is_left_child: bool) -> Result<Self> {
+        Ok(SubProof::Child(ChildProof::new(proof, is_left_child)?))
+    }
+
+    /// Initialize a new `SubProof::Embedded`
+    pub fn new_embedded_tree_proof(proof: Vec<u8>) -> Result<Self> {
+        Ok(SubProof::Embedded(ProofWithVK::deserialize(&proof)?))
+    }
 }
 
 /// Input data structure for circuits employed for nodes where only one among children node and embedded tree is proven
 #[derive(Clone, Debug)]
 pub struct SinglePathInput {
+    /// Data about the left child of the node being proven, if any
     pub(crate) left_child: Option<NodeInfo>,
+    /// Data about the right child of the node being proven, if any
     pub(crate) right_child: Option<NodeInfo>,
+    /// Data about the node being proven
     pub(crate) node_info: NodeInfo,
-    pub(crate) input_proof: ProofWithVK,
-    pub(crate) proven_tree: ProvenSubtree,
+    /// Proof of either a child node or of the embedded tree stored in the current node
+    pub(crate) subtree_proof: SubProof,
+    /// Common inputs shared across all the circuits
     pub(crate) common: CommonInputs,
 }
 
@@ -250,14 +301,23 @@ impl QueryHashNonExistenceCircuits {
 /// Input data structure for circuits employed to prove the non-existence of rows satisfying the query bounds
 #[derive(Clone, Debug)]
 pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
+    /// Data about the node being proven
     pub(crate) node_info: NodeInfo,
+    /// Data about the child of the node, if any
     pub(crate) child_info: Option<NodeInfo>,
+    /// Flag specifying whether the node hash a left or right child, if any
     pub(crate) is_child_left: Option<bool>,
+    /// Value of the primary index associated to the current node
     pub(crate) primary_index_value: U256,
+    /// Identifier of primary and secondary indexed columns
     pub(crate) index_ids: [F; 2],
+    /// Computational hash associated to the query
     pub(crate) computational_hash: ComputationalHash,
+    /// Placeholder hash associated to the query
     pub(crate) placeholder_hash: PlaceholderHash,
+    /// Set of aggregation operations employed to aggregate results
     pub(crate) aggregation_ops: [F; MAX_NUM_RESULTS],
+    /// Common inputs shared across all the circuits
     pub(crate) common: CommonInputs,
 }
 
