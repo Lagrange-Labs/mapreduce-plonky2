@@ -540,23 +540,24 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
         left: &[UInt256Target; L],
         right: &[UInt256Target; L],
     ) -> (BoolTarget, BoolTarget) {
-        let zero = self.zero_u32();
+        let zero = self.zero();
         let (borrow, sum_limbs) = zip_eq(
             left.iter().flat_map(|u| u.0),
             right.iter().flat_map(|u| u.0),
         )
         .fold((zero, zero), |(borrow, sum_limbs), (l, r)| {
-            let (res, borrow) = self.sub_u32(l, r, borrow);
-            let (sum_limbs, _) = self.add_u32(sum_limbs, res);
+            let (res, borrow) = self.sub_u32(l, r, U32Target(borrow));
+            // It's safe to add Uint32 as field element.
+            let sum_limbs = self.add(sum_limbs, res.0);
 
-            (borrow, sum_limbs)
+            (borrow.0, sum_limbs)
         });
 
         (
             // left < right
-            self.is_not_equal(borrow.0, zero.0),
+            self.is_not_equal(borrow, zero),
             // left == right
-            self.is_equal(sum_limbs.0, zero.0),
+            self.is_equal(sum_limbs, zero),
         )
     }
 
