@@ -112,8 +112,12 @@ pub(crate) mod tests {
                 if subtree_pi.no_duplicates_flag() && max_value == node_value {
                     // pC.max_items < pR.min_items
                     items[0] = items[0].checked_sub(one).unwrap();
+                } else {
+                    //Set pC.max_items = pR.min_items or the random U256s for false case.
+                    items = *[items, array::from_fn(|_| U256::from_limbs(rng.gen()))]
+                        .choose(&mut rng)
+                        .unwrap();
                 }
-                // Also set pC.max_items = pR.min_items if the above condition didn't satisfy (for false case).
                 proof[max_items_range]
                     .copy_from_slice(&items.iter().flat_map(|item| item.to_fields()).collect_vec());
             } else {
@@ -127,8 +131,12 @@ pub(crate) mod tests {
                 if subtree_pi.no_duplicates_flag() && min_value == node_value {
                     // pC.min_items > pR.max_items
                     items[0] = items[0].checked_add(one).unwrap();
+                } else {
+                    //Set pC.max_items = pR.min_items or the random U256s for false case.
+                    items = *[items, array::from_fn(|_| U256::from_limbs(rng.gen()))]
+                        .choose(&mut rng)
+                        .unwrap();
                 }
-                // Also set pC.min_items = pR.max_items if the above condition didn't satisfy (for false case).
                 proof[min_items_range]
                     .copy_from_slice(&items.iter().flat_map(|item| item.to_fields()).collect_vec());
             }
