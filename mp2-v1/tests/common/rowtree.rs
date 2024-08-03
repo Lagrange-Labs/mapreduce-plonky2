@@ -290,13 +290,15 @@ impl<P: ProofStorage> TestContext<P> {
             .storage
             .get_proof_exact(&ProofKey::Row(root_proof_key.clone()))
             .unwrap();
-
-        let tree_hash = table.row.root_data().unwrap().hash;
+        let root_row = table.row.root_data().unwrap();
+        let tree_hash = root_row.hash.clone();
         let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
 
         assert_eq!(
             tree_hash, proved_hash,
-            "mismatch between row tree root hash as computed by ryhope and mp2",
+            "mismatch between row tree root hash as computed by ryhope and mp2 (row.id {:?}, value {:?} , row.cell_hash {:?})",
+            root_row.secondary_index_column, root_row.secondary_index_value(),root_row.cell_root_hash
+
         );
         Ok(IndexNode {
             identifier: table.columns.primary_column().identifier,

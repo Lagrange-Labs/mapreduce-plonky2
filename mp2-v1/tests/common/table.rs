@@ -71,7 +71,7 @@ impl TableColumns {
         self.rest.clone()
     }
     pub fn column_id_of_cells_index(&self, key: CellTreeKey) -> Option<ColumnID> {
-        self.rest.get(key + 1).map(|tc| tc.identifier)
+        self.rest.get(key - 1).map(|tc| tc.identifier)
     }
     // Returns the index of the column identifier in the index tree, ie. the order of columns  in
     // the cells tree

@@ -261,6 +261,12 @@ impl<
                     // P(cell_tree_hash)
                     .chain(self.cell_root_hash.0.to_fields())
                     .collect::<Vec<_>>();
+        println!(
+            "\n--RYHOPE Row : id {:?}, value {:?} tree_root_hash {:?}",
+            self.secondary_index_column,
+            self.secondary_index_value(),
+            self.cell_root_hash
+        );
         self.hash = HashOutput(H::hash_no_pad(&to_hash).to_bytes().try_into().unwrap());
     }
 }
