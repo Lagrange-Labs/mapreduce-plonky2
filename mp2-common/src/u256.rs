@@ -42,6 +42,22 @@ use serde::{Deserialize, Serialize};
 /// Number of limbs employed to represent a 256-bit unsigned integer
 pub const NUM_LIMBS: usize = 8;
 
+/// Check if an UInt256 array is less than or equal to the other. It iterates
+/// with the two arrays and compare each Uint256 element till to the last,
+/// the comparison is defined as `l < r` or `l==r`.
+/// It's corresponding to the `is_less_than_or_equal_to_u256_arr` gadget
+/// function, and returns two flags: `left < right` and `left == right`.
+fn is_less_than_or_equal_to_u256_arr<const L: usize>(
+    left: &[U256; L],
+    right: &[U256; L],
+) -> (bool, bool) {
+    zip_eq(left, right).fold((false, true), |(is_lt, is_eq), (l, r)| {
+        let l = l - if is_lt { U256::from(1) } else { U256::ZERO };
+
+        (&l < r, is_eq && &l == r)
+    })
+}
+
 /// Circuit representation of u256
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct UInt256Target([U32Target; NUM_LIMBS]);
@@ -951,7 +967,6 @@ mod tests {
     use std::array;
 
     use alloy::primitives::U256;
-    use itertools::zip_eq;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,
@@ -974,7 +989,9 @@ mod tests {
         utils::FromFields,
     };
 
-    use super::{CircuitBuilderU256, UInt256Target, WitnessWriteU256};
+    use super::{
+        is_less_than_or_equal_to_u256_arr, CircuitBuilderU256, UInt256Target, WitnessWriteU256,
+    };
 
     const D: usize = 2;
     type F = GFp;
@@ -1645,12 +1662,7 @@ mod tests {
         .for_each(|[left, right]| {
             let circuit = TestArrLessThanOrEqualToCircuit(TestArrOperationsCircuit { left, right });
             let proof = run_circuit::<F, D, C, _>(circuit);
-            let (is_lt, is_eq) =
-                zip_eq(left, right).fold((false, true), |(is_lt, is_eq), (l, r)| {
-                    let l = l - if is_lt { U256::from(1) } else { U256::ZERO };
-
-                    (l < r, is_eq && l == r)
-                });
+            let (is_lt, is_eq) = is_less_than_or_equal_to_u256_arr(&left, &right);
             // is_less_than
             assert_eq!(proof.public_inputs[0], if is_lt { F::ONE } else { F::ZERO });
             // is_equal
