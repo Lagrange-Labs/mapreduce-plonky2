@@ -1,3 +1,4 @@
+pub mod block;
 pub mod cell;
 pub mod index;
 pub mod row;

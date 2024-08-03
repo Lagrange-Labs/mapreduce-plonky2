@@ -5,14 +5,17 @@ use local_simple::TableRowValues;
 use log::debug;
 use mp2_common::eth::StorageSlot;
 use mp2_test::utils::random_vector;
-use mp2_v1::values_extraction::{
-    identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+use mp2_v1::{
+    indexing::{
+        cell::Cell,
+        row::{RowTreeKey, ToNonce},
+    },
+    values_extraction::{identifier_for_mapping_key_column, identifier_for_mapping_value_column},
 };
 use rand::{thread_rng, Rng};
 
 use super::{
-    celltree::Cell,
-    rowtree::{RowTreeKey, SecondaryIndexCell, ToNonce},
+    rowtree::SecondaryIndexCell,
     table::{CellsUpdate, Table},
 };
 

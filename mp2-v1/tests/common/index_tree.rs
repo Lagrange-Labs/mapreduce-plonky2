@@ -1,8 +1,23 @@
 use alloy::primitives::U256;
 use anyhow::{Context, Result};
+use derive_more::From;
 use log::{debug, info};
-use mp2_common::{poseidon::empty_poseidon_hash, proof::ProofWithVK, utils::ToFields, CHasher, F};
-use mp2_v1::{api, values_extraction::identifier_block_column};
+use mp2_common::{
+    poseidon::empty_poseidon_hash,
+    proof::ProofWithVK,
+    serialization::{FromBytes, ToBytes},
+    types::HashOutput,
+    utils::ToFields,
+    CHasher, F,
+};
+use mp2_v1::{
+    api,
+    indexing::{
+        block::{BlockPrimaryIndex, BlockTree, BlockTreeKey},
+        index::IndexNode,
+    },
+    values_extraction::identifier_block_column,
+};
 use plonky2::{
     field::types::Field,
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
@@ -23,93 +38,13 @@ use std::iter::once;
 use crate::common::proof_storage::{IndexProofIdentifier, ProofKey};
 
 use super::{
-    proof_storage::{BlockPrimaryIndex, ProofStorage, RowProofIdentifier},
-    rowtree::RowTreeKey,
+    proof_storage::{ProofStorage, RowProofIdentifier},
     table::{Table, TableID},
     TestContext,
 };
 
-/// Hardcoded to use blocks but the spirit for any primary index is the same
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct IndexNode {
-    // information that must be filled manually
-    pub identifier: u64,
-    pub value: U256,
-    pub row_tree_proof_id: RowProofIdentifier<BlockPrimaryIndex>,
-    pub row_tree_hash: HashOut<F>,
-    // information filled during aggregation inside ryhope
-    pub node_hash: HashOut<F>,
-    pub min: U256,
-    pub max: U256,
-}
-
-impl NodePayload for IndexNode {
-    fn aggregate<I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
-        // curently always return the expected number of children which
-        // is two.
-        let children = children.into_iter().collect::<Vec<_>>();
-        assert_eq!(children.len(), 2);
-        let null_hash = empty_poseidon_hash();
-
-        let (left, right) = match [&children[0], &children[1]] {
-            // no children
-            [None, None] => {
-                self.min = self.value;
-                self.max = self.value;
-                (null_hash, null_hash)
-            }
-            [Some(left), None] => {
-                self.min = left.min;
-                self.max = self.value;
-                (&left.node_hash, null_hash)
-            }
-            [Some(left), Some(right)] => {
-                self.min = left.min;
-                self.max = right.max;
-                (&left.node_hash, &right.node_hash)
-            }
-            [None, Some(_)] => panic!("ryhope sbbst is wrong"),
-        };
-        let inputs = left
-            .to_fields()
-            .into_iter()
-            .chain(right.to_fields())
-            .chain(self.min.to_fields())
-            .chain(self.max.to_fields())
-            .chain(once(F::from_canonical_u64(self.identifier)))
-            .chain(self.value.to_fields())
-            .chain(self.row_tree_hash.to_fields())
-            .collect::<Vec<_>>();
-        self.node_hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&inputs);
-    }
-}
-
-pub type IndexTree = sbbst::Tree;
-pub type IndexTreeKey = <IndexTree as TreeTopology>::Key;
-type IndexStorage = InMemory<IndexTree, IndexNode>;
-pub type MerkleIndexTree = MerkleTreeKvDb<IndexTree, IndexNode, IndexStorage>;
-
-pub fn build_initial_index_tree(
-    index: &IndexNode,
-) -> Result<(MerkleIndexTree, UpdateTree<IndexTreeKey>)> {
-    let block_usize: BlockPrimaryIndex = index.value.try_into().unwrap();
-
-    // should always be one anyway since we iterate over blocks one by one
-    // but in the case of general index we might create multiple nodes
-    // at the same time
-    let mut index_tree = MerkleIndexTree::new(
-        InitSettings::Reset(sbbst::Tree::with_shift_and_capacity(block_usize - 1, 0)),
-        (),
-    )
-    .unwrap();
-    let update_tree = index_tree
-        .in_transaction(|t| {
-            t.store(index.value.to(), index.clone())?;
-            Ok(())
-        })
-        .context("while filling up index tree")?;
-    Ok((index_tree, update_tree))
-}
+type IndexStorage = InMemory<BlockTree, IndexNode<BlockPrimaryIndex>>;
+pub type MerkleIndexTree = MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>;
 
 impl<P: ProofStorage> TestContext<P> {
     /// NOTE: we require the added_index information because we need to distinguish if a new node
@@ -119,20 +54,25 @@ impl<P: ProofStorage> TestContext<P> {
         &mut self,
         table_id: &TableID,
         t: &MerkleIndexTree,
-        ut: UpdateTree<IndexTreeKey>,
-        added_index: &IndexNode,
+        ut: UpdateTree<BlockTreeKey>,
+        added_index: &IndexNode<BlockPrimaryIndex>,
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, node) = t.fetch_with_context(&k);
+            let row_proof_key = RowProofIdentifier {
+                table: table_id.clone(),
+                tree_key: node.row_tree_root_key,
+                primary: node.row_tree_root_primary,
+            };
             let row_tree_proof = self
                 .storage
-                .get_proof_exact(&ProofKey::Row(node.row_tree_proof_id.clone()))
+                .get_proof_exact(&ProofKey::Row(row_proof_key))
                 .expect("should find row proof");
             // extraction proof is done once per block, so its key can just be block based
             debug!(
                 "trying to LOAD the extraction proof from {table_id:?} - index value {}",
-                node.value.to::<U256>()
+                node.value.0.to::<U256>()
             );
             let extraction_proof = self
                 .storage
@@ -142,7 +82,7 @@ impl<P: ProofStorage> TestContext<P> {
                     // being proven which is not the latest one always. In update tree, many nodes
                     // may need to be proven again, historical nodes, since their children might
                     // have changed.
-                    node.value.to(),
+                    node.value.0.to(),
                 )))
                 .expect("should find extraction proof");
             {
@@ -161,13 +101,13 @@ impl<P: ProofStorage> TestContext<P> {
                     row_pi.rows_digest_field(),
                     ext_pi.value_point(),
                     "values extracted vs value in db don't match (left row, right mpt (block {})",
-                    node.value.to::<u64>()
+                    node.value.0.to::<u64>()
                 );
             }
             let proof = if context.is_leaf() {
                 info!(
                     "NodeIndex Proving --> LEAF (node {})",
-                    node.value.to::<U256>()
+                    node.value.0.to::<U256>()
                 );
 
                 let inputs = api::CircuitInput::BlockTree(
@@ -182,7 +122,7 @@ impl<P: ProofStorage> TestContext<P> {
             } else if context.is_partial() {
                 info!(
                     "NodeIndex Proving --> PARTIAL (node {})",
-                    node.value.to::<U256>()
+                    node.value.0.to::<U256>()
                 );
                 // a node that was already there before and is in the path of the added node to the
                 // root should always have two children
@@ -203,24 +143,24 @@ impl<P: ProofStorage> TestContext<P> {
                 let (prev_ctx, previous_node) = t.fetch_with_context(previous_key);
                 let prev_left_hash = match prev_ctx.left {
                     Some(kk) => t.fetch(&kk).node_hash,
-                    None => *empty_poseidon_hash(),
+                    None => empty_poseidon_hash().to_bytes().try_into().unwrap(),
                 };
 
                 let prev_right_hash = match prev_ctx.right {
                     Some(kk) => t.fetch(&kk).node_hash,
-                    None => *empty_poseidon_hash(),
+                    None => empty_poseidon_hash().to_bytes().try_into().unwrap(),
                 };
 
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_parent(
                         // TODO: change API to use u64 only
                         node.identifier,
-                        previous_node.value,
+                        previous_node.value.0,
                         previous_node.min,
                         previous_node.max,
-                        &prev_left_hash.to_bytes().try_into().unwrap(),
-                        &prev_right_hash.to_bytes().try_into().unwrap(),
-                        &previous_node.row_tree_hash.to_bytes().try_into().unwrap(),
+                        &prev_left_hash,
+                        &prev_right_hash,
+                        &previous_node.row_tree_hash,
                         extraction_proof,
                         row_tree_proof,
                     ),
@@ -246,11 +186,11 @@ impl<P: ProofStorage> TestContext<P> {
                 let inputs = api::CircuitInput::BlockTree(
                     verifiable_db::block_tree::CircuitInput::new_membership(
                         node.identifier,
-                        node.value,
+                        node.value.0,
                         previous_node.min,
                         previous_node.max,
-                        &left_node.node_hash.to_bytes().try_into().unwrap(),
-                        &node.row_tree_hash.to_bytes().try_into().unwrap(),
+                        &left_node.node_hash,
+                        &node.row_tree_hash,
                         right_proof,
                     ),
                 );
@@ -285,7 +225,7 @@ impl<P: ProofStorage> TestContext<P> {
         &mut self,
         bn: BlockPrimaryIndex,
         table: &Table,
-        ut: UpdateTree<IndexTreeKey>,
+        ut: UpdateTree<BlockTreeKey>,
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let row_tree_root = table.row.root().unwrap();
         let row_root_proof_key = RowProofIdentifier {
@@ -302,11 +242,10 @@ impl<P: ProofStorage> TestContext<P> {
             .expect("can't find hash?");
         let node = IndexNode {
             identifier: identifier_block_column(),
-            value: U256::from(bn),
+            value: U256::from(bn).into(),
             // NOTE: here we put the latest key found, since it may have been generated at a
             // previous block than the current one.
-            row_tree_proof_id: latest_root_key.clone(),
-            row_tree_hash,
+            row_tree_hash: row_tree_hash.to_bytes().try_into().unwrap(),
             ..Default::default()
         };
         info!("Generated index tree");

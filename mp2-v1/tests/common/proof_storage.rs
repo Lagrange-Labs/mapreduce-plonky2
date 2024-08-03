@@ -3,18 +3,21 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{context::TestContextConfig, index_tree::IndexTree, mkdir_all, table::TableID};
+use super::{context::TestContextConfig, mkdir_all, table::TableID};
 use alloy::primitives::Address;
 use anyhow::{bail, Context, Result};
 use envconfig::Envconfig;
 use mp2_test::cells_tree::CellTree;
-use mp2_v1::indexing::row_tree::RowTreeKey;
+use mp2_v1::indexing::{
+    block::{BlockPrimaryIndex, BlockTree},
+    row::RowTreeKey,
+};
 use ryhope::tree::{sbbst, TreeTopology};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 type CellTreeKey = <CellTree as TreeTopology>::Key;
-type IndexTreeKey = <IndexTree as TreeTopology>::Key;
+type IndexTreeKey = <BlockTree as TreeTopology>::Key;
 
 type ContractKey = (Address, BlockPrimaryIndex);
 
@@ -53,12 +56,6 @@ pub(crate) struct IndexProofIdentifier<PrimaryIndex> {
     pub(crate) table: TableID,
     pub(crate) tree_key: PrimaryIndex,
 }
-
-/// block number by default but can be different since we want to support primary index of any
-/// kinds in results tree and in general to build a table.
-/// This is usize in this case for the moment since right now we deal with sbbst tree as index
-/// tree.
-pub(crate) type BlockPrimaryIndex = <sbbst::Tree as TreeTopology>::Key;
 
 /// Uniquely identifies a proof in the proof storage backend.
 #[derive(Debug, Clone, PartialEq, Eq)]

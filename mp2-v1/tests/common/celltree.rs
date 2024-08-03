@@ -1,24 +1,15 @@
-use std::iter;
+use std::hash::Hash;
 
-use alloy::{
-    eips::BlockNumberOrTag,
-    primitives::{Address, U256},
-};
+use alloy::primitives::{Address, U256};
 use anyhow::*;
 use log::{debug, info};
-use mp2_common::{
-    eth::ProofQuery,
-    poseidon::{empty_poseidon_hash, H},
-    proof::ProofWithVK,
-    types::HashOutput,
-    utils::ToFields,
-    CHasher, F,
-};
+use mp2_common::proof::ProofWithVK;
 use mp2_v1::{
     api::{self, CircuitInput},
     indexing::{
-        cell::{CellTreeKey, MerkleCellTree, TreeCell},
-        row::{CellCollection, RowPayload, RowTreeKey},
+        block::BlockPrimaryIndex,
+        cell::{CellTreeKey, MerkleCellTree},
+        row::{CellCollection, Row, RowPayload, RowTreeKey},
     },
     values_extraction::identifier_single_var_column,
 };
@@ -31,8 +22,8 @@ use serde::{Deserialize, Serialize};
 use crate::common::{cell_tree_proof_to_hash, TestContext};
 
 use super::{
-    proof_storage::{BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage},
-    table::{CellsUpdateResult, Table, TableID},
+    proof_storage::{CellProofIdentifier, ProofKey, ProofStorage},
+    table::{CellsUpdateResult, Table, TableColumns, TableID},
 };
 
 impl<P: ProofStorage> TestContext<P> {
@@ -44,14 +35,41 @@ impl<P: ProofStorage> TestContext<P> {
     /// index update), then we can search previous proofs under this key.
     fn prove_cell_tree(
         &mut self,
-        row_key: RowTreeKey,
-        table_id: &TableID,
+        table: &Table,
+        primary: BlockPrimaryIndex,
+        // The row at which the previous cells tree was attached to
+        previous_row: Row<BlockPrimaryIndex>,
+        // the new row key for this new cells tree. It can be the same as the key of the previous
+        // row if there has been no change in the secondary index value.
+        new_row_key: RowTreeKey,
         tree: MerkleCellTree,
         ut: UpdateTree<CellTreeKey>,
     ) -> CellTreeKey {
+        let table_id = &table.id;
+        let table_columns = &table.columns;
         // Store the proofs here for the tests; will probably be done in S3 for
         // prod.
         let mut workplan = ut.into_workplan();
+
+        let find_primary = |k: CellTreeKey| -> BlockPrimaryIndex {
+            if previous_row == Default::default() {
+                return primary;
+            }
+            // Here, we need to find the primary index over which this children proof have
+            // been generated. To do this, we need to determine the column ID corresponding to
+            // the index of the child key. We do this by looking up the table definition.
+            // Then from this column ID, we can look in the previous row payload, the
+            // corresponding primary index stored for this child cell.
+            let child_column_id = table_columns
+                .column_id_of_cells_index(k)
+                .expect("invalid table index <-> id definition");
+            previous_row
+                .payload
+                .cells
+                .find_by_column(child_column_id)
+                .map(|c| c.primary)
+                .expect("unable to find cell with given column id")
+        };
 
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, cell) = tree.fetch_with_context(&k);
@@ -63,10 +81,13 @@ impl<P: ProofStorage> TestContext<P> {
                 );
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.right.is_none() {
-                // Prove a partial node
+                // Prove a partial node - only care about the left side since sbbst has this nice
+                // property
+                let child_primary = find_primary(context.left.unwrap());
                 let proof_key = CellProofIdentifier {
                     table: table_id.clone(),
-                    secondary: row_key.clone(),
+                    secondary: previous_row.k.clone(),
+                    primary: child_primary,
                     tree_key: context.left.unwrap(),
                 };
                 let left_proof = self
@@ -82,12 +103,14 @@ impl<P: ProofStorage> TestContext<P> {
                 // Prove a full node.
                 let left_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
-                    secondary: row_key.clone(),
+                    secondary: previous_row.k.clone(),
+                    primary: find_primary(context.left.unwrap()),
                     tree_key: context.left.unwrap(),
                 };
                 let right_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
-                    secondary: row_key.clone(),
+                    secondary: previous_row.k.clone(),
+                    primary: find_primary(context.right.unwrap()),
                     tree_key: context.right.unwrap(),
                 };
 
@@ -109,7 +132,8 @@ impl<P: ProofStorage> TestContext<P> {
             };
             let generated_proof_key = CellProofIdentifier {
                 table: table_id.clone(),
-                secondary: row_key.clone(),
+                secondary: new_row_key.clone(),
+                primary,
                 tree_key: k,
             };
 
@@ -132,7 +156,8 @@ impl<P: ProofStorage> TestContext<P> {
         let root = tree.root().unwrap();
         let root_proof_key = CellProofIdentifier {
             table: table_id.clone(),
-            secondary: row_key.clone(),
+            secondary: new_row_key.clone(),
+            primary,
             tree_key: root,
         };
 
@@ -151,24 +176,31 @@ impl<P: ProofStorage> TestContext<P> {
         &mut self,
         table: &Table,
         primary: BlockPrimaryIndex,
+        // The row that held the cell tree before it is updated. This is necessary to fetch information related to
+        // the location of the cells proofs.
+        previous_row: Row<BlockPrimaryIndex>,
         // All the new cells expected in the row, INCLUDING the secondary index
         // Note this is just needed to put inside the returned JSON Row payload, it's not
         // processed
-        all_cells: CellCollection,
+        all_cells: CellCollection<BlockPrimaryIndex>,
         cells_update: CellsUpdateResult,
-    ) -> RowPayload {
-        self.move_cells_proof_to_new_row(&table.id, &cells_update)
+    ) -> RowPayload<BlockPrimaryIndex> {
+        // sanity check
+        assert!(previous_row.k == cells_update.previous_row_key);
+        self.move_cells_proof_to_new_row(&table.id, primary, &cells_update)
             .expect("unable to move cells tree proof:");
         let tree_hash = cells_update.latest.root_data().unwrap().hash;
         let root_key = self.prove_cell_tree(
-            cells_update.new_row_key,
-            &table.id,
+            &table,
+            primary,
+            previous_row,
+            cells_update.new_row_key.clone(),
             cells_update.latest,
             cells_update.to_update,
         );
         let root_proof_key = CellProofIdentifier {
             primary,
-            table: table.id,
+            table: table.id.clone(),
             secondary: cells_update.new_row_key,
             tree_key: root_key,
         };
@@ -183,9 +215,13 @@ impl<P: ProofStorage> TestContext<P> {
         );
 
         RowPayload {
+            secondary_index_column: table.columns.secondary_column().identifier,
             cell_root_key: root_key,
             cell_root_hash: tree_hash,
-            cell_root_proof_primary: U256::from(primary),
+            cell_root_column: table
+                .columns
+                .column_id_of_cells_index(root_key)
+                .expect("unable to find column id of root cells"),
             cells: all_cells,
             ..Default::default()
         }
@@ -221,13 +257,13 @@ impl<P: ProofStorage> TestContext<P> {
                     let previous_proof_key = ProofKey::Cell(CellProofIdentifier {
                         table: table_id.clone(),
                         secondary: cells_update.previous_row_key.clone(),
-                        primary: primary,
+                        primary,
                         tree_key: key,
                     });
                     let new_proof_key = ProofKey::Cell(CellProofIdentifier {
                         table: table_id.clone(),
                         secondary: cells_update.new_row_key.clone(),
-                        primary: primary,
+                        primary,
                         tree_key: key,
                     });
                     self.storage

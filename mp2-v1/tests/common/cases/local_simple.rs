@@ -2,22 +2,26 @@
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
 use anyhow::{bail, Result};
-use itertools::Unique;
 use log::{debug, info};
-use mp2_v1::values_extraction::{
-    identifier_block_column, identifier_for_mapping_key_column,
-    identifier_for_mapping_value_column, identifier_single_var_column,
+use mp2_v1::{
+    indexing::{
+        block::BlockPrimaryIndex,
+        cell::Cell,
+        row::{CellCollection, CellInfo, Row, RowTreeKey},
+    },
+    values_extraction::{
+        identifier_block_column, identifier_for_mapping_key_column,
+        identifier_for_mapping_value_column, identifier_single_var_column,
+    },
 };
 use rand::{thread_rng, Rng};
-use ryhope::{storage::RoEpochKvStorage, tree::TreeTopology};
-use serde::Deserialize;
+use ryhope::storage::RoEpochKvStorage;
 
 use crate::common::{
     bindings::simple::Simple::{self, MappingChange, MappingOperation},
-    cases::{random_address, random_u256, MappingIndex},
-    celltree::{Cell, TreeCell},
-    proof_storage::{BlockPrimaryIndex, ProofKey, ProofStorage},
-    rowtree::{CellCollection, Row, RowTreeKey, SecondaryIndexCell},
+    cases::{random_address, MappingIndex},
+    proof_storage::{ProofKey, ProofStorage},
+    rowtree::SecondaryIndexCell,
     table::{
         CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TableID,
         TreeRowUpdate, TreeUpdateType,
@@ -42,7 +46,7 @@ use mp2_common::{
     proof::ProofWithVK,
     F,
 };
-use std::{assert_matches::assert_matches, collections::HashMap, str::FromStr};
+use std::{assert_matches::assert_matches, str::FromStr};
 
 /// Test slots for single values extraction
 const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
@@ -264,14 +268,23 @@ impl TestCase {
                     // cells collection and merge with the new one. THis allows us to not having
                     // the reprove the cells tree from scratch in that case !
                     // NOTE: this assume we go over the current row tree
-                    let previous_cells = match new_cells.previous_row_key != Default::default() {
-                        true => self.table.row.fetch(&new_cells.previous_row_key).cells,
-                        false => CellCollection::default(),
+                    let previous_row = match new_cells.previous_row_key != Default::default() {
+                        true => Row {
+                            k: new_cells.previous_row_key.clone(),
+                            payload: self.table.row.fetch(&new_cells.previous_row_key),
+                        },
+                        false => Row::default(),
                     };
-                    let new_cell_collection = row_update.updated_cells_collection(&previous_cells);
+                    let new_cell_collection =
+                        row_update.updated_cells_collection(bn, &previous_row.payload.cells);
                     let new_row_key = tree_update.new_row_key.clone();
-                    let row_payload =
-                        ctx.prove_cells_tree(&self.table, new_cell_collection, tree_update);
+                    let row_payload = ctx.prove_cells_tree(
+                        &self.table,
+                        current_block as usize,
+                        previous_row,
+                        new_cell_collection,
+                        tree_update,
+                    );
                     TreeRowUpdate::Insertion(Row {
                         k: new_row_key,
                         payload: row_payload,
@@ -288,10 +301,19 @@ impl TestCase {
                         .row
                         .try_fetch(&new_cells.previous_row_key)
                         .expect("unable to find preivous row");
-                    let new_cell_collection = row_update.updated_cells_collection(&old_row.cells);
+                    let new_cell_collection =
+                        row_update.updated_cells_collection(bn, &old_row.cells);
                     let new_row_key = tree_update.new_row_key.clone();
-                    let row_payload =
-                        ctx.prove_cells_tree(&self.table, new_cell_collection, tree_update);
+                    let row_payload = ctx.prove_cells_tree(
+                        &self.table,
+                        current_block as usize,
+                        Row {
+                            k: new_cells.previous_row_key.clone(),
+                            payload: old_row,
+                        },
+                        new_cell_collection,
+                        tree_update,
+                    );
                     TreeRowUpdate::Update(Row {
                         k: new_row_key,
                         payload: row_payload,
@@ -319,7 +341,7 @@ impl TestCase {
         // definition. This is a core assumption we currently have and that will not change in the
         // short term.
         let index_update = IndexUpdate {
-            added_index: (ctx.block_number().await as BlockPrimaryIndex, index_node),
+            added_index: (bn, index_node),
         };
         let updates = self
             .table
@@ -330,7 +352,7 @@ impl TestCase {
             .prove_update_index_tree(bn, &self.table, updates.plan)
             .await;
         info!("Generated final BLOCK tree proofs for block {current_block}");
-        let _ = ctx.prove_ivc(&self.table.id, &self.table.index).await;
+        let _ = ctx.prove_ivc(&self.table.id, bn, &self.table.index).await;
         info!("Generated final IVC proof for block {}", current_block,);
 
         Ok(())
@@ -1127,19 +1149,37 @@ pub enum TableRowUpdate {
 
 impl TableRowUpdate {
     // Returns the full cell collection to put inside the JSON row payload
-    fn updated_cells_collection(&self, previous: &CellCollection) -> CellCollection {
-        let new_cells = match self {
-            TableRowUpdate::Deletion(_) => vec![],
-            TableRowUpdate::Insertion(cells, index) => {
-                let rest = cells.updated_cells.clone();
-                // we want the new secondary index value to put inside the CellCollection of the JSON
-                // at the first position
-                let mut full = vec![index.cell()];
-                full.extend(rest);
-                full
+    fn updated_cells_collection<PrimaryIndex: PartialEq + Eq + Default + Clone + Default>(
+        &self,
+        new_primary: PrimaryIndex,
+        previous: &CellCollection<PrimaryIndex>,
+    ) -> CellCollection<PrimaryIndex> {
+        let new_cells = CellCollection(
+            match self {
+                TableRowUpdate::Deletion(_) => vec![],
+                TableRowUpdate::Insertion(cells, index) => {
+                    let rest = cells.updated_cells.clone();
+                    // we want the new secondary index value to put inside the CellCollection of the JSON
+                    // at the first position
+                    let mut full = vec![index.cell()];
+                    full.extend(rest);
+                    full
+                }
+                TableRowUpdate::Update(cells) => cells.updated_cells.clone(),
             }
-            TableRowUpdate::Update(cells) => cells.updated_cells.clone(),
-        };
+            .into_iter()
+            .map(|c| {
+                (
+                    c.id,
+                    CellInfo {
+                        primary: new_primary.clone(),
+                        value: c.value,
+                    },
+                )
+            })
+            .collect(),
+        );
+
         previous.merge_with_update(&new_cells)
     }
 }

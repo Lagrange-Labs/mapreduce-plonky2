@@ -22,8 +22,8 @@ use anyhow::Context;
 pub(crate) use cases::TestCase;
 pub(crate) use context::TestContext;
 
-use mp2_common::{proof::ProofWithVK, types::HashOutput, F};
-use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
+use mp2_common::{proof::ProofWithVK, types::HashOutput};
+use plonky2::plonk::config::GenericHashOut;
 
 type ColumnIdentifier = u64;
 
@@ -39,12 +39,16 @@ fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
         .unwrap()
 }
 
-fn row_tree_proof_to_hash(proof: &[u8]) -> HashOut<F> {
+fn row_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
     let root_pi = ProofWithVK::deserialize(&proof)
         .expect("while deserializing proof")
         .proof
         .public_inputs;
-    verifiable_db::row_tree::PublicInputs::from_slice(&root_pi).root_hash_hashout()
+    verifiable_db::row_tree::PublicInputs::from_slice(&root_pi)
+        .root_hash_hashout()
+        .to_bytes()
+        .try_into()
+        .unwrap()
 }
 
 pub fn mkdir_all(params_path_str: &str) -> Result<()> {

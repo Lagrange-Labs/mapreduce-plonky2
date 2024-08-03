@@ -4,18 +4,16 @@ use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::*;
 use log::debug;
 use mp2_common::{
-    poseidon::empty_poseidon_hash,
     proof::ProofWithVK,
     serialization::{deserialize, serialize, FromBytes, ToBytes},
-    types::HashOutput,
-    utils::ToFields,
-    CHasher, F,
 };
 use mp2_v1::{
     api::{self, CircuitInput},
     indexing::{
-        cell_tree::Cell,
-        row_tree::{Row, RowPayload, RowTreeKey, ToNonce},
+        block::BlockPrimaryIndex,
+        cell::Cell,
+        index::IndexNode,
+        row::{Row, RowPayload, RowTree, RowTreeKey, ToNonce},
     },
 };
 use plonky2::{
@@ -27,7 +25,7 @@ use ryhope::{
     storage::{
         memory::InMemory,
         updatetree::{Next, UpdateTree},
-        EpochKvStorage, TreeTransactionalStorage,
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
     tree::{
         scapegoat::{self, Alpha},
@@ -37,12 +35,10 @@ use ryhope::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::common::{index_tree::IndexNode, row_tree_proof_to_hash};
+use crate::common::row_tree_proof_to_hash;
 
 use super::{
-    proof_storage::{
-        BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier,
-    },
+    proof_storage::{CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier},
     table::{RowUpdateResult, Table},
     TestContext,
 };
@@ -85,30 +81,8 @@ impl From<&SecondaryIndexCell> for RowTreeKey {
     }
 }
 
-pub type RowTree = scapegoat::Tree<RowTreeKey>;
-type RowStorage = InMemory<RowTree, RowPayload>;
-pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload, RowStorage>;
-
-/// Given a list of row, build the Merkle tree of the secondary index and
-/// returns it along its update tree.
-pub async fn build_row_tree(rows: &[Row]) -> Result<(MerkleRowTree, UpdateTree<RowTreeKey>)> {
-    let mut row_tree = MerkleRowTree::new(
-        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
-        (),
-    )
-    .context("while creating row tree instance")?;
-
-    let update_tree = row_tree
-        .in_transaction(|t| {
-            for row in rows.iter() {
-                t.store(row.k.to_owned(), row.payload.to_owned())?;
-            }
-            Ok(())
-        })
-        .context("while filling row tree initial state")?;
-
-    Ok((row_tree, update_tree))
-}
+type RowStorage = InMemory<RowTree, RowPayload<BlockPrimaryIndex>>;
+pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>;
 
 impl<P: ProofStorage> TestContext<P> {
     /// Given a row tree (i.e. secondary index tree) and its update tree, prove
@@ -120,7 +94,7 @@ impl<P: ProofStorage> TestContext<P> {
         // for the same block (i.e. not the same data)
         primary: BlockPrimaryIndex,
         table: &Table,
-        ut: UpdateTree<<RowTree as TreeTopology>::Key>,
+        ut: UpdateTree<RowTreeKey>,
     ) -> Result<RowProofIdentifier<BlockPrimaryIndex>> {
         let t = &table.row;
         println!(" --- BEFORE WORKPLAN ---");
@@ -129,13 +103,25 @@ impl<P: ProofStorage> TestContext<P> {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, row) = t.fetch_with_context(&k);
-            let id = row.secondary_index;
+            let id = row.secondary_index_column;
             // Sec. index value
             let value = row.secondary_index_value();
-
+            // find where the root cells proof has been stored. This comes from looking up the
+            // column id, then searching for the cell info in the row payload about this
+            // identifier. We now have the primary index for which the cells proof have been
+            // generated.
+            let cell_root_primary = row.fetch_cell_root_info().primary;
+            let cell_proof_key = CellProofIdentifier {
+                table: table.id.clone(),
+                primary: cell_root_primary,
+                tree_key: row.cell_root_key,
+                secondary: k.clone(), // the cells proofs is already stored under the new key, even in the
+                                      // case of a fresh row, see celltree.rs for more info, see
+                                      // celltree.rs for more info
+            };
             let cell_tree_proof = self
                 .storage
-                .get_proof_exact(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
+                .get_proof_exact(&ProofKey::Cell(cell_proof_key))
                 .expect("should find cell root proof");
             debug!("After fetching cell proof for row key {:?}", k);
             let proof = if context.is_leaf() {
@@ -147,15 +133,18 @@ impl<P: ProofStorage> TestContext<P> {
                 debug!("Before proving leaf node row tree key {:?}", k);
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.is_partial() {
+                let child_key = context
+                    .left
+                    .as_ref()
+                    .or(context.right.as_ref())
+                    .cloned()
+                    .unwrap();
+                let child_row = table.row.fetch(&child_key);
+
                 let proof_key = RowProofIdentifier {
                     table: table.id.clone(),
-                    primary,
-                    tree_key: context
-                        .left
-                        .as_ref()
-                        .or(context.right.as_ref())
-                        .cloned()
-                        .unwrap(),
+                    primary: child_row.primary_index_value(),
+                    tree_key: child_key,
                 };
                 // Prove a partial node
                 // NOTE: we need to find the latest one generated for that rowtreekey
@@ -164,13 +153,13 @@ impl<P: ProofStorage> TestContext<P> {
                     "BEFORE fetching child proof of node {:?} for partial node {:?}",
                     proof_key, k,
                 );
-                let (child_proof, obn) = self
+                let child_proof = self
                     .storage
-                    .get_proof_latest(&proof_key)
+                    .get_proof_exact(&ProofKey::Row(proof_key.clone()))
                     .expect("UT guarantees proving in order");
                 debug!(
                     "AFTER fetching child proof for partial node - found at block {:?}",
-                    obn.primary
+                    proof_key.primary
                 );
 
                 debug!("AFTER fetching cell tree proof for partial node");
@@ -188,15 +177,19 @@ impl<P: ProofStorage> TestContext<P> {
                 debug!("Before proving partial node row tree key");
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
+                let left_key = context.left.unwrap();
+                let left_row = table.row.fetch(&left_key);
                 let left_proof_key = RowProofIdentifier {
                     table: table.id.clone(),
-                    primary,
-                    tree_key: context.left.unwrap(),
+                    primary: left_row.primary_index_value(),
+                    tree_key: left_key,
                 };
+                let right_key = context.right.unwrap();
+                let right_row = table.row.fetch(&right_key);
                 let right_proof_key = RowProofIdentifier {
                     table: table.id.clone(),
-                    primary,
-                    tree_key: context.right.unwrap(),
+                    primary: right_row.primary_index_value(),
+                    tree_key: right_key,
                 };
 
                 // Prove a full node: fetch the row proofs of the children
@@ -207,25 +200,25 @@ impl<P: ProofStorage> TestContext<P> {
                     "BEFORE fetching LEFT row tree {:?} proof for full node {:?}",
                     left_proof_key, k
                 );
-                let (left_proof, lbn) = self
+                let left_proof = self
                     .storage
-                    .get_proof_latest(&left_proof_key)
+                    .get_proof_exact(&ProofKey::Row(left_proof_key.clone()))
                     .expect("UT guarantees proving in order");
                 debug!(
                     "AFTER fetching LEFT row tree proof for full node - FOUND block {}",
-                    lbn.primary
+                    left_proof_key.primary
                 );
                 debug!(
                     "BEFORE fetching RIGHT row tree {:?} for full node {:?}",
                     right_proof_key, k
                 );
-                let (right_proof, rbn) = self
+                let right_proof = self
                     .storage
-                    .get_proof_latest(&right_proof_key)
+                    .get_proof_exact(&ProofKey::Row(right_proof_key.clone()))
                     .expect("UT guarantees proving in order");
                 debug!(
                     "AFTER fetching RIGHT row tree proof for full node - FOUND block {}",
-                    rbn.primary
+                    right_proof_key.primary
                 );
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::full(
@@ -242,6 +235,7 @@ impl<P: ProofStorage> TestContext<P> {
             };
             let new_proof_key = RowProofIdentifier {
                 table: table.id.clone(),
+                // we save the new proof under the new row key
                 primary,
                 tree_key: k.clone(),
             };
@@ -253,33 +247,30 @@ impl<P: ProofStorage> TestContext<P> {
             debug!("Finished row tree key proving {k:?}");
             workplan.done(&k).unwrap();
         }
+
         let root = t.root().unwrap();
+        let row = table.row.fetch(&root);
         let root_proof_key = RowProofIdentifier {
             table: table.id.clone(),
-            primary,
+            primary: row.primary_index_value(),
             tree_key: root,
         };
 
-        let (p, key_found) = self
+        let p = self
             .storage
-            .get_proof_latest(&root_proof_key)
+            .get_proof_exact(&ProofKey::Row(root_proof_key.clone()))
             .expect("row tree root proof absent");
 
-        if key_found == root_proof_key {
-            let pproof = ProofWithVK::deserialize(&p).unwrap();
-            let pi =
-                verifiable_db::row_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
-            debug!(
-                "[--] FINAL MERKLE DIGEST VALUE --> {:?} ",
-                pi.rows_digest_field()
-            );
-        } else {
-            debug!(
-                "[--] No updates to compute! (last root on block {}",
-                key_found.primary
-            );
-        }
-        Ok(key_found)
+        let pproof = ProofWithVK::deserialize(&p).unwrap();
+        let pi = verifiable_db::row_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
+        debug!(
+            "[--] FINAL MERKLE DIGEST VALUE --> {:?} ",
+            pi.rows_digest_field()
+        );
+        if root_proof_key.primary != primary {
+            debug!("[--] NO UPDATES on row this turn!");
+        };
+        Ok(root_proof_key)
     }
 
     /// Build and prove the row tree from the [`Row`]s and the secondary index
@@ -293,7 +284,7 @@ impl<P: ProofStorage> TestContext<P> {
         primary: BlockPrimaryIndex,
         table: &Table,
         update: RowUpdateResult,
-    ) -> Result<IndexNode> {
+    ) -> Result<IndexNode<BlockPrimaryIndex>> {
         let root_proof_key = self.prove_row_tree(primary, table, update.updates)?;
         let row_tree_proof = self
             .storage
@@ -309,47 +300,10 @@ impl<P: ProofStorage> TestContext<P> {
         );
         Ok(IndexNode {
             identifier: table.columns.primary_column().identifier,
-            value: U256::from(primary),
-            row_tree_proof_id: root_proof_key,
+            value: U256::from(primary).into(),
+            row_tree_root_key: root_proof_key.tree_key,
             row_tree_hash: table.row.root_data().unwrap().hash,
             ..Default::default()
         })
-    }
-}
-
-impl ToNonce for usize {
-    fn to_nonce(&self) -> RowTreeKeyNonce {
-        self.to_be_bytes().to_vec()
-    }
-}
-
-impl ToNonce for Vec<u8> {
-    fn to_nonce(&self) -> RowTreeKeyNonce {
-        self.to_owned()
-    }
-}
-
-impl ToNonce for U256 {
-    fn to_nonce(&self) -> RowTreeKeyNonce {
-        // we don't need to keep all the bytes, only the ones that matter.
-        // Since we are storing this inside psql, any storage saving is good to take !
-        self.to_be_bytes_trimmed_vec()
-    }
-}
-
-#[derive(Clone, Hash, Debug, PartialOrd, PartialEq, Ord, Eq, Default, From)]
-pub struct VectorU256(pub U256);
-
-impl ToBytes for VectorU256 {
-    fn to_bytes(&self) -> Vec<u8> {
-        self.0.to_be_bytes_trimmed_vec()
-    }
-}
-
-impl FromBytes for VectorU256 {
-    fn from_bytes(
-        bytes: &[u8],
-    ) -> std::result::Result<Self, mp2_common::serialization::SerializationError> {
-        std::result::Result::Ok(VectorU256(U256::from_be_slice(bytes)))
     }
 }

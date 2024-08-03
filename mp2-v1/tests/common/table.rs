@@ -1,25 +1,26 @@
+use std::hash::Hash;
+
 use alloy::primitives::Address;
 use anyhow::Result;
 use log::{debug, info};
-use mp2_v1::indexing::row_tree::RowTreeKey;
-use plonky2::plonk::config::GenericHashOut;
+use mp2_v1::indexing::{
+    block::BlockPrimaryIndex,
+    cell::{self, Cell, CellTreeKey, MerkleCellTree},
+    index::IndexNode,
+    row::{CellCollection, Row, RowTreeKey},
+    ColumnID,
+};
 use ryhope::{
     storage::{updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
     tree::{
         sbbst,
         scapegoat::{self, Alpha},
-        PrintableTree,
     },
     InitSettings,
 };
 use serde::{Deserialize, Serialize};
 
-use super::{
-    celltree::{Cell, CellTreeKey, MerkleCellTree, TreeCell},
-    index_tree::{IndexNode, IndexTreeKey, MerkleIndexTree},
-    rowtree::{CellCollection, MerkleRowTree, Row, RowPayload, RowTreeKey},
-    ColumnIdentifier,
-};
+use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TableID(String);
@@ -49,7 +50,7 @@ pub enum IndexType {
 
 #[derive(Clone, Debug)]
 pub struct TableColumn {
-    pub identifier: ColumnIdentifier,
+    pub identifier: ColumnID,
     pub index: IndexType,
 }
 
@@ -68,6 +69,9 @@ impl TableColumns {
     }
     pub fn non_indexed_columns(&self) -> Vec<TableColumn> {
         self.rest.clone()
+    }
+    pub fn column_id_of_cells_index(&self, key: CellTreeKey) -> Option<ColumnID> {
+        self.rest.get(key).map(|tc| tc.identifier)
     }
     // Returns the index of the column identifier in the index tree, ie. the order of columns  in
     // the cells tree
@@ -128,15 +132,26 @@ impl Table {
     // Function to call each time we need to build the index tree, i.e. for each row and
     // at each update for each row. Reason is we don't store it in memory since it's
     // very fast to recompute.
-    fn construct_cell_tree(&mut self, cells: &CellCollection) -> MerkleCellTree {
-        let mut cell_tree =
-            MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap();
+    fn construct_cell_tree(&mut self, cells: &CellCollection<BlockPrimaryIndex>) -> MerkleCellTree {
+        let mut cell_tree = cell::new_tree();
+        // we fetch the info from the column ids, and construct the cells of the tree
+        let rest_cells = self
+            .columns
+            .non_indexed_columns()
+            .iter()
+            .map(|tc| tc.identifier)
+            .filter_map(|id| cells.find_by_column(id).map(|info| (id, info)))
+            .map(|(id, info)| Cell {
+                id,
+                value: info.value,
+            })
+            .collect::<Vec<_>>();
         // the first time we actually create the cells tree, there is nothing
-        if !cells.non_indexed_cells().unwrap_or_default().is_empty() {
+        if !rest_cells.is_empty() {
             let _ = cell_tree
                 .in_transaction(|t| {
                     // if there is no cell, this loop wont run
-                    for cell in cells.non_indexed_cells().unwrap_or_default() {
+                    for cell in rest_cells {
                         // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
                         // but we put + 1 because sbbst starts at +1
                         let idx = self.columns.cells_tree_index_of(cell.id) + 1;
@@ -211,7 +226,7 @@ impl Table {
             .expect("can't apply cells update");
         println!(
             "Cell trees root hash after updates: {:?}",
-            hex::encode(cell_tree.root_data().unwrap().hash.to_bytes())
+            hex::encode(&cell_tree.root_data().unwrap().hash[..])
         );
         Ok(CellsUpdateResult {
             previous_row_key: update.previous_row_key,
@@ -251,7 +266,11 @@ impl Table {
     }
 
     // apply the transformation on the index tree and returns the new nodes to prove
-    pub fn apply_index_update(&mut self, updates: IndexUpdate) -> Result<IndexUpdateResult> {
+    // NOTE: hardcode for block since only block can use sbbst
+    pub fn apply_index_update(
+        &mut self,
+        updates: IndexUpdate<BlockPrimaryIndex>,
+    ) -> Result<IndexUpdateResult<BlockPrimaryIndex>> {
         let plan = self.index.in_transaction(move |t| {
             t.store(updates.added_index.0, updates.added_index.1)?;
             Ok(())
@@ -261,22 +280,23 @@ impl Table {
 }
 
 #[derive(Debug, Clone)]
-pub struct IndexUpdate {
+pub struct IndexUpdate<PrimaryIndex> {
     // TODO: at the moment we only append one by one the block.
     // Depending on how we do things for CSV, this might be a vector
-    pub added_index: (IndexTreeKey, IndexNode),
+    pub added_index: (PrimaryIndex, IndexNode<PrimaryIndex>),
     // TODO for CSV modification and deletion ?
 }
 
 #[derive(Clone)]
-pub struct IndexUpdateResult {
-    pub plan: UpdateTree<IndexTreeKey>,
+pub struct IndexUpdateResult<PrimaryIndex: Clone + PartialEq + Eq + Hash> {
+    pub plan: UpdateTree<PrimaryIndex>,
 }
 
+/// NOTE this hardcoding is ok for now but will have to change once we move to CSV types of data.
 #[derive(Debug, Clone)]
 pub enum TreeRowUpdate {
-    Insertion(Row),
-    Update(Row),
+    Insertion(Row<BlockPrimaryIndex>),
+    Update(Row<BlockPrimaryIndex>),
     Deletion(RowTreeKey),
 }
 

@@ -1,21 +1,21 @@
 use super::{
     context::TestContext,
-    index_tree::{IndexTree, MerkleIndexTree},
-    proof_storage::{BlockPrimaryIndex, IndexProofIdentifier, ProofKey, ProofStorage},
+    index_tree::MerkleIndexTree,
+    proof_storage::{IndexProofIdentifier, ProofKey, ProofStorage},
     table::TableID,
     TestCase,
 };
 use anyhow::Result;
-use mp2_v1::api;
+use mp2_v1::{api, indexing::block::BlockPrimaryIndex};
 use ryhope::tree::TreeTopology;
 
 impl<P: ProofStorage> TestContext<P> {
     pub async fn prove_ivc(
         &mut self,
         table_id: &TableID,
+        bn: BlockPrimaryIndex,
         index_tree: &MerkleIndexTree,
     ) -> Result<()> {
-        let bn = self.block_number().await as BlockPrimaryIndex;
         // load the block proof of the current block
         let root_key = index_tree.root().unwrap();
         let index_root_key = ProofKey::Index(IndexProofIdentifier {

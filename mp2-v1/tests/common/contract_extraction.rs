@@ -1,9 +1,6 @@
 //! Test utilities for Contract Extraction (C.3)
 
-use super::{
-    proof_storage::{BlockPrimaryIndex, ProofStorage},
-    TestContext,
-};
+use super::{proof_storage::ProofStorage, TestContext};
 use alloy::{eips::BlockNumberOrTag, primitives::Address, rpc::types::Block};
 use eth_trie::Nibbles;
 use mp2_common::{
@@ -19,6 +16,7 @@ use mp2_common::{
 use mp2_v1::{
     api::{generate_proof, CircuitInput, PublicParameters},
     contract_extraction::{self, compute_metadata_digest, PublicInputs},
+    indexing::block::BlockPrimaryIndex,
 };
 use plonky2::field::types::Field;
 use rlp::{Prototype, Rlp};
