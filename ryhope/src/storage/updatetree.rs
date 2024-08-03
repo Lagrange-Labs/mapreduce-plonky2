@@ -219,7 +219,7 @@ pub enum Next<T: Clone> {
 /// process, but their children have not been processed yet. In this case, the
 /// `[done(k)]` method shall be invoked to mark processed, which will allow
 /// `next()` to return their parents on its next invokation.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct UpdatePlan<T: Clone + Hash + Eq> {
     pub t: UpdateTree<T>,
     ready: Vec<T>,
