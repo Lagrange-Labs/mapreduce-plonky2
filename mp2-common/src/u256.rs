@@ -555,7 +555,7 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
 
         (
             // left < right
-            self.is_not_equal(borrow, zero),
+            BoolTarget::new_unsafe(borrow),
             // left == right
             self.is_equal(sum_limbs, zero),
         )
