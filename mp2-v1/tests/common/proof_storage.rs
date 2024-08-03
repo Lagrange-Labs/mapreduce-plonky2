@@ -3,14 +3,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{
-    context::TestContextConfig, index_tree::IndexTree, mkdir_all, rowtree::RowTreeKey,
-    table::TableID,
-};
+use super::{context::TestContextConfig, index_tree::IndexTree, mkdir_all, table::TableID};
 use alloy::primitives::Address;
 use anyhow::{bail, Context, Result};
 use envconfig::Envconfig;
 use mp2_test::cells_tree::CellTree;
+use mp2_v1::indexing::row_tree::RowTreeKey;
 use ryhope::tree::{sbbst, TreeTopology};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -22,12 +20,10 @@ type ContractKey = (Address, BlockPrimaryIndex);
 
 /// This is the identifier we store cells tree proof under in storage. This identifier
 /// is only unique per row tree key (i.e. secondary index value).
-/// WARNING: Therefore, if we create a new cell proof for the same row, i.e. when that cell value
-/// changed, the proof will be overwritten in the storage. This is something "ok" for this
-/// integrated test but needs to be carefully evaluated when running into production.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub(crate) struct CellProofIdentifier {
+pub(crate) struct CellProofIdentifier<PrimaryIndex> {
     pub(crate) table: TableID,
+    pub(crate) primary: PrimaryIndex,
     pub(crate) secondary: RowTreeKey,
     pub(crate) tree_key: CellTreeKey,
 }
@@ -67,7 +63,7 @@ pub(crate) type BlockPrimaryIndex = <sbbst::Tree as TreeTopology>::Key;
 /// Uniquely identifies a proof in the proof storage backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProofKey {
-    Cell(CellProofIdentifier),
+    Cell(CellProofIdentifier<BlockPrimaryIndex>),
     Row(RowProofIdentifier<BlockPrimaryIndex>),
     Index(IndexProofIdentifier<BlockPrimaryIndex>),
     FinalExtraction((TableID, BlockPrimaryIndex)),

@@ -1,5 +1,5 @@
-pub mod cell_tree;
-pub mod index_tree;
-pub mod row_tree;
+pub mod cell;
+pub mod index;
+pub mod row;
 
 pub type ColumnID = u64;

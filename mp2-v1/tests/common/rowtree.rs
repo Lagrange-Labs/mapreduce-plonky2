@@ -11,7 +11,13 @@ use mp2_common::{
     utils::ToFields,
     CHasher, F,
 };
-use mp2_v1::api::{self, CircuitInput};
+use mp2_v1::{
+    api::{self, CircuitInput},
+    indexing::{
+        cell_tree::Cell,
+        row_tree::{Row, RowPayload, RowTreeKey, ToNonce},
+    },
+};
 use plonky2::{
     field::types::Field,
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
@@ -34,7 +40,6 @@ use serde::{Deserialize, Serialize};
 use crate::common::{index_tree::IndexNode, row_tree_proof_to_hash};
 
 use super::{
-    celltree::Cell,
     proof_storage::{
         BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier,
     },
@@ -44,37 +49,6 @@ use super::{
 use derive_more::{From, Into};
 
 pub type RowTreeKeyNonce = Vec<u8>;
-
-pub trait ToNonce {
-    fn to_nonce(&self) -> RowTreeKeyNonce;
-}
-
-/// A unique identifier of a secondary-indexed row, from the secondary index value and an unique
-/// index since secondary index does not have to be unique.
-/// THis struct is kept in the JSON row as the "tree key".
-#[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct RowTreeKey {
-    /// Value of the secondary index of the row
-    /// NOTE: just a private wrapper type to ensure we always serialize in the smallest vector the
-    /// U256 in the backend. Once could directly impl serde:: traits on the wrapper as well but
-    /// it's easy to use the function "serialize" once the struct implements the ToBytes trait.
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    pub value: VectorU256,
-    /// An value such that the pair (value,rest) is unique accross all rows
-    pub rest: RowTreeKeyNonce,
-}
-
-impl RowTreeKey {
-    pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        let b = bincode::serialize(self)?;
-        Ok(b)
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let s = bincode::deserialize(bytes)?;
-        Ok(s)
-    }
-}
 
 /// Simply a struct useful to transmit around when dealing with the secondary index value, since
 /// the unique nonce must be kept around as well. It is not saved anywhere nor proven.
@@ -108,125 +82,6 @@ impl From<&SecondaryIndexCell> for RowTreeKey {
             value: value.0.value.into(),
             rest: value.1.clone(),
         }
-    }
-}
-// A collection of cells inserted in the JSON.
-// IMPORTANT: This collection MUST CONTAIN the secondary index value, as first element, to easily search
-// in JSONB from the SQL.
-#[derive(Eq, PartialEq, From, Into, Default, Debug, Clone, Serialize, Deserialize)]
-pub struct CellCollection(pub Vec<Cell>);
-impl CellCollection {
-    /// Return the [`Cell`] containing the sec. index of this row.
-    pub fn secondary_index(&self) -> Result<&Cell> {
-        ensure!(
-            !self.0.is_empty(),
-            "secondary_index() called on empty CellCollection"
-        );
-        Ok(&self.0[0])
-    }
-
-    pub fn non_indexed_cells(&self) -> Result<&[Cell]> {
-        ensure!(
-            !self.0.is_empty(),
-            "non_indexed_cells called on empty  CellCollection"
-        );
-        Ok(&self.0[1..])
-    }
-    // take all the cells ids on both collections, take the value present in the updated one
-    // if it exists, otherwise take from self.
-    pub fn merge_with_update(&self, updated_cells: &[Cell]) -> Self {
-        if self == &Self::default() {
-            return Self(updated_cells.to_vec());
-        }
-        Self(
-            self.0
-                .iter()
-                .map(|previous_cell| {
-                    updated_cells
-                        .iter()
-                        .find(|new_cell| previous_cell.id == new_cell.id)
-                        .unwrap_or(previous_cell)
-                })
-                .cloned()
-                .collect(),
-        )
-    }
-}
-
-/// An utility wrapper to pass around that connects what we put in the JSON description and
-/// the actual row key used to insert in the tree
-#[derive(Clone, Debug, Default)]
-pub struct Row {
-    /// A key *uniquely* representing this row in the row tree.
-    /// NOTE: this key is **not** the index as understood in the crypto
-    /// formalization.
-    pub k: RowTreeKey,
-    // What is being included in the row JSON
-    pub payload: RowPayload,
-}
-/// Represent a row in one of the virtual tables stored in the zkDB; which
-/// encapsulates its cells and the tree they form.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct RowPayload {
-    pub cells: CellCollection,
-    /// Storing the full identifier of the cells proof of the root of the cells tree.
-    /// Note this identifier can refer to a proof for older blocks if the cells tree didn't change
-    pub cell_tree_root_proof_id: CellProofIdentifier,
-    /// Storing the hash of the root of the cells tree. Once could get it as well from the proof
-    /// but it requires loading the proof, so when building the hashing structure it's best
-    /// to keep it at hand directly.
-    pub cell_tree_root_hash: HashOut<F>,
-    /// Min sec. index value of the subtree below this node
-    pub min: U256,
-    /// Max sec. index value "  "   "       "     "    "
-    pub max: U256,
-    /// Hash of this node
-    pub hash: HashOut<F>,
-}
-
-impl NodePayload for RowPayload {
-    fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
-        let children = children.into_iter().collect::<Vec<_>>();
-        assert_eq!(children.len(), 2);
-
-        let (left_hash, right_hash) = match [&children[0], &children[1]] {
-            [None, None] => {
-                self.min = self.cells.secondary_index().unwrap().value;
-                self.max = self.cells.secondary_index().unwrap().value;
-                (*empty_poseidon_hash(), *empty_poseidon_hash())
-            }
-            [None, Some(right)] => {
-                self.min = self.cells.secondary_index().unwrap().value;
-                self.max = right.max;
-                (*empty_poseidon_hash(), right.hash)
-            }
-            [Some(left), None] => {
-                self.min = left.min;
-                self.max = self.cells.secondary_index().unwrap().value;
-                (left.hash, *empty_poseidon_hash())
-            }
-            [Some(left), Some(right)] => {
-                self.min = left.min;
-                self.max = right.max;
-                (left.hash, right.hash)
-            }
-        };
-        let to_hash = // P(leftH)
-                    left_hash.elements.into_iter()
-                    // P(rightH)
-                    .chain(right_hash.elements)
-                    // P(min)
-                    .chain(self.min.to_fields())
-                    // P(max)
-                    .chain(self.max.to_fields())
-                    // P(id)
-                    .chain(std::iter::once(F::from_canonical_u64(self.cells.secondary_index().unwrap().id)))
-                    // P(value)
-                    .chain(self.cells.secondary_index().unwrap().value.to_fields())
-                    // P(cell_tree_hash)
-                    .chain(self.cell_tree_root_hash.to_fields())
-                    .collect::<Vec<_>>();
-        self.hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
     }
 }
 
@@ -274,9 +129,9 @@ impl<P: ProofStorage> TestContext<P> {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, row) = t.fetch_with_context(&k);
-            let id = row.cells.secondary_index().unwrap().id;
+            let id = row.secondary_index;
             // Sec. index value
-            let value = row.cells.secondary_index().unwrap().value;
+            let value = row.secondary_index_value();
 
             let cell_tree_proof = self
                 .storage

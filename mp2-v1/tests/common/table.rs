@@ -1,6 +1,7 @@
 use alloy::primitives::Address;
 use anyhow::Result;
 use log::{debug, info};
+use mp2_v1::indexing::row_tree::RowTreeKey;
 use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},

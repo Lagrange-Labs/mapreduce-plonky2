@@ -14,19 +14,17 @@ use mp2_common::{
     utils::ToFields,
     CHasher, F,
 };
-use mp2_v1::{api, api::CircuitInput, values_extraction::identifier_single_var_column};
-use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::hash_types::HashOut,
-    plonk::config::Hasher,
+use mp2_v1::{
+    api::{self, CircuitInput},
+    indexing::{
+        cell::{CellTreeKey, MerkleCellTree, TreeCell},
+        row::{CellCollection, RowPayload, RowTreeKey},
+    },
+    values_extraction::identifier_single_var_column,
 };
 use ryhope::{
-    storage::{
-        memory::InMemory,
-        updatetree::{Next, UpdateTree},
-    },
+    storage::updatetree::{Next, UpdateTree},
     tree::{sbbst, TreeTopology},
-    MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
 
@@ -34,71 +32,8 @@ use crate::common::{cell_tree_proof_to_hash, TestContext};
 
 use super::{
     proof_storage::{BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage},
-    rowtree::{CellCollection, RowPayload, RowTree, RowTreeKey},
     table::{CellsUpdateResult, Table, TableID},
 };
-
-use derive_more::Deref;
-
-pub type CellTree = sbbst::Tree;
-pub type CellTreeKey = <CellTree as TreeTopology>::Key;
-type CellStorage = InMemory<CellTree, TreeCell>;
-pub type MerkleCellTree = MerkleTreeKvDb<CellTree, TreeCell, CellStorage>;
-
-/// Cell is the information stored in a specific cell of a specific row.
-/// A row node in the row tree contains a vector of such cells.
-#[derive(Clone, Default, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Cell {
-    /// The unique identifier of the cell, derived from the contract it comes
-    /// from and its slot in its storage.
-    pub id: u64,
-    /// The value stored in the cell
-    pub value: U256,
-}
-
-/// TreeCell is the node stored in the cells tree. It contains a cell and a hash of the subtree
-/// rooted at the cell in the cells tree.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, Deref)]
-pub struct TreeCell {
-    #[deref]
-    cell: Cell,
-    /// The hash of this node in the cells tree
-    pub hash: HashOut<F>,
-}
-
-impl From<Cell> for TreeCell {
-    fn from(value: Cell) -> Self {
-        TreeCell {
-            cell: value,
-            hash: Default::default(),
-        }
-    }
-}
-
-impl From<&Cell> for TreeCell {
-    fn from(value: &Cell) -> Self {
-        TreeCell {
-            cell: value.clone(),
-            hash: Default::default(),
-        }
-    }
-}
-impl NodePayload for TreeCell {
-    fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
-        // H(H(left_child) || H(right_child) || id || value)
-        let inputs: Vec<_> = children
-            .into_iter()
-            .map(|c| c.map(|x| x.hash).unwrap_or_else(|| *empty_poseidon_hash()))
-            .flat_map(|x| x.elements.into_iter())
-            // ID
-            .chain(iter::once(F::from_canonical_u64(self.id)))
-            // Value
-            .chain(self.value.to_fields())
-            .collect();
-
-        self.hash = H::hash_no_pad(&inputs);
-    }
-}
 
 impl<P: ProofStorage> TestContext<P> {
     /// Given a [`MerkleCellTree`], recursively prove its hash and returns the storage key
@@ -113,7 +48,7 @@ impl<P: ProofStorage> TestContext<P> {
         table_id: &TableID,
         tree: MerkleCellTree,
         ut: UpdateTree<CellTreeKey>,
-    ) -> CellProofIdentifier {
+    ) -> CellTreeKey {
         // Store the proofs here for the tests; will probably be done in S3 for
         // prod.
         let mut workplan = ut.into_workplan();
@@ -206,7 +141,7 @@ impl<P: ProofStorage> TestContext<P> {
             .storage
             .get_proof_exact(&ProofKey::Cell(root_proof_key.clone()))
             .unwrap();
-        root_proof_key
+        root
     }
 
     /// Generate and prove a [`MerkleCellTree`] encoding the content of the
@@ -215,6 +150,7 @@ impl<P: ProofStorage> TestContext<P> {
     pub fn prove_cells_tree(
         &mut self,
         table: &Table,
+        primary: BlockPrimaryIndex,
         // All the new cells expected in the row, INCLUDING the secondary index
         // Note this is just needed to put inside the returned JSON Row payload, it's not
         // processed
@@ -230,9 +166,15 @@ impl<P: ProofStorage> TestContext<P> {
             cells_update.latest,
             cells_update.to_update,
         );
+        let root_proof_key = CellProofIdentifier {
+            primary,
+            table: table.id,
+            secondary: cells_update.new_row_key,
+            tree_key: root_key,
+        };
         let cell_root_proof = self
             .storage
-            .get_proof_exact(&ProofKey::Cell(root_key.clone()))
+            .get_proof_exact(&ProofKey::Cell(root_proof_key.clone()))
             .unwrap();
         let proved_hash = cell_tree_proof_to_hash(&cell_root_proof);
         assert_eq!(
@@ -241,14 +183,11 @@ impl<P: ProofStorage> TestContext<P> {
         );
 
         RowPayload {
-            cell_tree_root_proof_id: root_key,
-            cell_tree_root_hash: tree_hash,
+            cell_root_key: root_key,
+            cell_root_hash: tree_hash,
+            cell_root_proof_primary: U256::from(primary),
             cells: all_cells,
-            // these values are set during the tree update
-            // so we fill by default
-            min: U256::default(),
-            max: U256::default(),
-            hash: Default::default(),
+            ..Default::default()
         }
     }
 
@@ -258,6 +197,7 @@ impl<P: ProofStorage> TestContext<P> {
     fn move_cells_proof_to_new_row(
         &mut self,
         table_id: &TableID,
+        primary: BlockPrimaryIndex,
         cells_update: &CellsUpdateResult,
     ) -> Result<()> {
         if cells_update.previous_row_key == cells_update.new_row_key {
@@ -281,11 +221,13 @@ impl<P: ProofStorage> TestContext<P> {
                     let previous_proof_key = ProofKey::Cell(CellProofIdentifier {
                         table: table_id.clone(),
                         secondary: cells_update.previous_row_key.clone(),
+                        primary: primary,
                         tree_key: key,
                     });
                     let new_proof_key = ProofKey::Cell(CellProofIdentifier {
                         table: table_id.clone(),
                         secondary: cells_update.new_row_key.clone(),
+                        primary: primary,
                         tree_key: key,
                     });
                     self.storage
