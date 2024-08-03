@@ -1621,28 +1621,40 @@ mod tests {
 
     #[test]
     fn test_u256_arr_is_less_than_or_equal_to() {
+        const L: usize = 5;
+
         let rng = &mut thread_rng();
-        let [left, right] = array::from_fn(|_| [0; 5].map(|_| gen_random_u256(rng)));
-        let circuit = TestArrLessThanOrEqualToCircuit(TestArrOperationsCircuit { left, right });
-        let proof = run_circuit::<F, D, C, _>(circuit);
-        let (is_lt, is_eq) = zip_eq(left, right).fold((false, true), |(is_lt, is_eq), (l, r)| {
-            let l = l + if is_lt { U256::from(1) } else { U256::ZERO };
+        [
+            // The left and right arrays are random.
+            array::from_fn(|_| [0; L].map(|_| gen_random_u256(rng))),
+            // The left and right arrays are same.
+            {
+                let arr = [0; L].map(|_| gen_random_u256(rng));
+                [arr, arr]
+            },
+            // The right array is less than the left one.
+            {
+                let left = [0; L].map(|_| gen_random_u256(rng));
+                let mut right = left;
+                right[0] -= U256::from(1);
 
-            (l < r, is_eq && l == r)
+                [left, right]
+            },
+        ]
+        .into_iter()
+        .for_each(|[left, right]| {
+            let circuit = TestArrLessThanOrEqualToCircuit(TestArrOperationsCircuit { left, right });
+            let proof = run_circuit::<F, D, C, _>(circuit);
+            let (is_lt, is_eq) =
+                zip_eq(left, right).fold((false, true), |(is_lt, is_eq), (l, r)| {
+                    let l = l - if is_lt { U256::from(1) } else { U256::ZERO };
+
+                    (l < r, is_eq && l == r)
+                });
+            // is_less_than
+            assert_eq!(proof.public_inputs[0], if is_lt { F::ONE } else { F::ZERO });
+            // is_equal
+            assert_eq!(proof.public_inputs[1], if is_eq { F::ONE } else { F::ZERO });
         });
-        // is_less_than
-        assert_eq!(proof.public_inputs[0], if is_lt { F::ONE } else { F::ZERO });
-        // is_equal
-        assert_eq!(proof.public_inputs[1], if is_eq { F::ONE } else { F::ZERO });
-
-        // Check for equivalent.
-        let left = [0; 10].map(|_| gen_random_u256(rng));
-        let right = left;
-        let circuit = TestArrLessThanOrEqualToCircuit(TestArrOperationsCircuit { left, right });
-        let proof = run_circuit::<F, D, C, _>(circuit);
-        // is_less_than
-        assert_eq!(proof.public_inputs[0], F::ZERO);
-        // is_equal
-        assert_eq!(proof.public_inputs[1], F::ONE);
     }
 }
