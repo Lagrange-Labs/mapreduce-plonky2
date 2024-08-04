@@ -314,6 +314,7 @@ impl<P: ProofStorage> TestContext<P> {
             value: U256::from(primary).into(),
             row_tree_root_key: root_proof_key.tree_key,
             row_tree_hash: table.row.root_data().unwrap().hash,
+            row_tree_root_primary: primary,
             ..Default::default()
         })
     }
