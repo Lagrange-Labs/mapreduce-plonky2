@@ -96,24 +96,6 @@ impl<PrimaryIndex: PartialEq + Eq + Default + Clone> CellCollection<PrimaryIndex
     pub fn find_by_column(&self, id: ColumnID) -> Option<&CellInfo<PrimaryIndex>> {
         self.0.get(&id)
     }
-    pub fn from_cells(cells: &[Cell], primaries: Vec<PrimaryIndex>) -> Self {
-        assert!(cells.len() == primaries.len());
-        Self(
-            cells
-                .iter()
-                .zip(primaries.iter())
-                .map(|(c, p)| {
-                    (
-                        c.id,
-                        CellInfo {
-                            value: c.value,
-                            primary: p.clone(),
-                        },
-                    )
-                })
-                .collect(),
-        )
-    }
     // take all the cells ids on both collections, take the value present in the updated one
     // if it exists, otherwise take from self.
     pub fn merge_with_update(&self, updated_cells: &Self) -> Self {
@@ -125,8 +107,8 @@ impl<PrimaryIndex: PartialEq + Eq + Default + Clone> CellCollection<PrimaryIndex
                 .iter()
                 .map(|(previous_id, previous_cell)| {
                     updated_cells
-                        .iter()
-                        .find(|(new_id, _)| *previous_id == **new_id)
+                        .get(previous_id)
+                        .map(|ci| (previous_id, ci))
                         .unwrap_or((previous_id, previous_cell))
                 })
                 .map(|(id, cell)| (*id, cell.clone()))
