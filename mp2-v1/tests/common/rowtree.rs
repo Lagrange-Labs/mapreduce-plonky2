@@ -122,16 +122,21 @@ impl<P: ProofStorage> TestContext<P> {
                 .storage
                 .get_proof_exact(&ProofKey::Cell(cell_proof_key))
                 .expect("should find cell root proof");
-            debug!("After fetching cell proof for row key {:?}", k);
+            debug!(
+                "After fetching cell proof for row key {:?} & primary {}",
+                k, primary
+            );
             let proof = if context.is_leaf() {
                 // Prove a leaf
                 println!(
                     " \n PROVING ROW --> id {:?}, value {:?}, cell_tree_proof hash {:?}",
                     id,
                     value,
-                    cells_tree::extract_hash_from_proof(&cell_tree_proof)
-                        .unwrap()
-                        .to_bytes()
+                    hex::encode(
+                        cells_tree::extract_hash_from_proof(&cell_tree_proof)
+                            .unwrap()
+                            .to_bytes()
+                    )
                 );
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
@@ -154,22 +159,11 @@ impl<P: ProofStorage> TestContext<P> {
                     tree_key: child_key,
                 };
                 // Prove a partial node
-                // NOTE: we need to find the latest one generated for that rowtreekey
-                // and we don't know which block is it, it is not necessarily the current block!
-                debug!(
-                    "BEFORE fetching child proof of node {:?} for partial node {:?}",
-                    proof_key, k,
-                );
                 let child_proof = self
                     .storage
                     .get_proof_exact(&ProofKey::Row(proof_key.clone()))
                     .expect("UT guarantees proving in order");
-                debug!(
-                    "AFTER fetching child proof for partial node - found at block {:?}",
-                    proof_key.primary
-                );
 
-                debug!("AFTER fetching cell tree proof for partial node");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::partial(
                         id,
@@ -229,12 +223,13 @@ impl<P: ProofStorage> TestContext<P> {
             };
 
             self.storage
-                .store_proof(ProofKey::Row(new_proof_key.clone()), proof)
+                .store_proof(ProofKey::Row(new_proof_key.clone()), proof.clone())
                 .expect("storing should work");
 
             debug!(
-                "Finished row tree key proving {k:?} - stored under proof key {:?}",
-                new_proof_key
+                "Finished row tree key proving {k:?} - stored under proof key {:?} with hash {:?}",
+                new_proof_key,
+                hex::encode(extract_hash_from_proof(&proof).unwrap().to_bytes())
             );
             workplan.done(&k).unwrap();
         }

@@ -263,11 +263,11 @@ impl<
             self.secondary_index_column,
             self.secondary_index_value(),
             left_hash == *empty_poseidon_hash(),
-            left_hash.to_bytes(),
-            right_hash.to_bytes(),
+            hex::encode(left_hash.to_bytes()),
+            hex::encode(right_hash.to_bytes()),
             self.min,
             self.max,
-            self.cell_root_hash,
+            hex::encode(self.cell_root_hash.0),
         );
         self.hash = HashOutput(H::hash_no_pad(&to_hash).to_bytes().try_into().unwrap());
     }
