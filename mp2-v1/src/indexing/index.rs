@@ -86,7 +86,7 @@ impl<PrimaryIndex: Default + Clone + Sized + Serialize + for<'a> Deserialize<'a>
             .chain(self.max.to_fields())
             .chain(once(F::from_canonical_u64(self.identifier)))
             .chain(self.value.0.to_fields())
-            .chain(self.row_tree_hash.0.to_fields())
+            .chain(HashOut::from_bytes(&self.row_tree_hash.0).to_fields())
             .collect::<Vec<_>>();
         self.node_hash = HashOutput(H::hash_no_pad(&inputs).to_bytes().try_into().unwrap());
     }
