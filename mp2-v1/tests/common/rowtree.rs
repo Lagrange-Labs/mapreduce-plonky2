@@ -131,7 +131,8 @@ impl<P: ProofStorage> TestContext<P> {
                 .to_bytes();
             let cell_root_hash_from_row = row.cell_root_hash;
             assert!(
-                hex::encode(cell_root_hash_from_proof) == hex::encode(cell_root_hash_from_row.0),
+                hex::encode(cell_root_hash_from_proof.clone())
+                    == hex::encode(cell_root_hash_from_row.0),
                 "cell root proof from proof vs row is different"
             );
 
