@@ -15,7 +15,7 @@ use mp2_common::{
     proof::{ProofInputSerialized, ProofWithVK},
     C, D, F,
 };
-use plonky2::field::types::Field;
+use plonky2::{field::types::Field, hash::hash_types::HashOut};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{RecursiveCircuitInfo, RecursiveCircuits},
@@ -193,6 +193,10 @@ impl PublicParameters {
     }
 }
 
+pub fn extract_hash_from_proof(proof: &[u8]) -> Result<HashOut<F>> {
+    let p = ProofWithVK::deserialize(proof)?;
+    Ok(PublicInputs::from_slice(&p.proof.public_inputs).root_hash_hashout())
+}
 #[cfg(test)]
 mod tests {
     use super::*;

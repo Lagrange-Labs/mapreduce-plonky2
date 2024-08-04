@@ -34,7 +34,7 @@ use ryhope::{
     InitSettings, MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
-use verifiable_db::row_tree::extract_hash_from_proof;
+use verifiable_db::{cells_tree, row_tree::extract_hash_from_proof};
 
 use crate::common::row_tree_proof_to_hash;
 
@@ -131,7 +131,7 @@ impl<P: ProofStorage> TestContext<P> {
                     " \n PROVING ROW --> id {:?}, value {:?}, cell_tree_proof hash {:?}",
                     id,
                     value,
-                    extract_hash_from_proof(&cell_tree_proof)
+                    cells_tree::extract_hash_from_proof(&cell_tree_proof)
                         .unwrap()
                         .to_bytes()
                 );
