@@ -181,10 +181,18 @@ impl<P: ProofStorage> TestContext<P> {
             );
 
             self.storage
-                .store_proof(ProofKey::Cell(generated_proof_key.clone()), proof)
+                .store_proof(ProofKey::Cell(generated_proof_key.clone()), proof.clone())
                 .expect("storing should work");
 
-            debug!("STORING CELL PROOF at  {:?}", generated_proof_key);
+            debug!(
+                "STORING CELL PROOF at  {:?} -- hash {:?}",
+                generated_proof_key,
+                hex::encode(
+                    cells_tree::extract_hash_from_proof(&proof)
+                        .map(|c| c.to_bytes())
+                        .unwrap()
+                )
+            );
             workplan.done(&k).unwrap();
         }
         let root = tree.root().unwrap();
