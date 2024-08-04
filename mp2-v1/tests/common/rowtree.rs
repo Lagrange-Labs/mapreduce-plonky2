@@ -141,7 +141,7 @@ impl<P: ProofStorage> TestContext<P> {
                     " \n PROVING ROW --> id {:?}, value {:?}, cell_tree_proof hash {:?}",
                     id,
                     value,
-                    hex::encode(cell_root_hash_from_proof)
+                    hex::encode(cell_root_hash_from_proof.clone())
                 );
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
