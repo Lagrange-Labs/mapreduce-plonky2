@@ -15,10 +15,14 @@ use mp2_v1::{
 };
 use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
-    storage::updatetree::{Next, UpdateTree},
+    storage::{
+        updatetree::{Next, UpdateTree},
+        RoEpochKvStorage,
+    },
     tree::{sbbst, TreeTopology},
 };
 use serde::{Deserialize, Serialize};
+use sha3::digest::crypto_common::ParBlocksSizeUser;
 use verifiable_db::cells_tree;
 
 use crate::common::{cell_tree_proof_to_hash, TestContext};
@@ -44,7 +48,7 @@ impl<P: ProofStorage> TestContext<P> {
         // the new row key for this new cells tree. It can be the same as the key of the previous
         // row if there has been no change in the secondary index value.
         new_row_key: RowTreeKey,
-        tree: MerkleCellTree,
+        tree: MerkleCellTree<BlockPrimaryIndex>,
         ut: UpdateTree<CellTreeKey>,
     ) -> CellTreeKey {
         let previous_row_key = match previous_row == Default::default() {
@@ -56,28 +60,6 @@ impl<P: ProofStorage> TestContext<P> {
         // Store the proofs here for the tests; will probably be done in S3 for
         // prod.
         let mut workplan = ut.into_workplan();
-
-        let find_primary = |k: CellTreeKey| -> BlockPrimaryIndex {
-            if previous_row == Default::default() {
-                // if there is no previous row, that means we are creating a new cell tree from
-                // scrach and therefore the associated primary index must be the current one.
-                return primary;
-            }
-            // Here, we need to find the primary index over which this children proof have
-            // been generated. To do this, we need to determine the column ID corresponding to
-            // the index of the child key. We do this by looking up the table definition.
-            // Then from this column ID, we can look in the previous row payload, the
-            // corresponding primary index stored for this child cell.
-            let child_column_id = table_columns
-                .column_id_of_cells_index(k)
-                .expect("invalid table index <-> id definition");
-            previous_row
-                .payload
-                .cells
-                .find_by_column(child_column_id)
-                .map(|c| c.primary)
-                .expect("unable to find cell with given column id")
-        };
 
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, cell) = tree.fetch_with_context(&k);
@@ -96,12 +78,13 @@ impl<P: ProofStorage> TestContext<P> {
             } else if context.right.is_none() {
                 // Prove a partial node - only care about the left side since sbbst has this nice
                 // property
-                let child_primary = find_primary(context.left.unwrap());
+                let left_key = context.left.unwrap();
+                let left_node = tree.fetch(&left_key);
                 let proof_key = CellProofIdentifier {
                     table: table_id.clone(),
                     secondary: previous_row_key.clone(),
-                    primary: child_primary,
-                    tree_key: context.left.unwrap(),
+                    primary: left_node.primary,
+                    tree_key: left_key,
                 };
                 let left_proof = self
                     .storage
@@ -124,17 +107,21 @@ impl<P: ProofStorage> TestContext<P> {
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
                 // Prove a full node.
+                let left_key = context.left.unwrap();
+                let left_node = tree.fetch(&left_key);
                 let left_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
                     secondary: previous_row_key.clone(),
-                    primary: find_primary(context.left.unwrap()),
+                    primary: left_node.primary,
                     tree_key: context.left.unwrap(),
                 };
+                let right_key = context.right.unwrap();
+                let right_node = tree.fetch(&right_key);
                 let right_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
                     secondary: previous_row_key.clone(),
-                    primary: find_primary(context.right.unwrap()),
-                    tree_key: context.right.unwrap(),
+                    primary: right_node.primary,
+                    tree_key: right_key,
                 };
 
                 let left_proof = self
@@ -225,7 +212,7 @@ impl<P: ProofStorage> TestContext<P> {
         // Note this is just needed to put inside the returned JSON Row payload, it's not
         // processed
         all_cells: CellCollection<BlockPrimaryIndex>,
-        cells_update: CellsUpdateResult,
+        cells_update: CellsUpdateResult<BlockPrimaryIndex>,
     ) -> RowPayload<BlockPrimaryIndex> {
         // sanity check
         assert!(previous_row.k == cells_update.previous_row_key);
@@ -277,7 +264,7 @@ impl<P: ProofStorage> TestContext<P> {
         &mut self,
         table_id: &TableID,
         primary: BlockPrimaryIndex,
-        cells_update: &CellsUpdateResult,
+        cells_update: &CellsUpdateResult<BlockPrimaryIndex>,
     ) -> Result<()> {
         if cells_update.previous_row_key == cells_update.new_row_key {
             info!("NOT moving cells tree since previous row key does not change");

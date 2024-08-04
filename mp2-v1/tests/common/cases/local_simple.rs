@@ -250,7 +250,7 @@ impl TestCase {
         bn: BlockPrimaryIndex,
         // Note there is only one entry for a single variable update, but multiple for mappings for
         // example
-        updates: Vec<TableRowUpdate>,
+        updates: Vec<TableRowUpdate<BlockPrimaryIndex>>,
     ) -> Result<()> {
         let current_block = ctx.block_number().await;
         // apply the new cells to the trees
@@ -528,7 +528,7 @@ impl TestCase {
         &mut self,
         ctx: &mut TestContext<P>,
         c: ChangeType,
-    ) -> Vec<TableRowUpdate> {
+    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         match self.source {
             // NOTE 1: The first part is just trying to construct the right input to simulate any
             // changes on a mapping. This is mostly irrelevant for dist system but needs to
@@ -661,10 +661,16 @@ impl TestCase {
                 )
                 .await
                 .unwrap();
+                let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
                 // NOTE HERE is the interesting bit for dist system as this is the logic to execute
                 // on receiving updates from scapper. This only needs to have the relevant
                 // information from update and it will translate that to changes in the tree.
-                self.mapping_to_table_update(mapping_updates, index_type, slot as u8)
+                self.mapping_to_table_update(
+                    new_block_number,
+                    mapping_updates,
+                    index_type,
+                    slot as u8,
+                )
             }
             TableSourceSlot::SingleValues(_) => {
                 let old_table_values = self.current_table_row_values(ctx).await;
@@ -715,7 +721,7 @@ impl TestCase {
     async fn init_contract_data<P: ProofStorage>(
         &mut self,
         ctx: &mut TestContext<P>,
-    ) -> Vec<TableRowUpdate> {
+    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         match self.source {
             TableSourceSlot::Mapping((ref mut mapping, _)) => {
                 let index = mapping.index.clone();
@@ -753,7 +759,8 @@ impl TestCase {
                 )
                 .await
                 .unwrap();
-                self.mapping_to_table_update(mapping_updates, index, slot)
+                let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
+                self.mapping_to_table_update(new_block_number, mapping_updates, index, slot)
             }
             TableSourceSlot::SingleValues(_) => {
                 let contract_update = SimpleSingleValue {
@@ -819,17 +826,9 @@ impl TestCase {
     async fn current_table_row_values<P: ProofStorage>(
         &self,
         ctx: &mut TestContext<P>,
-    ) -> Vec<TableRowValues> {
+    ) -> Vec<TableRowValues<BlockPrimaryIndex>> {
         match self.source {
-            TableSourceSlot::Mapping((ref mapping, _)) => {
-                let unique_entries = self.current_mapping_entries(ctx).await;
-                unique_entries
-                    .iter()
-                    .map(|u| {
-                        u.to_table_row_value(&mapping.index, mapping.slot, &self.contract_address)
-                    })
-                    .collect::<Vec<_>>()
-            }
+            TableSourceSlot::Mapping((_, _)) => unimplemented!("not use of it"),
             TableSourceSlot::SingleValues(ref args) => {
                 let mut secondary_cell = None;
                 let mut rest_cells = Vec::new();
@@ -857,6 +856,7 @@ impl TestCase {
                 vec![TableRowValues {
                     current_cells: rest_cells,
                     current_secondary: secondary_cell.unwrap(),
+                    primary: ctx.block_number().await as BlockPrimaryIndex,
                 }]
             }
         }
@@ -864,10 +864,11 @@ impl TestCase {
 
     fn mapping_to_table_update(
         &self,
+        block_number: BlockPrimaryIndex,
         updates: Vec<MappingUpdate>,
         index: MappingIndex,
         slot: u8,
-    ) -> Vec<TableRowUpdate> {
+    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         updates
             .iter()
             .flat_map(|mapping_change| {
@@ -885,8 +886,13 @@ impl TestCase {
                     MappingUpdate::Insertion(mkey, mvalue) => {
                         // we transform the mapping entry into the "table notion" of row
                         let entry = UniqueMappingEntry::new(mkey, mvalue);
-                        let (cells, index) =
-                            entry.to_update(&index, slot, &self.contract_address, None);
+                        let (cells, index) = entry.to_update(
+                            block_number,
+                            &index,
+                            slot,
+                            &self.contract_address,
+                            None,
+                        );
                         vec![TableRowUpdate::Insertion(cells, index)]
                     }
                     MappingUpdate::Update(mkey, old_value, mvalue) => {
@@ -900,6 +906,7 @@ impl TestCase {
                         let new_entry = UniqueMappingEntry::new(mkey, mvalue);
 
                         let (mut cells, secondary_index) = new_entry.to_update(
+                            block_number,
                             &index,
                             slot,
                             &self.contract_address,
@@ -1055,21 +1062,23 @@ pub enum UpdateType {
 /// Represents in a generic way the value present in a row from a table
 /// TODO: add the first index in generic way as well for CSV
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
-pub struct TableRowValues {
+pub struct TableRowValues<PrimaryIndex> {
     // cells without the secondary index
     pub current_cells: Vec<Cell>,
     pub current_secondary: SecondaryIndexCell,
+    pub primary: PrimaryIndex,
 }
 
-impl TableRowValues {
+impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex> {
     // Compute the update from the current values and the new values
-    fn compute_update(&self, new: &Self) -> Vec<TableRowUpdate> {
+    fn compute_update(&self, new: &Self) -> Vec<TableRowUpdate<PrimaryIndex>> {
         // this is initialization
         if self == &Self::default() {
             let cells_update = CellsUpdate {
                 previous_row_key: RowTreeKey::default(),
                 new_row_key: (&new.current_secondary).into(),
                 updated_cells: new.current_cells.clone(),
+                primary: new.primary.clone(),
             };
             return vec![TableRowUpdate::Insertion(
                 cells_update,
@@ -1102,6 +1111,7 @@ impl TableRowValues {
             new_row_key: (&new.current_secondary).into(),
             previous_row_key: (&self.current_secondary).into(),
             updated_cells,
+            primary: new.primary.clone(),
         };
 
         assert!(
@@ -1134,7 +1144,7 @@ impl TableRowValues {
 /// This is computed from the update of a contract in the case of the current test, but
 /// should be given directly in case of CSV file.
 #[derive(Clone, Debug)]
-pub enum TableRowUpdate {
+pub enum TableRowUpdate<PrimaryIndex> {
     /// A row to be deleted
     Deletion(RowTreeKey),
     /// NOTE : this only includes changes on the regular non indexed cells.
@@ -1142,14 +1152,17 @@ pub enum TableRowUpdate {
     /// A new secondary index value is translated to a deletion and then a new insert
     /// since that is what must happen at the tree level where we delete the node corresponding to
     /// the previous secondary index value.
-    Update(CellsUpdate),
+    Update(CellsUpdate<PrimaryIndex>),
     /// Used to insert a new row from scratch
-    Insertion(CellsUpdate, SecondaryIndexCell),
+    Insertion(CellsUpdate<PrimaryIndex>, SecondaryIndexCell),
 }
 
-impl TableRowUpdate {
+impl<PrimaryIndex> TableRowUpdate<PrimaryIndex>
+where
+    PrimaryIndex: PartialEq + Eq + Default + Clone + Default,
+{
     // Returns the full cell collection to put inside the JSON row payload
-    fn updated_cells_collection<PrimaryIndex: PartialEq + Eq + Default + Clone + Default>(
+    fn updated_cells_collection(
         &self,
         new_primary: PrimaryIndex,
         previous: &CellCollection<PrimaryIndex>,

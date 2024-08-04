@@ -21,6 +21,8 @@ use ryhope::{
 };
 use serde::{Deserialize, Serialize};
 
+use super::ColumnID;
+
 /// By default the cells tree is a sbbst tree since it is fixed for a given table and this is the
 /// simplest/fastest tree.
 pub type CellTree = sbbst::Tree;
@@ -29,13 +31,23 @@ pub type CellTreeKey = <CellTree as TreeTopology>::Key;
 /// The storage of cell tree is "in memory" since it is never really saved on disk. Rather, it is
 /// always reconstructed on the fly given it is very small. Moreover, storing it on disk would
 /// require as many sql tables as there would be rows, making this solution highly unpracticable.
-pub type CellStorage = InMemory<CellTree, MerkleCell>;
+pub type CellStorage<PrimaryIndex> = InMemory<CellTree, MerkleCell<PrimaryIndex>>;
 /// The cells tree is a Merkle tree with cryptographically secure hash function committing to its
 /// content.
-pub type MerkleCellTree = MerkleTreeKvDb<CellTree, MerkleCell, CellStorage>;
+pub type MerkleCellTree<PrimaryIndex> =
+    MerkleTreeKvDb<CellTree, MerkleCell<PrimaryIndex>, CellStorage<PrimaryIndex>>;
 
 /// Returns a new empty Merkle cells tree.
-pub fn new_tree() -> MerkleCellTree {
+pub fn new_tree<
+    PrimaryIndex: std::fmt::Debug
+        + PartialEq
+        + Eq
+        + Default
+        + Clone
+        + Sized
+        + Serialize
+        + for<'a> Deserialize<'a>,
+>() -> MerkleCellTree<PrimaryIndex> {
     MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap()
 }
 
@@ -64,31 +76,28 @@ impl Cell {
 /// MerkleCell is the data stored in the cells tree. It contains a cell and a hash of the subtree
 /// rooted at the cell in the cells tree.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Deref)]
-pub struct MerkleCell {
+pub struct MerkleCell<PrimaryIndex> {
     #[deref]
-    cell: Cell,
+    pub cell: Cell,
+    pub primary: PrimaryIndex,
     /// The hash of this node in the cells tree
     pub hash: HashOutput,
 }
 
-impl From<Cell> for MerkleCell {
-    fn from(value: Cell) -> Self {
-        MerkleCell {
-            cell: value,
-            hash: Default::default(),
+impl<PrimaryIndex: Default> MerkleCell<PrimaryIndex> {
+    pub fn new(id: ColumnID, value: U256, primary: PrimaryIndex) -> Self {
+        Self {
+            cell: Cell { id, value },
+            primary,
+            ..Default::default()
         }
     }
 }
 
-impl From<&Cell> for MerkleCell {
-    fn from(value: &Cell) -> Self {
-        MerkleCell {
-            cell: value.clone(),
-            hash: Default::default(),
-        }
-    }
-}
-impl NodePayload for MerkleCell {
+impl<
+        PrimaryIndex: PartialEq + Eq + Default + Clone + Sized + Serialize + for<'a> Deserialize<'a>,
+    > NodePayload for MerkleCell<PrimaryIndex>
+{
     fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
         let children = children.into_iter().collect::<Vec<_>>();
         assert_eq!(children.len(), 2);

@@ -132,7 +132,10 @@ impl Table {
     // Function to call each time we need to build the index tree, i.e. for each row and
     // at each update for each row. Reason is we don't store it in memory since it's
     // very fast to recompute.
-    fn construct_cell_tree(&mut self, cells: &CellCollection<BlockPrimaryIndex>) -> MerkleCellTree {
+    fn construct_cell_tree(
+        &mut self,
+        cells: &CellCollection<BlockPrimaryIndex>,
+    ) -> MerkleCellTree<BlockPrimaryIndex> {
         let mut cell_tree = cell::new_tree();
         // we fetch the info from the column ids, and construct the cells of the tree
         let rest_cells = self
@@ -141,10 +144,7 @@ impl Table {
             .iter()
             .map(|tc| tc.identifier)
             .filter_map(|id| cells.find_by_column(id).map(|info| (id, info)))
-            .map(|(id, info)| Cell {
-                id,
-                value: info.value,
-            })
+            .map(|(id, info)| cell::MerkleCell::new(id, info.value, info.primary))
             .collect::<Vec<_>>();
         // the first time we actually create the cells tree, there is nothing
         if !rest_cells.is_empty() {
@@ -155,7 +155,7 @@ impl Table {
                         // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
                         // but we put + 1 because sbbst starts at +1
                         let idx = self.columns.cells_tree_index_of(cell.id) + 1;
-                        t.store(idx, cell.into())?;
+                        t.store(idx, cell)?;
                     }
                     Ok(())
                 })
@@ -167,13 +167,11 @@ impl Table {
     // Call this function first on all the cells tree that change from one update to another
     // Then prove the updates. Once done, you can call `apply_row_update` to update the row trees
     // and then once done you can call `apply_index_update`
-    // TODO: handle the case where the row secondary index changes, as this requires a deletion
-    // then fresh insertion
     pub fn apply_cells_update(
         &mut self,
-        update: CellsUpdate,
+        update: CellsUpdate<BlockPrimaryIndex>,
         update_type: TreeUpdateType,
-    ) -> Result<CellsUpdateResult> {
+    ) -> Result<CellsUpdateResult<BlockPrimaryIndex>> {
         // fetch previous row or return 0 cells in case of init
         let previous_cells = self
             .row
@@ -215,10 +213,12 @@ impl Table {
                     // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
                     // but we put + 1 because sbbst starts at +1
                     let cell_key = self.columns.cells_tree_index_of(new_cell.id) + 1;
+                    let merkle_cell =
+                        cell::MerkleCell::new(new_cell.id, new_cell.value, update.primary);
                     match update_type {
-                        TreeUpdateType::Update => t.update(cell_key, new_cell.into())?,
+                        TreeUpdateType::Update => t.update(cell_key, merkle_cell)?,
                         // This should only happen at init time or at creation of a new row
-                        TreeUpdateType::Insertion => t.store(cell_key, new_cell.into())?,
+                        TreeUpdateType::Insertion => t.store(cell_key, merkle_cell)?,
                     }
                 }
                 Ok(())
@@ -309,7 +309,7 @@ pub struct RowUpdateResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct CellsUpdate {
+pub struct CellsUpdate<PrimaryIndex> {
     /// Row key where to fetch the previous cells existing. In case  of  
     /// a secondary index value changing, that means a deletion + insertion.
     /// So tree logic should fetch the cells from the to-be-deleted row first
@@ -326,24 +326,31 @@ pub struct CellsUpdate {
     // did not change, we would not be able to separate the rest from the secondary index cell.
     // NOTE: In the case of initialization time, this contains the initial cells of the row
     pub updated_cells: Vec<Cell>,
-}
-
-impl CellsUpdate {
-    pub fn is_fresh_insert(&self) -> bool {
-        self.previous_row_key == Default::default()
-    }
+    /// Primary index associated with the proving of these cells. This is necessary to associate
+    /// the actual _proofs_ of each cell to an unique storage location. This primary is stored
+    /// within each cell of the cells tree, allowing for cells to evolve independently.
+    pub primary: PrimaryIndex,
 }
 
 // Contains the data necessary to start proving the update of the cells tree
 // and including the new information in the respective rows.
 // For example one needs to setup the location of the proof, the root hash of the new cells tree.
 // Once that is done, one can call `apply_row_update`
-pub struct CellsUpdateResult {
+pub struct CellsUpdateResult<
+    PrimaryIndex: std::fmt::Debug
+        + PartialEq
+        + Eq
+        + Default
+        + Clone
+        + Sized
+        + Serialize
+        + for<'a> Deserialize<'a>,
+> {
     pub previous_row_key: RowTreeKey,
     pub new_row_key: RowTreeKey,
     // give the tree here since we don't really store it so it's easier down the line to pass it
     // around
-    pub latest: MerkleCellTree,
+    pub latest: MerkleCellTree<PrimaryIndex>,
     pub to_update: UpdateTree<CellTreeKey>,
 }
 

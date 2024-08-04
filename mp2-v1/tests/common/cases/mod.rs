@@ -7,6 +7,7 @@ use mp2_common::eth::StorageSlot;
 use mp2_test::utils::random_vector;
 use mp2_v1::{
     indexing::{
+        block::BlockPrimaryIndex,
         cell::Cell,
         row::{RowTreeKey, ToNonce},
     },
@@ -52,16 +53,18 @@ impl UniqueMappingEntry {
     }
     pub fn to_update(
         &self,
-        index: &MappingIndex,
+        block_number: BlockPrimaryIndex,
+        mapping_index: &MappingIndex,
         slot: u8,
         contract: &Address,
         previous_row_key: Option<RowTreeKey>,
-    ) -> (CellsUpdate, SecondaryIndexCell) {
-        let row_value = self.to_table_row_value(index, slot, contract);
+    ) -> (CellsUpdate<BlockPrimaryIndex>, SecondaryIndexCell) {
+        let row_value = self.to_table_row_value(block_number, mapping_index, slot, contract);
         let cells_update = CellsUpdate {
             previous_row_key: previous_row_key.unwrap_or_default(),
-            new_row_key: self.to_row_key(index),
+            new_row_key: self.to_row_key(mapping_index),
             updated_cells: row_value.current_cells,
+            primary: block_number,
         };
         let index_cell = row_value.current_secondary;
         (cells_update, index_cell)
@@ -70,10 +73,11 @@ impl UniqueMappingEntry {
     /// Return a row given this mapping entry, depending on the chosen index
     pub fn to_table_row_value(
         &self,
+        block_number: BlockPrimaryIndex,
         index: &MappingIndex,
         slot: u8,
         contract: &Address,
-    ) -> TableRowValues {
+    ) -> TableRowValues<BlockPrimaryIndex> {
         // we construct the two associated cells in the table. One of them will become
         // a SecondaryIndexCell depending on the secondary index type we have chosen
         // for this mapping.
@@ -102,6 +106,7 @@ impl UniqueMappingEntry {
         TableRowValues {
             current_cells: vec![rest],
             current_secondary: secondary,
+            primary: block_number,
         }
     }
 
