@@ -191,7 +191,7 @@ impl<P: ProofStorage> TestContext<P> {
         };
 
         if root_data.primary != primary {
-            debug!("Cells Tree UNTOUCHED for row  {new_row_key:?} at block {primary}");
+            debug!("Cells Tree UNTOUCHED for row  {new_row_key:?} at block {primary} (root_data.primary{:?})",root_data.primary);
         }
 
         // just checking the storage is there
