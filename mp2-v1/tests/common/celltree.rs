@@ -220,6 +220,9 @@ impl<P: ProofStorage> TestContext<P> {
     ) -> RowPayload<BlockPrimaryIndex> {
         // sanity check
         assert!(previous_row.k == cells_update.previous_row_key);
+        // We need to (a) move the proofs to the new (new_row_key, primary) identifier
+        // then (b) update all the impacted cells to also have this new information about the new
+        // primary index
         self.move_cells_proof_to_new_row(&table.id, primary, &cells_update)
             .expect("unable to move cells tree proof:");
         // set the primary index for all cells that are in the update plan to the new primary
@@ -230,7 +233,9 @@ impl<P: ProofStorage> TestContext<P> {
             let mut cell_info = all_cells.find_by_column(identifier).unwrap().clone();
             cell_info.primary = primary;
             all_cells.update_column(identifier, cell_info);
+            debug!("CELL INFO: Updated key {updated_key} to new block {primary}")
         }
+        // (c) reconstruct key with those new updated cell info
         let updated_cell_tree = table.construct_cell_tree(&all_cells);
         let tree_hash = cells_update.latest.root_data().unwrap().hash;
         let root_key = self.prove_cell_tree(
@@ -299,24 +304,25 @@ impl<P: ProofStorage> TestContext<P> {
                 .into_iter()
                 .flat_map(|key| {
                     let previous_node = cells_update.latest.fetch(&key);
-                    let previous_proof_key = ProofKey::Cell(CellProofIdentifier {
+                    let previous_proof_key = CellProofIdentifier {
                         table: table_id.clone(),
                         secondary: cells_update.previous_row_key.clone(),
                         // take from where it has been proven (previous_row, any_block_in_the_past)
                         primary: previous_node.primary,
                         tree_key: key,
-                    });
-                    let new_proof_key = ProofKey::Cell(CellProofIdentifier {
+                    };
+                    let new_proof_key = CellProofIdentifier {
                         table: table_id.clone(),
                         secondary: cells_update.new_row_key.clone(),
                         // and put it to (new_row,new_block) as if it was a a new proving from
                         // scratch
                         primary,
                         tree_key: key,
-                    });
+                    };
                     self.storage
-                        .move_proof(&previous_proof_key, &new_proof_key)
+                        .move_proof(&ProofKey::Cell(previous_proof_key.clone()), &ProofKey::Cell(new_proof_key.clone()))
                         .expect("unable to move proof from one row key to another");
+                    debug!("CELL PROOFS MOVING: from (block {:?} - row_key {:?} to --> (block {:?}, row_key {:?})",previous_proof_key.primary,previous_proof_key.secondary,new_proof_key.primary,new_proof_key.secondary);
                     // look at the children to move _all_ the cell tree proofs for all the proofs
                     // that exist
                     match cells_update.latest.node_context(&key) {
