@@ -140,8 +140,8 @@ impl Table {
     // Function to call each time we need to build the index tree, i.e. for each row and
     // at each update for each row. Reason is we don't store it in memory since it's
     // very fast to recompute.
-    fn construct_cell_tree(
-        &mut self,
+    pub fn construct_cell_tree(
+        &self,
         cells: &CellCollection<BlockPrimaryIndex>,
     ) -> MerkleCellTree<BlockPrimaryIndex> {
         let mut cell_tree = cell::new_tree();

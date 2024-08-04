@@ -224,21 +224,21 @@ impl<P: ProofStorage> TestContext<P> {
             .expect("unable to move cells tree proof:");
         // set the primary index for all cells that are in the update plan to the new primary
         // index, since all of them will be reproven
-        // Note this could be done anywhere since this cells collection is only given to be given
-        // back but this place feels right
+        // We have to do this after updating cell tree
         for updated_key in cells_update.to_update.impacted_keys() {
             let identifier = table.columns.column_id_of_cells_index(updated_key).unwrap();
             let mut cell_info = all_cells.find_by_column(identifier).unwrap().clone();
             cell_info.primary = primary;
             all_cells.update_column(identifier, cell_info);
         }
+        let updated_cell_tree = table.construct_cell_tree(&all_cells);
         let tree_hash = cells_update.latest.root_data().unwrap().hash;
         let root_key = self.prove_cell_tree(
             table,
             primary,
             previous_row,
             cells_update.new_row_key.clone(),
-            cells_update.latest,
+            updated_cell_tree,
             cells_update.to_update,
         );
         let root_proof_key = CellProofIdentifier {
