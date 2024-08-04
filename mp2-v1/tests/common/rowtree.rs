@@ -133,8 +133,9 @@ impl<P: ProofStorage> TestContext<P> {
             assert!(
                 hex::encode(cell_root_hash_from_proof.clone())
                     == hex::encode(cell_root_hash_from_row.0),
-                "cell root proof from proof vs row is different - cell root info = {:?}",
-                row.fetch_cell_root_info()
+                "cell root proof from proof vs row is different - cell root info = {:?}, row {:?}",
+                row.fetch_cell_root_info(),
+                row,
             );
 
             let proof = if context.is_leaf() {
