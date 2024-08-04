@@ -45,6 +45,10 @@ impl<P: ProofStorage> TestContext<P> {
         tree: MerkleCellTree,
         ut: UpdateTree<CellTreeKey>,
     ) -> CellTreeKey {
+        let previous_row_key = match previous_row == Default::default() {
+            true => new_row_key.clone(),
+            false => previous_row.k.clone(),
+        };
         let table_id = &table.id;
         let table_columns = &table.columns;
         // Store the proofs here for the tests; will probably be done in S3 for
@@ -86,7 +90,7 @@ impl<P: ProofStorage> TestContext<P> {
                 let child_primary = find_primary(context.left.unwrap());
                 let proof_key = CellProofIdentifier {
                     table: table_id.clone(),
-                    secondary: previous_row.k.clone(),
+                    secondary: previous_row_key.clone(),
                     primary: child_primary,
                     tree_key: context.left.unwrap(),
                 };
@@ -103,13 +107,13 @@ impl<P: ProofStorage> TestContext<P> {
                 // Prove a full node.
                 let left_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
-                    secondary: previous_row.k.clone(),
+                    secondary: previous_row_key.clone(),
                     primary: find_primary(context.left.unwrap()),
                     tree_key: context.left.unwrap(),
                 };
                 let right_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
-                    secondary: previous_row.k.clone(),
+                    secondary: previous_row_key.clone(),
                     primary: find_primary(context.right.unwrap()),
                     tree_key: context.right.unwrap(),
                 };
@@ -148,9 +152,10 @@ impl<P: ProofStorage> TestContext<P> {
             );
 
             self.storage
-                .store_proof(ProofKey::Cell(generated_proof_key), proof)
+                .store_proof(ProofKey::Cell(generated_proof_key.clone()), proof)
                 .expect("storing should work");
 
+            debug!("STORING CELL PROOF at  {:?}", generated_proof_key);
             workplan.done(&k).unwrap();
         }
         let root = tree.root().unwrap();
