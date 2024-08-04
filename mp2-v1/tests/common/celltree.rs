@@ -182,12 +182,17 @@ impl<P: ProofStorage> TestContext<P> {
             workplan.done(&k).unwrap();
         }
         let root = tree.root().unwrap();
+        let root_data = tree.root_data().unwrap();
         let root_proof_key = CellProofIdentifier {
             table: table_id.clone(),
             secondary: new_row_key.clone(),
-            primary,
+            primary: root_data.primary,
             tree_key: root,
         };
+
+        if root_data.primary != primary {
+            debug!("Cells Tree UNTOUCHED for row  {new_row_key:?} at block {primary}");
+        }
 
         // just checking the storage is there
         let _ = self
@@ -293,15 +298,19 @@ impl<P: ProofStorage> TestContext<P> {
             let new_nodes = to_move
                 .into_iter()
                 .flat_map(|key| {
+                    let previous_node = cells_update.latest.fetch(&key);
                     let previous_proof_key = ProofKey::Cell(CellProofIdentifier {
                         table: table_id.clone(),
                         secondary: cells_update.previous_row_key.clone(),
-                        primary,
+                        // take from where it has been proven (previous_row, any_block_in_the_past)
+                        primary: previous_node.primary,
                         tree_key: key,
                     });
                     let new_proof_key = ProofKey::Cell(CellProofIdentifier {
                         table: table_id.clone(),
                         secondary: cells_update.new_row_key.clone(),
+                        // and put it to (new_row,new_block) as if it was a a new proving from
+                        // scratch
                         primary,
                         tree_key: key,
                     });
