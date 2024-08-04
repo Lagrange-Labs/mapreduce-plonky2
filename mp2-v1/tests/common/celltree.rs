@@ -322,7 +322,7 @@ impl<P: ProofStorage> TestContext<P> {
                     self.storage
                         .move_proof(&ProofKey::Cell(previous_proof_key.clone()), &ProofKey::Cell(new_proof_key.clone()))
                         .expect("unable to move proof from one row key to another");
-                    debug!("CELL PROOFS MOVING: from (block {:?} - row_key {:?} to --> (block {:?}, row_key {:?})",previous_proof_key.primary,previous_proof_key.secondary,new_proof_key.primary,new_proof_key.secondary);
+                    debug!("CELL PROOFS MOVING: cell key {key} from (block {:?} - row_key {:?} to --> (block {:?}, row_key {:?})",previous_proof_key.primary,previous_proof_key.secondary,new_proof_key.primary,new_proof_key.secondary);
                     // look at the children to move _all_ the cell tree proofs for all the proofs
                     // that exist
                     match cells_update.latest.node_context(&key) {
