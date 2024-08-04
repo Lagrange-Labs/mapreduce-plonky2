@@ -108,7 +108,7 @@ impl<PrimaryIndex: PartialEq + Eq + Default + Clone> CellCollection<PrimaryIndex
                 .map(|(previous_id, previous_cell)| {
                     updated_cells
                         .get(previous_id)
-                        .map(|ci| (previous_id, ci))
+                        .map(|new_cell| (previous_id, new_cell))
                         .unwrap_or((previous_id, previous_cell))
                 })
                 .map(|(id, cell)| (*id, cell.clone()))

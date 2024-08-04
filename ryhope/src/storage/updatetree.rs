@@ -46,6 +46,10 @@ impl<K: Clone + Hash + Eq> UpdateTree<K> {
         }
     }
 
+    pub fn impacted_keys(&self) -> Vec<K> {
+        self.nodes.iter().map(|n| n.k.clone()).collect()
+    }
+
     fn rec_build<T: TreeTopology<Key = K>, S: TreeStorage<T>>(
         &mut self,
         t: &T,

@@ -56,7 +56,6 @@ impl<P: ProofStorage> TestContext<P> {
             false => previous_row.k.clone(),
         };
         let table_id = &table.id;
-        let table_columns = &table.columns;
         // Store the proofs here for the tests; will probably be done in S3 for
         // prod.
         let mut workplan = ut.into_workplan();
@@ -211,13 +210,23 @@ impl<P: ProofStorage> TestContext<P> {
         // All the new cells expected in the row, INCLUDING the secondary index
         // Note this is just needed to put inside the returned JSON Row payload, it's not
         // processed
-        all_cells: CellCollection<BlockPrimaryIndex>,
+        mut all_cells: CellCollection<BlockPrimaryIndex>,
         cells_update: CellsUpdateResult<BlockPrimaryIndex>,
     ) -> RowPayload<BlockPrimaryIndex> {
         // sanity check
         assert!(previous_row.k == cells_update.previous_row_key);
         self.move_cells_proof_to_new_row(&table.id, primary, &cells_update)
             .expect("unable to move cells tree proof:");
+        // set the primary index for all cells that are in the update plan to the new primary
+        // index, since all of them will be reproven
+        // Note this could be done anywhere since this cells collection is only given to be given
+        // back but this place feels right
+        for updated_key in cells_update.to_update.impacted_keys() {
+            let identifier = table.columns.column_id_of_cells_index(updated_key).unwrap();
+            let mut cell_info = all_cells.find_by_column(identifier).unwrap().clone();
+            cell_info.primary = primary;
+            all_cells.update_column(identifier, cell_info);
+        }
         let tree_hash = cells_update.latest.root_data().unwrap().hash;
         let root_key = self.prove_cell_tree(
             table,
