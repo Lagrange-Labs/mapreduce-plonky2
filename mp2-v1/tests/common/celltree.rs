@@ -13,11 +13,13 @@ use mp2_v1::{
     },
     values_extraction::identifier_single_var_column,
 };
+use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::updatetree::{Next, UpdateTree},
     tree::{sbbst, TreeTopology},
 };
 use serde::{Deserialize, Serialize};
+use verifiable_db::cells_tree;
 
 use crate::common::{cell_tree_proof_to_hash, TestContext};
 
@@ -57,6 +59,8 @@ impl<P: ProofStorage> TestContext<P> {
 
         let find_primary = |k: CellTreeKey| -> BlockPrimaryIndex {
             if previous_row == Default::default() {
+                // if there is no previous row, that means we are creating a new cell tree from
+                // scrach and therefore the associated primary index must be the current one.
                 return primary;
             }
             // Here, we need to find the primary index over which this children proof have
@@ -79,7 +83,12 @@ impl<P: ProofStorage> TestContext<P> {
             let (context, cell) = tree.fetch_with_context(&k);
 
             let proof = if context.is_leaf() {
-                // Prove a leaf
+                debug!(
+                    "MP2 Proving Cell Tree hash for id {:?} - value {:?} -> {:?}",
+                    cell.id,
+                    cell.value,
+                    hex::encode(cell.hash.0)
+                );
                 let inputs = CircuitInput::CellsTree(
                     verifiable_db::cells_tree::CircuitInput::leaf(cell.id, cell.value),
                 );
@@ -100,8 +109,18 @@ impl<P: ProofStorage> TestContext<P> {
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::partial(
-                        cell.id, cell.value, left_proof,
+                        cell.id,
+                        cell.value,
+                        left_proof.clone(),
                     ));
+                debug!(
+                    "MP2 Proving Cell Tree PARTIAL for id {:?} - value {:?} -> {:?} --> LEFT CHILD HASH {:?}",
+                    cell.id,
+                    cell.value,
+                    hex::encode(cell.hash.0),
+                    hex::encode(cells_tree::extract_hash_from_proof(&left_proof).map(|c|c.to_bytes()).unwrap())
+                );
+
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
                 // Prove a full node.
@@ -126,12 +145,22 @@ impl<P: ProofStorage> TestContext<P> {
                     .storage
                     .get_proof_exact(&ProofKey::Cell(right_proof_key))
                     .expect("UT guarantees proving in order");
+                debug!(
+                    "MP2 Proving Cell Tree FULL for id {:?} - value {:?} -> {:?} --> LEFT HASH {:?}, RIGHT HASH {:?}",
+                    cell.id,
+                    cell.value,
+                    hex::encode(cell.hash.0),
+                    hex::encode(cells_tree::extract_hash_from_proof(&left_proof).map(|c|c.to_bytes()).unwrap()),
+                    hex::encode(cells_tree::extract_hash_from_proof(&right_proof).map(|c|c.to_bytes()).unwrap())
+                );
+
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::full(
                         cell.id,
                         cell.value,
                         [left_proof, right_proof],
                     ));
+
                 api::generate_proof(self.params(), inputs).expect("while proving full node")
             };
             let generated_proof_key = CellProofIdentifier {
@@ -196,7 +225,7 @@ impl<P: ProofStorage> TestContext<P> {
             .expect("unable to move cells tree proof:");
         let tree_hash = cells_update.latest.root_data().unwrap().hash;
         let root_key = self.prove_cell_tree(
-            &table,
+            table,
             primary,
             previous_row,
             cells_update.new_row_key.clone(),

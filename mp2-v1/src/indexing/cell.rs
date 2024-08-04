@@ -2,6 +2,7 @@ use std::iter;
 
 use alloy::primitives::U256;
 use derive_more::Deref;
+use log::debug;
 use mp2_common::{
     poseidon::{empty_poseidon_hash, H},
     types::HashOutput,
@@ -89,14 +90,24 @@ impl From<&Cell> for MerkleCell {
 }
 impl NodePayload for MerkleCell {
     fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
+        let children = children.into_iter().collect::<Vec<_>>();
+        assert_eq!(children.len(), 2);
+
+        let (left_hash, right_hash) = match [&children[0], &children[1]] {
+            [None, None] => (*empty_poseidon_hash(), *empty_poseidon_hash()),
+            [None, Some(right)] => (*empty_poseidon_hash(), HashOut::from_bytes(&right.hash.0)),
+            [Some(left), None] => (HashOut::from_bytes(&left.hash.0), *empty_poseidon_hash()),
+            [Some(left), Some(right)] => (
+                HashOut::from_bytes(&left.hash.0),
+                HashOut::from_bytes(&right.hash.0),
+            ),
+        };
+
         // H(H(left_child) || H(right_child) || id || value)
-        let inputs: Vec<_> = children
+        let inputs: Vec<_> = left_hash
+            .to_fields()
             .into_iter()
-            .map(|c| {
-                c.map(|x| HashOut::from_bytes(&x.hash.0))
-                    .unwrap_or_else(|| *empty_poseidon_hash())
-            })
-            .flat_map(|x| x.elements.into_iter())
+            .chain(right_hash.to_fields())
             // ID
             .chain(iter::once(F::from_canonical_u64(self.id)))
             // Value
@@ -104,5 +115,13 @@ impl NodePayload for MerkleCell {
             .collect();
 
         self.hash = HashOutput(H::hash_no_pad(&inputs).to_bytes().try_into().unwrap());
+        debug!(
+            "Ryhope Cell Tree hash for id {:?} - value {:?} -> {:?}: LEFT HASH: {:?}, RIGHT HASH {:?}",
+            self.cell.id,
+            self.cell.value,
+            hex::encode(self.hash.0),
+            hex::encode(left_hash.to_bytes()),
+            hex::encode(right_hash.to_bytes()),
+        );
     }
 }

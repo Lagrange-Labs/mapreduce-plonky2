@@ -27,6 +27,7 @@ recursion_framework = { path = "../recursion-framework" }
 ryhope = { path = "../ryhope" }
 verifiable-db = { path = "../verifiable-db" }
 derive_more = "0.99.18"
+hex.workspace = true
 
 [dev-dependencies]
 alloy.workspace = true
