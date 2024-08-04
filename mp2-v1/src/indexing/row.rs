@@ -253,12 +253,13 @@ impl<
                     // P(value)
                     .chain(self.secondary_index_value().to_fields())
                     // P(cell_tree_hash)
-                    .chain(self.cell_root_hash.0.to_fields())
+                    .chain(HashOut::from_bytes(&self.cell_root_hash.0).to_fields())
                     .collect::<Vec<_>>();
         println!(
-            "\n--RYHOPE Row : id {:?}, value {:?} left_hash {:?}, right_hash {:?} min {:?}, max {:?}, tree_root_hash {:?}",
+            "\n--RYHOPE Row : id {:?}, value {:?} (empty hash{}) left_hash {:?}, right_hash {:?} min {:?}, max {:?}, tree_root_hash {:?}",
             self.secondary_index_column,
             self.secondary_index_value(),
+            left_hash == *empty_poseidon_hash(),
             left_hash.to_bytes(),
             right_hash.to_bytes(),
             self.min,
