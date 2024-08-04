@@ -227,16 +227,34 @@ impl<P: ProofStorage> TestContext<P> {
             .expect("unable to move cells tree proof:");
         // set the primary index for all cells that are in the update plan to the new primary
         // index, since all of them will be reproven
-        // We have to do this after updating cell tree
-        for updated_key in cells_update.to_update.impacted_keys() {
-            let identifier = table.columns.column_id_of_cells_index(updated_key).unwrap();
-            let mut cell_info = all_cells.find_by_column(identifier).unwrap().clone();
-            cell_info.primary = primary;
-            all_cells.update_column(identifier, cell_info);
-            debug!("CELL INFO: Updated key {updated_key} to new block {primary}")
-        }
+        // We have to do this after updating cell tree because we don't know yet what are the
+        // updated nodes before we update the tree.
+        // NOTE: might be good to know this before doing the update, like a "blank run", feature on
+        // ryhope
+        let must_move_all_proofs = !(cells_update.previous_row_key == cells_update.new_row_key
+            || cells_update.previous_row_key == Default::default());
+        // impacted keys by the update
+        let impacted_keys = cells_update.to_update.impacted_keys();
+        let updated_cells = CellCollection(
+            all_cells
+                .0
+                .iter()
+                .map(|(id, cell_info)| {
+                    let tree_key = table.columns.cells_tree_index_of(*id);
+                    let mut new_cell = cell_info.clone();
+                    // we need to update the primary on the impacted cells at least, OR on all the cells if
+                    // we are moving all the proofs to a new row key which happens when doing an DELETE +
+                    // INSERT
+                    if must_move_all_proofs || impacted_keys.contains(&tree_key) {
+                        new_cell.primary = primary;
+                        debug!("CELL INFO: Updated key {tree_key} to new block {primary}")
+                    }
+                    (*id, new_cell)
+                })
+                .collect(),
+        );
         // (c) reconstruct key with those new updated cell info
-        let updated_cell_tree = table.construct_cell_tree(&all_cells);
+        let updated_cell_tree = table.construct_cell_tree(&updated_cells);
         let tree_hash = cells_update.latest.root_data().unwrap().hash;
         let root_key = self.prove_cell_tree(
             table,
