@@ -126,17 +126,22 @@ impl<P: ProofStorage> TestContext<P> {
                 "After fetching cell proof for row key {:?} & primary {}",
                 k, primary
             );
+            let cell_root_hash_from_proof = cells_tree::extract_hash_from_proof(&cell_tree_proof)
+                .unwrap()
+                .to_bytes();
+            let cell_root_hash_from_row = row.cell_root_hash;
+            assert!(
+                hex::encode(cell_root_hash_from_proof) == hex::encode(cell_root_hash_from_row.0),
+                "cell root proof from proof vs row is different"
+            );
+
             let proof = if context.is_leaf() {
                 // Prove a leaf
                 println!(
                     " \n PROVING ROW --> id {:?}, value {:?}, cell_tree_proof hash {:?}",
                     id,
                     value,
-                    hex::encode(
-                        cells_tree::extract_hash_from_proof(&cell_tree_proof)
-                            .unwrap()
-                            .to_bytes()
-                    )
+                    hex::encode()
                 );
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
