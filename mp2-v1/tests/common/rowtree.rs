@@ -290,7 +290,7 @@ impl<P: ProofStorage> TestContext<P> {
         assert_eq!(
             hex::encode(tree_hash.0), hex::encode(proved_hash.0),
             "mismatch between row tree root hash as computed by ryhope and mp2 (row.id {:?}, value {:?} , row.cell_hash {:?})",
-            root_row.secondary_index_column, root_row.secondary_index_value(),root_row.cell_root_hash
+            root_row.secondary_index_column, root_row.secondary_index_value(),hex::encode(root_row.cell_root_hash.0)
 
         );
         Ok(IndexNode {

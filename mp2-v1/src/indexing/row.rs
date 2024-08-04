@@ -90,6 +90,9 @@ impl<PrimaryIndex> CellInfo<PrimaryIndex> {
 #[derive(Eq, PartialEq, Deref, From, Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CellCollection<PrimaryIndex>(pub HashMap<ColumnID, CellInfo<PrimaryIndex>>);
 impl<PrimaryIndex: PartialEq + Eq + Default + Clone> CellCollection<PrimaryIndex> {
+    pub fn update_column(&mut self, id: ColumnID, cell: CellInfo<PrimaryIndex>) {
+        self.0.insert(id, cell);
+    }
     pub fn find_by_column(&self, id: ColumnID) -> Option<&CellInfo<PrimaryIndex>> {
         self.0.get(&id)
     }

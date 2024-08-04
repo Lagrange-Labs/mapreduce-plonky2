@@ -8,6 +8,7 @@ use mp2_v1::{
         block::BlockPrimaryIndex,
         cell::Cell,
         row::{CellCollection, CellInfo, Row, RowTreeKey},
+        ColumnID,
     },
     values_extraction::{
         identifier_block_column, identifier_for_mapping_key_column,
@@ -275,8 +276,11 @@ impl TestCase {
                         },
                         false => Row::default(),
                     };
-                    let new_cell_collection =
-                        row_update.updated_cells_collection(bn, &previous_row.payload.cells);
+                    let new_cell_collection = row_update.updated_cells_collection(
+                        self.table.columns.secondary_column().identifier,
+                        bn,
+                        &previous_row.payload.cells,
+                    );
                     let new_row_key = tree_update.new_row_key.clone();
                     let row_payload = ctx.prove_cells_tree(
                         &self.table,
@@ -300,9 +304,12 @@ impl TestCase {
                         .table
                         .row
                         .try_fetch(&new_cells.previous_row_key)
-                        .expect("unable to find preivous row");
-                    let new_cell_collection =
-                        row_update.updated_cells_collection(bn, &old_row.cells);
+                        .expect("unable to find previous row");
+                    let new_cell_collection = row_update.updated_cells_collection(
+                        self.table.columns.secondary_column().identifier,
+                        bn,
+                        &old_row.cells,
+                    );
                     let new_row_key = tree_update.new_row_key.clone();
                     let row_payload = ctx.prove_cells_tree(
                         &self.table,
@@ -1164,6 +1171,7 @@ where
     // Returns the full cell collection to put inside the JSON row payload
     fn updated_cells_collection(
         &self,
+        secondary_column: ColumnID,
         new_primary: PrimaryIndex,
         previous: &CellCollection<PrimaryIndex>,
     ) -> CellCollection<PrimaryIndex> {
@@ -1193,7 +1201,16 @@ where
             .collect(),
         );
 
-        previous.merge_with_update(&new_cells)
+        let mut new_collection = previous.merge_with_update(&new_cells);
+        let mut secondary_cell = new_collection
+            .find_by_column(secondary_column)
+            .expect("new collection should have secondary index")
+            .clone();
+        // NOTE: ! we _always_ update the new primary of a row that is being updated, since we are
+        // always reproving it !
+        secondary_cell.primary = new_primary;
+        new_collection.update_column(secondary_column, secondary_cell);
+        new_collection
     }
 }
 
