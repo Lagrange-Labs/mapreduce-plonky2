@@ -242,7 +242,7 @@ impl<P: ProofStorage> TestContext<P> {
                 // only move the cells tree proof of the actual cells, not the secondary index !
                 // CellsCollection is a bit weird because it has to contain as well the secondary
                 // index to be able to search in it in JSON
-                .filter(|(id, _)| **id != previous_row.payload.secondary_index_column)
+                .filter(|(id, _)| **id != table.columns.secondary_column().identifier)
                 .map(|(id, cell_info)| {
                     println!(
                         " --- CELL TRE index of {id} vs secondary id {} vs table.secondary_id {}",
