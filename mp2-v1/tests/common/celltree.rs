@@ -245,8 +245,9 @@ impl<P: ProofStorage> TestContext<P> {
                 .filter(|(id, _)| **id != previous_row.payload.secondary_index_column)
                 .map(|(id, cell_info)| {
                     println!(
-                        " --- CELL TRE index of {id} vs secondary id {}",
-                        previous_row.payload.secondary_index_column
+                        " --- CELL TRE index of {id} vs secondary id {} vs table.secondary_id {}",
+                        previous_row.payload.secondary_index_column,
+                        table.columns.secondary.identifier
                     );
                     let tree_key = table.columns.cells_tree_index_of(*id);
                     let mut new_cell = cell_info.clone();
