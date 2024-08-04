@@ -244,7 +244,8 @@ impl<P: ProofStorage> TestContext<P> {
             .unwrap();
         let proved_hash = cell_tree_proof_to_hash(&cell_root_proof);
         assert_eq!(
-            tree_hash, proved_hash,
+            hex::encode(tree_hash.0),
+            hex::encode(proved_hash.0),
             "mismatch between cell tree root hash as computed by ryhope and mp2",
         );
 
