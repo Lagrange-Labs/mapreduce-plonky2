@@ -1174,6 +1174,7 @@ where
         secondary_column: ColumnID,
         new_primary: PrimaryIndex,
         previous: &CellCollection<PrimaryIndex>,
+        table: &Table,
     ) -> CellCollection<PrimaryIndex> {
         let new_cells = CellCollection(
             match self {

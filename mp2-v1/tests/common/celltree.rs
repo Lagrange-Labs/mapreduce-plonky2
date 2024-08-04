@@ -235,6 +235,10 @@ impl<P: ProofStorage> TestContext<P> {
             || cells_update.previous_row_key == Default::default());
         // impacted keys by the update
         let impacted_keys = cells_update.to_update.impacted_keys();
+        println!(
+            "  -- -CELL TREE impacted keys in new update: {:?}",
+            cells_update.to_update.impacted_keys()
+        );
         let updated_cells = CellCollection(
             all_cells
                 .0
@@ -245,7 +249,7 @@ impl<P: ProofStorage> TestContext<P> {
                 .filter(|(id, _)| **id != table.columns.secondary_column().identifier)
                 .map(|(id, cell_info)| {
                     println!(
-                        " --- CELL TRE index of {id} vs secondary id {} vs table.secondary_id {}",
+                        " --- CELL TREE index of {id} vs secondary id {} vs table.secondary_id {}",
                         previous_row.payload.secondary_index_column,
                         table.columns.secondary.identifier
                     );
