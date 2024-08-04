@@ -228,15 +228,16 @@ impl<P: ProofStorage> TestContext<P> {
         ut: UpdateTree<BlockTreeKey>,
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let row_tree_root = table.row.root().unwrap();
+        let row_payload = table.row.fetch(&row_tree_root);
         let row_root_proof_key = RowProofIdentifier {
             table: table.id.clone(),
             tree_key: row_tree_root,
-            primary: bn,
+            primary: row_payload.primary_index_value(),
         };
 
-        let (row_tree_proof, latest_root_key) = self
+        let row_tree_proof = self
             .storage
-            .get_proof_latest(&row_root_proof_key.clone())
+            .get_proof_exact(&ProofKey::Row(row_root_proof_key.clone()))
             .unwrap();
         let row_tree_hash = verifiable_db::row_tree::extract_hash_from_proof(&row_tree_proof)
             .expect("can't find hash?");

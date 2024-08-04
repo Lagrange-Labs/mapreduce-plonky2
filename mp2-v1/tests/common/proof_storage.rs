@@ -124,16 +124,6 @@ impl Hash for ProofKey {
 pub trait ProofStorage {
     fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()>;
     fn get_proof_exact(&self, key: &ProofKey) -> Result<Vec<u8>>;
-    // Returns the latest proof that have been generated for the given row tree key. That means the
-    // primary field on the row tree key is not relevant in this method, since it will always try
-    // to find the _latest_ which may not be the same as the one given here.
-    // Returns the key associated to that proof.
-    // TODO: probably refactor this whole mechanism outside of storage, and potentially put primary
-    // index outside of row tree key since it's weird call here.
-    fn get_proof_latest(
-        &self,
-        key: &RowProofIdentifier<BlockPrimaryIndex>,
-    ) -> Result<(Vec<u8>, RowProofIdentifier<BlockPrimaryIndex>)>;
     /// Move the proof form the old key to the new key. This is **required** for cells proofs
     /// when the secondary index value changes.
     /// If there is no proof at the old key, it simply does nothing.
@@ -162,22 +152,6 @@ impl ProofStorage for MemoryProofStorage {
 
     fn get_proof_exact(&self, key: &ProofKey) -> Result<Vec<u8>> {
         self.0.get(key).context("unable to get proof").cloned()
-    }
-    // stupid dumb implementation
-    // TODO: remove this struct/implementation  alltogether ?
-    fn get_proof_latest(
-        &self,
-        key: &RowProofIdentifier<BlockPrimaryIndex>,
-    ) -> Result<(Vec<u8>, RowProofIdentifier<BlockPrimaryIndex>)> {
-        let key = key.clone();
-        for i in key.primary..0 {
-            let mut nkey = key.clone();
-            nkey.primary = i;
-            if let Ok(p) = self.get_proof_exact(&ProofKey::Row(nkey.clone())) {
-                return Ok((p, nkey));
-            }
-        }
-        bail!("couldn't find proof with such identifier");
     }
 
     fn move_proof(&mut self, old_key: &ProofKey, new_key: &ProofKey) -> Result<()> {
@@ -265,36 +239,6 @@ impl ProofStorage for KeyValueDB {
         }
         tx.commit()?;
         Ok(())
-    }
-
-    fn get_proof_latest(
-        &self,
-        key: &RowProofIdentifier<BlockPrimaryIndex>,
-    ) -> Result<(Vec<u8>, RowProofIdentifier<BlockPrimaryIndex>)> {
-        let tx = self.db.tx(false)?;
-        let row_bucket = tx.get_bucket(ROW_BUCKET_NAME)?;
-        let raw = match row_bucket.get(key.tree_key.to_bytes()?) {
-            Some(d) => match d {
-                Data::Bucket(_) => bail!("bucket found while required proofs"),
-                Data::KeyValue(kv) => kv.value().to_vec(),
-            },
-            None => bail!("bucket not found, data not found"),
-        };
-        // now that we have the block number of the latest row tree proof with the given row tree
-        // key, we can fetch that proof !
-        let block_number = BlockPrimaryIndex::from_be_bytes(raw.try_into().unwrap());
-        println!(
-            "GET_PROOF_LATEST: found latest block number {}",
-            block_number
-        );
-        let mut new_key = key.clone();
-        new_key.primary = block_number;
-        println!("GET_PROOF_LATEST: before fetching the full row key proof");
-        let out = self.get_proof_exact(&ProofKey::Row(new_key))?;
-        println!("GET_PROOF_LATEST: after finding the full row key");
-        let mut old_key = key.clone();
-        old_key.primary = block_number;
-        Ok((out, old_key))
     }
 
     fn move_proof(&mut self, old_key: &ProofKey, new_key: &ProofKey) -> Result<()> {
