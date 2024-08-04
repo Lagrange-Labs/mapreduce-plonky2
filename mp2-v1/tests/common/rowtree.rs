@@ -129,11 +129,12 @@ impl<P: ProofStorage> TestContext<P> {
             let cell_root_hash_from_proof = cells_tree::extract_hash_from_proof(&cell_tree_proof)
                 .unwrap()
                 .to_bytes();
-            let cell_root_hash_from_row = row.cell_root_hash;
+            let cell_root_hash_from_row = row.cell_root_hash.clone();
             assert!(
                 hex::encode(cell_root_hash_from_proof.clone())
                     == hex::encode(cell_root_hash_from_row.0),
-                "cell root proof from proof vs row is different"
+                "cell root proof from proof vs row is different - cell root info = {:?}",
+                row.fetch_cell_root_info()
             );
 
             let proof = if context.is_leaf() {
