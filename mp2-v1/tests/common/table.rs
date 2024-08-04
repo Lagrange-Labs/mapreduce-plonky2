@@ -162,7 +162,7 @@ impl Table {
                     for cell in rest_cells {
                         // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
                         // but we put + 1 because sbbst starts at +1
-                        let idx = self.columns.cells_tree_index_of(cell.id) + 1;
+                        let idx = self.columns.cells_tree_index_of(cell.id);
                         t.store(idx, cell)?;
                     }
                     Ok(())
