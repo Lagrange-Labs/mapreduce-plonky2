@@ -215,7 +215,7 @@ impl<P: ProofStorage> TestContext<P> {
         // All the new cells expected in the row, INCLUDING the secondary index
         // Note this is just needed to put inside the returned JSON Row payload, it's not
         // processed
-        mut all_cells: CellCollection<BlockPrimaryIndex>,
+        all_cells: CellCollection<BlockPrimaryIndex>,
         cells_update: CellsUpdateResult<BlockPrimaryIndex>,
     ) -> RowPayload<BlockPrimaryIndex> {
         // sanity check
@@ -239,6 +239,10 @@ impl<P: ProofStorage> TestContext<P> {
             all_cells
                 .0
                 .iter()
+                // only move the cells tree proof of the actual cells, not the secondary index !
+                // CellsCollection is a bit weird because it has to contain as well the secondary
+                // index to be able to search in it in JSON
+                .filter(|(id, _)| **id != previous_row.payload.secondary_index_column)
                 .map(|(id, cell_info)| {
                     let tree_key = table.columns.cells_tree_index_of(*id);
                     let mut new_cell = cell_info.clone();
