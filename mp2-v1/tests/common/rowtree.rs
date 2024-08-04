@@ -19,7 +19,7 @@ use mp2_v1::{
 use plonky2::{
     field::types::Field,
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
-    plonk::config::Hasher,
+    plonk::config::{GenericHashOut, Hasher},
 };
 use ryhope::{
     storage::{
@@ -34,6 +34,7 @@ use ryhope::{
     InitSettings, MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
+use verifiable_db::row_tree::extract_hash_from_proof;
 
 use crate::common::row_tree_proof_to_hash;
 
@@ -126,6 +127,14 @@ impl<P: ProofStorage> TestContext<P> {
             debug!("After fetching cell proof for row key {:?}", k);
             let proof = if context.is_leaf() {
                 // Prove a leaf
+                println!(
+                    " \n PROVING ROW --> id {:?}, value {:?}, cell_tree_proof hash {:?}",
+                    id,
+                    value,
+                    extract_hash_from_proof(&cell_tree_proof)
+                        .unwrap()
+                        .to_bytes()
+                );
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
                         .unwrap(),

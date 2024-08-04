@@ -151,12 +151,6 @@ pub struct RowPayload<PrimaryIndex: PartialEq + Eq + Default> {
     /// This includes the secondary index value as well
     pub cells: CellCollection<PrimaryIndex>,
     /// The ID of the secondary index column.
-    /// NOTE: the reason we have this here is because when computing the hash, we need to know
-    /// which value to lookup in the hashmap. The reason we have a hashmap is to be easily
-    /// searchable from JSONB in PSQL.
-    /// TODO: The real nice solution could be to allow a "context" in the ryhope NodePayload trait
-    /// such that we can extract that information from the context. Currently this info needs to be
-    /// stored in the JSONB because we have no other source of information.
     pub secondary_index_column: ColumnID,
     /// Storing the hash of the root of the cells tree. One could get it as well from the proof
     /// but it requires loading the proof, so when building the hashing structure it's best
@@ -262,10 +256,14 @@ impl<
                     .chain(self.cell_root_hash.0.to_fields())
                     .collect::<Vec<_>>();
         println!(
-            "\n--RYHOPE Row : id {:?}, value {:?} tree_root_hash {:?}",
+            "\n--RYHOPE Row : id {:?}, value {:?} left_hash {:?}, right_hash {:?} min {:?}, max {:?}, tree_root_hash {:?}",
             self.secondary_index_column,
             self.secondary_index_value(),
-            self.cell_root_hash
+            left_hash.to_bytes(),
+            right_hash.to_bytes(),
+            self.min,
+            self.max,
+            self.cell_root_hash,
         );
         self.hash = HashOutput(H::hash_no_pad(&to_hash).to_bytes().try_into().unwrap());
     }
