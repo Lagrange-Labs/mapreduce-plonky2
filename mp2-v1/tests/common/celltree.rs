@@ -248,13 +248,15 @@ impl<P: ProofStorage> TestContext<P> {
                 // index to be able to search in it in JSON
                 .filter(|(id, _)| **id != table.columns.secondary_column().identifier)
                 .map(|(id, cell_info)| {
+                                        let tree_key = table.columns.cells_tree_index_of(*id);
+                    let mut new_cell = cell_info.clone();
                     println!(
-                        " --- CELL TREE index of {id} vs secondary id {} vs table.secondary_id {}",
+                        " --- CELL TREE key {} index of {id} vs secondary id {} vs table.secondary_id {}",
+                        tree_key,
                         previous_row.payload.secondary_index_column,
                         table.columns.secondary.identifier
                     );
-                    let tree_key = table.columns.cells_tree_index_of(*id);
-                    let mut new_cell = cell_info.clone();
+
                     // we need to update the primary on the impacted cells at least, OR on all the cells if
                     // we are moving all the proofs to a new row key which happens when doing an DELETE +
                     // INSERT
