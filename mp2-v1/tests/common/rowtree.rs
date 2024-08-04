@@ -97,10 +97,8 @@ impl<P: ProofStorage> TestContext<P> {
         table: &Table,
         ut: UpdateTree<RowTreeKey>,
     ) -> Result<RowProofIdentifier<BlockPrimaryIndex>> {
+        debug!("PROVE_ROW_TREE -- BEGIN for block {}", primary);
         let t = &table.row;
-        println!(" --- BEFORE WORKPLAN ---");
-        ut.print();
-        println!(" --- AFTER WORKPLAN ---");
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(k)) = workplan.next() {
             let (context, row) = t.fetch_with_context(&k);
@@ -202,33 +200,14 @@ impl<P: ProofStorage> TestContext<P> {
                 };
 
                 // Prove a full node: fetch the row proofs of the children
-                // NOTE: these row proofs may have been generated at any block in the past.
-                // Therefore we need to search for the _latest_ one since that is the one of
-                // interest to us.
-                debug!(
-                    "BEFORE fetching LEFT row tree {:?} proof for full node {:?}",
-                    left_proof_key, k
-                );
                 let left_proof = self
                     .storage
                     .get_proof_exact(&ProofKey::Row(left_proof_key.clone()))
                     .expect("UT guarantees proving in order");
-                debug!(
-                    "AFTER fetching LEFT row tree proof for full node - FOUND block {}",
-                    left_proof_key.primary
-                );
-                debug!(
-                    "BEFORE fetching RIGHT row tree {:?} for full node {:?}",
-                    right_proof_key, k
-                );
                 let right_proof = self
                     .storage
                     .get_proof_exact(&ProofKey::Row(right_proof_key.clone()))
                     .expect("UT guarantees proving in order");
-                debug!(
-                    "AFTER fetching RIGHT row tree proof for full node - FOUND block {}",
-                    right_proof_key.primary
-                );
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::full(
                         id,
@@ -250,10 +229,13 @@ impl<P: ProofStorage> TestContext<P> {
             };
 
             self.storage
-                .store_proof(ProofKey::Row(new_proof_key), proof)
+                .store_proof(ProofKey::Row(new_proof_key.clone()), proof)
                 .expect("storing should work");
 
-            debug!("Finished row tree key proving {k:?}");
+            debug!(
+                "Finished row tree key proving {k:?} - stored under proof key {:?}",
+                new_proof_key
+            );
             workplan.done(&k).unwrap();
         }
 
@@ -277,8 +259,10 @@ impl<P: ProofStorage> TestContext<P> {
             pi.rows_digest_field()
         );
         if root_proof_key.primary != primary {
-            debug!("[--] NO UPDATES on row this turn!");
+            debug!("[--] NO UPDATES on row this turn? row.root().primary = {} vs new primary proving step {}",root_proof_key.primary,primary);
         };
+
+        debug!("PROVE_ROW_TREE -- END for block {}", primary);
         Ok(root_proof_key)
     }
 
@@ -304,7 +288,7 @@ impl<P: ProofStorage> TestContext<P> {
         let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
 
         assert_eq!(
-            tree_hash, proved_hash,
+            hex::encode(tree_hash.0), hex::encode(proved_hash.0),
             "mismatch between row tree root hash as computed by ryhope and mp2 (row.id {:?}, value {:?} , row.cell_hash {:?})",
             root_row.secondary_index_column, root_row.secondary_index_value(),root_row.cell_root_hash
 
