@@ -244,6 +244,10 @@ impl<P: ProofStorage> TestContext<P> {
                 // index to be able to search in it in JSON
                 .filter(|(id, _)| **id != previous_row.payload.secondary_index_column)
                 .map(|(id, cell_info)| {
+                    println!(
+                        " --- CELL TRE index of {id} vs secondary id {}",
+                        previous_row.payload.secondary_index_column
+                    );
                     let tree_key = table.columns.cells_tree_index_of(*id);
                     let mut new_cell = cell_info.clone();
                     // we need to update the primary on the impacted cells at least, OR on all the cells if
