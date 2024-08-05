@@ -424,6 +424,30 @@ pub struct CellsUpdateResult<
     pub to_update: UpdateTree<CellTreeKey>,
 }
 
+impl<PrimaryIndex> CellsUpdateResult<PrimaryIndex>
+where
+    PrimaryIndex: std::fmt::Debug
+        + PartialEq
+        + Eq
+        + Default
+        + Clone
+        + Sized
+        + Sync
+        + Send
+        + Serialize
+        + for<'a> Deserialize<'a>,
+{
+    pub fn is_new_row(&self) -> bool {
+        self.previous_row_key == Default::default()
+    }
+    pub fn is_same_row(&self) -> bool {
+        self.previous_row_key == self.new_row_key
+    }
+    pub fn is_moving_row(&self) -> bool {
+        !(self.is_new_row() || self.is_same_row())
+    }
+}
+
 pub enum TreeUpdateType {
     Insertion,
     Update,

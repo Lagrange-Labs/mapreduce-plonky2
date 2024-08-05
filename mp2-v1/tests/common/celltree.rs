@@ -315,11 +315,11 @@ impl<P: ProofStorage> TestContext<P> {
         primary: BlockPrimaryIndex,
         cells_update: &CellsUpdateResult<BlockPrimaryIndex>,
     ) -> Result<()> {
-        if cells_update.previous_row_key == cells_update.new_row_key {
+        if cells_update.is_same_row() {
             info!("NOT moving cells tree since previous row key does not change");
             return Ok(());
         }
-        if cells_update.previous_row_key == Default::default() {
+        if cells_update.is_new_row() {
             info!("NOT moving cells tree since it is a first time insertion");
             return Ok(());
         }
