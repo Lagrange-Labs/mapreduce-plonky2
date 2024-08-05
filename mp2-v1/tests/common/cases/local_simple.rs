@@ -334,7 +334,7 @@ impl TestCase {
             })
             .collect::<Vec<_>>();
         info!("Generated final CELLs tree proofs for block {current_block}");
-        let updates = self.table.apply_row_update(rows_update)?;
+        let updates = self.table.apply_row_update(bn, rows_update)?;
         info!("Applied updates to row tree");
         let index_node = ctx
             .prove_update_row_tree(bn, &self.table, updates)
