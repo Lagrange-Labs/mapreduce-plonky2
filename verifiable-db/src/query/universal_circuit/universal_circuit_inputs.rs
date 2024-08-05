@@ -18,7 +18,7 @@ pub(crate) type PlaceholderId = F;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// Enumeration representing all the possible types of input operands for a basic operation
-pub(crate) enum InputOperand {
+pub enum InputOperand {
     // Input operand is a placeholder in the query
     Placeholder(PlaceholderId),
     // Input operand is a constant value in the query
@@ -42,11 +42,11 @@ impl Default for InputOperand {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// Data structure employed to specify a basic operation to be performed to
 /// compute the query
-pub(crate) struct BasicOperation {
-    pub(crate) first_operand: InputOperand,
+pub struct BasicOperation {
+    pub first_operand: InputOperand,
     /// Can be None in case of unary operation
-    pub(crate) second_operand: Option<InputOperand>,
-    pub(crate) op: Operation,
+    pub second_operand: Option<InputOperand>,
+    pub op: Operation,
 }
 
 impl BasicOperation {
@@ -165,7 +165,7 @@ impl BasicOperation {
 
 #[derive(Clone, Copy, Debug)]
 /// Enumeration representing the type of output values that can be returned for each row
-pub(crate) enum OutputItem {
+pub enum OutputItem {
     /// Output value is a column of the table
     Column(usize),
     /// Output value is computed in one of the `MAX_NUM_RESULT_OPS` operations; the numeric value
@@ -176,9 +176,9 @@ pub(crate) enum OutputItem {
 
 /// Data structure that contains the description of the output items to be returned and the
 /// operations necessary to compute the output items
-pub(crate) struct ResultStructure {
-    pub(crate) result_operations: Vec<BasicOperation>,
-    pub(crate) output_items: Vec<OutputItem>,
+pub struct ResultStructure {
+    pub result_operations: Vec<BasicOperation>,
+    pub output_items: Vec<OutputItem>,
 }
 
 impl From<(Vec<BasicOperation>, Vec<OutputItem>)> for ResultStructure {

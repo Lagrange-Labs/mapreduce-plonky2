@@ -18,12 +18,12 @@ mod output_with_aggregation;
 /// a single row of a table according to a given query. The overall layout of the circuit is described here
 /// https://www.notion.so/lagrangelabs/Queries-Circuits-2695199166a54954bbc44ad9dc398825?pvs=4#5c0d5af8c40f4bf0ae7dd13b20a54dcc
 /// while the detailed specs can be found here https://www.notion.so/lagrangelabs/Queries-Circuits-2695199166a54954bbc44ad9dc398825?pvs=4#22fbb552e11e411e95d426264c94aa46
-pub(crate) mod universal_query_circuit;
+pub mod universal_query_circuit;
 
 /// Set of data structures to be provided as input to initialize a universal query circuit to prove
 /// the query computation for a single row. They basically allow to represent in a strucutred format
 /// the operations to be performed to compute the results of the query for each row
-pub(crate) mod universal_circuit_inputs;
+pub mod universal_circuit_inputs;
 
 /// Column index number (primary and secondary indexes)
 pub(crate) const COLUMN_INDEX_NUM: usize = 2;
