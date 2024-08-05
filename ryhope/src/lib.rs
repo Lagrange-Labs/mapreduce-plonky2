@@ -349,12 +349,12 @@ impl<
 
     async fn commit_transaction(&mut self) -> Result<UpdateTree<T::Key>> {
         let mut paths = vec![];
-        for k in self.dirty.iter() {
-            if let Some(p) = self.tree.lineage(k, &self.storage).await {
+        for k in self.dirty.drain() {
+            if let Some(p) = self.tree.lineage(&k, &self.storage).await {
                 paths.push(p.into_full_path().collect::<Vec<_>>());
             }
         }
-        self.dirty.drain();
+
         let update_tree = UpdateTree::from_paths(paths, self.current_epoch() + 1);
 
         let plan = update_tree.clone().into_workplan();
