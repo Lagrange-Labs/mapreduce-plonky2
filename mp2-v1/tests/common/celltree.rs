@@ -244,23 +244,26 @@ impl<P: ProofStorage> TestContext<P> {
                 .0
                 .iter()
                 .map(|(id, cell_info)| {
-                    let tree_key = table.columns.cells_tree_index_of(*id);
                     let mut new_cell = cell_info.clone();
+                    // only move the cells tree proof of the actual cells, not the secondary index !
+                    // CellsCollection is a bit weird because it has to contain as well the secondary
+                    // index to be able to search in it in JSON
+                    if *id != table.columns.secondary_column().identifier {
+                        return (*id, new_cell);
+                    }
+
+                    let tree_key = table.columns.cells_tree_index_of(*id);
                     println!(
                         " --- CELL TREE key {} index of {id} vs secondary id {} vs table.secondary_id {}",
                         tree_key,
                         previous_row.payload.secondary_index_column,
                         table.columns.secondary.identifier
                     );
-                // only move the cells tree proof of the actual cells, not the secondary index !
-                // CellsCollection is a bit weird because it has to contain as well the secondary
-                // index to be able to search in it in JSON
-                let is_secondary = *id != table.columns.secondary_column().identifier;
-
+                
                     // we need to update the primary on the impacted cells at least, OR on all the cells if
                     // we are moving all the proofs to a new row key which happens when doing an DELETE +
                     // INSERT
-                    if !is_secondary || must_move_all_proofs || impacted_keys.contains(&tree_key) {
+                    if must_move_all_proofs || impacted_keys.contains(&tree_key) {
                         new_cell.primary = primary;
                         debug!("CELL INFO: Updated key {tree_key} to new block {primary}")
                     }
