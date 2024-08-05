@@ -126,7 +126,7 @@ impl<
     /// defined in the current transactions.
     ///
     /// The set will be empty if their is no transaction active.
-    fn touched(&mut self) -> HashSet<T::Key> {
+    pub fn touched(&mut self) -> HashSet<T::Key> {
         self.dirty
             .iter()
             .filter_map(|k| self.tree.lineage(k, &self.storage))

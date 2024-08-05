@@ -547,3 +547,32 @@ fn context_at() {
     assert_eq!(s.fetch_with_context_at(&1, 1).0.parent, None);
     assert_eq!(s.fetch_with_context_at(&1, 2).0.parent, Some(2));
 }
+
+#[test]
+fn dirties() {
+    type Tree = sbbst::Tree;
+    type V = MinMaxi64;
+    type Storage = InMemory<Tree, V>;
+    let mut s =
+        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ()).unwrap();
+
+    // Initial tree:
+    // (2 (1))
+    s.in_transaction(|s| {
+        s.store(1, 1i64.into()).unwrap();
+        s.store(2, 2i64.into()).unwrap();
+        Ok(())
+    })
+    .unwrap();
+
+    // Initial tree = (2 (1))
+    // New tree = (2 (1 3)) --> dirties = { 2, 3 }
+    s.in_transaction(|s| {
+        s.store(3, 2i64.into()).unwrap();
+        let dirties = s.touched();
+        assert!(dirties.contains(&2));
+        assert!(dirties.contains(&3));
+        Ok(())
+    })
+    .unwrap();
+}
