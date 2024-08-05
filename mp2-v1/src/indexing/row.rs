@@ -16,10 +16,7 @@ use plonky2::{
 use ryhope::{tree::scapegoat, NodePayload};
 use serde::{Deserialize, Serialize};
 
-use super::{
-    cell::{Cell, CellTreeKey},
-    ColumnID,
-};
+use super::{cell::CellTreeKey, ColumnID};
 
 pub type RowTree = scapegoat::Tree<RowTreeKey>;
 pub type RowTreeKeyNonce = Vec<u8>;
@@ -43,10 +40,9 @@ impl RowTreeKey {
     // Returns a row key from a value and the "nonce". Since in the row tree, multiple rows/nodes
     // can have the same value, we need an additional information such that both combine make an
     // unique identifier for the row.
-    // NOTE: the value MUST be encoded as big endian.
-    pub fn new(value: &[u8], rest: &[u8]) -> Self {
+    pub fn new(value: U256, rest: &[u8]) -> Self {
         Self {
-            value: U256::from_be_slice(value),
+            value,
             rest: rest.to_vec(),
         }
     }
@@ -75,11 +71,8 @@ pub struct CellInfo<PrimaryIndex> {
 }
 
 impl<PrimaryIndex> CellInfo<PrimaryIndex> {
-    pub fn new(value: &[u8], primary: PrimaryIndex) -> Self {
-        Self {
-            value: U256::from_be_slice(value),
-            primary,
-        }
+    pub fn new(value: U256, primary: PrimaryIndex) -> Self {
+        Self { value, primary }
     }
 }
 

@@ -36,8 +36,16 @@ pub struct IndexNode<PrimaryIndex> {
 }
 
 impl<PrimaryIndex: Default> IndexNode<PrimaryIndex> {
-    pub fn new(row_key: RowTreeKey, row_hash: HashOutput, row_primary: PrimaryIndex) -> Self {
+    pub fn new(
+        identifier: ColumnID,
+        value: U256,
+        row_key: RowTreeKey,
+        row_hash: HashOutput,
+        row_primary: PrimaryIndex,
+    ) -> Self {
         Self {
+            identifier,
+            value: value.into(),
             row_tree_root_key: row_key,
             row_tree_hash: row_hash,
             row_tree_root_primary: row_primary,

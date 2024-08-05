@@ -68,12 +68,8 @@ pub struct Cell {
 
 impl Cell {
     /// Returns a new cell from the column identifier and the value.
-    /// NOTE: The value MUST be encoded as big endian.
-    pub fn new(id: u64, value: &[u8]) -> Self {
-        Self {
-            id,
-            value: U256::from_be_slice(value),
-        }
+    pub fn new(id: u64, value: U256) -> Self {
+        Self { id, value }
     }
 }
 
