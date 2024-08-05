@@ -473,4 +473,8 @@ impl AggregationOperation {
             AggregationOperation::IdOp => Point::NEUTRAL.to_fields(),
         }
     }
+
+    pub fn to_id(&self) -> usize {
+        Identifiers::AggregationOperations(*self).position()
+    }
 }

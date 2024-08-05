@@ -756,3 +756,928 @@ where
         proof.serialize()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{cmp::Ordering, collections::HashMap, iter::once};
+
+    use alloy::{primitives::U256, signers::k256::elliptic_curve::consts::U2};
+    use itertools::Itertools;
+    use mp2_common::{
+        poseidon::empty_poseidon_hash,
+        proof::{self, ProofWithVK},
+        types::HashOutput,
+        utils::{Fieldable, ToFields},
+        F,
+    };
+    use mp2_test::utils::{gen_random_field_hash, gen_random_u256};
+    use plonky2::{
+        hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
+        plonk::config::GenericHashOut,
+    };
+    use rand::{thread_rng, Rng};
+    use ryhope::tree::scapegoat::Node;
+
+    use crate::query::{
+        aggregation::{NodeInfo, QueryBounds, QueryHashNonExistenceCircuits, SubProof},
+        api::{CircuitInput, Parameters},
+        computational_hash_ids::{AggregationOperation, HashPermutation, Operation},
+        public_inputs::PublicInputs,
+        universal_circuit::universal_circuit_inputs::{
+            BasicOperation, ColumnCell, InputOperand, OutputItem, ResultStructure,
+        },
+    };
+
+    impl NodeInfo {
+        pub(crate) fn compute_node_hash(&self, index_id: F) -> HashOut<F> {
+            hash_n_to_hash_no_pad::<F, HashPermutation>(
+                &self
+                    .child_hashes
+                    .into_iter()
+                    .flat_map(|h| h.to_vec())
+                    .chain(self.min.to_fields())
+                    .chain(self.max.to_fields())
+                    .chain(once(index_id))
+                    .chain(self.value.to_fields())
+                    .chain(self.embedded_tree_hash.to_vec())
+                    .collect_vec(),
+            )
+        }
+    }
+
+    #[test]
+    fn test_api() {
+        // Simple query for testing SELECT SUM(C1 + C3) FROM T WHERE C3 >= 5 AND C1 > 56 AND C1 <= 67 AND C2 > 34 AND C2 <= 78
+        let rng = &mut thread_rng();
+        const NUM_COLUMNS: usize = 3;
+        const MAX_NUM_COLUMNS: usize = 20;
+        const MAX_NUM_PREDICATE_OPS: usize = 20;
+        const MAX_NUM_RESULT_OPS: usize = 20;
+        const MAX_NUM_RESULTS: usize = 10;
+        let column_ids = (0..NUM_COLUMNS)
+            .map(|_| {
+                let id: u32 = rng.gen();
+                id as u64
+            })
+            .collect_vec();
+
+        let primary_index_id: F = column_ids[0].to_field();
+        let secondary_index_id: F = column_ids[1].to_field();
+
+        let min_query_primary = 57;
+        let max_query_primary = 67;
+        let min_query_secondary = 35;
+        let max_query_secondary = 78;
+        // define Enum to specify whether to generate index values in range or not
+        enum IndexValueBounds {
+            InRange, // generate index value within query bounds
+            Smaller, // generate index value smaller than minimum query bound
+            Bigger,  // generate inde value bigger than maximum query bound
+        }
+        // generate a new row with `NUM_COLUMNS` where value of secondary index is within the query bounds
+        let mut gen_row = |primary_index: usize, secondary_index: IndexValueBounds| {
+            (0..NUM_COLUMNS)
+                .map(|i| match i {
+                    0 => U256::from(primary_index),
+                    1 => match secondary_index {
+                        IndexValueBounds::InRange => {
+                            U256::from(rng.gen_range(min_query_secondary..max_query_secondary))
+                        }
+                        IndexValueBounds::Smaller => {
+                            U256::from(rng.gen_range(0..min_query_secondary))
+                        }
+                        IndexValueBounds::Bigger => {
+                            U256::from(rng.gen_range(0..min_query_secondary))
+                        }
+                    },
+                    _ => gen_random_u256(rng),
+                })
+                .collect_vec()
+        };
+
+        let predicate_operations = vec![BasicOperation {
+            first_operand: InputOperand::Column(2),
+            second_operand: Some(InputOperand::Constant(U256::from(5))),
+            op: Operation::GreaterThanOrEqOp,
+        }];
+        let result_operations = vec![BasicOperation {
+            first_operand: InputOperand::Column(0),
+            second_operand: Some(InputOperand::Column(2)),
+            op: Operation::AddOp,
+        }];
+        let aggregation_op_ids = vec![AggregationOperation::SumOp.to_id() as u64];
+        let output_items = vec![OutputItem::ComputedValue(0)];
+        let results = ResultStructure::new_for_query_with_aggregation(
+            result_operations,
+            output_items,
+            aggregation_op_ids.clone(),
+        );
+        let query_bounds = QueryBounds::new(
+            U256::from(min_query_primary),
+            U256::from(max_query_primary),
+            Some(U256::from(min_query_secondary)),
+            Some(U256::from(max_query_secondary)),
+        );
+
+        let params = Parameters::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >::build();
+
+        type Input = CircuitInput<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >;
+
+        // test an index tree with all proven nodes: we assume to have index tree built as follows
+        // (node identified according to their sorting order):
+        //              4
+        //          0
+        //              2
+        //          1       3
+
+        // build a vector of 5 rows with values of index columns within the query bounds. The entries in the
+        // vector are sorted according to primary index value
+        let column_values = (min_query_primary..max_query_primary)
+            .step_by((max_query_primary - min_query_primary) / 5)
+            .take(5)
+            .map(|index| gen_row(index, IndexValueBounds::InRange))
+            .collect_vec();
+
+        // generate proof with universal for a row with the `values` provided as input.
+        // The flag `is_leaf` specifies whether the row is stored in a leaf node of a rows tree
+        // or not
+        let gen_universal_circuit_proofs = |values: &[U256], is_leaf: bool| {
+            let column_cells = values
+                .iter()
+                .zip(column_ids.iter())
+                .map(|(&value, &id)| ColumnCell::new(id, value))
+                .collect_vec();
+            let input = Input::new_universal_circuit(
+                &column_cells,
+                &predicate_operations,
+                &results,
+                &HashMap::new(),
+                is_leaf,
+                &query_bounds,
+            )
+            .unwrap();
+            params.generate_proof(input).unwrap()
+        };
+
+        // generate base proofs with universal circuits for each node
+        let base_proofs = column_values
+            .iter()
+            .map(|values| gen_universal_circuit_proofs(values, true))
+            .collect_vec();
+
+        // closure to extract the tree hash from a proof
+        let get_tree_hash_from_proof = |proof: &[u8]| {
+            let (proof, _) = ProofWithVK::deserialize(proof).unwrap().into();
+            let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+            pis.tree_hash()
+        };
+
+        // closure to generate the proof for a leaf node of the index tree, corresponding to the node_index-th row
+        let gen_leaf_proof_for_node = |node_index: usize| {
+            let embedded_tree_hash = get_tree_hash_from_proof(&base_proofs[node_index]);
+            let node_info = NodeInfo::new(
+                &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
+                None,
+                None,
+                column_values[node_index][0], // primary index value for this row
+                column_values[node_index][0],
+                column_values[node_index][0],
+            );
+            let tree_hash = node_info.compute_node_hash(primary_index_id);
+            let subtree_proof =
+                SubProof::new_embedded_tree_proof(base_proofs[node_index].clone()).unwrap();
+            let input = Input::new_single_path(
+                subtree_proof,
+                None,
+                None,
+                node_info,
+                false, // index tree node
+                &query_bounds,
+            )
+            .unwrap();
+            let proof = params.generate_proof(input).unwrap();
+            // check tree hash is correct
+            assert_eq!(tree_hash, get_tree_hash_from_proof(&proof));
+            proof
+        };
+
+        // generate proof for node 1 of index tree above
+        let leaf_proof_left = gen_leaf_proof_for_node(1);
+
+        // generate proof for node 3 of index tree above
+        let leaf_proof_right = gen_leaf_proof_for_node(3);
+
+        // generate proof for node 2 of index tree above
+        let left_child_hash = get_tree_hash_from_proof(&leaf_proof_left);
+        let right_child_hash = get_tree_hash_from_proof(&leaf_proof_right);
+        let input = Input::new_full_node(
+            leaf_proof_left,
+            leaf_proof_right,
+            base_proofs[2].clone(),
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let full_node_proof = params.generate_proof(input).unwrap();
+
+        // verify hash is correct
+        let full_node_info = NodeInfo::new(
+            &HashOutput::try_from(get_tree_hash_from_proof(&base_proofs[2]).to_bytes()).unwrap(),
+            Some(&HashOutput::try_from(left_child_hash.to_bytes()).unwrap()),
+            Some(&HashOutput::try_from(right_child_hash.to_bytes()).unwrap()),
+            column_values[2][0], // primary index value for that row
+            column_values[1][0], // primary index value for the min node in the left subtree
+            column_values[3][0], // primary index value for the max node in the right subtree
+        );
+        let full_node_hash = get_tree_hash_from_proof(&full_node_proof);
+        assert_eq!(
+            full_node_hash,
+            full_node_info.compute_node_hash(primary_index_id),
+        );
+
+        // generate proof for node 0 of the index tree above
+        let input = Input::new_partial_node(
+            full_node_proof,
+            base_proofs[0].clone(),
+            None,  // there is no left child
+            false, // proven child is the right child of node 0
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let one_child_node_proof = params.generate_proof(input).unwrap();
+        // verify hash is correct
+        let one_child_node_info = NodeInfo::new(
+            &HashOutput::try_from(get_tree_hash_from_proof(&base_proofs[0]).to_bytes()).unwrap(),
+            None,
+            Some(&HashOutput::try_from(full_node_hash.to_bytes()).unwrap()),
+            column_values[0][0],
+            column_values[0][0],
+            column_values[3][0],
+        );
+        let one_child_node_hash = get_tree_hash_from_proof(&one_child_node_proof);
+        assert_eq!(
+            one_child_node_hash,
+            one_child_node_info.compute_node_hash(primary_index_id)
+        );
+
+        // generate proof for root node
+        let input = Input::new_partial_node(
+            one_child_node_proof,
+            base_proofs[4].clone(),
+            None, // there is no right child
+            true, // proven child is the left child of root node
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let (root_proof, _) = ProofWithVK::deserialize(&params.generate_proof(input).unwrap())
+            .unwrap()
+            .into();
+        // check some public inputs for root proof
+        let check_pis = |root_proof_pis: &[F], node_info: NodeInfo, column_values: &[Vec<U256>]| {
+            let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&root_proof_pis);
+            assert_eq!(
+                pis.tree_hash(),
+                node_info.compute_node_hash(primary_index_id),
+            );
+            assert_eq!(pis.min_value(), node_info.min,);
+            assert_eq!(pis.max_value(), node_info.max,);
+            assert_eq!(pis.min_query_value(), query_bounds.min_query_primary,);
+            assert_eq!(pis.max_query_value(), query_bounds.max_query_primary,);
+            assert_eq!(
+                pis.index_ids().to_vec(),
+                column_ids
+                    .iter()
+                    .take(2)
+                    .map(|id| id.to_field())
+                    .collect_vec(),
+            );
+            // compute output value: SUM(C1 + C3) for all the rows where C3 >= 5
+            let (output, overflow, count) =
+                column_values
+                    .iter()
+                    .fold((U256::ZERO, false, 0u64), |acc, value| {
+                        if value[2] >= U256::from(5)
+                            && value[0] >= query_bounds.min_query_primary
+                            && value[0] <= query_bounds.max_query_primary
+                            && value[1] >= query_bounds.min_query_secondary
+                            && value[1] <= query_bounds.max_query_secondary
+                        {
+                            let (sum, overflow) = value[0].overflowing_add(value[2]);
+                            let new_overflow = acc.1 || overflow;
+                            let (new_sum, overflow) = sum.overflowing_add(acc.0);
+                            (new_sum, new_overflow || overflow, acc.2 + 1)
+                        } else {
+                            acc
+                        }
+                    });
+            assert_eq!(pis.first_value_as_u256(), output,);
+            assert_eq!(pis.overflow_flag(), overflow,);
+            assert_eq!(pis.num_matching_rows(), count.to_field(),);
+        };
+
+        let root_node_info = NodeInfo::new(
+            &HashOutput::try_from(get_tree_hash_from_proof(&base_proofs[4]).to_bytes()).unwrap(),
+            Some(&HashOutput::try_from(one_child_node_hash.to_bytes()).unwrap()),
+            None,
+            column_values[4][0],
+            column_values[0][0],
+            column_values[4][0],
+        );
+
+        check_pis(&root_proof.public_inputs, root_node_info, &column_values);
+
+        // build an index tree with a mix of proven and unproven nodes. The tree is built as follows:
+        //          0
+        //              8
+        //          3       9
+        //      2       5
+        //   1        4   6
+        //                   7
+        // nodes 3,4,5,6 are in the range specified by the query for the primary index, while the other nodes
+        // are not
+        let column_values = [0, min_query_primary / 3, min_query_primary * 2 / 3]
+            .into_iter() // primary index values for nodes 0,1,2
+            .chain(
+                (min_query_primary..max_query_primary)
+                    .step_by((max_query_primary - min_query_primary) / 4)
+                    .take(4),
+            ) // primary index values for nodes in the range
+            .chain([
+                max_query_primary * 2,
+                max_query_primary * 3,
+                max_query_primary * 4,
+            ]) // primary index values for nodes 7,8, 9
+            .map(|index| gen_row(index, IndexValueBounds::InRange))
+            .collect_vec();
+
+        // generate base proofs with universal circuits for each node in the range
+        const START_NODE_IN_RANGE: usize = 3;
+        const LAST_NODE_IN_RANGE: usize = 6;
+        let base_proofs = column_values[START_NODE_IN_RANGE..=LAST_NODE_IN_RANGE]
+            .iter()
+            .map(|values| gen_universal_circuit_proofs(values, true))
+            .collect_vec();
+
+        // generate proof for node 4
+        let embedded_tree_hash = get_tree_hash_from_proof(&base_proofs[4 - START_NODE_IN_RANGE]);
+        let node_info = NodeInfo::new(
+            &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
+            None,
+            None,
+            column_values[4][0],
+            column_values[4][0],
+            column_values[4][0],
+        );
+        let subtree_proof =
+            SubProof::new_embedded_tree_proof(base_proofs[4 - START_NODE_IN_RANGE].clone())
+                .unwrap();
+        let hash_4 = node_info.compute_node_hash(primary_index_id);
+        let input =
+            Input::new_single_path(subtree_proof, None, None, node_info, false, &query_bounds)
+                .unwrap();
+        let proof_4 = params.generate_proof(input).unwrap();
+        // check hash
+        assert_eq!(hash_4, get_tree_hash_from_proof(&proof_4),);
+
+        // generate proof for node 6
+        // compute node data for node 7, which is needed as input to generate the proof
+        let node_info_7 = NodeInfo::new(
+            // for the sake of this test, we can use random hash for the embedded tree stored in node 7, since it's not proven;
+            // in a non-test scenario, we would need to get the actual embedded hash of the node, otherwise the root hash of the
+            // tree computed in the proofs will be incorrect
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            None,
+            None,
+            column_values[7][0],
+            column_values[7][0],
+            column_values[7][0],
+        );
+        let hash_7 = node_info_7.compute_node_hash(primary_index_id);
+        let embedded_tree_hash = get_tree_hash_from_proof(&base_proofs[6 - START_NODE_IN_RANGE]);
+        let node_info_6 = NodeInfo::new(
+            &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
+            None,
+            Some(&HashOutput::try_from(hash_7.to_bytes()).unwrap()),
+            column_values[6][0],
+            column_values[6][0],
+            column_values[7][0],
+        );
+        let subtree_proof =
+            SubProof::new_embedded_tree_proof(base_proofs[6 - START_NODE_IN_RANGE].clone())
+                .unwrap();
+        let hash_6 = node_info_6.compute_node_hash(primary_index_id);
+        let input = Input::new_single_path(
+            subtree_proof,
+            None,
+            Some(node_info_7),
+            node_info_6,
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let proof_6 = params.generate_proof(input).unwrap();
+        // check hash
+        assert_eq!(hash_6, get_tree_hash_from_proof(&proof_6));
+
+        // generate proof for node 5
+        let input = Input::new_full_node(
+            proof_4,
+            proof_6,
+            base_proofs[5 - START_NODE_IN_RANGE].clone(),
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let proof_5 = params.generate_proof(input).unwrap();
+        // check hash
+        let embedded_tree_hash = get_tree_hash_from_proof(&base_proofs[5 - START_NODE_IN_RANGE]);
+        let node_info_5 = NodeInfo::new(
+            &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
+            Some(&HashOutput::try_from(hash_4.to_bytes()).unwrap()),
+            Some(&HashOutput::try_from(hash_6.to_bytes()).unwrap()),
+            column_values[5][0],
+            column_values[4][0],
+            column_values[7][0],
+        );
+        let hash_5 = node_info_5.compute_node_hash(primary_index_id);
+        assert_eq!(hash_5, get_tree_hash_from_proof(&proof_5),);
+
+        // generate proof for node 3
+        // compute node data for node 2, which is needed as input to generate the proof
+        let node_info_2 = NodeInfo::new(
+            // same as for node_info_7, we can use random hashes for the sake of this test
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            Some(&HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap()),
+            None,
+            column_values[2][0],
+            column_values[1][0],
+            column_values[2][0],
+        );
+        let hash_2 = node_info_2.compute_node_hash(primary_index_id);
+        let input = Input::new_partial_node(
+            proof_5,
+            base_proofs[3 - START_NODE_IN_RANGE].clone(),
+            Some(node_info_2),
+            false, // proven child is right child
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let proof_3 = params.generate_proof(input).unwrap();
+        // check hash
+        let embedded_tree_hash = get_tree_hash_from_proof(&base_proofs[3 - START_NODE_IN_RANGE]);
+        let node_info_3 = NodeInfo::new(
+            &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
+            Some(&HashOutput::try_from(hash_2.to_bytes()).unwrap()),
+            Some(&HashOutput::try_from(hash_5.to_bytes()).unwrap()),
+            column_values[3][0],
+            column_values[1][0],
+            column_values[7][0],
+        );
+        let hash_3 = node_info_3.compute_node_hash(primary_index_id);
+        assert_eq!(hash_3, get_tree_hash_from_proof(&proof_3),);
+
+        // generate proof for node 8
+        // compute node_info_9, which is needed as input for the proof
+        let node_info_9 = NodeInfo::new(
+            // same as for node_info_2, we can use random hashes for the sake of this test
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            None,
+            None,
+            column_values[9][0],
+            column_values[9][0],
+            column_values[9][0],
+        );
+        let hash_9 = node_info_9.compute_node_hash(primary_index_id);
+        let node_info_8 = NodeInfo::new(
+            // same as for node_info_2, we can use random hashes for the sake of this test
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            Some(&HashOutput::try_from(hash_3.to_bytes()).unwrap()),
+            Some(&HashOutput::try_from(hash_9.to_bytes()).unwrap()),
+            column_values[8][0],
+            column_values[1][0],
+            column_values[9][0],
+        );
+        let hash_8 = node_info_8.compute_node_hash(primary_index_id);
+        let subtree_proof = SubProof::new_child_proof(
+            proof_3, true, // subtree proof refers to the left child of the node
+        )
+        .unwrap();
+        let input = Input::new_single_path(
+            subtree_proof,
+            Some(node_info_3),
+            Some(node_info_9),
+            node_info_8.clone(),
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let proof_8 = params.generate_proof(input).unwrap();
+        // check hash
+        assert_eq!(get_tree_hash_from_proof(&proof_8), hash_8);
+        println!("generate proof for node 0");
+
+        // generate proof for node 0 (root)
+        let node_info_0 = NodeInfo::new(
+            // same as for node_info_1, we can use random hashes for the sake of this test
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            None,
+            Some(&HashOutput::try_from(hash_8.to_bytes()).unwrap()),
+            column_values[0][0],
+            column_values[0][0],
+            column_values[9][0],
+        );
+        let subtree_proof = SubProof::new_child_proof(
+            proof_8, false, // subtree proof refers to the right child of the node
+        )
+        .unwrap();
+        let input = Input::new_single_path(
+            subtree_proof,
+            None,
+            Some(node_info_8),
+            node_info_0.clone(),
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let (root_proof, _) = ProofWithVK::deserialize(&params.generate_proof(input).unwrap())
+            .unwrap()
+            .into();
+
+        // check some public inputs
+        check_pis(&root_proof.public_inputs, node_info_0, &column_values);
+
+        // build an index tree with all nodes outside of the primary index range. The tree is built as follows:
+        //          2
+        //      1       3
+        //  0
+        // where nodes 0 stores an index value smaller than `min_query_primary`, while nodes 1, 2, 3 store index values
+        // bigger than `max_query_primary`
+        let column_values = [min_query_primary / 2]
+            .into_iter()
+            .chain(
+                [
+                    max_query_primary * 2,
+                    max_query_primary * 3,
+                    max_query_primary * 4,
+                ]
+                .into_iter(),
+            )
+            .map(|index| gen_row(index, IndexValueBounds::InRange))
+            .collect_vec();
+
+        // generate proof for node 0 with non-existence circuit, since it is outside of the query bounds
+        let node_info_0 = NodeInfo::new(
+            // we can use a randomly generated hash for the subtree, for the sake of the test
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            None,
+            None,
+            column_values[0][0],
+            column_values[0][0],
+            column_values[0][0],
+        );
+        let hash_0 = node_info_0.compute_node_hash(primary_index_id);
+        let column_cells = column_values[0]
+            .iter()
+            .zip(column_ids.iter())
+            .map(|(&value, &id)| ColumnCell::new(id, value))
+            .collect_vec();
+        // compute hashes associated to query, which are needed as inputs
+        let query_hashes = QueryHashNonExistenceCircuits::new::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >(
+            &column_cells,
+            &predicate_operations,
+            &results,
+            &HashMap::new(),
+            &query_bounds,
+            false,
+        )
+        .unwrap();
+        let input = Input::new_non_existence_input(
+            node_info_0.clone(),
+            None,
+            node_info_0.value,
+            &column_ids[..2].try_into().unwrap(),
+            &[AggregationOperation::SumOp],
+            query_hashes,
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let proof_0 = params.generate_proof(input).unwrap();
+        // check hash
+        assert_eq!(hash_0, get_tree_hash_from_proof(&proof_0),);
+
+        // get up to the root of the tree with proofs
+        // generate proof for node 1
+        let node_info_1 = NodeInfo::new(
+            // we can use a random hash for the embedded tree
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            Some(&HashOutput::try_from(hash_0.to_bytes()).unwrap()),
+            None,
+            column_values[1][0],
+            column_values[0][0],
+            column_values[1][0],
+        );
+        let hash_1 = node_info_1.compute_node_hash(primary_index_id);
+        let subtree_proof = SubProof::new_child_proof(proof_0, true).unwrap();
+        let input = Input::new_single_path(
+            subtree_proof,
+            Some(node_info_0.clone()),
+            None,
+            node_info_1.clone(),
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let proof_1 = params.generate_proof(input).unwrap();
+        // check hash
+        assert_eq!(hash_1, get_tree_hash_from_proof(&proof_1),);
+
+        // generate proof for root node
+        let node_info_2 = NodeInfo::new(
+            // we can use a random hash for the embedded tree
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            Some(&HashOutput::try_from(hash_1.to_bytes()).unwrap()),
+            None,
+            column_values[2][0],
+            column_values[0][0],
+            column_values[2][0],
+        );
+        let node_info_3 = NodeInfo::new(
+            // we can use a random hash for the embedded tree
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            None,
+            None,
+            column_values[3][0],
+            column_values[3][0],
+            column_values[3][0],
+        );
+        let subtree_proof = SubProof::new_child_proof(proof_1, true).unwrap();
+        let input = Input::new_single_path(
+            subtree_proof,
+            Some(node_info_1.clone()),
+            Some(node_info_3.clone()),
+            node_info_2.clone(),
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let (root_proof, _) = ProofWithVK::deserialize(&params.generate_proof(input).unwrap())
+            .unwrap()
+            .into();
+
+        check_pis(
+            &root_proof.public_inputs,
+            node_info_2.clone(),
+            &column_values,
+        );
+
+        // generate non-existence proof starting from intermediate node (i.e., node 1) rather than a leaf node
+        // generate proof with non-existence circuit for node 1
+        let column_cells = column_values[1]
+            .iter()
+            .zip(column_ids.iter())
+            .map(|(&value, &id)| ColumnCell::new(id, value))
+            .collect_vec();
+        // compute hashes associated to query, which are needed as inputs
+        let query_hashes = QueryHashNonExistenceCircuits::new::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >(
+            &column_cells,
+            &predicate_operations,
+            &results,
+            &HashMap::new(),
+            &query_bounds,
+            false,
+        )
+        .unwrap();
+        let input = Input::new_non_existence_input(
+            node_info_1.clone(),
+            Some((node_info_0, true)), // node 0 is the elft child
+            node_info_1.value,
+            &column_ids[..2].try_into().unwrap(),
+            &[AggregationOperation::SumOp],
+            query_hashes,
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let proof_1 = params.generate_proof(input).unwrap();
+        // check hash
+        assert_eq!(hash_1, get_tree_hash_from_proof(&proof_1),);
+
+        // generate proof for root node
+        let subtree_proof = SubProof::new_child_proof(proof_1, true).unwrap();
+        let input = Input::new_single_path(
+            subtree_proof,
+            Some(node_info_1.clone()),
+            Some(node_info_3.clone()),
+            node_info_2.clone(),
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let (root_proof, _) = ProofWithVK::deserialize(&params.generate_proof(input).unwrap())
+            .unwrap()
+            .into();
+
+        check_pis(&root_proof.public_inputs, node_info_2, &column_values);
+
+        // generate a tree with rows tree with more than one node. We generate an index tree with 2 nodes A and B,
+        // both storing a primary index value within the query bounds.
+        // Node A stores a rows tree with all entries outside of query bounds for secondary index, while
+        // node B stores a rows tree with all entries within query bounds for secondary index.
+        // The tree is structured as follows:
+        //                      B
+        //                      4
+        //                  3       5
+        //          A
+        //          1
+        //      0       2
+        let mut column_values = vec![
+            gen_row(min_query_primary, IndexValueBounds::Smaller),
+            gen_row(min_query_primary, IndexValueBounds::Smaller),
+            gen_row(min_query_primary, IndexValueBounds::Bigger),
+            gen_row(max_query_primary, IndexValueBounds::InRange),
+            gen_row(max_query_primary, IndexValueBounds::InRange),
+            gen_row(max_query_primary, IndexValueBounds::InRange),
+        ];
+        // sort column values according to primary/secondary index values
+        column_values.sort_by(|a, b| {
+            if a[0] < b[0] {
+                Ordering::Less
+            } else if a[0] > b[0] {
+                Ordering::Greater
+            } else {
+                a[1].cmp(&b[1])
+            }
+        });
+
+        // generate proof for node A rows tree
+        // generate non-existence proof for node 2, which is the smallest node higher than the maximum query bound, since
+        // node 1, which is the highest node smaller than the minimum query bound, has 2 children
+        // (see non-existence circuit docs to see why we don't generate non-existence proofs for nodes with 2 children)
+        let node_info_2 = NodeInfo::new(
+            // we can use a random hash for the embedded tree
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            None,
+            None,
+            column_values[2][1],
+            column_values[2][1],
+            column_values[2][1],
+        );
+        let hash_2 = node_info_2.compute_node_hash(secondary_index_id);
+        let column_cells = column_values[2]
+            .iter()
+            .zip(column_ids.iter())
+            .map(|(&value, &id)| ColumnCell::new(id, value))
+            .collect_vec();
+        // compute hashes associated to query, which are needed as inputs
+        let query_hashes = QueryHashNonExistenceCircuits::new::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >(
+            &column_cells,
+            &predicate_operations,
+            &results,
+            &HashMap::new(),
+            &query_bounds,
+            true,
+        )
+        .unwrap();
+        let input = Input::new_non_existence_input(
+            node_info_2.clone(),
+            None,
+            column_values[2][0], // we need to place the primary index value associated to this row
+            &column_ids[..2].try_into().unwrap(),
+            &[AggregationOperation::SumOp],
+            query_hashes,
+            true,
+            &query_bounds,
+        )
+        .unwrap();
+        let proof_2 = params.generate_proof(input).unwrap();
+        // check hash
+        assert_eq!(hash_2, get_tree_hash_from_proof(&proof_2),);
+
+        // generate proof for node 1 (root of rows tree for node A)
+        let node_info_1 = NodeInfo::new(
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            None,
+            Some(&HashOutput::try_from(hash_2.to_bytes()).unwrap()),
+            column_values[1][1],
+            column_values[0][1],
+            column_values[2][1],
+        );
+        let node_info_0 = NodeInfo::new(
+            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
+            None,
+            None,
+            column_values[0][1],
+            column_values[0][1],
+            column_values[0][1],
+        );
+        let hash_1 = node_info_1.compute_node_hash(secondary_index_id);
+        let subtree_proof = SubProof::new_child_proof(proof_2, false).unwrap();
+        let input = Input::new_single_path(
+            subtree_proof,
+            Some(node_info_0),
+            Some(node_info_2),
+            node_info_1,
+            true,
+            &query_bounds,
+        )
+        .unwrap();
+        let proof_1 = params.generate_proof(input).unwrap();
+        // check hash
+        assert_eq!(hash_1, get_tree_hash_from_proof(&proof_1),);
+
+        // generate proof for node A (leaf of index tree)
+        let node_info_A = NodeInfo::new(
+            &HashOutput::try_from(hash_1.to_bytes()).unwrap(),
+            None,
+            None,
+            column_values[0][0],
+            column_values[0][0],
+            column_values[0][0],
+        );
+        let hash_A = node_info_A.compute_node_hash(primary_index_id);
+        let subtree_proof = SubProof::new_embedded_tree_proof(proof_1).unwrap();
+        let input = Input::new_single_path(
+            subtree_proof,
+            None,
+            None,
+            node_info_A.clone(),
+            false,
+            &query_bounds,
+        )
+        .unwrap();
+        let proof_A = params.generate_proof(input).unwrap();
+        // check hash
+        assert_eq!(hash_A, get_tree_hash_from_proof(&proof_A),);
+
+        // generate proof for node B rows tree
+        // all the nodes are in the range, so we generate proofs for each of the nodes
+        // generate proof for nodes 3 and 5: they are leaf nodes in the rows tree, so we directly use the universal circuit
+        let [proof_3, proof_5] = [&column_values[3], &column_values[5]]
+            .map(|values| gen_universal_circuit_proofs(values, true));
+        // node 4 is not a leaf in the rows tree, so instead we need to first generate a proof for the row results using
+        // the universal circuit, and then we generate the proof for the rows tree node
+        let row_proof = gen_universal_circuit_proofs(&column_values[4], false);
+        let hash_3 = get_tree_hash_from_proof(&proof_3);
+        let hash_5 = get_tree_hash_from_proof(&proof_5);
+        let embedded_tree_hash = get_tree_hash_from_proof(&row_proof);
+        let input = Input::new_full_node(proof_3, proof_5, row_proof, true, &query_bounds).unwrap();
+        let proof_4 = params.generate_proof(input).unwrap();
+        // check hash
+        let node_info_4 = NodeInfo::new(
+            &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
+            Some(&HashOutput::try_from(hash_3.to_bytes()).unwrap()),
+            Some(&HashOutput::try_from(hash_5.to_bytes()).unwrap()),
+            column_values[4][1],
+            column_values[3][1],
+            column_values[5][1],
+        );
+        let hash_4 = node_info_4.compute_node_hash(secondary_index_id);
+        assert_eq!(hash_4, get_tree_hash_from_proof(&proof_4),);
+
+        // generate proof for node B of the index tree (root node)
+        let node_info_root = NodeInfo::new(
+            &HashOutput::try_from(hash_4.to_bytes()).unwrap(),
+            Some(&HashOutput::try_from(hash_A.to_bytes()).unwrap()),
+            None,
+            column_values[4][0],
+            column_values[0][0],
+            column_values[5][0],
+        );
+        let input =
+            Input::new_partial_node(proof_A, proof_4, None, true, false, &query_bounds).unwrap();
+        let (root_proof, _) = ProofWithVK::deserialize(&params.generate_proof(input).unwrap())
+            .unwrap()
+            .into();
+
+        check_pis(&root_proof.public_inputs, node_info_root, &column_values);
+    }
+}
