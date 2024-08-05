@@ -7,7 +7,7 @@ use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
     cell::{self, Cell, CellTreeKey, MerkleCellTree},
     index::IndexNode,
-    row::{CellCollection, Row, RowTreeKey},
+    row::{CellCollection, Row, RowPayload, RowTreeKey},
     ColumnID,
 };
 use ryhope::{
@@ -252,41 +252,51 @@ impl Table {
         let out = self
             .row
             .in_transaction(move |t| {
-                for update in updates {
+                // apply all the updates and then look at the touched ones to update to the new
+                // primary
+                for update in updates.iter() {
                     debug!("Apply update to row tree: {:?}", update);
                     match update {
-                        TreeRowUpdate::Update(row) => t.update(row.k, row.payload)?,
-                        TreeRowUpdate::Deletion(row_key) => match t.try_fetch(&row_key) {
+                        TreeRowUpdate::Update(row) => {
+                            t.update(row.k.clone(), row.payload.clone())?
+                        }
+                        TreeRowUpdate::Deletion(row_key) => match t.try_fetch(row_key) {
                             // sanity check
-                            Some(_) => t.remove(row_key)?,
+                            Some(_) => t.remove(row_key.clone())?,
                             None => panic!("can't delete a row key that does not exist"),
                         },
-                        TreeRowUpdate::Insertion(row) => t.store(row.k.clone(), row.payload)?,
+                        TreeRowUpdate::Insertion(row) => {
+                            t.store(row.k.clone(), row.payload.clone())?
+                        }
+                    }
+                }
+                let update_payload =
+                    |mut row_payload: RowPayload<BlockPrimaryIndex>| -> RowPayload<BlockPrimaryIndex> {
+                        let mut cell_info = row_payload
+                            .cells
+                            .find_by_column(row_payload.secondary_index_column)
+                            .unwrap()
+                            .clone();
+                        cell_info.primary = new_primary;
+                        row_payload
+                            .cells
+                            .update_column(row_payload.secondary_index_column, cell_info.clone());
+                        row_payload
+                    };
+
+                let dirties = t.touched();
+                for update in updates {
+                    match update {
+                        TreeRowUpdate::Update(row) if dirties.contains(&row.k) => {
+                            t.update(row.k, update_payload(row.payload))?;
+                        }
+                        TreeRowUpdate::Insertion(row) if dirties.contains(&row.k) => {
+                            t.store(row.k.clone(), update_payload(row.payload))?;
+                        }
+                        _ => {}
                     }
                 }
                 Ok(())
-            })
-            .map(|plan| {
-                self.row
-                    .in_transaction(|t| {
-                        for key in plan.impacted_keys() {
-                            let mut row_payload = t.fetch(&key);
-                            let mut cell_info = row_payload
-                                .cells
-                                .find_by_column(row_payload.secondary_index_column)
-                                .unwrap()
-                                .clone();
-                            cell_info.primary = new_primary;
-                            row_payload.cells.update_column(
-                                row_payload.secondary_index_column,
-                                cell_info.clone(),
-                            );
-                            t.update(key, row_payload)?;
-                        }
-                        Ok(())
-                    })
-                    .expect("unable to re-update row tree");
-                plan
             })
             .map(|plan| RowUpdateResult { updates: plan });
         {
