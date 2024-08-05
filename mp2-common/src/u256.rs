@@ -52,9 +52,12 @@ fn is_less_than_or_equal_to_u256_arr<const L: usize>(
     right: &[U256; L],
 ) -> (bool, bool) {
     zip_eq(left, right).fold((false, true), |(is_lt, is_eq), (l, r)| {
-        let l = l - if is_lt { U256::from(1) } else { U256::ZERO };
-
-        (&l < r, is_eq && &l == r)
+        let borrow = if is_lt { U256::from(1) } else { U256::ZERO };
+        if let Some(l) = l.checked_sub(borrow) {
+            (&l < r, is_eq && &l == r)
+        } else {
+            (true, false)
+        }
     })
 }
 
@@ -1651,9 +1654,26 @@ mod tests {
             },
             // The right array is less than the left one.
             {
-                let left = [0; L].map(|_| gen_random_u256(rng));
+                let mut left = [0; L].map(|_| gen_random_u256(rng));
                 let mut right = left;
-                right[0] -= U256::from(1);
+
+                let one = U256::from(1);
+                if let Some(val) = right[0].checked_sub(one) {
+                    right[0] = val;
+                } else {
+                    left[0] += one;
+                }
+
+                [left, right]
+            },
+            // Test for borrow.
+            {
+                let mut left = [U256::ZERO; L];
+                let mut right = left;
+
+                let one = U256::from(1);
+                left[L - 1] = one;
+                right[0] = one;
 
                 [left, right]
             },
