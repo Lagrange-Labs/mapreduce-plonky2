@@ -47,7 +47,7 @@ pub const NUM_LIMBS: usize = 8;
 /// the comparison is defined as `l < r` or `l==r`.
 /// It's corresponding to the `is_less_than_or_equal_to_u256_arr` gadget
 /// function, and returns two flags: `left < right` and `left == right`.
-fn is_less_than_or_equal_to_u256_arr<const L: usize>(
+pub fn is_less_than_or_equal_to_u256_arr<const L: usize>(
     left: &[U256; L],
     right: &[U256; L],
 ) -> (bool, bool) {
