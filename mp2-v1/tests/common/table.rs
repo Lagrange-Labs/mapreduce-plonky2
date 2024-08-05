@@ -281,7 +281,7 @@ impl Table {
                 // Because nodes are proven from bottom up, all the parents of leaves will already
                 // be able to fetch the latest children proof at the latest primary thanks to this
                 // update.
-                let updated_rows = updated_rows
+                let filtered_rows = updated_rows
                     .into_iter()
                     .filter(|row| dirties.contains(&row.k))
                     .map(|mut row| {
@@ -295,10 +295,18 @@ impl Table {
                         row.payload
                             .cells
                             .update_column(row.payload.secondary_index_column, cell_info.clone());
+                        println!(
+                            " !!!!!!! UPDATED ROW {:?} to new primary {}",
+                            &row.k, new_primary
+                        );
                         row
                     })
                     .collect::<Vec<_>>();
-                for row in updated_rows {
+                println!(
+                    " !!!!! FILTERED ROWS: {:?}",
+                    filtered_rows.iter().map(|row| &row.k).collect::<Vec<_>>()
+                );
+                for row in filtered_rows {
                     t.update(row.k, row.payload)?;
                 }
                 Ok(())
