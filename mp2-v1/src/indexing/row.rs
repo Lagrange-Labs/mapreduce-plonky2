@@ -155,7 +155,7 @@ pub struct RowPayload<PrimaryIndex: PartialEq + Eq + Default> {
     pub hash: HashOutput,
 }
 
-impl<PrimaryIndex: Clone + Default + PartialEq + Eq> RowPayload<PrimaryIndex> {
+impl<PrimaryIndex: std::fmt::Debug + Clone + Default + PartialEq + Eq> RowPayload<PrimaryIndex> {
     /// Construct a row payload from
     /// * the collection of cells, which MUST include the value of the secondary index
     /// * the hash of the cells tree associated to that row
@@ -181,7 +181,15 @@ impl<PrimaryIndex: Clone + Default + PartialEq + Eq> RowPayload<PrimaryIndex> {
     }
 
     pub fn secondary_index_value(&self) -> U256 {
-        self.cells[&self.secondary_index_column].value
+        self.cells
+            .get(&self.secondary_index_column)
+            .unwrap_or_else(|| {
+                panic!(
+                    "unable to get secondary column {:?} on cells {:?}",
+                    self.secondary_index_column, self.cells
+                )
+            })
+            .value
     }
     /// Returns the primary index value under which this row is stored
     pub fn primary_index_value(&self) -> PrimaryIndex {
@@ -193,7 +201,14 @@ impl<PrimaryIndex: Clone + Default + PartialEq + Eq> RowPayload<PrimaryIndex> {
 }
 
 impl<
-        PrimaryIndex: PartialEq + Eq + Default + Clone + Sized + Serialize + for<'a> Deserialize<'a>,
+        PrimaryIndex: std::fmt::Debug
+            + PartialEq
+            + Eq
+            + Default
+            + Clone
+            + Sized
+            + Serialize
+            + for<'a> Deserialize<'a>,
     > NodePayload for RowPayload<PrimaryIndex>
 {
     fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
