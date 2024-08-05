@@ -46,10 +46,10 @@ impl Default for InputOperand {
 /// Data structure employed to specify a basic operation to be performed to
 /// compute the query
 pub struct BasicOperation {
-    pub(crate) first_operand: InputOperand,
+    pub first_operand: InputOperand,
     /// Can be None in case of unary operation
-    pub(crate) second_operand: Option<InputOperand>,
-    pub(crate) op: Operation,
+    pub second_operand: Option<InputOperand>,
+    pub op: Operation,
 }
 
 impl BasicOperation {
@@ -202,10 +202,10 @@ pub enum OutputItem {
 /// Data structure that contains the description of the output items to be returned and the
 /// operations necessary to compute the output items
 pub struct ResultStructure {
-    pub(crate) result_operations: Vec<BasicOperation>,
-    pub(crate) output_items: Vec<OutputItem>,
-    pub(crate) output_ids: Vec<F>,
-    pub(crate) output_variant: Output,
+    pub result_operations: Vec<BasicOperation>,
+    pub output_items: Vec<OutputItem>,
+    pub output_ids: Vec<F>,
+    pub output_variant: Output,
 }
 
 impl ResultStructure {
