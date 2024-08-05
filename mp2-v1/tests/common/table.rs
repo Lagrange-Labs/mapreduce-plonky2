@@ -1,13 +1,15 @@
-use std::hash::Hash;
-
 use alloy::primitives::Address;
 use anyhow::Result;
-use log::{debug, info};
+use futures::{
+    stream::{self, StreamExt},
+    FutureExt,
+};
+use log::debug;
 use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
     cell::{self, Cell, CellTreeKey, MerkleCellTree},
     index::IndexNode,
-    row::{CellCollection, Row, RowPayload, RowTreeKey},
+    row::{CellCollection, Row, RowTreeKey},
     ColumnID,
 };
 use ryhope::{
@@ -19,6 +21,7 @@ use ryhope::{
     InitSettings,
 };
 use serde::{Deserialize, Serialize};
+use std::hash::Hash;
 
 use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
 
@@ -51,7 +54,7 @@ pub enum IndexType {
 #[derive(Clone, Debug)]
 pub struct TableColumn {
     pub identifier: ColumnID,
-    pub index: IndexType,
+    pub _index: IndexType,
 }
 
 #[derive(Clone, Debug)]
@@ -117,17 +120,19 @@ pub struct Table {
 }
 
 impl Table {
-    pub fn new(genesis_block: u64, table_id: TableID, columns: TableColumns) -> Self {
+    pub async fn new(genesis_block: u64, table_id: TableID, columns: TableColumns) -> Self {
         let row_tree = MerkleRowTree::new(
             InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
             (),
         )
+        .await
         .unwrap();
         let index_tree = MerkleIndexTree::new(
             //InitSettings::Reset(sbbst::Tree::empty()),
             InitSettings::Reset(sbbst::Tree::with_shift((genesis_block - 1) as usize)),
             (),
         )
+        .await
         .unwrap();
         columns.self_assert();
         Self {
@@ -141,11 +146,11 @@ impl Table {
     // Function to call each time we need to build the index tree, i.e. for each row and
     // at each update for each row. Reason is we don't store it in memory since it's
     // very fast to recompute.
-    pub fn construct_cell_tree(
+    pub async fn construct_cell_tree(
         &self,
         cells: &CellCollection<BlockPrimaryIndex>,
     ) -> MerkleCellTree<BlockPrimaryIndex> {
-        let mut cell_tree = cell::new_tree();
+        let mut cell_tree = cell::new_tree().await;
         // we fetch the info from the column ids, and construct the cells of the tree
         let rest_cells = self
             .columns
@@ -155,19 +160,25 @@ impl Table {
             .filter_map(|id| cells.find_by_column(id).map(|info| (id, info)))
             .map(|(id, info)| cell::MerkleCell::new(id, info.value, info.primary))
             .collect::<Vec<_>>();
+        // because of lifetime issues in async
+        let columns = self.columns.clone();
         // the first time we actually create the cells tree, there is nothing
         if !rest_cells.is_empty() {
             let _ = cell_tree
                 .in_transaction(|t| {
-                    // if there is no cell, this loop wont run
-                    for cell in rest_cells {
-                        // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
-                        // but we put + 1 because sbbst starts at +1
-                        let idx = self.columns.cells_tree_index_of(cell.id);
-                        t.store(idx, cell)?;
+                    async move {
+                        // if there is no cell, this loop wont run
+                        for cell in rest_cells {
+                            // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
+                            // but we put + 1 because sbbst starts at +1
+                            let idx = columns.cells_tree_index_of(cell.id);
+                            t.store(idx, cell).await?;
+                        }
+                        Ok(())
                     }
-                    Ok(())
+                    .boxed()
                 })
+                .await
                 .expect("can't update cell tree");
         }
         cell_tree
@@ -176,7 +187,7 @@ impl Table {
     // Call this function first on all the cells tree that change from one update to another
     // Then prove the updates. Once done, you can call `apply_row_update` to update the row trees
     // and then once done you can call `apply_index_update`
-    pub fn apply_cells_update(
+    pub async fn apply_cells_update(
         &mut self,
         update: CellsUpdate<BlockPrimaryIndex>,
         update_type: TreeUpdateType,
@@ -185,6 +196,7 @@ impl Table {
         let previous_cells = self
             .row
             .try_fetch(&update.previous_row_key)
+            .await
             .map(|row_node| row_node.cells)
             // if it happens, it must be because of init time
             .or_else(|| Some(CellCollection::default()))
@@ -196,44 +208,41 @@ impl Table {
             "BEFORE construct cell tree - previous_cells {:?}",
             previous_cells
         );
-        let mut cell_tree = self.construct_cell_tree(&previous_cells);
+        let mut cell_tree = self.construct_cell_tree(&previous_cells).await;
         println!(
             "BEFORE update cell tree -> going over {} new updated cells",
             update.updated_cells.len()
         );
-        //println!(
-        //    "Cell trees root hash before updates: {:?}",
-        //    hex::encode(
-        //        cell_tree
-        //            .root_data()
-        //            .map(|root| root.hash.to_bytes())
-        //            .unwrap_or_default()
-        //    )
-        //);
         // apply updates and save the update plan for the new values
+        // clone for lifetime issues with async
+        let columns = self.columns.clone();
         let cell_update = cell_tree
             .in_transaction(|t| {
-                for new_cell in update.updated_cells.iter() {
-                    let merkle_cell =
-                        cell::MerkleCell::new(new_cell.id, new_cell.value, update.primary);
-                    println!(
-                        " --- TREE: inserting rest-cell: (index {}) : {:?}",
-                        self.columns.cells_tree_index_of(new_cell.id),
-                        merkle_cell
-                    );
-                    let cell_key = self.columns.cells_tree_index_of(new_cell.id);
-                    match update_type {
-                        TreeUpdateType::Update => t.update(cell_key, merkle_cell)?,
-                        // This should only happen at init time or at creation of a new row
-                        TreeUpdateType::Insertion => t.store(cell_key, merkle_cell)?,
+                async move {
+                    for new_cell in update.updated_cells.iter() {
+                        let merkle_cell =
+                            cell::MerkleCell::new(new_cell.id, new_cell.value, update.primary);
+                        println!(
+                            " --- TREE: inserting rest-cell: (index {}) : {:?}",
+                            columns.cells_tree_index_of(new_cell.id),
+                            merkle_cell
+                        );
+                        let cell_key = columns.cells_tree_index_of(new_cell.id);
+                        match update_type {
+                            TreeUpdateType::Update => t.update(cell_key, merkle_cell).await?,
+                            // This should only happen at init time or at creation of a new row
+                            TreeUpdateType::Insertion => t.store(cell_key, merkle_cell).await?,
+                        }
                     }
+                    Ok(())
                 }
-                Ok(())
+                .boxed()
             })
+            .await
             .expect("can't apply cells update");
         println!(
             "Cell trees root hash after updates: {:?}",
-            hex::encode(&cell_tree.root_data().unwrap().hash[..])
+            hex::encode(&cell_tree.root_data().await.unwrap().hash[..])
         );
         Ok(CellsUpdateResult {
             previous_row_key: update.previous_row_key,
@@ -244,80 +253,73 @@ impl Table {
     }
 
     // apply the transformation directly to the row tree to get the update plan and the new
-    pub fn apply_row_update(
+    pub async fn apply_row_update(
         &mut self,
         new_primary: BlockPrimaryIndex,
         updates: Vec<TreeRowUpdate>,
     ) -> Result<RowUpdateResult> {
         let out = self
             .row
-            .in_transaction(move |t| {
-                // apply all the updates and then look at the touched ones to update to the new
-                // primary
-                for update in updates {
-                    debug!("Apply update to row tree: {:?}", update);
-                    match update {
-                        TreeRowUpdate::Update(row) => {
-                            t.update(row.k.clone(), row.payload.clone())?;
-                        }
-                        TreeRowUpdate::Deletion(row_key) => match t.try_fetch(&row_key) {
-                            // sanity check
-                            Some(_) => {
-                                t.remove(row_key.clone())?;
+            .in_transaction(|t| {
+                async move {
+                    // apply all the updates and then look at the touched ones to update to the new
+                    // primary
+                    for update in updates {
+                        debug!("Apply update to row tree: {:?}", update);
+                        match update {
+                            TreeRowUpdate::Update(row) => {
+                                t.update(row.k.clone(), row.payload.clone()).await?;
                             }
-                            None => panic!("can't delete a row key that does not exist"),
-                        },
-                        TreeRowUpdate::Insertion(row) => {
-                            t.store(row.k.clone(), row.payload.clone())?;
+                            TreeRowUpdate::Deletion(row_key) => match t.try_fetch(&row_key).await {
+                                // sanity check
+                                Some(_) => {
+                                    t.remove(row_key.clone()).await?;
+                                }
+                                None => panic!("can't delete a row key that does not exist"),
+                            },
+                            TreeRowUpdate::Insertion(row) => {
+                                t.store(row.k.clone(), row.payload.clone()).await?;
+                            }
                         }
                     }
+                    let dirties = t.touched().await;
+                    // we now update the primary value of all nodes affected by the update.
+                    // Because nodes are proven from bottom up, all the parents of leaves will already
+                    // be able to fetch the latest children proof at the latest primary thanks to this
+                    // update.
+                    let filtered_rows = stream::iter(dirties.into_iter())
+                        .then(|row_key| async {
+                            let mut row_payload = t.fetch(&row_key).await;
+                            let mut cell_info = row_payload
+                                .cells
+                                .find_by_column(row_payload.secondary_index_column)
+                                .unwrap()
+                                .clone();
+                            cell_info.primary = new_primary;
+                            row_payload.cells.update_column(
+                                row_payload.secondary_index_column,
+                                cell_info.clone(),
+                            );
+                            Row {
+                                k: row_key,
+                                payload: row_payload,
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .await;
+                    for row in filtered_rows {
+                        t.update(row.k, row.payload).await?;
+                    }
+                    Ok(())
                 }
-                let dirties = t.touched();
-                println!("!!!! DIRTIES INSIDE TX : {:?}", dirties);
-                // we now update the primary value of all nodes affected by the update.
-                // Because nodes are proven from bottom up, all the parents of leaves will already
-                // be able to fetch the latest children proof at the latest primary thanks to this
-                // update.
-                let filtered_rows = dirties
-                    .into_iter()
-                    .map(|row_key| {
-                        let mut row_payload = t.fetch(&row_key);
-                        let mut cell_info = row_payload
-                            .cells
-                            .find_by_column(row_payload.secondary_index_column)
-                            .unwrap()
-                            .clone();
-                        cell_info.primary = new_primary;
-                        row_payload
-                            .cells
-                            .update_column(row_payload.secondary_index_column, cell_info.clone());
-                        println!(
-                            " !!!!!!! UPDATED ROW {:?} to new primary {}",
-                            &row_key, new_primary
-                        );
-                        Row {
-                            k: row_key,
-                            payload: row_payload,
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                println!(
-                    " !!!!! FILTERED ROWS: {:?}",
-                    filtered_rows.iter().map(|row| &row.k).collect::<Vec<_>>()
-                );
-                for row in filtered_rows {
-                    t.update(row.k, row.payload)?;
-                }
-                Ok(())
+                .boxed()
             })
-            .map(|plan| {
-                println!("!!!! UPDATE PLAN AFTER UPDATE : {:?}", plan.impacted_keys());
-                RowUpdateResult { updates: plan }
-            });
+            .await
+            .map(|plan| RowUpdateResult { updates: plan });
         {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
-            self.row.print_tree();
+            self.row.print_tree().await;
             println!("\n+++++++++++++++++++++++++++++++++\n");
         }
         out
@@ -325,14 +327,21 @@ impl Table {
 
     // apply the transformation on the index tree and returns the new nodes to prove
     // NOTE: hardcode for block since only block can use sbbst
-    pub fn apply_index_update(
+    pub async fn apply_index_update(
         &mut self,
         updates: IndexUpdate<BlockPrimaryIndex>,
     ) -> Result<IndexUpdateResult<BlockPrimaryIndex>> {
-        let plan = self.index.in_transaction(move |t| {
-            t.store(updates.added_index.0, updates.added_index.1)?;
-            Ok(())
-        })?;
+        let plan = self
+            .index
+            .in_transaction(|t| {
+                async move {
+                    t.store(updates.added_index.0, updates.added_index.1)
+                        .await?;
+                    Ok(())
+                }
+                .boxed()
+            })
+            .await?;
         Ok(IndexUpdateResult { plan })
     }
 }
@@ -371,9 +380,9 @@ pub struct CellsUpdate<PrimaryIndex> {
     /// Row key where to fetch the previous cells existing. In case  of  
     /// a secondary index value changing, that means a deletion + insertion.
     /// So tree logic should fetch the cells from the to-be-deleted row first
-    /// * In case there is no update of secondary index value, this value is
+    ///     * In case there is no update of secondary index value, this value is
     /// just equal to the row key under which the cells must be updated
-    /// * In case there is no previous row key, which happens at initialization time
+    ///     * In case there is no previous row key, which happens at initialization time
     /// then it can be the `RowTreeKey::default()` one.
     pub previous_row_key: RowTreeKey,
     /// the key under which the new cells are going to be stored. Can be
@@ -401,6 +410,8 @@ pub struct CellsUpdateResult<
         + Default
         + Clone
         + Sized
+        + Sync
+        + Send
         + Serialize
         + for<'a> Deserialize<'a>,
 > {

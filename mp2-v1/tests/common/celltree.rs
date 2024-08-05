@@ -1,7 +1,6 @@
-use std::hash::Hash;
 
-use alloy::primitives::{Address, U256};
 use anyhow::*;
+use futures::{stream, StreamExt};
 use log::{debug, info};
 use mp2_common::proof::ProofWithVK;
 use mp2_v1::{
@@ -11,25 +10,20 @@ use mp2_v1::{
         cell::{CellTreeKey, MerkleCellTree},
         row::{CellCollection, Row, RowPayload, RowTreeKey},
     },
-    values_extraction::identifier_single_var_column,
 };
 use plonky2::plonk::config::GenericHashOut;
-use ryhope::{
-    storage::{
+use ryhope::storage::{
         updatetree::{Next, UpdateTree},
         RoEpochKvStorage,
-    },
-    tree::{sbbst, TreeTopology},
-};
-use serde::{Deserialize, Serialize};
-use sha3::digest::crypto_common::ParBlocksSizeUser;
+    }
+;
 use verifiable_db::cells_tree;
 
 use crate::common::{cell_tree_proof_to_hash, TestContext};
 
 use super::{
     proof_storage::{CellProofIdentifier, ProofKey, ProofStorage},
-    table::{CellsUpdateResult, Table, TableColumns, TableID},
+    table::{CellsUpdateResult, Table, TableID},
 };
 
 impl<P: ProofStorage> TestContext<P> {
@@ -39,7 +33,7 @@ impl<P: ProofStorage> TestContext<P> {
     /// proofs.
     /// Note that since all previous proofs have been moved to this new key (in case of secondary
     /// index update), then we can search previous proofs under this key.
-    fn prove_cell_tree(
+    async fn prove_cell_tree(
         &mut self,
         table: &Table,
         primary: BlockPrimaryIndex,
@@ -61,7 +55,7 @@ impl<P: ProofStorage> TestContext<P> {
         let mut workplan = ut.into_workplan();
 
         while let Some(Next::Ready(k)) = workplan.next() {
-            let (context, cell) = tree.fetch_with_context(&k);
+            let (context, cell) = tree.fetch_with_context(&k).await;
 
             let proof = if context.is_leaf() {
                 debug!(
@@ -78,7 +72,7 @@ impl<P: ProofStorage> TestContext<P> {
                 // Prove a partial node - only care about the left side since sbbst has this nice
                 // property
                 let left_key = context.left.unwrap();
-                let left_node = tree.fetch(&left_key);
+                let left_node = tree.fetch(&left_key).await;
                 let proof_key = CellProofIdentifier {
                     table: table_id.clone(),
                     secondary: previous_row_key.clone(),
@@ -107,7 +101,7 @@ impl<P: ProofStorage> TestContext<P> {
             } else {
                 // Prove a full node.
                 let left_key = context.left.unwrap();
-                let left_node = tree.fetch(&left_key);
+                let left_node = tree.fetch(&left_key).await;
                 let left_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
                     secondary: previous_row_key.clone(),
@@ -115,7 +109,7 @@ impl<P: ProofStorage> TestContext<P> {
                     tree_key: context.left.unwrap(),
                 };
                 let right_key = context.right.unwrap();
-                let right_node = tree.fetch(&right_key);
+                let right_node = tree.fetch(&right_key).await;
                 let right_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
                     secondary: previous_row_key.clone(),
@@ -181,8 +175,8 @@ impl<P: ProofStorage> TestContext<P> {
             );
             workplan.done(&k).unwrap();
         }
-        let root = tree.root().unwrap();
-        let root_data = tree.root_data().unwrap();
+        let root = tree.root().await.unwrap();
+        let root_data = tree.root_data().await.unwrap();
         let root_proof_key = CellProofIdentifier {
             table: table_id.clone(),
             secondary: new_row_key.clone(),
@@ -205,7 +199,7 @@ impl<P: ProofStorage> TestContext<P> {
     /// Generate and prove a [`MerkleCellTree`] encoding the content of the
     /// given slots for the contract located at `contract_address`.
     // NOTE: the 0th column is assumed to be the secondary index.
-    pub fn prove_cells_tree(
+    pub async fn prove_cells_tree(
         &mut self,
         table: &Table,
         primary: BlockPrimaryIndex,
@@ -223,7 +217,7 @@ impl<P: ProofStorage> TestContext<P> {
         // We need to (a) move the proofs to the new (new_row_key, primary) identifier
         // then (b) update all the impacted cells to also have this new information about the new
         // primary index
-        self.move_cells_proof_to_new_row(&table.id, primary, &cells_update)
+        self.move_cells_proof_to_new_row(&table.id, primary, &cells_update).await
             .expect("unable to move cells tree proof:");
         // set the primary index for all cells that are in the update plan to the new primary
         // index, since all of them will be reproven
@@ -272,8 +266,8 @@ impl<P: ProofStorage> TestContext<P> {
                 .collect(),
         );
         // (c) reconstruct key with those new updated cell info
-        let updated_cell_tree = table.construct_cell_tree(&updated_cells);
-        let tree_hash = cells_update.latest.root_data().unwrap().hash;
+        let updated_cell_tree = table.construct_cell_tree(&updated_cells).await;
+        let tree_hash = cells_update.latest.root_data().await.unwrap().hash;
         let root_key = self.prove_cell_tree(
             table,
             primary,
@@ -281,7 +275,7 @@ impl<P: ProofStorage> TestContext<P> {
             cells_update.new_row_key.clone(),
             updated_cell_tree,
             cells_update.to_update,
-        );
+        ).await;
         let root_proof_key = CellProofIdentifier {
             primary,
             table: table.id.clone(),
@@ -315,7 +309,7 @@ impl<P: ProofStorage> TestContext<P> {
     /// Traverse the new cells tree, look at all the proofs already existing and move them to the
     /// new row tree key. If the new row tree key is the same as the old one (i.e. there has been
     /// no secondary index update), then this is a no-op.
-    fn move_cells_proof_to_new_row(
+    async fn move_cells_proof_to_new_row(
         &mut self,
         table_id: &TableID,
         primary: BlockPrimaryIndex,
@@ -333,13 +327,18 @@ impl<P: ProofStorage> TestContext<P> {
         let mut to_move = vec![cells_update
             .latest
             .root()
+            .await
             .expect("can't get root of new cells tree")];
         // traverse key in DFS style
+        struct Return  {
+            before: ProofKey,
+            after: ProofKey,
+            children: Vec<CellTreeKey>,
+        }
         while !to_move.is_empty() {
-            let new_nodes = to_move
-                .into_iter()
-                .flat_map(|key| {
-                    let previous_node = cells_update.latest.fetch(&key);
+            let new_nodes = stream::iter(to_move.clone())
+                .then(|key| async move {
+                    let previous_node = cells_update.latest.fetch(&key).await;
                     let previous_proof_key = CellProofIdentifier {
                         table: table_id.clone(),
                         secondary: cells_update.previous_row_key.clone(),
@@ -355,13 +354,10 @@ impl<P: ProofStorage> TestContext<P> {
                         primary,
                         tree_key: key,
                     };
-                    self.storage
-                        .move_proof(&ProofKey::Cell(previous_proof_key.clone()), &ProofKey::Cell(new_proof_key.clone()))
-                        .expect("unable to move proof from one row key to another");
                     debug!("CELL PROOFS MOVING: cell key {key} from (block {:?} - row_key {:?} to --> (block {:?}, row_key {:?})",previous_proof_key.primary,previous_proof_key.secondary,new_proof_key.primary,new_proof_key.secondary);
                     // look at the children to move _all_ the cell tree proofs for all the proofs
                     // that exist
-                    match cells_update.latest.node_context(&key) {
+                    let children = stream::iter(match cells_update.latest.node_context(&key).await {
                         Some(ctx) => {
                             let mut children = vec![];
                             if let Some(left_key) = ctx.left {
@@ -373,10 +369,21 @@ impl<P: ProofStorage> TestContext<P> {
                             children
                         }
                         None => vec![],
+                    }).collect::<Vec<_>>().await;
+                    Return {
+                       before: ProofKey::Cell(previous_proof_key),
+                        after: ProofKey::Cell(new_proof_key),
+                        children,
                     }
                 })
-                .collect::<Vec<_>>();
-            to_move = new_nodes;
+                .collect::<Vec<_>>().await;
+            // move all the proofs. Need to be done separately before of lifetime issues with
+            // self.storage that can not be captured in async
+            // Should be refactored to have async first storage
+            to_move = new_nodes.into_iter().flat_map(|r| {
+                self.storage.move_proof(&r.before, &r.after).expect("can't move proof");
+                r.children
+            }).collect();
         }
         info!(
             "Moved all cells tree proof from old {:?} to new {:?}",

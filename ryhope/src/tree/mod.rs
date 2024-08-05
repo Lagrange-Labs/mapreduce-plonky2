@@ -1,6 +1,8 @@
-use anyhow::*;
-use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt::Debug, hash::Hash};
+
+use anyhow::*;
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 use crate::storage::TreeStorage;
 
@@ -31,53 +33,61 @@ impl<K> NodePath<K> {
 }
 
 /// Define common topological operations on trees.
-pub trait TreeTopology: Default {
-    type Key: Debug + Clone + Hash + Eq;
-    type Node: Debug;
+#[async_trait]
+pub trait TreeTopology: Default + Send + Sync {
+    type Key: Debug + Clone + Hash + Eq + Sync + Send;
+    type Node: Debug + Sync + Send;
     /// Minimal data required to persist the tree.
-    type State: Sync + Clone + Debug + Serialize + for<'a> Deserialize<'a>;
+    type State: Send + Sync + Clone + Debug + Serialize + for<'a> Deserialize<'a>;
 
     /// Return the number of nodes currently stored in the tree
-    fn size<S: TreeStorage<Self>>(&self, s: &S) -> usize;
+    async fn size<S: TreeStorage<Self>>(&self, s: &S) -> usize;
 
     /// Return the root of the tree.
     ///
     /// May be empty, e.g. if the tree is empty.
-    fn root<S: TreeStorage<Self>>(&self, s: &S) -> Option<Self::Key>;
+    async fn root<S: TreeStorage<Self>>(&self, s: &S) -> Option<Self::Key>;
 
     /// Return the parent of `n`, or None if `n` is the root of the tree.
-    fn parent<S: TreeStorage<Self>>(&self, n: Self::Key, s: &S) -> Option<Self::Key>;
+    async fn parent<S: TreeStorage<Self>>(&self, n: Self::Key, s: &S) -> Option<Self::Key>;
 
     /// Return whether `k` exists in the tree.
-    fn contains<S: TreeStorage<Self>>(&self, k: &Self::Key, s: &S) -> bool;
+    async fn contains<S: TreeStorage<Self>>(&self, k: &Self::Key, s: &S) -> bool;
 
     /// Return, if it has some, the children of `k`.
     ///
     /// Return nothing if `k` is not in the tree.
-    fn children<S: TreeStorage<Self>>(
+    async fn children<S: TreeStorage<Self>>(
         &self,
         k: &Self::Key,
         s: &S,
     ) -> Option<(Option<Self::Key>, Option<Self::Key>)>;
 
     /// Returns the [`NodePath`] from the root of the tree to `k`.
-    fn lineage<S: TreeStorage<Self>>(&self, k: &Self::Key, s: &S) -> Option<NodePath<Self::Key>>;
+    async fn lineage<S: TreeStorage<Self>>(
+        &self,
+        k: &Self::Key,
+        s: &S,
+    ) -> Option<NodePath<Self::Key>>;
 
     /// Return the union of the lineages of all the `ns`
-    fn ascendance<S: TreeStorage<Self>>(
+    async fn ascendance<S: TreeStorage<Self>>(
         &self,
-        ns: impl IntoIterator<Item = Self::Key>,
+        ns: &[Self::Key],
         s: &S,
     ) -> HashSet<Self::Key> {
-        ns.into_iter()
-            .filter_map(|n| self.lineage(&n, s))
-            .flat_map(|np| np.into_full_path())
-            .collect()
+        let mut ascendance = HashSet::new();
+        for n in ns {
+            if let Some(np) = self.lineage(&n, s).await {
+                ascendance.extend(np.into_full_path());
+            }
+        }
+        ascendance
     }
 
     /// Return the immediate neighborhood of the given `k`, if it exists, in the
     /// tree.
-    fn node_context<S: TreeStorage<Self>>(
+    async fn node_context<S: TreeStorage<Self>>(
         &self,
         k: &Self::Key,
         s: &S,
@@ -85,11 +95,12 @@ pub trait TreeTopology: Default {
 }
 
 /// Define operations to mutate a tree.
+#[async_trait]
 pub trait MutableTree: TreeTopology {
     /// Insert the given key in the tree; fail if it is already present.
     ///
     /// Return the [`NodePath`] to the newly inserted node.
-    fn insert<S: TreeStorage<Self>>(
+    async fn insert<S: TreeStorage<Self>>(
         &mut self,
         k: Self::Key,
         s: &mut S,
@@ -98,7 +109,11 @@ pub trait MutableTree: TreeTopology {
     /// Remove the given key from the tree; fail if it is already present.
     ///
     /// Return the `Key`s of the nodes affected by the deletion.
-    fn delete<S: TreeStorage<Self>>(&mut self, k: &Self::Key, s: &mut S) -> Result<Vec<Self::Key>>;
+    async fn delete<S: TreeStorage<Self>>(
+        &mut self,
+        k: &Self::Key,
+        s: &mut S,
+    ) -> Result<Vec<Self::Key>>;
 }
 
 /// A data structure encompassing the immediate neighborhood of a node.
@@ -131,6 +146,7 @@ impl<K> NodeContext<K> {
     }
 }
 
+#[async_trait]
 pub trait PrintableTree: TreeTopology {
-    fn print<S: TreeStorage<Self>>(&self, s: &S);
+    async fn print<S: TreeStorage<Self>>(&self, s: &S);
 }

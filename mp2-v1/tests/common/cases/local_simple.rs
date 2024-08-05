@@ -1,7 +1,7 @@
 //! Test case for local Simple contract
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use log::{debug, info};
 use mp2_v1::{
     indexing::{
@@ -40,12 +40,10 @@ use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
     providers::ProviderBuilder,
-    rpc::types::Block,
 };
 use mp2_common::{
-    eth::{left_pad32, ProofQuery, StorageSlot},
+    eth::{ProofQuery, StorageSlot},
     proof::ProofWithVK,
-    F,
 };
 use std::{assert_matches::assert_matches, str::FromStr};
 
@@ -66,15 +64,6 @@ const LENGTH_VALUE: u8 = 2;
 /// Test slot for contract extraction
 const CONTRACT_SLOT: usize = 1;
 impl TestCase {
-    /// Deploy a simple contract, and insert some dummy values at first
-    pub(crate) async fn new_local_simple_contract<P: ProofStorage>(
-        ctx: &TestContext<P>,
-    ) -> Result<Vec<Self>> {
-        //let single = Self::single_value_test_case(ctx).await?;
-        let mapping = Self::mapping_test_case(ctx).await?;
-        Ok(vec![mapping])
-    }
-
     pub(crate) async fn single_value_test_case<P: ProofStorage>(
         ctx: &TestContext<P>,
     ) -> Result<Self> {
@@ -108,11 +97,11 @@ impl TestCase {
         let columns = TableColumns {
             primary: TableColumn {
                 identifier: identifier_block_column(),
-                index: IndexType::Primary,
+                _index: IndexType::Primary,
             },
             secondary: TableColumn {
                 identifier: identifier_single_var_column(INDEX_SLOT, contract_address),
-                index: IndexType::Secondary,
+                _index: IndexType::Secondary,
             },
             rest: SINGLE_SLOTS
                 .iter()
@@ -123,7 +112,7 @@ impl TestCase {
                         let identifier = identifier_single_var_column(*slot, contract_address);
                         Some(TableColumn {
                             identifier,
-                            index: IndexType::None,
+                            _index: IndexType::None,
                         })
                     }
                 })
@@ -131,7 +120,7 @@ impl TestCase {
         };
         Ok(Self {
             source: source.clone(),
-            table: Table::new(indexing_genesis_block, table_id, columns),
+            table: Table::new(indexing_genesis_block, table_id, columns).await,
             contract_address: *contract_address,
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
@@ -186,18 +175,18 @@ impl TestCase {
         let columns = TableColumns {
             primary: TableColumn {
                 identifier: identifier_block_column(),
-                index: IndexType::Primary,
+                _index: IndexType::Primary,
             },
             secondary: TableColumn {
                 identifier: index_identifier,
-                index: IndexType::Secondary,
+                _index: IndexType::Secondary,
             },
             rest: vec![TableColumn {
                 identifier: cell_identifier,
-                index: IndexType::None,
+                _index: IndexType::None,
             }],
         };
-        let table = Table::new(index_genesis_block, table_id, columns);
+        let table = Table::new(index_genesis_block, table_id, columns).await;
         Ok(Self {
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
@@ -256,13 +245,14 @@ impl TestCase {
         let current_block = ctx.block_number().await;
         // apply the new cells to the trees
         // NOTE ONLY the rest of the cells, not including the secondary one !
-        let rows_update = updates
-            .iter()
-            .map(|row_update| match row_update {
+        let mut rows_update = Vec::new();
+        for row_update in updates {
+            let tree_update = match row_update {
                 TableRowUpdate::Insertion(ref new_cells, _) => {
                     let tree_update = self
                         .table
                         .apply_cells_update(new_cells.clone(), TreeUpdateType::Insertion)
+                        .await
                         .expect("can't insert in cells tree");
                     // it may be an insertion where the cells already existed before ("delete  +
                     // insertio" = update on secondary index value) so we first fetch the previous
@@ -272,7 +262,7 @@ impl TestCase {
                     let previous_row = match new_cells.previous_row_key != Default::default() {
                         true => Row {
                             k: new_cells.previous_row_key.clone(),
-                            payload: self.table.row.fetch(&new_cells.previous_row_key),
+                            payload: self.table.row.fetch(&new_cells.previous_row_key).await,
                         },
                         false => Row::default(),
                     };
@@ -282,13 +272,15 @@ impl TestCase {
                         &previous_row.payload.cells,
                     );
                     let new_row_key = tree_update.new_row_key.clone();
-                    let row_payload = ctx.prove_cells_tree(
-                        &self.table,
-                        current_block as usize,
-                        previous_row,
-                        new_cell_collection,
-                        tree_update,
-                    );
+                    let row_payload = ctx
+                        .prove_cells_tree(
+                            &self.table,
+                            current_block as usize,
+                            previous_row,
+                            new_cell_collection,
+                            tree_update,
+                        )
+                        .await;
                     TreeRowUpdate::Insertion(Row {
                         k: new_row_key,
                         payload: row_payload,
@@ -298,12 +290,14 @@ impl TestCase {
                     let tree_update = self
                         .table
                         .apply_cells_update(new_cells.clone(), TreeUpdateType::Update)
+                        .await
                         .expect("can't insert in cells tree");
                     // fetch all the current cells, merge with the new modified ones
                     let old_row = self
                         .table
                         .row
                         .try_fetch(&new_cells.previous_row_key)
+                        .await
                         .expect("unable to find previous row");
                     let new_cell_collection = row_update.updated_cells_collection(
                         self.table.columns.secondary_column().identifier,
@@ -311,16 +305,18 @@ impl TestCase {
                         &old_row.cells,
                     );
                     let new_row_key = tree_update.new_row_key.clone();
-                    let row_payload = ctx.prove_cells_tree(
-                        &self.table,
-                        current_block as usize,
-                        Row {
-                            k: new_cells.previous_row_key.clone(),
-                            payload: old_row,
-                        },
-                        new_cell_collection,
-                        tree_update,
-                    );
+                    let row_payload = ctx
+                        .prove_cells_tree(
+                            &self.table,
+                            current_block as usize,
+                            Row {
+                                k: new_cells.previous_row_key.clone(),
+                                payload: old_row,
+                            },
+                            new_cell_collection,
+                            tree_update,
+                        )
+                        .await;
                     TreeRowUpdate::Update(Row {
                         k: new_row_key,
                         payload: row_payload,
@@ -331,13 +327,15 @@ impl TestCase {
                 // containing output of previous steps, the former is only created from the updates
                 // of a table, this is the source.
                 TableRowUpdate::Deletion(k) => TreeRowUpdate::Deletion(k.clone()),
-            })
-            .collect::<Vec<_>>();
+            };
+            rows_update.push(tree_update);
+        }
         info!("Generated final CELLs tree proofs for block {current_block}");
-        let updates = self.table.apply_row_update(bn, rows_update)?;
+        let updates = self.table.apply_row_update(bn, rows_update).await?;
         info!("Applied updates to row tree");
         let index_node = ctx
             .prove_update_row_tree(bn, &self.table, updates)
+            .await
             .expect("unable to prove row tree");
         info!("Generated final ROWs tree proofs for block {current_block}");
 
@@ -353,9 +351,10 @@ impl TestCase {
         let updates = self
             .table
             .apply_index_update(index_update)
+            .await
             .expect("can't update index tree");
         info!("Applied updates to index tree for block {current_block}");
-        let root_proof_key = ctx
+        let _root_proof_key = ctx
             .prove_update_index_tree(bn, &self.table, updates.plan)
             .await;
         info!("Generated final BLOCK tree proofs for block {current_block}");
@@ -585,7 +584,6 @@ impl TestCase {
 
                 let new_value: U256 = random_address().into_word().into();
                 let mapping_updates = match c {
-                    ChangeType::None => vec![],
                     ChangeType::Insertion => {
                         vec![MappingUpdate::Insertion(new_key, new_value)]
                     }
@@ -704,7 +702,6 @@ impl TestCase {
                             current_values.s2 = U256::from_be_bytes(thread_rng().gen::<[u8; 32]>());
                         }
                     },
-                    ChangeType::None => {}
                 };
 
                 let contract_update = UpdateSimpleStorage::Single(current_values);
@@ -757,7 +754,7 @@ impl TestCase {
                 );
                 let mapping_updates = init_state
                     .iter()
-                    .map(|u| MappingUpdate::Insertion(u.0.clone(), u.1.into_word().into()))
+                    .map(|u| MappingUpdate::Insertion(u.0, u.1.into_word().into()))
                     .collect::<Vec<_>>();
 
                 self.apply_update_to_contract(
@@ -797,35 +794,6 @@ impl TestCase {
                 );
                 update
             }
-        }
-    }
-
-    async fn current_mapping_entries<P: ProofStorage>(
-        &self,
-        ctx: &mut TestContext<P>,
-    ) -> Vec<UniqueMappingEntry> {
-        match self.source {
-            TableSourceSlot::Mapping((ref mapping, _)) => {
-                let mut updates = Vec::new();
-                for mkey in mapping.mapping_keys.iter() {
-                    // for each mapping key we track, we fetch the associated value
-                    let query = ProofQuery::new_mapping_slot(
-                        self.contract_address,
-                        mapping.slot as usize,
-                        mkey.to_owned(),
-                    );
-                    let response = ctx
-                        .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
-                        .await;
-                    let unique_entry = UniqueMappingEntry::from((
-                        response.storage_proof[0].key.0.into(),
-                        response.storage_proof[0].value,
-                    ));
-                    updates.push(unique_entry);
-                }
-                updates
-            }
-            _ => panic!("invalid case"),
         }
     }
 
@@ -1057,7 +1025,6 @@ pub enum ChangeType {
     Deletion,
     Insertion,
     Update(UpdateType),
-    None,
 }
 
 #[derive(Clone, Debug)]

@@ -17,7 +17,7 @@ impl<P: ProofStorage> TestContext<P> {
         index_tree: &MerkleIndexTree,
     ) -> Result<()> {
         // load the block proof of the current block
-        let root_key = index_tree.root().unwrap();
+        let root_key = index_tree.root().await.unwrap();
         let index_root_key = ProofKey::Index(IndexProofIdentifier {
             table: table_id.clone(),
             tree_key: root_key,

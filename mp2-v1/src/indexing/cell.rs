@@ -38,8 +38,10 @@ pub type MerkleCellTree<PrimaryIndex> =
     MerkleTreeKvDb<CellTree, MerkleCell<PrimaryIndex>, CellStorage<PrimaryIndex>>;
 
 /// Returns a new empty Merkle cells tree.
-pub fn new_tree<
+pub async fn new_tree<
     PrimaryIndex: std::fmt::Debug
+        + Sync
+        + Send
         + PartialEq
         + Eq
         + Default
@@ -48,7 +50,9 @@ pub fn new_tree<
         + Serialize
         + for<'a> Deserialize<'a>,
 >() -> MerkleCellTree<PrimaryIndex> {
-    MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap()
+    MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ())
+        .await
+        .unwrap()
 }
 
 /// Cell is the information stored in a specific cell of a specific row.

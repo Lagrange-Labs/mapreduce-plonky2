@@ -1,39 +1,25 @@
-use std::collections::HashSet;
-
-use alloy::{primitives::U256, rpc::types::Block};
+use alloy::primitives::U256;
 use anyhow::*;
 use log::debug;
-use mp2_common::{
-    proof::ProofWithVK,
-    serialization::{deserialize, serialize, FromBytes, ToBytes},
-};
+use mp2_common::proof::ProofWithVK;
 use mp2_v1::{
     api::{self, CircuitInput},
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
         index::IndexNode,
-        row::{Row, RowPayload, RowTree, RowTreeKey, ToNonce},
+        row::{RowPayload, RowTree, RowTreeKey, ToNonce},
     },
 };
-use plonky2::{
-    field::types::Field,
-    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
-    plonk::config::{GenericHashOut, Hasher},
-};
+use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{
         memory::InMemory,
         updatetree::{Next, UpdateTree},
-        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
+        RoEpochKvStorage,
     },
-    tree::{
-        scapegoat::{self, Alpha},
-        TreeTopology,
-    },
-    InitSettings, MerkleTreeKvDb, NodePayload,
+    MerkleTreeKvDb,
 };
-use serde::{Deserialize, Serialize};
 use verifiable_db::{cells_tree, row_tree::extract_hash_from_proof};
 
 use crate::common::row_tree_proof_to_hash;
@@ -43,7 +29,6 @@ use super::{
     table::{RowUpdateResult, Table},
     TestContext,
 };
-use derive_more::{From, Into};
 
 pub type RowTreeKeyNonce = Vec<u8>;
 
@@ -67,7 +52,7 @@ impl SecondaryIndexCell {
 impl From<SecondaryIndexCell> for RowTreeKey {
     fn from(value: SecondaryIndexCell) -> Self {
         RowTreeKey {
-            value: value.0.value.into(),
+            value: value.0.value,
             rest: value.1,
         }
     }
@@ -76,7 +61,7 @@ impl From<SecondaryIndexCell> for RowTreeKey {
 impl From<&SecondaryIndexCell> for RowTreeKey {
     fn from(value: &SecondaryIndexCell) -> Self {
         RowTreeKey {
-            value: value.0.value.into(),
+            value: value.0.value,
             rest: value.1.clone(),
         }
     }
@@ -88,7 +73,7 @@ pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, 
 impl<P: ProofStorage> TestContext<P> {
     /// Given a row tree (i.e. secondary index tree) and its update tree, prove
     /// it.
-    pub fn prove_row_tree(
+    pub async fn prove_row_tree(
         &mut self,
         // required to fetch the right row tree proofs during the update, since the key
         // itself is not enough, since there might be multiple proofs with the same key but not
@@ -101,7 +86,7 @@ impl<P: ProofStorage> TestContext<P> {
         let t = &table.row;
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(k)) = workplan.next() {
-            let (context, row) = t.fetch_with_context(&k);
+            let (context, row) = t.fetch_with_context(&k).await;
             let id = row.secondary_index_column;
             // Sec. index value
             let value = row.secondary_index_value();
@@ -159,7 +144,7 @@ impl<P: ProofStorage> TestContext<P> {
                     .or(context.right.as_ref())
                     .cloned()
                     .unwrap();
-                let child_row = table.row.fetch(&child_key);
+                let child_row = table.row.fetch(&child_key).await;
 
                 let proof_key = RowProofIdentifier {
                     table: table.id.clone(),
@@ -187,14 +172,14 @@ impl<P: ProofStorage> TestContext<P> {
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
                 let left_key = context.left.unwrap();
-                let left_row = table.row.fetch(&left_key);
+                let left_row = table.row.fetch(&left_key).await;
                 let left_proof_key = RowProofIdentifier {
                     table: table.id.clone(),
                     primary: left_row.primary_index_value(),
                     tree_key: left_key,
                 };
                 let right_key = context.right.unwrap();
-                let right_row = table.row.fetch(&right_key);
+                let right_row = table.row.fetch(&right_key).await;
                 let right_proof_key = RowProofIdentifier {
                     table: table.id.clone(),
                     primary: right_row.primary_index_value(),
@@ -241,9 +226,8 @@ impl<P: ProofStorage> TestContext<P> {
             );
             workplan.done(&k).unwrap();
         }
-
-        let root = t.root().unwrap();
-        let row = table.row.fetch(&root);
+        let root = t.root().await.unwrap();
+        let row = table.row.fetch(&root).await;
         let root_proof_key = RowProofIdentifier {
             table: table.id.clone(),
             primary: row.primary_index_value(),
@@ -275,18 +259,18 @@ impl<P: ProofStorage> TestContext<P> {
     /// NOTE:we are simplifying a bit here as we assume the construction of the index tree
     /// is from (a) the block and (b) only one by one, i.e. there is only one IndexNode to return
     /// that have to be inserted. For CSV case, it should return a vector of new inserted nodes.
-    pub fn prove_update_row_tree(
+    pub async fn prove_update_row_tree(
         &mut self,
         primary: BlockPrimaryIndex,
         table: &Table,
         update: RowUpdateResult,
     ) -> Result<IndexNode<BlockPrimaryIndex>> {
-        let root_proof_key = self.prove_row_tree(primary, table, update.updates)?;
+        let root_proof_key = self.prove_row_tree(primary, table, update.updates).await?;
         let row_tree_proof = self
             .storage
             .get_proof_exact(&ProofKey::Row(root_proof_key.clone()))
             .unwrap();
-        let root_row = table.row.root_data().unwrap();
+        let root_row = table.row.root_data().await.unwrap();
         let tree_hash = root_row.hash.clone();
         let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
 
@@ -300,7 +284,7 @@ impl<P: ProofStorage> TestContext<P> {
             identifier: table.columns.primary_column().identifier,
             value: U256::from(primary).into(),
             row_tree_root_key: root_proof_key.tree_key,
-            row_tree_hash: table.row.root_data().unwrap().hash,
+            row_tree_hash: table.row.root_data().await.unwrap().hash,
             row_tree_root_primary: primary,
             ..Default::default()
         })

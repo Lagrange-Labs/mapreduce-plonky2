@@ -13,7 +13,6 @@ use mp2_v1::{
     },
     values_extraction::{identifier_for_mapping_key_column, identifier_for_mapping_value_column},
 };
-use rand::{thread_rng, Rng};
 
 use super::{
     rowtree::SecondaryIndexCell,
@@ -42,7 +41,7 @@ impl From<(U256, U256)> for UniqueMappingEntry {
 /// What is the secondary index chosen for the table in the mapping.
 /// Each entry contains the identifier of the column expected to store in our tree
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum MappingIndex {
+pub enum MappingIndex {
     Key(u64),
     Value(u64),
 }
@@ -129,12 +128,12 @@ impl UniqueMappingEntry {
         match index {
             MappingIndex::Key(_) => RowTreeKey {
                 // tree key indexed by mapping key
-                value: self.key.into(),
+                value: self.key,
                 rest: self.value.to_nonce(),
             },
             MappingIndex::Value(_) => RowTreeKey {
                 // tree key indexed by mapping value
-                value: self.value.into(),
+                value: self.value,
                 rest: self.key.to_nonce(),
             },
         }
@@ -187,9 +186,9 @@ pub(crate) struct MappingValuesExtractionArgs {
     pub(crate) slot: u8,
     pub(crate) index: MappingIndex,
     /// Mapping keys: they are useful for two things:
-    /// * doing some controlled changes on the smart contract, since if we want to do an update we
+    ///     * doing some controlled changes on the smart contract, since if we want to do an update we
     /// need to know an existing key
-    /// * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
+    ///     * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
     /// (yet), we're just recomputing all the proofs at every block and we need the keys for that.
     pub(crate) mapping_keys: Vec<Vec<u8>>,
 }
@@ -208,11 +207,6 @@ pub(crate) struct LengthExtractionArgs {
 pub(crate) struct ContractExtractionArgs {
     /// Storage slot
     pub(crate) slot: StorageSlot,
-}
-
-fn random_u256() -> U256 {
-    let limbs = thread_rng().gen::<[u64; 4]>();
-    U256::from_limbs(limbs)
 }
 
 fn random_address() -> Address {
