@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::*;
 use mp2_common::{
@@ -86,13 +88,13 @@ impl From<&SecondaryIndexCell> for RowTreeKey {
 // A collection of cells inserted in the JSON.
 // IMPORTANT: This collection MUST CONTAIN the secondary index value, as first element, to easily search
 // in JSONB from the SQL.
-#[derive(From, Into, Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, From, Into, Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CellCollection(pub Vec<Cell>);
 impl CellCollection {
     /// Return the [`Cell`] containing the sec. index of this row.
     pub fn secondary_index(&self) -> Result<&Cell> {
         ensure!(
-            self.0.len() > 0,
+            !self.0.is_empty(),
             "secondary_index() called on empty CellCollection"
         );
         Ok(&self.0[0])
@@ -100,17 +102,26 @@ impl CellCollection {
 
     pub fn non_indexed_cells(&self) -> Result<&[Cell]> {
         ensure!(
-            self.0.len() > 0,
+            !self.0.is_empty(),
             "non_indexed_cells called on empty  CellCollection"
         );
         Ok(&self.0[1..])
     }
-    // take all the cells in &self, and replace the ones with same identifier from other
-    pub fn replace_by(&self, other: &Self) -> Self {
+    // take all the cells ids on both collections, take the value present in the updated one
+    // if it exists, otherwise take from self.
+    pub fn merge_with_update(&self, updated_cells: &[Cell]) -> Self {
+        if self == &Self::default() {
+            return Self(updated_cells.to_vec());
+        }
         Self(
             self.0
                 .iter()
-                .map(|c| other.0.iter().find(|c2| c.id == c2.id).unwrap_or(c))
+                .map(|previous_cell| {
+                    updated_cells
+                        .iter()
+                        .find(|new_cell| previous_cell.id == new_cell.id)
+                        .unwrap_or(previous_cell)
+                })
                 .cloned()
                 .collect(),
         )

@@ -151,22 +151,18 @@ impl Table {
     // and then once done you can call `apply_index_update`
     // TODO: handle the case where the row secondary index changes, as this requires a deletion
     // then fresh insertion
-    pub fn apply_cells_update(&mut self, update: CellsUpdate) -> Result<CellsUpdateResult> {
+    pub fn apply_cells_update(
+        &mut self,
+        update: CellsUpdate,
+        update_type: TreeUpdateType,
+    ) -> Result<CellsUpdateResult> {
         // fetch previous row or return 0 cells in case of init
         let previous_cells = self
             .row
-            .try_fetch(&update.row_key)
+            .try_fetch(&update.previous_row_key)
             .map(|row_node| row_node.cells)
-            .or_else(|| {
-                if update.init {
-                    Some(CellCollection::default())
-                } else {
-                    log::error!(
-                        "either row is full or we are initializing - this is something else"
-                    );
-                    None
-                }
-            })
+            // if it happens, it must be because of init time
+            .or_else(|| Some(CellCollection::default()))
             .unwrap();
         // reconstruct the _current_ cell tree before update
         // note we ignore the update plan here since we assume it already has been proven
@@ -181,35 +177,41 @@ impl Table {
                     // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
                     // but we put + 1 because sbbst starts at +1
                     let cell_key = self.columns.cells_tree_index_of(new_cell.id) + 1;
-                    if update.init {
-                        t.store(cell_key, new_cell.into())?;
-                    } else {
-                        t.update(cell_key, new_cell.into())?;
+                    match update_type {
+                        TreeUpdateType::Update => t.update(cell_key, new_cell.into())?,
+                        // This should only happen at init time
+                        TreeUpdateType::Insertion => t.store(cell_key, new_cell.into())?,
                     }
                 }
                 Ok(())
             })
             .expect("can't apply cells update");
         Ok(CellsUpdateResult {
-            row_key: update.row_key.clone(),
+            previous_row_key: update.previous_row_key,
+            new_row_key: update.new_row_key,
             to_update: cell_update,
             latest: cell_tree,
         })
     }
 
     // apply the transformation directly to the row tree to get the update plan and the new
-    pub fn apply_row_update(&mut self, updates: RowUpdate) -> Result<RowUpdateResult> {
-        let plan = self.row.in_transaction(move |t| {
-            for update in updates.modified_rows.into_iter() {
-                if updates.init {
-                    t.store(update.k.clone(), update.payload)?;
-                } else {
-                    t.update(update.k.clone(), update.payload)?;
+    pub fn apply_row_update(&mut self, updates: Vec<TreeRowUpdate>) -> Result<RowUpdateResult> {
+        self.row
+            .in_transaction(move |t| {
+                for update in updates {
+                    match update {
+                        TreeRowUpdate::Update(row) => t.update(row.k, row.payload)?,
+                        TreeRowUpdate::Deletion(row_key) => match t.try_fetch(&row_key) {
+                            // sanity check
+                            Some(_) => t.remove(row_key)?,
+                            None => panic!("can't delete a row key that does not exist"),
+                        },
+                        TreeRowUpdate::Insertion(row) => t.store(row.k.clone(), row.payload)?,
+                    }
                 }
-            }
-            Ok(())
-        })?;
-        Ok(RowUpdateResult { updates: plan })
+                Ok(())
+            })
+            .map(|plan| RowUpdateResult { updates: plan })
     }
 
     // apply the transformation on the index tree and returns the new nodes to prove
@@ -236,33 +238,38 @@ pub struct IndexUpdateResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct RowUpdate {
-    // TODO:
-    // * added rows
-    // * deleted rows
-    pub modified_rows: Vec<Row>,
-    pub init: bool,
+pub enum TreeRowUpdate {
+    Insertion(Row),
+    Update(Row),
+    Deletion(RowTreeKey),
 }
 
 #[derive(Clone)]
 pub struct RowUpdateResult {
+    // There is only a single row key for a table that we update continuously
+    // so no need to track all the rows that have been updated in the result
+    // The tree already have this information by now.
     pub updates: UpdateTree<RowTreeKey>,
 }
 
 #[derive(Debug, Clone)]
 pub struct CellsUpdate {
-    pub row_key: RowTreeKey,
+    /// Row key where to fetch the previous cells existing. In case  of  
+    /// a secondary index value changing, that means a deletion + insertion.
+    /// So tree logic should fetch the cells from the to-be-deleted row first
+    /// * In case there is no update of secondary index value, this value is
+    /// just equal to the row key under which the cells must be updated
+    /// * In case there is no previous row key, which happens at initialization time
+    /// then it can be the `RowTreeKey::default()` one.
+    pub previous_row_key: RowTreeKey,
+    /// the key under which the new cells are going to be stored. Can be
+    /// the same as previous_row_key if the secondary index value did
+    /// not change
+    pub new_row_key: RowTreeKey,
     // this must NOT contain the secondary index cell. Otherwise, in case the secondary index cell values
     // did not change, we would not be able to separate the rest from the secondary index cell.
+    // NOTE: In the case of initialization time, this contains the initial cells of the row
     pub updated_cells: Vec<Cell>,
-    // set this to true to notify to consumers this is the first insert in the cell tree
-    // Useful to know whether this update contains all the cells or the rest of the cells
-    // must be fetching somewhere else.
-    pub init: bool,
-    // TODO:
-    // * add modified secondary index
-    // * add deleted cells
-    // no need for added cells since we don't add columns on a table
 }
 
 // Contains the data necessary to start proving the update of the cells tree
@@ -270,9 +277,15 @@ pub struct CellsUpdate {
 // For example one needs to setup the location of the proof, the root hash of the new cells tree.
 // Once that is done, one can call `apply_row_update`
 pub struct CellsUpdateResult {
-    pub row_key: RowTreeKey,
+    pub previous_row_key: RowTreeKey,
+    pub new_row_key: RowTreeKey,
     // give the tree here since we don't really store it so it's easier down the line to pass it
     // around
     pub latest: MerkleCellTree,
     pub to_update: UpdateTree<CellTreeKey>,
+}
+
+pub enum TreeUpdateType {
+    Insertion,
+    Update,
 }
