@@ -254,47 +254,47 @@ impl Table {
             .in_transaction(move |t| {
                 // apply all the updates and then look at the touched ones to update to the new
                 // primary
-                for update in updates.iter() {
+                let mut updated_rows = Vec::new();
+                for update in updates {
                     debug!("Apply update to row tree: {:?}", update);
                     match update {
                         TreeRowUpdate::Update(row) => {
-                            t.update(row.k.clone(), row.payload.clone())?
+                            t.update(row.k.clone(), row.payload.clone())?;
+                            updated_rows.push(row);
                         }
-                        TreeRowUpdate::Deletion(row_key) => match t.try_fetch(row_key) {
+                        TreeRowUpdate::Deletion(row_key) => match t.try_fetch(&row_key) {
                             // sanity check
-                            Some(_) => t.remove(row_key.clone())?,
+                            Some(_) => {
+                                t.remove(row_key.clone())?;
+                            }
                             None => panic!("can't delete a row key that does not exist"),
                         },
                         TreeRowUpdate::Insertion(row) => {
-                            t.store(row.k.clone(), row.payload.clone())?
+                            t.store(row.k.clone(), row.payload.clone())?;
+                            updated_rows.push(row);
                         }
                     }
                 }
-                let update_payload =
-                    |mut row_payload: RowPayload<BlockPrimaryIndex>| -> RowPayload<BlockPrimaryIndex> {
-                        let mut cell_info = row_payload
+                let dirties = t.touched();
+                let updated_rows = updated_rows
+                    .into_iter()
+                    .filter(|row| dirties.contains(&row.k))
+                    .map(|mut row| {
+                        let mut cell_info = row
+                            .payload
                             .cells
-                            .find_by_column(row_payload.secondary_index_column)
+                            .find_by_column(row.payload.secondary_index_column)
                             .unwrap()
                             .clone();
                         cell_info.primary = new_primary;
-                        row_payload
+                        row.payload
                             .cells
-                            .update_column(row_payload.secondary_index_column, cell_info.clone());
-                        row_payload
-                    };
-
-                let dirties = t.touched();
-                for update in updates {
-                    match update {
-                        TreeRowUpdate::Update(row) if dirties.contains(&row.k) => {
-                            t.update(row.k, update_payload(row.payload))?;
-                        }
-                        TreeRowUpdate::Insertion(row) if dirties.contains(&row.k) => {
-                            t.store(row.k.clone(), update_payload(row.payload))?;
-                        }
-                        _ => {}
-                    }
+                            .update_column(row.payload.secondary_index_column, cell_info.clone());
+                        row
+                    })
+                    .collect::<Vec<_>>();
+                for row in updated_rows {
+                    t.update(row.k, row.payload)?;
                 }
                 Ok(())
             })
