@@ -121,6 +121,19 @@ impl<
         Ok(())
     }
 
+    /// Return, if any, the set of nodes that will be touched, either directly
+    /// or as a result of the aggregation update process, byt the operations
+    /// defined in the current transactions.
+    ///
+    /// The set will be empty if their is no transaction active.
+    fn touched(&mut self) -> HashSet<T::Key> {
+        self.dirty
+            .iter()
+            .filter_map(|k| self.tree.lineage(k, &self.storage))
+            .flat_map(|p| p.into_full_path())
+            .collect::<_>()
+    }
+
     /// Return the key mapped to the current root of the Merkle tree.
     pub fn root(&self) -> Option<T::Key> {
         self.tree.root(&self.storage)
