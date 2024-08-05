@@ -254,13 +254,11 @@ impl Table {
             .in_transaction(move |t| {
                 // apply all the updates and then look at the touched ones to update to the new
                 // primary
-                let mut updated_rows = Vec::new();
                 for update in updates {
                     debug!("Apply update to row tree: {:?}", update);
                     match update {
                         TreeRowUpdate::Update(row) => {
                             t.update(row.k.clone(), row.payload.clone())?;
-                            updated_rows.push(row);
                         }
                         TreeRowUpdate::Deletion(row_key) => match t.try_fetch(&row_key) {
                             // sanity check
@@ -271,7 +269,6 @@ impl Table {
                         },
                         TreeRowUpdate::Insertion(row) => {
                             t.store(row.k.clone(), row.payload.clone())?;
-                            updated_rows.push(row);
                         }
                     }
                 }
@@ -281,25 +278,27 @@ impl Table {
                 // Because nodes are proven from bottom up, all the parents of leaves will already
                 // be able to fetch the latest children proof at the latest primary thanks to this
                 // update.
-                let filtered_rows = updated_rows
+                let filtered_rows = dirties
                     .into_iter()
-                    .filter(|row| dirties.contains(&row.k))
-                    .map(|mut row| {
-                        let mut cell_info = row
-                            .payload
+                    .map(|row_key| {
+                        let mut row_payload = t.fetch(&row_key);
+                        let mut cell_info = row_payload
                             .cells
-                            .find_by_column(row.payload.secondary_index_column)
+                            .find_by_column(row_payload.secondary_index_column)
                             .unwrap()
                             .clone();
                         cell_info.primary = new_primary;
-                        row.payload
+                        row_payload
                             .cells
-                            .update_column(row.payload.secondary_index_column, cell_info.clone());
+                            .update_column(row_payload.secondary_index_column, cell_info.clone());
                         println!(
                             " !!!!!!! UPDATED ROW {:?} to new primary {}",
-                            &row.k, new_primary
+                            &row_key, new_primary
                         );
-                        row
+                        Row {
+                            k: row_key,
+                            payload: row_payload,
+                        }
                     })
                     .collect::<Vec<_>>();
                 println!(
