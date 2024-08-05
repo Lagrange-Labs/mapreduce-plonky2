@@ -276,6 +276,11 @@ impl Table {
                     }
                 }
                 let dirties = t.touched();
+                println!("!!!! DIRTIES INSIDE TX : {:?}", dirties);
+                // we now update the primary value of all nodes affected by the update.
+                // Because nodes are proven from bottom up, all the parents of leaves will already
+                // be able to fetch the latest children proof at the latest primary thanks to this
+                // update.
                 let updated_rows = updated_rows
                     .into_iter()
                     .filter(|row| dirties.contains(&row.k))
@@ -298,7 +303,10 @@ impl Table {
                 }
                 Ok(())
             })
-            .map(|plan| RowUpdateResult { updates: plan });
+            .map(|plan| {
+                println!("!!!! UPDATE PLAN AFTER UPDATE : {:?}", plan.impacted_keys());
+                RowUpdateResult { updates: plan }
+            });
         {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
