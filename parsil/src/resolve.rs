@@ -40,6 +40,13 @@ impl<'a, C: RootContextProvider> AstPass for Leafer<'a, C> {
     }
 }
 
+pub(crate) fn parse_placeholder(p: &str) -> Result<u8> {
+    ensure!(p.starts_with("$"), "{p}: invalid placeholder");
+
+    let number = p.trim_start_matches('$');
+    number.parse().with_context(|| "failed to parse `{p}`")
+}
+
 /// A [`Symbol`] is anything that can be referenced from an SQL expression.
 #[derive(Debug, Clone)]
 pub enum Symbol {

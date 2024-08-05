@@ -1,13 +1,12 @@
-use std::hash::{DefaultHasher, Hasher};
-
 use anyhow::*;
 use sqlparser::ast::{
-    BinaryOperator, Distinct, Expr, GroupByExpr, JoinOperator, Offset, OffsetRows, OrderBy,
-    OrderByExpr, Query, Select, SelectItem, SetExpr, TableFactor, UnaryOperator, Value,
+    BinaryOperator, Distinct, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr,
+    JoinOperator, Offset, OffsetRows, OrderBy, OrderByExpr, Query, Select, SelectItem, SetExpr,
+    TableFactor, UnaryOperator, Value,
 };
 
 use crate::{
-    exprhash::DefaultExprHasher,
+    resolve::parse_placeholder,
     visitor::{AstPass, Visit},
 };
 
@@ -82,12 +81,41 @@ impl AstPass for Validator {
             | Expr::Between { .. }
             | Expr::BinaryOp { .. }
             | Expr::UnaryOp { .. }
-            | Expr::Nested(_)
-            | Expr::Tuple(_)
-            | Expr::Function(_) => {}
+            | Expr::Nested(_) => {}
+
+            Expr::Function(funcall) => {
+                ensure!(
+                    funcall.name.0.len() == 1,
+                    "{}: unknown function `{}`",
+                    funcall,
+                    funcall.name
+                );
+
+                if let FunctionArguments::List(arglist) = &mut funcall.args {
+                    ensure!(
+                        arglist.args.len() == 1,
+                        "expected one argument in `{}`, found `{}`",
+                        funcall,
+                        funcall.args
+                    );
+                    match &mut arglist.args[0] {
+                        FunctionArg::Unnamed(FunctionArgExpr::Expr(_)) => {}
+                        _ => bail!("{}: unexpected argument type", arglist.args[0]),
+                    }
+                } else {
+                    bail!(
+                        "expected one argument for `{}`, found `{}`",
+                        funcall,
+                        funcall.args
+                    );
+                }
+            }
 
             Expr::Value(v) => match v {
-                Value::Placeholder(_) | Value::Number(_, _) | Value::Boolean(_) => {}
+                Value::Number(_, _) | Value::Boolean(_) => {}
+                Value::Placeholder(p) => {
+                    ensure!(parse_placeholder(p).is_ok(), "{}: invalid placeholder", p)
+                }
                 Value::HexStringLiteral(s) => ensure!(s.len() <= 32, "{s}: more than 32 bytes"),
                 Value::SingleQuotedString(_)
                 | Value::DollarQuotedString(_)
@@ -112,6 +140,7 @@ impl AstPass for Validator {
             }
 
             Expr::AnyOp { .. }
+            | Expr::Tuple(_)
             | Expr::AllOp { .. }
             | Expr::InSubquery { .. }
             | Expr::InUnnest { .. }
