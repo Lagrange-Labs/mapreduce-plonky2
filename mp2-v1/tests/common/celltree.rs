@@ -248,7 +248,7 @@ impl<P: ProofStorage> TestContext<P> {
                     // only move the cells tree proof of the actual cells, not the secondary index !
                     // CellsCollection is a bit weird because it has to contain as well the secondary
                     // index to be able to search in it in JSON
-                    if *id != table.columns.secondary_column().identifier {
+                    if *id == table.columns.secondary_column().identifier {
                         return (*id, new_cell);
                     }
 
