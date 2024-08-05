@@ -244,7 +244,11 @@ impl Table {
     }
 
     // apply the transformation directly to the row tree to get the update plan and the new
-    pub fn apply_row_update(&mut self, updates: Vec<TreeRowUpdate>) -> Result<RowUpdateResult> {
+    pub fn apply_row_update(
+        &mut self,
+        new_primary: BlockPrimaryIndex,
+        updates: Vec<TreeRowUpdate>,
+    ) -> Result<RowUpdateResult> {
         let out = self
             .row
             .in_transaction(move |t| {
@@ -261,6 +265,28 @@ impl Table {
                     }
                 }
                 Ok(())
+            })
+            .map(|plan| {
+                self.row
+                    .in_transaction(|t| {
+                        for key in plan.impacted_keys() {
+                            let mut row_payload = t.fetch(&key);
+                            let mut cell_info = row_payload
+                                .cells
+                                .find_by_column(row_payload.secondary_index_column)
+                                .unwrap()
+                                .clone();
+                            cell_info.primary = new_primary;
+                            row_payload.cells.update_column(
+                                row_payload.secondary_index_column,
+                                cell_info.clone(),
+                            );
+                            t.update(key, row_payload)?;
+                        }
+                        Ok(())
+                    })
+                    .expect("unable to re-update row tree");
+                plan
             })
             .map(|plan| RowUpdateResult { updates: plan });
         {
