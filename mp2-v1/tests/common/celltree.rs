@@ -248,7 +248,7 @@ impl<P: ProofStorage> TestContext<P> {
                 // index to be able to search in it in JSON
                 .filter(|(id, _)| **id != table.columns.secondary_column().identifier)
                 .map(|(id, cell_info)| {
-                                        let tree_key = table.columns.cells_tree_index_of(*id);
+                    let tree_key = table.columns.cells_tree_index_of(*id);
                     let mut new_cell = cell_info.clone();
                     println!(
                         " --- CELL TREE key {} index of {id} vs secondary id {} vs table.secondary_id {}",
@@ -304,7 +304,7 @@ impl<P: ProofStorage> TestContext<P> {
                 .columns
                 .column_id_of_cells_index(root_key)
                 .expect("unable to find column id of root cells"),
-            cells: all_cells,
+            cells: updated_cells,
             ..Default::default()
         }
     }

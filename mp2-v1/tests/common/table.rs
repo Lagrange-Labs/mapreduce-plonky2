@@ -90,6 +90,7 @@ impl TableColumns {
                 .iter()
                 .enumerate()
                 .find(|(_, c)| c.identifier == identifier)
+                // + 1 because sbbst starts at 1 not zero
                 .map(|(i, _)| i+1)
                 .expect("can't find index of identfier"),
         }
@@ -217,11 +218,9 @@ impl Table {
                         cell::MerkleCell::new(new_cell.id, new_cell.value, update.primary);
                     println!(
                         " --- TREE: inserting rest-cell: (index {}) : {:?}",
-                        self.columns.cells_tree_index_of(new_cell.id) + 1,
+                        self.columns.cells_tree_index_of(new_cell.id),
                         merkle_cell
                     );
-                    // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
-                    // but we put + 1 because sbbst starts at +1
                     let cell_key = self.columns.cells_tree_index_of(new_cell.id);
                     match update_type {
                         TreeUpdateType::Update => t.update(cell_key, merkle_cell)?,
