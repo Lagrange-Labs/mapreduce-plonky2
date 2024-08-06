@@ -932,7 +932,7 @@ mod tests {
 
     // test the following query:
     // SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99
-    fn query_with_aggregation(build_parameters: bool) {
+    async fn query_with_aggregation(build_parameters: bool) {
         init_logging();
         const NUM_ACTUAL_COLUMNS: usize = 5;
         const MAX_NUM_COLUMNS: usize = 30;
@@ -1136,7 +1136,7 @@ mod tests {
             .skip(2)
             .map(|(value, id)| TestCell::new(*value, *id))
             .collect_vec();
-        let mut tree_hash = compute_cells_tree_hash(&cells);
+        let mut tree_hash = compute_cells_tree_hash(cells).await;
         if is_leaf {
             tree_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(
                 &empty_poseidon_hash()
@@ -1239,19 +1239,19 @@ mod tests {
         assert_eq!(predicate_err || result_err, pi.overflow_flag());
     }
 
-    #[test]
-    fn test_query_with_aggregation() {
-        query_with_aggregation(false)
+    #[tokio::test]
+    async fn test_query_with_aggregation() {
+        query_with_aggregation(false).await
     }
 
-    #[test]
-    fn test_parameters_query_with_aggregation() {
-        query_with_aggregation(true)
+    #[tokio::test]
+    async fn test_parameters_query_with_aggregation() {
+        query_with_aggregation(true).await
     }
 
     // test the following query:
     // SELECT C1 < C2/45, C3*C4, C7, (C5-C6)%C1, C3*C4 - $1 FROM T WHERE ((NOT C5 != 42) OR C1*C7 <= C4/C6+C5 XOR C3 < $2) AND C2 > 42 AND C2 < 44
-    fn query_without_aggregation(single_result: bool, build_parameters: bool) {
+    async fn query_without_aggregation(single_result: bool, build_parameters: bool) {
         init_logging();
         const NUM_ACTUAL_COLUMNS: usize = 7;
         const MAX_NUM_COLUMNS: usize = 30;
@@ -1483,7 +1483,7 @@ mod tests {
             .skip(2)
             .map(|(value, id)| TestCell::new(*value, *id))
             .collect_vec();
-        let mut tree_hash = compute_cells_tree_hash(&cells);
+        let mut tree_hash = compute_cells_tree_hash(cells).await;
         if is_leaf {
             tree_hash = hash_n_to_hash_no_pad::<_, HashPermutation>(
                 &empty_poseidon_hash()
@@ -1536,8 +1536,12 @@ mod tests {
                     )
                     .chain(
                         compute_cells_tree_hash(
-                            out_cells.get(COLUMN_INDEX_NUM..).unwrap_or_default(),
+                            out_cells
+                                .get(COLUMN_INDEX_NUM..)
+                                .unwrap_or_default()
+                                .to_vec(),
                         )
+                        .await
                         .to_vec(),
                     )
                     .collect_vec(),
@@ -1615,18 +1619,18 @@ mod tests {
         assert_eq!(predicate_err || result_err, pi.overflow_flag());
     }
 
-    #[test]
-    fn test_query_without_aggregation() {
-        query_without_aggregation(false, false)
+    #[tokio::test]
+    async fn test_query_without_aggregation() {
+        query_without_aggregation(false, false).await
     }
 
-    #[test]
-    fn test_query_without_aggregation_single_output() {
-        query_without_aggregation(true, false)
+    #[tokio::test]
+    async fn test_query_without_aggregation_single_output() {
+        query_without_aggregation(true, false).await
     }
 
-    #[test]
-    fn test_parameters_query_no_aggregation() {
-        query_without_aggregation(false, true)
+    #[tokio::test]
+    async fn test_parameters_query_no_aggregation() {
+        query_without_aggregation(false, true).await
     }
 }

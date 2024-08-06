@@ -2,12 +2,14 @@
 
 use crate::{array::Array, D};
 use anyhow::ensure;
+use derive_more::Deref;
 use plonky2::{
     field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},
     iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use serde::{Deserialize, Serialize};
 
 /// Default field
 pub type GFp = GoldilocksField;
@@ -55,7 +57,8 @@ pub type PackedMappingKeyTarget = Array<U32Target, PACKED_MAPPING_KEY_LEN>;
 
 /// Regular hash output function - it can be generated from field elements using
 /// poseidon with the output serialized or via regular hash functions.
-pub struct HashOutput([u8; 32]);
+#[derive(Clone, Default, Debug, Serialize, Deserialize, Deref, PartialEq, Eq)]
+pub struct HashOutput(pub [u8; 32]);
 
 /// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
 /// since it still has to do 5 rounds in 622 or 650.

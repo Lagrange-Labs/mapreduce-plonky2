@@ -57,6 +57,8 @@ pub fn deserialize<'a, T: FromBytes, D: Deserializer<'a>>(deserializer: D) -> Re
 
 /// `serialize_array` allows to serialize an array with `N` elements of type `T: ToBytes` employing a serde serializer;
 /// Can be employed to derive `Serialize` if `T` does not implement `Serialize` with the `serialize_with` annotation
+/// This function could handle for arrays longer than `32` elements, it requires `T: ToBytes`, which is the only
+/// difference with `serialize_long_array`.
 pub fn serialize_array<T: ToBytes, S: Serializer, const N: usize>(
     input: &[T; N],
     serializer: S,
@@ -67,6 +69,8 @@ pub fn serialize_array<T: ToBytes, S: Serializer, const N: usize>(
 
 /// `deserialize_array` allows to deserialize an array with `N` elements of type `T: FromBytes` employing a serde deserializer;
 /// Can be employed to derive `Deserialize` if `T` does not implement `Deserialize` with the `deserialize_with` annotation
+/// This function could handle for arrays longer than `32` elements, it requires `T: ToBytes`, which is the only
+/// difference with `deserialize_long_array`.
 pub fn deserialize_array<'a, T: FromBytes, D: Deserializer<'a>, const N: usize>(
     deserializer: D,
 ) -> Result<[T; N], D::Error> {

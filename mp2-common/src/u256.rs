@@ -584,16 +584,33 @@ impl UInt256Target {
                 })?,
         ))
     }
+    /// Initialize a `UInt256Target` from a target within the range of Uint32 without range check
+    pub fn new_from_target_unsafe<F: SerializableRichField<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        target: Target,
+    ) -> Self {
+        let limbs = repeat(b.zero_u32())
+            .take(NUM_LIMBS - 1)
+            .chain(once(U32Target::from_target(target)))
+            .collect_vec();
+        Self::new_from_be_limbs(&limbs).unwrap()
+    }
+    /// Initialize a `UInt256Target` from a target within the range of Uint32 with range check
+    pub fn new_from_target<F: SerializableRichField<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        target: Target,
+    ) -> Self {
+        // Check if the target is within the range of Uint32.
+        b.range_check(target, 32);
+
+        Self::new_from_target_unsafe(b, target)
+    }
     /// Initialize a `UInt256Target` from a target representing a single bit
     pub fn new_from_bool_target<F: SerializableRichField<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         target: BoolTarget,
     ) -> Self {
-        let limbs = repeat(b.zero_u32())
-            .take(NUM_LIMBS - 1)
-            .chain(once(U32Target::from_target(target.target)))
-            .collect_vec();
-        Self::new_from_be_limbs(&limbs).unwrap()
+        Self::new_from_target_unsafe(b, target.target)
     }
     /// Take a `UInt256Target` which is assumed to represent a single bit and convert it to
     /// a `BoolTarget`. Note that this method assumes that the input `UInt256Target` is either

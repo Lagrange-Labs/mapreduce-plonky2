@@ -2,8 +2,11 @@
 
 use std::str::FromStr;
 
-use super::{storage_trie::TestStorageTrie, TestContext};
-use alloy::primitives::Address;
+use super::{proof_storage::ProofStorage, storage_trie::TestStorageTrie, TestContext};
+use alloy::{
+    eips::BlockNumberOrTag,
+    primitives::{Address, U256},
+};
 use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
@@ -16,15 +19,13 @@ use plonky2::field::types::Field;
 
 type MappingKey = Vec<u8>;
 
-impl TestContext {
+impl<P: ProofStorage> TestContext<P> {
     /// Generate the Values Extraction (C.1) proof for single variables.
     pub(crate) async fn prove_single_values_extraction(
         &self,
-        contract_address: &str,
+        contract_address: &Address,
         slots: &[u8],
-    ) -> ProofWithVK {
-        let contract_address = Address::from_str(contract_address).unwrap();
-
+    ) -> Vec<u8> {
         // Initialize the test trie.
         let mut trie = TestStorageTrie::new();
         info!("Initialized the test storage trie");
@@ -36,7 +37,7 @@ impl TestContext {
         }
 
         info!("Prove the test storage trie including the simple slots {slots:?}");
-        let proof_value = trie.prove_value(&contract_address, self.params());
+        let proof_value = trie.prove_value(contract_address, self.params());
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof_value.proof().public_inputs);
@@ -54,31 +55,32 @@ impl TestContext {
             assert_eq!(ptr, F::NEG_ONE);
         }
 
-        proof_value
+        proof_value.serialize().unwrap()
     }
 
     /// Generate the Values Extraction (C.1) proof for mapping variables.
     pub(crate) async fn prove_mapping_values_extraction(
         &self,
-        contract_address: &str,
+        contract_address: &Address,
         slot: u8,
         mapping_keys: Vec<MappingKey>,
-    ) -> ProofWithVK {
+    ) -> Vec<u8> {
         let slot = slot as usize;
-        let contract_address = Address::from_str(contract_address).unwrap();
 
         let first_mapping_key = mapping_keys[0].clone();
         let storage_slot_number = mapping_keys.len();
 
         // Initialize the test trie.
         let mut trie = TestStorageTrie::new();
-        info!("Initialized the test storage trie");
+        info!("mapping mpt proving: Initialized the test storage trie");
 
         // Query the slot and add the node path to the trie.
         for mapping_key in mapping_keys {
-            info!("Query the mapping slot ({slot}, {mapping_key:?})");
-            let query = ProofQuery::new_mapping_slot(contract_address, slot, mapping_key.clone());
-            let response = self.query_mpt_proof(&query, self.get_block_number()).await;
+            let query =
+                ProofQuery::new_mapping_slot(contract_address.clone(), slot, mapping_key.clone());
+            let response = self
+                .query_mpt_proof(&query, BlockNumberOrTag::Number(self.block_number().await))
+                .await;
 
             // Get the nodes to prove. Reverse to the sequence from leaf to root.
             let nodes: Vec<_> = response.storage_proof[0]
@@ -88,10 +90,15 @@ impl TestContext {
                 .map(|node| node.to_vec())
                 .collect();
 
-            let slot = StorageSlot::Mapping(mapping_key, slot);
-            info!("Save the mapping slot {slot:?} to the test storage trie");
+            let sslot = StorageSlot::Mapping(mapping_key.clone(), slot);
+            info!(
+                "Save the mapping key {:?} (value {}) on slot {} to the test storage trie",
+                U256::from_be_slice(&mapping_key),
+                response.storage_proof[0].value,
+                slot
+            );
 
-            trie.add_slot(slot, nodes);
+            trie.add_slot(sslot, nodes);
         }
 
         info!("Prove the test storage trie including the mapping slots ({slot}, ...)");
@@ -113,6 +120,6 @@ impl TestContext {
             assert_eq!(ptr, F::NEG_ONE);
         }
 
-        proof
+        proof.serialize().expect("can't serialize mpt proof")
     }
 }

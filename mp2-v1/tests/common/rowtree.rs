@@ -1,250 +1,162 @@
 use alloy::primitives::U256;
 use anyhow::*;
-use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, F};
-use mp2_test::cells_tree::TestCell as Cell;
-use mp2_v1::api::{self, CircuitInput};
-use plonky2::{
-    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
-    plonk::config::Hasher,
+use log::debug;
+use mp2_common::proof::ProofWithVK;
+use mp2_v1::{
+    api::{self, CircuitInput},
+    indexing::{
+        block::BlockPrimaryIndex,
+        cell::Cell,
+        index::IndexNode,
+        row::{RowPayload, RowTree, RowTreeKey, ToNonce},
+    },
 };
+use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{
         memory::InMemory,
         updatetree::{Next, UpdateTree},
-        EpochKvStorage, TreeTransactionalStorage,
+        RoEpochKvStorage,
     },
-    tree::{
-        scapegoat::{self, Alpha},
-        TreeTopology,
-    },
-    InitSettings, MerkleTreeKvDb, NodePayload,
+    MerkleTreeKvDb,
 };
-use serde::{Deserialize, Serialize};
+use verifiable_db::{cells_tree, row_tree::extract_hash_from_proof};
 
 use crate::common::row_tree_proof_to_hash;
 
 use super::{
-    proof_storage::{
-        BlockPrimaryIndex, CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier, TableID,
-    },
+    proof_storage::{CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier},
+    table::{RowUpdateResult, Table},
     TestContext,
 };
 
-/// A unique identifier in a row tree
-#[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct RowTreeKey {
-    /// Value of the secondary index of the row
-    pub value: U256,
-    /// Enumerated index of the row in the virtual table
-    pub id: usize,
-}
+pub type RowTreeKeyNonce = Vec<u8>;
 
-/// Represent a row in one of the virtual tables stored in the zkDB; which
-/// encapsulates its cells and the tree they form.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Row {
-    /// A key *uniquely* representing this row in the row tree.
-    ///
-    /// NOTE: this key is **not** the index as understood in the crypto
-    /// formalization.
-    pub k: RowTreeKey,
-    pub cells: Vec<Cell>,
-    /// Storing the full identifier of the cells proof of the root of the cells tree.
-    /// Note this identifier can refer to a proof for older blocks if the cells tree didn't change
-    pub cell_tree_root_proof_id: CellProofIdentifier<BlockPrimaryIndex>,
-    /// Storing the hash of the root of the cells tree. Once could get it as well from the proof
-    /// but it requires loading the proof, so when building the hashing structure it's best
-    /// to keep it at hand directly.
-    pub cell_tree_root_hash: HashOut<F>,
-    /// Min sec. index value of the subtree below this node
-    pub min: U256,
-    /// Max sec. index value "  "   "       "     "    "
-    pub max: U256,
-    /// Hash of this node
-    pub hash: HashOut<F>,
-}
-impl Row {
-    /// Return the [`Cell`] containing the sec. index of this row.
-    pub fn secondary_index(&self) -> &Cell {
-        &self.cells[0]
+/// Simply a struct useful to transmit around when dealing with the secondary index value, since
+/// the unique nonce must be kept around as well. It is not saved anywhere nor proven.
+#[derive(PartialEq, Eq, Default, Debug, Clone)]
+pub struct SecondaryIndexCell(Cell, RowTreeKeyNonce);
+impl SecondaryIndexCell {
+    pub fn new_from<T: ToNonce>(c: Cell, nonce: T) -> Self {
+        Self(c, nonce.to_nonce())
     }
-}
-impl NodePayload for Row {
-    fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
-        let children = children.into_iter().collect::<Vec<_>>();
-        assert_eq!(children.len(), 2);
 
-        self.hash = match [&children[0], &children[1]] {
-            [None, None] => {
-                self.min = self.secondary_index().value.clone();
-                self.max = self.secondary_index().value.clone();
-                let to_hash =
-                    // 2 × P("")
-                    empty_poseidon_hash()
-                    .to_fields()
-                    .into_iter()
-                    .chain(empty_poseidon_hash().to_fields().into_iter())
-                    // P(min) = P(max) = P(value)
-                    .chain(self.min.to_fields().into_iter())
-                    .chain(self.max.to_fields().into_iter())
-                    // P(id)
-                    .chain(std::iter::once(self.secondary_index().id))
-                    // P(value)
-                    .chain(self.secondary_index().value.to_fields().into_iter())
-                    // P(cell_tree_hash)
-                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
-                    .collect::<Vec<_>>();
-                hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
-            }
-            [None, Some(right)] => {
-                self.min = self.secondary_index().value.clone();
-                self.max = right.max.clone();
-                let to_hash =
-                    // P(leftH) = ""
-                    empty_poseidon_hash()
-                    .to_fields()
-                    .into_iter()
-                    // P(rightH)
-                    .chain(right.hash.elements.into_iter())
-                    // P(min)
-                    .chain(self.min.to_fields().into_iter())
-                    // P(max)
-                    .chain(self.max.to_fields().into_iter())
-                    // P(id)
-                    .chain(std::iter::once(self.secondary_index().id))
-                    // P(value)
-                    .chain(self.secondary_index().value.to_fields().into_iter())
-                    // P(cell_tree_hash)
-                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
-                    .collect::<Vec<_>>();
-                hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
-            }
-            [Some(left), None] => {
-                self.min = left.min.clone();
-                self.max = self.secondary_index().value.clone();
-                let to_hash =
-                    // P(leftH")
-                    left.hash.elements.into_iter()
-                    // P(rightH) = ""
-                    .chain(empty_poseidon_hash()
-                    .to_fields()
-                    .into_iter())
-                    // P(min)
-                    .chain(self.min.to_fields().into_iter())
-                    // P(max)
-                    .chain(self.max.to_fields().into_iter())
-                    // P(id)
-                    .chain(std::iter::once(self.secondary_index().id))
-                    // P(value)
-                    .chain(self.secondary_index().value.to_fields().into_iter())
-                    // P(cell_tree_hash)
-                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
-                    .collect::<Vec<_>>();
-                hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
-            }
-            [Some(left), Some(right)] => {
-                self.min = left.min.clone();
-                self.max = right.max.clone();
-                let to_hash =
-                    // P(leftH)
-                    left.hash.elements.into_iter()
-                    // P(rightH)
-                    .chain(right.hash.elements.into_iter())
-                    // P(min)
-                    .chain(self.min.to_fields().into_iter())
-                    // P(max)
-                    .chain(self.max.to_fields().into_iter())
-                    // P(id)
-                    .chain(std::iter::once(self.secondary_index().id))
-                    // P(value)
-                    .chain(self.secondary_index().value.to_fields().into_iter())
-                    // P(cell_tree_hash)
-                    .chain(self.cell_tree_root_hash.to_fields().into_iter())
-                    .collect::<Vec<_>>();
-                hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&to_hash)
-            }
-        };
+    pub fn cell(&self) -> Cell {
+        self.0.clone()
+    }
+    pub fn rest(&self) -> RowTreeKeyNonce {
+        self.1.clone()
     }
 }
 
-pub type RowTree = scapegoat::Tree<RowTreeKey>;
-type RowStorage = InMemory<RowTree, Row>;
-pub type MerkleRowTree = MerkleTreeKvDb<RowTree, Row, RowStorage>;
-
-/// Given a list of row, build the Merkle tree of the secondary index and
-/// returns it along its update tree.
-pub async fn build_row_tree(rows: &[Row]) -> Result<(MerkleRowTree, UpdateTree<RowTreeKey>)> {
-    let mut row_tree = MerkleRowTree::new(
-        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
-        (),
-    )
-    .context("while creating row tree instance")?;
-
-    let update_tree = row_tree
-        .in_transaction(|t| {
-            for row in rows.iter() {
-                t.store(row.k.to_owned(), row.to_owned())?;
-            }
-            Ok(())
-        })
-        .context("while filling row tree initial state")?;
-
-    Ok((row_tree, update_tree))
+impl From<SecondaryIndexCell> for RowTreeKey {
+    fn from(value: SecondaryIndexCell) -> Self {
+        RowTreeKey {
+            value: value.0.value(),
+            rest: value.1,
+        }
+    }
 }
 
-impl TestContext {
+impl From<&SecondaryIndexCell> for RowTreeKey {
+    fn from(value: &SecondaryIndexCell) -> Self {
+        RowTreeKey {
+            value: value.0.value(),
+            rest: value.1.clone(),
+        }
+    }
+}
+
+type RowStorage = InMemory<RowTree, RowPayload<BlockPrimaryIndex>>;
+pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>;
+
+impl<P: ProofStorage> TestContext<P> {
     /// Given a row tree (i.e. secondary index tree) and its update tree, prove
     /// it.
-    pub async fn prove_row_tree<P: ProofStorage>(
-        &self,
-        table_id: &TableID,
-        t: &MerkleRowTree,
-        ut: UpdateTree<<RowTree as TreeTopology>::Key>,
-        storage: &mut P,
-    ) -> RowProofIdentifier<BlockPrimaryIndex> {
+    pub async fn prove_row_tree(
+        &mut self,
+        // required to fetch the right row tree proofs during the update, since the key
+        // itself is not enough, since there might be multiple proofs with the same key but not
+        // for the same block (i.e. not the same data)
+        primary: BlockPrimaryIndex,
+        table: &Table,
+        ut: UpdateTree<RowTreeKey>,
+    ) -> Result<RowProofIdentifier<BlockPrimaryIndex>> {
+        debug!("PROVE_ROW_TREE -- BEGIN for block {}", primary);
+        let t = &table.row;
         let mut workplan = ut.into_workplan();
-        // THIS can panic but for block number it should be fine on 64bit platforms...
-        // unwrap is safe since we know it is really a block number and not set to Latest or stg
-        let block_key: BlockPrimaryIndex =
-            self.block_number.as_number().unwrap().try_into().unwrap();
-
         while let Some(Next::Ready(k)) = workplan.next() {
-            let (context, row) = t.fetch_with_context(&k);
-            // NOTE: the sec. index. is assumed to be in the first position
-            // Sec. index identifier
-            let id = row.secondary_index().id;
+            let (context, row) = t.fetch_with_context(&k).await;
+            let id = row.secondary_index_column;
             // Sec. index value
-            let value = row.secondary_index().value;
-
-            let cell_tree_proof = storage
-                .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
+            let value = row.secondary_index_value();
+            // find where the root cells proof has been stored. This comes from looking up the
+            // column id, then searching for the cell info in the row payload about this
+            // identifier. We now have the primary index for which the cells proof have been
+            // generated.
+            let cell_root_primary = row.fetch_cell_root_info().primary;
+            let cell_proof_key = CellProofIdentifier {
+                table: table.id.clone(),
+                primary: cell_root_primary,
+                tree_key: row.cell_root_key,
+                secondary: k.clone(), // the cells proofs is already stored under the new key, even in the
+                                      // case of a fresh row, see celltree.rs for more info, see
+                                      // celltree.rs for more info
+            };
+            let cell_tree_proof = self
+                .storage
+                .get_proof_exact(&ProofKey::Cell(cell_proof_key))
                 .expect("should find cell root proof");
+            debug!(
+                "After fetching cell proof for row key {:?} & primary {}",
+                k, primary
+            );
+            let cell_root_hash_from_proof = cells_tree::extract_hash_from_proof(&cell_tree_proof)
+                .unwrap()
+                .to_bytes();
+            let cell_root_hash_from_row = row.cell_root_hash.clone();
+            assert_eq!(
+                hex::encode(cell_root_hash_from_proof.clone()),
+                hex::encode(cell_root_hash_from_row.0),
+                "cell root proof from proof vs row is different - cell root info = {:?}, row {:?}",
+                row.fetch_cell_root_info(),
+                row.cells,
+            );
+
             let proof = if context.is_leaf() {
                 // Prove a leaf
+                println!(
+                    " \n PROVING ROW --> id {:?}, value {:?}, cell_tree_proof hash {:?}",
+                    id,
+                    value,
+                    hex::encode(cell_root_hash_from_proof.clone())
+                );
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
                         .unwrap(),
                 );
+                debug!("Before proving leaf node row tree key {:?}", k);
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.is_partial() {
+                let child_key = context
+                    .left
+                    .as_ref()
+                    .or(context.right.as_ref())
+                    .cloned()
+                    .unwrap();
+                let child_row = table.row.fetch(&child_key).await;
+
                 let proof_key = RowProofIdentifier {
-                    table: table_id.clone(),
-                    primary: block_key,
-                    tree_key: context
-                        .left
-                        .as_ref()
-                        .or(context.right.as_ref())
-                        .cloned()
-                        .unwrap(),
+                    table: table.id.clone(),
+                    primary: child_row.primary_index_value(),
+                    tree_key: child_key,
                 };
                 // Prove a partial node
-                let child_proof = storage
-                    .get_proof(&ProofKey::Row(proof_key))
+                let child_proof = self
+                    .storage
+                    .get_proof_exact(&ProofKey::Row(proof_key.clone()))
                     .expect("UT guarantees proving in order");
 
-                let cell_tree_proof = storage
-                    .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id))
-                    .expect("should find cells tree root proof");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::partial(
                         id,
@@ -256,28 +168,32 @@ impl TestContext {
                     .unwrap(),
                 );
 
+                debug!("Before proving partial node row tree key");
                 api::generate_proof(self.params(), inputs).expect("while proving partial node")
             } else {
+                let left_key = context.left.unwrap();
+                let left_row = table.row.fetch(&left_key).await;
                 let left_proof_key = RowProofIdentifier {
-                    table: table_id.clone(),
-                    primary: block_key,
-                    tree_key: context.left.unwrap(),
+                    table: table.id.clone(),
+                    primary: left_row.primary_index_value(),
+                    tree_key: left_key,
                 };
+                let right_key = context.right.unwrap();
+                let right_row = table.row.fetch(&right_key).await;
                 let right_proof_key = RowProofIdentifier {
-                    table: table_id.clone(),
-                    primary: block_key,
-                    tree_key: context.right.unwrap(),
+                    table: table.id.clone(),
+                    primary: right_row.primary_index_value(),
+                    tree_key: right_key,
                 };
-                let cell_tree_proof = storage
-                    .get_proof(&ProofKey::Cell(row.cell_tree_root_proof_id.clone()))
-                    .expect("should find cells tree root proof");
 
-                // Prove a full node.
-                let left_proof = storage
-                    .get_proof(&ProofKey::Row(left_proof_key))
+                // Prove a full node: fetch the row proofs of the children
+                let left_proof = self
+                    .storage
+                    .get_proof_exact(&ProofKey::Row(left_proof_key.clone()))
                     .expect("UT guarantees proving in order");
-                let right_proof = storage
-                    .get_proof(&ProofKey::Row(right_proof_key))
+                let right_proof = self
+                    .storage
+                    .get_proof_exact(&ProofKey::Row(right_proof_key.clone()))
                     .expect("UT guarantees proving in order");
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::full(
@@ -289,59 +205,88 @@ impl TestContext {
                     )
                     .unwrap(),
                 );
+                debug!("Before proving full node row tree key {:?}", k);
                 api::generate_proof(self.params(), inputs).expect("while proving full node")
             };
             let new_proof_key = RowProofIdentifier {
-                table: table_id.clone(),
-                primary: block_key,
+                table: table.id.clone(),
+                // we save the new proof under the new row key
+                primary,
                 tree_key: k.clone(),
             };
 
-            storage
-                .store_proof(ProofKey::Row(new_proof_key), proof)
+            self.storage
+                .store_proof(ProofKey::Row(new_proof_key.clone()), proof.clone())
                 .expect("storing should work");
 
+            debug!(
+                "Finished row tree key proving {k:?} - stored under proof key {:?} with hash {:?}",
+                new_proof_key,
+                hex::encode(extract_hash_from_proof(&proof).unwrap().to_bytes())
+            );
             workplan.done(&k).unwrap();
         }
-        let root = t.root().unwrap();
+        let root = t.root().await.unwrap();
+        let row = table.row.fetch(&root).await;
         let root_proof_key = RowProofIdentifier {
-            table: table_id.clone(),
-            primary: block_key,
+            table: table.id.clone(),
+            primary: row.primary_index_value(),
             tree_key: root,
         };
 
-        storage
-            .get_proof(&ProofKey::Row(root_proof_key.clone()))
+        let p = self
+            .storage
+            .get_proof_exact(&ProofKey::Row(root_proof_key.clone()))
             .expect("row tree root proof absent");
-        root_proof_key
+
+        let pproof = ProofWithVK::deserialize(&p).unwrap();
+        let pi = verifiable_db::row_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
+        debug!(
+            "[--] FINAL MERKLE DIGEST VALUE --> {:?} ",
+            pi.rows_digest_field()
+        );
+        if root_proof_key.primary != primary {
+            debug!("[--] NO UPDATES on row this turn? row.root().primary = {} vs new primary proving step {}",root_proof_key.primary,primary);
+        };
+
+        debug!("PROVE_ROW_TREE -- END for block {}", primary);
+        Ok(root_proof_key)
     }
 
     /// Build and prove the row tree from the [`Row`]s and the secondary index
-    /// data (which **must be absent** from the rows), returning its proof.
-    pub async fn build_and_prove_rowtree<P: ProofStorage>(
-        &self,
-        table_id: &TableID,
-        rows: &[Row],
-        storage: &mut P,
-    ) -> RowProofIdentifier<BlockPrimaryIndex> {
-        let (row_tree, row_tree_ut) = build_row_tree(rows)
-            .await
-            .expect("failed to create row tree");
-        let root_proof_key = self
-            .prove_row_tree(table_id, &row_tree, row_tree_ut, storage)
-            .await;
-        let row_tree_proof = storage
-            .get_proof(&ProofKey::Row(root_proof_key.clone()))
+    /// data (which **must be absent** from the rows).
+    /// Returns the identifier of the root proof and the hash of the updated row tree
+    /// NOTE:we are simplifying a bit here as we assume the construction of the index tree
+    /// is from (a) the block and (b) only one by one, i.e. there is only one IndexNode to return
+    /// that have to be inserted. For CSV case, it should return a vector of new inserted nodes.
+    pub async fn prove_update_row_tree(
+        &mut self,
+        primary: BlockPrimaryIndex,
+        table: &Table,
+        update: RowUpdateResult,
+    ) -> Result<IndexNode<BlockPrimaryIndex>> {
+        let root_proof_key = self.prove_row_tree(primary, table, update.updates).await?;
+        let row_tree_proof = self
+            .storage
+            .get_proof_exact(&ProofKey::Row(root_proof_key.clone()))
             .unwrap();
-
-        let tree_hash = row_tree.root_data().unwrap().hash;
+        let root_row = table.row.root_data().await.unwrap();
+        let tree_hash = root_row.hash.clone();
         let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
 
         assert_eq!(
-            tree_hash, proved_hash,
-            "mismatch between row tree root hash as computed by ryhope and mp2",
-        );
+            hex::encode(tree_hash.0), hex::encode(proved_hash.0),
+            "mismatch between row tree root hash as computed by ryhope and mp2 (row.id {:?}, value {:?} , row.cell_hash {:?})",
+            root_row.secondary_index_column, root_row.secondary_index_value(),hex::encode(root_row.cell_root_hash.0)
 
-        root_proof_key
+        );
+        Ok(IndexNode {
+            identifier: table.columns.primary_column().identifier,
+            value: U256::from(primary).into(),
+            row_tree_root_key: root_proof_key.tree_key,
+            row_tree_hash: table.row.root_data().await.unwrap().hash,
+            row_tree_root_primary: primary,
+            ..Default::default()
+        })
     }
 }
