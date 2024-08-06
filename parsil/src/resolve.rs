@@ -30,30 +30,6 @@ use crate::{
     visitor::{AstPass, Visit},
 };
 
-// NOTE: not yet used
-// struct Leafer<'a, C: RootContextProvider> {
-//     resolver: &'a Resolver<C>,
-//     leafs: Vec<Symbol>,
-// }
-// impl<'a, C: RootContextProvider> Leafer<'a, C> {
-//     fn new(resolver: &'a Resolver<C>) -> Self {
-//         Self {
-//             resolver,
-//             leafs: Vec::new(),
-//         }
-//     }
-// }
-// impl<'a, C: RootContextProvider> AstPass for Leafer<'a, C> {
-//     fn pre_expr(&mut self, expr: &mut Expr) -> Result<()> {
-//         match expr {
-//             Expr::Identifier(e) => self.leafs.push(self.resolver.resolve_freestanding(e)?),
-//             Expr::CompoundIdentifier(c) => self.leafs.push(self.resolver.resolve_compound(c)?),
-//             _ => {}
-//         }
-//         Ok(())
-//     }
-// }
-
 /// A Wire carry data that can be injected in universal query circuits. It
 /// carries an index, whose sginification depends on the type of wire.
 #[derive(Debug, Clone, PartialEq)]
@@ -410,48 +386,6 @@ struct CircuitPis {
 }
 
 impl<C: RootContextProvider> AstPass for Resolver<C> {
-    // NOTE: will be used later
-    // fn post_expr(&mut self, e: &mut Expr) -> Result<()> {
-    //     match e {
-    //         // Identifier must be converted to JSON accesses into the ryhope tables.
-    //         Expr::Identifier(symbol) => {
-    //             if let Symbol::Column { target, .. } = self.resolve_freestanding(symbol)? {
-    //                 *e = if let Handle::Qualified { table, name } = target {
-    //                     Expr::BinaryOp {
-    //                         left: Box::new(Expr::CompoundIdentifier(
-    //                             [Ident::new(table), Ident::new("payload")].to_vec(),
-    //                         )),
-    //                         op: sqlparser::ast::BinaryOperator::Arrow,
-    //                         right: Box::new(Expr::Identifier(Ident::with_quote('\'', name))),
-    //                     }
-    //                 } else {
-    //                     unreachable!()
-    //                 }
-    //             }
-    //         }
-    //         // Qualified identifiers must be converted to JSON accesses into the ryhope tables.
-    //         Expr::CompoundIdentifier(compound) => {
-    //             if let Symbol::Column { target, .. } = self.resolve_compound(compound)? {
-    //                 *e = if let Handle::Qualified { table, name } = target {
-    //                     Expr::BinaryOp {
-    //                         left: Box::new(Expr::CompoundIdentifier(
-    //                             [Ident::new(table), Ident::new("payload")].to_vec(),
-    //                         )),
-    //                         op: sqlparser::ast::BinaryOperator::Arrow,
-    //                         right: Box::new(Expr::Identifier(Ident::with_quote('\'', name))),
-    //                     }
-    //                 } else {
-    //                     unreachable!()
-    //                 }
-    //             }
-    //         }
-    //         // Function call must be validated
-    //         Expr::Function(f) => self.resolve_function(f)?,
-    //         _ => {}
-    //     }
-    //     Ok(())
-    // }
-
     fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
         match &table_factor {
             TableFactor::Table {

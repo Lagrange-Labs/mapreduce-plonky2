@@ -451,7 +451,7 @@ impl<M: Debug + Default, P: Debug + Clone> ScopeTable<M, P> {
     }
 
     /// Ensure that the given function call is valid.
-    fn resolve_function(&self, f: &Function) -> Result<()> {
+    pub fn resolve_function(&self, f: &Function) -> Result<()> {
         ensure!(f.name.0.len() == 1, "{}: unknown function `{}`", f, f.name);
 
         let fname = &f.name.0[0];

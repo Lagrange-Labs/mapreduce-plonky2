@@ -1,6 +1,7 @@
 use anyhow::Result;
 use sqlparser::ast::Query;
 
+mod executor;
 mod expand;
 mod parser;
 mod resolve;
