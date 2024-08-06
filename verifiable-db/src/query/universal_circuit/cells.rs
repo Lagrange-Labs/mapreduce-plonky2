@@ -1,6 +1,5 @@
 //! Cells tree utilities for query circuit
 
-use itertools::Itertools;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
     types::CBuilder,
@@ -19,8 +18,6 @@ use ryhope::{
 };
 use serde::{Deserialize, Serialize};
 use std::iter::{self, once};
-
-use super::{column_extraction::ColumnExtractionInputs, COLUMN_INDEX_NUM};
 
 type CellTree = sbbst::Tree;
 #[derive(Serialize, Deserialize, Debug, Clone)]
