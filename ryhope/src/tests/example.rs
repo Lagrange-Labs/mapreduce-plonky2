@@ -6,8 +6,8 @@ use crate::tree::PrintableTree;
 use crate::tree::{scapegoat, scapegoat::Alpha};
 use crate::{InitSettings, MerkleTreeKvDb};
 
-#[test]
-fn run() -> Result<()> {
+#[tokio::test]
+async fn run() -> Result<()> {
     println!("Example to create a RowTree backed by memory storage");
 
     type V = usize;
@@ -17,7 +17,8 @@ fn run() -> Result<()> {
     let mut tree = MerkleTreeKvDb::<RowTree, V, Storage>::new(
         InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.5))),
         (),
-    )?;
+    )
+    .await?;
 
     println!("Insertion of some (key,value) pairs");
     println!(
@@ -31,6 +32,7 @@ fn run() -> Result<()> {
             Operation::Insert(2, 2),
             Operation::Insert(3, 3),
         ])
+        .await
         .expect("this should work");
 
     let first_stamp = tree.current_epoch();
@@ -42,7 +44,7 @@ fn run() -> Result<()> {
     println!("Tree of keys to update:");
     res.print();
     let fetch_key = 1;
-    let v = tree.try_fetch(&fetch_key).expect("that should exist");
+    let v = tree.try_fetch(&fetch_key).await.expect("that should exist");
     assert_eq!(fetch_key, v);
     println!("Fetching value from key {} = {}", fetch_key, v);
 
@@ -53,15 +55,16 @@ fn run() -> Result<()> {
             Operation::Insert(4, 4),
             Operation::Insert(5, 5),
         ])
+        .await
         .expect("this should work");
 
-    match tree.try_fetch(&fetch_key) {
+    match tree.try_fetch(&fetch_key).await {
         Some(_) => panic!("that should not happen"),
         None => println!("Fetching deleted key {} fails", fetch_key),
     }
 
     // Now try to fetch from previous version
-    match tree.try_fetch_at(&fetch_key, first_stamp) {
+    match tree.try_fetch_at(&fetch_key, first_stamp).await {
         Some(v) => println!(
             "Fetching {} at previous stamp {} works: {}",
             fetch_key, first_stamp, v
@@ -71,20 +74,20 @@ fn run() -> Result<()> {
 
     // Printing the tree at its previous versions
     println!("tree at {} is now:", tree.current_epoch());
-    tree.tree().print(&tree.storage);
+    tree.tree().print(&tree.storage).await;
 
     println!("tree at epoch {first_stamp} was:");
     let previous_state = tree.view_at(first_stamp);
-    tree.tree().print(&previous_state);
+    tree.tree().print(&previous_state).await;
 
     println!(
         "The update tree from {first_stamp} to {} was:",
         first_stamp + 1
     );
-    tree.diff_at(first_stamp + 1).unwrap().print();
+    tree.diff_at(first_stamp + 1).await.unwrap().print();
 
     println!("The update tree from 0 to 1 was:",);
-    tree.diff_at(1).unwrap().print();
+    tree.diff_at(1).await.unwrap().print();
 
     Ok(())
 }

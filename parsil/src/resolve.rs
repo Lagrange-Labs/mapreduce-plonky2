@@ -11,8 +11,8 @@ use std::{cell::OnceCell, default, thread::scope};
 use alloy::primitives::U256;
 use anyhow::*;
 use log::warn;
-use mp2_common::array::ToField;
 use mp2_common::F;
+use mp2_common::{array::ToField, mpt_sequential::Circuit};
 use plonky2::field::types::Field;
 use sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, Query,
@@ -714,7 +714,7 @@ impl<C: RootContextProvider> Resolver<C> {
 }
 
 #[derive(Debug)]
-struct CircuitPis {
+pub struct CircuitPis {
     result: ResultStructure,
     query_aggregations: Vec<F>,
     column_ids: Vec<F>,
@@ -1041,7 +1041,7 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
 // }
 
 /// Convert a query so that it can be executed on a ryhope-generated db.
-pub fn resolve<C: RootContextProvider>(q: &Query, context: C) -> Result<()> {
+pub fn resolve<C: RootContextProvider>(q: &Query, context: C) -> Result<CircuitPis> {
     let mut converted_query = q.clone();
     let mut resolver = Resolver::new(context);
     converted_query.visit(&mut resolver)?;
@@ -1056,7 +1056,8 @@ pub fn resolve<C: RootContextProvider>(q: &Query, context: C) -> Result<()> {
     }
 
     println!("Sent to circuit:");
-    println!("{:#?}", resolver.to_pis());
+    let pis = resolver.to_pis();
+    println!("{:#?}", pis);
 
-    Ok(())
+    Ok(pis)
 }

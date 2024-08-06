@@ -34,6 +34,8 @@ pub enum CircuitInput {
     RowsTree(verifiable_db::row_tree::CircuitInput),
     /// Block tree creation input
     BlockTree(verifiable_db::block_tree::CircuitInput),
+    /// recursive IVC proof to prove updates of a table
+    IVC(verifiable_db::ivc::CircuitInput),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -124,6 +126,11 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
         CircuitInput::BlockTree(input) => verifiable_db::api::generate_proof(
             &params.tree_creation,
             verifiable_db::api::CircuitInput::BlockTree(input),
+            params.final_extraction.get_circuit_set(),
+        ),
+        CircuitInput::IVC(input) => verifiable_db::api::generate_proof(
+            &params.tree_creation,
+            verifiable_db::api::CircuitInput::IVC(input),
             params.final_extraction.get_circuit_set(),
         ),
     }

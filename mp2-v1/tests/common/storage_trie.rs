@@ -1,17 +1,23 @@
 //! Storage trie for proving tests
 
-use super::TestContext;
-use alloy::primitives::Address;
+use super::{proof_storage::ProofStorage, TestContext};
+use alloy::{
+    eips::BlockNumberOrTag,
+    primitives::{Address, U256},
+};
+use log::debug;
 use mp2_common::{
-    eth::{ProofQuery, StorageSlot},
+    eth::{left_pad32, ProofQuery, StorageSlot},
     mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
     proof::ProofWithVK,
     utils::{keccak256, Endianness, Packer},
 };
 use mp2_v1::{
     api::{generate_proof, CircuitInput, PublicParameters},
-    length_extraction, values_extraction,
+    length_extraction,
+    values_extraction::{self, identifier_single_var_column},
 };
+use rand::{thread_rng, Rng};
 use rlp::{Prototype, Rlp};
 use std::collections::HashMap;
 
@@ -195,13 +201,13 @@ impl TrieNode {
         // Build the leaf circuit input.
         let input = match slot {
             StorageSlot::Simple(slot) => values_extraction::CircuitInput::new_single_variable_leaf(
-                node,
+                node.clone(),
                 *slot as u8,
                 ctx.contract_address,
             ),
             StorageSlot::Mapping(mapping_key, slot) => {
                 values_extraction::CircuitInput::new_mapping_variable_leaf(
-                    node,
+                    node.clone(),
                     *slot as u8,
                     mapping_key.clone(),
                     ctx.contract_address,
@@ -211,7 +217,18 @@ impl TrieNode {
         let input = CircuitInput::ValuesExtraction(input);
 
         // Generate the proof.
-        generate_proof(ctx.params, input).unwrap()
+        let proof = generate_proof(ctx.params, input).unwrap();
+        let pproof = ProofWithVK::deserialize(&proof).unwrap();
+        let pi = mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
+        let list: Vec<Vec<u8>> = rlp::decode_list(&node);
+        let value: Vec<u8> = rlp::decode(&list[1]).unwrap();
+        debug!(
+            "[+] [+] MPT SLOT {:?} -> value {:?} value.digest() = {:?}",
+            slot.slot(),
+            U256::from_be_slice(&value),
+            pi.values_digest()
+        );
+        proof
     }
 
     /// Prove a trie node recursively for length extraction.
@@ -336,16 +353,18 @@ impl TestStorageTrie {
 
     /// Query the contract at the provided address, fetch a proof using the context, and add it to
     /// the trie's slot.
-    pub(crate) async fn query_proof_and_add_slot(
+    pub(crate) async fn query_proof_and_add_slot<P: ProofStorage>(
         &mut self,
-        ctx: &TestContext,
-        contract_address: Address,
+        ctx: &TestContext<P>,
+        contract_address: &Address,
         slot: usize,
     ) {
         log::debug!("Querying the simple slot `{slot:?}` of the contract `{contract_address}` from the test context's RPC");
 
-        let query = ProofQuery::new_simple_slot(contract_address, slot);
-        let response = ctx.query_mpt_proof(&query, ctx.get_block_number()).await;
+        let query = ProofQuery::new_simple_slot(*contract_address, slot);
+        let response = ctx
+            .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
+            .await;
 
         // Get the nodes to prove. Reverse to the sequence from leaf to root.
         let nodes: Vec<_> = response.storage_proof[0]

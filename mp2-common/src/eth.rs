@@ -123,6 +123,12 @@ pub enum StorageSlot {
     Mapping(Vec<u8>, usize),
 }
 impl StorageSlot {
+    pub fn slot(&self) -> u8 {
+        match self {
+            StorageSlot::Simple(slot) => *slot as u8,
+            StorageSlot::Mapping(_, slot) => *slot as u8,
+        }
+    }
     pub fn location(&self) -> B256 {
         match self {
             StorageSlot::Simple(slot) => B256::left_padding_from(&(*slot as u64).to_be_bytes()[..]),

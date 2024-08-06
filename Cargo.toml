@@ -8,12 +8,12 @@ members = [
   "parsil",
   "ryhope",
   "recursion-framework",
-  "verifiable-db",
+  "verifiable-db"
 ]
 resolver = "2"
 
 [workspace.dependencies]
-alloy = { version = "0.1", default-features = false, features = [
+alloy = { version = "0.2", default-features = false, features = [
   "contract",
   "node-bindings",
   "providers",

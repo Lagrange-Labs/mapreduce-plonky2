@@ -233,7 +233,7 @@ mod tests {
         }
         // Check metadata digest
         {
-            let exp_digest = compute_metadata_digest(contract_address);
+            let exp_digest = compute_metadata_digest(&contract_address);
             assert_eq!(pi.metadata_point(), exp_digest.to_weierstrass());
         }
         // Check MPT key and pointer

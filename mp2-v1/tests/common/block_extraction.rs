@@ -8,9 +8,8 @@ use mp2_common::{
     C, D, F,
 };
 use mp2_v1::{api, block_extraction};
-use plonky2::plonk::proof::ProofWithPublicInputs;
 
-use super::TestContext;
+use super::{proof_storage::ProofStorage, TestContext};
 
 pub(crate) fn block_number_to_u256_limbs(number: u64) -> Vec<F> {
     const NUM_LIMBS: usize = u256::NUM_LIMBS;
@@ -18,9 +17,9 @@ pub(crate) fn block_number_to_u256_limbs(number: u64) -> Vec<F> {
     left_pad_generic::<u32, NUM_LIMBS>(&block_number_buff.pack(Endianness::Big)).to_fields()
 }
 
-impl TestContext {
-    pub(crate) async fn prove_block_extraction(&self) -> Result<ProofWithPublicInputs<F, C, D>> {
-        let block = self.query_block().await;
+impl<P: ProofStorage> TestContext<P> {
+    pub(crate) async fn prove_block_extraction(&self) -> Result<Vec<u8>> {
+        let block = self.query_current_block().await;
         let buffer = block.rlp();
         let proof = api::generate_proof(
             self.params(),
@@ -50,6 +49,6 @@ impl TestContext {
         assert_eq!(pi.block_hash_raw(), block_hash);
         assert_eq!(pi.prev_block_hash_raw(), prev_block_hash);
 
-        Ok(pproof)
+        Ok(proof)
     }
 }
