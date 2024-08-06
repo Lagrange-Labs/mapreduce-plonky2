@@ -9,6 +9,7 @@ use common::{
     cases::local_simple::{ChangeType, UpdateType},
     context,
     proof_storage::{KeyValueDB, ProofStorage},
+    query::ContextProvider,
     table::Table,
     TestCase, TestContext,
 };
@@ -75,8 +76,9 @@ async fn integrated_test() -> Result<()> {
 }
 
 fn test_queries_on_table<P: ProofStorage>(ctx: &TestContext<P>, table: &Table) -> Result<()> {
+    let full_ctx = ContextProvider::new(table, ctx);
     let query = "SELECT AVG(value) FROM table";
-    common::query::run_query(ctx, table, query)?;
+    let query = common::query::run_query(full_ctx, query)?;
     Ok(())
 }
 

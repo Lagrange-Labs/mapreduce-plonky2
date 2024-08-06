@@ -12,6 +12,7 @@ use mp2_v1::indexing::{
     row::{CellCollection, Row, RowTreeKey},
     ColumnID,
 };
+use parsil::symbols::{RootContextProvider, ZkTable};
 use ryhope::{
     storage::{updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
     tree::{
@@ -454,4 +455,14 @@ where
 pub enum TreeUpdateType {
     Insertion,
     Update,
+}
+
+impl RootContextProvider for Table {
+    fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable> {
+        todo!()
+    }
+
+    fn current_block(&self) -> u64 {
+        todo!()
+    }
 }

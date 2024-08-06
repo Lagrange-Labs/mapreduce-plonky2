@@ -1198,21 +1198,17 @@ static SHIFT: AtomicU64 = AtomicU64::new(0);
 
 use lazy_static::lazy_static;
 lazy_static! {
-    static ref BASE_ADDRESS: Address =
-        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap();
     static ref BASE_VALUE: U256 = U256::from(10);
 }
 
-use rand::seq::SliceRandom;
 fn next_mapping_key() -> U256 {
     next_value()
 }
 fn next_address() -> Address {
     let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(shift);
-    let mut vec = BASE_ADDRESS.into_word().0.to_vec();
-    vec.shuffle(&mut rng);
-    Address::from_slice(&vec)
+    let slice = rng.gen::<[u8; 20]>();
+    Address::from_slice(&slice)
 }
 fn next_value() -> U256 {
     let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
