@@ -90,9 +90,8 @@ impl<
 {
     /// Create a new `EpochTreeStorage` from the given parameters.
     ///
-    /// * `tree_settings` - the settings passed to the tree constructor
-    /// * `node_storage_settings` - the settings to build the node storage
-    /// * `data_storage_settings` - the settings to build the data storage
+    /// * `init_settings` - the initial state of the underlying tree
+    /// * `storage_settings` - the settings to build the storage backend
     ///
     /// Fails if the tree construction or either of the storage initialization
     /// failed.
