@@ -12,12 +12,16 @@ name = "parsil"
 path = "src/main.rs"
 
 [dependencies]
+alloy.workspace = true
 anyhow.workspace = true
 camelpaste = "0.1.0"
 clap = { version = "4.5.4", features = ["derive"] }
 log.workspace = true
+mp2_common = { path = "../mp2-common" }
+plonky2.workspace = true
 postgres.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlparser = "0.49.0"
 stderrlog = { version = "0.6.0", default-features = false }
+verifiable-db = { path = "../verifiable-db" }

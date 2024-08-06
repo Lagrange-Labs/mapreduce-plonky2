@@ -19,8 +19,6 @@ pub struct ZkTable {
 pub struct ZkColumn {
     /// The user-facing name of this column
     pub name: String,
-    /// This column identifier in the circuits
-    pub id: u64,
     /// Whether this column is the cryptographic primary index
     pub is_primary_index: bool,
 }
