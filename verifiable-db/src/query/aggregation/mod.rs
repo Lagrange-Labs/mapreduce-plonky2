@@ -106,6 +106,23 @@ impl NodeInfo {
     }
 }
 #[derive(Clone, Debug)]
+/// enum to specify whether a node is the left or right child of another node
+pub enum ChildPosition {
+    Left,
+    Right,
+}
+
+impl ChildPosition {
+    // convert `self` to a flag specifying whether a node is the left child of another node or not
+    pub(crate) fn to_flag(&self) -> bool {
+        match self {
+            ChildPosition::Left => true,
+            ChildPosition::Right => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct CommonInputs {
     pub(crate) is_rows_tree_node: bool,
     pub(crate) min_query: U256,
@@ -158,15 +175,15 @@ pub struct OneProvenChildNodeInput {
 pub struct ChildProof {
     /// Actual proof
     pub(crate) proof: ProofWithVK,
-    /// Flag specifying whether the child associated with `proof`` is the left or right child of its parent
-    pub(crate) is_left_child: bool,
+    /// Flag specifying whether the child associated with `proof` is the left or right child of its parent
+    pub(crate) child_position: ChildPosition,
 }
 
 impl ChildProof {
-    pub fn new(proof: Vec<u8>, is_left_child: bool) -> Result<ChildProof> {
+    pub fn new(proof: Vec<u8>, child_position: ChildPosition) -> Result<ChildProof> {
         Ok(Self {
             proof: ProofWithVK::deserialize(&proof)?,
-            is_left_child,
+            child_position,
         })
     }
 }
@@ -174,16 +191,17 @@ impl ChildProof {
 #[derive(Clone, Debug)]
 /// Enum employed to specify whether a proof refers to a child node or the embedded tree stored in a node
 pub enum SubProof {
-    /// Proof refer to a child: the wrapped flag specify whether it is the left child or not
+    /// Proof refer to a child
     Child(ChildProof),
-    /// Proof refer to the embedded tree stored in the node
+    /// Proof refer to the embedded tree stored in the node: can be either the proof for a single row
+    /// (if proving a rows tree node) of the proof for the root node of a rows tree (if proving an index tree node)
     Embedded(ProofWithVK),
 }
 
 impl SubProof {
     /// Initialize a new `SubProof::Child`
-    pub fn new_child_proof(proof: Vec<u8>, is_left_child: bool) -> Result<Self> {
-        Ok(SubProof::Child(ChildProof::new(proof, is_left_child)?))
+    pub fn new_child_proof(proof: Vec<u8>, child_position: ChildPosition) -> Result<Self> {
+        Ok(SubProof::Child(ChildProof::new(proof, child_position)?))
     }
 
     /// Initialize a new `SubProof::Embedded`

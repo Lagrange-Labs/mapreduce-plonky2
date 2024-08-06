@@ -32,9 +32,9 @@ use super::{
         partial_node::{
             self, PartialNodeCircuit, PartialNodeWires, NUM_VERIFIED_PROOFS as NUM_PROOFS_PN,
         },
-        ChildProof, CommonInputs, NodeInfo, NonExistenceInput, OneProvenChildNodeInput,
-        QueryBounds, QueryHashNonExistenceCircuits, SinglePathInput, SubProof,
-        TwoProvenChildNodeInput,
+        ChildPosition, ChildProof, CommonInputs, NodeInfo, NonExistenceInput,
+        OneProvenChildNodeInput, QueryBounds, QueryHashNonExistenceCircuits, SinglePathInput,
+        SubProof, TwoProvenChildNodeInput,
     },
     computational_hash_ids::{AggregationOperation, HashPermutation, Output},
     universal_circuit::{
@@ -156,9 +156,10 @@ where
     }
 
     /// Initialize input to prove a full node from the following inputs:
-    /// - `left_child_proof`: proof for the left child of the full node
-    /// - `right_child_proof`: proof for the right child of the full node
-    /// - `embedded_tree_proof`: proof for the embedded tree stored in the full node
+    /// - `left_child_proof`: proof for the left child of the node being proven
+    /// - `right_child_proof`: proof for the right child of the node being proven
+    /// - `embedded_tree_proof`: proof for the embedded tree stored in the full node: can be either the proof for a single
+    ///     row (if proving a rows tree node) of the proof for the root node of a rows tree (if proving an index tree node)
     /// - `is_rows_tree_node`: flag specifying whether the full node belongs to the rows tree or to the index tree
     /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
     pub fn new_full_node(
@@ -178,10 +179,12 @@ where
 
     /// Initialize input to prove a partial node from the following inputs:
     /// - `proven_child_proof`: Proof for the child being a proven node
-    /// - `embedded_tree_proof`: Proof for the embedded tree stored in the partial node
+    /// - `embedded_tree_proof`: Proof for the embedded tree stored in the partial node: can be either the proof
+    ///     for a single row (if proving a rows tree node) of the proof for the root node of a rows
+    ///     tree (if proving an index tree node)
     /// - `unproven_child`: Data about the child not being a proven node; if the node has only one child,
     ///     then, this parameter must be `None`
-    /// - `is_proven_child_left`: Flag specifying whether the proven child is the left or right child
+    /// - `proven_child_position`: Enum specifying whether the proven child is the left or right child
     ///     of the partial node being proven
     /// - `is_rows_tree_node`: flag specifying whether the full node belongs to the rows tree or to the index tree
     /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
@@ -189,7 +192,7 @@ where
         proven_child_proof: Vec<u8>,
         embedded_tree_proof: Vec<u8>,
         unproven_child: Option<NodeInfo>,
-        proven_child_left: bool,
+        proven_child_position: ChildPosition,
         is_rows_tree_node: bool,
         query_bounds: &QueryBounds,
     ) -> Result<Self> {
@@ -197,7 +200,7 @@ where
             unproven_child,
             proven_child_proof: ChildProof {
                 proof: ProofWithVK::deserialize(&proven_child_proof)?,
-                is_left_child: proven_child_left,
+                child_position: proven_child_position,
             },
             embedded_tree_proof: ProofWithVK::deserialize(&embedded_tree_proof)?,
             common: CommonInputs::new(is_rows_tree_node, query_bounds),
@@ -231,8 +234,8 @@ where
     /// Initialize input to prove a node storing a value of the primary or secondary index which
     /// is outside of the query bounds, from the following inputs:
     /// - `node_info`: Data about the node being proven
-    /// - `child_info`: Data aboout the child of the node being proven, altogether with a flag specifying
-    ///     whether this child is the left or right one; must be `None` if the node being proven has no children
+    /// - `child_info`: Data aboout the child of the node being proven, altogether with the child position;
+    ///     must be `None` if the node being proven has no children
     /// - `primary_index_value`: Value of the primary index associated to the current node
     /// - `index_ids`: Identifiers of the primary and secondary index columns
     /// - `aggregation_ops`: Set of aggregation operations employed to aggregate the results of the query
@@ -243,7 +246,7 @@ where
     #[allow(clippy::too_many_arguments)] // doesn't make sense to aggregate arguments
     pub fn new_non_existence_input(
         node_info: NodeInfo,
-        child_info: Option<(NodeInfo, bool)>,
+        child_info: Option<(NodeInfo, ChildPosition)>,
         primary_index_value: U256,
         index_ids: &[u64; 2],
         aggregation_ops: &[AggregationOperation],
@@ -260,7 +263,7 @@ where
         Ok(CircuitInput::NonExistence(NonExistenceInput {
             node_info,
             child_info: child_info.clone().map(|info| info.0),
-            is_child_left: child_info.map(|info| info.1),
+            is_child_left: child_info.map(|info| info.1.to_flag()),
             primary_index_value,
             index_ids: index_ids
                 .iter()
@@ -543,7 +546,7 @@ where
             }) => {
                 let ChildProof {
                     proof,
-                    is_left_child,
+                    child_position,
                 } = proven_child_proof;
                 let (child_proof, child_vk) = proof.into();
                 let (embedded_proof, embedded_vk) = embedded_tree_proof.into();
@@ -552,7 +555,7 @@ where
                         // the node has 2 children, so we use the partial node circuit
                         let input = PartialNodeCircuit {
                             is_rows_tree_node: common.is_rows_tree_node,
-                            is_left_child,
+                            is_left_child: child_position.to_flag(),
                             sibling_tree_hash: child_node.embedded_tree_hash,
                             sibling_child_hashes: child_node.child_hashes,
                             sibling_value: child_node.value,
@@ -575,7 +578,7 @@ where
                         // the node has 1 child, so use the circuit for full node with 1 child
                         let input = FullNodeWithOneChildCircuit {
                             is_rows_tree_node: common.is_rows_tree_node,
-                            is_left_child,
+                            is_left_child: child_position.to_flag(),
                             min_query: common.min_query,
                             max_query: common.max_query,
                         };
@@ -654,10 +657,11 @@ where
                     }
                     SubProof::Child(ChildProof {
                         proof,
-                        is_left_child,
+                        child_position,
                     }) => {
                         // the input proof refers to a child of the node
                         let (proof, vk) = proof.into();
+                        let is_left_child = child_position.to_flag();
                         let input = ChildProvenSinglePathNodeCircuit {
                             value: node_info.value,
                             subtree_hash: node_info.embedded_tree_hash,
@@ -779,7 +783,9 @@ mod tests {
     use ryhope::tree::scapegoat::Node;
 
     use crate::query::{
-        aggregation::{NodeInfo, QueryBounds, QueryHashNonExistenceCircuits, SubProof},
+        aggregation::{
+            ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits, SubProof,
+        },
         api::{CircuitInput, Parameters},
         computational_hash_ids::{AggregationOperation, HashPermutation, Operation},
         public_inputs::PublicInputs,
@@ -1009,8 +1015,8 @@ mod tests {
         let input = Input::new_partial_node(
             full_node_proof,
             base_proofs[0].clone(),
-            None,  // there is no left child
-            false, // proven child is the right child of node 0
+            None,                 // there is no left child
+            ChildPosition::Right, // proven child is the right child of node 0
             false,
             &query_bounds,
         )
@@ -1035,8 +1041,8 @@ mod tests {
         let input = Input::new_partial_node(
             one_child_node_proof,
             base_proofs[4].clone(),
-            None, // there is no right child
-            true, // proven child is the left child of root node
+            None,                // there is no right child
+            ChildPosition::Left, // proven child is the left child of root node
             false,
             &query_bounds,
         )
@@ -1230,7 +1236,7 @@ mod tests {
             proof_5,
             base_proofs[3 - START_NODE_IN_RANGE].clone(),
             Some(node_info_2),
-            false, // proven child is right child
+            ChildPosition::Right, // proven child is right child
             false,
             &query_bounds,
         )
@@ -1272,7 +1278,8 @@ mod tests {
         );
         let hash_8 = node_info_8.compute_node_hash(primary_index_id);
         let subtree_proof = SubProof::new_child_proof(
-            proof_3, true, // subtree proof refers to the left child of the node
+            proof_3,
+            ChildPosition::Left, // subtree proof refers to the left child of the node
         )
         .unwrap();
         let input = Input::new_single_path(
@@ -1300,7 +1307,8 @@ mod tests {
             column_values[9][0],
         );
         let subtree_proof = SubProof::new_child_proof(
-            proof_8, false, // subtree proof refers to the right child of the node
+            proof_8,
+            ChildPosition::Right, // subtree proof refers to the right child of the node
         )
         .unwrap();
         let input = Input::new_single_path(
@@ -1396,7 +1404,7 @@ mod tests {
             column_values[1][0],
         );
         let hash_1 = node_info_1.compute_node_hash(primary_index_id);
-        let subtree_proof = SubProof::new_child_proof(proof_0, true).unwrap();
+        let subtree_proof = SubProof::new_child_proof(proof_0, ChildPosition::Left).unwrap();
         let input = Input::new_single_path(
             subtree_proof,
             Some(node_info_0.clone()),
@@ -1429,7 +1437,7 @@ mod tests {
             column_values[3][0],
             column_values[3][0],
         );
-        let subtree_proof = SubProof::new_child_proof(proof_1, true).unwrap();
+        let subtree_proof = SubProof::new_child_proof(proof_1, ChildPosition::Left).unwrap();
         let input = Input::new_single_path(
             subtree_proof,
             Some(node_info_1.clone()),
@@ -1473,7 +1481,7 @@ mod tests {
         .unwrap();
         let input = Input::new_non_existence_input(
             node_info_1.clone(),
-            Some((node_info_0, true)), // node 0 is the elft child
+            Some((node_info_0, ChildPosition::Left)), // node 0 is the left child
             node_info_1.value,
             &column_ids[..2].try_into().unwrap(),
             &[AggregationOperation::SumOp],
@@ -1487,7 +1495,7 @@ mod tests {
         assert_eq!(hash_1, get_tree_hash_from_proof(&proof_1),);
 
         // generate proof for root node
-        let subtree_proof = SubProof::new_child_proof(proof_1, true).unwrap();
+        let subtree_proof = SubProof::new_child_proof(proof_1, ChildPosition::Left).unwrap();
         let input = Input::new_single_path(
             subtree_proof,
             Some(node_info_1.clone()),
@@ -1600,7 +1608,7 @@ mod tests {
             column_values[0][1],
         );
         let hash_1 = node_info_1.compute_node_hash(secondary_index_id);
-        let subtree_proof = SubProof::new_child_proof(proof_2, false).unwrap();
+        let subtree_proof = SubProof::new_child_proof(proof_2, ChildPosition::Right).unwrap();
         let input = Input::new_single_path(
             subtree_proof,
             Some(node_info_0),
@@ -1672,8 +1680,15 @@ mod tests {
             column_values[0][0],
             column_values[5][0],
         );
-        let input =
-            Input::new_partial_node(proof_A, proof_4, None, true, false, &query_bounds).unwrap();
+        let input = Input::new_partial_node(
+            proof_A,
+            proof_4,
+            None,
+            ChildPosition::Left,
+            false,
+            &query_bounds,
+        )
+        .unwrap();
         let (root_proof, _) = ProofWithVK::deserialize(&params.generate_proof(input).unwrap())
             .unwrap()
             .into();
