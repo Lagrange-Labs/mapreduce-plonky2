@@ -26,7 +26,7 @@ use std::array;
 use crate::query::public_inputs::PublicInputs;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SubtreeProvenSinglePathNodeWires<const MAX_NUM_RESULTS: usize> {
+pub struct EmbeddedTreeProvenSinglePathNodeWires<const MAX_NUM_RESULTS: usize> {
     left_child_min: UInt256Target,
     left_child_max: UInt256Target,
     left_child_value: UInt256Target,
@@ -58,7 +58,7 @@ pub struct SubtreeProvenSinglePathNodeWires<const MAX_NUM_RESULTS: usize> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SubtreeProvenSinglePathNodeCircuit<const MAX_NUM_RESULTS: usize> {
+pub struct EmbeddedTreeProvenSinglePathNodeCircuit<const MAX_NUM_RESULTS: usize> {
     /// Minimum value associated to the left child
     pub(crate) left_child_min: U256,
     /// Maximum value associated to the left child
@@ -92,11 +92,11 @@ pub struct SubtreeProvenSinglePathNodeCircuit<const MAX_NUM_RESULTS: usize> {
     pub(crate) max_query: U256,
 }
 
-impl<const MAX_NUM_RESULTS: usize> SubtreeProvenSinglePathNodeCircuit<MAX_NUM_RESULTS> {
+impl<const MAX_NUM_RESULTS: usize> EmbeddedTreeProvenSinglePathNodeCircuit<MAX_NUM_RESULTS> {
     pub fn build(
         b: &mut CBuilder,
-        subtree_proof: &PublicInputs<Target, MAX_NUM_RESULTS>,
-    ) -> SubtreeProvenSinglePathNodeWires<MAX_NUM_RESULTS> {
+        embedded_tree_proof: &PublicInputs<Target, MAX_NUM_RESULTS>,
+    ) -> EmbeddedTreeProvenSinglePathNodeWires<MAX_NUM_RESULTS> {
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
         let [left_child_min, left_child_max, left_child_value, right_child_min, right_child_max, right_child_value, min_query, max_query] =
@@ -107,17 +107,17 @@ impl<const MAX_NUM_RESULTS: usize> SubtreeProvenSinglePathNodeCircuit<MAX_NUM_RE
         let [left_child_exists, right_child_exists, is_rows_tree_node] =
             array::from_fn(|_| b.add_virtual_bool_target_safe());
 
-        let index_value = subtree_proof.index_value_target();
+        let index_value = embedded_tree_proof.index_value_target();
 
         let column_id = b.select(
             is_rows_tree_node,
-            subtree_proof.index_ids_target()[1],
-            subtree_proof.index_ids_target()[0],
+            embedded_tree_proof.index_ids_target()[1],
+            embedded_tree_proof.index_ids_target()[0],
         );
 
         let node_value = b.select_u256(
             is_rows_tree_node,
-            &subtree_proof.min_value_target(),
+            &embedded_tree_proof.min_value_target(),
             &index_value,
         );
 
@@ -165,13 +165,13 @@ impl<const MAX_NUM_RESULTS: usize> SubtreeProvenSinglePathNodeCircuit<MAX_NUM_RE
         // If the current node is in a rows tree, we need to ensure that
         // the query bounds exposed as public inputs are the same as the one exposed
         // by the proof for the row associated to the current node
-        let is_min_same = b.is_equal_u256(&subtree_proof.min_query_target(), &min_query);
-        let is_max_same = b.is_equal_u256(&subtree_proof.max_query_target(), &max_query);
+        let is_min_same = b.is_equal_u256(&embedded_tree_proof.min_query_target(), &min_query);
+        let is_max_same = b.is_equal_u256(&embedded_tree_proof.max_query_target(), &max_query);
         let are_query_bounds_same = b.and(is_min_same, is_max_same);
 
         // if is_rows_tree_node:
-        //   subtree_proof.min_query == min_query &&
-        //   subtree_proof.max_query == max_query
+        //   embedded_tree_proof.min_query == min_query &&
+        //   embedded_tree_proof.max_query == max_query
         // else if not is_rows_tree_node:
         //   min_query <= index_value <= max_query
         let rows_tree_condition = b.select(
@@ -205,29 +205,29 @@ impl<const MAX_NUM_RESULTS: usize> SubtreeProvenSinglePathNodeCircuit<MAX_NUM_RE
             .chain(node_max.to_targets())
             .chain(iter::once(column_id))
             .chain(node_value.to_targets())
-            .chain(subtree_proof.tree_hash_target().to_targets())
+            .chain(embedded_tree_proof.tree_hash_target().to_targets())
             .collect();
         let node_hash = b.hash_n_to_hash_no_pad::<H>(node_hash_inputs);
 
         // Register the public inputs.
         PublicInputs::<_, MAX_NUM_RESULTS>::new(
             &node_hash.to_targets(),
-            subtree_proof.to_values_raw(),
-            &[subtree_proof.num_matching_rows_target()],
-            subtree_proof.to_ops_raw(),
-            subtree_proof.to_index_value_raw(),
+            embedded_tree_proof.to_values_raw(),
+            &[embedded_tree_proof.num_matching_rows_target()],
+            embedded_tree_proof.to_ops_raw(),
+            embedded_tree_proof.to_index_value_raw(),
             &node_min.to_targets(),
             &node_max.to_targets(),
-            subtree_proof.to_index_ids_raw(),
+            embedded_tree_proof.to_index_ids_raw(),
             &min_query.to_targets(),
             &max_query.to_targets(),
-            &[*subtree_proof.to_overflow_raw()],
-            subtree_proof.to_computational_hash_raw(),
-            subtree_proof.to_placeholder_hash_raw(),
+            &[*embedded_tree_proof.to_overflow_raw()],
+            embedded_tree_proof.to_computational_hash_raw(),
+            embedded_tree_proof.to_placeholder_hash_raw(),
         )
         .register(b);
 
-        SubtreeProvenSinglePathNodeWires {
+        EmbeddedTreeProvenSinglePathNodeWires {
             left_child_min,
             left_child_max,
             left_child_value,
@@ -249,7 +249,7 @@ impl<const MAX_NUM_RESULTS: usize> SubtreeProvenSinglePathNodeCircuit<MAX_NUM_RE
     fn assign(
         &self,
         pw: &mut PartialWitness<F>,
-        wires: &SubtreeProvenSinglePathNodeWires<MAX_NUM_RESULTS>,
+        wires: &EmbeddedTreeProvenSinglePathNodeWires<MAX_NUM_RESULTS>,
     ) {
         [
             (&wires.left_child_min, self.left_child_min),
@@ -292,10 +292,10 @@ impl<const MAX_NUM_RESULTS: usize> SubtreeProvenSinglePathNodeCircuit<MAX_NUM_RE
 pub(crate) const NUM_VERIFIED_PROOFS: usize = 1;
 
 impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
-    for SubtreeProvenSinglePathNodeWires<MAX_NUM_RESULTS>
+    for EmbeddedTreeProvenSinglePathNodeWires<MAX_NUM_RESULTS>
 {
     type CircuitBuilderParams = ();
-    type Inputs = SubtreeProvenSinglePathNodeCircuit<MAX_NUM_RESULTS>;
+    type Inputs = EmbeddedTreeProvenSinglePathNodeCircuit<MAX_NUM_RESULTS>;
 
     const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F, MAX_NUM_RESULTS>::total_len();
 
@@ -334,35 +334,35 @@ mod tests {
     const MAX_NUM_RESULTS: usize = 20;
 
     #[derive(Clone, Debug)]
-    struct TestSubtreeProvenSinglePathNodeCircuit<'a> {
-        c: SubtreeProvenSinglePathNodeCircuit<MAX_NUM_RESULTS>,
-        subtree_proof: &'a [F],
+    struct TestEmbeddedTreeProvenSinglePathNodeCircuit<'a> {
+        c: EmbeddedTreeProvenSinglePathNodeCircuit<MAX_NUM_RESULTS>,
+        embedded_tree_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestSubtreeProvenSinglePathNodeCircuit<'a> {
+    impl<'a> UserCircuit<F, D> for TestEmbeddedTreeProvenSinglePathNodeCircuit<'a> {
         type Wires = (
-            SubtreeProvenSinglePathNodeWires<MAX_NUM_RESULTS>,
+            EmbeddedTreeProvenSinglePathNodeWires<MAX_NUM_RESULTS>,
             Vec<Target>,
         );
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let subtree_proof = b
+            let embedded_tree_proof = b
                 .add_virtual_target_arr::<{ PI_LEN::<MAX_NUM_RESULTS> }>()
                 .to_vec();
-            let pi = PublicInputs::<Target, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
+            let pi = PublicInputs::<Target, MAX_NUM_RESULTS>::from_slice(&embedded_tree_proof);
 
-            let wires = SubtreeProvenSinglePathNodeCircuit::build(b, &pi);
+            let wires = EmbeddedTreeProvenSinglePathNodeCircuit::build(b, &pi);
 
-            (wires, subtree_proof)
+            (wires, embedded_tree_proof)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.c.assign(pw, &wires.0);
-            pw.set_target_arr(&wires.1, &self.subtree_proof);
+            pw.set_target_arr(&wires.1, &self.embedded_tree_proof);
         }
     }
 
-    fn test_subtree_proven_single_path_node_circuit(
+    fn test_embedded_tree_proven_single_path_node_circuit(
         is_rows_tree_node: bool,
         left_child_exists: bool,
         right_child_exists: bool,
@@ -371,11 +371,11 @@ mod tests {
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
         // Build the subtree proof.
-        let [subtree_proof] = random_aggregation_public_inputs(&ops);
-        let subtree_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
+        let [embdeed_tree_proof] = random_aggregation_public_inputs(&ops);
+        let embedded_tree_pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&embdeed_tree_proof);
 
-        let index_ids = subtree_pi.index_ids();
-        let index_value = subtree_pi.index_value();
+        let index_ids = embedded_tree_pi.index_ids();
+        let index_value = embedded_tree_pi.index_value();
 
         // Construct the witness.
         let mut rng = thread_rng();
@@ -389,8 +389,8 @@ mod tests {
         let mut max_query = U256::from(200);
 
         if is_rows_tree_node {
-            min_query = subtree_pi.min_query_value();
-            max_query = subtree_pi.max_query_value();
+            min_query = embedded_tree_pi.min_query_value();
+            max_query = embedded_tree_pi.max_query_value();
         } else {
             if min_query > index_value {
                 min_query = index_value - U256::from(1);
@@ -409,8 +409,8 @@ mod tests {
         }
 
         // Construct the test circuit.
-        let test_circuit = TestSubtreeProvenSinglePathNodeCircuit {
-            c: SubtreeProvenSinglePathNodeCircuit {
+        let test_circuit = TestEmbeddedTreeProvenSinglePathNodeCircuit {
+            c: EmbeddedTreeProvenSinglePathNodeCircuit {
                 left_child_min,
                 left_child_max,
                 left_child_value,
@@ -427,7 +427,7 @@ mod tests {
                 min_query,
                 max_query,
             },
-            subtree_proof: &subtree_proof,
+            embedded_tree_proof: &embdeed_tree_proof,
         };
 
         // Proof for the test circuit.
@@ -435,7 +435,7 @@ mod tests {
         let pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
 
         let node_value = if is_rows_tree_node {
-            subtree_pi.min_value()
+            embedded_tree_pi.min_value()
         } else {
             index_value
         };
@@ -502,18 +502,18 @@ mod tests {
                 .chain(node_max.to_fields())
                 .chain(iter::once(column_id))
                 .chain(node_value.to_fields())
-                .chain(subtree_pi.tree_hash().to_fields())
+                .chain(embedded_tree_pi.tree_hash().to_fields())
                 .collect();
             let exp_hash = H::hash_no_pad(&node_hash_input);
 
             assert_eq!(pi.tree_hash(), exp_hash);
         }
         // Output values
-        assert_eq!(pi.to_values_raw(), subtree_pi.to_values_raw());
+        assert_eq!(pi.to_values_raw(), embedded_tree_pi.to_values_raw());
         // Count
-        assert_eq!(pi.num_matching_rows(), subtree_pi.num_matching_rows());
+        assert_eq!(pi.num_matching_rows(), embedded_tree_pi.num_matching_rows());
         // Operation IDs
-        assert_eq!(pi.operation_ids(), subtree_pi.operation_ids());
+        assert_eq!(pi.operation_ids(), embedded_tree_pi.operation_ids());
         // Index value
         assert_eq!(pi.index_value(), index_value);
         // Minimum value
@@ -527,43 +527,46 @@ mod tests {
         // Maximum query
         assert_eq!(pi.max_query_value(), max_query);
         // Overflow flag
-        assert_eq!(pi.overflow_flag(), subtree_pi.overflow_flag());
+        assert_eq!(pi.overflow_flag(), embedded_tree_pi.overflow_flag());
         // Computational hash
-        assert_eq!(pi.computational_hash(), subtree_pi.computational_hash());
+        assert_eq!(
+            pi.computational_hash(),
+            embedded_tree_pi.computational_hash()
+        );
         // Placeholder hash
-        assert_eq!(pi.placeholder_hash(), subtree_pi.placeholder_hash());
+        assert_eq!(pi.placeholder_hash(), embedded_tree_pi.placeholder_hash());
     }
 
     #[test]
-    fn test_subtree_proven_node_for_row_node_with_no_child() {
-        test_subtree_proven_single_path_node_circuit(true, false, false);
+    fn test_embedded_tree_proven_node_for_row_node_with_no_child() {
+        test_embedded_tree_proven_single_path_node_circuit(true, false, false);
     }
     #[test]
-    fn test_subtree_proven_node_for_row_node_with_left_child() {
-        test_subtree_proven_single_path_node_circuit(true, true, false);
+    fn test_embedded_tree_proven_node_for_row_node_with_left_child() {
+        test_embedded_tree_proven_single_path_node_circuit(true, true, false);
     }
     #[test]
-    fn test_subtree_proven_node_for_row_node_with_right_child() {
-        test_subtree_proven_single_path_node_circuit(true, false, true);
+    fn test_embedded_tree_proven_node_for_row_node_with_right_child() {
+        test_embedded_tree_proven_single_path_node_circuit(true, false, true);
     }
     #[test]
-    fn test_subtree_proven_node_for_row_node_with_both_children() {
-        test_subtree_proven_single_path_node_circuit(true, true, true);
+    fn test_embedded_tree_proven_node_for_row_node_with_both_children() {
+        test_embedded_tree_proven_single_path_node_circuit(true, true, true);
     }
     #[test]
-    fn test_subtree_proven_node_for_index_node_with_no_child() {
-        test_subtree_proven_single_path_node_circuit(false, false, false);
+    fn test_embedded_tree_proven_node_for_index_node_with_no_child() {
+        test_embedded_tree_proven_single_path_node_circuit(false, false, false);
     }
     #[test]
-    fn test_subtree_proven_node_for_index_node_with_left_child() {
-        test_subtree_proven_single_path_node_circuit(false, true, false);
+    fn test_embedded_tree_proven_node_for_index_node_with_left_child() {
+        test_embedded_tree_proven_single_path_node_circuit(false, true, false);
     }
     #[test]
-    fn test_subtree_proven_node_for_index_node_with_right_child() {
-        test_subtree_proven_single_path_node_circuit(false, false, true);
+    fn test_embedded_tree_proven_node_for_index_node_with_right_child() {
+        test_embedded_tree_proven_single_path_node_circuit(false, false, true);
     }
     #[test]
-    fn test_subtree_proven_node_for_index_node_with_both_children() {
-        test_subtree_proven_single_path_node_circuit(false, true, true);
+    fn test_embedded_tree_proven_node_for_index_node_with_both_children() {
+        test_embedded_tree_proven_single_path_node_circuit(false, true, true);
     }
 }
