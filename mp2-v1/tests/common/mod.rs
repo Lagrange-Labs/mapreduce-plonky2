@@ -11,9 +11,10 @@ pub mod index_tree;
 pub mod ivc;
 mod length_extraction;
 pub(crate) mod proof_storage;
+pub mod query;
 pub mod rowtree;
 mod storage_trie;
-mod table;
+pub mod table;
 mod values_extraction;
 
 use std::path::PathBuf;

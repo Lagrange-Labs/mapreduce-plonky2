@@ -202,7 +202,3 @@ pub(crate) struct ContractExtractionArgs {
     /// Storage slot
     pub(crate) slot: StorageSlot,
 }
-
-fn random_address() -> Address {
-    Address::from_slice(&random_vector(20))
-}

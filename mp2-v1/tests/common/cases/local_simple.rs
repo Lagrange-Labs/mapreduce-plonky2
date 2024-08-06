@@ -15,12 +15,12 @@ use mp2_v1::{
         identifier_for_mapping_value_column, identifier_single_var_column,
     },
 };
-use rand::{thread_rng, Rng};
+use rand::{Rng, SeedableRng};
 use ryhope::storage::RoEpochKvStorage;
 
 use crate::common::{
     bindings::simple::Simple::{self, MappingChange, MappingOperation},
-    cases::{random_address, MappingIndex},
+    cases::MappingIndex,
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::{
@@ -45,7 +45,7 @@ use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     proof::ProofWithVK,
 };
-use std::{assert_matches::assert_matches, str::FromStr};
+use std::{assert_matches::assert_matches, str::FromStr, sync::atomic::AtomicU64};
 
 /// Test slots for single values extraction
 const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
@@ -64,6 +64,9 @@ const LENGTH_VALUE: u8 = 2;
 /// Test slot for contract extraction
 const CONTRACT_SLOT: usize = 1;
 impl TestCase {
+    pub fn table(&self) -> &Table {
+        &self.table
+    }
     pub(crate) async fn single_value_test_case<P: ProofStorage>(
         ctx: &TestContext<P>,
     ) -> Result<Self> {
@@ -567,22 +570,14 @@ impl TestCase {
                 let slot = mapping.slot as usize;
                 let index_type = mapping.index.clone();
                 let address = &self.contract_address.clone();
-                // for ease of debugging, just take incremental keys
-                let new_key = mapping
-                    .mapping_keys
-                    .iter()
-                    .map(|k| U256::from_be_slice(k))
-                    .max()
-                    .unwrap()
-                    + U256::from(1);
                 let query = ProofQuery::new_mapping_slot(*address, slot, mkey.to_owned());
                 let response = ctx
                     .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
                     .await;
                 let current_value = response.storage_proof[0].value;
                 let current_key = U256::from_be_slice(mkey);
-
-                let new_value: U256 = random_address().into_word().into();
+                let new_key = next_mapping_key();
+                let new_value: U256 = next_address().into_word().into();
                 let mapping_updates = match c {
                     ChangeType::Insertion => {
                         vec![MappingUpdate::Insertion(new_key, new_value)]
@@ -694,12 +689,9 @@ impl TestCase {
                         panic!("can't add a new row for blockchain data over single values")
                     }
                     ChangeType::Update(u) => match u {
-                        UpdateType::Rest => {
-                            current_values.s4 =
-                                Address::from_slice(&thread_rng().gen::<[u8; 20]>());
-                        }
+                        UpdateType::Rest => current_values.s4 = next_address(),
                         UpdateType::SecondaryIndex => {
-                            current_values.s2 = U256::from_be_bytes(thread_rng().gen::<[u8; 32]>());
+                            current_values.s2 = next_value();
                         }
                     },
                 };
@@ -976,7 +968,7 @@ impl UpdateSimpleStorage {
             .map(|tuple| {
                 let op: MappingOperation = tuple.into();
                 let (k, v) = match tuple {
-                    MappingUpdate::Deletion(k, _) => (*k, random_address()),
+                    MappingUpdate::Deletion(k, _) => (*k, next_address()),
                     MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => {
                         (*k, Address::from_slice(&v.to_be_bytes_trimmed_vec()))
                     }
@@ -1201,4 +1193,29 @@ impl From<&MappingUpdate> for MappingOperation {
             MappingUpdate::Insertion(_, _) => 2,
         })
     }
+}
+static SHIFT: AtomicU64 = AtomicU64::new(0);
+
+use lazy_static::lazy_static;
+lazy_static! {
+    static ref BASE_ADDRESS: Address =
+        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap();
+    static ref BASE_VALUE: U256 = U256::from(10);
+}
+
+use rand::seq::SliceRandom;
+fn next_mapping_key() -> U256 {
+    next_value()
+}
+fn next_address() -> Address {
+    let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(shift);
+    let mut vec = BASE_ADDRESS.into_word().0.to_vec();
+    vec.shuffle(&mut rng);
+    Address::from_slice(&vec)
+}
+fn next_value() -> U256 {
+    let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let bv: U256 = *BASE_VALUE;
+    bv + U256::from(shift)
 }
