@@ -1,6 +1,5 @@
 //! Cells tree utilities for query circuit
 
-use itertools::Itertools;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
     types::CBuilder,
@@ -12,24 +11,13 @@ use plonky2::{
     hash::hash_types::HashOutTarget,
     iop::target::{BoolTarget, Target},
 };
-use ryhope::{
-    storage::{memory::InMemory, EpochKvStorage, TreeTransactionalStorage},
-    tree::{
-        sbbst::{self, State},
-        TreeTopology,
-    },
-    InitSettings, MerkleTreeKvDb, NodePayload,
+use ryhope::tree::{
+    sbbst::{self, State},
+    TreeTopology,
 };
-use serde::{Deserialize, Serialize};
 use std::iter::once;
-
 type CellTree = sbbst::Tree;
-#[derive(Serialize, Deserialize, Debug, Clone)]
-/// Empty payload used just to instantiate a dummy storage to employ `CellTree` methods
-struct Payload(());
-impl NodePayload for Payload {}
-type CellStorage = InMemory<CellTree, Payload>;
-type MerkleTree = MerkleTreeKvDb<CellTree, Payload, CellStorage>;
+type CellTreeKey = <CellTree as TreeTopology>::Key;
 
 /// Re-compute the root hash of the cells tree by the column identifiers and values
 /// except the first 2 which correspond to the indexed columns.
@@ -77,7 +65,7 @@ fn build_cells_subtree_at_key(
     input_values: &[UInt256Target],
     input_ids: &[Target],
     is_real_value: &[BoolTarget],
-    key: &<CellTree as TreeTopology>::Key,
+    key: &CellTreeKey,
     state: &State,
 ) -> HashOutTarget {
     let empty_hash = b.constant_hash(*empty_poseidon_hash());
@@ -98,7 +86,7 @@ fn build_cells_subtree_at_key(
                 empty_hash
             }
         })
-        .collect_vec();
+        .collect::<Vec<_>>();
     assert_eq!(children.len(), 2);
     let node_key = key - 1; // sbbst stores key starting by 1, while slice starts from 0
     let node_hash = b.hash_n_to_hash_no_pad::<CHasher>(
@@ -212,12 +200,12 @@ mod tests {
     //     \         /
     //      \       /
     //        root (c4)
-    #[test]
-    fn test_query_cells_tree_circuit_saturated() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_saturated() {
         const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 7;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5
@@ -227,12 +215,12 @@ mod tests {
     //     \      /
     //      \    /
     //        root (c4)
-    #[test]
-    fn test_query_cells_tree_circuit_partial_unsaturated() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_partial_unsaturated() {
         const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 5;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5 c6 c7 c8
@@ -248,12 +236,12 @@ mod tests {
     //             \
     //              \
     //                  root (c8), has no right child
-    #[test]
-    fn test_query_cells_tree_circuit_completely_unsaturated() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_completely_unsaturated() {
         const MAX_NUM_CELLS: usize = 15;
         const REAL_NUM_CELLS: usize = 8;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5 c6 c7 c8 c9
@@ -269,12 +257,12 @@ mod tests {
     //             \        /
     //              \      /
     //                  root (c8)
-    #[test]
-    fn test_query_cells_tree_circuit_index_out_of_range() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_index_out_of_range() {
         const MAX_NUM_CELLS: usize = 9;
         const REAL_NUM_CELLS: usize = 9;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5 c6 c7 c8 c9
@@ -290,19 +278,19 @@ mod tests {
     //             \        /
     //              \      /
     //                  root (c8)
-    #[test]
-    fn test_query_cells_tree_circuit_index_dummy_cell() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_index_dummy_cell() {
         const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 9;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
-    #[test]
-    fn test_empty_tree() {
+    #[tokio::test]
+    async fn test_empty_tree() {
         const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 0;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 }
