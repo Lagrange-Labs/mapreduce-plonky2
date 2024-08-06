@@ -136,7 +136,7 @@ impl AstPass for Validator {
             },
             Expr::Subquery(s) => {
                 // NOTE: here to enable nested queries
-                bail!("{s}: nested selects not supported");
+                // bail!("{s}: nested selects not supported");
             }
 
             Expr::AnyOp { .. }
@@ -214,7 +214,8 @@ impl AstPass for Validator {
             TableFactor::Table { .. } => Ok(()),
             TableFactor::Derived { .. } => {
                 // NOTE: when the time comes, let us be careful of LATERAL joins
-                bail!("{j}: nested selects not supported");
+                // bail!("{j}: nested selects not supported");
+                Ok(())
             }
             TableFactor::TableFunction { .. }
             | TableFactor::Function { .. }
@@ -292,7 +293,7 @@ impl AstPass for Validator {
     fn pre_set_expr(&mut self, s: &mut SetExpr) -> Result<()> {
         match s {
             SetExpr::Select(_) => Ok(()),
-            SetExpr::Query(_) => bail!("{s}: nested queries are not supported"),
+            SetExpr::Query(_) => Ok(()), //bail!("{s}: nested queries are not supported"),
             SetExpr::SetOperation { .. } => bail!("{s}: set operations are not supported"),
             SetExpr::Values(_) | SetExpr::Insert(_) | SetExpr::Update(_) | SetExpr::Table(_) => {
                 bail!("{s}: mutable queries not supported")
