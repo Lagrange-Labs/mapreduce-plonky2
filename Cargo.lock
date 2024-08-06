@@ -5620,6 +5620,7 @@ dependencies = [
  "bincode",
  "derive_more",
  "env_logger",
+ "futures",
  "itertools 0.12.1",
  "log",
  "mp2_common",
