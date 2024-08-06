@@ -109,6 +109,112 @@ pub struct State {
     pub(crate) shift: usize,
 }
 
+impl State {
+    pub fn root(&self) -> NodeIdx {
+        outer_root(self)
+    }
+
+    pub fn ascendance(&self, ns: &[NodeIdx]) -> HashSet<NodeIdx> {
+        let mut ascendance = HashSet::new();
+        let inner_max = inner_max(self);
+        for n in ns {
+            let inner_idx = inner_idx(*n, self);
+            if inner_idx <= inner_max {
+                if let Some(lineage) = lineage_inner(&inner_idx, self) {
+                    for n in lineage.into_full_path() {
+                        if n < inner_max {
+                            ascendance.insert(outer_idx(n, self));
+                        }
+                    }
+                }
+            }
+        }
+
+        ascendance
+    }
+
+    pub fn parent(&self, n: NodeIdx) -> Option<NodeIdx> {
+        let n = inner_idx(n, self);
+        if n > inner_max(self) {
+            panic!("{n:?} not in tree");
+        }
+
+        if n == inner_root(self) {
+            return None;
+        }
+
+        let mut parent = parent_in_saturated(n);
+        while parent > inner_max(self) {
+            parent = parent_in_saturated(parent);
+        }
+
+        Some(outer_idx(parent, self))
+    }
+
+    pub fn lineage(&self, n: &NodeIdx) -> Option<NodePath<NodeIdx>> {
+        if let Some(lineage_inner) = lineage_inner(&inner_idx(*n, self), self) {
+            let mut ascendance = vec![];
+            for n in lineage_inner.ascendance {
+                ascendance.push(outer_idx(n, self));
+            }
+            Some(NodePath {
+                ascendance,
+                target: outer_idx(lineage_inner.target, self),
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn node_context(&self, k: &NodeIdx) -> Option<NodeContext<NodeIdx>> {
+        if let Some(inner) = _node_context(&inner_idx(*k, self), self) {
+            let parent_outer = if let Some(parent) = inner.parent {
+                Some(outer_idx(parent, self))
+            } else {
+                None
+            };
+
+            let left_outer = if let Some(left) = inner.left {
+                Some(outer_idx(left, self))
+            } else {
+                None
+            };
+
+            let right_outer = if let Some(right) = inner.right {
+                Some(outer_idx(right, self))
+            } else {
+                None
+            };
+            Some(NodeContext {
+                node_id: outer_idx(inner.node_id, self),
+                parent: parent_outer,
+                left: left_outer,
+                right: right_outer,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn children(&self, n: &NodeIdx) -> Option<(Option<NodeIdx>, Option<NodeIdx>)> {
+        if let Some((l, r)) = children_inner(&inner_idx(*n, self), self) {
+            let l_option = if let Some(l) = l {
+                Some(outer_idx(l, self))
+            } else {
+                None
+            };
+            let r_option = if let Some(r) = r {
+                Some(outer_idx(r, self))
+            } else {
+                None
+            };
+            Some((l_option, r_option))
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Tree;
 impl Tree {
@@ -142,12 +248,12 @@ impl Tree {
 }
 
 /// Return the largest value currently stored in the tree
-async fn outer_max<S: TreeStorage<Tree>>(s: &S) -> NodeIdx {
-    outer_idx(inner_max(s).await, s).await
+fn outer_max(s: &State) -> NodeIdx {
+    outer_idx(inner_max(s), s)
 }
 
-async fn inner_max<S: TreeStorage<Tree>>(s: &S) -> InnerIdx {
-    s.state().fetch().await.max
+fn inner_max(s: &State) -> InnerIdx {
+    s.max
 }
 
 async fn shift<S: TreeStorage<Tree>>(s: &S) -> usize {
@@ -170,54 +276,51 @@ fn parent_in_saturated(n: InnerIdx) -> InnerIdx {
 }
 
 /// Return the root of the tree, as a non-shifted node index.
-async fn inner_root<S: TreeStorage<Tree>>(s: &S) -> InnerIdx {
-    InnerIdx(if inner_max(s).await.0 > 0 {
-        1 << inner_max(s).await.0.ilog2()
+fn inner_root(s: &State) -> InnerIdx {
+    InnerIdx(if inner_max(s).0 > 0 {
+        1 << inner_max(s).0.ilog2()
     } else {
         0
     })
 }
-
-/// Return the root of the tree, as a shifted node index.
-pub(crate) async fn outer_root<S: TreeStorage<Tree>>(s: &S) -> NodeIdx {
-    outer_idx(inner_root(s).await, s).await
-}
-
-/// Un-shift an index into the canonical range
-async fn inner_idx<S: TreeStorage<Tree>>(n: NodeIdx, s: &S) -> InnerIdx {
-    InnerIdx(n - shift(s).await)
-}
-
 /// Re-shift an index from the canonical range to the actual one
-async fn outer_idx<S: TreeStorage<Tree>>(n: InnerIdx, s: &S) -> NodeIdx {
-    (n + shift(s).await).0
+fn outer_idx(n: InnerIdx, s: &State) -> NodeIdx {
+    (n + s.shift).0
+}
+/// Return the root of the tree, as a shifted node index.
+fn outer_root(s: &State) -> NodeIdx {
+    outer_idx(inner_root(s), s)
+}
+/// Un-shift an index into the canonical range
+fn inner_idx(n: NodeIdx, s: &State) -> InnerIdx {
+    InnerIdx(n - s.shift)
 }
 
-async fn parent_inner<S: TreeStorage<Tree>>(n: InnerIdx, s: &S) -> Option<InnerIdx> {
-    if n > inner_max(s).await {
+fn parent_inner(n: InnerIdx, s: &State) -> Option<InnerIdx> {
+    if n > inner_max(s) {
         panic!("{n:?} not in tree");
     }
 
-    if n == inner_root(s).await {
+    if n == inner_root(s) {
         return None;
     }
 
     let mut parent = parent_in_saturated(n);
-    while parent > inner_max(s).await {
+    while parent > inner_max(s) {
         parent = parent_in_saturated(parent);
     }
 
     Some(parent)
 }
 
-async fn lineage_inner<S: TreeStorage<Tree>>(n: &InnerIdx, s: &S) -> Option<NodePath<InnerIdx>> {
-    if n.0 > inner_max(s).await.0 {
+fn lineage_inner(n: &InnerIdx, s: &State) -> Option<NodePath<InnerIdx>> {
+    if n.0 > inner_max(s).0 {
         return None;
     }
 
-    let mut r = Vec::with_capacity(inner_max(s).await.0.ilog2() as usize);
+    let mut r = Vec::with_capacity(inner_max(s).0.ilog2() as usize);
     let mut current = *n;
-    while let Some(parent) = parent_inner(current, s).await {
+    while let Some(parent) = parent_inner(current, s) {
         current = parent;
         r.push(parent);
     }
@@ -248,16 +351,13 @@ fn children_inner_in_saturated(n: &InnerIdx) -> Option<(InnerIdx, InnerIdx)> {
     Some((maybe_left, maybe_right))
 }
 
-async fn children_inner<S: TreeStorage<Tree>>(
-    n: &InnerIdx,
-    s: &S,
-) -> Option<(Option<InnerIdx>, Option<InnerIdx>)> {
+fn children_inner(n: &InnerIdx, s: &State) -> Option<(Option<InnerIdx>, Option<InnerIdx>)> {
     if let Some((maybe_left, maybe_right)) = children_inner_in_saturated(n) {
-        let has_left = maybe_left.0 <= inner_max(s).await.0;
+        let has_left = maybe_left.0 <= inner_max(s).0;
         let left_child = if has_left { Some(maybe_left) } else { None };
 
         // Return directly if the right child is in range.
-        if maybe_right.0 <= inner_max(s).await.0 {
+        if maybe_right.0 <= inner_max(s).0 {
             return Some((left_child, Some(maybe_right)));
         }
 
@@ -272,7 +372,7 @@ async fn children_inner<S: TreeStorage<Tree>>(
         // And set it as the current right child.
         let mut right_child = Some(maybe_right);
         while let Some(c) = right_child {
-            if c.0 <= inner_max(s).await.0 {
+            if c.0 <= inner_max(s).0 {
                 break;
             }
 
@@ -284,12 +384,12 @@ async fn children_inner<S: TreeStorage<Tree>>(
     None
 }
 
-async fn _node_context<S: TreeStorage<Tree>>(k: &InnerIdx, s: &S) -> Option<NodeContext<InnerIdx>> {
-    if *k <= inner_max(s).await {
-        let children = children_inner(k, s).await;
+fn _node_context(k: &InnerIdx, s: &State) -> Option<NodeContext<InnerIdx>> {
+    if *k <= inner_max(s) {
+        let children = children_inner(k, s);
         Some(NodeContext {
             node_id: *k,
-            parent: parent_inner(*k, s).await,
+            parent: parent_inner(*k, s),
             left: children.and_then(|x| x.0),
             right: children.and_then(|x| x.1),
         })
@@ -306,63 +406,28 @@ impl TreeTopology for Tree {
     type Node = ();
 
     async fn size<S: TreeStorage<Tree>>(&self, s: &S) -> usize {
-        inner_max(s).await.0
+        let state = s.state().fetch().await;
+        inner_max(&state).0
     }
 
     async fn ascendance<S: TreeStorage<Tree>>(&self, ns: &[Self::Key], s: &S) -> HashSet<NodeIdx> {
-        let mut ascendance = HashSet::new();
-        let inner_max = inner_max(s).await;
-        for n in ns {
-            let inner_idx = inner_idx(*n, s).await;
-            if inner_idx <= inner_max {
-                if let Some(lineage) = lineage_inner(&inner_idx, s).await {
-                    for n in lineage.into_full_path() {
-                        if n < inner_max {
-                            ascendance.insert(outer_idx(n, s).await);
-                        }
-                    }
-                }
-            }
-        }
-
-        ascendance
+        let state = s.state().fetch().await;
+        state.ascendance(ns)
     }
 
     async fn root<S: TreeStorage<Tree>>(&self, s: &S) -> Option<NodeIdx> {
-        Some(outer_root(s).await)
+        let state = s.state().fetch().await;
+        Some(state.root())
     }
 
     async fn parent<S: TreeStorage<Tree>>(&self, n: NodeIdx, s: &S) -> Option<NodeIdx> {
-        let n = inner_idx(n, s).await;
-        if n > inner_max(s).await {
-            panic!("{n:?} not in tree");
-        }
-
-        if n == inner_root(s).await {
-            return None;
-        }
-
-        let mut parent = parent_in_saturated(n);
-        while parent > inner_max(s).await {
-            parent = parent_in_saturated(parent);
-        }
-
-        Some(outer_idx(parent, s).await)
+        let state = s.state().fetch().await;
+        state.parent(n)
     }
 
     async fn lineage<S: TreeStorage<Tree>>(&self, n: &NodeIdx, s: &S) -> Option<NodePath<NodeIdx>> {
-        if let Some(lineage_inner) = lineage_inner(&inner_idx(*n, s).await, s).await {
-            let mut ascendance = vec![];
-            for n in lineage_inner.ascendance {
-                ascendance.push(outer_idx(n, s).await);
-            }
-            Some(NodePath {
-                ascendance,
-                target: outer_idx(lineage_inner.target, s).await,
-            })
-        } else {
-            None
-        }
+        let state = s.state().fetch().await;
+        state.lineage(n)
     }
 
     async fn children<S: TreeStorage<Tree>>(
@@ -370,21 +435,8 @@ impl TreeTopology for Tree {
         n: &NodeIdx,
         s: &S,
     ) -> Option<(Option<NodeIdx>, Option<NodeIdx>)> {
-        if let Some((l, r)) = children_inner(&inner_idx(*n, s).await, s).await {
-            let l_option = if let Some(l) = l {
-                Some(outer_idx(l, s).await)
-            } else {
-                None
-            };
-            let r_option = if let Some(r) = r {
-                Some(outer_idx(r, s).await)
-            } else {
-                None
-            };
-            Some((l_option, r_option))
-        } else {
-            None
-        }
+        let state = s.state().fetch().await;
+        state.children(n)
     }
 
     async fn node_context<S: TreeStorage<Self>>(
@@ -393,40 +445,16 @@ impl TreeTopology for Tree {
         s: &S,
     ) -> Option<NodeContext<NodeIdx>> {
         async {
-            if let Some(inner) = _node_context(&inner_idx(*k, s).await, s).await {
-                let parent_outer = if let Some(parent) = inner.parent {
-                    Some(outer_idx(parent, s).await)
-                } else {
-                    None
-                };
-
-                let left_outer = if let Some(left) = inner.left {
-                    Some(outer_idx(left, s).await)
-                } else {
-                    None
-                };
-
-                let right_outer = if let Some(right) = inner.right {
-                    Some(outer_idx(right, s).await)
-                } else {
-                    None
-                };
-                Some(NodeContext {
-                    node_id: outer_idx(inner.node_id, s).await,
-                    parent: parent_outer,
-                    left: left_outer,
-                    right: right_outer,
-                })
-            } else {
-                None
-            }
+            let state = s.state().fetch().await;
+            state.node_context(k)
         }
         .boxed()
         .await
     }
 
     async fn contains<S: TreeStorage<Tree>>(&self, k: &NodeIdx, s: &S) -> bool {
-        inner_idx(*k, s).await <= inner_max(s).await
+        let state = s.state().fetch().await;
+        inner_idx(*k, &state) <= inner_max(&state)
     }
 }
 
@@ -444,12 +472,13 @@ impl MutableTree for Tree {
             shift(s).await
         );
 
-        if inner_idx(k, s).await != inner_max(s).await + 1 {
+        let state = s.state().fetch().await;
+        if inner_idx(k, &state) != inner_max(&state) + 1 {
             bail!(
                 "invalid insert in SBBST: trying to insert {}, but next insert should be {} (shift = {})",
                 k,
-                outer_idx(inner_max(s).await +1, s).await,
-                s.state().fetch().await.shift,
+                outer_idx(inner_max(&state) +1, &state),
+                state.shift,
             );
         } else {
             s.state_mut().update(|state| state.max += 1).await;
@@ -471,14 +500,15 @@ impl MutableTree for Tree {
 #[async_trait]
 impl PrintableTree for Tree {
     async fn print<S: TreeStorage<Tree>>(&self, s: &S) {
-        let max_layer = inner_root(s).await.0.trailing_zeros();
+        let state = s.state().fetch().await;
+        let max_layer = inner_root(&state).0.trailing_zeros();
         for layer in (0..max_layer).rev() {
             let spacing = " ".repeat((2 * layer + 1).try_into().unwrap());
-            for rank in 0..inner_max(s).await.0 {
+            for rank in 0..inner_max(&state).0 {
                 let maybe_left = rank * (1 << (layer + 1)) + (1 << layer);
-                if maybe_left <= inner_max(s).await.0 {
+                if maybe_left <= inner_max(&state).0 {
                     let n = InnerIdx(maybe_left);
-                    print!("{}{}", outer_idx(n, s).await, spacing);
+                    print!("{}{}", outer_idx(n, &state), spacing);
                 }
             }
             println!()
