@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use parsil::prepare;
 use symbols::FileContextProvider;
 
+mod executor;
 mod expand;
 mod parser;
 mod resolve;
@@ -25,6 +26,7 @@ struct Args {
 #[derive(Subcommand)]
 enum Command {
     Debug {},
+    Circuit {},
     Execute {},
 }
 
@@ -40,10 +42,16 @@ fn main() -> Result<()> {
             }
             println!("Final query:\n{}", query);
         }
-        Command::Execute {} => {
+        Command::Circuit {} => {
             let ctx = FileContextProvider::from_file("tests/context.json")?;
             let query = prepare(&args.request)?;
             resolve::resolve(&query, ctx)?;
+        }
+        Command::Execute {} => {
+            let ctx = FileContextProvider::from_file("tests/context.json")?;
+            let query = prepare(&args.request)?;
+            let to_execute = executor::execute(query, ctx)?;
+            print!("{to_execute}");
         }
     }
 

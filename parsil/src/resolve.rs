@@ -6,7 +6,7 @@
 //!
 //! 2. wrap the original query into a CTE to expand CoW row spans into
 //!    individual column for each covered block number.
-use std::{cell::OnceCell, default, thread::scope};
+use std::fmt::Debug;
 
 use alloy::primitives::U256;
 use anyhow::*;
@@ -26,33 +26,33 @@ use verifiable_db::query::{
 };
 
 use crate::{
-    symbols::{Handle, RootContextProvider},
+    symbols::{Handle, Kind, RootContextProvider, ScopeTable, Symbol},
     visitor::{AstPass, Visit},
 };
 
 // NOTE: not yet used
-struct Leafer<'a, C: RootContextProvider> {
-    resolver: &'a Resolver<C>,
-    leafs: Vec<Symbol>,
-}
-impl<'a, C: RootContextProvider> Leafer<'a, C> {
-    fn new(resolver: &'a Resolver<C>) -> Self {
-        Self {
-            resolver,
-            leafs: Vec::new(),
-        }
-    }
-}
-impl<'a, C: RootContextProvider> AstPass for Leafer<'a, C> {
-    fn pre_expr(&mut self, expr: &mut Expr) -> Result<()> {
-        match expr {
-            Expr::Identifier(e) => self.leafs.push(self.resolver.resolve_freestanding(e)?),
-            Expr::CompoundIdentifier(c) => self.leafs.push(self.resolver.resolve_compound(c)?),
-            _ => {}
-        }
-        Ok(())
-    }
-}
+// struct Leafer<'a, C: RootContextProvider> {
+//     resolver: &'a Resolver<C>,
+//     leafs: Vec<Symbol>,
+// }
+// impl<'a, C: RootContextProvider> Leafer<'a, C> {
+//     fn new(resolver: &'a Resolver<C>) -> Self {
+//         Self {
+//             resolver,
+//             leafs: Vec::new(),
+//         }
+//     }
+// }
+// impl<'a, C: RootContextProvider> AstPass for Leafer<'a, C> {
+//     fn pre_expr(&mut self, expr: &mut Expr) -> Result<()> {
+//         match expr {
+//             Expr::Identifier(e) => self.leafs.push(self.resolver.resolve_freestanding(e)?),
+//             Expr::CompoundIdentifier(c) => self.leafs.push(self.resolver.resolve_compound(c)?),
+//             _ => {}
+//         }
+//         Ok(())
+//     }
+// }
 
 /// A Wire carry data that can be injected in universal query circuits. It
 /// carries an index, whose sginification depends on the type of wire.
@@ -91,81 +91,16 @@ pub(crate) fn parse_placeholder(p: &str) -> Result<usize> {
     number.parse().with_context(|| "failed to parse `{p}`")
 }
 
-/// A [`Symbol`] is anything that can be referenced from an SQL expression.
-#[derive(Debug, Clone)]
-enum Symbol {
-    /// A column must be replaced by <table>.payload -> <column>
-    Column {
-        /// The name or alias this column is known under
-        handle: Handle,
-        /// The concrete column it targets
-        target: Handle,
-        /// Index of the column
-        id: Wire,
-        ///
-        is_primary_index: bool,
-    },
-    /// An alias is validated as existing, but is not replaced, as substitution
-    /// will take place in its own definition
-    Alias { from: Handle, to: Box<Symbol> },
-    /// A named expression is defined by `<expression> AS <name>`
-    NamedExpression { name: Handle, id: Wire },
-    /// A free-standing, anonymous, expression
-    Expression(Wire),
-    /// The wildcard selector: `*`
-    Wildcard,
-}
-impl Symbol {
-    /// Return, if any, the [`Handle`] under which a symbol is known in the
-    /// current context.
-    fn handle(&self) -> Option<&Handle> {
-        match self {
-            Symbol::Column { handle, .. } => Some(handle),
-            Symbol::Alias { from, .. } => Some(from),
-            Symbol::NamedExpression { name, .. } => Some(name),
-            Symbol::Expression(_) => None,
-            Symbol::Wildcard => None,
-        }
-    }
-
-    /// Return whether this symbol could be referenced by `other`.
-    fn matches(&self, other: &Handle) -> bool {
-        self.handle().map(|h| h.matches(other)).unwrap_or(false)
-    }
-
+impl Symbol<Wire> {
     fn to_wire_id(&self) -> Wire {
         match self {
-            Symbol::NamedExpression { id, .. } | Symbol::Expression(id) => id.clone(),
-            Symbol::Column { id, .. } => id.clone(),
-            Symbol::Alias { from, to } => todo!(),
+            Symbol::NamedExpression { payload, .. }
+            | Symbol::Expression(payload)
+            | Symbol::Column { payload, .. } => payload.clone(),
+            Symbol::Alias { .. } => todo!(),
             Symbol::Wildcard => todo!(),
         }
     }
-}
-impl std::fmt::Display for Symbol {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Symbol::Column { handle, target, .. } => write!(f, "{}: {}", handle, target),
-            Symbol::Alias { from, to } => write!(f, "{}: {}", from, to),
-            Symbol::NamedExpression { name, id } => write!(f, "{}: {:?}", name, id),
-            Symbol::Expression(e) => write!(f, "{:?}", e),
-            Symbol::Wildcard => write!(f, "*"),
-        }
-    }
-}
-
-/// The [`Kind`] of a [`Scope`] defines how it behaves when being traversed.
-#[derive(Debug)]
-enum Kind {
-    /// This context exposes symbols, and can not be traversed further.
-    Standard,
-    /// This context behaves transparently and delegates to its `providers`.
-    Transparent,
-    /// This context exposes the symbols it can reach, renaming their table
-    /// name.
-    TableAliasing(String),
-    /// This context exposes the symbols it can reach under new names.
-    FullAliasing { table: String, columns: Vec<String> },
 }
 
 /// This struct aggregates the data from which the universal query circuit
@@ -227,309 +162,38 @@ impl<T: PartialEq> UniqueStorage<T> {
     }
 }
 
-/// A [`Scope`] stores the symbols accessible at a given level in the AST, as
-/// well as information to guide symbol retrieval.
-///
-/// A `Scope` stores in `provides` the symbol that it exposes to its parent,
-/// and in `providers` the sub-context it can leverage to resolve identifiers
-/// living at its level.
-///
-/// For instance, for the following expression:
-///
-/// ```sql
-/// SELECT a, b, FROM my_table
-/// ```
-///
-/// the context at the `SELECT` level in the AST would **provide** the symbols
-/// `a` and `b`, and have the `Scope` matching `FROM my_table` as a provider.
-/// Therefore, it could dip into the `FROM` [`Scope`] to ensure that columns
-/// `a` and `b` exists, and then hold them available for a putative parent
-/// [`Scope`] to use.
-#[derive(Debug)]
-struct Scope {
-    /// The name of this context - for debugging purpose.
-    name: String,
-    /// The kind of context, which drives traversal behavior.
-    kind: Kind,
-    /// The symbols exposed by this context.
-    provides: Vec<Symbol>,
-    /// The other contexts this context may call upon when resolving a symbol.
-    providers: Vec<usize>,
-    circuit_data: CircuitData,
-}
-impl Scope {
-    /// Create a new context with some space is pre-allocated for its
-    /// variable-size members.
-    fn new(name: String, kind: Kind) -> Self {
-        Scope {
-            name,
-            kind,
-            provides: Vec::with_capacity(8),
-            providers: Vec::with_capacity(2),
-            circuit_data: Default::default(),
-        }
-    }
-
-    /// Add a sub-context in which odentifier at this context level can be
-    /// resolved.
-    fn add_provider(&mut self, id: usize) {
-        self.providers.push(id);
-    }
-}
-
-impl Scope {
-    /// Insert a new symbol in the current context, ensuring it does not
-    /// conflict with the existing ones.
-    fn insert(&mut self, s: Symbol) -> Result<()> {
-        for p in &self.provides {
-            if p.matches(s.handle().unwrap()) {
-                bail!("{} already defined: {}", s, p)
-            }
-        }
-
-        self.provides.push(s);
-        Ok(())
-    }
-}
-
-/// The `Resolver` is an AST pass, or visitor, that will ensure that all the
-/// symbols in a query are valid and references known items.
 pub(crate) struct Resolver<C: RootContextProvider> {
-    /// A tree of [`Scope`] mirroring the AST, whose nodes are the AST nodes
-    /// introducing new contexts, i.e. `SELECT` and `FROM`.
-    ///
-    /// The tree topology is built through the `providers` links in the
-    /// [`Scope`].
-    scopes: Vec<Scope>,
-    /// A handle to an object providing a register of the existing virtual
-    /// tables and their columns.
-    context: C,
-    /// A stack of pointers to the currently active node in the context tree.
-    /// The top of the stack points toward the currentlt active [`Scope`]. New
-    /// pointers are pushed when entering a new context, and popped when exiting
-    /// it.
-    pointer: Vec<usize>,
     /// A storage for the SELECT-involved operations.
     query_ops: UniqueStorage<BasicOperation>,
     /// The query-global immediate values storage.
     constants: UniqueStorage<U256>,
+    ///
+    scopes: ScopeTable<CircuitData, Wire>,
+    /// A handle to an object providing a register of the existing virtual
+    /// tables and their columns.
+    context: C,
 }
 impl<C: RootContextProvider> Resolver<C> {
     /// Create a new empty [`Resolver`]
     fn new(context: C) -> Self {
         Resolver {
-            scopes: vec![Scope::new("<QUERY>".into(), Kind::Standard)],
-            context,
-            pointer: vec![0],
+            scopes: ScopeTable::<CircuitData, Wire>::new(),
             query_ops: Default::default(),
             constants: Default::default(),
+            context,
         }
     }
 
-    fn rec_pretty(&self, i: usize, indent: usize) {
-        let spacer = "  ".repeat(indent);
-        let ctx = &self.scopes[i];
-        println!("{}{}[{:?}]{}:", spacer, i, ctx.kind, ctx.name);
-        println!("{}Predicates: {:?}", spacer, ctx.circuit_data.predicates);
-        for s in &ctx.provides {
-            println!(
-                "{} - {}",
-                spacer,
-                s.handle()
-                    .map(|h| h.to_string())
-                    .unwrap_or(format!("unnamed term: {}", s))
-            )
-        }
-        println!();
-        for n in &ctx.providers {
-            self.rec_pretty(*n, indent + 1);
-        }
-    }
-    /// Pretty-print the context tree.
-    fn pretty(&self) {
-        self.rec_pretty(0, 0);
-    }
-
-    /// Returns a list of all the symbols reachable from the [`Scope`] `n`,
-    /// i.e. that can be used for symbol resolution at its level.
-    fn reachable(&self, context_id: usize) -> Result<Vec<Symbol>> {
-        let ctx = &self.scopes[context_id];
-
-        Ok(ctx
-            .providers
-            .iter()
-            .map(|i| self.provided(*i))
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .flat_map(|x| x.into_iter())
-            .collect())
-    }
-
-    /// Insert, if needed, a new constant in the constant register and returns its index.
-    fn new_constant(&mut self, value: U256) -> Wire {
-        Wire::Constant(self.constants.insert(value))
-    }
-
-    /// Returns a list of all the symbols exposed by the [`Scope`] `n` to its parent.
-    fn provided(&self, n: usize) -> Result<Vec<Symbol>> {
-        let ctx = &self.scopes[n];
-        Ok(match &ctx.kind {
-            // A standard context exposes the symbol it containts
-            Kind::Standard => ctx.provides.clone(),
-            // A transparent context delegates to its children
-            Kind::Transparent => self.reachable(n)?,
-            // A table aliaser rewrites the table name of the symbols it can reach
-            Kind::TableAliasing(table) => {
-                let mut accessibles = self.reachable(n)?;
-                for s in accessibles.iter_mut() {
-                    match s {
-                        Symbol::Column { handle, .. } => {
-                            handle.move_to_table(table);
-                        }
-                        Symbol::Alias { from, .. } => {
-                            from.move_to_table(table);
-                        }
-                        Symbol::NamedExpression { name, .. } => {
-                            name.move_to_table(table);
-                        }
-                        Symbol::Expression(_) => {}
-                        Symbol::Wildcard => unreachable!(),
-                    }
-                }
-
-                accessibles
-            }
-            // A full aliaser exposes the symbols it can reach, but renamed.
-            Kind::FullAliasing { table, columns } => {
-                let accessible = self.reachable(n)?;
-                ensure!(columns.len() == accessible.len());
-                columns
-                    .iter()
-                    .cloned()
-                    .zip(accessible)
-                    .map(|(alias, symbol)| Symbol::Alias {
-                        from: Handle::Qualified {
-                            table: table.clone(),
-                            name: alias,
-                        },
-                        to: Box::new(symbol),
-                    })
-                    .collect()
-            }
-        })
-    }
-
-    /// Resolve a free-standing (non-qualified) identifier in the current
-    /// context.
-    fn resolve_freestanding(&self, symbol: &Ident) -> Result<Symbol> {
-        self.resolve_handle(&Handle::Simple(symbol.value.clone()))
-    }
-
-    /// Resolve a qualified (e.g. `<table>.<name>`) identifier in the current
-    /// context.
-    fn resolve_compound(&self, compound: &[Ident]) -> Result<Symbol> {
-        ensure!(
-            compound.len() == 2,
-            "`{compound:?}`: deeply coumpounded symbols are not supported"
-        );
-
-        self.resolve_handle(&Handle::Qualified {
-            table: compound[0].value.clone(),
-            name: compound[1].value.clone(),
-        })
-    }
-
-    /// Find a unique symbol reachable from the current context matching the
-    /// given [`Handle`].
-    fn resolve_handle(&self, h: &Handle) -> Result<Symbol> {
-        let pointer = *self.pointer.last().unwrap();
-
-        let candidates = self
-            .reachable(pointer)?
-            .into_iter()
-            .filter(|e| e.matches(h))
-            .collect::<Vec<_>>();
-
-        ensure!(
-            !candidates.is_empty(),
-            "symbol `{h}` not found in {}",
-            self.scopes[pointer].name,
-        );
-
-        ensure!(
-            candidates.len() <= 1,
-            "symbol `{h}` ambiguous in {}",
-            self.scopes[pointer].name
-        );
-
-        Ok(candidates[0].to_owned())
-    }
-
-    /// Ensure that the given function call is valid.
-    fn resolve_function(&self, f: &Function) -> Result<()> {
-        ensure!(f.name.0.len() == 1, "{}: unknown function `{}`", f, f.name);
-
-        let fname = &f.name.0[0];
-
-        match fname.value.as_str() {
-            "AVG" | "SUM" | "COUNT" | "MIN" | "MAX" => Ok(()),
-            _ => bail!("{}: unknown function `{}`", f, f.name),
-        }
-    }
-
-    /// Return a reference to the currently active scope.
-    fn current_scope(&self) -> &Scope {
-        &self.scopes[*self.pointer.last().unwrap()]
-    }
-
-    /// Return a mutable reference to the currently active scope.
-    fn current_scope_mut(&mut self) -> &mut Scope {
-        &mut self.scopes[*self.pointer.last().unwrap()]
-    }
-
-    /// Return a list of the symbols reachable from the current scope.
-    fn currently_reachable(&self) -> Result<Vec<Symbol>> {
-        self.reachable(*self.pointer.last().unwrap())
-    }
-
-    /// Enter a new context in the context tree, marking it as a provider to its
-    /// parent.
-    fn enter_scope(&mut self, name: String, kind: Kind) {
-        let new_id = self.scopes.len();
-        self.scopes.push(Scope::new(name, kind));
-        self.scopes[*self.pointer.last().unwrap()].add_provider(new_id);
-        self.pointer.push(new_id);
-    }
-
-    /// Exit the current context, moving the pointer back to its parent.
     fn exit_scope(&mut self) -> Result<()> {
-        // Expand the wildcards that may be present in this context exposed
-        // symbols.
-        let pointer = *self.pointer.last().unwrap();
-        let reached = self.currently_reachable().unwrap();
-        let new_provided = self.scopes[pointer]
-            .provides
-            .iter()
-            .cloned()
-            .flat_map(|s| {
-                // If the symbol is normal, let it be; if it is a wildcard,
-                // replace it by an integral copy of the symbols reachable from
-                // this context.
-                match s {
-                    Symbol::Wildcard => reached.clone(),
-                    _ => vec![s],
-                }
-                .into_iter()
-            })
-            .collect::<Vec<_>>();
+        let exited_scope = self.scopes.exit_scope()?;
 
         // Prepare the data that will be used to generate the circuit PIs
         let mut output_items = Vec::new();
         let mut aggregations = Vec::new();
-        for r in self.reachable(0)?.into_iter() {
+        for r in self.scopes.currently_reachable()?.into_iter() {
             match r {
-                Symbol::Column { id, .. }
-                | Symbol::NamedExpression { id, .. }
+                Symbol::Column { payload: id, .. }
+                | Symbol::NamedExpression { payload: id, .. }
                 | Symbol::Expression(id) => {
                     let (aggregation, output_item) = self.to_output_expression(id, false)?;
                     output_items.push(output_item);
@@ -539,13 +203,21 @@ impl<C: RootContextProvider> Resolver<C> {
                 Symbol::Wildcard => unreachable!(),
             };
         }
-        self.scopes[pointer].provides = new_provided;
-        self.scopes[pointer].circuit_data.outputs = output_items;
-        self.scopes[pointer].circuit_data.aggregation = aggregations;
+        self.scopes
+            .scope_at_mut(exited_scope)
+            .metadata_mut()
+            .outputs = output_items;
+        self.scopes
+            .scope_at_mut(exited_scope)
+            .metadata_mut()
+            .aggregation = aggregations;
 
-        // Jump back to the parent context.
-        self.pointer.pop();
         Ok(())
+    }
+
+    /// Insert, if needed, a new constant in the constant register and returns its index.
+    fn new_constant(&mut self, value: U256) -> Wire {
+        Wire::Constant(self.constants.insert(value))
     }
 
     /// Recursively convert the given expression into an assembly of circuit PI
@@ -553,7 +225,7 @@ impl<C: RootContextProvider> Resolver<C> {
     ///
     /// `storage_target` determines whether the circuit ojects should be stored
     /// in the SELECT-specific or the WHERE-specific storage target.
-    fn compile(&mut self, expr: &mut Expr, storage_target: StorageTarget) -> Result<Symbol> {
+    fn compile(&mut self, expr: &mut Expr, storage_target: StorageTarget) -> Result<Symbol<Wire>> {
         match expr {
             Expr::Value(v) => Ok(Symbol::Expression(match v {
                 Value::Number(x, _) => self.new_constant(x.parse().unwrap()),
@@ -561,10 +233,10 @@ impl<C: RootContextProvider> Resolver<C> {
                 _ => unreachable!(),
             })),
             Expr::Identifier(s) => Ok(Symbol::Expression(
-                self.resolve_freestanding(s)?.to_wire_id(),
+                self.scopes.resolve_freestanding(s)?.to_wire_id(),
             )),
             Expr::Nested(e) => self.compile(e, storage_target),
-            Expr::CompoundIdentifier(c) => self.resolve_compound(c),
+            Expr::CompoundIdentifier(c) => self.scopes.resolve_compound(c),
             Expr::BinaryOp { left, op, right } => {
                 let first_operand = self.compile(left, storage_target)?;
                 let second_operand = self.compile(right, storage_target)?;
@@ -595,8 +267,9 @@ impl<C: RootContextProvider> Resolver<C> {
                 let new_id = Wire::BasicOperation(match storage_target {
                     StorageTarget::Query => self.query_ops.insert(operation),
                     StorageTarget::Predicate => self
+                        .scopes
                         .current_scope_mut()
-                        .circuit_data
+                        .metadata_mut()
                         .predicates
                         .insert(operation),
                 });
@@ -615,8 +288,9 @@ impl<C: RootContextProvider> Resolver<C> {
                     let new_id = Wire::BasicOperation(match storage_target {
                         StorageTarget::Query => self.query_ops.insert(operation),
                         StorageTarget::Predicate => self
+                            .scopes
                             .current_scope_mut()
-                            .circuit_data
+                            .metadata_mut()
                             .predicates
                             .insert(operation),
                     });
@@ -655,10 +329,10 @@ impl<C: RootContextProvider> Resolver<C> {
     }
 
     /// Create an operand from the given wire.
-    fn to_operand(&self, s: &Symbol) -> InputOperand {
+    fn to_operand(&self, s: &Symbol<Wire>) -> InputOperand {
         match s {
-            Symbol::Column { id, .. } => InputOperand::Column(id.to_index()),
-            Symbol::NamedExpression { id, .. } | Symbol::Expression(id) => match id {
+            Symbol::Column { payload: id, .. } => InputOperand::Column(id.to_index()),
+            Symbol::NamedExpression { payload: id, .. } | Symbol::Expression(id) => match id {
                 Wire::BasicOperation(idx) => InputOperand::PreviousValue(*idx),
                 Wire::ColumnId(idx) => InputOperand::Column(*idx),
                 Wire::Constant(idx) => InputOperand::Constant(self.constants.get(*idx).clone()),
@@ -692,10 +366,10 @@ impl<C: RootContextProvider> Resolver<C> {
     /// Generate appropriate universal query circuit PIs from the root context
     /// of this Resolver.
     fn to_pis(&self) -> CircuitPis {
-        let root_scope = &self.scopes[1];
+        let root_scope = &self.scopes.scope_at(1);
         let result = ResultStructure::from((
             self.query_ops.ops.clone(),
-            root_scope.circuit_data.outputs.clone(),
+            root_scope.metadata().outputs.clone(),
         ));
 
         CircuitPis {
@@ -703,21 +377,32 @@ impl<C: RootContextProvider> Resolver<C> {
             // TODO:
             column_ids: vec![],
             query_aggregations: root_scope
-                .circuit_data
+                .metadata()
                 .aggregation
                 .iter()
                 .map(|x| x.to_field())
                 .collect(),
-            predication_operations: root_scope.circuit_data.predicates.ops.clone(),
+            predication_operations: root_scope.metadata().predicates.ops.clone(),
         }
     }
 }
 
+/// This struct contains all the data required to build the public inputs of the
+/// universal query circuit for a given query.
 #[derive(Debug)]
 struct CircuitPis {
+    /// The [`ResultStructure`] taken as input by the universal query circuit
     result: ResultStructure,
+    /// A list of [`AggregationOperation`] matching 1-1 the outputs in
+    /// [`ResultStructure`]
     query_aggregations: Vec<F>,
+    /// The list of crypto IDs of the column involved in the query. Their
+    /// position in this list **MUST** match their index in the
+    /// [`ResultStructure`] operations.
     column_ids: Vec<F>,
+    /// A list of mutually-referencing [`BasicOperation`] encoding the AST of
+    /// the WHERE predicate, if any. By convention, the root of the AST **MUST**
+    /// be the last one in this list.
     predication_operations: Vec<BasicOperation>,
 }
 
@@ -774,7 +459,8 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
                 // ... FROM table [AS alias [(col1, // col2, ...)]]
                 //
                 // so both the table name and its columns may be aliased.
-                self.enter_scope(format!("TableFactor: {table_factor}"), Kind::Standard);
+                self.scopes
+                    .enter_scope(format!("TableFactor: {table_factor}"), Kind::Standard);
                 if args.is_some() {
                     warn!("ignoring table-valued function {name}");
                 } else {
@@ -827,14 +513,11 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
                                 table: apparent_table_name.clone(),
                                 name: column.name.clone(),
                             },
-                            id: Wire::ColumnId(i),
+                            payload: Wire::ColumnId(i),
                             is_primary_index: column.is_primary_index,
                         };
 
-                        self.scopes
-                            .last_mut()
-                            .expect("never empty by construction")
-                            .insert(symbol)?;
+                        self.scopes.current_scope_mut().insert(symbol)?;
                     }
                 }
             }
@@ -863,7 +546,7 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
                     // No AS clause are provided, this context is purely transparent.
                     Kind::Transparent
                 };
-                self.enter_scope(format!("{table_factor}"), kind);
+                self.scopes.enter_scope(format!("{table_factor}"), kind);
             }
             TableFactor::TableFunction { .. } => todo!(),
             TableFactor::Function { .. } => todo!(),
@@ -885,7 +568,8 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
     /// items to their parent while ensuring that they are actually contained in
     /// its providers.
     fn pre_select(&mut self, s: &mut Select) -> Result<()> {
-        self.enter_scope(format!("Select: {s}"), Kind::Standard);
+        self.scopes
+            .enter_scope(format!("Select: {s}"), Kind::Standard);
         Ok(())
     }
 
@@ -907,7 +591,7 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
                         .compile(&mut order_by_expr.expr, StorageTarget::Query)?
                         .to_wire_id();
                     ensure!(
-                        self.currently_reachable()?
+                        self.scopes.currently_reachable()?
                             .iter()
                             .map(|s| s.to_wire_id())
                             .any(|w| w == wire_id),
@@ -927,19 +611,17 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
         let provided = match select_item {
             SelectItem::ExprWithAlias { expr, alias } => Symbol::NamedExpression {
                 name: Handle::Simple(alias.value.clone()),
-                id: self.compile(expr, StorageTarget::Query)?.to_wire_id(),
+                payload: self.compile(expr, StorageTarget::Query)?.to_wire_id(),
             },
             SelectItem::UnnamedExpr(e) => match e {
-                Expr::Identifier(i) => self.resolve_freestanding(i)?,
-                Expr::CompoundIdentifier(is) => self.resolve_compound(is)?,
+                Expr::Identifier(i) => self.scopes.resolve_freestanding(i)?,
+                Expr::CompoundIdentifier(is) => self.scopes.resolve_compound(is)?,
                 _ => Symbol::Expression(self.compile(e, StorageTarget::Query)?.to_wire_id()),
             },
             SelectItem::Wildcard(_) => Symbol::Wildcard,
             SelectItem::QualifiedWildcard(_, _) => unreachable!(),
         };
-        self.scopes[*self.pointer.last().unwrap()]
-            .provides
-            .push(provided);
+        self.scopes.current_scope_mut().provides(provided);
         Ok(())
     }
 }
@@ -1048,7 +730,7 @@ pub fn resolve<C: RootContextProvider>(q: &Query, context: C) -> Result<()> {
     println!("Original query:\n>> {}", q);
     println!("Translated query:\n>> {}", converted_query);
 
-    resolver.pretty();
+    resolver.scopes.pretty();
 
     println!("Query ops:");
     for (i, op) in resolver.query_ops.ops.iter().enumerate() {
