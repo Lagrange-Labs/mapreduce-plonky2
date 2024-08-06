@@ -171,7 +171,7 @@ impl Table {
                         for cell in rest_cells {
                             // here we don't put i+2 (primary + secondary) since only those values are in the cells tree
                             // but we put + 1 because sbbst starts at +1
-                            let idx = columns.cells_tree_index_of(cell.id);
+                            let idx = columns.cells_tree_index_of(cell.identifier());
                             t.store(idx, cell).await?;
                         }
                         Ok(())
@@ -220,14 +220,17 @@ impl Table {
             .in_transaction(|t| {
                 async move {
                     for new_cell in update.updated_cells.iter() {
-                        let merkle_cell =
-                            cell::MerkleCell::new(new_cell.id, new_cell.value, update.primary);
+                        let merkle_cell = cell::MerkleCell::new(
+                            new_cell.identifier(),
+                            new_cell.value(),
+                            update.primary,
+                        );
                         println!(
                             " --- TREE: inserting rest-cell: (index {}) : {:?}",
-                            columns.cells_tree_index_of(new_cell.id),
+                            columns.cells_tree_index_of(new_cell.identifier()),
                             merkle_cell
                         );
-                        let cell_key = columns.cells_tree_index_of(new_cell.id);
+                        let cell_key = columns.cells_tree_index_of(new_cell.identifier());
                         match update_type {
                             TreeUpdateType::Update => t.update(cell_key, merkle_cell).await?,
                             // This should only happen at init time or at creation of a new row

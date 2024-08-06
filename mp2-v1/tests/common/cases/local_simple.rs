@@ -818,7 +818,7 @@ impl TestCase {
                         .await
                         .storage_proof[0]
                         .value;
-                    let cell = Cell { id, value };
+                    let cell = Cell::new(id, value);
                     // make sure we separate the secondary cells and rest of the cells separately.
                     if *slot == INDEX_SLOT {
                         // we put 0 since we know there are no other rows with that secondary value since we are dealing
@@ -1069,9 +1069,9 @@ impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex
                 let new = new
                     .current_cells
                     .iter()
-                    .find(|new| current.id == new.id)
+                    .find(|new| current.identifier() == new.identifier())
                     .expect("missing cell");
-                if new.value != current.value {
+                if new.value() != current.value() {
                     // there is an update!
                     Some(new.clone())
                 } else {
@@ -1089,7 +1089,7 @@ impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex
         };
 
         assert!(
-            self.current_secondary.cell().id == new.current_secondary.cell().id,
+            self.current_secondary.cell().identifier() == new.current_secondary.cell().identifier(),
             "ids are different between updates?"
         );
         assert!(
@@ -1158,10 +1158,10 @@ where
             .into_iter()
             .map(|c| {
                 (
-                    c.id,
+                    c.identifier(),
                     CellInfo {
                         primary: new_primary.clone(),
-                        value: c.value,
+                        value: c.value(),
                     },
                 )
             })

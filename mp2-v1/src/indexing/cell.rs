@@ -61,15 +61,24 @@ pub async fn new_tree<
 pub struct Cell {
     /// The unique identifier of the cell, derived from the contract it comes
     /// from and its slot in its storage.
-    pub id: u64,
+    id: u64,
     /// The value stored in the cell
-    pub value: U256,
+    value: U256,
 }
 
 impl Cell {
     /// Returns a new cell from the column identifier and the value.
     pub fn new(id: u64, value: U256) -> Self {
         Self { id, value }
+    }
+    /// Returns the identifier associed to that cell
+    pub fn identifier(&self) -> ColumnID {
+        self.id
+    }
+
+    /// Returns the value associated to that cell
+    pub fn value(&self) -> U256 {
+        self.value
     }
 }
 

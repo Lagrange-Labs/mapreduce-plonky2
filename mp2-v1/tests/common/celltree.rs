@@ -60,12 +60,12 @@ impl<P: ProofStorage> TestContext<P> {
             let proof = if context.is_leaf() {
                 debug!(
                     "MP2 Proving Cell Tree hash for id {:?} - value {:?} -> {:?}",
-                    cell.id,
-                    cell.value,
+                    cell.identifier(),
+                    cell.value(),
                     hex::encode(cell.hash.0)
                 );
                 let inputs = CircuitInput::CellsTree(
-                    verifiable_db::cells_tree::CircuitInput::leaf(cell.id, cell.value),
+                    verifiable_db::cells_tree::CircuitInput::leaf(cell.identifier(), cell.value()),
                 );
                 api::generate_proof(self.params(), inputs).expect("while proving leaf")
             } else if context.right.is_none() {
@@ -85,14 +85,14 @@ impl<P: ProofStorage> TestContext<P> {
                     .expect("UT guarantees proving in order");
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::partial(
-                        cell.id,
-                        cell.value,
+                        cell.identifier(),
+                        cell.value(),
                         left_proof.clone(),
                     ));
                 debug!(
                     "MP2 Proving Cell Tree PARTIAL for id {:?} - value {:?} -> {:?} --> LEFT CHILD HASH {:?}",
-                    cell.id,
-                    cell.value,
+                    cell.identifier(),
+                    cell.value(),
                     hex::encode(cell.hash.0),
                     hex::encode(cells_tree::extract_hash_from_proof(&left_proof).map(|c|c.to_bytes()).unwrap())
                 );
@@ -127,8 +127,8 @@ impl<P: ProofStorage> TestContext<P> {
                     .expect("UT guarantees proving in order");
                 debug!(
                     "MP2 Proving Cell Tree FULL for id {:?} - value {:?} -> {:?} --> LEFT HASH {:?}, RIGHT HASH {:?}",
-                    cell.id,
-                    cell.value,
+                    cell.identifier(),
+                    cell.value(),
                     hex::encode(cell.hash.0),
                     hex::encode(cells_tree::extract_hash_from_proof(&left_proof).map(|c|c.to_bytes()).unwrap()),
                     hex::encode(cells_tree::extract_hash_from_proof(&right_proof).map(|c|c.to_bytes()).unwrap())
@@ -136,8 +136,8 @@ impl<P: ProofStorage> TestContext<P> {
 
                 let inputs =
                     CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::full(
-                        cell.id,
-                        cell.value,
+                        cell.identifier(),
+                        cell.value(),
                         [left_proof, right_proof],
                     ));
 
@@ -155,8 +155,8 @@ impl<P: ProofStorage> TestContext<P> {
                 verifiable_db::cells_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
             debug!(
                 "[+] [+] Merkle SLOT identifier {:?} -> value {} value.digest() = {:?}",
-                cell.id,
-                cell.value,
+                cell.identifier(),
+                cell.value(),
                 pi.digest_point()
             );
 

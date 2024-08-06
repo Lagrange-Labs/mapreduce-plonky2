@@ -113,14 +113,8 @@ impl UniqueMappingEntry {
     // we want to extract
     fn to_cell(&self, index: MappingIndex) -> Cell {
         match index {
-            MappingIndex::Key(id) => Cell {
-                id,
-                value: self.key,
-            },
-            MappingIndex::Value(id) => Cell {
-                id,
-                value: self.value,
-            },
+            MappingIndex::Key(id) => Cell::new(id, self.key),
+            MappingIndex::Value(id) => Cell::new(id, self.value),
         }
     }
 

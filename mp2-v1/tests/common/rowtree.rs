@@ -52,7 +52,7 @@ impl SecondaryIndexCell {
 impl From<SecondaryIndexCell> for RowTreeKey {
     fn from(value: SecondaryIndexCell) -> Self {
         RowTreeKey {
-            value: value.0.value,
+            value: value.0.value(),
             rest: value.1,
         }
     }
@@ -61,7 +61,7 @@ impl From<SecondaryIndexCell> for RowTreeKey {
 impl From<&SecondaryIndexCell> for RowTreeKey {
     fn from(value: &SecondaryIndexCell) -> Self {
         RowTreeKey {
-            value: value.0.value,
+            value: value.0.value(),
             rest: value.1.clone(),
         }
     }
