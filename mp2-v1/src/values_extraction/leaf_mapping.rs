@@ -166,8 +166,8 @@ impl CircuitLogicWires<GFp, D, 0> for LeafMappingWires<MAX_LEAF_NODE_LEN> {
 mod tests {
     use super::{
         super::{
-            compute_leaf_mapping_key_id, compute_leaf_mapping_metadata_digest,
-            compute_leaf_mapping_value_id, compute_leaf_mapping_values_digest,
+            compute_leaf_mapping_metadata_digest, compute_leaf_mapping_values_digest,
+            identifier_for_mapping_key_column, identifier_for_mapping_value_column,
         },
         *,
     };
@@ -236,8 +236,8 @@ mod tests {
         let mapping_key = hex::decode("1234").unwrap();
         let slot = StorageSlot::Mapping(mapping_key.clone(), mapping_slot as usize);
         let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let key_id = compute_leaf_mapping_key_id(mapping_slot, &contract_address);
-        let value_id = compute_leaf_mapping_value_id(mapping_slot, &contract_address);
+        let key_id = identifier_for_mapping_key_column(mapping_slot, &contract_address);
+        let value_id = identifier_for_mapping_value_column(mapping_slot, &contract_address);
 
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);

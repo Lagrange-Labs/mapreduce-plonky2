@@ -21,7 +21,7 @@ mod leaf_single;
 pub mod public_inputs;
 
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
-pub(crate) use public_inputs::PublicInputs;
+pub use public_inputs::PublicInputs;
 
 /// Constant prefixes for key and value IDs. Restrict both prefixes to 3-bytes,
 /// so `prefix + slot (u8)` could be converted to an U32.
@@ -30,13 +30,13 @@ pub(crate) const VALUE_ID_PREFIX: &[u8] = b"VAL";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
-pub fn compute_block_id() -> u64 {
+pub fn identifier_block_column() -> u64 {
     pack_and_compute_poseidon_value::<GFp>(BLOCK_ID_DST, Endianness::Big).elements[0]
         .to_canonical_u64()
 }
 
-/// Calculate `id = Poseidon(slot || contract_address)[0]` for single variable leaf.
-pub fn compute_leaf_single_id(slot: u8, contract_address: &Address) -> u64 {
+/// Calculate `id = Poseidon(slot || contract_address)[0]` for single variable.
+pub fn identifier_single_var_column(slot: u8, contract_address: &Address) -> u64 {
     let packed_contract_address: Vec<_> = contract_address.0.pack(Endianness::Big).to_fields();
 
     let inputs: Vec<_> = iter::once(GFp::from_canonical_u8(slot))
@@ -47,12 +47,12 @@ pub fn compute_leaf_single_id(slot: u8, contract_address: &Address) -> u64 {
 }
 
 /// Calculate `key_id = Poseidon(KEY || slot || contract_address)[0]` for mapping variable leaf.
-pub fn compute_leaf_mapping_key_id(slot: u8, contract_address: &Address) -> u64 {
+pub fn identifier_for_mapping_key_column(slot: u8, contract_address: &Address) -> u64 {
     compute_id_with_prefix(KEY_ID_PREFIX, slot, contract_address)
 }
 
 /// Calculate `value_id = Poseidon(VAL || slot || contract_address)[0]` for mapping variable leaf.
-pub fn compute_leaf_mapping_value_id(slot: u8, contract_address: &Address) -> u64 {
+pub fn identifier_for_mapping_value_column(slot: u8, contract_address: &Address) -> u64 {
     compute_id_with_prefix(VALUE_ID_PREFIX, slot, contract_address)
 }
 
