@@ -302,15 +302,32 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
         }
     }
 
-    pub fn with_value(epoch: Epoch, table: String, db: DBPool, t: T) -> Self {
-        Self {
+    /// Initialize a new store, with the given state. The initial state is
+    /// immediately persisted, as the DB representation of the payload must be
+    /// valid even if it is never modified further by the user.
+    pub async fn with_value(epoch: Epoch, table: String, db: DBPool, t: T) -> Result<Self> {
+        {
+            let connection = db.get().await.unwrap();
+            connection
+                .query(
+                    &format!(
+                        "INSERT INTO {}_meta (valid_from, valid_until, payload)
+                     VALUES ($1, $1, $2)",
+                        table
+                    ),
+                    &[&epoch, &Json(t.clone())],
+                )
+                .await?;
+        }
+
+        Ok(Self {
             db,
             in_tx: false,
             dirty: true,
             epoch,
             table,
             cache: RwLock::new(Some(t)),
-        }
+        })
     }
 }
 

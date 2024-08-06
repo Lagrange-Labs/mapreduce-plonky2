@@ -667,6 +667,47 @@ async fn context_at() {
     assert_eq!(s.fetch_with_context_at(&1, 2).await.0.parent, Some(2));
 }
 
+/// Ensure that a tree created will see its state persisted even if it is empty.
+#[tokio::test]
+async fn initial_state() {
+    use crate::storage::EpochStorage;
+
+    type K = i64;
+    type V = MinMaxi64;
+    type Tree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<Tree, V>;
+
+    // Create an empty tree
+    {
+        let _ = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::Reset(Tree::empty(Alpha::new(0.8))),
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "empty_tree".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    {
+        let s_init = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::MustExist,
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "empty_tree".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let tree_state = s_init.storage.state().fetch().await;
+        assert_eq!(tree_state.alpha, Alpha::new(0.8));
+        assert_eq!(tree_state.node_count, 0);
+        println!("Tree alpha is {:?}", tree_state);
+    }
+}
+
 #[tokio::test]
 async fn dirties() {
     type Tree = sbbst::Tree;

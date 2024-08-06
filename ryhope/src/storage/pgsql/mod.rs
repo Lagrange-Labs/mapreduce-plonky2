@@ -196,7 +196,11 @@ where
     }
 }
 
-/// Return, if it exists, the current epoch for a given table pair.
+/// Return the current epoch for a given table pair. Note that there always will
+/// be a matching row, for the state initialization will always commit the
+/// initial state to the database, even if the tree is left empty.
+///
+/// Fail if the DB query fails.
 async fn fetch_current_epoch(db: DBPool, table: &str) -> Result<i64> {
     let connection = db.get().await.unwrap();
     connection
@@ -227,7 +231,7 @@ where
             fetch_current_epoch(db_pool.clone(), &table).await.is_err(),
             "table `{table}` already exists"
         );
-        Self::create_storage_table(db_pool.clone(), &table).await?;
+        Self::create_tables(db_pool.clone(), &table).await?;
 
         let epoch = 0;
         let r = Self {
@@ -236,7 +240,9 @@ where
             epoch,
             in_tx: false,
             nodes: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
-            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state),
+            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
+                .await
+                .context("failed to store initial state")?,
             data: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
         };
         Ok(r)
@@ -276,14 +282,17 @@ where
         debug!("connection successful.");
 
         delete_storage_table(db_pool.clone(), &table).await?;
-        Self::create_storage_table(db_pool.clone(), &table).await?;
+        Self::create_tables(db_pool.clone(), &table).await?;
         let epoch = 0;
 
         let r = Self {
             table: table.clone(),
             db: db_pool.clone(),
             epoch,
-            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state),
+            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
+                .await
+                .context("failed to store initial state")?,
+
             nodes: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
             data: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
             in_tx: false,
@@ -328,7 +337,7 @@ where
     ///     the tree at the given epoch range.
     ///
     /// Will fail if the CREATE is not valid (e.g. the table already exists)
-    async fn create_storage_table(db: DBPool, table: &str) -> Result<()> {
+    async fn create_tables(db: DBPool, table: &str) -> Result<()> {
         let node_columns = <NodeConnector as DbConnector<T::Key, T::Node>>::columns()
             .iter()
             .chain(<PayloadConnector as DbConnector<T::Key, V>>::columns().iter())
