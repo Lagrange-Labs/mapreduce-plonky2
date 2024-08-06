@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{cmp::Ordering, fmt::Debug, hash::Hash, marker::PhantomData};
 
 /// The representation of a fraction as its numerator and denominator, allowing
@@ -327,6 +327,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         let binding = s.nodes().fetch(&to_remove).await;
         let to_remove_left_child = binding.left();
         let mut to_remove_right_child = s.nodes().fetch(&to_remove).await.right().cloned();
+        let mut dirties = HashSet::new();
 
         let new_child = match (to_remove_left_child, to_remove_right_child.as_ref()) {
             (None, None) => None,
@@ -355,6 +356,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                                             n.subtree_size -= 1;
                                         })
                                         .await;
+                                    dirties.insert(min_parent_idx.to_owned());
                                     if let Some(u) = unlink_new_child {
                                         s.nodes_mut()
                                             .update_with(u.to_owned(), |n| {
@@ -377,6 +379,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                                             n.subtree_size -= 1
                                         })
                                         .await;
+                                    dirties.insert(min_parent_idx.to_owned());
                                 }
                                 break;
                             }
@@ -392,22 +395,23 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                         min_node.subtree_size = min_node_sub_tree_size;
                     })
                     .await;
+                dirties.insert(min_idx.clone());
                 if let Some(i) = to_remove_right_child {
                     s.nodes_mut()
                         .update_with(i.to_owned(), |n| n.parent = Some(min_idx.to_owned()))
-                        .await
+                        .await;
                 }
                 if let Some(i) = to_remove_left_child {
                     s.nodes_mut()
                         .update_with(i.to_owned(), |n| n.parent = Some(min_idx.to_owned()))
-                        .await
+                        .await;
                 }
 
                 Some(min_idx)
             }
         };
 
-        let dirties = match to_remove_context.ascendance.last() {
+        match to_remove_context.ascendance.last() {
             Some(parent) => {
                 {
                     s.nodes_mut()
@@ -424,11 +428,8 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                     s.nodes_mut()
                         .update_with(i.to_owned(), |n| n.parent = Some(parent.to_owned()))
                         .await;
-                    // NOTE: optimality would require to remove unchanged leaf nodes
-                    self.descendants(new_child.as_ref().unwrap(), s).await
-                } else {
-                    vec![]
                 }
+                dirties.insert(parent.clone());
             }
             None => {
                 s.state_mut().update(|r| r.root = new_child.clone()).await;
@@ -437,11 +438,10 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                         .update_with(new_child_k.to_owned(), |n| n.parent = None)
                         .await;
                 }
-                new_child.map(|n| vec![n]).unwrap_or_default()
             }
         };
 
-        s.nodes_mut().remove(to_remove).await?;
+        s.nodes_mut().remove(to_remove.clone()).await?;
         s.state_mut().update(|r| r.node_count -= 1).await;
 
         for ancestor in to_remove_context.ascendance {
@@ -451,7 +451,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 .await;
         }
 
-        Ok(dirties)
+        Ok(dirties.into_iter().filter(|n| *n != to_remove).collect())
     }
 
     // --------------------------------------------------------------------------

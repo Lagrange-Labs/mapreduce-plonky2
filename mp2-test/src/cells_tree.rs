@@ -10,6 +10,8 @@ use mp2_common::{
     utils::{Fieldable, ToFields},
     F,
 };
+use plonky2::field::types::Field;
+use plonky2::field::types::Sample;
 use plonky2::{
     hash::hash_types::HashOut,
     iop::{
@@ -28,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use std::iter;
 
 pub type CellTree = sbbst::Tree;
+pub type CellTreeKey = <CellTree as TreeTopology>::Key;
 type CellStorage = InMemory<CellTree, TestCell>;
 pub type MerkleCellTree = MerkleTreeKvDb<CellTree, TestCell, CellStorage>;
 
@@ -62,7 +65,7 @@ impl TestCell {
         let mut rng = thread_rng();
 
         Self {
-            id: rng.gen::<u32>().to_field(),
+            id: F::rand(),
             value: U256::from_limbs(rng.gen::<[u64; 4]>()),
             hash: Default::default(),
         }

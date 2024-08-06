@@ -1,3 +1,4 @@
+use futures::{stream, StreamExt};
 use std::{collections::HashSet, marker::PhantomData};
 
 use anyhow::*;
@@ -132,6 +133,19 @@ impl<
             self.storage.data_mut().store(k, payload).await?
         }
         Ok(())
+    }
+
+    /// Return, if any, the set of nodes that will be touched, either directly
+    /// or as a result of the aggregation update process, byt the operations
+    /// defined in the current transactions.
+    ///
+    /// The set will be empty if their is no transaction active.
+    pub async fn touched(&mut self) -> HashSet<T::Key> {
+        stream::iter(self.dirty.iter())
+            .filter_map(|k| async { self.tree.lineage(k, &self.storage).await })
+            .flat_map(|p| stream::iter(p.into_full_path()))
+            .collect::<_>()
+            .await
     }
 
     /// Return the key mapped to the current root of the Merkle tree.
@@ -335,8 +349,8 @@ impl<
 
     async fn commit_transaction(&mut self) -> Result<UpdateTree<T::Key>> {
         let mut paths = vec![];
-        for k in self.dirty.iter() {
-            if let Some(p) = self.tree.lineage(k, &self.storage).await {
+        for k in self.dirty.drain() {
+            if let Some(p) = self.tree.lineage(&k, &self.storage).await {
                 paths.push(p.into_full_path().collect::<Vec<_>>());
             }
         }
@@ -358,7 +372,7 @@ impl<
         S: TransactionalStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
     > MerkleTreeKvDb<T, V, S>
 {
-    async fn print_tree(&self) {
+    pub async fn print_tree(&self) {
         self.tree.print(&self.storage).await
     }
 }

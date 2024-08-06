@@ -147,8 +147,8 @@ mod tests {
 
     use super::{
         super::{
-            compute_leaf_single_id, compute_leaf_single_metadata_digest,
-            compute_leaf_single_values_digest,
+            compute_leaf_single_metadata_digest, compute_leaf_single_values_digest,
+            identifier_single_var_column,
         },
         *,
     };
@@ -216,7 +216,7 @@ mod tests {
         let simple_slot = 2_u8;
         let slot = StorageSlot::Simple(simple_slot as usize);
         let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let id = compute_leaf_single_id(simple_slot, &contract_address);
+        let id = identifier_single_var_column(simple_slot, &contract_address);
 
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);

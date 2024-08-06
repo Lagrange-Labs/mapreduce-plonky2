@@ -10,18 +10,16 @@ use plonky2::field::types::Field;
 
 use crate::common::storage_trie::TestStorageTrie;
 
-use super::TestContext;
+use super::{proof_storage::ProofStorage, TestContext};
 
-impl TestContext {
+impl<P: ProofStorage> TestContext<P> {
     /// Generate the Values Extraction (C.2) proof for single variables.
     pub(crate) async fn prove_length_extraction(
         &self,
-        contract_address: &str,
+        contract_address: &Address,
         slot: u8,
         value: u8,
     ) -> ProofWithVK {
-        let contract_address = Address::from_str(contract_address).unwrap();
-
         // Initialize the test trie.
         let mut trie = TestStorageTrie::new();
         info!("Initialized the test storage trie");

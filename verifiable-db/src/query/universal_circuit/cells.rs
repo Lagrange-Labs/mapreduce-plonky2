@@ -1,6 +1,5 @@
 //! Cells tree utilities for query circuit
 
-use itertools::Itertools;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
     types::CBuilder,
@@ -12,21 +11,13 @@ use plonky2::{
     hash::hash_types::HashOutTarget,
     iop::target::{BoolTarget, Target},
 };
-use ryhope::{
-    storage::{memory::InMemory, EpochKvStorage, TreeTransactionalStorage},
-    tree::{sbbst, TreeTopology},
-    InitSettings, MerkleTreeKvDb, NodePayload,
+use ryhope::tree::{
+    sbbst::{self, State},
+    TreeTopology,
 };
-use serde::{Deserialize, Serialize};
 use std::iter::once;
-
 type CellTree = sbbst::Tree;
-#[derive(Serialize, Deserialize, Debug, Clone)]
-/// Empty payload used just to instantiate a dummy storage to employ `CellTree` methods
-struct Payload(());
-impl NodePayload for Payload {}
-type CellStorage = InMemory<CellTree, Payload>;
-type MerkleTree = MerkleTreeKvDb<CellTree, Payload, CellStorage>;
+type CellTreeKey = <CellTree as TreeTopology>::Key;
 
 /// Re-compute the root hash of the cells tree by the column identifiers and values
 /// except the first 2 which correspond to the indexed columns.
@@ -51,41 +42,22 @@ pub(crate) fn build_cells_tree(
     input_ids: &[Target],
     is_real_value: &[BoolTarget],
 ) -> HashOutTarget {
-    unimplemented!("async ryhope");
+    // Get the input length and ensure these array arguments must have the same length.
+    let input_len = input_ids.len();
+    assert_eq!(input_len, input_values.len());
+    assert_eq!(input_len, is_real_value.len());
 
-    #[cfg(foo_bar)]
-    {
-        // Get the input length and ensure these array arguments must have the same length.
-        let input_len = input_ids.len();
-        assert_eq!(input_len, input_values.len());
-        assert_eq!(input_len, is_real_value.len());
+    let sbbst_state = sbbst::Tree::with_capacity(input_len);
 
-        // we create a dummy storage representing a sbbst tree with `input_len` elements;
-        // the storage is fake becuase we don't store anything in the nodes, as we are just
-        // interested in the tree topology
-        let mut fake_storage =
-            MerkleTree::new(InitSettings::Reset(sbbst::Tree::empty()), ()).unwrap();
-
-        // Insert the `input_len` nodes in the tree
-        fake_storage
-            .in_transaction(|s| {
-                for i in 1..=input_len {
-                    s.store(i, Payload(()))?;
-                }
-                Ok(())
-            })
-            .expect("failed to initialize fake storage");
-
-        let root_key = fake_storage.root().unwrap();
-        build_cells_subtree_at_key(
-            b,
-            input_values,
-            input_ids,
-            is_real_value,
-            &root_key,
-            &fake_storage,
-        )
-    }
+    let root_key = sbbst_state.root();
+    build_cells_subtree_at_key(
+        b,
+        input_values,
+        input_ids,
+        is_real_value,
+        &root_key,
+        &sbbst_state,
+    )
 }
 
 fn build_cells_subtree_at_key(
@@ -93,46 +65,41 @@ fn build_cells_subtree_at_key(
     input_values: &[UInt256Target],
     input_ids: &[Target],
     is_real_value: &[BoolTarget],
-    key: &<CellTree as TreeTopology>::Key,
-    fake_storage: &MerkleTree,
+    key: &CellTreeKey,
+    state: &State,
 ) -> HashOutTarget {
-    return input_ids.try_into().unwrap();
-
-    #[cfg(foo_bar)]
-    {
-        let empty_hash = b.constant_hash(*empty_poseidon_hash());
-        let node_context = fake_storage.node_context(key).unwrap();
-        let children = node_context
-            .iter_children()
-            .map(|child| {
-                if let Some(child_key) = child {
-                    build_cells_subtree_at_key(
-                        b,
-                        input_values,
-                        input_ids,
-                        is_real_value,
-                        child_key,
-                        fake_storage,
-                    )
-                } else {
-                    empty_hash
-                }
-            })
-            .collect_vec();
-        assert_eq!(children.len(), 2);
-        let node_key = key - 1; // sbbst stores key starting by 1, while slice starts from 0
-        let node_hash = b.hash_n_to_hash_no_pad::<CHasher>(
-            children
-                .iter()
-                .flat_map(|child_hash| child_hash.to_targets())
-                .chain(once(input_ids[node_key]))
-                .chain(input_values[node_key].to_targets())
-                .collect(),
-        );
-        // if is_real_value[node_key] == true, then the hash of the node is the computed one, otherwise
-        // we just propagate the hash of the left child
-        b.select_hash(is_real_value[node_key], &node_hash, &children[0])
-    }
+    let empty_hash = b.constant_hash(*empty_poseidon_hash());
+    let node_context = state.node_context(key).unwrap();
+    let children = node_context
+        .iter_children()
+        .map(|child| {
+            if let Some(child_key) = child {
+                build_cells_subtree_at_key(
+                    b,
+                    input_values,
+                    input_ids,
+                    is_real_value,
+                    child_key,
+                    state,
+                )
+            } else {
+                empty_hash
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(children.len(), 2);
+    let node_key = key - 1; // sbbst stores key starting by 1, while slice starts from 0
+    let node_hash = b.hash_n_to_hash_no_pad::<CHasher>(
+        children
+            .iter()
+            .flat_map(|child_hash| child_hash.to_targets())
+            .chain(once(input_ids[node_key]))
+            .chain(input_values[node_key].to_targets())
+            .collect(),
+    );
+    // if is_real_value[node_key] == true, then the hash of the node is the computed one, otherwise
+    // we just propagate the hash of the left child
+    b.select_hash(is_real_value[node_key], &node_hash, &children[0])
 }
 
 #[cfg(test)]
@@ -233,12 +200,12 @@ mod tests {
     //     \         /
     //      \       /
     //        root (c4)
-    #[test]
-    fn test_query_cells_tree_circuit_saturated() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_saturated() {
         const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 7;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5
@@ -248,12 +215,12 @@ mod tests {
     //     \      /
     //      \    /
     //        root (c4)
-    #[test]
-    fn test_query_cells_tree_circuit_partial_unsaturated() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_partial_unsaturated() {
         const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 5;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5 c6 c7 c8
@@ -269,12 +236,12 @@ mod tests {
     //             \
     //              \
     //                  root (c8), has no right child
-    #[test]
-    fn test_query_cells_tree_circuit_completely_unsaturated() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_completely_unsaturated() {
         const MAX_NUM_CELLS: usize = 15;
         const REAL_NUM_CELLS: usize = 8;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5 c6 c7 c8 c9
@@ -290,12 +257,12 @@ mod tests {
     //             \        /
     //              \      /
     //                  root (c8)
-    #[test]
-    fn test_query_cells_tree_circuit_index_out_of_range() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_index_out_of_range() {
         const MAX_NUM_CELLS: usize = 9;
         const REAL_NUM_CELLS: usize = 9;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
     // c1 c2 c3 c4 c5 c6 c7 c8 c9
@@ -311,19 +278,19 @@ mod tests {
     //             \        /
     //              \      /
     //                  root (c8)
-    #[test]
-    fn test_query_cells_tree_circuit_index_dummy_cell() {
+    #[tokio::test]
+    async fn test_query_cells_tree_circuit_index_dummy_cell() {
         const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 9;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 
-    #[test]
-    fn test_empty_tree() {
+    #[tokio::test]
+    async fn test_empty_tree() {
         const MAX_NUM_CELLS: usize = 13;
         const REAL_NUM_CELLS: usize = 0;
 
-        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>();
+        test_cells_tree_circuit::<MAX_NUM_CELLS, REAL_NUM_CELLS>().await;
     }
 }

@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use anyhow::*;
+use futures::FutureExt;
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
@@ -664,4 +665,42 @@ async fn context_at() {
 
     assert_eq!(s.fetch_with_context_at(&1, 1).await.0.parent, None);
     assert_eq!(s.fetch_with_context_at(&1, 2).await.0.parent, Some(2));
+}
+
+#[tokio::test]
+async fn dirties() {
+    type Tree = sbbst::Tree;
+    type V = MinMaxi64;
+    type Storage = InMemory<Tree, V>;
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ())
+        .await
+        .unwrap();
+
+    // Initial tree:
+    // (2 (1))
+    s.in_transaction(|s| {
+        async {
+            s.store(1, 1i64.into()).await.unwrap();
+            s.store(2, 2i64.into()).await.unwrap();
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+
+    // Initial tree = (2 (1))
+    // New tree = (2 (1 3)) --> dirties = { 2, 3 }
+    s.in_transaction(|s| {
+        async {
+            s.store(3, 2i64.into()).await.unwrap();
+            let dirties = s.touched().await;
+            assert!(dirties.contains(&2));
+            assert!(dirties.contains(&3));
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
 }
