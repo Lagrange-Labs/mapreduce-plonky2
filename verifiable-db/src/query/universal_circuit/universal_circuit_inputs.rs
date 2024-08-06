@@ -19,7 +19,7 @@ pub struct Placeholder {
 
 pub type PlaceholderId = F;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 /// Enumeration representing all the possible types of input operands for a basic operation
 pub enum InputOperand {
     // Input operand is a placeholder in the query
@@ -35,14 +35,23 @@ pub enum InputOperand {
     /// an operation found before the current operation in the set of operations
     PreviousValue(usize),
 }
-
+impl std::fmt::Debug for InputOperand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InputOperand::Placeholder(i) => write!(f, "${i}"),
+            InputOperand::Constant(x) => write!(f, "{x}"),
+            InputOperand::Column(id) => write!(f, "C[{id}]"),
+            InputOperand::PreviousValue(previous) => write!(f, "@{previous}"),
+        }
+    }
+}
 impl Default for InputOperand {
     fn default() -> Self {
         InputOperand::Column(0)
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 /// Data structure employed to specify a basic operation to be performed to
 /// compute the query
 pub struct BasicOperation {
@@ -50,6 +59,19 @@ pub struct BasicOperation {
     /// Can be None in case of unary operation
     pub second_operand: Option<InputOperand>,
     pub op: Operation,
+}
+impl std::fmt::Debug for BasicOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(second_operand) = self.second_operand {
+            write!(
+                f,
+                "({:?} {:?} {:?})",
+                self.first_operand, self.op, second_operand
+            )
+        } else {
+            write!(f, "({:?} {:?})", self.first_operand, self.op)
+        }
+    }
 }
 
 impl BasicOperation {
@@ -201,6 +223,7 @@ pub enum OutputItem {
 
 /// Data structure that contains the description of the output items to be returned and the
 /// operations necessary to compute the output items
+#[derive(Debug)]
 pub struct ResultStructure {
     pub result_operations: Vec<BasicOperation>,
     pub output_items: Vec<OutputItem>,

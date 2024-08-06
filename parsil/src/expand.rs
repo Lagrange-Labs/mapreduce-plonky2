@@ -1,7 +1,7 @@
 //! Expand high-level operations (e.g. IN or BETWEEN) into combination of
 //! operations supported by the circuits.
 
-use sqlparser::ast::{BinaryOperator, Expr, Query, Value};
+use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
 
 use crate::visitor::{AstPass, Visit};
 
@@ -15,7 +15,7 @@ impl AstPass for Expander {
         let FALSE = Expr::Value(Value::Number("0".to_string(), false));
 
         match e {
-            // Expand ISFALSE(old) into (old = 0)
+            // ISFALSE(old) := (old = 0)
             Expr::IsNotTrue(old) | Expr::IsFalse(old) => {
                 *e = Expr::Nested(Box::new(Expr::BinaryOp {
                     left: Box::new(*old.clone()),
@@ -23,7 +23,7 @@ impl AstPass for Expander {
                     right: Box::new(FALSE.clone()),
                 }))
             }
-            // Expand ISTRUE(old) into (old != 0)
+            // ISTRUE(old) := (old != 0)
             Expr::IsTrue(old) | Expr::IsNotFalse(old) => {
                 *e = Expr::Nested(Box::new(Expr::BinaryOp {
                     left: Box::new(*old.clone()),
@@ -37,7 +37,7 @@ impl AstPass for Expander {
                 negated,
             } => {
                 *e = if *negated {
-                    // NOT INLIST -> old != list[0] AND old != list[1] ... AND TRUE
+                    // NOT INLIST := old != list[0] AND old != list[1] ... AND TRUE
                     Expr::Nested(Box::new(list.iter_mut().fold(TRUE.clone(), |ax, l| {
                         Expr::BinaryOp {
                             left: Box::new(Expr::BinaryOp {
@@ -50,7 +50,7 @@ impl AstPass for Expander {
                         }
                     })))
                 } else {
-                    // INLIST -> old == list[0] OR old == list[1] ... OR FALSE
+                    // INLIST := old == list[0] OR old == list[1] ... OR FALSE
                     Expr::Nested(Box::new(list.iter_mut().fold(FALSE.clone(), |ax, l| {
                         Expr::BinaryOp {
                             left: Box::new(Expr::BinaryOp {
@@ -71,7 +71,7 @@ impl AstPass for Expander {
                 high,
             } => {
                 *e = if *negated {
-                    // NOT x BETWEEN a AND b -> x < a OR x > b
+                    // NOT x BETWEEN a AND b := x < a OR x > b
                     Expr::Nested(Box::new(Expr::BinaryOp {
                         left: Box::new(Expr::BinaryOp {
                             left: Box::new(*expr.clone()),
@@ -86,7 +86,7 @@ impl AstPass for Expander {
                         }),
                     }))
                 } else {
-                    // x BETWEEN a AND b -> x >= a AND x <= b
+                    // x BETWEEN a AND b := x >= a AND x <= b
                     Expr::Nested(Box::new(Expr::BinaryOp {
                         left: Box::new(Expr::BinaryOp {
                             left: Box::new(*expr.clone()),
@@ -100,6 +100,12 @@ impl AstPass for Expander {
                             right: Box::new(*high.clone()),
                         }),
                     }))
+                }
+            }
+            Expr::UnaryOp { op, expr } => {
+                // +E := E
+                if let UnaryOperator::Plus = op {
+                    *e = *expr.clone();
                 }
             }
             _ => {}

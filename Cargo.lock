@@ -3408,14 +3408,18 @@ dependencies = [
 name = "parsil"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "anyhow",
  "clap",
  "log",
+ "mp2_common",
+ "plonky2",
  "postgres",
  "serde",
  "serde_json",
  "sqlparser",
  "stderrlog",
+ "verifiable-db",
 ]
 
 [[package]]

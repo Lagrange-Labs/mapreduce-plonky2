@@ -121,7 +121,7 @@ pub enum Extraction {
     Column,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Default, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Default, Hash)]
 /// Set of constant identifiers employed in the
 /// computational hash, which is a compact representation
 /// of the query being proven by the query circuits
@@ -142,6 +142,31 @@ pub enum Operation {
     OrOp,
     NotOp,
     XorOp,
+}
+impl std::fmt::Debug for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Operation::AddOp => '+',
+                Operation::SubOp => '-',
+                Operation::MulOp => '*',
+                Operation::DivOp => '/',
+                Operation::ModOp => '%',
+                Operation::EqOp => '=',
+                Operation::NeOp => '≠',
+                Operation::LessThanOp => '<',
+                Operation::GreaterThanOp => '>',
+                Operation::LessThanOrEqOp => '≤',
+                Operation::GreaterThanOrEqOp => '≥',
+                Operation::AndOp => '&',
+                Operation::OrOp => '|',
+                Operation::NotOp => '!',
+                Operation::XorOp => '^',
+            }
+        )
+    }
 }
 
 impl<F: RichField> ToField<F> for Operation {
