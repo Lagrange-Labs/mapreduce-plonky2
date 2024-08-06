@@ -53,6 +53,31 @@ pub struct BasicOperation {
 }
 
 impl BasicOperation {
+    /// Instantiate a new binary operation, i.e., a basic operation with 2 operands
+    pub fn new_binary_operation(
+        first_operand: InputOperand,
+        second_operand: InputOperand,
+        op: Operation,
+    ) -> Self {
+        BasicOperation {
+            first_operand,
+            second_operand: Some(second_operand),
+            op,
+        }
+    }
+    
+    /// Instantiate a new unary operation, i.e., a basic operation with a single operand
+    pub fn new_unary_operation(
+        operand: InputOperand,
+        op: Operation,
+    ) -> Self {
+        BasicOperation {
+            first_operand: operand,
+            second_operand: None,
+            op,
+        }
+    }
+
     /// Compute the results of the `operations` provided as input, employing the provided
     /// `column_values` as the operands for the operations having `InputOperand::Column`
     /// operands and the provided `placeholder_values` for the operations having `InputOperand::Placeholder`
