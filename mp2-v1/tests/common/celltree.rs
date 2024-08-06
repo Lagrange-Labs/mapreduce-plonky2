@@ -1,4 +1,3 @@
-
 use anyhow::*;
 use futures::{stream, StreamExt};
 use log::{debug, info};
@@ -13,10 +12,9 @@ use mp2_v1::{
 };
 use plonky2::plonk::config::GenericHashOut;
 use ryhope::storage::{
-        updatetree::{Next, UpdateTree},
-        RoEpochKvStorage,
-    }
-;
+    updatetree::{Next, UpdateTree},
+    RoEpochKvStorage,
+};
 use verifiable_db::cells_tree;
 
 use crate::common::{cell_tree_proof_to_hash, TestContext};
@@ -217,7 +215,8 @@ impl<P: ProofStorage> TestContext<P> {
         // We need to (a) move the proofs to the new (new_row_key, primary) identifier
         // then (b) update all the impacted cells to also have this new information about the new
         // primary index
-        self.move_cells_proof_to_new_row(&table.id, primary, &cells_update).await
+        self.move_cells_proof_to_new_row(&table.id, primary, &cells_update)
+            .await
             .expect("unable to move cells tree proof:");
         // set the primary index for all cells that are in the update plan to the new primary
         // index, since all of them will be reproven
@@ -253,7 +252,6 @@ impl<P: ProofStorage> TestContext<P> {
                         previous_row.payload.secondary_index_column,
                         table.columns.secondary.identifier
                     );
-                
                     // we need to update the primary on the impacted cells at least, OR on all the cells if
                     // we are moving all the proofs to a new row key which happens when doing an DELETE +
                     // INSERT
@@ -268,14 +266,16 @@ impl<P: ProofStorage> TestContext<P> {
         // (c) reconstruct key with those new updated cell info
         let updated_cell_tree = table.construct_cell_tree(&updated_cells).await;
         let tree_hash = cells_update.latest.root_data().await.unwrap().hash;
-        let root_key = self.prove_cell_tree(
-            table,
-            primary,
-            previous_row,
-            cells_update.new_row_key.clone(),
-            updated_cell_tree,
-            cells_update.to_update,
-        ).await;
+        let root_key = self
+            .prove_cell_tree(
+                table,
+                primary,
+                previous_row,
+                cells_update.new_row_key.clone(),
+                updated_cell_tree,
+                cells_update.to_update,
+            )
+            .await;
         let root_proof_key = CellProofIdentifier {
             primary,
             table: table.id.clone(),
@@ -330,7 +330,7 @@ impl<P: ProofStorage> TestContext<P> {
             .await
             .expect("can't get root of new cells tree")];
         // traverse key in DFS style
-        struct Return  {
+        struct Return {
             before: ProofKey,
             after: ProofKey,
             children: Vec<CellTreeKey>,
@@ -380,10 +380,15 @@ impl<P: ProofStorage> TestContext<P> {
             // move all the proofs. Need to be done separately before of lifetime issues with
             // self.storage that can not be captured in async
             // Should be refactored to have async first storage
-            to_move = new_nodes.into_iter().flat_map(|r| {
-                self.storage.move_proof(&r.before, &r.after).expect("can't move proof");
-                r.children
-            }).collect();
+            to_move = new_nodes
+                .into_iter()
+                .flat_map(|r| {
+                    self.storage
+                        .move_proof(&r.before, &r.after)
+                        .expect("can't move proof");
+                    r.children
+                })
+                .collect();
         }
         info!(
             "Moved all cells tree proof from old {:?} to new {:?}",
