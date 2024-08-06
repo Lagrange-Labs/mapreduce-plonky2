@@ -76,7 +76,7 @@ impl std::fmt::Display for Handle {
 /// Ryhope.
 pub trait RootContextProvider {
     /// Return, if it exists, the structure of the given virtual table.
-    fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable>;
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable>;
 
     /// Return the current block number
     fn current_block(&self) -> u64;
@@ -84,7 +84,7 @@ pub trait RootContextProvider {
 
 pub struct EmptyProvider;
 impl RootContextProvider for EmptyProvider {
-    fn fetch_table(&mut self, _table_name: &str) -> Result<ZkTable> {
+    fn fetch_table(&self, _table_name: &str) -> Result<ZkTable> {
         bail!("empty provider")
     }
 
@@ -105,7 +105,7 @@ impl FileContextProvider {
     }
 }
 impl RootContextProvider for FileContextProvider {
-    fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable> {
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         self.tables
             .get(table_name)
             .cloned()
@@ -119,7 +119,7 @@ impl RootContextProvider for FileContextProvider {
 
 pub struct PgsqlContextProvider {}
 impl RootContextProvider for PgsqlContextProvider {
-    fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable> {
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         todo!()
     }
 

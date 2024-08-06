@@ -12,7 +12,7 @@ use mp2_v1::indexing::{
     row::{CellCollection, Row, RowTreeKey},
     ColumnID,
 };
-use parsil::symbols::{RootContextProvider, ZkTable};
+use parsil::symbols::{RootContextProvider, ZkColumn, ZkTable};
 use ryhope::{
     storage::{updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
     tree::{
@@ -22,7 +22,7 @@ use ryhope::{
     InitSettings,
 };
 use serde::{Deserialize, Serialize};
-use std::hash::Hash;
+use std::{hash::Hash, iter::once};
 
 use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
 
@@ -50,6 +50,15 @@ pub enum IndexType {
     Primary,
     Secondary,
     None,
+}
+
+impl IndexType {
+    pub fn is_primary(&self) -> bool {
+        match self {
+            IndexType::Primary => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -457,12 +466,38 @@ pub enum TreeUpdateType {
     Update,
 }
 
-impl RootContextProvider for Table {
-    fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable> {
-        todo!()
+impl Table {
+    fn into_zktable(&self) -> Result<ZkTable> {
+        let zk_columns = self.columns.into_zkcolumns();
+        Ok(ZkTable {
+            name: self.id.0.clone(),
+            // TODO: metadata id
+            id: 0,
+            columns: zk_columns,
+        })
     }
 
     fn current_block(&self) -> u64 {
         todo!()
+    }
+}
+
+impl TableColumns {
+    pub fn into_zkcolumns(&self) -> Vec<ZkColumn> {
+        once(&self.primary_column())
+            .chain(once(&self.secondary_column()))
+            .chain(self.rest.iter())
+            .map(|c| c.into_zkcolumn())
+            .collect()
+    }
+}
+
+impl TableColumn {
+    pub fn into_zkcolumn(&self) -> ZkColumn {
+        ZkColumn {
+            is_primary_index: self._index.is_primary(),
+            // TODO: make a real name
+            name: self.identifier.to_string(),
+        }
     }
 }
