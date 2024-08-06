@@ -1,4 +1,5 @@
 use anyhow::*;
+use mp2_common::F;
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{Function, Ident};
 use std::{collections::HashMap, fmt::Debug};
@@ -22,6 +23,8 @@ pub struct ZkColumn {
     pub name: String,
     /// Whether this column is the cryptographic primary index
     pub is_primary_index: bool,
+    /// The cryptographic ID of this column
+    pub id: F,
 }
 
 /// A [`Handle`] defines an identifier in a SQL expression.

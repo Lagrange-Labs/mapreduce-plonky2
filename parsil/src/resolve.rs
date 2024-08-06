@@ -61,7 +61,7 @@ enum Wire {
     /// A wire indexing an operation, either in the SELECT-sepcific or
     /// WHERE-specific operation storage.
     BasicOperation(usize),
-    /// A wire carrying a column index.
+    /// A wire carrying a column index in the column register.
     /// NOTE: this will have to be reworked when allowing JOINs.
     ColumnId(usize),
     /// A wire referring to the given constant in the constant storage.
@@ -165,9 +165,12 @@ impl<T: PartialEq> UniqueStorage<T> {
 pub(crate) struct Resolver<C: RootContextProvider> {
     /// A storage for the SELECT-involved operations.
     query_ops: UniqueStorage<BasicOperation>,
-    /// The query-global immediate values storage.
+    /// The query-global immediate value storage.
     constants: UniqueStorage<U256>,
-    ///
+    /// The query-global column storage, mapping a column index to a
+    /// cryptographic column ID.
+    columns: Vec<F>,
+    /// The symbol table hierarchy for this query
     scopes: ScopeTable<CircuitData, Wire>,
     /// A handle to an object providing a register of the existing virtual
     /// tables and their columns.
@@ -180,6 +183,7 @@ impl<C: RootContextProvider> Resolver<C> {
             scopes: ScopeTable::<CircuitData, Wire>::new(),
             query_ops: Default::default(),
             constants: Default::default(),
+            columns: Vec::new(),
             context,
         }
     }
@@ -374,8 +378,7 @@ impl<C: RootContextProvider> Resolver<C> {
 
         CircuitPis {
             result,
-            // TODO:
-            column_ids: vec![],
+            column_ids: self.columns.clone(),
             query_aggregations: root_scope
                 .metadata()
                 .aggregation
@@ -494,7 +497,10 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
                         ensure!(column_aliases.len() == table_columns.len())
                     }
 
+                    let initial_offset = self.columns.len();
                     for (i, column) in table_columns.into_iter().enumerate() {
+                        let i = i + initial_offset;
+                        self.columns.push(column.id);
                         // The symbol refers to a concrete column
                         let symbol = Symbol::Column {
                             handle: Handle::Qualified {
