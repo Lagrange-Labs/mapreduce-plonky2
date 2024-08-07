@@ -1,5 +1,5 @@
 use alloy::primitives::Address;
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use futures::{
     stream::{self, StreamExt},
     FutureExt,
@@ -119,6 +119,7 @@ impl TableColumns {
 }
 
 pub struct Table {
+    pub(crate) genesis_block: u64,
     pub(crate) name: String,
     pub(crate) id: TableID,
     pub(crate) columns: TableColumns,
@@ -154,6 +155,7 @@ impl Table {
         columns.self_assert();
         Self {
             columns,
+            genesis_block,
             name: table_name,
             id: table_id,
             row: row_tree,
@@ -507,5 +509,30 @@ impl TableColumn {
             // TODO: make a real name
             name: self.identifier.to_string(),
         }
+    }
+}
+
+impl RootContextProvider for Table {
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+        <&Self as RootContextProvider>::fetch_table(&self, table_name)
+    }
+
+    fn current_block(&self) -> u64 {
+        todo!()
+    }
+}
+impl RootContextProvider for &Table {
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+        ensure!(
+            self.name == table_name,
+            "names differ table {} vs requested {}",
+            self.name,
+            table_name
+        );
+        self.into_zktable()
+    }
+
+    fn current_block(&self) -> u64 {
+        todo!()
     }
 }

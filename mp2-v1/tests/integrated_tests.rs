@@ -6,7 +6,7 @@
 use anyhow::Result;
 
 use common::{
-    cases::local_simple::{ChangeType, UpdateType},
+    cases::indexing::{ChangeType, UpdateType},
     context,
     proof_storage::{KeyValueDB, ProofStorage},
     table::Table,
@@ -69,14 +69,7 @@ async fn integrated_test() -> Result<()> {
         ChangeType::Deletion,
     ];
     mapping.run(&mut ctx, changes).await?;
-    let mapping_table = mapping.table();
-    test_queries_on_table(&ctx, mapping_table)?;
-    Ok(())
-}
-
-fn test_queries_on_table<P: ProofStorage>(ctx: &TestContext<P>, table: &Table) -> Result<()> {
-    let query = "SELECT AVG(value) FROM table";
-    let query = common::query::run_query(ctx, table, query)?;
+    mapping.test_query(&ctx).await?;
     Ok(())
 }
 
