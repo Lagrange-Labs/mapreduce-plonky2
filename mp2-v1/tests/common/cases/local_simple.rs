@@ -63,6 +63,10 @@ const LENGTH_VALUE: u8 = 2;
 
 /// Test slot for contract extraction
 const CONTRACT_SLOT: usize = 1;
+
+/// human friendly name about the column containing the block number
+const BLOCK_COLUMN_NAME: &str = "block_number";
+
 impl TestCase {
     pub fn table(&self) -> &Table {
         &self.table
@@ -99,12 +103,14 @@ impl TestCase {
         // own way of defining their table.
         let columns = TableColumns {
             primary: TableColumn {
+                name: BLOCK_COLUMN_NAME.to_string(),
                 identifier: identifier_block_column(),
-                _index: IndexType::Primary,
+                index: IndexType::Primary,
             },
             secondary: TableColumn {
+                name: "column_value".to_string(),
                 identifier: identifier_single_var_column(INDEX_SLOT, contract_address),
-                _index: IndexType::Secondary,
+                index: IndexType::Secondary,
             },
             rest: SINGLE_SLOTS
                 .iter()
@@ -114,8 +120,9 @@ impl TestCase {
                     _ => {
                         let identifier = identifier_single_var_column(*slot, contract_address);
                         Some(TableColumn {
+                            name: format!("column_{}", i),
                             identifier,
-                            _index: IndexType::None,
+                            index: IndexType::None,
                         })
                     }
                 })
@@ -123,7 +130,13 @@ impl TestCase {
         };
         Ok(Self {
             source: source.clone(),
-            table: Table::new(indexing_genesis_block, table_id, columns).await,
+            table: Table::new(
+                indexing_genesis_block,
+                table_id,
+                "single_table".to_string(),
+                columns,
+            )
+            .await,
             contract_address: *contract_address,
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
@@ -177,19 +190,28 @@ impl TestCase {
         // own way of defining their table.
         let columns = TableColumns {
             primary: TableColumn {
+                name: BLOCK_COLUMN_NAME.to_string(),
                 identifier: identifier_block_column(),
-                _index: IndexType::Primary,
+                index: IndexType::Primary,
             },
             secondary: TableColumn {
+                name: if value_as_index { "value" } else { "key" }.to_string(),
                 identifier: index_identifier,
-                _index: IndexType::Secondary,
+                index: IndexType::Secondary,
             },
             rest: vec![TableColumn {
+                name: if value_as_index { "key" } else { "value" }.to_string(),
                 identifier: cell_identifier,
-                _index: IndexType::None,
+                index: IndexType::None,
             }],
         };
-        let table = Table::new(index_genesis_block, table_id, columns).await;
+        let table = Table::new(
+            index_genesis_block,
+            table_id,
+            "m1_table".to_string(),
+            columns,
+        )
+        .await;
         Ok(Self {
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
@@ -722,21 +744,10 @@ impl TestCase {
             TableSourceSlot::Mapping((ref mut mapping, _)) => {
                 let index = mapping.index.clone();
                 let slot = mapping.slot;
-                let init_state = [
-                    (
-                        U256::from(10),
-                        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
-                    ),
-                    (
-                        // NOTE: here is the same address but for different mapping key (10,11)
-                        U256::from(11),
-                        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
-                    ),
-                    (
-                        U256::from(12),
-                        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfeee").unwrap(),
-                    ),
-                ];
+                let init_pair = (next_value(), next_address());
+                // NOTE: here is the same address but for different mapping key (10,11)
+                let pair2 = (init_pair.0, next_address());
+                let init_state = [init_pair, pair2, (next_value(), next_address())];
                 // saving the keys we are tracking in the mapping
                 mapping.mapping_keys.extend(
                     init_state
@@ -763,7 +774,7 @@ impl TestCase {
                     s1: true,
                     s2: U256::from(10),
                     s3: "test".to_string(),
-                    s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
+                    s4: next_address(),
                 };
                 // since the table is not created yet, we are giving an empty table row. When making the
                 // diff with the new updated contract storage, the logic will detect it's an initialization

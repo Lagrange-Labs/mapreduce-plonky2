@@ -63,8 +63,9 @@ impl IndexType {
 
 #[derive(Clone, Debug)]
 pub struct TableColumn {
+    pub name: String,
     pub identifier: ColumnID,
-    pub _index: IndexType,
+    pub index: IndexType,
 }
 
 #[derive(Clone, Debug)]
@@ -118,6 +119,7 @@ impl TableColumns {
 }
 
 pub struct Table {
+    pub(crate) name: String,
     pub(crate) id: TableID,
     pub(crate) columns: TableColumns,
     // NOTE: there is no cell tree because it's small and can be reconstructed
@@ -130,7 +132,12 @@ pub struct Table {
 }
 
 impl Table {
-    pub async fn new(genesis_block: u64, table_id: TableID, columns: TableColumns) -> Self {
+    pub async fn new(
+        genesis_block: u64,
+        table_id: TableID,
+        table_name: String,
+        columns: TableColumns,
+    ) -> Self {
         let row_tree = MerkleRowTree::new(
             InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
             (),
@@ -147,6 +154,7 @@ impl Table {
         columns.self_assert();
         Self {
             columns,
+            name: table_name,
             id: table_id,
             row: row_tree,
             index: index_tree,
@@ -495,7 +503,7 @@ impl TableColumns {
 impl TableColumn {
     pub fn into_zkcolumn(&self) -> ZkColumn {
         ZkColumn {
-            is_primary_index: self._index.is_primary(),
+            is_primary_index: self.index.is_primary(),
             // TODO: make a real name
             name: self.identifier.to_string(),
         }
