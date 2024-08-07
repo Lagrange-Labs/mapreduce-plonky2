@@ -211,7 +211,7 @@ mod tests {
         }
     }
 
-    fn test_results_tree_with_duplicates_circuit(is_stored_in_leaf: bool) {
+    async fn test_results_tree_with_duplicates_circuit(is_stored_in_leaf: bool) {
         let mut rng = thread_rng();
         let cells: [TestCell; S] = array::from_fn(|_| TestCell::random());
         let mut item_values = array::from_fn(|_| U256::ZERO);
@@ -241,7 +241,7 @@ mod tests {
         // Check the public inputs.
 
         // Tree hash
-        let exp_hash = compute_cells_tree_hash(&cells[2..]);
+        let exp_hash = compute_cells_tree_hash(cells[2..].to_vec()).await;
         if is_stored_in_leaf {
             let empty_hash = empty_poseidon_hash();
             let empty_hash_fields = empty_hash.to_fields();
@@ -299,12 +299,12 @@ mod tests {
         assert_eq!(pi.accumulator(), exp_accumulator.to_weierstrass());
     }
 
-    #[test]
-    fn test_results_tree_with_duplicates_circuit_storing_in_leaf() {
-        test_results_tree_with_duplicates_circuit(true);
+    #[tokio::test]
+    async fn test_results_tree_with_duplicates_circuit_storing_in_leaf() {
+        test_results_tree_with_duplicates_circuit(true).await;
     }
-    #[test]
-    fn test_results_tree_with_duplicates_circuit_storing_in_inter() {
-        test_results_tree_with_duplicates_circuit(false);
+    #[tokio::test]
+    async fn test_results_tree_with_duplicates_circuit_storing_in_inter() {
+        test_results_tree_with_duplicates_circuit(false).await;
     }
 }
