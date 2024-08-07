@@ -65,12 +65,9 @@ impl BasicOperation {
             op,
         }
     }
-    
+
     /// Instantiate a new unary operation, i.e., a basic operation with a single operand
-    pub fn new_unary_operation(
-        operand: InputOperand,
-        op: Operation,
-    ) -> Self {
+    pub fn new_unary_operation(operand: InputOperand, op: Operation) -> Self {
         BasicOperation {
             first_operand: operand,
             second_operand: None,
