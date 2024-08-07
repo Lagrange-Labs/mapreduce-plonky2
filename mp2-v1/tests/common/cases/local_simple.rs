@@ -746,7 +746,7 @@ impl TestCase {
                 let slot = mapping.slot;
                 let init_pair = (next_value(), next_address());
                 // NOTE: here is the same address but for different mapping key (10,11)
-                let pair2 = (init_pair.0, next_address());
+                let pair2 = (next_value(), init_pair.1);
                 let init_state = [init_pair, pair2, (next_value(), next_address())];
                 // saving the keys we are tracking in the mapping
                 mapping.mapping_keys.extend(
@@ -979,7 +979,7 @@ impl UpdateSimpleStorage {
             .map(|tuple| {
                 let op: MappingOperation = tuple.into();
                 let (k, v) = match tuple {
-                    MappingUpdate::Deletion(k, _) => (*k, next_address()),
+                    MappingUpdate::Deletion(k, _) => (*k, DEFAULT_ADDRESS.clone()),
                     MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => {
                         (*k, Address::from_slice(&v.to_be_bytes_trimmed_vec()))
                     }
@@ -1210,6 +1210,8 @@ static SHIFT: AtomicU64 = AtomicU64::new(0);
 use lazy_static::lazy_static;
 lazy_static! {
     static ref BASE_VALUE: U256 = U256::from(10);
+    static ref DEFAULT_ADDRESS: Address =
+        Address::from_str("0xBA401cdAc1A3B6AEede21c9C4A483bE6c29F88C4");
 }
 
 fn next_mapping_key() -> U256 {
