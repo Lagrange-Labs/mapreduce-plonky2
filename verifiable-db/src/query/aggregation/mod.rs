@@ -249,7 +249,7 @@ impl QueryHashNonExistenceCircuits {
     ) -> Result<Self>
     where
         [(); MAX_NUM_RESULTS - 1]:,
-        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     {
         let column_ids = column_cells
             .iter()

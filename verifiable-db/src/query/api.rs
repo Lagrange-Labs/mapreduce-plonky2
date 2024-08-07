@@ -104,7 +104,7 @@ impl<
     > CircuitInput<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS>
 where
     [(); MAX_NUM_RESULTS - 1]:,
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
 {
     /// Initialize input for universal circuit to prove the execution of a query over a
     /// single row, from the following inputs:
@@ -115,14 +115,10 @@ where
     /// - `placeholder_values`: Set of values employed for placeholder in the query
     /// - `is_leaf`: Flag specifying whether the row being proven is stored in a leaf node of the rows tree or not
     /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
-    /// Note that the following assumptions are expected on the structure of the inputs:
-    /// - The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation;
-    ///   this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
-    ///   the caller of this method
-    /// - The operations in `results.result_operations` that compute output values must be placed in the last `MAX_NUM_RESULTS`
-    ///   entries of the `result_operations` found in `results` structure. This is again an assumption we require to
-    ///   properly place the output values in the circuit. Note that this method returns an error if this assumption
-    ///   is not met in the `results` structure provided as input
+    /// Note that the following assumption is expected on the structure of the inputs:
+    /// The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation;
+    /// this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
+    /// the caller of this method
     pub fn new_universal_circuit(
         column_cells: &[ColumnCell],
         predicate_operations: &[BasicOperation],
@@ -345,7 +341,7 @@ pub struct Parameters<
     const MAX_NUM_RESULT_OPS: usize,
     const MAX_NUM_RESULTS: usize,
 > where
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_RESULTS - 1]:,
 {
     circuit_with_agg: CircuitWithUniversalVerifier<
@@ -436,7 +432,7 @@ impl<
         const MAX_NUM_RESULTS: usize,
     > Parameters<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS>
 where
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_RESULTS - 1]:,
     [(); PI_LEN::<MAX_NUM_RESULTS>]:,
     [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,

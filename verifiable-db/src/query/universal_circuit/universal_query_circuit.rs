@@ -188,17 +188,13 @@ impl<
     >
 where
     [(); MAX_NUM_RESULTS - 1]:,
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
 {
-    /// Instantiate `Self` from the necessary inputs. Note that the following assumptions are expected on the
+    /// Instantiate `Self` from the necessary inputs. Note that the following assumption is expected on the
     /// structure of the inputs:
-    /// - The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation;
-    ///   this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
-    ///   the caller of this method
-    /// - The operations in `result_operations` that compute output values must be placed in the last `MAX_NUM_RESULTS`
-    ///   entries of the `result_operations` found in `results` structure. This is again an assumption we require to
-    ///   properly place the output values in the circuit. Note that this method returns an error if this assumption
-    ///   is not met in the `results` structure provided as input
+    /// The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation;
+    /// this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
+    /// the caller of this method
     pub(crate) fn new(
         column_cells: &[ColumnCell],
         predicate_operations: &[BasicOperation],
@@ -257,31 +253,14 @@ where
                     OutputItem::ComputedValue(index) => {
                         ensure!(*index < num_result_ops,
                             "an operation computing an output results not found in set of result operations");
-                        // starting index is the minimum index, in the `results.result operations` vector, for an 
-                        // operation that could contain a possible output value. Indeed, since the circuit is 
-                        // expecting the possible output values computed from result operations to be found in the 
-                        // last `MAX_NUM_RESULTS` slots among the `MAX_NUM_RESULT_OPS` instantiated in the circuit, 
-                        // we require that the index of a `ComputedValue` must be one of the last `MAX_NUM_RESULTS` 
-                        // entries of the `results.result_operations` vector. Therefore, `starting_index` is the
-                        // index of the first entry in `result.result_operations` vector that could be employed as
-                        // an outptu value, which correspond to the `MAX_NUM_RESULTS`-th entry from the end of the
-                        // vector (or the first entry if `result.result_operations` has less operations than 
-                        // `MAX_NUM_RESULTS`)
-                        let starting_index = if num_result_ops > MAX_NUM_RESULTS {
-                            num_result_ops - MAX_NUM_RESULTS
-                        } else {
-                            0
-                        };
-                        ensure!(*index >= starting_index,
-                            "an operation computing an output results is not placed in the last {} elements of result operations vector", MAX_NUM_RESULTS);
                         // the output will be placed in the `num_result_ops - index` last slot in the set of
                         // `possible_output_values` provided as input in the circuit to the output component,
                         // i.e., the input array found in `OutputComponent::build` method.
                         // Therefore, since the `possible_output_values` array in the circuit has 
-                        // `MAX_NUM_COLUMNS + MAX_NUM_RESULTS` entries, the selector for such output value
+                        // `MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS` entries, the selector for such output value
                         // can be computed as the length of `possible_output_values.len() - (num_result_ops - index)`,
                         // which correspond to the `num_result_ops - index`-th entry from the end of the array  
-                        F::from_canonical_usize(MAX_NUM_COLUMNS + MAX_NUM_RESULTS - (num_result_ops - *index))
+                        F::from_canonical_usize(MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS - (num_result_ops - *index))
                     },
             })
         }).collect::<Result<Vec<_>>>()?;
@@ -417,33 +396,14 @@ where
                 .extend_from_slice(&input_wires.placeholder_values[1].to_targets());
             result_value_wires.push(input_wires);
         }
-        // Place the results to be returned for the current row, and the corresponding computational hashes,
-        // in the arrays `item_values` and `item_hash`; such results are expected to be found as the last
-        // items computed by the last `MAX_NUM_RESULTS` basic operation components among the `MAX_NUM_RESULT_OPS`
-        // ones employed to compute such results. This placement is done to have fixed locations in the circuits
-        // where to find the possible values to be exposed as results, thus avoiding `MAX_NUM_RESULTS` random
-        // access operations to extract these possible values from the set of all result operations
-        let item_values = &input_values[input_values.len() - MAX_NUM_RESULTS..];
-        let item_hash = &input_hash[input_hash.len() - MAX_NUM_RESULTS..];
-        let possible_output_values: [UInt256Target; MAX_NUM_COLUMNS + MAX_NUM_RESULTS] =
-            column_extraction_wires
-                .input_wires
-                .column_values
-                .iter()
-                .chain(item_values)
-                .cloned()
-                .collect_vec()
-                .try_into()
-                .unwrap();
-        let possible_output_hash: [ComputationalHashTarget; MAX_NUM_COLUMNS + MAX_NUM_RESULTS] =
-            column_extraction_wires
-                .column_hash
-                .iter()
-                .chain(item_hash)
-                .cloned()
-                .collect_vec()
-                .try_into()
-                .unwrap();
+        // `possible_output_values` to be provided to output component are the set of `MAX_NUM_COLUMNS`
+        // and the `MAX_NUM_RESULT_OPS` results of results operations, which are all already accumulated
+        // in the `input_values` vector
+        let possible_output_values: [UInt256Target; MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS] =
+            input_values.try_into().unwrap();
+        // same for `possible_output_hash`, all the hashes are already accumulated in the `input_hash` vector
+        let possible_output_hash: [ComputationalHashTarget; MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS] =
+            input_hash.try_into().unwrap();
         let output_component_wires = T::build(
             b,
             possible_output_values,
@@ -705,7 +665,7 @@ impl<
         T,
     >
 where
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_RESULTS - 1]:,
 {
     type CircuitBuilderParams = ();
@@ -775,7 +735,7 @@ impl<
     >
 where
     [(); MAX_NUM_RESULTS - 1]:,
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
 {
     /// Provide input values for universal circuit variant for queries with aggregation operations
     pub(crate) fn new_query_with_agg(
@@ -899,7 +859,7 @@ mod tests {
         >
     where
         [(); MAX_NUM_RESULTS - 1]:,
-        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     {
         type Wires = UniversalQueryCircuitWires<
             MAX_NUM_COLUMNS,
