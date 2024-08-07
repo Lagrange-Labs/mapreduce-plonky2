@@ -133,13 +133,13 @@ pub struct RowPayload<PrimaryIndex: PartialEq + Eq + Default> {
     /// Storing the hash of the root of the cells tree. One could get it as well from the proof
     /// but it requires loading the proof, so when building the hashing structure it's best
     /// to keep it at hand directly.
-    pub cell_root_hash: HashOutput,
+    pub cell_root_hash: Option<HashOutput>,
     /// Information needed to retrieve the cells root proof belonging to this row
     /// From the column ID, one can search in the cell collection to find the corresponding
     /// value and primary index, necessary to fetch the corresponding proof.
-    pub cell_root_column: ColumnID,
+    pub cell_root_column: Option<ColumnID>,
     /// Information needed to retrieve the cells root proof belonging to this row
-    pub cell_root_key: CellTreeKey,
+    pub cell_root_key: Option<CellTreeKey>,
     /// Min sec. index value of the subtree below this node
     pub min: U256,
     /// Max sec. index value "  "   "       "     "    "
@@ -159,9 +159,9 @@ impl<PrimaryIndex: std::fmt::Debug + Clone + Default + PartialEq + Eq> RowPayloa
     pub fn new(
         cells: CellCollection<PrimaryIndex>,
         secondary_index: ColumnID,
-        cell_tree_hash: HashOutput,
-        cell_root_column: ColumnID,
-        cell_root_key: CellTreeKey,
+        cell_tree_hash: Option<HashOutput>,
+        cell_root_column: Option<ColumnID>,
+        cell_root_key: Option<CellTreeKey>,
     ) -> Self {
         RowPayload {
             cells,
@@ -188,8 +188,10 @@ impl<PrimaryIndex: std::fmt::Debug + Clone + Default + PartialEq + Eq> RowPayloa
     pub fn primary_index_value(&self) -> PrimaryIndex {
         self.cells[&self.secondary_index_column].primary.clone()
     }
-    pub fn fetch_cell_root_info(&self) -> &CellInfo<PrimaryIndex> {
-        &self.cells[&self.cell_root_column]
+    pub fn fetch_cell_root_info(&self) -> Option<&CellInfo<PrimaryIndex>> {
+        self.cell_root_column
+            .as_ref()
+            .map(|column| &self.cells[column])
     }
 }
 
@@ -234,20 +236,23 @@ impl<
             }
         };
         let to_hash = // P(leftH)
-                    left_hash.elements.into_iter()
-                    // P(rightH)
-                    .chain(right_hash.elements)
-                    // P(min)
-                    .chain(self.min.to_fields())
-                    // P(max)
-                    .chain(self.max.to_fields())
-                    // P(id)
-                    .chain(std::iter::once(F::from_canonical_u64(self.secondary_index_column)))
-                    // P(value)
-                    .chain(self.secondary_index_value().to_fields())
-                    // P(cell_tree_hash)
-                    .chain(HashOut::from_bytes(&self.cell_root_hash.0).to_fields())
-                    .collect::<Vec<_>>();
+            left_hash.elements.into_iter()
+                // P(rightH)
+                .chain(right_hash.elements)
+                // P(min)
+                .chain(self.min.to_fields())
+                // P(max)
+                .chain(self.max.to_fields())
+                // P(id)
+                .chain(std::iter::once(F::from_canonical_u64(self.secondary_index_column)))
+                // P(value)
+                .chain(self.secondary_index_value().to_fields())
+                // P(cell_tree_hash)
+                .chain(HashOut::from_bytes(
+                    &self.cell_root_hash.as_ref().map(|h| h.0)
+                        .unwrap_or(empty_poseidon_hash().to_bytes().try_into().unwrap())
+                ).to_fields())
+                .collect::<Vec<_>>();
         println!(
             "\n--RYHOPE Row : id {:?}, value {:?} (empty hash{}) left_hash {:?}, right_hash {:?} min {:?}, max {:?}, tree_root_hash {:?}",
             self.secondary_index_column,
@@ -257,7 +262,8 @@ impl<
             hex::encode(right_hash.to_bytes()),
             self.min,
             self.max,
-            hex::encode(self.cell_root_hash.0),
+            hex::encode(self.cell_root_hash.as_ref().map(|h| h.0)
+                .unwrap_or(empty_poseidon_hash().to_bytes().try_into().unwrap())),
         );
         self.hash = HashOutput(H::hash_no_pad(&to_hash).to_bytes().try_into().unwrap());
     }
