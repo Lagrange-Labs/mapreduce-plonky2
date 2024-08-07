@@ -65,7 +65,7 @@ pub struct ResultsTreeWithDuplicatesCircuit<const S: usize> {
     /// Number of items accumulated in the results of the query for the given record.
     pub(crate) num_included_items: usize,
     /// Boolean flag specifying whether this record is going to be stored
-    /// in a leaf node of a record subtree.
+    /// in a leaf node of a rows tree.
     pub(crate) is_stored_in_leaf: bool,
     /// Counter value associated to the current record.
     pub(crate) counter: F,
