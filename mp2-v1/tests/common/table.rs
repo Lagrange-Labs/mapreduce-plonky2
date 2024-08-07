@@ -14,7 +14,10 @@ use mp2_v1::indexing::{
 };
 use parsil::symbols::{RootContextProvider, ZkColumn, ZkTable};
 use ryhope::{
-    storage::{updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
+    storage::{
+        pgsql::SqlStorageSettings, updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage,
+        TreeTransactionalStorage,
+    },
     tree::{
         sbbst,
         scapegoat::{self, Alpha},
@@ -27,7 +30,7 @@ use std::{hash::Hash, iter::once};
 use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TableID(String);
+pub struct TableID(String);
 
 impl TableID {
     /// TODO: should contain more info probablyalike which index are selected
@@ -139,9 +142,13 @@ impl Table {
         table_name: String,
         columns: TableColumns,
     ) -> Self {
+        let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
         let row_tree = MerkleRowTree::new(
             InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
-            (),
+            SqlStorageSettings {
+                db_url,
+                table: table_name.clone(),
+            },
         )
         .await
         .unwrap();
@@ -153,7 +160,6 @@ impl Table {
         .await
         .unwrap();
 
-        let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
         columns.self_assert();
         Self {
             columns,

@@ -29,6 +29,7 @@ verifiable-db = { path = "../verifiable-db" }
 derive_more = "0.99.18"
 hex.workspace = true
 parsil = { path = "../parsil" }
+serde_json.workspace = true
 
 [dev-dependencies]
 alloy.workspace = true

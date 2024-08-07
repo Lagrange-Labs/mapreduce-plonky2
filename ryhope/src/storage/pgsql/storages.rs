@@ -1,3 +1,4 @@
+use std::hash::Hash;
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
 use anyhow::*;
@@ -493,7 +494,7 @@ where
 #[async_trait]
 impl<K, V, F> RoEpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
-    K: ToFromBytea + Send + Sync,
+    K: ToFromBytea + Send + Sync + Hash,
     V: Clone + Send + Sync,
     F: DbConnector<K, V> + Sync,
 {
@@ -550,7 +551,7 @@ where
 #[async_trait]
 impl<K, V, F: DbConnector<K, V> + Send + Sync> EpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
-    K: ToFromBytea + Send + Sync,
+    K: ToFromBytea + Send + Sync + Hash,
     V: Clone + Send + Sync,
     F: DbConnector<K, V> + Send + Sync,
 {

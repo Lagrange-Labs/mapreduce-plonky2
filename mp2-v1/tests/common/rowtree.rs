@@ -15,6 +15,7 @@ use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{
         memory::InMemory,
+        pgsql::PgsqlStorage,
         updatetree::{Next, UpdateTree},
         RoEpochKvStorage,
     },
@@ -67,7 +68,7 @@ impl From<&SecondaryIndexCell> for RowTreeKey {
     }
 }
 
-type RowStorage = InMemory<RowTree, RowPayload<BlockPrimaryIndex>>;
+type RowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
 pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>;
 
 impl<P: ProofStorage> TestContext<P> {
