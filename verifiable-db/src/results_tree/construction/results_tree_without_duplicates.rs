@@ -102,7 +102,7 @@ impl<const S: usize> ResultsTreeWithoutDuplicatesCircuit<S> {
             // if not is_item_included[i]:
             //   assert item_values[i] == 0
             // is_item_included[i] OR (item_values[i] == 0)
-            let is_zero = b.is_equal_u256(&item_values[i], &u256_zero);
+            let is_zero = b.is_zero(&item_values[i]);
             let condition = b.or(is_item_included[i], is_zero);
             b.connect(condition.target, ttrue.target);
         }
