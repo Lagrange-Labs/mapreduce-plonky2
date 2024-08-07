@@ -115,14 +115,10 @@ where
     /// - `placeholder_values`: Set of values employed for placeholder in the query
     /// - `is_leaf`: Flag specifying whether the row being proven is stored in a leaf node of the rows tree or not
     /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
-    /// Note that the following assumptions are expected on the structure of the inputs:
-    /// - The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation;
-    ///   this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
-    ///   the caller of this method
-    /// - The operations in `results.result_operations` that compute output values must be placed in the last `MAX_NUM_RESULTS`
-    ///   entries of the `result_operations` found in `results` structure. This is again an assumption we require to
-    ///   properly place the output values in the circuit. Note that this method returns an error if this assumption
-    ///   is not met in the `results` structure provided as input
+    /// Note that the following assumption is expected on the structure of the inputs:
+    /// The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation;
+    /// this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
+    /// the caller of this method
     pub fn new_universal_circuit(
         column_cells: &[ColumnCell],
         predicate_operations: &[BasicOperation],

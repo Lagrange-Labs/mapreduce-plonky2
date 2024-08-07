@@ -190,15 +190,11 @@ where
     [(); MAX_NUM_RESULTS - 1]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
 {
-    /// Instantiate `Self` from the necessary inputs. Note that the following assumptions are expected on the
+    /// Instantiate `Self` from the necessary inputs. Note that the following assumption is expected on the
     /// structure of the inputs:
-    /// - The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation;
-    ///   this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
-    ///   the caller of this method
-    /// - The operations in `result_operations` that compute output values must be placed in the last `MAX_NUM_RESULTS`
-    ///   entries of the `result_operations` found in `results` structure. This is again an assumption we require to
-    ///   properly place the output values in the circuit. Note that this method returns an error if this assumption
-    ///   is not met in the `results` structure provided as input
+    /// The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation;
+    /// this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
+    /// the caller of this method
     pub(crate) fn new(
         column_cells: &[ColumnCell],
         predicate_operations: &[BasicOperation],
