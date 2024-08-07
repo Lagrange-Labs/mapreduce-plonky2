@@ -303,15 +303,32 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
         }
     }
 
-    pub fn with_value(epoch: Epoch, table: String, db: DBPool, t: T) -> Self {
-        Self {
+    /// Initialize a new store, with the given state. The initial state is
+    /// immediately persisted, as the DB representation of the payload must be
+    /// valid even if it is never modified further by the user.
+    pub async fn with_value(epoch: Epoch, table: String, db: DBPool, t: T) -> Result<Self> {
+        {
+            let connection = db.get().await.unwrap();
+            connection
+                .query(
+                    &format!(
+                        "INSERT INTO {}_meta (valid_from, valid_until, payload)
+                     VALUES ($1, $1, $2)",
+                        table
+                    ),
+                    &[&epoch, &Json(t.clone())],
+                )
+                .await?;
+        }
+
+        Ok(Self {
             db,
             in_tx: false,
             dirty: true,
             epoch,
             table,
             cache: RwLock::new(Some(t)),
-        }
+        })
     }
 }
 
@@ -456,7 +473,7 @@ where
 pub struct CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V>,
 {
     /// The latest *commited* epoch
@@ -472,7 +489,7 @@ where
 impl<K, V, F> CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V>,
 {
     pub fn new(epoch: Epoch, table: String, db: DBPool) -> Self {
@@ -495,7 +512,7 @@ where
 impl<K, V, F> RoEpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync + Hash,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V> + Sync,
 {
     fn current_epoch(&self) -> Epoch {
@@ -552,7 +569,7 @@ where
 impl<K, V, F: DbConnector<K, V> + Send + Sync> EpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync + Hash,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V> + Send + Sync,
 {
     // Operations are stored in the cache; persistence to the DB only occurs on

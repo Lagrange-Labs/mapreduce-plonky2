@@ -403,6 +403,69 @@ async fn hashes() -> Result<()> {
 }
 
 #[tokio::test]
+async fn hashes_pgsql() -> Result<()> {
+    type K = i64;
+    type V = ShaizedString;
+
+    type Tree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<Tree, V>;
+
+    {
+        let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "test_hashes".into(),
+            },
+        )
+        .await?;
+
+        s.in_transaction(|s| {
+            Box::pin(async {
+                s.store(2, "cava".into()).await?;
+                s.store(1, "coucou".into()).await?;
+                s.store(3, "bien".into()).await
+            })
+        })
+        .await?;
+
+        assert_eq!(s.storage.data().fetch(&1).await.h, sha256::digest("coucou"));
+        assert_eq!(
+            s.storage.data().fetch(&2).await.h,
+            sha256::digest(
+                sha256::digest("coucou") + &sha256::digest("bien") + &sha256::digest("cava")
+            )
+        );
+        assert_eq!(s.storage.data().fetch(&3).await.h, sha256::digest("bien"));
+    }
+
+    {
+        let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::MustExist,
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "test_hashes".into(),
+            },
+        )
+        .await?;
+
+        s.in_transaction(|s| Box::pin(async { s.update(1, "oucouc".into()).await }))
+            .await?;
+
+        assert_eq!(s.storage.data().fetch(&1).await.h, sha256::digest("oucouc"));
+        assert_eq!(
+            s.storage.data().fetch(&2).await.h,
+            sha256::digest(
+                sha256::digest("oucouc") + &sha256::digest("bien") + &sha256::digest("cava")
+            )
+        );
+        assert_eq!(s.storage.data().fetch(&3).await.h, sha256::digest("bien"));
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn sbbst_requires_sequential_keys() -> Result<()> {
     type Tree = sbbst::Tree;
     type V = i64;
@@ -665,6 +728,47 @@ async fn context_at() {
 
     assert_eq!(s.fetch_with_context_at(&1, 1).await.0.parent, None);
     assert_eq!(s.fetch_with_context_at(&1, 2).await.0.parent, Some(2));
+}
+
+/// Ensure that a tree created will see its state persisted even if it is empty.
+#[tokio::test]
+async fn initial_state() {
+    use crate::storage::EpochStorage;
+
+    type K = i64;
+    type V = MinMaxi64;
+    type Tree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<Tree, V>;
+
+    // Create an empty tree
+    {
+        let _ = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::Reset(Tree::empty(Alpha::new(0.8))),
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "empty_tree".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    {
+        let s_init = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::MustExist,
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "empty_tree".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let tree_state = s_init.storage.state().fetch().await;
+        assert_eq!(tree_state.alpha, Alpha::new(0.8));
+        assert_eq!(tree_state.node_count, 0);
+        println!("Tree alpha is {:?}", tree_state);
+    }
 }
 
 #[tokio::test]

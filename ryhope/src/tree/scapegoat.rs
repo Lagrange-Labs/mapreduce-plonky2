@@ -133,11 +133,11 @@ impl<K: Clone> NodeUpstream<K> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct State<K> {
     /// The current number of nodes in the tree
-    node_count: usize,
+    pub(crate) node_count: usize,
     /// If any, the ID of the root node
-    root: Option<K>,
+    pub(crate) root: Option<K>,
     /// The α parameter of the scapegoat tree
-    alpha: Alpha,
+    pub(crate) alpha: Alpha,
 }
 
 pub struct Tree<

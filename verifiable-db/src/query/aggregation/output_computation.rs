@@ -29,7 +29,7 @@ pub(crate) fn compute_dummy_output_targets<const S: usize>(
         .map(|op| b.constant(Identifiers::AggregationOperations(op).to_field()));
 
     let mut outputs = vec![];
-    for i in 0..S {
+    (0..S).for_each(|i| {
         // Expose the dummy value, it's zero for all the supported operations,
         // except for `MIN`, where it's the biggest possible value in domain (U256::MAX).
         let is_op_min = b.is_equal(ops[i], op_min);
@@ -51,7 +51,7 @@ pub(crate) fn compute_dummy_output_targets<const S: usize>(
         }
 
         outputs.append(&mut output);
-    }
+    });
 
     outputs
 }

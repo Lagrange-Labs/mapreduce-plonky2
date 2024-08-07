@@ -156,7 +156,7 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceLeafCircuit<MAX_NUM_RESULTS> {
         // Register the public inputs.
         PublicInputs::<_, MAX_NUM_RESULTS>::new(
             &node_hash.to_targets(),
-            &outputs.as_slice(),
+            outputs.as_slice(),
             &[zero],
             &ops,
             &index_value_targets,
