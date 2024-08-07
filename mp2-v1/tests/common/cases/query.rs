@@ -41,7 +41,7 @@ async fn cook_query<P: ProofStorage>(
 ) -> Result<String> {
     let mut all_table = HashMap::new();
     let max = table.row.current_epoch();
-    for epoch in max..0 {
+    for epoch in (1..=max).rev() {
         let rows = collect_all_at(&table.row, epoch).await?;
         info!("Collecting {} rows at epoch {}", rows.len(), epoch);
         for row in rows {
@@ -60,10 +60,12 @@ async fn cook_query<P: ProofStorage>(
     // find the longest running row
     let (longest_key, epochs) = all_table
         .iter()
-        .max_by_key(|(_, epochs)| {
+        .max_by_key(|(k, epochs)| {
             // simplification here to start at first epoch where this row was. Otherwise need to do
             // longest consecutive sequence etc...
-            find_longest_consecutive_sequence(epochs.to_vec())
+            let l = find_longest_consecutive_sequence(epochs.to_vec());
+            info!("finding sequence of {l} blocks for key {k:?}");
+            l
         })
         .unwrap_or_else(|| {
             panic!(
@@ -72,6 +74,11 @@ async fn cook_query<P: ProofStorage>(
                 max
             )
         });
+    info!(
+        "Longest sequence is for key {longest_key:?} -> sequence of {} (sequence:  {:?})",
+        find_longest_consecutive_sequence(epochs.clone()),
+        epochs,
+    );
     // now we can fetch the key that we want
     let key_value = hex::encode(longest_key.value.to_be_bytes_vec());
     let key_column = table.columns.secondary.name.clone();
@@ -83,7 +90,13 @@ async fn cook_query<P: ProofStorage>(
     // TODO: careful about off by one error. -1 because tree epoch starts at 1
     let min_block = *epochs.first().unwrap() as u64 + table.genesis_block - 1;
     let max_block = min_block + longest_sequence as u64;
-    Ok(format!("SELECT AVG({value_column}) FROM {table_name} WHERE {BLOCK_COLUMN_NAME} > {min_block} AND {BLOCK_COLUMN_NAME} < {max_block} AND {key_column} == \\x{key_value}::bytea;"))
+    Ok(format!(
+        "SELECT AVG({value_column}) 
+                FROM {table_name} 
+                WHERE {BLOCK_COLUMN_NAME} > {min_block} 
+                AND {BLOCK_COLUMN_NAME} < {max_block} 
+                AND {key_column} == '\\x{key_value}'::bytea;"
+    ))
 }
 
 async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<BlockPrimaryIndex>>> {

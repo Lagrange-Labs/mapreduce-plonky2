@@ -152,6 +152,8 @@ impl Table {
         )
         .await
         .unwrap();
+
+        let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
         columns.self_assert();
         Self {
             columns,
