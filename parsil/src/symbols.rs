@@ -78,22 +78,22 @@ impl std::fmt::Display for Handle {
 /// resolution in a query, i.e. the virtual columns representing the indexed
 /// data from the contraact, and available in the JSON payload exposed by
 /// Ryhope.
-pub trait RootContextProvider {
+pub trait ContextProvider {
     /// Return, if it exists, the structure of the given virtual table.
-    fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable>;
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable>;
 
-    /// Return the current block number
-    fn current_block(&self) -> u64;
+    /// Return the output IDs of the current query
+    fn output_ids(&self) -> Vec<u64>;
 }
 
 pub struct EmptyProvider;
-impl RootContextProvider for EmptyProvider {
-    fn fetch_table(&mut self, _table_name: &str) -> Result<ZkTable> {
+impl ContextProvider for EmptyProvider {
+    fn fetch_table(&self, _table_name: &str) -> Result<ZkTable> {
         bail!("empty provider")
     }
 
-    fn current_block(&self) -> u64 {
-        0
+    fn output_ids(&self) -> Vec<u64> {
+        vec![]
     }
 }
 
@@ -108,27 +108,16 @@ impl FileContextProvider {
         })
     }
 }
-impl RootContextProvider for FileContextProvider {
-    fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable> {
+impl ContextProvider for FileContextProvider {
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         self.tables
             .get(table_name)
             .cloned()
             .ok_or_else(|| anyhow!("table `{}` not found", table_name))
     }
 
-    fn current_block(&self) -> u64 {
-        2134
-    }
-}
-
-pub struct PgsqlContextProvider {}
-impl RootContextProvider for PgsqlContextProvider {
-    fn fetch_table(&mut self, table_name: &str) -> Result<ZkTable> {
-        todo!()
-    }
-
-    fn current_block(&self) -> u64 {
-        todo!()
+    fn output_ids(&self) -> Vec<u64> {
+        vec![]
     }
 }
 

@@ -19,14 +19,15 @@ use sqlparser::ast::{
     Select, SelectItem, SetExpr, TableAlias, TableFactor, UnaryOperator, Value,
 };
 use verifiable_db::query::{
-    computational_hash_ids::{AggregationOperation, Operation},
+    aggregation,
+    computational_hash_ids::{AggregationOperation, Operation, Output},
     universal_circuit::universal_circuit_inputs::{
         BasicOperation, InputOperand, OutputItem, ResultStructure,
     },
 };
 
 use crate::{
-    symbols::{Handle, Kind, RootContextProvider, ScopeTable, Symbol},
+    symbols::{ContextProvider, Handle, Kind, ScopeTable, Symbol},
     visitor::{AstPass, Visit},
 };
 
@@ -139,7 +140,7 @@ impl<T: PartialEq> UniqueStorage<T> {
     }
 }
 
-pub(crate) struct Resolver<C: RootContextProvider> {
+pub(crate) struct Resolver<C: ContextProvider> {
     /// A storage for the SELECT-involved operations.
     query_ops: UniqueStorage<BasicOperation>,
     /// The query-global immediate value storage.
@@ -153,7 +154,7 @@ pub(crate) struct Resolver<C: RootContextProvider> {
     /// tables and their columns.
     context: C,
 }
-impl<C: RootContextProvider> Resolver<C> {
+impl<C: ContextProvider> Resolver<C> {
     /// Create a new empty [`Resolver`]
     fn new(context: C) -> Self {
         Resolver {
@@ -347,14 +348,36 @@ impl<C: RootContextProvider> Resolver<C> {
 
     /// Generate appropriate universal query circuit PIs from the root context
     /// of this Resolver.
-    fn to_pis(&self) -> CircuitPis {
+    fn to_pis(&self) -> Result<CircuitPis> {
         let root_scope = &self.scopes.scope_at(1);
-        let result = ResultStructure::from((
-            self.query_ops.ops.clone(),
-            root_scope.metadata().outputs.clone(),
-        ));
 
-        CircuitPis {
+        let aggregation = if root_scope
+            .metadata()
+            .aggregation
+            .iter()
+            .all(|&a| a == AggregationOperation::IdOp)
+        {
+            Output::NoAggregation
+        } else if root_scope
+            .metadata()
+            .aggregation
+            .iter()
+            .all(|&a| a != AggregationOperation::IdOp)
+        {
+            Output::Aggregation
+        } else {
+            unreachable!()
+        };
+
+        let result = ResultStructure {
+            result_operations: self.query_ops.ops.clone(),
+            output_items: root_scope.metadata().outputs.clone(),
+            // TODO: to fetch from the context
+            output_ids: vec![F::from_canonical_u8(0); root_scope.metadata().outputs.len()],
+            output_variant: aggregation,
+        };
+
+        Ok(CircuitPis {
             result,
             column_ids: self.columns.clone(),
             query_aggregations: root_scope
@@ -364,7 +387,7 @@ impl<C: RootContextProvider> Resolver<C> {
                 .map(|x| x.to_field())
                 .collect(),
             predication_operations: root_scope.metadata().predicates.ops.clone(),
-        }
+        })
     }
 }
 
@@ -387,7 +410,7 @@ struct CircuitPis {
     predication_operations: Vec<BasicOperation>,
 }
 
-impl<C: RootContextProvider> AstPass for Resolver<C> {
+impl<C: ContextProvider> AstPass for Resolver<C> {
     fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
         match &table_factor {
             TableFactor::Table {
@@ -665,7 +688,7 @@ impl<C: RootContextProvider> AstPass for Resolver<C> {
 // }
 
 /// Convert a query so that it can be executed on a ryhope-generated db.
-pub fn resolve<C: RootContextProvider>(q: &Query, context: C) -> Result<()> {
+pub fn resolve<C: ContextProvider>(q: &Query, context: C) -> Result<()> {
     let mut converted_query = q.clone();
     let mut resolver = Resolver::new(context);
     converted_query.visit(&mut resolver)?;
@@ -680,7 +703,7 @@ pub fn resolve<C: RootContextProvider>(q: &Query, context: C) -> Result<()> {
     }
 
     println!("Sent to circuit:");
-    println!("{:#?}", resolver.to_pis());
+    println!("{:#?}", resolver.to_pis()?);
 
     Ok(())
 }

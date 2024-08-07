@@ -3,7 +3,7 @@ use log::*;
 use sqlparser::ast::{BinaryOperator, Expr, Ident, Query, Select, TableAlias, TableFactor};
 
 use crate::{
-    symbols::{Handle, Kind, RootContextProvider, ScopeTable, Symbol},
+    symbols::{ContextProvider, Handle, Kind, ScopeTable, Symbol},
     visitor::{AstPass, Visit},
 };
 
@@ -70,7 +70,7 @@ fn is_ident(e: &Expr) -> bool {
     matches!(e, Expr::Identifier(_) | Expr::CompoundIdentifier(_))
 }
 
-struct Executor<C: RootContextProvider> {
+struct Executor<C: ContextProvider> {
     /// The stack representation of the query sections currently being traversed
     position: Vec<Position>,
     /// A symbol resolver without any metadata attached
@@ -79,7 +79,7 @@ struct Executor<C: RootContextProvider> {
     /// tables and their columns.
     context: C,
 }
-impl<C: RootContextProvider> Executor<C> {
+impl<C: ContextProvider> Executor<C> {
     fn new(context: C) -> Self {
         Self {
             scopes: ScopeTable::new(),
@@ -309,7 +309,7 @@ impl<C: RootContextProvider> Executor<C> {
         Ok(())
     }
 }
-impl<C: RootContextProvider> AstPass for Executor<C> {
+impl<C: ContextProvider> AstPass for Executor<C> {
     fn pre_selection(&mut self) -> Result<()> {
         self.position.push(Position::Where);
         Ok(())
@@ -514,7 +514,7 @@ impl<C: RootContextProvider> AstPass for Executor<C> {
     }
 }
 
-pub(crate) fn execute<C: RootContextProvider>(mut query: Query, ctx: C) -> Result<Query> {
+pub(crate) fn execute<C: ContextProvider>(mut query: Query, ctx: C) -> Result<Query> {
     let mut executor = Executor::new(ctx);
     println!("OLD QUERY:\n{query}");
     query.visit(&mut executor)?;
