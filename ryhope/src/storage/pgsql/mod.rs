@@ -470,7 +470,7 @@ where
             // later.
             self.update_all(&db_tx).await?;
 
-            // Collect all the keys found in the cache
+            // Collect all the keys found in the caches
             let mut cached_keys = HashSet::new();
             {
                 let guard = self.nodes.cache.read().await;
@@ -511,9 +511,9 @@ where
                     )
                     | (None, Some(Some(CachedValue::Written(new_payload)))) => {
                         // rollback the old value if any
-                        let previous_state = self.rollback_one_row(&db_tx, &k).await?.unwrap();
+                        let previous_node = self.rollback_one_row(&db_tx, &k).await?.unwrap().0;
                         // write the new value
-                        self.new_node(&db_tx, &k, previous_state.0).await?;
+                        self.new_node(&db_tx, &k, previous_node).await?;
                         PayloadConnector::set_at_in_tx(
                             &db_tx,
                             &self.table,
