@@ -70,7 +70,7 @@ async fn cook_query<P: ProofStorage>(
     // TODO: careful about off by one error. -1 because tree epoch starts at 1
     let min_block = *epochs.first().unwrap() as u64 + table.genesis_block - 1;
     let max_block = min_block + longest_sequence as u64;
-    Ok(format!("SELECT AVG({value_column}) FROM {table_name} WHERE {BLOCK_COLUMN_NAME} > {min_block} AND {BLOCK_COLUMN_NAME} < {max_block} AND {key_column} == \\x{key_value};"))
+    Ok(format!("SELECT AVG({value_column}) FROM {table_name} WHERE {BLOCK_COLUMN_NAME} > {min_block} AND {BLOCK_COLUMN_NAME} < {max_block} AND {key_column} == \\x{key_value}::bytea;"))
 }
 
 async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<BlockPrimaryIndex>>> {
