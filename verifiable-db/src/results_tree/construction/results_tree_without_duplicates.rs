@@ -242,9 +242,14 @@ mod tests {
         }
     }
 
-    async fn test_results_tree_without_duplicates_circuit(is_stored_in_leaf: bool) {
+    async fn test_results_tree_without_duplicates_circuit(
+        is_stored_in_leaf: bool,
+        num_included_items: usize,
+    ) {
         let mut rng = thread_rng();
-        let cells: [TestCell; S] = array::from_fn(|_| TestCell::random());
+        let cells: Vec<TestCell> = (0..num_included_items)
+            .map(|_| TestCell::random())
+            .collect();
         let mut item_values = array::from_fn(|_| U256::ZERO);
         let mut ids = array::from_fn(|_| F::ZERO);
         let multiplicity = F::from_canonical_u32(rng.gen());
@@ -252,7 +257,6 @@ mod tests {
             item_values[i] = cell.value;
             ids[i] = cell.id;
         }
-        let num_included_items = 20;
         let counter = F::from_canonical_usize(rng.gen());
 
         // Construct the test circuit.
@@ -269,12 +273,21 @@ mod tests {
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::<_, S>::from_slice(&proof.public_inputs);
 
-        let second_item = item_values[1];
+        let second_item = if num_included_items > 1 {
+            item_values[1]
+        } else {
+            U256::ZERO
+        };
         let second_item_fields = second_item.to_fields();
         // Check the public inputs.
 
         // Tree hash
-        let exp_hash = compute_cells_tree_hash(cells[2..].to_vec()).await;
+        let exp_hash = if cells.len() < 3 {
+            *empty_poseidon_hash()
+        } else {
+            compute_cells_tree_hash(cells[2..].to_vec()).await
+        };
+
         if is_stored_in_leaf {
             let empty_hash = empty_poseidon_hash();
             let empty_hash_fields = empty_hash.to_fields();
@@ -337,10 +350,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_results_tree_without_duplicates_circuit_storing_in_leaf() {
-        test_results_tree_without_duplicates_circuit(true).await;
+        test_results_tree_without_duplicates_circuit(true, S).await;
+        test_results_tree_without_duplicates_circuit(true, S - 1).await;
+        test_results_tree_without_duplicates_circuit(true, 1).await;
     }
     #[tokio::test]
     async fn test_results_tree_without_duplicates_circuit_storing_in_inter() {
-        test_results_tree_without_duplicates_circuit(false).await;
+        test_results_tree_without_duplicates_circuit(false, S).await;
+        test_results_tree_without_duplicates_circuit(false, S - 1).await;
+        test_results_tree_without_duplicates_circuit(false, 1).await;
     }
 }
