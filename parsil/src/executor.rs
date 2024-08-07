@@ -1,6 +1,8 @@
 use anyhow::*;
 use log::*;
-use sqlparser::ast::{BinaryOperator, Expr, Ident, Query, Select, TableAlias, TableFactor};
+use sqlparser::ast::{
+    BinaryOperator, Expr, Ident, Query, Select, SelectItem, TableAlias, TableFactor,
+};
 
 use crate::{
     symbols::{ContextProvider, Handle, Kind, ScopeTable, Symbol},
@@ -457,6 +459,26 @@ impl<C: ContextProvider> AstPass for Executor<C> {
     fn post_select(&mut self, _select: &mut Select) -> Result<()> {
         self.position.pop().expect("should never fail");
         self.scopes.exit_scope().map(|_| ())
+    }
+
+    /// All the [`SelectItem`] in the SELECT clause are exposed to the current
+    /// context parent.
+    fn pre_select_item(&mut self, select_item: &mut SelectItem) -> Result<()> {
+        let provided = match select_item {
+            SelectItem::ExprWithAlias { expr, alias } => Symbol::NamedExpression {
+                name: Handle::Simple(alias.value.clone()),
+                payload: (),
+            },
+            SelectItem::UnnamedExpr(e) => match e {
+                Expr::Identifier(i) => self.scopes.resolve_freestanding(i)?,
+                Expr::CompoundIdentifier(is) => self.scopes.resolve_compound(is)?,
+                _ => Symbol::Expression(()),
+            },
+            SelectItem::Wildcard(_) => Symbol::Wildcard,
+            SelectItem::QualifiedWildcard(_, _) => unreachable!(),
+        };
+        self.scopes.current_scope_mut().provides(provided);
+        Ok(())
     }
 
     // The pre_expr hooks triggers the conversion of the conditions related to
