@@ -53,14 +53,19 @@ async fn cook_query<P: ProofStorage>(
     // find the longest running row
     let (longest_key, epochs) = all_table
         .iter()
-        .max_by_key(|(row_key, epochs)| {
+        .max_by_key(|(_, epochs)| {
             // simplification here to start at first epoch where this row was. Otherwise need to do
             // longest consecutive sequence etc...
             find_longest_consecutive_sequence(epochs.to_vec())
         })
-        .expect("unable to find longest row?");
+        .unwrap_or_else(|| {
+            panic!(
+                "unable to find longest row? -> length all _table {}",
+                all_table.len()
+            )
+        });
     // now we can fetch the key that we want
-    let key_value = hex::encode(&longest_key.value.to_be_bytes_vec());
+    let key_value = hex::encode(longest_key.value.to_be_bytes_vec());
     let key_column = table.columns.secondary.name.clone();
     // Assuming this is mapping with only two columns !
     let value_column = table.columns.rest[0].name.clone();
@@ -89,7 +94,7 @@ async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<Block
                 let lctx = ctx.clone();
                 let mut local_rows = Vec::new();
                 let mut local_ctx = Vec::new();
-                for child_k in lctx.iter_children().flat_map(|child_k| child_k) {
+                for child_k in lctx.iter_children().flatten() {
                     let (child_ctx, child_payload) =
                         tree.try_fetch_with_context_at(child_k, at).await.unwrap();
                     local_rows.push(Row {
