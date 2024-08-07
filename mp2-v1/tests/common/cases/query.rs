@@ -68,7 +68,7 @@ async fn cook_query<P: ProofStorage>(
         .max_by_key(|(k, epochs)| {
             // simplification here to start at first epoch where this row was. Otherwise need to do
             // longest consecutive sequence etc...
-            let l = find_longest_consecutive_sequence(epochs.to_vec());
+            let (l, start) = find_longest_consecutive_sequence(epochs.to_vec());
             info!("finding sequence of {l} blocks for key {k:?} (epochs {epochs:?}");
             l
         })
@@ -80,7 +80,7 @@ async fn cook_query<P: ProofStorage>(
             )
         });
     info!(
-        "Longest sequence is for key {longest_key:?} -> sequence of {} (sequence:  {:?})",
+        "Longest sequence is for key {longest_key:?} -> sequence of {:?} (sequence:  {:?})",
         find_longest_consecutive_sequence(epochs.clone()),
         epochs,
     );
@@ -91,9 +91,9 @@ async fn cook_query<P: ProofStorage>(
     let value_column = table.columns.rest[0].name.clone();
     let table_name = table.name.clone();
     // we set the block bounds
-    let longest_sequence = find_longest_consecutive_sequence(epochs.to_vec());
+    let (longest_sequence, starting) = find_longest_consecutive_sequence(epochs.to_vec());
     // TODO: careful about off by one error. -1 because tree epoch starts at 1
-    let min_block = *epochs.first().unwrap() as u64 + table.genesis_block - 1;
+    let min_block = starting as u64 + table.genesis_block - 1;
     let max_block = min_block + longest_sequence as u64;
     Ok(format!(
         "SELECT AVG({value_column}) 
@@ -139,12 +139,16 @@ async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<Block
     Ok(all_rows)
 }
 
-fn find_longest_consecutive_sequence(v: Vec<i64>) -> usize {
+fn find_longest_consecutive_sequence(v: Vec<i64>) -> (usize, i64) {
     let mut longest = 0;
+    let mut starting_idx = 0;
     for i in 0..v.len() - 1 {
-        if v[i] == v[i + 1] + 1 {
+        if v[i] + 1 == v[i + 1] {
             longest += 1;
+        } else {
+            longest = 0;
+            starting_idx = i + 1;
         }
     }
-    longest
+    (longest, v[starting_idx])
 }
