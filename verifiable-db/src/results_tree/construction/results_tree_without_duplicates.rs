@@ -119,9 +119,8 @@ impl<const S: usize> ResultsTreeWithoutDuplicatesCircuit<S> {
             .chain(tree_hash.to_targets())
             .collect();
         let mut accumulator = b.map_to_curve_point(&accumulator_inputs);
-        let (low, high) = b.split_low_high(multiplicity, 32, 64);
         let multiplicity_bituint = BigUintTarget {
-            limbs: vec![U32Target(low), U32Target(high)],
+            limbs: vec![U32Target(multiplicity)],
         };
         let multiplicity_nonnative = b.biguint_to_nonnative(&multiplicity_bituint);
         accumulator = b.curve_scalar_mul(accumulator, &multiplicity_nonnative);
@@ -248,7 +247,7 @@ mod tests {
         let cells: [TestCell; S] = array::from_fn(|_| TestCell::random());
         let mut item_values = array::from_fn(|_| U256::ZERO);
         let mut ids = array::from_fn(|_| F::ZERO);
-        let multiplicity = F::from_canonical_usize(rng.gen());
+        let multiplicity = F::from_canonical_u32(rng.gen());
         for (i, cell) in cells.iter().enumerate() {
             item_values[i] = cell.value;
             ids[i] = cell.id;
