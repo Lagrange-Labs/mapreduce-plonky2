@@ -1,3 +1,4 @@
+use super::{cell::CellTreeKey, ColumnID};
 use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::{Deref, From};
@@ -13,10 +14,8 @@ use plonky2::{
     hash::hash_types::HashOut,
     plonk::config::{GenericHashOut, Hasher},
 };
-use ryhope::{tree::scapegoat, NodePayload};
+use ryhope::{storage::pgsql::ToFromBytea, tree::scapegoat, NodePayload};
 use serde::{Deserialize, Serialize};
-
-use super::{cell::CellTreeKey, ColumnID};
 
 pub type RowTree = scapegoat::Tree<RowTreeKey>;
 pub type RowTreeKeyNonce = Vec<u8>;
@@ -286,5 +285,14 @@ impl ToNonce for U256 {
         // we don't need to keep all the bytes, only the ones that matter.
         // Since we are storing this inside psql, any storage saving is good to take !
         self.to_be_bytes_trimmed_vec()
+    }
+}
+
+impl ToFromBytea for RowTreeKey {
+    fn to_bytea(&self) -> Vec<u8> {
+        self.to_bytes().unwrap()
+    }
+    fn from_bytea(bytes: Vec<u8>) -> Self {
+        Self::from_bytes(&bytes).unwrap()
     }
 }
