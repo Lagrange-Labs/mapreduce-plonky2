@@ -1,5 +1,3 @@
-use std::ops::Add;
-
 use crate::common::{cases::indexing::BLOCK_COLUMN_NAME, rowtree::MerkleRowTree};
 
 use super::{
@@ -45,7 +43,7 @@ async fn cook_query<P: ProofStorage>(
     let max = table.row.current_epoch();
     for epoch in max..0 {
         let rows = collect_all_at(&table.row, epoch).await?;
-        debug!("Collecting {} rows at epoch {}", rows.len(), epoch);
+        info!("Collecting {} rows at epoch {}", rows.len(), epoch);
         for row in rows {
             let epochs = all_table.entry(row.k.clone()).or_insert(Vec::new());
             epochs.push(epoch);
