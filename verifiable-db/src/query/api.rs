@@ -104,7 +104,7 @@ impl<
     > CircuitInput<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS>
 where
     [(); MAX_NUM_RESULTS - 1]:,
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
 {
     /// Initialize input for universal circuit to prove the execution of a query over a
     /// single row, from the following inputs:
@@ -345,7 +345,7 @@ pub struct Parameters<
     const MAX_NUM_RESULT_OPS: usize,
     const MAX_NUM_RESULTS: usize,
 > where
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_RESULTS - 1]:,
 {
     circuit_with_agg: CircuitWithUniversalVerifier<
@@ -436,7 +436,7 @@ impl<
         const MAX_NUM_RESULTS: usize,
     > Parameters<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS>
 where
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULTS]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_RESULTS - 1]:,
     [(); PI_LEN::<MAX_NUM_RESULTS>]:,
     [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
