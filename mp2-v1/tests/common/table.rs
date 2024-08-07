@@ -351,6 +351,11 @@ impl Table {
         {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
+            let root = self.row.root_data().await.unwrap();
+            println!(
+                " ++ After row update, row cell tree root tree proof hash = {:?}",
+                hex::encode(root.cell_root_hash.0)
+            );
             self.row.print_tree().await;
             println!("\n+++++++++++++++++++++++++++++++++\n");
         }
