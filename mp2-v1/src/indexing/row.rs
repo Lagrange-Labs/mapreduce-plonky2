@@ -1,7 +1,9 @@
+use super::{cell::CellTreeKey, ColumnID};
 use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::{Deref, From};
 use hashbrown::HashMap;
+use log::trace;
 use mp2_common::{
     poseidon::{empty_poseidon_hash, H},
     types::HashOutput,
@@ -13,10 +15,8 @@ use plonky2::{
     hash::hash_types::HashOut,
     plonk::config::{GenericHashOut, Hasher},
 };
-use ryhope::{tree::scapegoat, NodePayload};
+use ryhope::{storage::pgsql::ToFromBytea, tree::scapegoat, NodePayload};
 use serde::{Deserialize, Serialize};
-
-use super::{cell::CellTreeKey, ColumnID};
 
 pub type RowTree = scapegoat::Tree<RowTreeKey>;
 pub type RowTreeKeyNonce = Vec<u8>;
@@ -248,7 +248,7 @@ impl<
                     // P(cell_tree_hash)
                     .chain(HashOut::from_bytes(&self.cell_root_hash.0).to_fields())
                     .collect::<Vec<_>>();
-        println!(
+        trace!(
             "\n--RYHOPE Row : id {:?}, value {:?} (empty hash{}) left_hash {:?}, right_hash {:?} min {:?}, max {:?}, tree_root_hash {:?}",
             self.secondary_index_column,
             self.secondary_index_value(),
@@ -280,5 +280,14 @@ impl ToNonce for U256 {
         // we don't need to keep all the bytes, only the ones that matter.
         // Since we are storing this inside psql, any storage saving is good to take !
         self.to_be_bytes_trimmed_vec()
+    }
+}
+
+impl ToFromBytea for RowTreeKey {
+    fn to_bytea(&self) -> Vec<u8> {
+        self.to_bytes().unwrap()
+    }
+    fn from_bytea(bytes: Vec<u8>) -> Self {
+        Self::from_bytes(&bytes).unwrap()
     }
 }
