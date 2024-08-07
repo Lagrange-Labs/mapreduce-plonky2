@@ -174,8 +174,8 @@ pub struct Scope<M: Debug + Default, P: Debug + Clone> {
     provides: Vec<Symbol<P>>,
     /// The other contexts this scope may call upon when resolving a symbol.
     providers: Vec<usize>,
+    /// Metadata that may be attached to the scope by the caller
     metadata: M,
-    // circuit_data: CircuitData,
 }
 impl<M: Debug + Default, P: Debug + Clone> Scope<M, P> {
     /// Create a new scope with some space is pre-allocated for its
@@ -227,6 +227,8 @@ impl<M: Debug + Default, P: Debug + Clone> Scope<M, P> {
 /// A [`Symbol`] is anything that can be referenced from an SQL expression.
 #[derive(Debug, Clone)]
 pub enum Symbol<Payload: Debug + Clone> {
+    /// A column directly handled by the SQL table that should not be changed, e.g. `valid_from`
+    MetaColumn { handle: Handle, payload: Payload },
     /// A column must be replaced by <table>.payload -> <column>
     Column {
         /// The name or alias this column is known under
@@ -256,7 +258,7 @@ impl<P: Debug + Clone> Symbol<P> {
     /// current scope.
     fn handle(&self) -> Option<&Handle> {
         match self {
-            Symbol::Column { handle, .. } => Some(handle),
+            Symbol::MetaColumn { handle, .. } | Symbol::Column { handle, .. } => Some(handle),
             Symbol::Alias { from, .. } => Some(from),
             Symbol::NamedExpression { name, .. } => Some(name),
             Symbol::Expression(_) => None,
@@ -272,6 +274,7 @@ impl<P: Debug + Clone> Symbol<P> {
 impl<P: Debug + Clone> std::fmt::Display for Symbol<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Symbol::MetaColumn { handle, .. } => write!(f, "__|{}|__", handle),
             Symbol::Column { handle, target, .. } => write!(f, "{}: {}", handle, target),
             Symbol::Alias { from, to } => write!(f, "{}: {}", from, to),
             Symbol::NamedExpression { name, payload: id } => write!(f, "{}: {:?}", name, id),
@@ -368,6 +371,7 @@ impl<M: Debug + Default, P: Debug + Clone> ScopeTable<M, P> {
                 let mut accessibles = self.reachable(n)?;
                 for s in accessibles.iter_mut() {
                     match s {
+                        Symbol::MetaColumn { .. } => {}
                         Symbol::Column { handle, .. } => {
                             handle.move_to_table(table);
                         }
@@ -408,6 +412,11 @@ impl<M: Debug + Default, P: Debug + Clone> ScopeTable<M, P> {
     /// context.
     pub fn resolve_freestanding(&self, symbol: &Ident) -> Result<Symbol<P>> {
         self.resolve_handle(&Handle::Simple(symbol.value.clone()))
+    }
+
+    /// Resolve a string identifier in the current context.
+    pub fn resolve_str(&self, symbol: &str) -> Result<Symbol<P>> {
+        self.resolve_freestanding(&Ident::new(symbol))
     }
 
     /// Resolve a qualified (e.g. `<table>.<name>`) identifier in the current

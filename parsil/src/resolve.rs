@@ -72,6 +72,7 @@ impl Symbol<Wire> {
         match self {
             Symbol::NamedExpression { payload, .. }
             | Symbol::Expression(payload)
+            | Symbol::MetaColumn { payload, .. }
             | Symbol::Column { payload, .. } => payload.clone(),
             Symbol::Alias { .. } => todo!(),
             Symbol::Wildcard => todo!(),
@@ -172,7 +173,8 @@ impl<C: RootContextProvider> Resolver<C> {
         let mut aggregations = Vec::new();
         for r in self.scopes.currently_reachable()?.into_iter() {
             match r {
-                Symbol::Column { payload: id, .. }
+                Symbol::MetaColumn { payload: id, .. }
+                | Symbol::Column { payload: id, .. }
                 | Symbol::NamedExpression { payload: id, .. }
                 | Symbol::Expression(id) => {
                     let (aggregation, output_item) = self.to_output_expression(id, false)?;

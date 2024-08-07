@@ -205,7 +205,10 @@ where
 async fn fetch_current_epoch(db: DBPool, table: &str) -> Result<i64> {
     let connection = db.get().await.unwrap();
     connection
-        .query_one(&format!("SELECT MAX(valid_until) FROM {table}_meta",), &[])
+        .query_one(
+            &format!("SELECT MAX(__valid_until) FROM {table}_meta",),
+            &[],
+        )
         .await
         .map(|r| r.get(0))
         .context("while fetching current epoch")
@@ -321,8 +324,8 @@ where
     /// transactions they went through, hence allowing to access any of them at
     /// any timestamp of choice. Its columns are:
     ///   - key: byte-serialized key of this row node in the tree;
-    ///   - valid_from: from which epoch this row is valid;
-    ///   - valid_until: up to which epoch this row is valid;
+    ///   - __valid_from: from which epoch this row is valid;
+    ///   - __valid_until: up to which epoch this row is valid;
     ///   - [tree-specific]: a set of columns defined by the tree DB connector
     ///     storing node-specific values depending on the tree implementation;
     ///   - [payload specific]: a column containing the payload of this node,
@@ -332,8 +335,8 @@ where
     /// historic data, but storing the underlying tree inner state instead of
     /// the nodes. Combined with the node table, it allows to rebuild the whole
     /// underlying tree at any timestamp. Its columns are:
-    ///   - valid_from: from which epoch this row is valid;
-    ///   - valid_until: up to which epoch this row is valid;
+    ///   - __valid_from: from which epoch this row is valid;
+    ///   - __valid_until: up to which epoch this row is valid;
     ///   - payload: a JSONB-serialized value representing the inner state of
     ///     the tree at the given epoch range.
     ///
@@ -352,10 +355,10 @@ where
                 &format!(
                     "CREATE TABLE {table} (
                    key          BYTEA NOT NULL,
-                   valid_from   BIGINT NOT NULL,
-                   valid_until  BIGINT DEFAULT -1,
+                   __valid_from   BIGINT NOT NULL,
+                   __valid_until  BIGINT DEFAULT -1,
                    {node_columns}
-                   UNIQUE (key, valid_from))"
+                   UNIQUE (key, __valid_from))"
                 ),
                 &[],
             )
@@ -368,8 +371,8 @@ where
             .execute(
                 &format!(
                     "CREATE TABLE {table}_meta (
-                   valid_from   BIGINT NOT NULL UNIQUE,
-                   valid_until  BIGINT DEFAULT -1,
+                   __valid_from   BIGINT NOT NULL UNIQUE,
+                   __valid_until  BIGINT DEFAULT -1,
                    payload      JSONB)"
                 ),
                 &[],
@@ -381,7 +384,7 @@ where
 
     async fn update_all(&self, db_tx: &tokio_postgres::Transaction<'_>) -> Result<()> {
         let update_all = format!(
-            "UPDATE {} SET valid_until=$1 WHERE valid_until=$2",
+            "UPDATE {} SET __valid_until=$1 WHERE __valid_until=$2",
             self.table
         );
 
@@ -401,7 +404,7 @@ where
         let rows = db_tx
             .query(
                 &format!(
-                    "UPDATE {} SET valid_until={} WHERE key=$1 AND valid_until={} RETURNING *",
+                    "UPDATE {} SET __valid_until={} WHERE key=$1 AND __valid_until={} RETURNING *",
                     self.table,
                     self.epoch,
                     self.epoch + 1
@@ -605,7 +608,7 @@ where
         let connection = self.db.get().await.unwrap();
         connection
             .query(
-                &format!("SELECT key FROM {} WHERE valid_from=$1", self.table),
+                &format!("SELECT key FROM {} WHERE __valid_from=$1", self.table),
                 &[&epoch],
             )
             .await
