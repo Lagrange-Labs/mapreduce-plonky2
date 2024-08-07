@@ -9,7 +9,7 @@ use super::{
 use anyhow::Result;
 use futures::{stream, StreamExt};
 use hashbrown::HashMap;
-use log::info;
+use log::{debug, info};
 use mp2_v1::indexing::{block::BlockPrimaryIndex, row::Row};
 use ryhope::{storage::RoEpochKvStorage, Epoch};
 
@@ -45,11 +45,20 @@ async fn cook_query<P: ProofStorage>(
     let max = table.row.current_epoch();
     for epoch in max..0 {
         let rows = collect_all_at(&table.row, epoch).await?;
+        debug!("Collecting {} rows at epoch {}", rows.len(), epoch);
         for row in rows {
             let epochs = all_table.entry(row.k.clone()).or_insert(Vec::new());
             epochs.push(epoch);
         }
     }
+    // sort the epochs
+    let all_table: HashMap<_, _> = all_table
+        .into_iter()
+        .map(|(k, mut epochs)| {
+            epochs.sort_unstable();
+            (k, epochs)
+        })
+        .collect();
     // find the longest running row
     let (longest_key, epochs) = all_table
         .iter()
@@ -60,8 +69,9 @@ async fn cook_query<P: ProofStorage>(
         })
         .unwrap_or_else(|| {
             panic!(
-                "unable to find longest row? -> length all _table {}",
-                all_table.len()
+                "unable to find longest row? -> length all _table {}, max {}",
+                all_table.len(),
+                max
             )
         });
     // now we can fetch the key that we want
