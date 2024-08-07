@@ -8,6 +8,7 @@ mod expand;
 mod parser;
 mod resolve;
 mod symbols;
+mod utils;
 mod validate;
 mod visitor;
 

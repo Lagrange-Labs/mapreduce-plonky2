@@ -19,6 +19,11 @@ fn must_accept() -> Result<()> {
         "SELECT q FROM pipo WHERE block IN (1, 2, 4)",
         "SELECT q FROM pipo WHERE NOT block BETWEEN 12 AND 15",
         "SELECT foo, 39, bar FROM table2 AS tt (a, b)",
+        "SELECT '0x1122334455667788990011223344556677889900112233445566778899001122'",
+        "SELECT '0x'",
+        "SELECT '1234567'",
+        "SELECT '0b01001'",
+        "SELECT '0o1234567'",
     ] {
         prepare(q)?;
     }
@@ -50,6 +55,12 @@ fn must_reject() {
         "SELECT a FROM t WHERE a < ANY (SELECT b FROM u)",
         // Too many ORDER BY
         "SELECT * FROM t ORDER BY a, b, c",
+        // Too long
+        "SELECT '0x11223344556677889900112233445566778899001122334455667788990011223'",
+        // Unknown prefix
+        "SELECT '0t11223344556677889900112233445566778899001122334455667788990011223'",
+        // Invalid digit
+        "SELECT '0o12345678'",
     ] {
         assert!(dbg!(prepare(q)).is_err())
     }

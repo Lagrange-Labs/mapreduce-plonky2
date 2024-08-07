@@ -7,6 +7,7 @@ use sqlparser::ast::{
 
 use crate::{
     resolve::parse_placeholder,
+    utils::parse_string,
     visitor::{AstPass, Visit},
 };
 
@@ -116,8 +117,8 @@ impl AstPass for Validator {
                 Value::Placeholder(p) => {
                     ensure!(parse_placeholder(p).is_ok(), "{}: invalid placeholder", p)
                 }
-                Value::HexStringLiteral(s) => ensure!(s.len() <= 32, "{s}: more than 32 bytes"),
-                Value::SingleQuotedString(_)
+                Value::SingleQuotedString(s) => parse_string(s).map(|_| ())?,
+                Value::HexStringLiteral(_)
                 | Value::DollarQuotedString(_)
                 | Value::TripleSingleQuotedString(_)
                 | Value::TripleDoubleQuotedString(_)

@@ -8,6 +8,7 @@ mod resolve;
 mod symbols;
 #[cfg(test)]
 mod tests;
+mod utils;
 mod validate;
 mod visitor;
 

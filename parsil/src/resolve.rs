@@ -28,6 +28,7 @@ use verifiable_db::query::{
 
 use crate::{
     symbols::{ContextProvider, Handle, Kind, ScopeTable, Symbol},
+    utils::parse_string,
     visitor::{AstPass, Visit},
 };
 
@@ -212,6 +213,7 @@ impl<C: ContextProvider> Resolver<C> {
         match expr {
             Expr::Value(v) => Ok(Symbol::Expression(match v {
                 Value::Number(x, _) => self.new_constant(x.parse().unwrap()),
+                Value::SingleQuotedString(s) => self.new_constant(parse_string(s)?),
                 Value::Placeholder(p) => Wire::PlaceHolder(parse_placeholder(p)?),
                 _ => unreachable!(),
             })),
@@ -341,8 +343,8 @@ impl<C: ContextProvider> Resolver<C> {
                 ensure!(!in_aggregation, "recursive aggregation detected");
                 Ok((agg, self.to_output_expression(*sub_wire_id, true)?.1))
             }
-            Wire::Constant(_) => unreachable!("top-level immediate values are not supported"),
-            Wire::PlaceHolder(_) => unreachable!("top-level placeholders are not supported"),
+            Wire::Constant(_) => bail!("top-level immediate values are not supported"),
+            Wire::PlaceHolder(_) => bail!("top-level placeholders are not supported"),
         }
     }
 
