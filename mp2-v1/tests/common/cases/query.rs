@@ -43,7 +43,12 @@ async fn cook_query<P: ProofStorage>(
     let max = table.row.current_epoch();
     for epoch in (1..=max).rev() {
         let rows = collect_all_at(&table.row, epoch).await?;
-        info!("Collecting {} rows at epoch {}", rows.len(), epoch);
+        info!(
+            "Collecting {} rows at epoch {} (rows_keys {:?})",
+            rows.len(),
+            epoch,
+            rows.iter().map(|r| r.k.value).collect::<Vec<_>>()
+        );
         for row in rows {
             let epochs = all_table.entry(row.k.clone()).or_insert(Vec::new());
             epochs.push(epoch);
@@ -64,7 +69,7 @@ async fn cook_query<P: ProofStorage>(
             // simplification here to start at first epoch where this row was. Otherwise need to do
             // longest consecutive sequence etc...
             let l = find_longest_consecutive_sequence(epochs.to_vec());
-            info!("finding sequence of {l} blocks for key {k:?}");
+            info!("finding sequence of {l} blocks for key {k:?} (epochs {epochs:?}");
             l
         })
         .unwrap_or_else(|| {
