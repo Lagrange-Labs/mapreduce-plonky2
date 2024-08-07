@@ -3,22 +3,25 @@ use std::collections::HashMap;
 
 use alloy::primitives::U256;
 use itertools::Itertools;
-use mp2_common::{utils::TryIntoBool, F};
+use mp2_common::{
+    utils::{Fieldable, TryIntoBool},
+    F,
+};
 
-use crate::query::computational_hash_ids::Operation;
+use crate::query::computational_hash_ids::{Operation, Output};
 
 #[derive(Clone, Copy, Debug, Default)]
 /// Data structure representing a placeholder in the query, given by its value and its identifier
-pub(crate) struct Placeholder {
+pub struct Placeholder {
     pub(crate) value: U256,
     pub(crate) id: PlaceholderId,
 }
 
-pub(crate) type PlaceholderId = F;
+pub type PlaceholderId = F;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// Enumeration representing all the possible types of input operands for a basic operation
-pub(crate) enum InputOperand {
+pub enum InputOperand {
     // Input operand is a placeholder in the query
     Placeholder(PlaceholderId),
     // Input operand is a constant value in the query
@@ -42,7 +45,7 @@ impl Default for InputOperand {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// Data structure employed to specify a basic operation to be performed to
 /// compute the query
-pub(crate) struct BasicOperation {
+pub struct BasicOperation {
     pub(crate) first_operand: InputOperand,
     /// Can be None in case of unary operation
     pub(crate) second_operand: Option<InputOperand>,
@@ -50,6 +53,28 @@ pub(crate) struct BasicOperation {
 }
 
 impl BasicOperation {
+    /// Instantiate a new binary operation, i.e., a basic operation with 2 operands
+    pub fn new_binary_operation(
+        first_operand: InputOperand,
+        second_operand: InputOperand,
+        op: Operation,
+    ) -> Self {
+        BasicOperation {
+            first_operand,
+            second_operand: Some(second_operand),
+            op,
+        }
+    }
+
+    /// Instantiate a new unary operation, i.e., a basic operation with a single operand
+    pub fn new_unary_operation(operand: InputOperand, op: Operation) -> Self {
+        BasicOperation {
+            first_operand: operand,
+            second_operand: None,
+            op,
+        }
+    }
+
     /// Compute the results of the `operations` provided as input, employing the provided
     /// `column_values` as the operands for the operations having `InputOperand::Column`
     /// operands and the provided `placeholder_values` for the operations having `InputOperand::Placeholder`
@@ -165,7 +190,7 @@ impl BasicOperation {
 
 #[derive(Clone, Copy, Debug)]
 /// Enumeration representing the type of output values that can be returned for each row
-pub(crate) enum OutputItem {
+pub enum OutputItem {
     /// Output value is a column of the table
     Column(usize),
     /// Output value is computed in one of the `MAX_NUM_RESULT_OPS` operations; the numeric value
@@ -176,18 +201,11 @@ pub(crate) enum OutputItem {
 
 /// Data structure that contains the description of the output items to be returned and the
 /// operations necessary to compute the output items
-pub(crate) struct ResultStructure {
+pub struct ResultStructure {
     pub(crate) result_operations: Vec<BasicOperation>,
     pub(crate) output_items: Vec<OutputItem>,
-}
-
-impl From<(Vec<BasicOperation>, Vec<OutputItem>)> for ResultStructure {
-    fn from(value: (Vec<BasicOperation>, Vec<OutputItem>)) -> Self {
-        Self {
-            result_operations: value.0,
-            output_items: value.1,
-        }
-    }
+    pub(crate) output_ids: Vec<F>,
+    pub(crate) output_variant: Output,
 }
 
 impl ResultStructure {
@@ -214,5 +232,48 @@ impl ResultStructure {
             })
             .collect_vec();
         Ok((results, overflow_err))
+    }
+
+    pub fn new_for_query_with_aggregation(
+        result_operations: Vec<BasicOperation>,
+        output_items: Vec<OutputItem>,
+        aggregation_op_ids: Vec<u64>,
+    ) -> Self {
+        Self {
+            result_operations,
+            output_items,
+            output_ids: aggregation_op_ids
+                .into_iter()
+                .map(|id| id.to_field())
+                .collect_vec(),
+            output_variant: Output::Aggregation,
+        }
+    }
+
+    pub fn new_for_query_no_aggregation(
+        result_operations: Vec<BasicOperation>,
+        output_items: Vec<OutputItem>,
+        output_ids: Vec<u64>,
+    ) -> Self {
+        Self {
+            result_operations,
+            output_items,
+            output_ids: output_ids.into_iter().map(|id| id.to_field()).collect_vec(),
+            output_variant: Output::NoAggregation,
+        }
+    }
+}
+
+pub struct ColumnCell {
+    pub(crate) value: U256,
+    pub(crate) id: F,
+}
+
+impl ColumnCell {
+    pub fn new(id: u64, value: U256) -> Self {
+        Self {
+            value,
+            id: id.to_field(),
+        }
     }
 }

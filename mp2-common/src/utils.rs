@@ -387,6 +387,13 @@ impl<F: RichField> Fieldable<F> for u32 {
         F::from_canonical_u32(*self)
     }
 }
+
+impl<F: RichField> Fieldable<F> for u64 {
+    fn to_field(&self) -> F {
+        F::from_canonical_u64(*self)
+    }
+}
+
 pub trait FromTargets {
     fn from_targets(t: &[Target]) -> Self;
 }
