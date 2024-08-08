@@ -100,7 +100,7 @@ async fn cook_query<P: ProofStorage>(
                 FROM {table_name} 
                 WHERE {BLOCK_COLUMN_NAME} > {min_block} 
                 AND {BLOCK_COLUMN_NAME} < {max_block} 
-                AND {key_column} = '\\x{key_value}'::bytea;"
+                AND {key_column} = '0x{key_value}';"
     ))
 }
 

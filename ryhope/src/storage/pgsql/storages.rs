@@ -311,7 +311,7 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
             connection
                 .query(
                     &format!(
-                        "INSERT INTO {}_meta (valid_from, valid_until, payload)
+                        "INSERT INTO {}_meta (__valid_from, __valid_until, payload)
                      VALUES ($1, $1, $2)",
                         table
                     ),
