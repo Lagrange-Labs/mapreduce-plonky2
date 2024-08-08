@@ -9,6 +9,7 @@ use futures::{stream, StreamExt};
 use hashbrown::HashMap;
 use log::{debug, info};
 use mp2_v1::indexing::{block::BlockPrimaryIndex, row::Row};
+use parsil::symbols::ContextProvider;
 use ryhope::{storage::RoEpochKvStorage, Epoch};
 
 impl TestCase {
@@ -28,6 +29,12 @@ async fn query_mapping<P: ProofStorage>(
     let query = cook_query(ctx, map, table).await?;
     info!("QUERY on the testcase: {query}");
     let parsed = parsil::prepare(&query)?;
+    let zktable = table.fetch_table(&table.name);
+    info!(
+        "table name {:?} => columns name {:?}",
+        table.name,
+        zktable.iter().map(|c| c.name.clone()).collect::<Vec<_>>()
+    );
     let pis = parsil::resolve::resolve(&parsed, table)?;
     Ok(())
 }
