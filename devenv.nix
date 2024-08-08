@@ -4,7 +4,7 @@
   cachix.enable = false;
 
   # https://devenv.sh/packages/
-  packages = [ pkgs.git pkgs.figlet pkgs.openssl pkgs.pkg-config ]
+  packages = [ pkgs.git pkgs.figlet pkgs.openssl pkgs.pkg-config pkgs.pgcli ]
              ++ lib.optionals pkgs.stdenv.targetPlatform.isDarwin [
                pkgs.libiconv
                pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
@@ -28,6 +28,8 @@
   enterTest = ''
     cargo test --features ci -- --test-threads 16
   '';
+
+  scripts.db.exec = "pgcli storage -h localhost -p ${builtins.toString config.env.PGPORT}";
 
   # https://devenv.sh/services/
   services.postgres = {
