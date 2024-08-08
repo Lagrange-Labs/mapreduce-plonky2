@@ -24,7 +24,7 @@ mod storages;
 
 /// A trait that must be implemented by a custom node key. This allows to
 /// (de)serialize any custom key to and fro a PgSQL BYTEA.
-pub trait ToFromBytea: Clone + Eq {
+pub trait ToFromBytea: Clone + Sync + Hash + Eq {
     /// Return the BYTEA representation of this type to be stored in a PgSQL
     /// column.
     fn to_bytea(&self) -> Vec<u8>;

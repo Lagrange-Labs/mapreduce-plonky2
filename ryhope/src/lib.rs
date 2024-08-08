@@ -162,20 +162,6 @@ impl<
         }
     }
 
-    pub async fn root_at(&self, epoch: Epoch) -> Option<T::Key> {
-        let view = self.view_at(epoch);
-        self.tree.root(&view).await
-    }
-    pub async fn root_data_at(&self, epoch: Epoch) -> Option<V> {
-        let view = self.view_at(epoch);
-        if let Some(root) = self.tree.root(&view).await {
-            let root = self.storage.data().fetch_at(&root, epoch).await;
-            Some(root)
-        } else {
-            None
-        }
-    }
-
     /// Return the current root hash of the Merkle tree at the given epoch.
     pub async fn root_hash_at(&self, epoch: Epoch) -> Option<V> {
         let view = self.view_at(epoch);
