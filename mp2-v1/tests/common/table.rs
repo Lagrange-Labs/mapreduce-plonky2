@@ -5,6 +5,7 @@ use futures::{
     FutureExt,
 };
 use log::debug;
+use mp2_common::F;
 use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
     cell::{self, Cell, CellTreeKey, MerkleCellTree},
@@ -12,7 +13,8 @@ use mp2_v1::indexing::{
     row::{CellCollection, Row, RowTreeKey},
     ColumnID,
 };
-use parsil::symbols::{RootContextProvider, ZkColumn, ZkTable};
+use parsil::symbols::{ContextProvider, ZkColumn, ZkTable};
+use plonky2::field::types::Field;
 use ryhope::{
     storage::{
         pgsql::SqlStorageSettings, updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage,
@@ -518,6 +520,7 @@ impl TableColumns {
 impl TableColumn {
     pub fn into_zkcolumn(&self) -> ZkColumn {
         ZkColumn {
+            id: F::from_canonical_u64(self.identifier),
             is_primary_index: self.index.is_primary(),
             // TODO: make a real name
             name: self.identifier.to_string(),
@@ -525,16 +528,16 @@ impl TableColumn {
     }
 }
 
-impl RootContextProvider for Table {
+impl ContextProvider for Table {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
-        <&Self as RootContextProvider>::fetch_table(&self, table_name)
+        <&Self as ContextProvider>::fetch_table(&self, table_name)
     }
 
-    fn current_block(&self) -> u64 {
+    fn output_ids(&self) -> Vec<u64> {
         todo!()
     }
 }
-impl RootContextProvider for &Table {
+impl ContextProvider for &Table {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         ensure!(
             self.name == table_name,
@@ -545,7 +548,7 @@ impl RootContextProvider for &Table {
         self.into_zktable()
     }
 
-    fn current_block(&self) -> u64 {
+    fn output_ids(&self) -> Vec<u64> {
         todo!()
     }
 }

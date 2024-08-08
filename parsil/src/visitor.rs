@@ -76,6 +76,16 @@ pub trait AstPass {
             Values
             WindowSpec
     );
+
+    /// Called before traversing a WHERE
+    fn pre_selection(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    /// Called after traversing a WHERE
+    fn post_selection(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub trait Visit<P: AstPass> {
@@ -446,7 +456,9 @@ impl<P: AstPass> Visit<P> for Select {
         }
 
         if let Some(selection) = self.selection.as_mut() {
+            pass.pre_selection()?;
             selection.visit(pass)?;
+            pass.post_selection()?;
         }
 
         match &mut self.group_by {

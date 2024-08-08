@@ -1,12 +1,14 @@
 use anyhow::Result;
 use sqlparser::ast::Query;
 
+mod executor;
 mod expand;
 mod parser;
 pub mod resolve;
 pub mod symbols;
 #[cfg(test)]
 mod tests;
+mod utils;
 mod validate;
 mod visitor;
 
