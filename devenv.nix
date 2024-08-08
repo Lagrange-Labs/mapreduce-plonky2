@@ -1,6 +1,7 @@
 { pkgs, lib, config, inputs, ... }:
 
 let
+  # return `s` if it not empty, `default` otherwise.
   orDefault = s: default: if builtins.stringLength s == 0 then default else s;
 in
 {
