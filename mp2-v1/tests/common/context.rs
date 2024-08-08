@@ -8,7 +8,7 @@ use alloy::{
     signers::local::PrivateKeySigner,
     transports::http::{Client, Http},
 };
-use anyhow::Context;
+use anyhow::{Context, Result};
 use envconfig::Envconfig;
 use log::info;
 use mp2_common::eth::ProofQuery;
@@ -18,10 +18,17 @@ use std::{
     io::{BufReader, BufWriter},
     path::PathBuf,
 };
+use verifiable_db::query;
 
 use crate::common::mkdir_all;
 
-use super::proof_storage::ProofStorage;
+use super::{
+    cases::{
+        self,
+        query::{MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULTS, MAX_NUM_RESULT_OPS},
+    },
+    proof_storage::{ProofKV, ProofStorage},
+};
 
 #[derive(Envconfig)]
 pub struct TestContextConfig {
@@ -33,7 +40,7 @@ pub struct TestContextConfig {
 }
 
 /// Test context
-pub(crate) struct TestContext<P: ProofStorage> {
+pub(crate) struct TestContext {
     pub(crate) rpc_url: String,
     /// HTTP provider
     /// TODO: fix to use alloy provider.
@@ -43,10 +50,18 @@ pub(crate) struct TestContext<P: ProofStorage> {
     pub(crate) local_node: Option<AnvilInstance>,
     /// Parameters
     pub(crate) params: Option<PublicParameters>,
-    pub(crate) storage: P,
+    pub(crate) query_params: Option<
+        query::api::Parameters<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >,
+    >,
+    pub(crate) storage: ProofKV,
 }
 /// Create the test context on a local anvil chain. It also setups the local simple test cases
-pub async fn new_local_chain<P: ProofStorage>(storage: P) -> TestContext<P> {
+pub async fn new_local_chain(storage: ProofKV) -> TestContext {
     // Spin up a local node.
     let anvil = Anvil::new().spawn();
 
@@ -69,11 +84,104 @@ pub async fn new_local_chain<P: ProofStorage>(storage: P) -> TestContext<P> {
         rpc,
         local_node: Some(anvil),
         params: None,
+        query_params: None,
         storage,
     }
 }
 
-impl<P: ProofStorage> TestContext<P> {
+enum ParamsType {
+    Indexing(String),
+    Query(String),
+}
+
+impl ParamsType {
+    pub fn full_path(&self, mut pre: PathBuf) -> PathBuf {
+        match self {
+            ParamsType::Indexing(s) => pre.push(s),
+            ParamsType::Query(s) => pre.push(s),
+        };
+        pre
+    }
+
+    pub fn parse(&self, path: PathBuf, ctx: &mut TestContext) -> Result<()> {
+        match self {
+            ParamsType::Query(_) => {
+                info!("parsing the querying mp2-v1 parameters");
+                let params = bincode::deserialize_from(BufReader::new(
+                    File::open(&path).with_context(|| format!("while opening {path:?}"))?,
+                ))
+                .context("while parsing MP2 parameters")?;
+                ctx.query_params = Some(params);
+            }
+            ParamsType::Indexing(_) => {
+                info!("parsing the indexing mp2-v1 parameters");
+                let params = bincode::deserialize_from(BufReader::new(
+                    File::open(&path).with_context(|| format!("while opening {path:?}"))?,
+                ))
+                .context("while parsing MP2 parameters")?;
+                ctx.params = Some(params);
+            }
+        };
+        Ok(())
+    }
+
+    pub fn build(&self, ctx: &mut TestContext) -> Result<()>
+    where
+        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+        [(); MAX_NUM_RESULTS - 1]:,
+    {
+        match self {
+            ParamsType::Query(_) => {
+                info!("rebuilding the mp2 querying parameters");
+                let params = query::api::Parameters::<
+                    MAX_NUM_COLUMNS,
+                    MAX_NUM_PREDICATE_OPS,
+                    MAX_NUM_RESULT_OPS,
+                    MAX_NUM_RESULTS,
+                >::build();
+                ctx.query_params = Some(params);
+                Ok(())
+            }
+            ParamsType::Indexing(_) => {
+                info!("rebuilding the mp2 indexing parameters");
+                let mp2 = build_circuits_params();
+                ctx.params = Some(mp2);
+                info!("writing the mp2-v1 indexing parameters");
+                Ok(())
+            }
+        }
+    }
+
+    pub fn build_and_save(&self, path: PathBuf, ctx: &mut TestContext) -> Result<()>
+    where
+        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+        [(); MAX_NUM_RESULTS - 1]:,
+    {
+        self.build(ctx)?;
+        match self {
+            ParamsType::Query(_) => {
+                bincode::serialize_into(
+                    BufWriter::new(
+                        File::create(&path).with_context(|| format!("while creating {path:?}"))?,
+                    ),
+                    &ctx.query_params.as_ref().unwrap(),
+                )?;
+                Ok(())
+            }
+            ParamsType::Indexing(_) => {
+                bincode::serialize_into(
+                    BufWriter::new(
+                        File::create(&path).with_context(|| format!("while creating {path:?}"))?,
+                    ),
+                    &ctx.params.as_ref().unwrap(),
+                )?;
+                Ok(())
+            }
+        }
+    }
+}
+
+impl TestContext {
     pub(crate) fn wallet(&self) -> EthereumWallet {
         let signer: PrivateKeySigner = self.local_node.as_ref().unwrap().keys()[0].clone().into();
         EthereumWallet::from(signer)
@@ -85,43 +193,31 @@ impl<P: ProofStorage> TestContext<P> {
     pub(crate) fn build_params(&mut self) -> anyhow::Result<()> {
         let cfg = TestContextConfig::init_from_env().context("while parsing configuration")?;
 
-        self.params = Some(match cfg.params_dir {
+        let params = vec![
+            ParamsType::Indexing("params_mp2".to_string()),
+            ParamsType::Query("query_mp2".to_string()),
+        ];
+        match cfg.params_dir {
             Some(params_path_str) => {
                 info!("attempting to read parameters from {params_path_str}");
                 mkdir_all(&params_path_str)?;
                 let params_path = PathBuf::from(params_path_str);
-
-                let mut mp2_filepath = params_path.clone();
-                mp2_filepath.push("params_mp2");
-
-                let mp2 = if !mp2_filepath.exists() || cfg.force_rebuild {
-                    info!("rebuilding the mp2 parameters");
-                    let mp2 = build_circuits_params();
-                    info!("writing the mp2-v1 parameters");
-                    bincode::serialize_into(
-                        BufWriter::new(
-                            File::create(&mp2_filepath)
-                                .with_context(|| format!("while creating {mp2_filepath:?}"))?,
-                        ),
-                        &mp2,
-                    )?;
-                    mp2
-                } else {
-                    info!("parsing the mp2-v1 parameters");
-                    bincode::deserialize_from(BufReader::new(
-                        File::open(&mp2_filepath)
-                            .with_context(|| format!("while opening {mp2_filepath:?}"))?,
-                    ))
-                    .context("while parsing MP2 parameters")?
-                };
-
-                mp2
+                for p in params.iter() {
+                    let full = p.full_path(params_path.clone());
+                    if !full.exists() || cfg.force_rebuild {
+                        p.build_and_save(full, self)?;
+                    } else {
+                        p.parse(full, self)?;
+                    };
+                }
             }
             None => {
                 info!("recomputing parameters");
-                build_circuits_params()
+                for p in params {
+                    p.build(self)?;
+                }
             }
-        });
+        }
 
         Ok(())
     }
@@ -166,5 +262,9 @@ impl<P: ProofStorage> TestContext<P> {
     /// different RPCs during testing.
     pub(crate) fn set_rpc(&mut self, rpc_url: &str) {
         self.rpc = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
+    }
+
+    pub fn run_query_proof(&self, input: cases::query::CircuitInput) -> Result<Vec<u8>> {
+        self.query_params.as_ref().unwrap().generate_proof(input)
     }
 }

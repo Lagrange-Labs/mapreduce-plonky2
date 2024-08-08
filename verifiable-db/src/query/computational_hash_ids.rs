@@ -25,7 +25,9 @@ use plonky2::{
 use plonky2_ecgfp5::curve::curve::Point;
 
 use super::universal_circuit::{
-    universal_circuit_inputs::{BasicOperation, InputOperand, OutputItem, ResultStructure},
+    universal_circuit_inputs::{
+        BasicOperation, InputOperand, OutputItem, PlaceholderId, ResultStructure,
+    },
     ComputationalHash, ComputationalHashTarget,
 };
 
@@ -543,5 +545,8 @@ impl PlaceholderIdentifier {
             Self::GenericPlaceholder(i) => self.discriminant() + i,
             _ => self.discriminant(),
         }
+    }
+    pub fn identifier(&self) -> PlaceholderId {
+        self.to_field()
     }
 }

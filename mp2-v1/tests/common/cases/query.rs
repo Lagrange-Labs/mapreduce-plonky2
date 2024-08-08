@@ -1,19 +1,48 @@
+use std::{collections::HashMap, iter::once};
+
 use crate::common::{cases::indexing::BLOCK_COLUMN_NAME, rowtree::MerkleRowTree};
 
 use super::{
     super::{context::TestContext, proof_storage::ProofStorage, table::Table},
     MappingValuesExtractionArgs, TableSourceSlot, TestCase,
 };
+use alloy::primitives::U256;
 use anyhow::Result;
 use futures::{stream, StreamExt};
-use hashbrown::HashMap;
 use log::{debug, info};
-use mp2_v1::indexing::{block::BlockPrimaryIndex, row::Row};
-use parsil::symbols::ContextProvider;
+use mp2_common::{array::ToField, F};
+use mp2_v1::{
+    indexing::{
+        block::BlockPrimaryIndex,
+        row::{Row, RowTreeKey},
+        ColumnID,
+    },
+    values_extraction::identifier_block_column,
+};
+use parsil::{resolve::CircuitPis, symbols::ContextProvider};
 use ryhope::{storage::RoEpochKvStorage, Epoch};
+use verifiable_db::query::{
+    self,
+    aggregation::QueryBounds,
+    computational_hash_ids::PlaceholderIdentifier,
+    universal_circuit::universal_circuit_inputs::{ColumnCell, PlaceholderId},
+};
+
+pub const NUM_COLUMNS: usize = 3;
+pub const MAX_NUM_COLUMNS: usize = 20;
+pub const MAX_NUM_PREDICATE_OPS: usize = 20;
+pub const MAX_NUM_RESULT_OPS: usize = 20;
+pub const MAX_NUM_RESULTS: usize = 10;
+
+pub type CircuitInput = query::api::CircuitInput<
+    MAX_NUM_COLUMNS,
+    MAX_NUM_PREDICATE_OPS,
+    MAX_NUM_RESULT_OPS,
+    MAX_NUM_RESULTS,
+>;
 
 impl TestCase {
-    pub async fn test_query<P: ProofStorage>(&self, ctx: &TestContext<P>) -> Result<()> {
+    pub async fn test_query(&self, ctx: &TestContext) -> Result<()> {
         match self.source {
             TableSourceSlot::Mapping((ref map, _)) => query_mapping(&ctx, map, &self.table).await?,
             _ => unimplemented!("yet"),
@@ -21,14 +50,14 @@ impl TestCase {
         Ok(())
     }
 }
-async fn query_mapping<P: ProofStorage>(
-    ctx: &TestContext<P>,
+async fn query_mapping(
+    ctx: &TestContext,
     map: &MappingValuesExtractionArgs,
     table: &Table,
 ) -> Result<()> {
-    let query = cook_query(ctx, map, table).await?;
-    info!("QUERY on the testcase: {query}");
-    let parsed = parsil::prepare(&query)?;
+    let query_info = cook_query(table).await?;
+    info!("QUERY on the testcase: {}", query_info.query);
+    let parsed = parsil::prepare(&query_info.query)?;
     let zktable = table.fetch_table(&table.name);
     info!(
         "table name {:?} => columns name {:?}",
@@ -36,16 +65,58 @@ async fn query_mapping<P: ProofStorage>(
         zktable.iter().map(|c| c.name.clone()).collect::<Vec<_>>()
     );
     let pis = parsil::resolve::resolve(&parsed, table)?;
+    run_query(ctx, table, query_info, pis)
+        .await
+        .expect("unable to run universal query proof");
     Ok(())
+}
+
+async fn run_query(
+    ctx: &TestContext,
+    table: &Table,
+    query: QueryCooking,
+    pis: CircuitPis,
+) -> Result<()> {
+    // right now we first test the universal query gadget on a single row
+    // 1. Get the all the cells including primary and secondary index
+    let example_epoch = query.epochs.last().cloned().unwrap();
+    let (row_ctx, _) = table
+        .row
+        .fetch_with_context_at(&query.example_row, example_epoch)
+        .await;
+    let cells = table
+        .cells_in_row(&query.example_row, example_epoch)
+        .await?;
+    let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(example_epoch));
+    let all_cells = once(primary_cell).chain(cells).collect::<Vec<_>>();
+    // 2. create input
+    let input = CircuitInput::new_universal_circuit(
+        &all_cells,
+        &pis.predication_operations,
+        &pis.result,
+        &query.placeholders,
+        row_ctx.is_leaf(),
+        &query.bounds,
+    )
+    .expect("unable to create universal query circuit inputs");
+    // 3. run proof
+    ctx.run_query_proof(input)?;
+    Ok(())
+}
+
+struct QueryCooking {
+    query: String,
+    placeholders: HashMap<PlaceholderId, U256>,
+    bounds: QueryBounds,
+    // At the moment it returns the row key selected and the epochs to run the circuit on
+    // This will get removed once we can serach through JSON in PSQL directly.
+    example_row: RowTreeKey,
+    epochs: Vec<Epoch>,
 }
 
 // cook up a SQL query on the secondary index. For that we just iterate on mapping keys and
 // take the one that exist for most blocks
-async fn cook_query<P: ProofStorage>(
-    ctx: &TestContext<P>,
-    map: &MappingValuesExtractionArgs,
-    table: &Table,
-) -> Result<String> {
+async fn cook_query(table: &Table) -> Result<QueryCooking> {
     let mut all_table = HashMap::new();
     let max = table.row.current_epoch();
     for epoch in (1..=max).rev() {
@@ -75,7 +146,7 @@ async fn cook_query<P: ProofStorage>(
         .max_by_key(|(k, epochs)| {
             // simplification here to start at first epoch where this row was. Otherwise need to do
             // longest consecutive sequence etc...
-            let (l, start) = find_longest_consecutive_sequence(epochs.to_vec());
+            let (l, _start) = find_longest_consecutive_sequence(epochs.to_vec());
             info!("finding sequence of {l} blocks for key {k:?} (epochs {epochs:?}");
             l
         })
@@ -102,13 +173,36 @@ async fn cook_query<P: ProofStorage>(
     // TODO: careful about off by one error. -1 because tree epoch starts at 1
     let min_block = starting as u64 + table.genesis_block - 1;
     let max_block = min_block + longest_sequence as u64;
-    Ok(format!(
+    let placeholders = HashMap::from([
+        (
+            PlaceholderIdentifier::MinQueryOnIdx1.identifier(),
+            U256::from(min_block),
+        ),
+        (
+            PlaceholderIdentifier::MaxQueryOnIdx1.identifier(),
+            U256::from(max_block),
+        ),
+    ]);
+    let bounds = QueryBounds::new(
+        U256::from(min_block),
+        U256::from(max_block),
+        Some(longest_key.value),
+        Some(longest_key.value),
+    );
+    let query_str = format!(
         "SELECT AVG({value_column}) 
                 FROM {table_name} 
-                WHERE {BLOCK_COLUMN_NAME} > {min_block} 
-                AND {BLOCK_COLUMN_NAME} < {max_block} 
+                WHERE {BLOCK_COLUMN_NAME} > $1 
+                AND {BLOCK_COLUMN_NAME} < $2 
                 AND {key_column} = '0x{key_value}';"
-    ))
+    );
+    Ok(QueryCooking {
+        bounds,
+        query: query_str,
+        placeholders,
+        example_row: longest_key.clone(),
+        epochs: epochs.clone(),
+    })
 }
 
 async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<BlockPrimaryIndex>>> {

@@ -12,7 +12,7 @@ use crate::common::storage_trie::TestStorageTrie;
 
 use super::{proof_storage::ProofStorage, TestContext};
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     /// Generate the Values Extraction (C.2) proof for single variables.
     pub(crate) async fn prove_length_extraction(
         &self,

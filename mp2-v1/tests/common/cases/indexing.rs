@@ -73,9 +73,7 @@ impl TestCase {
     pub fn table(&self) -> &Table {
         &self.table
     }
-    pub(crate) async fn single_value_test_case<P: ProofStorage>(
-        ctx: &TestContext<P>,
-    ) -> Result<Self> {
+    pub(crate) async fn single_value_test_case(ctx: &TestContext) -> Result<Self> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -146,7 +144,7 @@ impl TestCase {
         })
     }
 
-    pub(crate) async fn mapping_test_case<P: ProofStorage>(ctx: &TestContext<P>) -> Result<Self> {
+    pub(crate) async fn mapping_test_case(ctx: &TestContext) -> Result<Self> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -234,11 +232,7 @@ impl TestCase {
         })
     }
 
-    pub async fn run<P: ProofStorage>(
-        &mut self,
-        ctx: &mut TestContext<P>,
-        changes: Vec<ChangeType>,
-    ) -> Result<()> {
+    pub async fn run(&mut self, ctx: &mut TestContext, changes: Vec<ChangeType>) -> Result<()> {
         // Call the contract function to set the test data.
         // TODO: make it return an update for a full table, right now it's only for one row.
         // to make when we deal with mappings
@@ -271,9 +265,9 @@ impl TestCase {
 
     // separate function only dealing with preprocesisng MPT proofs
     // This function is "generic" as it can table a table description
-    async fn run_lagrange_preprocessing<P: ProofStorage>(
+    async fn run_lagrange_preprocessing(
         &mut self,
-        ctx: &mut TestContext<P>,
+        ctx: &mut TestContext,
         bn: BlockPrimaryIndex,
         // Note there is only one entry for a single variable update, but multiple for mappings for
         // example
@@ -402,9 +396,9 @@ impl TestCase {
     }
 
     // separate function only dealing with preprocessing MPT proofs
-    async fn run_mpt_preprocessing<P: ProofStorage>(
+    async fn run_mpt_preprocessing(
         &self,
-        ctx: &mut TestContext<P>,
+        ctx: &mut TestContext,
         bn: BlockPrimaryIndex,
     ) -> Result<()> {
         let contract_proof_key = ProofKey::ContractExtraction((self.contract_address, bn));
@@ -532,9 +526,9 @@ impl TestCase {
     }
 
     // Returns the table updated
-    async fn apply_update_to_contract<P: ProofStorage>(
+    async fn apply_update_to_contract(
         &self,
-        ctx: &TestContext<P>,
+        ctx: &TestContext,
         update: &UpdateSimpleStorage,
     ) -> Result<()> {
         let provider = ProviderBuilder::new()
@@ -548,10 +542,7 @@ impl TestCase {
         Ok(())
     }
 
-    async fn current_single_values<P: ProofStorage>(
-        &self,
-        ctx: &TestContext<P>,
-    ) -> Result<SimpleSingleValue> {
+    async fn current_single_values(&self, ctx: &TestContext) -> Result<SimpleSingleValue> {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(ctx.wallet())
@@ -567,9 +558,9 @@ impl TestCase {
         })
     }
 
-    async fn random_contract_update<P: ProofStorage>(
+    async fn random_contract_update(
         &mut self,
-        ctx: &mut TestContext<P>,
+        ctx: &mut TestContext,
         c: ChangeType,
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         match self.source {
@@ -748,9 +739,9 @@ impl TestCase {
     ///  2. apply new update to contract
     ///  3. get new table values
     ///  4. compute the diff, i.e. the update to apply to the table and the trees
-    async fn init_contract_data<P: ProofStorage>(
+    async fn init_contract_data(
         &mut self,
-        ctx: &mut TestContext<P>,
+        ctx: &mut TestContext,
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         match self.source {
             TableSourceSlot::Mapping((ref mut mapping, _)) => {
@@ -813,9 +804,9 @@ impl TestCase {
     }
 
     // construct a row of the table from the actual value in the contract by fetching from MPT
-    async fn current_table_row_values<P: ProofStorage>(
+    async fn current_table_row_values(
         &self,
-        ctx: &mut TestContext<P>,
+        ctx: &mut TestContext,
     ) -> Vec<TableRowValues<BlockPrimaryIndex>> {
         match self.source {
             TableSourceSlot::Mapping((_, _)) => unimplemented!("not use of it"),

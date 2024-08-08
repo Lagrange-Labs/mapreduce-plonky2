@@ -140,30 +140,8 @@ pub trait ProofStorage {
     fn move_proof(&mut self, old_key: &ProofKey, new_key: &ProofKey) -> Result<()>;
 }
 
-/// This is simply a suggestion but this should be stored on a proper backend of course.
-#[derive(Default)]
-pub struct MemoryProofStorage(HashMap<ProofKey, Vec<u8>>);
-
-impl ProofStorage for MemoryProofStorage {
-    fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()> {
-        self.0.insert(key, proof);
-        Ok(())
-    }
-
-    fn get_proof_exact(&self, key: &ProofKey) -> Result<Vec<u8>> {
-        self.0.get(key).context("unable to get proof").cloned()
-    }
-
-    fn move_proof(&mut self, old_key: &ProofKey, new_key: &ProofKey) -> Result<()> {
-        match self.0.remove(old_key) {
-            Some(data) => self.store_proof(new_key.clone(), data),
-            // silent update
-            None => Ok(()),
-        }
-    }
-}
 use jammdb::{Data, Error, DB};
-pub struct KeyValueDB {
+pub struct ProofKV {
     db: DB,
 }
 
@@ -175,7 +153,7 @@ const BUCKET_NAME: &str = "v1_proof_store_test";
 pub const ENV_PROOF_STORE: &str = "proofs.store";
 pub const DEFAULT_PROOF_STORE_FOLDER: &str = "store/";
 
-impl KeyValueDB {
+impl ProofKV {
     pub fn new_from_env(default: &str) -> Result<Self> {
         let filename = std::env::var(ENV_PROOF_STORE).unwrap_or(default.to_string());
         Self::new(Path::new(&filename))
@@ -216,7 +194,7 @@ impl KeyValueDB {
     }
 }
 
-impl ProofStorage for KeyValueDB {
+impl ProofStorage for ProofKV {
     fn store_proof(&mut self, key: ProofKey, proof: Vec<u8>) -> Result<()> {
         let store_key = key.compute_hash();
         let tx = self.db.tx(true)?;

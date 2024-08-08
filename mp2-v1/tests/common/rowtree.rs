@@ -71,7 +71,7 @@ impl From<&SecondaryIndexCell> for RowTreeKey {
 type RowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
 pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>;
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     /// Given a row tree (i.e. secondary index tree) and its update tree, prove
     /// it.
     pub async fn prove_row_tree(

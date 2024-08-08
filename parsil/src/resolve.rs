@@ -395,20 +395,20 @@ impl<C: ContextProvider> Resolver<C> {
 /// This struct contains all the data required to build the public inputs of the
 /// universal query circuit for a given query.
 #[derive(Debug)]
-struct CircuitPis {
+pub struct CircuitPis {
     /// The [`ResultStructure`] taken as input by the universal query circuit
-    result: ResultStructure,
+    pub result: ResultStructure,
     /// A list of [`AggregationOperation`] matching 1-1 the outputs in
     /// [`ResultStructure`]
-    query_aggregations: Vec<F>,
+    pub query_aggregations: Vec<F>,
     /// The list of crypto IDs of the column involved in the query. Their
     /// position in this list **MUST** match their index in the
     /// [`ResultStructure`] operations.
-    column_ids: Vec<F>,
+    pub column_ids: Vec<F>,
     /// A list of mutually-referencing [`BasicOperation`] encoding the AST of
     /// the WHERE predicate, if any. By convention, the root of the AST **MUST**
     /// be the last one in this list.
-    predication_operations: Vec<BasicOperation>,
+    pub predication_operations: Vec<BasicOperation>,
 }
 
 impl<C: ContextProvider> AstPass for Resolver<C> {
@@ -689,7 +689,7 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
 // }
 
 /// Convert a query so that it can be executed on a ryhope-generated db.
-pub fn resolve<C: ContextProvider>(q: &Query, context: C) -> Result<()> {
+pub fn resolve<C: ContextProvider>(q: &Query, context: C) -> Result<CircuitPis> {
     let mut converted_query = q.clone();
     let mut resolver = Resolver::new(context);
     converted_query.visit(&mut resolver)?;
@@ -706,5 +706,5 @@ pub fn resolve<C: ContextProvider>(q: &Query, context: C) -> Result<()> {
     println!("Sent to circuit:");
     println!("{:#?}", resolver.to_pis()?);
 
-    Ok(())
+    resolver.to_pis()
 }

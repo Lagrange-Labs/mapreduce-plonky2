@@ -30,7 +30,7 @@ use super::{
 type IndexStorage = InMemory<BlockTree, IndexNode<BlockPrimaryIndex>>;
 pub type MerkleIndexTree = MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>;
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     /// NOTE: we require the added_index information because we need to distinguish if a new node
     /// added has a leaf or a as parent. The rest of the nodes in the update tree are to be proven
     /// by the "membership" circuit. So we need to differentiate between the two cases.

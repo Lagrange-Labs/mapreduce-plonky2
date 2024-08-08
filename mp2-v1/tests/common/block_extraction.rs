@@ -17,7 +17,7 @@ pub(crate) fn block_number_to_u256_limbs(number: u64) -> Vec<F> {
     left_pad_generic::<u32, NUM_LIMBS>(&block_number_buff.pack(Endianness::Big)).to_fields()
 }
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     pub(crate) async fn prove_block_extraction(&self) -> Result<Vec<u8>> {
         let block = self.query_current_block().await;
         let buffer = block.rlp();

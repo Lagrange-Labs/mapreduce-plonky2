@@ -353,9 +353,9 @@ impl TestStorageTrie {
 
     /// Query the contract at the provided address, fetch a proof using the context, and add it to
     /// the trie's slot.
-    pub(crate) async fn query_proof_and_add_slot<P: ProofStorage>(
+    pub(crate) async fn query_proof_and_add_slot(
         &mut self,
-        ctx: &TestContext<P>,
+        ctx: &TestContext,
         contract_address: &Address,
         slot: usize,
     ) {

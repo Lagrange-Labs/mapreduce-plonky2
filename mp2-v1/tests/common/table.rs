@@ -24,10 +24,11 @@ use ryhope::{
         sbbst,
         scapegoat::{self, Alpha},
     },
-    InitSettings,
+    Epoch, InitSettings,
 };
 use serde::{Deserialize, Serialize};
 use std::{hash::Hash, iter::once};
+use verifiable_db::query::universal_circuit::universal_circuit_inputs::ColumnCell;
 
 use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
 
@@ -382,6 +383,22 @@ impl Table {
             })
             .await?;
         Ok(IndexUpdateResult { plan })
+    }
+
+    // For proving query, we need the column cell structure
+    // TODO: make it only one structure, with the indexing/ package
+    pub async fn cells_in_row(&self, key: &RowTreeKey, at: Epoch) -> Result<Vec<ColumnCell>> {
+        let payload = self.row.fetch_at(key, at).await;
+        // this includes the secondary AND the rest of the cells.
+        let cells = payload
+            .cells
+            .0
+            .into_iter()
+            .map(|(id, cell_info)| ColumnCell::new(id, cell_info.value))
+            .collect::<Vec<_>>();
+        // we then fetch the primary associated to it
+
+        Ok(cells)
     }
 }
 

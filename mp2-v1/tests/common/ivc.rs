@@ -9,7 +9,7 @@ use anyhow::Result;
 use mp2_v1::{api, indexing::block::BlockPrimaryIndex};
 use ryhope::tree::TreeTopology;
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     pub async fn prove_ivc(
         &mut self,
         table_id: &TableID,

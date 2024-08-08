@@ -7,7 +7,7 @@ use mp2_v1::{
 use super::{proof_storage::ProofStorage, TestContext};
 use anyhow::Result;
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     pub(crate) async fn prove_final_extraction(
         &self,
         contract_proof: Vec<u8>,

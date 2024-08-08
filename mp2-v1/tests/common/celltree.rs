@@ -24,7 +24,7 @@ use super::{
     table::{CellsUpdateResult, Table, TableID},
 };
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     /// Given a [`MerkleCellTree`], recursively prove its hash and returns the storage key
     /// associated to the root proof
     /// The row key is used for (a) saving the new proofs to the storage (b) loading the previous
