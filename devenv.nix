@@ -29,7 +29,7 @@ in
   # Use a DB_URL tuned for the dockerized processes.postgres-ci
   enterTest = ''
     DB_URL="host=localhost dbname=storage port=${builtins.toString config.env.PGPORT}";
-    cargo test --features ci -- --test-threads 16
+    cargo test --features ci storage -- --test-threads 16
   '';
 
   # Spawn a local PgSQL instance iff we are not in test mode (e.g. when running
