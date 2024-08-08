@@ -25,9 +25,6 @@ pub(crate) mod universal_query_circuit;
 /// the operations to be performed to compute the results of the query for each row
 pub(crate) mod universal_circuit_inputs;
 
-/// Column index number (primary and secondary indexes)
-pub(crate) const COLUMN_INDEX_NUM: usize = 2;
-
 // type alias introduced to specify the semantic of a hash, given that we have many in the query circuits
 pub type ComputationalHash = HashOut<F>;
 pub type PlaceholderHash = HashOut<F>;

@@ -26,7 +26,7 @@ use std::{
 use super::{
     cells::build_cells_tree,
     universal_query_circuit::{OutputComponent, OutputComponentWires},
-    ComputationalHashTarget, COLUMN_INDEX_NUM,
+    ComputationalHashTarget,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -140,23 +140,22 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
         // Compute the cells tree of the all output items to be returned for the given record.
         let tree_hash = build_cells_tree(
             b,
-            &output_items[COLUMN_INDEX_NUM..],
-            &input_wires.ids[COLUMN_INDEX_NUM..],
-            &input_wires.is_output_valid[COLUMN_INDEX_NUM..],
+            &output_items[2..],
+            &input_wires.ids[2..],
+            &input_wires.is_output_valid[2..],
         );
 
         // Compute the accumulator including the indexed items:
         // second_item = is_output_valid[1] ? output_items[1] : 0
         // accumulator = D(ids[0] || output_items[0] || ids[1] || second_item || tree_hash)
-        let mut inputs: Vec<_> = iter::once(input_wires.ids[0])
+        let second_item =
+            b.select_u256(input_wires.is_output_valid[1], &output_items[1], &u256_zero);
+        let inputs: Vec<_> = iter::once(input_wires.ids[0])
             .chain(output_items[0].to_targets())
+            .chain(iter::once(input_wires.ids[1]))
+            .chain(second_item.to_targets())
+            .chain(tree_hash.to_targets())
             .collect();
-        (1..COLUMN_INDEX_NUM).for_each(|i| {
-            let item = b.select_u256(input_wires.is_output_valid[i], &output_items[i], &u256_zero);
-            inputs.push(input_wires.ids[i]);
-            inputs.extend(item.to_targets());
-        });
-        inputs.extend(tree_hash.elements);
         let accumulator = b.map_to_curve_point(&inputs);
 
         // Expose the accumulator only if the results for this record have to be
@@ -408,23 +407,21 @@ mod tests {
                     ..Default::default()
                 })
                 .collect();
-            let tree_hash = compute_cells_tree_hash((cells[COLUMN_INDEX_NUM..]).to_vec()).await;
+            let tree_hash = compute_cells_tree_hash((cells[2..]).to_vec()).await;
 
             // Compute the first output value only for predicate value.
             let first_output_value = if output.predicate_value {
-                let mut inputs: Vec<_> = iter::once(cells[0].id)
+                let second_item = if c.valid_num_outputs > 1 {
+                    cells[1].value
+                } else {
+                    u256_zero
+                };
+                let inputs: Vec<_> = iter::once(cells[0].id)
                     .chain(cells[0].value.to_fields())
+                    .chain(iter::once(cells[1].id))
+                    .chain(second_item.to_fields())
+                    .chain(tree_hash.to_fields())
                     .collect();
-                for i in 1..COLUMN_INDEX_NUM {
-                    let item = if i < c.valid_num_outputs {
-                        cells[i].value
-                    } else {
-                        u256_zero
-                    };
-                    inputs.push(cells[i].id);
-                    inputs.extend::<Vec<F>>(item.to_fields());
-                }
-                inputs.extend(tree_hash.elements);
                 map_to_curve_point(&inputs)
             } else {
                 curve_zero

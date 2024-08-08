@@ -256,10 +256,10 @@ where
                         // the output will be placed in the `num_result_ops - index` last slot in the set of
                         // `possible_output_values` provided as input in the circuit to the output component,
                         // i.e., the input array found in `OutputComponent::build` method.
-                        // Therefore, since the `possible_output_values` array in the circuit has 
+                        // Therefore, since the `possible_output_values` array in the circuit has
                         // `MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS` entries, the selector for such output value
                         // can be computed as the length of `possible_output_values.len() - (num_result_ops - index)`,
-                        // which correspond to the `num_result_ops - index`-th entry from the end of the array  
+                        // which correspond to the `num_result_ops - index`-th entry from the end of the array
                         F::from_canonical_usize(MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS - (num_result_ops - *index))
                     },
             })
@@ -553,7 +553,7 @@ where
         let start_actual_ops = MAX_NUM_COLUMNS + MAX_NUM_OPS - operations.len();
         let ops_wires = operations.iter().enumerate().map(|(i, op)| {
             let mut constant_operand = U256::ZERO;
-            // the number of input values provided to the basic operation component 
+            // the number of input values provided to the basic operation component
             // computing the current predicate operation
             let num_inputs = start_actual_ops + i;
             let mut compute_op_inputs = |is_first_op: bool| {
@@ -832,7 +832,7 @@ mod tests {
             universal_circuit_inputs::{
                 BasicOperation, ColumnCell, InputOperand, OutputItem, ResultStructure,
             },
-            ComputationalHash, COLUMN_INDEX_NUM,
+            ComputationalHash,
         },
     };
 
@@ -1495,14 +1495,9 @@ mod tests {
                             .to_fields(),
                     )
                     .chain(
-                        compute_cells_tree_hash(
-                            out_cells
-                                .get(COLUMN_INDEX_NUM..)
-                                .unwrap_or_default()
-                                .to_vec(),
-                        )
-                        .await
-                        .to_vec(),
+                        compute_cells_tree_hash(out_cells.get(2..).unwrap_or_default().to_vec())
+                            .await
+                            .to_vec(),
                     )
                     .collect_vec(),
             )
