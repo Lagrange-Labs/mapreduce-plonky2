@@ -304,6 +304,7 @@ where
 
     /// Initialize a DB pool.
     pub async fn init_db_pool(db_url: &str) -> Result<DBPool> {
+        info!("Connecting to `{db_url}`");
         let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
             .with_context(|| format!("while connecting to postgreSQL with `{}`", db_url))?;
 
