@@ -806,7 +806,32 @@ mod tests {
             )
         }
     }
+    const NUM_COLUMNS: usize = 3;
+    const MAX_NUM_COLUMNS: usize = 20;
+    const MAX_NUM_PREDICATE_OPS: usize = 20;
+    const MAX_NUM_RESULT_OPS: usize = 20;
+    const MAX_NUM_RESULTS: usize = 10;
 
+    struct MyParams<P>
+    where
+        [(); MAX_NUM_RESULTS - 1]:,
+        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    {
+        another_field: Option<P>,
+        params: super::Parameters<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >,
+    }
+
+    impl<P> MyParams<P> {
+        fn describe(&self) -> anyhow::Result<()> {
+            println!("hello");
+            Ok(())
+        }
+    }
     #[test]
     fn test_api() {
         // Simple query for testing SELECT SUM(C1 + C3) FROM T WHERE C3 >= 5 AND C1 > 56 AND C1 <= 67 AND C2 > 34 AND C2 <= 78
@@ -816,6 +841,7 @@ mod tests {
         const MAX_NUM_PREDICATE_OPS: usize = 20;
         const MAX_NUM_RESULT_OPS: usize = 20;
         const MAX_NUM_RESULTS: usize = 10;
+
         let column_ids = (0..NUM_COLUMNS)
             .map(|_| {
                 let id: u32 = rng.gen();
