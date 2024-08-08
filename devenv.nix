@@ -25,10 +25,11 @@ in
   env.GOFLAGS = "-modcacherw";
   # Required for Rust linking to OpenSSL
   env.OPENSSL_DEV = pkgs.openssl.dev;
+  env.DB_URL = "host=localhost dbname=storage port=${builtins.toString config.env.PGPORT}";
+  env.RUST_LOG = "debug";
 
   # Use a DB_URL tuned for the dockerized processes.postgres-ci
   enterTest = ''
-    RUST_LOG=debug DB_URL="host=localhost dbname=storage port=${builtins.toString config.env.PGPORT}"
     cargo test --features ci storage -- --test-threads 16
   '';
 
