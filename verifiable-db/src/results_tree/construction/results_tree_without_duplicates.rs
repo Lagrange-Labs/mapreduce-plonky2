@@ -119,6 +119,8 @@ impl<const S: usize> ResultsTreeWithoutDuplicatesCircuit<S> {
             .chain(tree_hash.to_targets())
             .collect();
         let mut accumulator = b.map_to_curve_point(&accumulator_inputs);
+
+        b.range_check(multiplicity, 32);
         let multiplicity_bituint = BigUintTarget {
             limbs: vec![U32Target(multiplicity)],
         };
