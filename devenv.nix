@@ -28,14 +28,14 @@ in
 
   # Use a DB_URL tuned for the dockerized processes.postgres-ci
   enterTest = ''
-    DB_URL="host=localhost dbname=storage port=${builtins.toString config.env.PGPORT} user=postgres";
+    DB_URL="host=localhost dbname=storage port=${builtins.toString config.env.PGPORT}";
     cargo test --features ci -- --test-threads 16
   '';
 
   # Spawn a local PgSQL instance iff we are not in test mode (e.g. when running
   # `devenv up`) for development purposes.
   services.postgres = {
-    enable = !config.devenv.isTesting;
+    enable = true;
     listen_addresses = "127.0.0.1";
     port = lib.strings.toInt (orDefault config.env.PGSQL_PORT "5432");
     settings = {
@@ -47,32 +47,7 @@ in
     }];
   };
 
-
   scripts.db.exec = "psql storage -h localhost -p ${builtins.toString config.env.PGPORT}";
-
-  # Run PgSQL in a container iff we are running `devenv test`. The goal is to be
-  # able to run multiple PgSQL at once on the same machine for concurrent CI
-  # runs on beefy servers.
-  processes.postgres-ci = lib.mkIf config.devenv.isTesting {
-    exec = (lib.concatStringsSep " " [
-      "${pkgs.docker}/bin/docker"
-      "--name postgres-${config.env.PGPORT}"
-      "run"
-      "-p ${config.env.PGPORT}:5432"
-      "postgres"
-    ]
-    );
-
-    process-compose = {
-      description = "docker container of postgres";
-      shutdown = {
-        command = "${pkgs.docker}/bin/docker rm -f postgres-${config.env.PGPORT}";
-      };
-      environment = [
-        "POSTGRES_DB=storage"
-      ];
-    };
-  };
 
   # https://devenv.sh/languages/
   languages.rust = {
