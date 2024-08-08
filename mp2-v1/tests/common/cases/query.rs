@@ -58,11 +58,15 @@ async fn query_mapping(
     let query_info = cook_query(table).await?;
     info!("QUERY on the testcase: {}", query_info.query);
     let parsed = parsil::prepare(&query_info.query)?;
-    let zktable = table.fetch_table(&table.name);
+    let zktable = table.fetch_table(&table.name)?;
     info!(
         "table name {:?} => columns name {:?}",
         table.name,
-        zktable.iter().map(|c| c.name.clone()).collect::<Vec<_>>()
+        zktable
+            .columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>()
     );
     let pis = parsil::resolve::resolve(&parsed, table)?;
     run_query(ctx, table, query_info, pis)
@@ -121,7 +125,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     let max = table.row.current_epoch();
     for epoch in (1..=max).rev() {
         let rows = collect_all_at(&table.row, epoch).await?;
-        info!(
+        debug!(
             "Collecting {} rows at epoch {} (rows_keys {:?})",
             rows.len(),
             epoch,
@@ -147,7 +151,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
             // simplification here to start at first epoch where this row was. Otherwise need to do
             // longest consecutive sequence etc...
             let (l, _start) = find_longest_consecutive_sequence(epochs.to_vec());
-            info!("finding sequence of {l} blocks for key {k:?} (epochs {epochs:?}");
+            debug!("finding sequence of {l} blocks for key {k:?} (epochs {epochs:?}");
             l
         })
         .unwrap_or_else(|| {

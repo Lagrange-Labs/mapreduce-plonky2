@@ -132,7 +132,7 @@ impl ParamsType {
     {
         match self {
             ParamsType::Query(_) => {
-                info!("rebuilding the mp2 querying parameters");
+                info!("building the mp2 querying parameters");
                 let params = query::api::Parameters::<
                     MAX_NUM_COLUMNS,
                     MAX_NUM_PREDICATE_OPS,
@@ -143,7 +143,7 @@ impl ParamsType {
                 Ok(())
             }
             ParamsType::Indexing(_) => {
-                info!("rebuilding the mp2 indexing parameters");
+                info!("building the mp2 indexing parameters");
                 let mp2 = build_circuits_params();
                 ctx.params = Some(mp2);
                 info!("writing the mp2-v1 indexing parameters");

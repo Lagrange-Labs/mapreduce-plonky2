@@ -539,8 +539,7 @@ impl TableColumn {
         ZkColumn {
             id: F::from_canonical_u64(self.identifier),
             is_primary_index: self.index.is_primary(),
-            // TODO: make a real name
-            name: self.identifier.to_string(),
+            name: self.name.clone(),
         }
     }
 }

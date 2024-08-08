@@ -51,6 +51,7 @@ use super::{
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 use itertools::Itertools;
+use log::info;
 use mp2_common::{
     array::ToField,
     default_config,
@@ -446,16 +447,21 @@ where
                 default_config(),
                 QUERY_CIRCUIT_SET_SIZE,
             );
+        info!("Building the query circuits parameters...");
+        info!("Building universal circuits...");
         let circuit_with_agg = builder.build_circuit(());
         let circuit_no_agg = builder.build_circuit(());
+        info!("Building aggregation circuits..");
         let full_node_two_children = builder.build_circuit(());
         let full_node_one_child = builder.build_circuit(());
         let full_node_leaf = builder.build_circuit(());
         let partial_node = builder.build_circuit(());
         let single_path_proven_child = builder.build_circuit(());
         let single_path_embedded_tree = builder.build_circuit(());
+        info!("Building non-existence circuits..");
         let non_existence_leaf = builder.build_circuit(());
         let non_existence_intermediate = builder.build_circuit(());
+        info!("All query circuits parameters generated!");
 
         let circuits = vec![
             prepare_recursive_circuit_for_circuit_set(&circuit_with_agg),
