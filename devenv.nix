@@ -28,7 +28,7 @@ in
 
   # Use a DB_URL tuned for the dockerized processes.postgres-ci
   enterTest = ''
-    DB_URL="host=localhost dbname=storage port=${builtins.toString config.env.PGPORT}";
+    DB_URL="host=localhost dbname=storage port=${builtins.toString config.env.PGPORT}"
     cargo test --features ci storage -- --test-threads 16
   '';
 
