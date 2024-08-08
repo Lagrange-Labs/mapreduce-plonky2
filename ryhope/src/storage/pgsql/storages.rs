@@ -86,7 +86,7 @@ where
         connection
             .query(
                 &format!(
-                    "SELECT payload FROM {} WHERE key=$1 AND valid_from <= $2 AND $2 <= valid_until",
+                    "SELECT payload FROM {} WHERE key=$1 AND __valid_from <= $2 AND $2 <= __valid_until",
                     table
                 ),
                 &[&(k.to_bytea()), &epoch],
@@ -119,7 +119,7 @@ where
         db_tx
             .execute(
                 &format!(
-                    "UPDATE {} SET payload=$3 WHERE key=$1 AND valid_from<=$2 AND $2<=valid_until",
+                    "UPDATE {} SET payload=$3 WHERE key=$1 AND __valid_from<=$2 AND $2<=__valid_until",
                     table
                 ),
                 &[&k.to_bytea(), &epoch, &Json(v)],
@@ -147,7 +147,7 @@ where
         connection
             .query(
                 &format!(
-                    "SELECT * FROM {} WHERE key=$1 AND valid_from<=$2 AND $2<=valid_until",
+                    "SELECT * FROM {} WHERE key=$1 AND __valid_from<=$2 AND $2<=__valid_until",
                     table
                 ),
                 &[&k.to_bytea(), &epoch],
@@ -176,7 +176,7 @@ where
             .execute(
                 &format!(
                     "INSERT INTO
-                     {} (key, valid_from, valid_until)
+                     {} (key, __valid_from, __valid_until)
                      VALUES ($1, $2, $2)",
                     table
                 ),
@@ -213,7 +213,7 @@ where
             .query(
                 &format!(
                     "SELECT parent, left_child, right_child, subtree_size FROM {}
-                 WHERE key=$1 AND valid_from<=$2 AND $2<=valid_until",
+                 WHERE key=$1 AND __valid_from<=$2 AND $2<=__valid_until",
                     table
                 ),
                 &[&k.to_bytea(), &epoch],
@@ -263,7 +263,7 @@ where
             .execute(
                 &format!(
                     "INSERT INTO
-                     {} (key, valid_from, valid_until, subtree_size, parent, left_child, right_child)
+                     {} (key, __valid_from, __valid_until, subtree_size, parent, left_child, right_child)
                      VALUES ($1, $2, $2, $3, $4, $5, $6)",
                     table
                 ),
@@ -303,15 +303,32 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
         }
     }
 
-    pub fn with_value(epoch: Epoch, table: String, db: DBPool, t: T) -> Self {
-        Self {
+    /// Initialize a new store, with the given state. The initial state is
+    /// immediately persisted, as the DB representation of the payload must be
+    /// valid even if it is never modified further by the user.
+    pub async fn with_value(epoch: Epoch, table: String, db: DBPool, t: T) -> Result<Self> {
+        {
+            let connection = db.get().await.unwrap();
+            connection
+                .query(
+                    &format!(
+                        "INSERT INTO {}_meta (valid_from, valid_until, payload)
+                     VALUES ($1, $1, $2)",
+                        table
+                    ),
+                    &[&epoch, &Json(t.clone())],
+                )
+                .await?;
+        }
+
+        Ok(Self {
             db,
             in_tx: false,
             dirty: true,
             epoch,
             table,
             cache: RwLock::new(Some(t)),
-        }
+        })
     }
 }
 
@@ -336,7 +353,7 @@ where
             connection
                 .query(
                     &format!(
-                        "INSERT INTO {}_meta (valid_from, valid_until, payload)
+                        "INSERT INTO {}_meta (__valid_from, __valid_until, payload)
                      VALUES ($1, $1, $2)",
                         self.table
                     ),
@@ -347,7 +364,7 @@ where
             connection
                 .query(
                     &format!(
-                        "UPDATE {}_meta SET valid_until = $1 + 1 WHERE valid_until = $1",
+                        "UPDATE {}_meta SET __valid_until = $1 + 1 WHERE __valid_until = $1",
                         self.table
                     ),
                     &[&(self.epoch)],
@@ -372,9 +389,9 @@ where
             let connection = self.db.get().await.unwrap();
             let row = connection
                 .query_one(
-                    // Fetch the row with the most recent valid_from
+                    // Fetch the row with the most recent __valid_from
                     &format!(
-                        "SELECT payload FROM {}_meta WHERE valid_from <= $1 AND $1 <= valid_until",
+                        "SELECT payload FROM {}_meta WHERE __valid_from <= $1 AND $1 <= __valid_until",
                         self.table
                     ),
                     &[&self.epoch],
@@ -392,7 +409,7 @@ where
         connection
             .query_one(
                 &format!(
-                    "SELECT payload FROM {}_meta WHERE valid_from <= $1 AND $1 <= valid_until",
+                    "SELECT payload FROM {}_meta WHERE __valid_from <= $1 AND $1 <= __valid_until",
                     self.table,
                 ),
                 &[&epoch],
@@ -430,7 +447,7 @@ where
         db_tx
             .query(
                 &format!(
-                    "UPDATE {}_meta SET valid_until = $1 WHERE valid_until > $1",
+                    "UPDATE {}_meta SET __valid_until = $1 WHERE __valid_until > $1",
                     self.table
                 ),
                 &[&new_epoch],
@@ -439,7 +456,7 @@ where
         // Delete nodes that would not have been born yet
         db_tx
             .query(
-                &format!("DELETE FROM {}_meta WHERE valid_from > $1", self.table),
+                &format!("DELETE FROM {}_meta WHERE __valid_from > $1", self.table),
                 &[&new_epoch],
             )
             .await?;
@@ -456,7 +473,7 @@ where
 pub struct CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V>,
 {
     /// The latest *commited* epoch
@@ -472,7 +489,7 @@ where
 impl<K, V, F> CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V>,
 {
     pub fn new(epoch: Epoch, table: String, db: DBPool) -> Self {
@@ -495,7 +512,7 @@ where
 impl<K, V, F> RoEpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync + Hash,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V> + Sync,
 {
     fn current_epoch(&self) -> Epoch {
@@ -533,7 +550,7 @@ where
         connection
             .query_one(
                 &format!(
-                    "SELECT COUNT(*) FROM {} WHERE valid_from <= $1 AND $1 <= valid_until",
+                    "SELECT COUNT(*) FROM {} WHERE __valid_from <= $1 AND $1 <= __valid_until",
                     self.table
                 ),
                 &[&self.epoch],
@@ -552,7 +569,7 @@ where
 impl<K, V, F: DbConnector<K, V> + Send + Sync> EpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync + Hash,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V> + Send + Sync,
 {
     // Operations are stored in the cache; persistence to the DB only occurs on
@@ -599,7 +616,7 @@ where
         db_tx
             .query(
                 &format!(
-                    "UPDATE {} SET valid_until = $1 WHERE valid_until > $1",
+                    "UPDATE {} SET __valid_until = $1 WHERE __valid_until > $1",
                     self.table
                 ),
                 &[&new_epoch],
@@ -608,7 +625,7 @@ where
         // Delete nodes that would not have been born yet
         db_tx
             .query(
-                &format!("DELETE FROM {} WHERE valid_from > $1", self.table),
+                &format!("DELETE FROM {} WHERE __valid_from > $1", self.table),
                 &[&new_epoch],
             )
             .await?;

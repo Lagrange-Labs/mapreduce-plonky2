@@ -1,6 +1,7 @@
 use crate::storage::RoEpochKvStorage;
 use crate::tree::TreeTopology;
 use crate::{Epoch, InitSettings};
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -196,11 +197,18 @@ where
     }
 }
 
-/// Return, if it exists, the current epoch for a given table pair.
+/// Return the current epoch for a given table pair. Note that there always will
+/// be a matching row, for the state initialization will always commit the
+/// initial state to the database, even if the tree is left empty.
+///
+/// Fail if the DB query fails.
 async fn fetch_current_epoch(db: DBPool, table: &str) -> Result<i64> {
     let connection = db.get().await.unwrap();
     connection
-        .query_one(&format!("SELECT MAX(valid_until) FROM {table}_meta",), &[])
+        .query_one(
+            &format!("SELECT MAX(__valid_until) FROM {table}_meta",),
+            &[],
+        )
         .await
         .map(|r| r.get(0))
         .context("while fetching current epoch")
@@ -227,7 +235,7 @@ where
             fetch_current_epoch(db_pool.clone(), &table).await.is_err(),
             "table `{table}` already exists"
         );
-        Self::create_storage_table(db_pool.clone(), &table).await?;
+        Self::create_tables(db_pool.clone(), &table).await?;
 
         let epoch = 0;
         let r = Self {
@@ -236,7 +244,9 @@ where
             epoch,
             in_tx: false,
             nodes: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
-            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state),
+            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
+                .await
+                .context("failed to store initial state")?,
             data: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
         };
         Ok(r)
@@ -276,14 +286,17 @@ where
         debug!("connection successful.");
 
         delete_storage_table(db_pool.clone(), &table).await?;
-        Self::create_storage_table(db_pool.clone(), &table).await?;
+        Self::create_tables(db_pool.clone(), &table).await?;
         let epoch = 0;
 
         let r = Self {
             table: table.clone(),
             db: db_pool.clone(),
             epoch,
-            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state),
+            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
+                .await
+                .context("failed to store initial state")?,
+
             nodes: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
             data: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
             in_tx: false,
@@ -311,8 +324,8 @@ where
     /// transactions they went through, hence allowing to access any of them at
     /// any timestamp of choice. Its columns are:
     ///   - key: byte-serialized key of this row node in the tree;
-    ///   - valid_from: from which epoch this row is valid;
-    ///   - valid_until: up to which epoch this row is valid;
+    ///   - __valid_from: from which epoch this row is valid;
+    ///   - __valid_until: up to which epoch this row is valid;
     ///   - [tree-specific]: a set of columns defined by the tree DB connector
     ///     storing node-specific values depending on the tree implementation;
     ///   - [payload specific]: a column containing the payload of this node,
@@ -322,13 +335,13 @@ where
     /// historic data, but storing the underlying tree inner state instead of
     /// the nodes. Combined with the node table, it allows to rebuild the whole
     /// underlying tree at any timestamp. Its columns are:
-    ///   - valid_from: from which epoch this row is valid;
-    ///   - valid_until: up to which epoch this row is valid;
+    ///   - __valid_from: from which epoch this row is valid;
+    ///   - __valid_until: up to which epoch this row is valid;
     ///   - payload: a JSONB-serialized value representing the inner state of
     ///     the tree at the given epoch range.
     ///
     /// Will fail if the CREATE is not valid (e.g. the table already exists)
-    async fn create_storage_table(db: DBPool, table: &str) -> Result<()> {
+    async fn create_tables(db: DBPool, table: &str) -> Result<()> {
         let node_columns = <NodeConnector as DbConnector<T::Key, T::Node>>::columns()
             .iter()
             .chain(<PayloadConnector as DbConnector<T::Key, V>>::columns().iter())
@@ -342,10 +355,10 @@ where
                 &format!(
                     "CREATE TABLE {table} (
                    key          BYTEA NOT NULL,
-                   valid_from   BIGINT NOT NULL,
-                   valid_until  BIGINT DEFAULT -1,
+                   __valid_from   BIGINT NOT NULL,
+                   __valid_until  BIGINT DEFAULT -1,
                    {node_columns}
-                   UNIQUE (key, valid_from))"
+                   UNIQUE (key, __valid_from))"
                 ),
                 &[],
             )
@@ -358,8 +371,8 @@ where
             .execute(
                 &format!(
                     "CREATE TABLE {table}_meta (
-                   valid_from   BIGINT NOT NULL UNIQUE,
-                   valid_until  BIGINT DEFAULT -1,
+                   __valid_from   BIGINT NOT NULL UNIQUE,
+                   __valid_until  BIGINT DEFAULT -1,
                    payload      JSONB)"
                 ),
                 &[],
@@ -371,7 +384,7 @@ where
 
     async fn update_all(&self, db_tx: &tokio_postgres::Transaction<'_>) -> Result<()> {
         let update_all = format!(
-            "UPDATE {} SET valid_until=$1 WHERE valid_until=$2",
+            "UPDATE {} SET __valid_until=$1 WHERE __valid_until=$2",
             self.table
         );
 
@@ -391,7 +404,7 @@ where
         let rows = db_tx
             .query(
                 &format!(
-                    "UPDATE {} SET valid_until={} WHERE key=$1 AND valid_until={} RETURNING *",
+                    "UPDATE {} SET __valid_until={} WHERE key=$1 AND __valid_until={} RETURNING *",
                     self.table,
                     self.epoch,
                     self.epoch + 1
@@ -460,83 +473,85 @@ where
             // later.
             self.update_all(&db_tx).await?;
 
-            // First, handle the corner case of nodes whose payload only have been
-            // updated, that will be the only ones appearing in the data cache but
-            // not in the node cache.
-            // Some read may have been performed outside of a transaction; just ignore them.
-
-            let mut not_in_nodes_cache = vec![];
-            let nodes_cache = self.data.cache.read().await;
-            for (k, v) in nodes_cache.iter() {
-                if !self.nodes.cache.read().await.contains_key(k) {
-                    not_in_nodes_cache.push((k, v));
-                }
+            // Collect all the keys found in the caches
+            let mut cached_keys = HashSet::new();
+            {
+                let guard = self.nodes.cache.read().await;
+                cached_keys.extend(guard.keys().cloned());
+            }
+            {
+                let guard = self.data.cache.read().await;
+                cached_keys.extend(guard.keys().cloned());
             }
 
-            for (k, v) in not_in_nodes_cache {
-                if let Some(CachedValue::Written(v)) = v {
-                    // rollback the old value if any
-                    let previous_payload = self.rollback_one_row(&db_tx, k).await?.unwrap();
-                    // write the new value
-                    self.new_node(&db_tx, k, previous_payload.0).await?;
-                    PayloadConnector::set_at_in_tx(
-                        &db_tx,
-                        &self.table,
-                        k,
-                        self.epoch + 1,
-                        v.to_owned(),
+            for k in cached_keys {
+                let node_value = {
+                    let guard = self.nodes.cache.read().await;
+                    guard.get(&k).cloned()
+                };
+                let data_value = {
+                    let guard = self.data.cache.read().await;
+                    guard.get(&k).cloned()
+                };
+
+                match (node_value, data_value) {
+                    // Nothing or a combination of read-only operations, do nothing
+                    (None, None) // will never happen by construction of cached_keys
+                    | (None, Some(Some(CachedValue::Read(_))))
+                    | (Some(Some(CachedValue::Read(_))), None)
+                    | (Some(Some(CachedValue::Read(_))), Some(Some(CachedValue::Read(_)))) => {}
+
+                    // The node has been removed
+                    (Some(None), _) => {
+                        // k has been deleted; simply roll-back the lifetime of its row.
+                        self.rollback_one_row(&db_tx, &k).await?;
+                    }
+
+                    // The payload alone has been updated
+                    (
+                        Some(Some(CachedValue::Read(_))),
+                        Some(Some(CachedValue::Written(new_payload))),
                     )
-                    .await?;
-                }
-            }
+                    | (None, Some(Some(CachedValue::Written(new_payload)))) => {
+                        // rollback the old value if any
+                        let previous_node = self.rollback_one_row(&db_tx, &k).await?.unwrap().0;
+                        // write the new value
+                        self.new_node(&db_tx, &k, previous_node).await?;
+                        PayloadConnector::set_at_in_tx(
+                            &db_tx,
+                            &self.table,
+                            &k,
+                            self.epoch + 1,
+                            new_payload.to_owned(),
+                        )
+                        .await?;
+                    }
 
-            // Then generically process all the other touched nodes.
-            for (k, v) in self.nodes.cache.read().await.iter() {
-                match v {
-                    Some(cv) => match cv {
-                        // read-only accesses during this transaction, nothing to do
-                        CachedValue::Read(_) => {}
+                    // The node has been updated, maybe its payload as well
+                    (Some(Some(CachedValue::Written(new_node))), maybe_new_payload) => {
                         // insertion or displacement in the tree; the row has to be
                         // duplicated/updated and rolled-back
-                        CachedValue::Written(node) => {
-                            // rollback the old value if any
-                            let previous_payload = self.rollback_one_row(&db_tx, k).await?;
-                            let old_payload = previous_payload.as_ref().map(|x| x.1.clone());
-                            let maybe_new_payload = self
-                                .data
-                                .cache
-                                .read()
-                                .await
-                                .get(k)
-                                .and_then(|v| v.as_ref().map(|cv| cv.value().to_owned()));
+                        let previous_state = self.rollback_one_row(&db_tx, &k).await?;
 
-                            // insert the new row representing the new state of the key...
-                            self.new_node(&db_tx, k, node.to_owned()).await?;
+                        // insert the new row representing the new state of the key...
+                        self.new_node(&db_tx, &k, new_node.to_owned()).await?;
 
-                            // ... and carry over its associated payload and hash.
-
-                            // the new associated payload is the one present in the
-                            // cache if any (that would reflect and insertion or an
-                            // update), or the previous one (if the key moved in the
-                            // tree, but the payload stayed the same).
-                            let payload = maybe_new_payload
-                                .or(old_payload)
-                                .expect("both old and new payloads are both None");
-
-                            PayloadConnector::set_at_in_tx(
-                                &db_tx,
-                                &self.table,
-                                k,
-                                new_epoch,
-                                payload,
-                            )
+                        // the new associated payload is the one present in the
+                        // cache if any (that would reflect and insertion or an
+                        // update), or the previous one (if the key moved in the
+                        // tree, but the payload stayed the same).
+                        let previous_payload = previous_state.as_ref().map(|x| x.1.clone());
+                        let maybe_new_payload = maybe_new_payload
+                            .and_then(|v| v.as_ref().map(|cv| cv.value().to_owned()));
+                        let payload = maybe_new_payload
+                            .or(previous_payload)
+                            .expect("both old and new payloads are both None");
+                        PayloadConnector::set_at_in_tx(&db_tx, &self.table, &k, new_epoch, payload)
                             .await?;
-                        }
-                    },
-                    // k has been deleted; simply roll-back the lifetime of its row.
-                    None => {
-                        self.rollback_one_row(&db_tx, k).await?;
                     }
+
+                    // A node cannot be removed through its payload
+                    (_, Some(None)) => unreachable!(),
                 }
             }
 
@@ -593,7 +608,7 @@ where
         let connection = self.db.get().await.unwrap();
         connection
             .query(
-                &format!("SELECT key FROM {} WHERE valid_from=$1", self.table),
+                &format!("SELECT key FROM {} WHERE __valid_from=$1", self.table),
                 &[&epoch],
             )
             .await

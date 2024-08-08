@@ -11,9 +11,9 @@ use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     poseidon::{empty_poseidon_hash, H},
-    types::CBuilder,
+    types::{CBuilder, HashOutput},
     u256::UInt256Target,
-    utils::{FromFields, SelectHashBuilder, ToFields, ToTargets},
+    utils::{Fieldable, FromFields, SelectHashBuilder, ToFields, ToTargets},
     CHasher, F,
 };
 use plonky2::{
@@ -25,7 +25,7 @@ use plonky2::{
 use plonky2_ecgfp5::curve::curve::Point;
 
 use super::universal_circuit::{
-    universal_circuit_inputs::{BasicOperation, InputOperand, OutputItem},
+    universal_circuit_inputs::{BasicOperation, InputOperand, OutputItem, ResultStructure},
     ComputationalHash, ComputationalHashTarget,
 };
 
@@ -81,6 +81,31 @@ impl Identifiers {
     ) -> ComputationalHashTarget {
         let inputs = once(b.constant(self.to_field())).chain(elements).collect();
         b.hash_n_to_hash_no_pad::<CHasher>(inputs)
+    }
+
+    pub fn computational_hash_universal_circuit(
+        column_ids: &[u64],
+        predicate_operations: &[BasicOperation],
+        results: &ResultStructure,
+    ) -> Result<HashOutput> {
+        let mut cache = ComputationalHashCache::new(column_ids.len());
+        let column_ids = column_ids.iter().map(|id| id.to_field()).collect_vec();
+        let predicate_ops_hash =
+            Operation::operation_hash(predicate_operations, &column_ids, &mut cache)?;
+        let predicate_hash = predicate_ops_hash.last().unwrap();
+        let result_ops_hash =
+            Operation::operation_hash(&results.result_operations, &column_ids, &mut cache)?;
+        results
+            .output_variant
+            .output_hash(
+                predicate_hash,
+                &mut cache,
+                &column_ids,
+                &result_ops_hash,
+                &results.output_items,
+                &results.output_ids,
+            )
+            .map(|hash| HashOutput::try_from(hash.to_bytes()).unwrap())
     }
 }
 
@@ -153,7 +178,8 @@ impl<F: RichField> ToField<F> for Operation {
 pub(crate) type HashPermutation = <CHasher as Hasher<F>>::Permutation;
 
 /// Data structure to cache previously computed computational hashes
-pub(crate) struct ComputationalHashCache<const MAX_NUM_COLUMNS: usize> {
+pub(crate) struct ComputationalHashCache {
+    max_num_columns: usize,
     // cache the computational hash already computed for columns of the table, identified
     // by the column index
     column_hash: HashMap<usize, ComputationalHash>,
@@ -162,22 +188,27 @@ pub(crate) struct ComputationalHashCache<const MAX_NUM_COLUMNS: usize> {
     operation_hash: HashMap<usize, ComputationalHash>,
 }
 
-impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
+impl ComputationalHashCache {
     /// Initialize an empty `ComputationalHashCache`
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(max_num_columns: usize) -> Self {
         Self {
+            max_num_columns,
             column_hash: HashMap::new(),
             operation_hash: HashMap::new(),
         }
     }
     /// Initialize a `ComputationalHashCache ` with a set of computational hash for the
     /// columns of the table
-    pub(crate) fn new_from_column_hash(column_hash: &[ComputationalHash]) -> Result<Self> {
+    pub(crate) fn new_from_column_hash(
+        max_num_columns: usize,
+        column_hash: &[ComputationalHash],
+    ) -> Result<Self> {
         ensure!(
-            column_hash.len() <= MAX_NUM_COLUMNS,
+            column_hash.len() <= max_num_columns,
             "Number of input column hash is higher than the maximum number of columns"
         );
         Ok(Self {
+            max_num_columns,
             column_hash: column_hash
                 .iter()
                 .enumerate()
@@ -194,7 +225,7 @@ impl<const MAX_NUM_COLUMNS: usize> ComputationalHashCache<MAX_NUM_COLUMNS> {
         column_ids: &[F],
     ) -> Result<ComputationalHash> {
         ensure!(
-            column_index < MAX_NUM_COLUMNS,
+            column_index < self.max_num_columns,
             "column index bigger than maximum number of columns"
         );
         Ok(*self.column_hash.entry(column_index).or_insert_with(|| {
@@ -229,8 +260,8 @@ impl Operation {
     /// Compute the computational hash associated to the basic operation provided as input, employing the hash
     /// already computed and cached in `previous_hash` and the set of `column_ids` to compute the column hashes
     /// not found in the cache
-    pub(crate) fn basic_operation_hash<const MAX_NUM_COLUMNS: usize>(
-        previous_hash: &mut ComputationalHashCache<MAX_NUM_COLUMNS>,
+    pub(crate) fn basic_operation_hash(
+        previous_hash: &mut ComputationalHashCache,
         column_ids: &[F],
         operation: &BasicOperation,
     ) -> Result<ComputationalHash> {
@@ -266,10 +297,10 @@ impl Operation {
 
     /// Compute the computational hash for a set of operations, employing the hash already computed and cached in
     /// `previous_hash`; `column_ids` is employed to compute hashes of columns which are not found in the cache
-    pub(crate) fn operation_hash<const MAX_NUM_COLUMNS: usize>(
+    pub(crate) fn operation_hash(
         operations: &[BasicOperation],
         column_ids: &[F],
-        previous_hash: &mut ComputationalHashCache<MAX_NUM_COLUMNS>,
+        previous_hash: &mut ComputationalHashCache,
     ) -> Result<Vec<ComputationalHash>> {
         operations
             .iter()
@@ -347,10 +378,10 @@ impl<F: RichField> ToField<F> for Output {
 }
 
 impl Output {
-    pub(crate) fn output_hash<const MAX_NUM_COLUMNS: usize>(
+    pub(crate) fn output_hash(
         &self,
         predicate_hash: &ComputationalHash,
-        previous_hash: &mut ComputationalHashCache<MAX_NUM_COLUMNS>,
+        previous_hash: &mut ComputationalHashCache,
         column_ids: &[F],
         result_ops_hash: &[ComputationalHash],
         output_items: &[OutputItem],
@@ -362,7 +393,7 @@ impl Output {
             |hash, (i, item)| {
                 let output_hash = match item {
                     OutputItem::Column(index) => {
-                        ensure!(*index < MAX_NUM_COLUMNS,
+                        ensure!(*index < previous_hash.max_num_columns,
                             "column index in output item higher than maximum number of columns");
                         previous_hash.get_or_compute_column_hash(
                             *index,
@@ -472,6 +503,10 @@ impl AggregationOperation {
             AggregationOperation::CountOp => U256::ZERO.to_fields(),
             AggregationOperation::IdOp => Point::NEUTRAL.to_fields(),
         }
+    }
+
+    pub fn to_id(&self) -> usize {
+        Identifiers::AggregationOperations(*self).position()
     }
 }
 
