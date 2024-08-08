@@ -11,6 +11,8 @@
                pkgs.darwin.apple_sdk.frameworks.AppKit
              ];
 
+  dotenv.enable = true;
+
   # https://devenv.sh/basics/
   env.RUST_BACKTRACE = 1;
   # Make Go dependencies RW
@@ -19,6 +21,7 @@
 
   enterShell = ''
   figlet -f slant "MR2 loaded"
+  figlet -f standard -w200 "PgSQL on port ${builtins.toString config.env.PGSQL_PORT}"
   '';
 
   # https://devenv.sh/tests/
@@ -30,6 +33,7 @@
   services.postgres = {
     enable = true;
     listen_addresses = "127.0.0.1";
+    port = lib.strings.toInt (if builtins.stringLength config.env.PGSQL_PORT == 0 then "5432" else config.env.PGSQL_PORT);
     settings = {
       log_connections = false;
       log_statement = "all";
@@ -52,7 +56,7 @@
     check-merge-conflicts.enable = true;
     # clippy.enable = true;
     # commitizen.enable = true;
-    rustfmt.enable = true;
+    # rustfmt.enable = true;
   };
 
   # https://devenv.sh/processes/
