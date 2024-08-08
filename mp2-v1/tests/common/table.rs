@@ -144,7 +144,7 @@ impl Table {
         table_name: String,
         columns: TableColumns,
     ) -> Self {
-        let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
+        let db_url = std::env::var("DB_URL").unwrap_or("127.0.0.1:5432".to_string());
         let row_tree = MerkleRowTree::new(
             InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
             SqlStorageSettings {
