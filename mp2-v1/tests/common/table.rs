@@ -1,10 +1,11 @@
 use alloy::primitives::Address;
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use futures::{
     stream::{self, StreamExt},
     FutureExt,
 };
 use log::debug;
+use mp2_common::F;
 use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
     cell::{self, Cell, CellTreeKey, MerkleCellTree},
@@ -12,8 +13,13 @@ use mp2_v1::indexing::{
     row::{CellCollection, Row, RowTreeKey},
     ColumnID,
 };
+use parsil::symbols::{ContextProvider, ZkColumn, ZkTable};
+use plonky2::field::types::Field;
 use ryhope::{
-    storage::{updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
+    storage::{
+        pgsql::SqlStorageSettings, updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage,
+        TreeTransactionalStorage,
+    },
     tree::{
         sbbst,
         scapegoat::{self, Alpha},
@@ -21,12 +27,12 @@ use ryhope::{
     InitSettings,
 };
 use serde::{Deserialize, Serialize};
-use std::hash::Hash;
+use std::{hash::Hash, iter::once};
 
 use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TableID(String);
+pub struct TableID(String);
 
 impl TableID {
     /// TODO: should contain more info probablyalike which index are selected
@@ -51,10 +57,20 @@ pub enum IndexType {
     None,
 }
 
+impl IndexType {
+    pub fn is_primary(&self) -> bool {
+        match self {
+            IndexType::Primary => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TableColumn {
+    pub name: String,
     pub identifier: ColumnID,
-    pub _index: IndexType,
+    pub index: IndexType,
 }
 
 #[derive(Clone, Debug)]
@@ -108,6 +124,8 @@ impl TableColumns {
 }
 
 pub struct Table {
+    pub(crate) genesis_block: u64,
+    pub(crate) name: String,
     pub(crate) id: TableID,
     pub(crate) columns: TableColumns,
     // NOTE: there is no cell tree because it's small and can be reconstructed
@@ -120,10 +138,19 @@ pub struct Table {
 }
 
 impl Table {
-    pub async fn new(genesis_block: u64, table_id: TableID, columns: TableColumns) -> Self {
+    pub async fn new(
+        genesis_block: u64,
+        table_id: TableID,
+        table_name: String,
+        columns: TableColumns,
+    ) -> Self {
+        let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
         let row_tree = MerkleRowTree::new(
             InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
-            (),
+            SqlStorageSettings {
+                db_url,
+                table: table_name.clone(),
+            },
         )
         .await
         .unwrap();
@@ -134,9 +161,12 @@ impl Table {
         )
         .await
         .unwrap();
+
         columns.self_assert();
         Self {
             columns,
+            genesis_block,
+            name: table_name,
             id: table_id,
             row: row_tree,
             index: index_tree,
@@ -323,6 +353,11 @@ impl Table {
         {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
+            let root = self.row.root_data().await.unwrap();
+            println!(
+                " ++ After row update, row cell tree root tree proof hash = {:?}",
+                hex::encode(root.cell_root_hash.0)
+            );
             self.row.print_tree().await;
             println!("\n+++++++++++++++++++++++++++++++++\n");
         }
@@ -454,4 +489,66 @@ where
 pub enum TreeUpdateType {
     Insertion,
     Update,
+}
+
+impl Table {
+    fn into_zktable(&self) -> Result<ZkTable> {
+        let zk_columns = self.columns.into_zkcolumns();
+        Ok(ZkTable {
+            name: self.id.0.clone(),
+            // TODO: metadata id
+            id: 0,
+            columns: zk_columns,
+        })
+    }
+
+    fn current_block(&self) -> u64 {
+        todo!()
+    }
+}
+
+impl TableColumns {
+    pub fn into_zkcolumns(&self) -> Vec<ZkColumn> {
+        once(&self.primary_column())
+            .chain(once(&self.secondary_column()))
+            .chain(self.rest.iter())
+            .map(|c| c.into_zkcolumn())
+            .collect()
+    }
+}
+
+impl TableColumn {
+    pub fn into_zkcolumn(&self) -> ZkColumn {
+        ZkColumn {
+            id: F::from_canonical_u64(self.identifier),
+            is_primary_index: self.index.is_primary(),
+            // TODO: make a real name
+            name: self.identifier.to_string(),
+        }
+    }
+}
+
+impl ContextProvider for Table {
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+        <&Self as ContextProvider>::fetch_table(&self, table_name)
+    }
+
+    fn output_ids(&self) -> Vec<u64> {
+        todo!()
+    }
+}
+impl ContextProvider for &Table {
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+        ensure!(
+            self.name == table_name,
+            "names differ table {} vs requested {}",
+            self.name,
+            table_name
+        );
+        self.into_zktable()
+    }
+
+    fn output_ids(&self) -> Vec<u64> {
+        todo!()
+    }
 }

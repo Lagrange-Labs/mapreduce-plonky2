@@ -41,53 +41,37 @@
         "id": 94230,
         "columns": [
             {
-                "name": "C1",
-                "id": 123,
-                "is_primary_index": true
-            },
-            {
-                "name": "C2",
-                "id": 456,
-                "is_primary_index": false
-            },
-            {
-                "name": "C3",
-                "id": 789,
-                "is_primary_index": false
-            },
-            {
-                "name": "C4",
-                "id": 12,
-                "is_primary_index": false
-            },
-            {
-                "name": "C5",
-                "id": 345,
-                "is_primary_index": false
-            },
-            {
-                "name": "C6",
-                "id": 678,
-                "is_primary_index": false
-            }
-        ]
-    },
-        {
-        "name": "t",
-        "id": 4865,
-        "columns": [
-            {
                 "name": "block",
                 "id": 1,
                 "is_primary_index": true
             },
             {
-                "name": "pipo",
+                "name": "C1",
                 "id": 45678,
                 "is_primary_index": false
             },
             {
-                "name": "p",
+                "name": "C2",
+                "id": 45678,
+                "is_primary_index": false
+            },
+            {
+                "name": "C3",
+                "id": 45678,
+                "is_primary_index": false
+            },
+            {
+                "name": "C4",
+                "id": 45678,
+                "is_primary_index": false
+            },
+            {
+                "name": "C5",
+                "id": 45678,
+                "is_primary_index": false
+            },
+            {
+                "name": "C6",
                 "id": 45678,
                 "is_primary_index": false
             }

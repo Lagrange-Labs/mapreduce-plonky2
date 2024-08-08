@@ -13,7 +13,7 @@ use plonky2::{
     hash::hash_types::HashOut,
     plonk::config::{GenericHashOut, Hasher},
 };
-use ryhope::{tree::scapegoat, NodePayload};
+use ryhope::{storage::pgsql::ToFromBytea, tree::scapegoat, NodePayload};
 use serde::{Deserialize, Serialize};
 
 use super::{cell::CellTreeKey, ColumnID};
@@ -249,7 +249,7 @@ impl<
                     .chain(HashOut::from_bytes(&self.cell_root_hash.0).to_fields())
                     .collect::<Vec<_>>();
         println!(
-            "\n--RYHOPE Row : id {:?}, value {:?} (empty hash{}) left_hash {:?}, right_hash {:?} min {:?}, max {:?}, tree_root_hash {:?}",
+            "\n--RYHOPE aggregate() Row : id {:?}, value {:?} (empty hash{}) left_hash {:?}, right_hash {:?} min {:?}, max {:?}, tree_root_hash {:?}",
             self.secondary_index_column,
             self.secondary_index_value(),
             left_hash == *empty_poseidon_hash(),
@@ -280,5 +280,35 @@ impl ToNonce for U256 {
         // we don't need to keep all the bytes, only the ones that matter.
         // Since we are storing this inside psql, any storage saving is good to take !
         self.to_be_bytes_trimmed_vec()
+    }
+}
+
+impl<PrimaryIndex> ToFromBytea for RowPayload<PrimaryIndex>
+where
+    PrimaryIndex: std::fmt::Debug
+        + PartialEq
+        + Eq
+        + Default
+        + Clone
+        + Sized
+        + Serialize
+        + for<'a> Deserialize<'a>,
+{
+    fn to_bytea(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap()
+    }
+
+    fn from_bytea(bytes: Vec<u8>) -> Self {
+        serde_json::from_slice(&bytes).expect("invalid row payload JSON in database")
+    }
+}
+
+impl ToFromBytea for RowTreeKey {
+    fn to_bytea(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("unable to serialize row key to json")
+    }
+
+    fn from_bytea(bytes: Vec<u8>) -> Self {
+        serde_json::from_slice(&bytes).expect("invalid row key JSON in db")
     }
 }

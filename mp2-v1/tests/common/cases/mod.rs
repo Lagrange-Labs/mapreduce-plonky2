@@ -1,7 +1,7 @@
 //! Define test cases
 
 use alloy::primitives::{Address, U256};
-use local_simple::TableRowValues;
+use indexing::TableRowValues;
 use log::debug;
 use mp2_common::eth::StorageSlot;
 use mp2_test::utils::random_vector;
@@ -19,7 +19,8 @@ use super::{
     table::{CellsUpdate, Table},
 };
 
-pub mod local_simple;
+pub mod indexing;
+pub mod query;
 
 /// The key,value such that the combination is unique. This can be turned into a RowTreeKey.
 /// to store in the row tree.
@@ -201,8 +202,4 @@ pub(crate) struct LengthExtractionArgs {
 pub(crate) struct ContractExtractionArgs {
     /// Storage slot
     pub(crate) slot: StorageSlot,
-}
-
-fn random_address() -> Address {
-    Address::from_slice(&random_vector(20))
 }

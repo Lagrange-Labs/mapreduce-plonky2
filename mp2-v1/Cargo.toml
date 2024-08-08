@@ -28,6 +28,8 @@ ryhope = { path = "../ryhope" }
 verifiable-db = { path = "../verifiable-db" }
 derive_more = "0.99.18"
 hex.workspace = true
+parsil = { path = "../parsil" }
+serde_json.workspace = true
 
 [dev-dependencies]
 alloy.workspace = true
@@ -44,3 +46,5 @@ test-log = "0.2.16"
 jammdb = "0.11.0"
 bincode.workspace = true
 futures = "0.3.30"
+lazy_static = "1.5.0"
+rand_chacha = "0.3.1"

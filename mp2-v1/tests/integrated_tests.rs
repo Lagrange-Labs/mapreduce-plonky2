@@ -2,31 +2,17 @@
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
 #![feature(assert_matches)]
-use std::future::Future;
 
-use alloy::primitives::U256;
 use anyhow::Result;
 
 use common::{
-    cases::local_simple::{ChangeType, UpdateType},
+    cases::indexing::{ChangeType, UpdateType},
     context,
-    proof_storage::{KeyValueDB, MemoryProofStorage, ProofKey},
-    rowtree::MerkleRowTree,
+    proof_storage::{KeyValueDB, ProofStorage},
+    table::Table,
     TestCase, TestContext,
 };
 use log::info;
-use mp2_v1::indexing::{
-    cell::Cell,
-    row::{CellCollection, RowPayload, RowTreeKey},
-};
-use ryhope::{
-    storage::{
-        updatetree::{UpdatePlan, UpdateTree},
-        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
-    },
-    tree::scapegoat::{self, Alpha},
-    InitSettings,
-};
 use test_log::test;
 
 pub(crate) mod common;
@@ -52,7 +38,7 @@ pub(crate) mod common;
 //}
 
 #[test(tokio::test)]
-async fn db_creation_integrated_tests() -> Result<()> {
+async fn integrated_test() -> Result<()> {
     // Create the test context for mainnet.
     // let ctx = &mut TestContext::new_mainet();
     let _ = env_logger::try_init();
@@ -83,6 +69,7 @@ async fn db_creation_integrated_tests() -> Result<()> {
         ChangeType::Deletion,
     ];
     mapping.run(&mut ctx, changes).await?;
+    mapping.test_query(&ctx).await?;
     Ok(())
 }
 

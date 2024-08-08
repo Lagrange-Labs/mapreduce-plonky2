@@ -15,11 +15,10 @@ use mp2_common::array::ToField;
 use mp2_common::F;
 use plonky2::field::types::Field;
 use sqlparser::ast::{
-    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, Query,
-    Select, SelectItem, SetExpr, TableAlias, TableFactor, UnaryOperator, Value,
+    BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Query, Select,
+    SelectItem, SetExpr, TableAlias, TableFactor, UnaryOperator, Value,
 };
 use verifiable_db::query::{
-    aggregation,
     computational_hash_ids::{AggregationOperation, Operation, Output},
     universal_circuit::universal_circuit_inputs::{
         BasicOperation, InputOperand, OutputItem, ResultStructure,

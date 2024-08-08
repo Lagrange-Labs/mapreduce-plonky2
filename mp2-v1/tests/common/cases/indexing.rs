@@ -15,12 +15,12 @@ use mp2_v1::{
         identifier_for_mapping_value_column, identifier_single_var_column,
     },
 };
-use rand::{thread_rng, Rng};
+use rand::{Rng, SeedableRng};
 use ryhope::storage::RoEpochKvStorage;
 
 use crate::common::{
     bindings::simple::Simple::{self, MappingChange, MappingOperation},
-    cases::{random_address, MappingIndex},
+    cases::MappingIndex,
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::{
@@ -45,7 +45,7 @@ use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     proof::ProofWithVK,
 };
-use std::{assert_matches::assert_matches, str::FromStr};
+use std::{assert_matches::assert_matches, str::FromStr, sync::atomic::AtomicU64};
 
 /// Test slots for single values extraction
 const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
@@ -63,7 +63,16 @@ const LENGTH_VALUE: u8 = 2;
 
 /// Test slot for contract extraction
 const CONTRACT_SLOT: usize = 1;
+
+/// human friendly name about the column containing the block number
+pub(crate) const BLOCK_COLUMN_NAME: &str = "block_number";
+pub(crate) const MAPPING_VALUE_COLUMN: &str = "map_value";
+pub(crate) const MAPPING_KEY_COLUMN: &str = "map_key";
+
 impl TestCase {
+    pub fn table(&self) -> &Table {
+        &self.table
+    }
     pub(crate) async fn single_value_test_case<P: ProofStorage>(
         ctx: &TestContext<P>,
     ) -> Result<Self> {
@@ -96,12 +105,14 @@ impl TestCase {
         // own way of defining their table.
         let columns = TableColumns {
             primary: TableColumn {
+                name: BLOCK_COLUMN_NAME.to_string(),
                 identifier: identifier_block_column(),
-                _index: IndexType::Primary,
+                index: IndexType::Primary,
             },
             secondary: TableColumn {
+                name: "column_value".to_string(),
                 identifier: identifier_single_var_column(INDEX_SLOT, contract_address),
-                _index: IndexType::Secondary,
+                index: IndexType::Secondary,
             },
             rest: SINGLE_SLOTS
                 .iter()
@@ -111,8 +122,9 @@ impl TestCase {
                     _ => {
                         let identifier = identifier_single_var_column(*slot, contract_address);
                         Some(TableColumn {
+                            name: format!("column_{}", i),
                             identifier,
-                            _index: IndexType::None,
+                            index: IndexType::None,
                         })
                     }
                 })
@@ -120,7 +132,13 @@ impl TestCase {
         };
         Ok(Self {
             source: source.clone(),
-            table: Table::new(indexing_genesis_block, table_id, columns).await,
+            table: Table::new(
+                indexing_genesis_block,
+                table_id,
+                "single_table".to_string(),
+                columns,
+            )
+            .await,
             contract_address: *contract_address,
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
@@ -174,19 +192,38 @@ impl TestCase {
         // own way of defining their table.
         let columns = TableColumns {
             primary: TableColumn {
+                name: BLOCK_COLUMN_NAME.to_string(),
                 identifier: identifier_block_column(),
-                _index: IndexType::Primary,
+                index: IndexType::Primary,
             },
             secondary: TableColumn {
+                name: if value_as_index {
+                    MAPPING_VALUE_COLUMN
+                } else {
+                    MAPPING_KEY_COLUMN
+                }
+                .to_string(),
                 identifier: index_identifier,
-                _index: IndexType::Secondary,
+                index: IndexType::Secondary,
             },
             rest: vec![TableColumn {
+                name: if value_as_index {
+                    MAPPING_KEY_COLUMN
+                } else {
+                    MAPPING_VALUE_COLUMN
+                }
+                .to_string(),
                 identifier: cell_identifier,
-                _index: IndexType::None,
+                index: IndexType::None,
             }],
         };
-        let table = Table::new(index_genesis_block, table_id, columns).await;
+        let table = Table::new(
+            index_genesis_block,
+            table_id,
+            "m1_table".to_string(),
+            columns,
+        )
+        .await;
         Ok(Self {
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
@@ -567,22 +604,14 @@ impl TestCase {
                 let slot = mapping.slot as usize;
                 let index_type = mapping.index.clone();
                 let address = &self.contract_address.clone();
-                // for ease of debugging, just take incremental keys
-                let new_key = mapping
-                    .mapping_keys
-                    .iter()
-                    .map(|k| U256::from_be_slice(k))
-                    .max()
-                    .unwrap()
-                    + U256::from(1);
                 let query = ProofQuery::new_mapping_slot(*address, slot, mkey.to_owned());
                 let response = ctx
                     .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
                     .await;
                 let current_value = response.storage_proof[0].value;
                 let current_key = U256::from_be_slice(mkey);
-
-                let new_value: U256 = random_address().into_word().into();
+                let new_key = next_mapping_key();
+                let new_value: U256 = next_address().into_word().into();
                 let mapping_updates = match c {
                     ChangeType::Insertion => {
                         vec![MappingUpdate::Insertion(new_key, new_value)]
@@ -694,12 +723,9 @@ impl TestCase {
                         panic!("can't add a new row for blockchain data over single values")
                     }
                     ChangeType::Update(u) => match u {
-                        UpdateType::Rest => {
-                            current_values.s4 =
-                                Address::from_slice(&thread_rng().gen::<[u8; 20]>());
-                        }
+                        UpdateType::Rest => current_values.s4 = next_address(),
                         UpdateType::SecondaryIndex => {
-                            current_values.s2 = U256::from_be_bytes(thread_rng().gen::<[u8; 32]>());
+                            current_values.s2 = next_value();
                         }
                     },
                 };
@@ -730,21 +756,10 @@ impl TestCase {
             TableSourceSlot::Mapping((ref mut mapping, _)) => {
                 let index = mapping.index.clone();
                 let slot = mapping.slot;
-                let init_state = [
-                    (
-                        U256::from(10),
-                        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
-                    ),
-                    (
-                        // NOTE: here is the same address but for different mapping key (10,11)
-                        U256::from(11),
-                        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
-                    ),
-                    (
-                        U256::from(12),
-                        Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfeee").unwrap(),
-                    ),
-                ];
+                let init_pair = (next_value(), next_address());
+                // NOTE: here is the same address but for different mapping key (10,11)
+                let pair2 = (next_value(), init_pair.1);
+                let init_state = [init_pair, pair2, (next_value(), next_address())];
                 // saving the keys we are tracking in the mapping
                 mapping.mapping_keys.extend(
                     init_state
@@ -771,7 +786,7 @@ impl TestCase {
                     s1: true,
                     s2: U256::from(10),
                     s3: "test".to_string(),
-                    s4: Address::from_str("0xb90ed61bffed1df72f2ceebd965198ad57adfcbd").unwrap(),
+                    s4: next_address(),
                 };
                 // since the table is not created yet, we are giving an empty table row. When making the
                 // diff with the new updated contract storage, the logic will detect it's an initialization
@@ -976,7 +991,7 @@ impl UpdateSimpleStorage {
             .map(|tuple| {
                 let op: MappingOperation = tuple.into();
                 let (k, v) = match tuple {
-                    MappingUpdate::Deletion(k, _) => (*k, random_address()),
+                    MappingUpdate::Deletion(k, _) => (*k, DEFAULT_ADDRESS.clone()),
                     MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => {
                         (*k, Address::from_slice(&v.to_be_bytes_trimmed_vec()))
                     }
@@ -1201,4 +1216,27 @@ impl From<&MappingUpdate> for MappingOperation {
             MappingUpdate::Insertion(_, _) => 2,
         })
     }
+}
+static SHIFT: AtomicU64 = AtomicU64::new(0);
+
+use lazy_static::lazy_static;
+lazy_static! {
+    static ref BASE_VALUE: U256 = U256::from(10);
+    static ref DEFAULT_ADDRESS: Address =
+        Address::from_str("0xBA401cdAc1A3B6AEede21c9C4A483bE6c29F88C4").unwrap();
+}
+
+fn next_mapping_key() -> U256 {
+    next_value()
+}
+fn next_address() -> Address {
+    let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(shift);
+    let slice = rng.gen::<[u8; 20]>();
+    Address::from_slice(&slice)
+}
+fn next_value() -> U256 {
+    let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let bv: U256 = *BASE_VALUE;
+    bv + U256::from(shift)
 }

@@ -4,8 +4,8 @@ use sqlparser::ast::Query;
 mod executor;
 mod expand;
 mod parser;
-mod resolve;
-mod symbols;
+pub mod resolve;
+pub mod symbols;
 #[cfg(test)]
 mod tests;
 mod utils;

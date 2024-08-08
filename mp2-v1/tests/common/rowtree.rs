@@ -15,6 +15,7 @@ use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{
         memory::InMemory,
+        pgsql::PgsqlStorage,
         updatetree::{Next, UpdateTree},
         RoEpochKvStorage,
     },
@@ -67,7 +68,7 @@ impl From<&SecondaryIndexCell> for RowTreeKey {
     }
 }
 
-type RowStorage = InMemory<RowTree, RowPayload<BlockPrimaryIndex>>;
+type RowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
 pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>;
 
 impl<P: ProofStorage> TestContext<P> {
@@ -126,10 +127,11 @@ impl<P: ProofStorage> TestContext<P> {
             let proof = if context.is_leaf() {
                 // Prove a leaf
                 println!(
-                    " \n PROVING ROW --> id {:?}, value {:?}, cell_tree_proof hash {:?}",
+                    " \n PROVING ROW --> id {:?}, value {:?}, cell_tree_proof hash {:?} - vs row.cell_root_hash {:?}",
                     id,
                     value,
-                    hex::encode(cell_root_hash_from_proof.clone())
+                    hex::encode(cell_root_hash_from_proof.clone()),
+                    hex::encode(row.cell_root_hash.0)
                 );
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
