@@ -1,10 +1,13 @@
 { pkgs, lib, config, inputs, ... }:
 
+let
+  orDefault = s: default: if builtins.stringLength s == 0 then default else s;
+in
 {
   cachix.enable = false;
 
   # https://devenv.sh/packages/
-  packages = [ pkgs.git pkgs.figlet pkgs.openssl pkgs.pkg-config pkgs.pgcli ]
+  packages = [ pkgs.git pkgs.figlet pkgs.openssl pkgs.pkg-config ]
              ++ lib.optionals pkgs.stdenv.targetPlatform.isDarwin [
                pkgs.libiconv
                pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
@@ -19,23 +22,16 @@
   env.GOFLAGS = "-modcacherw";
   env.OPENSSL_DEV = pkgs.openssl.dev;
 
-  enterShell = ''
-  figlet -f slant "MR2 loaded"
-  figlet -f standard -w200 "PgSQL on port ${builtins.toString config.env.PGSQL_PORT}"
-  '';
-
   # https://devenv.sh/tests/
   enterTest = ''
     cargo test --features ci -- --test-threads 16
   '';
 
-  scripts.db.exec = "pgcli storage -h localhost -p ${builtins.toString config.env.PGPORT}";
-
   # https://devenv.sh/services/
   services.postgres = {
     enable = true;
     listen_addresses = "127.0.0.1";
-    port = lib.strings.toInt (if builtins.stringLength config.env.PGSQL_PORT == 0 then "5432" else config.env.PGSQL_PORT);
+    port = lib.strings.toInt (orDefault config.env.PGSQL_PORT "5432");
     settings = {
       log_connections = false;
       log_statement = "all";
@@ -44,6 +40,13 @@
       name = "storage";
     }];
   };
+
+  enterShell = ''
+  figlet -f slant "MR2 loaded"
+  figlet -f standard -w200 "PgSQL on port ${builtins.toString config.env.PGSQL_PORT}"
+  '';
+
+  scripts.db.exec = "psql storage -h localhost -p ${builtins.toString config.env.PGPORT}";
 
   # https://devenv.sh/languages/
   languages.rust = {
