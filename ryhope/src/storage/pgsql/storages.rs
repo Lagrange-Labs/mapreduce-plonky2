@@ -472,7 +472,7 @@ where
 pub struct CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V>,
 {
     /// The latest *commited* epoch
@@ -488,7 +488,7 @@ where
 impl<K, V, F> CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V>,
 {
     pub fn new(epoch: Epoch, table: String, db: DBPool) -> Self {
@@ -511,7 +511,7 @@ where
 impl<K, V, F> RoEpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V> + Sync,
 {
     fn current_epoch(&self) -> Epoch {
@@ -568,7 +568,7 @@ where
 impl<K, V, F: DbConnector<K, V> + Send + Sync> EpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync,
-    V: Clone + Send + Sync,
+    V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V> + Send + Sync,
 {
     // Operations are stored in the cache; persistence to the DB only occurs on
