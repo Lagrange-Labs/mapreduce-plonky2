@@ -812,26 +812,24 @@ mod tests {
     const MAX_NUM_RESULT_OPS: usize = 20;
     const MAX_NUM_RESULTS: usize = 10;
 
-    struct MyParams<P>
-    where
-        [(); MAX_NUM_RESULTS - 1]:,
-        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
-    {
-        another_field: Option<P>,
-        params: super::Parameters<
+    struct ActualParams(
+        MyParams<
+            String,
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >,
+    );
+    struct MyParams<P, const T1: usize, const T2: usize, const T3: usize, const T4: usize>
+    where
+        [(); T1 + T3]:,
+        [(); T4 - 1]:,
+    {
+        another_field: Option<P>,
+        params: super::Parameters<T1, T2, T3, T4>,
     }
 
-    impl<P> MyParams<P> {
-        fn describe(&self) -> anyhow::Result<()> {
-            println!("hello");
-            Ok(())
-        }
-    }
     #[test]
     fn test_api() {
         // Simple query for testing SELECT SUM(C1 + C3) FROM T WHERE C3 >= 5 AND C1 > 56 AND C1 <= 67 AND C2 > 34 AND C2 <= 78
