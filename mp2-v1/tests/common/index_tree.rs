@@ -216,7 +216,7 @@ impl TestContext {
         let row_tree_root = table.row.root().await.unwrap();
         let row_payload = table.row.fetch(&row_tree_root).await;
         let row_root_proof_key = RowProofIdentifier {
-            table: table.id.clone(),
+            table: table.name.clone(),
             tree_key: row_tree_root,
             primary: row_payload.primary_index_value(),
         };
@@ -236,7 +236,7 @@ impl TestContext {
             ..Default::default()
         };
         info!("Generated index tree");
-        self.prove_index_tree(&table.id, &table.index, ut, &node)
+        self.prove_index_tree(&table.name.clone(), &table.index, ut, &node)
             .await
     }
 }

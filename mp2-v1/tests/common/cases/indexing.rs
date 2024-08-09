@@ -69,11 +69,19 @@ pub(crate) const BLOCK_COLUMN_NAME: &str = "block_number";
 pub(crate) const MAPPING_VALUE_COLUMN: &str = "map_value";
 pub(crate) const MAPPING_KEY_COLUMN: &str = "map_key";
 
+pub enum TreeFactory {
+    New,
+    Load,
+}
+
 impl TestCase {
     pub fn table(&self) -> &Table {
         &self.table
     }
-    pub(crate) async fn single_value_test_case(ctx: &TestContext) -> Result<Self> {
+    pub(crate) async fn single_value_test_case(
+        ctx: &TestContext,
+        factory: TreeFactory,
+    ) -> Result<Self> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -86,7 +94,6 @@ impl TestCase {
             contract.address()
         );
         let contract_address = contract.address();
-        let index_genesis_block = ctx.block_number().await;
 
         let source = TableSourceSlot::SingleValues(SingleValuesExtractionArgs {
             slots: SINGLE_SLOTS.to_vec(),
@@ -97,7 +104,6 @@ impl TestCase {
         // TODO: change sbbst such that it doesn't require this max . Though we still need the
         // correct shift.
         let indexing_genesis_block = ctx.block_number().await + 1;
-        let table_id = TableID::new(index_genesis_block, contract_address, &source.slots());
         // Defining the columns structure of the table from the source slots
         // This is depending on what is our data source, mappings and CSV both have their o
         // own way of defining their table.
@@ -128,15 +134,15 @@ impl TestCase {
                 })
                 .collect::<Vec<_>>(),
         };
+        let table = match factory {
+            TreeFactory::New => {
+                Table::new(indexing_genesis_block, "single_table".to_string(), columns).await
+            }
+            TreeFactory::Load => Table::load("single_table".to_string(), columns).await?,
+        };
         Ok(Self {
             source: source.clone(),
-            table: Table::new(
-                indexing_genesis_block,
-                table_id,
-                "single_table".to_string(),
-                columns,
-            )
-            .await,
+            table,
             contract_address: *contract_address,
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
@@ -144,7 +150,7 @@ impl TestCase {
         })
     }
 
-    pub(crate) async fn mapping_test_case(ctx: &TestContext) -> Result<Self> {
+    pub(crate) async fn mapping_test_case(ctx: &TestContext, factory: TreeFactory) -> Result<Self> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -184,7 +190,6 @@ impl TestCase {
             }),
         ));
 
-        let table_id = TableID::new(index_genesis_block, contract_address, &source.slots());
         // Defining the columns structure of the table from the source slots
         // This is depending on what is our data source, mappings and CSV both have their o
         // own way of defining their table.
@@ -215,13 +220,13 @@ impl TestCase {
                 index: IndexType::None,
             }],
         };
-        let table = Table::new(
-            index_genesis_block,
-            table_id,
-            "m1_table".to_string(),
-            columns,
-        )
-        .await;
+        let table = match factory {
+            TreeFactory::New => {
+                Table::new(index_genesis_block, "single_table".to_string(), columns).await
+            }
+            TreeFactory::Load => Table::load("single_table".to_string(), columns).await?,
+        };
+
         Ok(Self {
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
@@ -389,7 +394,7 @@ impl TestCase {
             .prove_update_index_tree(bn, &self.table, updates.plan)
             .await;
         info!("Generated final BLOCK tree proofs for block {current_block}");
-        let _ = ctx.prove_ivc(&self.table.id, bn, &self.table.index).await;
+        let _ = ctx.prove_ivc(&self.table.name, bn, &self.table.index).await;
         info!("Generated final IVC proof for block {}", current_block,);
 
         Ok(())
@@ -450,7 +455,7 @@ impl TestCase {
             }
         };
 
-        let table_id = &self.table.id;
+        let table_id = &self.table.name.clone();
         // we construct the proof key for both mappings and single variable in the same way since
         // it is derived from the table id which should be different for any tables we create.
         let proof_key = ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex));

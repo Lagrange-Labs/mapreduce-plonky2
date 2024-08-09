@@ -89,23 +89,23 @@ pub async fn new_local_chain(storage: ProofKV) -> TestContext {
     }
 }
 
-enum ParamsType {
-    Indexing(String),
-    Query(String),
+pub enum ParamsType {
+    Indexing,
+    Query,
 }
 
 impl ParamsType {
     pub fn full_path(&self, mut pre: PathBuf) -> PathBuf {
         match self {
-            ParamsType::Indexing(s) => pre.push(s),
-            ParamsType::Query(s) => pre.push(s),
+            ParamsType::Indexing => pre.push("index.params"),
+            ParamsType::Query => pre.push("query.params"),
         };
         pre
     }
 
     pub fn parse(&self, path: PathBuf, ctx: &mut TestContext) -> Result<()> {
         match self {
-            ParamsType::Query(_) => {
+            ParamsType::Query => {
                 info!("parsing the querying mp2-v1 parameters");
                 let params = bincode::deserialize_from(BufReader::new(
                     File::open(&path).with_context(|| format!("while opening {path:?}"))?,
@@ -113,7 +113,7 @@ impl ParamsType {
                 .context("while parsing MP2 parameters")?;
                 ctx.query_params = Some(params);
             }
-            ParamsType::Indexing(_) => {
+            ParamsType::Indexing => {
                 info!("parsing the indexing mp2-v1 parameters");
                 let params = bincode::deserialize_from(BufReader::new(
                     File::open(&path).with_context(|| format!("while opening {path:?}"))?,
@@ -131,7 +131,7 @@ impl ParamsType {
         [(); MAX_NUM_RESULTS - 1]:,
     {
         match self {
-            ParamsType::Query(_) => {
+            ParamsType::Query => {
                 info!("building the mp2 querying parameters");
                 let params = query::api::Parameters::<
                     MAX_NUM_COLUMNS,
@@ -142,7 +142,7 @@ impl ParamsType {
                 ctx.query_params = Some(params);
                 Ok(())
             }
-            ParamsType::Indexing(_) => {
+            ParamsType::Indexing => {
                 info!("building the mp2 indexing parameters");
                 let mp2 = build_circuits_params();
                 ctx.params = Some(mp2);
@@ -159,7 +159,7 @@ impl ParamsType {
     {
         self.build(ctx)?;
         match self {
-            ParamsType::Query(_) => {
+            ParamsType::Query => {
                 bincode::serialize_into(
                     BufWriter::new(
                         File::create(&path).with_context(|| format!("while creating {path:?}"))?,
@@ -168,7 +168,7 @@ impl ParamsType {
                 )?;
                 Ok(())
             }
-            ParamsType::Indexing(_) => {
+            ParamsType::Indexing => {
                 bincode::serialize_into(
                     BufWriter::new(
                         File::create(&path).with_context(|| format!("while creating {path:?}"))?,
@@ -190,32 +190,24 @@ impl TestContext {
     ///
     /// NOTE: It could avoid `runtime stack overflow`, otherwise needs to set
     /// `export RUST_MIN_STACK=10000000`.
-    pub(crate) fn build_params(&mut self) -> anyhow::Result<()> {
+    pub(crate) fn build_params(&mut self, p: ParamsType) -> anyhow::Result<()> {
         let cfg = TestContextConfig::init_from_env().context("while parsing configuration")?;
 
-        let params = vec![
-            ParamsType::Indexing("params_mp2".to_string()),
-            ParamsType::Query("query_mp2".to_string()),
-        ];
         match cfg.params_dir {
             Some(params_path_str) => {
                 info!("attempting to read parameters from {params_path_str}");
                 mkdir_all(&params_path_str)?;
                 let params_path = PathBuf::from(params_path_str);
-                for p in params.iter() {
-                    let full = p.full_path(params_path.clone());
-                    if !full.exists() || cfg.force_rebuild {
-                        p.build_and_save(full, self)?;
-                    } else {
-                        p.parse(full, self)?;
-                    };
-                }
+                let full = p.full_path(params_path.clone());
+                if !full.exists() || cfg.force_rebuild {
+                    p.build_and_save(full, self)?;
+                } else {
+                    p.parse(full, self)?;
+                };
             }
             None => {
                 info!("recomputing parameters");
-                for p in params {
-                    p.build(self)?;
-                }
+                p.build(self)?;
             }
         }
 

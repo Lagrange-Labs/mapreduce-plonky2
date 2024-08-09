@@ -32,24 +32,7 @@ use verifiable_db::query::universal_circuit::universal_circuit_inputs::ColumnCel
 
 use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
 
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TableID(String);
-
-impl TableID {
-    /// TODO: should contain more info probablyalike which index are selected
-    pub fn new(init_block: u64, contract: &Address, slots: &[u8]) -> Self {
-        TableID(format!(
-            "{}-{}-{}",
-            init_block,
-            contract,
-            slots
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>()
-                .join("+"),
-        ))
-    }
-}
+pub type TableID = String;
 
 #[derive(Clone, Debug)]
 pub enum IndexType {
@@ -126,8 +109,7 @@ impl TableColumns {
 
 pub struct Table {
     pub(crate) genesis_block: u64,
-    pub(crate) name: String,
-    pub(crate) id: TableID,
+    pub(crate) name: TableID,
     pub(crate) columns: TableColumns,
     // NOTE: there is no cell tree because it's small and can be reconstructed
     // on the fly very quickly. Otherwise, we would need to store one cell tree per row
@@ -146,36 +128,38 @@ fn index_table_name(name: &str) -> String {
 }
 
 impl Table {
-    //pub async fn load(table_name: String, columns: TableColumns) -> Result<Self> {
-    //    let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
-    //    let row_tree = MerkleRowTree::new(
-    //        InitSettings::MustExist,
-    //        SqlStorageSettings {
-    //            db_url,
-    //            table: row_table_name(&table_name),
-    //        },
-    //    )
-    //    .await
-    //    .unwrap();
-    //    let index_tree = MerkleIndexTree::new(
-    //        InitSettings::MustExist,
-    //        SqlStorageSettings {
-    //            db_url,
-    //            table: index_table_name(&table_name),
-    //        },
-    //    )
-    //    .await
-    //    .unwrap();
-    //    let genesis = index_tree.storage.state().fetch().await.shift;
-    //    columns.self_assert();
-    //}
+    pub async fn load(table_name: String, columns: TableColumns) -> Result<Self> {
+        let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
+        let row_tree = MerkleRowTree::new(
+            InitSettings::MustExist,
+            SqlStorageSettings {
+                db_url: db_url.clone(),
+                table: row_table_name(&table_name),
+            },
+        )
+        .await
+        .unwrap();
+        let index_tree = MerkleIndexTree::new(
+            InitSettings::MustExist,
+            SqlStorageSettings {
+                db_url: db_url.clone(),
+                table: index_table_name(&table_name),
+            },
+        )
+        .await
+        .unwrap();
+        let genesis = index_tree.storage_state().await.shift;
+        columns.self_assert();
+        Ok(Self {
+            columns,
+            genesis_block: genesis as u64,
+            name: table_name,
+            row: row_tree,
+            index: index_tree,
+        })
+    }
 
-    pub async fn new(
-        genesis_block: u64,
-        table_id: TableID,
-        table_name: String,
-        columns: TableColumns,
-    ) -> Self {
+    pub async fn new(genesis_block: u64, table_name: String, columns: TableColumns) -> Self {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
         let row_tree = MerkleRowTree::new(
             InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
@@ -202,7 +186,6 @@ impl Table {
             columns,
             genesis_block,
             name: table_name,
-            id: table_id,
             row: row_tree,
             index: index_tree,
         }

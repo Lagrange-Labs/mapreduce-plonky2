@@ -6,8 +6,8 @@
 use anyhow::Result;
 
 use common::{
-    cases::indexing::{ChangeType, UpdateType},
-    context,
+    cases::indexing::{ChangeType, TreeFactory, UpdateType},
+    context::{self, ParamsType},
     proof_storage::{ProofKV, ProofStorage},
     table::Table,
     TestCase, TestContext,
@@ -37,36 +37,29 @@ pub(crate) mod common;
 //    );
 //    info!("Generated Final Extraction (C.5.1) proof for mapping (with length slot check)");
 //}
+//
+
+const PROOF_STORE_FILE: &str = "test_proofs.store";
 
 #[test(tokio::test)]
-async fn integrated_test() -> Result<()> {
-    // Create the test context for mainnet.
-    // let ctx = &mut TestContext::new_mainet();
+async fn integrated_indexing() -> Result<()> {
     let _ = env_logger::try_init();
-    // Create the test context for the local node.
-    //let storage = MemoryProofStorage::default();
-    info!("Loading proof storage");
-    let storage = ProofKV::new_from_env("test_proofs.store")?;
+    info!("Running INDEXING test");
+    let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
     info!("Loading Anvil and contract");
     let mut ctx = context::new_local_chain(storage).await;
     info!("Initial Anvil block: {}", ctx.block_number().await);
-    info!("Building params");
-    // Build the parameters.
-    ctx.build_params().unwrap();
+    info!("Building indexing params");
+    ctx.build_params(ParamsType::Indexing).unwrap();
 
     info!("Params built");
-    let mut single = TestCase::single_value_test_case(&ctx).await?;
+    let mut single = TestCase::single_value_test_case(&ctx, TreeFactory::New).await?;
     let changes = vec![
         ChangeType::Update(UpdateType::Rest),
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
     single.run(&mut ctx, changes.clone()).await?;
-    let mut mapping = TestCase::mapping_test_case(&ctx).await?;
-    let zktable = mapping.table.fetch_table(&mapping.table.name).unwrap();
-    println!(
-        "zkTable JSON pretty:  \n{}\n",
-        serde_json::to_string_pretty(&zktable).unwrap()
-    );
+    let mut mapping = TestCase::mapping_test_case(&ctx, TreeFactory::New).await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
@@ -75,6 +68,21 @@ async fn integrated_test() -> Result<()> {
         ChangeType::Deletion,
     ];
     mapping.run(&mut ctx, changes).await?;
+    mapping.test_query(&ctx).await?;
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn integrated_query() -> Result<()> {
+    let _ = env_logger::try_init();
+    info!("Running QUERY test");
+    let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
+    info!("Loading Anvil and contract");
+    let mut ctx = context::new_local_chain(storage).await;
+    info!("Building querying params");
+    ctx.build_params(ParamsType::Query).unwrap();
+    info!("Params built");
+    let mapping = TestCase::mapping_test_case(&ctx, TreeFactory::Load).await?;
     mapping.test_query(&ctx).await?;
     Ok(())
 }

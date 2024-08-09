@@ -106,7 +106,7 @@ pub struct State {
     /// The largest block that will be stored in this tree (inclusive)
     pub(crate) max: InnerIdx,
     /// The actual beginning of the tree w.r.t. 1
-    pub(crate) shift: usize,
+    pub shift: usize,
 }
 
 impl State {
