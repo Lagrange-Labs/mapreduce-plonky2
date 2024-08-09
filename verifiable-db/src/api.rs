@@ -3,11 +3,20 @@
 use crate::{
     block_tree, cells_tree,
     extraction::{ExtractionPI, ExtractionPIWrap},
-    ivc, row_tree,
+    ivc,
+    query::{self, api::Parameters as QueryParams, PI_LEN as QUERY_PI_LEN},
+    revelation::{
+        self, api::Parameters as RevelationParams, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
+    },
+    row_tree,
 };
 use alloy::primitives::U256;
 use anyhow::Result;
-use mp2_common::{C, D, F};
+use mp2_common::{
+    serialization::{deserialize, serialize},
+    C, D, F,
+};
+use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;
 use recursion_framework::framework::RecursiveCircuits;
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +47,19 @@ where
     rows_tree: row_tree::PublicParameters,
     block_tree: block_tree::PublicParameters<E>,
     ivc: ivc::PublicParameters,
+}
+
+impl<E: ExtractionPIWrap> PublicParameters<E>
+where
+    [(); E::PI::TOTAL_LEN]:,
+{
+    pub fn get_params_info(&self) -> Result<Vec<u8>> {
+        let params_info = ParamsInfo {
+            preprocessing_circuit_set: self.ivc.get_circuit_set().clone(),
+            preprocessing_vk: self.ivc.get_ivc_circuit_data().verifier_only.clone(),
+        };
+        Ok(bincode::serialize(&params_info)?)
+    }
 }
 
 /// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.
@@ -87,5 +109,125 @@ where
                 .generate_proof(input, extraction_set, params.rows_tree.set_vk())
         }
         CircuitInput::IVC(input) => params.ivc.generate_proof(input, params.block_tree.set_vk()),
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ParamsInfo {
+    preprocessing_circuit_set: RecursiveCircuits<F, C, D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    preprocessing_vk: VerifierOnlyCircuitData<C, D>,
+}
+
+pub struct QueryParameters<
+    const MAX_NUM_COLUMNS: usize,
+    const MAX_NUM_PREDICATE_OPS: usize,
+    const MAX_NUM_RESULT_OPS: usize,
+    const MAX_NUM_OUTPUTS: usize,
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize,
+    const MAX_NUM_PLACEHOLDERS: usize,
+> where
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
+    [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+{
+    query_params: QueryParams<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_ITEMS_PER_OUTPUT,
+    >,
+    revelation_params: RevelationParams<
+        MAX_NUM_OUTPUTS,
+        MAX_NUM_ITEMS_PER_OUTPUT,
+        MAX_NUM_PLACEHOLDERS,
+        { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
+    >,
+}
+
+pub enum QueryCircuitInput<
+    const MAX_NUM_COLUMNS: usize,
+    const MAX_NUM_PREDICATE_OPS: usize,
+    const MAX_NUM_RESULT_OPS: usize,
+    const MAX_NUM_OUTPUTS: usize,
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize,
+    const MAX_NUM_PLACEHOLDERS: usize,
+> where
+    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+{
+    Query(
+        query::api::CircuitInput<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_ITEMS_PER_OUTPUT,
+        >,
+    ),
+    Revelation(
+        revelation::api::CircuitInput<
+            MAX_NUM_OUTPUTS,
+            MAX_NUM_ITEMS_PER_OUTPUT,
+            MAX_NUM_PLACEHOLDERS,
+            { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
+        >,
+    ),
+}
+
+impl<
+        const MAX_NUM_COLUMNS: usize,
+        const MAX_NUM_PREDICATE_OPS: usize,
+        const MAX_NUM_RESULT_OPS: usize,
+        const MAX_NUM_OUTPUTS: usize,
+        const MAX_NUM_ITEMS_PER_OUTPUT: usize,
+        const MAX_NUM_PLACEHOLDERS: usize,
+    >
+    QueryParameters<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_OUTPUTS,
+        MAX_NUM_ITEMS_PER_OUTPUT,
+        MAX_NUM_PLACEHOLDERS,
+    >
+where
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
+    [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
+{
+    /// Build `QueryParameters` from serialized `ParamsInfo` of `PublicParamaters`
+    pub fn build_query_params(preprocessing_params_info: &[u8]) -> Result<Self> {
+        let params_info: ParamsInfo = bincode::deserialize(preprocessing_params_info)?;
+        let query_params = QueryParams::build();
+        let revelation_params = RevelationParams::build(
+            query_params.get_circuit_set(),
+            &params_info.preprocessing_circuit_set,
+            &params_info.preprocessing_vk,
+        );
+        Ok(Self {
+            query_params,
+            revelation_params,
+        })
+    }
+
+    pub fn generate_proof(
+        &self,
+        input: QueryCircuitInput<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_OUTPUTS,
+            MAX_NUM_ITEMS_PER_OUTPUT,
+            MAX_NUM_PLACEHOLDERS,
+        >,
+    ) -> Result<Vec<u8>> {
+        match input {
+            QueryCircuitInput::Query(input) => self.query_params.generate_proof(input),
+            QueryCircuitInput::Revelation(input) => self
+                .revelation_params
+                .generate_proof(input, self.query_params.get_circuit_set()),
+        }
     }
 }

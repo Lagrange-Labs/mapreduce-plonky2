@@ -20,12 +20,16 @@ pub(crate) mod partial_node;
 mod utils;
 
 use super::{
+    api::CircuitInput,
     computational_hash_ids::{Identifiers, Output},
     universal_circuit::{
         output_no_aggregation::Circuit as NoAggOutputCircuit,
         output_with_aggregation::Circuit as AggOutputCircuit,
         universal_circuit_inputs::{BasicOperation, ColumnCell, PlaceholderId, ResultStructure},
-        universal_query_circuit::UniversalQueryCircuitInputs,
+        universal_query_circuit::{
+            dummy_placeholder, placeholder_hash, placeholder_hash_without_query_bounds,
+            UniversalQueryCircuitInputs,
+        },
         ComputationalHash, PlaceholderHash,
     },
 };
@@ -250,6 +254,7 @@ impl QueryHashNonExistenceCircuits {
     where
         [(); MAX_NUM_RESULTS - 1]:,
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+        [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     {
         let column_ids = column_cells
             .iter()
@@ -263,52 +268,27 @@ impl QueryHashNonExistenceCircuits {
             )?)
                 .into(),
         );
-        let placeholder_hash = match results.output_variant {
-            Output::Aggregation => {
-                let circuit = UniversalQueryCircuitInputs::<
-                    MAX_NUM_COLUMNS,
-                    MAX_NUM_PREDICATE_OPS,
-                    MAX_NUM_RESULT_OPS,
-                    MAX_NUM_RESULTS,
-                    AggOutputCircuit<MAX_NUM_RESULTS>,
-                >::new(
-                    column_cells,
-                    predicate_operations,
-                    placeholder_values,
-                    false, // doesn't matter for placeholder hash computation
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
-                    results,
-                )?;
-                if is_rows_tree_node {
-                    circuit.placeholder_hash_without_query_bounds()
-                } else {
-                    circuit.placeholder_hash()
-                }
-            }
-            Output::NoAggregation => {
-                let circuit = UniversalQueryCircuitInputs::<
-                    MAX_NUM_COLUMNS,
-                    MAX_NUM_PREDICATE_OPS,
-                    MAX_NUM_RESULT_OPS,
-                    MAX_NUM_RESULTS,
-                    NoAggOutputCircuit<MAX_NUM_RESULTS>,
-                >::new(
-                    column_cells,
-                    predicate_operations,
-                    placeholder_values,
-                    false, // doesn't matter for placeholder hash computation
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
-                    results,
-                )?;
-                if is_rows_tree_node {
-                    circuit.placeholder_hash_without_query_bounds()
-                } else {
-                    circuit.placeholder_hash()
-                }
-            }
-        };
+        let placeholder_hash_ids = CircuitInput::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >::ids_for_placeholder_hash(
+            column_cells,
+            predicate_operations,
+            results,
+            placeholder_values,
+            query_bounds,
+        )?;
+        let placeholder_hash = if is_rows_tree_node {
+            placeholder_hash_without_query_bounds(
+                &placeholder_hash_ids,
+                &placeholder_values,
+                &dummy_placeholder(query_bounds),
+            )
+        } else {
+            placeholder_hash(&placeholder_hash_ids, &placeholder_values, query_bounds)
+        }?;
         Ok(Self {
             computational_hash,
             placeholder_hash,

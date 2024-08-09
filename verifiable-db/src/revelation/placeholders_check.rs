@@ -1,18 +1,20 @@
 //! Check the placeholder identifiers and values with the specified `final_placeholder_hash`,
 //! compute and return the `num_placeholders` and the `placeholder_ids_hash`.
 
-use crate::query::computational_hash_ids::PlaceholderIdentifier;
+use crate::query::{aggregation::QueryBounds, computational_hash_ids::PlaceholderIdentifier};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     poseidon::{empty_poseidon_hash, H},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
-    utils::{SelectHashBuilder, ToTargets},
+    utils::{SelectHashBuilder, ToFields, ToTargets},
+    F,
 };
 use plonky2::{
-    hash::hash_types::HashOutTarget,
+    hash::hash_types::{HashOut, HashOutTarget},
     iop::target::{BoolTarget, Target},
+    plonk::config::Hasher,
 };
 use std::{array, iter::once};
 
@@ -133,6 +135,27 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
     b.connect_hashes(*final_placeholder_hash, expected_final_placeholder_hash);
 
     (num_placeholders, placeholder_ids_hash)
+}
+
+/// Compute the hash of placeholder ids provided as input, in the same way as it is computed in the `check_placeholders`
+/// gadget
+pub(crate) fn placeholder_ids_hash(placeholder_ids: &[PlaceholderIdentifier]) -> HashOut<F> {
+    [
+        &PlaceholderIdentifier::MinQueryOnIdx1,
+        &PlaceholderIdentifier::MaxQueryOnIdx1,
+        &PlaceholderIdentifier::MinQueryOnIdx2,
+        &PlaceholderIdentifier::MaxQueryOnIdx2,
+    ]
+    .into_iter()
+    .chain(placeholder_ids)
+    .fold(*empty_poseidon_hash(), |acc, id| {
+        let inputs = acc
+            .to_fields()
+            .into_iter()
+            .chain(once(id.to_field()))
+            .collect_vec();
+        H::hash_no_pad(&inputs)
+    })
 }
 
 #[cfg(test)]

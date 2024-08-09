@@ -18,11 +18,16 @@ use mp2_common::{
 };
 use plonky2::{
     field::types::Field,
-    hash::{hash_types::RichField, hashing::hash_n_to_hash_no_pad},
+    hash::{
+        hash_types::{HashOut, RichField},
+        hashing::hash_n_to_hash_no_pad,
+    },
     iop::target::{BoolTarget, Target},
     plonk::config::{GenericHashOut, Hasher},
 };
 use plonky2_ecgfp5::curve::curve::Point;
+
+use crate::revelation::placeholders_check::placeholder_ids_hash;
 
 use super::universal_circuit::{
     universal_circuit_inputs::{BasicOperation, InputOperand, OutputItem, ResultStructure},
@@ -83,6 +88,8 @@ impl Identifiers {
         b.hash_n_to_hash_no_pad::<CHasher>(inputs)
     }
 
+    /// Compute the computational hash computed by the universal circuit for the query represented
+    /// by the given inputs
     pub fn computational_hash_universal_circuit(
         column_ids: &[u64],
         predicate_operations: &[BasicOperation],
@@ -106,6 +113,44 @@ impl Identifiers {
                 &results.output_ids,
             )
             .map(|hash| HashOutput::try_from(hash.to_bytes()).unwrap())
+    }
+
+    /// Compute the computational hash.
+    pub fn computational_hash(
+        column_ids: &[u64],
+        predicate_operations: &[BasicOperation],
+        results: &ResultStructure,
+        metadata_hash: &HashOutput,
+    ) -> Result<HashOutput> {
+        let hash = Identifiers::computational_hash_universal_circuit(
+            column_ids,
+            predicate_operations,
+            results,
+        )?;
+        // compute placeholder ids array from operations of the query
+        let mut placeholder_ids = predicate_operations
+            .iter()
+            .chain(&results.result_operations)
+            .flat_map(|op| op.extract_placeholder_ids())
+            .collect_vec();
+        placeholder_ids.sort();
+
+        // compute placeholder id hash
+        let placeholder_id_hash = placeholder_ids_hash(&placeholder_ids);
+
+        //ToDo: add ORDER BY info and DISTINCT info for queries without the results tree, when adding results tree
+        // circuits APIs
+
+        let inputs = ComputationalHash::from_bytes((&hash).into())
+            .to_vec()
+            .into_iter()
+            .chain(placeholder_id_hash.to_vec())
+            .chain(HashOut::<F>::from_bytes(metadata_hash.into()).to_vec())
+            .collect_vec();
+
+        Ok(HashOutput::try_from(
+            hash_n_to_hash_no_pad::<F, HashPermutation>(&inputs).to_bytes(),
+        )?)
     }
 }
 
@@ -242,7 +287,9 @@ impl Operation {
     ) -> Result<ComputationalHash> {
         let mut compute_operand_hash = |operand: &InputOperand| -> Result<ComputationalHash> {
             Ok(match operand {
-                InputOperand::Placeholder(p) => hash_n_to_hash_no_pad::<_, HashPermutation>(&[*p]),
+                InputOperand::Placeholder(p) => {
+                    hash_n_to_hash_no_pad::<_, HashPermutation>(&[p.to_field()])
+                }
                 InputOperand::Constant(value) => {
                     hash_n_to_hash_no_pad::<_, HashPermutation>(&value.to_fields())
                 }
@@ -486,14 +533,14 @@ impl AggregationOperation {
 }
 
 /// Placeholder identifiers
-#[derive(Clone, Debug, Copy, Default)]
+#[derive(Clone, Debug, Copy, Default, Eq, Hash, PartialEq, PartialOrd, Ord)]
 pub enum PlaceholderIdentifier {
     // MIN_I1
-    #[default]
     MinQueryOnIdx1,
     // MAX_I1
     MaxQueryOnIdx1,
     // MIN_I2
+    #[default]
     MinQueryOnIdx2,
     // MAX_I2
     MaxQueryOnIdx2,
@@ -504,6 +551,25 @@ pub enum PlaceholderIdentifier {
 impl<F: RichField> ToField<F> for PlaceholderIdentifier {
     fn to_field(&self) -> F {
         Identifiers::PlaceholderIdentifiers(*self).to_field()
+    }
+}
+
+impl<F: RichField> FromFields<F> for PlaceholderIdentifier {
+    fn from_fields(t: &[F]) -> Self {
+        let generic_placeholder_start_value =
+            <Self as ToField<F>>::to_field(&Self::GenericPlaceholder(0)).to_canonical_u64();
+        match t[0] {
+            f if <Self as ToField<F>>::to_field(&Self::MinQueryOnIdx1) == f => Self::MinQueryOnIdx1,
+            f if <Self as ToField<F>>::to_field(&Self::MaxQueryOnIdx1) == f => Self::MaxQueryOnIdx1,
+            f if <Self as ToField<F>>::to_field(&Self::MinQueryOnIdx2) == f => Self::MinQueryOnIdx2,
+            f if <Self as ToField<F>>::to_field(&Self::MaxQueryOnIdx2) == f => Self::MaxQueryOnIdx2,
+            f => Self::GenericPlaceholder(
+                f.to_canonical_u64()
+                    .checked_sub(generic_placeholder_start_value)
+                    .expect("invalid field element for PlaceholderIdentifier")
+                    as usize,
+            ),
+        }
     }
 }
 
