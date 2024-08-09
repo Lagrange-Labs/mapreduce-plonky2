@@ -32,7 +32,7 @@ mod public_inputs;
 #[cfg(test)]
 mod tests;
 
-pub use api::{LengthCircuitInput, PublicParameters};
+pub use api::{utils::compute_metadata_digest, LengthCircuitInput, PublicParameters};
 pub use branch::{BranchLengthCircuit, BranchLengthWires};
 pub use extension::{ExtensionLengthCircuit, ExtensionLengthWires};
 pub use leaf::{LeafLengthCircuit, LeafLengthWires};

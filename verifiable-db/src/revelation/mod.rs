@@ -19,7 +19,8 @@ pub(crate) const PI_LEN<const L: usize, const S: usize, const PH: usize>: usize 
     PublicInputs::<F, L, S, PH>::total_len();
 
 pub(crate) const NUM_PREPROCESSING_IO: usize = NUM_IO;
-pub(crate) const NUM_QUERY_IO: usize = QUERY_PI_LEN::<S>;
+#[rustfmt::skip]
+pub(crate) const NUM_QUERY_IO<const S: usize>: usize = QUERY_PI_LEN::<S>;
 
 #[cfg(test)]
 pub(crate) mod tests {

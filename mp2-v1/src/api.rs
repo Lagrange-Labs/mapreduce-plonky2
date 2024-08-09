@@ -1,12 +1,34 @@
 //! Main APIs and related structures
 
+use std::iter::once;
+
 use crate::{
-    block_extraction, contract_extraction, final_extraction,
-    length_extraction::{self, LengthCircuitInput},
-    values_extraction,
+    block_extraction,
+    contract_extraction::{self, compute_metadata_digest as contract_metadata_digest},
+    final_extraction,
+    length_extraction::{
+        self, compute_metadata_digest as length_metadata_digest, LengthCircuitInput,
+    },
+    values_extraction::{
+        self, compute_leaf_mapping_metadata_digest, compute_leaf_single_metadata_digest,
+        identifier_block_column, identifier_for_mapping_key_column,
+        identifier_for_mapping_value_column, identifier_single_var_column,
+    },
 };
+use alloy::primitives::Address;
 use anyhow::Result;
-use plonky2::iop::target::Target;
+use itertools::Itertools;
+use mp2_common::{
+    poseidon::H,
+    types::HashOutput,
+    utils::{Fieldable, ToFields},
+};
+use plonky2::{
+    hash::hashing::hash_n_to_hash_no_pad,
+    iop::target::Target,
+    plonk::config::{GenericHashOut, Hasher},
+};
+use plonky2_ecgfp5::curve::curve::Point;
 use serde::{Deserialize, Serialize};
 
 /// Struct containing the expected input MPT Extension/Branch node
@@ -134,4 +156,51 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
             params.final_extraction.get_circuit_set(),
         ),
     }
+}
+
+pub type MetadataHash = HashOutput;
+
+/// Enumeration to be employed to provide input slots for metadata hash computation
+pub enum SlotInputs {
+    /// slots of a set of simple variables
+    Simple(Vec<u8>),
+    /// slot of a mapping variable without an associated length slot to determine the number of entries
+    Mapping(u8),
+    /// slots of a mapping variable and of a slot containing the length of the mapping
+    MappingWithLength(u8, u8),
+}
+
+/// Compute metadata hash for a table related to the provided inputs slots of the contract with
+/// address `contract_address`
+pub fn metadata_hash(slot_input: SlotInputs, contract_address: &Address) -> MetadataHash {
+    // closure to compute the metadata digest associated to a mapping variable
+    let metadata_digest_mapping = |slot| {
+        let key_id = identifier_for_mapping_key_column(slot, contract_address);
+        let value_id = identifier_for_mapping_value_column(slot, contract_address);
+        compute_leaf_mapping_metadata_digest(key_id, value_id, slot)
+    };
+    let digest = match slot_input {
+        SlotInputs::Simple(slots) => slots.iter().fold(Point::NEUTRAL, |acc, &slot| {
+            let id = identifier_single_var_column(slot, contract_address);
+            let digest = compute_leaf_single_metadata_digest(id, slot);
+            acc + digest
+        }),
+        SlotInputs::Mapping(slot) => metadata_digest_mapping(slot),
+        SlotInputs::MappingWithLength(mapping_slot, length_slot) => {
+            let mapping_digest = metadata_digest_mapping(mapping_slot);
+            let length_digest = length_metadata_digest(length_slot, mapping_slot);
+            mapping_digest + length_digest
+        }
+    };
+    // add contract digest
+    let contract_digest = contract_metadata_digest(contract_address);
+    let final_digest = contract_digest + digest;
+    // compute final hash
+    let block_id = identifier_block_column();
+    let inputs = final_digest
+        .to_fields()
+        .into_iter()
+        .chain(once(block_id.to_field()))
+        .collect_vec();
+    HashOutput::try_from(H::hash_no_pad(&inputs).to_bytes()).unwrap()
 }
