@@ -1,79 +1,101 @@
 [
     {
-        "name": "table1",
-        "id": 123456789,
+        "user_name": "table1",
+        "name": "contract_user_table1",
         "columns": [
             {
                 "name": "block",
                 "id": 1,
-                "is_primary_index": true
+                "kind": "PrimaryIndex"
             },
             {
                 "name": "pipo",
                 "id": 45678,
-                "is_primary_index": false
+                "kind": "Standard"
             }
         ]
     },
     {
-        "name": "table2",
+        "user_name": "table2",
+        "name": "contract_user_table2",
         "id": 123456,
         "columns": [
             {
                 "name": "block",
                 "id": 1,
-                "is_primary_index": true
+                "kind": "PrimaryIndex"
             },
             {
                 "name": "foo",
                 "id": 45678,
-                "is_primary_index": false
+                "kind": "Standard"
             },
             {
                 "name": "bar",
                 "id": 45678,
-                "is_primary_index": false
+                "kind": "Standard"
             }
         ]
     },
     {
-        "name": "T",
-        "id": 94230,
+        "user_name": "T",
+        "name": "contract_user_T",
         "columns": [
             {
                 "name": "block",
                 "id": 1,
-                "is_primary_index": true
+                "kind": "PrimaryIndex"
             },
             {
                 "name": "C1",
                 "id": 45678,
-                "is_primary_index": false
+                "kind": "Standard"
             },
             {
                 "name": "C2",
                 "id": 45678,
-                "is_primary_index": false
+                "kind": "Standard"
             },
             {
                 "name": "C3",
                 "id": 45678,
-                "is_primary_index": false
+                "kind": "Standard"
             },
             {
                 "name": "C4",
                 "id": 45678,
-                "is_primary_index": false
+                "kind": "Standard"
             },
             {
                 "name": "C5",
                 "id": 45678,
-                "is_primary_index": false
+                "kind": "Standard"
             },
             {
                 "name": "C6",
                 "id": 45678,
-                "is_primary_index": false
+                "kind": "Standard"
+            }
+        ]
+    },
+    {
+        "user_name": "row_mapping_table",
+        "name": "row_mapping_table",
+        "columns": [
+            {
+                "name": "block_number",
+                "kind": "PrimaryIndex",
+                "id": 17422912802427138938
+            },
+            {
+                "name": "map_value",
+                "kind": "SecondaryIndex",
+                "id": 12191544657365810443
+            },
+            {
+                "name": "map_key",
+                "kind": "Standard",
+                "id": 10362498354857054631
             }
         ]
     }

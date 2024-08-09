@@ -26,7 +26,7 @@ use verifiable_db::query::{
 };
 
 use crate::{
-    symbols::{ContextProvider, Handle, Kind, ScopeTable, Symbol},
+    symbols::{ColumnKind, ContextProvider, Handle, Kind, ScopeTable, Symbol},
     utils::parse_string,
     visitor::{AstPass, Visit},
 };
@@ -147,7 +147,7 @@ pub(crate) struct Resolver<C: ContextProvider> {
     constants: UniqueStorage<U256>,
     /// The query-global column storage, mapping a column index to a
     /// cryptographic column ID.
-    columns: Vec<F>,
+    columns: Vec<u64>,
     /// The symbol table hierarchy for this query
     scopes: ScopeTable<CircuitData, Wire>,
     /// A handle to an object providing a register of the existing virtual
@@ -404,7 +404,7 @@ pub struct CircuitPis {
     /// The list of crypto IDs of the column involved in the query. Their
     /// position in this list **MUST** match their index in the
     /// [`ResultStructure`] operations.
-    pub column_ids: Vec<F>,
+    pub column_ids: Vec<u64>,
     /// A list of mutually-referencing [`BasicOperation`] encoding the AST of
     /// the WHERE predicate, if any. By convention, the root of the AST **MUST**
     /// be the last one in this list.
@@ -480,7 +480,7 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
                                 name: column.name.clone(),
                             },
                             payload: Wire::ColumnId(i),
-                            is_primary_index: column.is_primary_index,
+                            is_primary_index: column.kind == ColumnKind::PrimaryIndex,
                         };
 
                         self.scopes.current_scope_mut().insert(symbol)?;
@@ -591,102 +591,6 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
         Ok(())
     }
 }
-
-// NOTE: will be used later
-// /// Wrap an existing query to demultiplicate and annotate each row with `block`
-// /// ranging from `valid_from` to `valid_until`.
-// fn expand_block_range(mut q: Query) -> Query {
-//     // Save the original projection queried by the user
-//     if let SetExpr::Select(ref mut select) = &mut *q.body {
-//         // Filter out `block` if it has explicitely been selected by the user,
-//         // it will be injected back later
-//         select.projection.retain(|p| match p {
-//             SelectItem::UnnamedExpr(e) => match e {
-//                 Expr::Identifier(id) => id.value != "block",
-//                 _ => true,
-//             },
-//             SelectItem::ExprWithAlias { expr, alias } => todo!(),
-//             _ => true,
-//         });
-//         for additional_column in ["valid_from", "valid_until"] {
-//             select
-//                 .projection
-//                 .push(SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(
-//                     additional_column,
-//                 ))));
-//         }
-//     } else {
-//         unreachable!()
-//     };
-
-//     Query {
-//         with: None,
-//         body: Box::new(SetExpr::Select(Box::new(Select {
-//             distinct: None,
-//             top: None,
-//             projection: vec![
-//                 SelectItem::Wildcard(WildcardAdditionalOptions::default()),
-//                 SelectItem::ExprWithAlias {
-//                     expr: Expr::Function(Function {
-//                         name: ObjectName(vec![Ident::new("generate_series")]),
-//                         parameters: FunctionArguments::None,
-//                         args: FunctionArguments::List(FunctionArgumentList {
-//                             duplicate_treatment: None,
-//                             args: vec![
-//                                 FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
-//                                     Ident::new("valid_from"),
-//                                 ))),
-//                                 FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
-//                                     Ident::new("valid_until"),
-//                                 ))),
-//                             ],
-//                             clauses: vec![],
-//                         }),
-//                         filter: None,
-//                         null_treatment: None,
-//                         over: None,
-//                         within_group: vec![],
-//                     }),
-//                     alias: Ident::new("block"),
-//                 },
-//             ],
-//             into: None,
-//             from: vec![TableWithJoins {
-//                 relation: TableFactor::Derived {
-//                     lateral: false,
-//                     subquery: Box::new(q),
-//                     alias: Some(TableAlias {
-//                         name: Ident::new("user_query"),
-//                         columns: vec![],
-//                     }),
-//                 },
-//                 joins: vec![],
-//             }],
-//             lateral_views: vec![],
-//             prewhere: None,
-//             selection: None,
-//             group_by: GroupByExpr::Expressions(vec![], vec![]),
-//             cluster_by: vec![],
-//             distribute_by: vec![],
-//             sort_by: vec![],
-//             having: None,
-//             named_window: vec![],
-//             qualify: None,
-//             window_before_qualify: false,
-//             value_table_mode: None,
-//             connect_by: None,
-//         }))),
-//         order_by: None,
-//         limit: None,
-//         limit_by: vec![],
-//         offset: None,
-//         fetch: None,
-//         locks: vec![],
-//         for_clause: None,
-//         settings: None,
-//         format_clause: None,
-//     }
-// }
 
 /// Convert a query so that it can be executed on a ryhope-generated db.
 pub fn resolve<C: ContextProvider>(q: &Query, context: C) -> Result<CircuitPis> {

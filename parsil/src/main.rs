@@ -1,5 +1,6 @@
 use anyhow::*;
 use clap::{Parser, Subcommand};
+use log::Level;
 use parsil::prepare;
 use symbols::FileContextProvider;
 
@@ -26,13 +27,27 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Displays the AST as parsed by sqlparser.
     Debug {},
+    /// Generate the PIs required by the universal query circuit.
     Circuit {},
-    Execute {},
+    /// Generate the queries to execute the user query of fetch the range of
+    /// primary indices and key it touches.
+    Query {
+        #[command(subcommand)]
+        kind: QueryKind,
+    },
+}
+
+#[derive(Subcommand)]
+enum QueryKind {
+    Execute,
+    Keys,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    stderrlog::new().verbosity(Level::Debug).init().unwrap();
 
     match args.command {
         Command::Debug {} => {
@@ -48,11 +63,16 @@ fn main() -> Result<()> {
             let query = prepare(&args.request)?;
             resolve::resolve(&query, ctx)?;
         }
-        Command::Execute {} => {
+        Command::Query { kind } => {
             let ctx = FileContextProvider::from_file("tests/context.json")?;
             let query = prepare(&args.request)?;
-            let to_execute = executor::execute(query, ctx)?;
-            print!("{to_execute}");
+            println!(
+                "{}",
+                match kind {
+                    QueryKind::Execute => executor::generate_query_execution(&query, ctx)?,
+                    QueryKind::Keys => executor::generate_query_keys(&query, ctx)?,
+                }
+            );
         }
     }
 

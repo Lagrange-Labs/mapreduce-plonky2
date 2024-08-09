@@ -8,11 +8,18 @@ use std::{collections::HashMap, fmt::Debug};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZkTable {
     /// The user-facing name of this table
+    pub user_name: String,
+    /// The inner name of this table
     pub name: String,
-    /// This table identifier in the circuits
-    pub id: u64,
     /// Columns accessible from this table
     pub columns: Vec<ZkColumn>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ColumnKind {
+    PrimaryIndex,
+    SecondaryIndex,
+    Standard,
 }
 
 /// A scalar value accessible from a contract storage and exposed as a virtual
@@ -21,10 +28,10 @@ pub struct ZkTable {
 pub struct ZkColumn {
     /// The user-facing name of this column
     pub name: String,
-    /// Whether this column is the cryptographic primary index
-    pub is_primary_index: bool,
+    /// Whether this column is an index or a normal column
+    pub kind: ColumnKind,
     /// The cryptographic ID of this column
-    pub id: F,
+    pub id: u64,
 }
 
 /// A [`Handle`] defines an identifier in a SQL expression.
