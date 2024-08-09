@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use storage::{
     updatetree::{Next, UpdatePlan, UpdateTree},
     view::TreeStorageView,
-    EpochKvStorage, FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage,
-    TreeStorage, TreeTransactionalStorage,
+    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
+    TransactionalStorage, TreeStorage, TreeTransactionalStorage,
 };
 use tree::{MutableTree, NodeContext, PrintableTree, TreeTopology};
 
@@ -112,6 +112,10 @@ impl<
         })
     }
 
+    /// Returns the storage state, which can be useful to fetch information like the shift on sbbst
+    pub async fn storage_state(&self) -> <T as TreeTopology>::State {
+        self.storage.state().fetch().await
+    }
     /// Compute a bottom-up-aggregated value on the payload of the nodes,
     /// recursively from the leaves up to the root node.
     async fn aggregate(&mut self, mut plan: UpdatePlan<T::Key>) -> Result<()> {

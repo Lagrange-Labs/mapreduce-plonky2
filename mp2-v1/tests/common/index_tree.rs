@@ -1,4 +1,5 @@
 use alloy::primitives::U256;
+
 use log::{debug, info};
 use mp2_common::{poseidon::empty_poseidon_hash, proof::ProofWithVK};
 use mp2_v1::{
@@ -13,6 +14,7 @@ use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{
         memory::InMemory,
+        pgsql::PgsqlStorage,
         updatetree::{Next, UpdateTree},
         RoEpochKvStorage,
     },
@@ -27,7 +29,7 @@ use super::{
     TestContext,
 };
 
-type IndexStorage = InMemory<BlockTree, IndexNode<BlockPrimaryIndex>>;
+type IndexStorage = PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>>;
 pub type MerkleIndexTree = MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>;
 
 impl TestContext {

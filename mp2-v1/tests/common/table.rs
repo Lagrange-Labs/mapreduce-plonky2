@@ -138,7 +138,38 @@ pub struct Table {
     pub(crate) index: MerkleIndexTree,
 }
 
+fn row_table_name(name: &str) -> String {
+    format!("row_{}", name)
+}
+fn index_table_name(name: &str) -> String {
+    format!("index_{}", name)
+}
+
 impl Table {
+    //pub async fn load(table_name: String, columns: TableColumns) -> Result<Self> {
+    //    let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
+    //    let row_tree = MerkleRowTree::new(
+    //        InitSettings::MustExist,
+    //        SqlStorageSettings {
+    //            db_url,
+    //            table: row_table_name(&table_name),
+    //        },
+    //    )
+    //    .await
+    //    .unwrap();
+    //    let index_tree = MerkleIndexTree::new(
+    //        InitSettings::MustExist,
+    //        SqlStorageSettings {
+    //            db_url,
+    //            table: index_table_name(&table_name),
+    //        },
+    //    )
+    //    .await
+    //    .unwrap();
+    //    let genesis = index_tree.storage.state().fetch().await.shift;
+    //    columns.self_assert();
+    //}
+
     pub async fn new(
         genesis_block: u64,
         table_id: TableID,
@@ -149,8 +180,8 @@ impl Table {
         let row_tree = MerkleRowTree::new(
             InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
             SqlStorageSettings {
-                db_url,
-                table: table_name.clone(),
+                db_url: db_url.clone(),
+                table: row_table_name(&table_name),
             },
         )
         .await
@@ -158,7 +189,10 @@ impl Table {
         let index_tree = MerkleIndexTree::new(
             //InitSettings::Reset(sbbst::Tree::empty()),
             InitSettings::Reset(sbbst::Tree::with_shift((genesis_block - 1) as usize)),
-            (),
+            SqlStorageSettings {
+                db_url,
+                table: index_table_name(&table_name),
+            },
         )
         .await
         .unwrap();
@@ -355,6 +389,10 @@ impl Table {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
             let root = self.row.root_data().await.unwrap();
+            println!(
+                " JSON ROW EXAMPLE: \n{}\n",
+                serde_json::to_string(&root).unwrap()
+            );
             println!(
                 " ++ After row update, row cell tree root tree proof hash = {:?}",
                 hex::encode(root.cell_root_hash.0)
