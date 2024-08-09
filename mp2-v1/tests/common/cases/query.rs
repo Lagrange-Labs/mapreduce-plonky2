@@ -177,16 +177,58 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     // TODO: careful about off by one error. -1 because tree epoch starts at 1
     let min_block = starting as u64 + table.genesis_block - 1;
     let max_block = min_block + longest_sequence as u64;
+    // primary_min_placeholder = ".."
+    // primary_max_placeholder = ".."
+    // Address == $3 --> placeholders.hashmap empty, put in query bounds secondary_min = secondary_max = "$3""
+    // adddress IN ($3,$4,$5) -> min "$3" max "$5", put in query bounds
+    // secondary_min = $3, and secondary_max = "$5", placeholders.put(generic, "$4")
+    // placeholders.generic(("generic", $3)),(generic,$4), (generic,$5))
+    // WHERE price > $3 AND price < $4 <--
     let placeholders = HashMap::from([
         (
-            PlaceholderIdentifier::MinQueryOnIdx1.identifier(),
+            PlaceholderIdentifier::GenericPlaceholder(1).identifier(),
             U256::from(min_block),
         ),
         (
-            PlaceholderIdentifier::MaxQueryOnIdx1.identifier(),
+            PlaceholderIdentifier::GenericPlaceholder(2).identifier(),
             U256::from(max_block),
         ),
     ]);
+    // placeholders _values = [min_block,max_block,sec_address];
+    // "$3" = secondary min placeholder
+    // "$4" = secondary max placeholder
+    // "secondary_column < $3 || secondary_column > $3 || secondary_column == $3" <-- then it can
+    // Ok iv'e seen < for $3,
+    //  * if i see > $4 it's ok,
+    //  * if i see sec_index < $4 , then it's worng because i already have seen an < for sec. index
+    // go to QueryBounds, so we need to know that $3 is being used for secondary index
+    // "secondary_column + price < $3 * 9" <--- it NEVER goes into range stuff not QUeryBounds
+    // * secondary_column < $3 AND secondary_column + price < $3 * 9 AND secondary_column > $4" -->
+    //     secondary placeholder usage = min = $3, max = $4
+    //     basic operations = secondary_column + Price < $3 * 9
+    //  * secondary_column < $3 AND secondary_column < $4
+    // secondary_index In [1,2,4,5] -> sec >= 1 AND sec <= 5 AND (sec=1 OR sec = 2 OR sec = 4 OR sec=5)
+    // WHERE something() OR sec_index > $4 <-- we dont use range, it's expensive
+    // WHERE something() AND sec_index OP [$1] <-- we use range
+    // WHERE something() AND sec_index >= [$1] AND sec_index + price < 3*quantity <-- not optimized
+    // (AND (< sec_ind $4) (OR (something) (< sec_ind (+ price 3)))
+    // something1 AND (sec_indx < $4 AND (something OR $4 < price  + 3)) <-- al right stuff goes into basic
+    // operation --> transformation to ?
+    // something1 AND (1 AND (something OR sec_ind < price  + 3)) <-- al right stuff goes into basic
+    // parseil needs to take as input
+    // * placeholder namings for ranges
+    //      "$1" => primary_index_min, "$2" => primary_index_max
+    //      max number of placeholders supported
+    //  * parsil needs to output as well
+    //      * Option<"$3"=> secondary_index_min >
+    //      * Option<"$4"=> secondary_index_max >
+    //  * parsil restrictions
+    //      * block number will always be "block >= $1 AND block =< $2"
+    //      * secondary_index to be used in optimuzed query needs to be of form "sec_index OP $3"
+    //      with only AND with similar formats (range format)
+    //          * we can't have "sec_index < $3" OR "sec_index > $4"
+    //          * but we can have "sec_index < $3 AND (price < $3 -10 OR sec_index * price < $4 + 20")
+    //              * only the first predicate is used in range query
     let bounds = QueryBounds::new(
         U256::from(min_block),
         U256::from(max_block),

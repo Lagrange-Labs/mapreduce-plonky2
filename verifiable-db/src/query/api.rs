@@ -118,7 +118,7 @@ where
     /// - `is_leaf`: Flag specifying whether the row being proven is stored in a leaf node of the rows tree or not
     /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
     /// Note that the following assumption is expected on the structure of the inputs:
-    /// The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation;
+    /// The output of the last operation in `predicate_operations` is taken as the filtering predicate evaluation;
     /// this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
     /// the caller of this method
     pub fn new_universal_circuit(
