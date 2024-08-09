@@ -546,7 +546,7 @@ impl Table {
     fn into_zktable(&self) -> Result<ZkTable> {
         let zk_columns = self.columns.into_zkcolumns();
         Ok(ZkTable {
-            name: self.id.0.clone(),
+            name: self.name.clone(),
             // TODO: metadata id
             id: 0,
             columns: zk_columns,
