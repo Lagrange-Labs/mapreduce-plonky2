@@ -1,9 +1,10 @@
 use anyhow::*;
 use log::*;
 use sqlparser::ast::{
-    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
-    FunctionArguments, GroupByExpr, Ident, ObjectName, Query, Select, SelectItem, SetExpr,
-    TableAlias, TableFactor, TableWithJoins, Value, WildcardAdditionalOptions,
+    BinaryOperator, CastKind, DataType, ExactNumberInfo, Expr, Function, FunctionArg,
+    FunctionArgExpr, FunctionArgumentList, FunctionArguments, GroupByExpr, Ident, ObjectName,
+    Query, Select, SelectItem, SetExpr, TableAlias, TableFactor, TableWithJoins, Value,
+    WildcardAdditionalOptions,
 };
 
 use crate::{
@@ -35,20 +36,28 @@ fn expand_block_range() -> Expr {
     })
 }
 
+/// The SQL datatype to represent a UINT256
+const UINT256: DataType = DataType::Numeric(ExactNumberInfo::None);
+
 /// Generate an [`Expr`] encoding for `payload -> cells -> '{id}' -> value
 fn fetch_from_payload(id: u64) -> Expr {
-    Expr::BinaryOp {
-        left: Box::new(Expr::Identifier(Ident::new("payload"))),
-        op: BinaryOperator::Arrow,
-        right: Box::new(Expr::BinaryOp {
-            left: Box::new(Expr::Value(Value::SingleQuotedString("cells".into()))),
+    Expr::Cast {
+        kind: CastKind::DoubleColon,
+        expr: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new("payload"))),
             op: BinaryOperator::Arrow,
             right: Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::Value(Value::SingleQuotedString(id.to_string()))),
+                left: Box::new(Expr::Value(Value::SingleQuotedString("cells".into()))),
                 op: BinaryOperator::Arrow,
-                right: Box::new(Expr::Value(Value::SingleQuotedString("value".into()))),
+                right: Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Value(Value::SingleQuotedString(id.to_string()))),
+                    op: BinaryOperator::LongArrow,
+                    right: Box::new(Expr::Value(Value::SingleQuotedString("value".into()))),
+                }),
             }),
-        }),
+        }))),
+        data_type: UINT256,
+        format: None,
     }
 }
 
