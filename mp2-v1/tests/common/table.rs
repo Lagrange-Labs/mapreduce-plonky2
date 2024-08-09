@@ -390,10 +390,6 @@ impl Table {
             println!("\n+++++++++++++++++++++++++++++++++\n");
             let root = self.row.root_data().await.unwrap();
             println!(
-                " JSON ROW EXAMPLE: \n{}\n",
-                serde_json::to_string(&root).unwrap()
-            );
-            println!(
                 " ++ After row update, row cell tree root tree proof hash = {:?}",
                 hex::encode(root.cell_root_hash.0)
             );

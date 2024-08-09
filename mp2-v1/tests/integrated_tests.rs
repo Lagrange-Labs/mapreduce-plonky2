@@ -13,6 +13,7 @@ use common::{
     TestCase, TestContext,
 };
 use log::info;
+use parsil::symbols::ContextProvider;
 use test_log::test;
 
 pub(crate) mod common;
@@ -61,6 +62,11 @@ async fn integrated_test() -> Result<()> {
     ];
     single.run(&mut ctx, changes.clone()).await?;
     let mut mapping = TestCase::mapping_test_case(&ctx).await?;
+    let zktable = mapping.table.fetch_table(&mapping.table.name).unwrap();
+    println!(
+        "zkTable JSON pretty:  \n{}\n",
+        serde_json::to_string_pretty(&zktable).unwrap()
+    );
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
