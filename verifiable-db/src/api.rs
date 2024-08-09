@@ -13,11 +13,23 @@ use crate::{
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
+    default_config,
+    proof::{serialize_proof, ProofWithVK},
     serialization::{deserialize, serialize},
     C, D, F,
 };
-use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;
-use recursion_framework::framework::RecursiveCircuits;
+use plonky2::{
+    hash::poseidon::PoseidonHash,
+    iop::witness::PartialWitness,
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitData, VerifierOnlyCircuitData},
+        config::Hasher,
+    },
+};
+use recursion_framework::framework::{
+    RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+};
 use serde::{Deserialize, Serialize};
 
 /// Struct containing the expected input of the Cell Tree node
@@ -118,6 +130,71 @@ struct ParamsInfo {
     preprocessing_vk: VerifierOnlyCircuitData<C, D>,
 }
 
+#[derive(Serialize, Deserialize)]
+/// Wrapper circuit around the different type of revelation circuits we expose. Reason we need one is to be able
+/// to always keep the same succinct wrapper circuit and Groth16 circuit regardless of the end result we submit
+/// onchain.
+pub struct WrapCircuitParams<
+    const MAX_NUM_OUTPUTS: usize,
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize,
+    const MAX_NUM_PLACEHOLDERS: usize,
+> {
+    query_verifier_wires: RecursiveCircuitsVerifierTarget<D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    circuit_data: CircuitData<F, C, D>,
+}
+
+impl<
+        const MAX_NUM_OUTPUTS: usize,
+        const MAX_NUM_ITEMS_PER_OUTPUT: usize,
+        const MAX_NUM_PLACEHOLDERS: usize,
+    > WrapCircuitParams<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
+where
+    [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
+    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+{
+    pub fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
+        let mut builder = CircuitBuilder::new(default_config());
+        let verifier_gadget = RecursiveCircuitsVerifierGagdet::<
+            F,
+            C,
+            D,
+            {
+                REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
+            },
+        >::new(default_config(), revelation_circuit_set);
+        let query_verifier_wires = verifier_gadget.verify_proof_in_circuit_set(&mut builder);
+        // expose public inputs of verifier proof as public inputs
+        let verified_proof_pi = query_verifier_wires.get_public_input_targets::<F, {
+            REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
+        }>();
+        builder.register_public_inputs(verified_proof_pi);
+        let circuit_data = builder.build();
+
+        Self {
+            query_verifier_wires,
+            circuit_data,
+        }
+    }
+
+    pub fn generate_proof(
+        &self,
+        revelation_circuit_set: &RecursiveCircuits<F, C, D>,
+        query_proof: &ProofWithVK,
+    ) -> Result<Vec<u8>> {
+        let (proof, vd) = query_proof.into();
+        let mut pw = PartialWitness::new();
+        self.query_verifier_wires
+            .set_target(&mut pw, revelation_circuit_set, proof, vd)?;
+        let proof = self.circuit_data.prove(pw)?;
+        serialize_proof(&proof)
+    }
+
+    pub fn circuit_data(&self) -> &CircuitData<F, C, D> {
+        &self.circuit_data
+    }
+}
+
 pub struct QueryParameters<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
@@ -143,6 +220,8 @@ pub struct QueryParameters<
         MAX_NUM_PLACEHOLDERS,
         { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
     >,
+    wrap_circuit:
+        WrapCircuitParams<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>,
 }
 
 pub enum QueryCircuitInput<
@@ -206,9 +285,11 @@ where
             &params_info.preprocessing_circuit_set,
             &params_info.preprocessing_vk,
         );
+        let wrap_circuit = WrapCircuitParams::build(revelation_params.get_circuit_set());
         Ok(Self {
             query_params,
             revelation_params,
+            wrap_circuit,
         })
     }
 
@@ -225,9 +306,15 @@ where
     ) -> Result<Vec<u8>> {
         match input {
             QueryCircuitInput::Query(input) => self.query_params.generate_proof(input),
-            QueryCircuitInput::Revelation(input) => self
-                .revelation_params
-                .generate_proof(input, self.query_params.get_circuit_set()),
+            QueryCircuitInput::Revelation(input) => {
+                let proof = self
+                    .revelation_params
+                    .generate_proof(input, self.query_params.get_circuit_set())?;
+                self.wrap_circuit.generate_proof(
+                    self.revelation_params.get_circuit_set(),
+                    &ProofWithVK::deserialize(&proof)?,
+                )
+            }
         }
     }
 }
