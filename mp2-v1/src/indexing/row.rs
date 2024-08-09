@@ -47,7 +47,6 @@ where
 #[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RowTreeKey {
     /// Value of the secondary index of the row
-    #[serde(serialize_with = "u256_to_string", deserialize_with = "string_to_u256")]
     pub value: U256,
     /// An value such that the pair (value,rest) is unique accross all rows
     pub rest: RowTreeKeyNonce,
@@ -81,6 +80,7 @@ impl RowTreeKey {
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct CellInfo<PrimaryIndex> {
     /// Value of the cell
+    #[serde(serialize_with = "u256_to_string", deserialize_with = "string_to_u256")]
     pub value: U256,
     /// The primary index under which this cell was proven to. In most cases it will be a block
     /// number.
