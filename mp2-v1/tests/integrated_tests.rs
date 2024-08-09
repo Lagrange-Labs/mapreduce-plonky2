@@ -68,12 +68,11 @@ async fn integrated_indexing() -> Result<()> {
         ChangeType::Deletion,
     ];
     mapping.run(&mut ctx, changes).await?;
-    mapping.test_query(&ctx).await?;
     Ok(())
 }
 
 #[test(tokio::test)]
-async fn integrated_query() -> Result<()> {
+async fn integrated_querying() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test");
     let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
