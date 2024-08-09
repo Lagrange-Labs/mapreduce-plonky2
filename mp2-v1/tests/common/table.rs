@@ -13,7 +13,7 @@ use mp2_v1::indexing::{
     row::{CellCollection, Row, RowTreeKey},
     ColumnID,
 };
-use parsil::symbols::{ContextProvider, ZkColumn, ZkTable};
+use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
 use plonky2::field::types::Field;
 use ryhope::{
     storage::{
@@ -530,8 +530,7 @@ impl Table {
         let zk_columns = self.columns.into_zkcolumns();
         Ok(ZkTable {
             name: self.name.clone(),
-            // TODO: metadata id
-            id: 0,
+            user_name: self.name.clone(),
             columns: zk_columns,
         })
     }
@@ -554,8 +553,12 @@ impl TableColumns {
 impl TableColumn {
     pub fn into_zkcolumn(&self) -> ZkColumn {
         ZkColumn {
-            id: F::from_canonical_u64(self.identifier),
-            is_primary_index: self.index.is_primary(),
+            id: self.identifier,
+            kind: match self.index {
+                IndexType::Primary => ColumnKind::PrimaryIndex,
+                IndexType::Secondary => ColumnKind::SecondaryIndex,
+                IndexType::None => ColumnKind::Standard,
+            },
             name: self.name.clone(),
         }
     }
