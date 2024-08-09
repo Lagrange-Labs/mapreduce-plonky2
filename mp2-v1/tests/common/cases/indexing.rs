@@ -222,9 +222,9 @@ impl TestCase {
         };
         let table = match factory {
             TreeFactory::New => {
-                Table::new(index_genesis_block, "single_table".to_string(), columns).await
+                Table::new(index_genesis_block, "mapping_table".to_string(), columns).await
             }
-            TreeFactory::Load => Table::load("single_table".to_string(), columns).await?,
+            TreeFactory::Load => Table::load("mapping_table".to_string(), columns).await?,
         };
 
         Ok(Self {

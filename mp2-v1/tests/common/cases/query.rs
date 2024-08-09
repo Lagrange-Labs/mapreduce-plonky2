@@ -167,7 +167,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
         epochs,
     );
     // now we can fetch the key that we want
-    let key_value = hex::encode(longest_key.value.to_be_bytes_vec());
+    let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     let key_column = table.columns.secondary.name.clone();
     // Assuming this is mapping with only two columns !
     let value_column = table.columns.rest[0].name.clone();
