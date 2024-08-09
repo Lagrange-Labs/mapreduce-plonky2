@@ -1,5 +1,7 @@
 use alloy::primitives::Address;
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
+use bb8::Pool;
+use bb8_postgres::{tokio_postgres::NoTls, PostgresConnectionManager};
 use futures::{
     stream::{self, StreamExt},
     FutureExt,
@@ -28,6 +30,7 @@ use ryhope::{
 };
 use serde::{Deserialize, Serialize};
 use std::{hash::Hash, iter::once};
+use tokio_postgres::row::Row as PsqlRow;
 use verifiable_db::query::universal_circuit::universal_circuit_inputs::ColumnCell;
 
 use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
@@ -107,6 +110,17 @@ impl TableColumns {
     }
 }
 
+pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
+async fn new_db_pool(db_url: &str) -> Result<DBPool> {
+    let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
+        .with_context(|| format!("while connecting to postgreSQL with `{}`", db_url))?;
+
+    let db_pool = DBPool::builder()
+        .build(db_manager)
+        .await
+        .context("while creating the db_pool")?;
+    Ok(db_pool)
+}
 pub struct Table {
     pub(crate) genesis_block: u64,
     pub(crate) name: TableID,
@@ -118,6 +132,7 @@ pub struct Table {
     // the columns information
     pub(crate) row: MerkleRowTree,
     pub(crate) index: MerkleIndexTree,
+    pub(crate) db_pool: DBPool,
 }
 
 fn row_table_name(name: &str) -> String {
@@ -150,7 +165,9 @@ impl Table {
         .unwrap();
         let genesis = index_tree.storage_state().await.shift;
         columns.self_assert();
+
         Ok(Self {
+            db_pool: new_db_pool(&db_url).await?,
             columns,
             genesis_block: genesis as u64,
             name: table_name,
@@ -174,7 +191,7 @@ impl Table {
             //InitSettings::Reset(sbbst::Tree::empty()),
             InitSettings::Reset(sbbst::Tree::with_shift((genesis_block - 1) as usize)),
             SqlStorageSettings {
-                db_url,
+                db_url: db_url.clone(),
                 table: index_table_name(&table_name),
             },
         )
@@ -183,6 +200,9 @@ impl Table {
 
         columns.self_assert();
         Self {
+            db_pool: new_db_pool(&db_url)
+                .await
+                .expect("unable to create db pool"),
             columns,
             genesis_block,
             name: table_name,
@@ -402,20 +422,13 @@ impl Table {
         Ok(IndexUpdateResult { plan })
     }
 
-    // For proving query, we need the column cell structure
-    // TODO: make it only one structure, with the indexing/ package
-    pub async fn cells_in_row(&self, key: &RowTreeKey, at: Epoch) -> Result<Vec<ColumnCell>> {
-        let payload = self.row.fetch_at(key, at).await;
-        // this includes the secondary AND the rest of the cells.
-        let cells = payload
-            .cells
-            .0
-            .into_iter()
-            .map(|(id, cell_info)| ColumnCell::new(id, cell_info.value))
-            .collect::<Vec<_>>();
-        // we then fetch the primary associated to it
-
-        Ok(cells)
+    pub async fn execute_row_query(&self, query: &str) -> Result<Vec<PsqlRow>> {
+        let connection = self.db_pool.get().await.unwrap();
+        let res = connection
+            .query(query, &[])
+            .await
+            .context("while fetching current epoch")?;
+        Ok(res)
     }
 }
 

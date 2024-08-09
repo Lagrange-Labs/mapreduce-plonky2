@@ -69,6 +69,7 @@ pub enum ProofKey {
     ValueExtraction((TableID, BlockPrimaryIndex)),
     #[allow(clippy::upper_case_acronyms)]
     IVC(BlockPrimaryIndex),
+    QueryUniversal((BlockPrimaryIndex, RowTreeKey)),
 }
 
 impl ProofKey {
@@ -116,6 +117,10 @@ impl Hash for ProofKey {
             }
             ProofKey::IVC(n) => {
                 "ivc".hash(state);
+                n.hash(state);
+            }
+            ProofKey::QueryUniversal(n) => {
+                "query_universal".hash(state);
                 n.hash(state);
             }
         }

@@ -1,14 +1,17 @@
 use std::{collections::HashMap, iter::once};
 
-use crate::common::{cases::indexing::BLOCK_COLUMN_NAME, rowtree::MerkleRowTree};
+use crate::common::{
+    cases::indexing::BLOCK_COLUMN_NAME, proof_storage::ProofKey, rowtree::MerkleRowTree,
+};
 
 use super::{
     super::{context::TestContext, proof_storage::ProofStorage, table::Table},
     MappingValuesExtractionArgs, TableSourceSlot, TestCase,
 };
 use alloy::primitives::U256;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::{stream, StreamExt};
+use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{array::ToField, F};
 use mp2_v1::{
@@ -20,7 +23,12 @@ use mp2_v1::{
     values_extraction::identifier_block_column,
 };
 use parsil::{resolve::CircuitPis, symbols::ContextProvider};
-use ryhope::{storage::RoEpochKvStorage, Epoch};
+use ryhope::{
+    storage::{pgsql::ToFromBytea, RoEpochKvStorage},
+    Epoch,
+};
+use sqlparser::ast::Query;
+use tokio_postgres::Row as PsqlRow;
 use verifiable_db::query::{
     self,
     aggregation::QueryBounds,
@@ -42,69 +50,90 @@ pub type CircuitInput = query::api::CircuitInput<
 >;
 
 impl TestCase {
-    pub async fn test_query(&self, ctx: &TestContext) -> Result<()> {
+    pub async fn test_query(&self, ctx: &mut TestContext) -> Result<()> {
         match self.source {
-            TableSourceSlot::Mapping((ref map, _)) => query_mapping(&ctx, map, &self.table).await?,
+            TableSourceSlot::Mapping((ref map, _)) => query_mapping(ctx, map, &self.table).await?,
             _ => unimplemented!("yet"),
         }
         Ok(())
     }
 }
+/// Run a test query on the mapping table such as created during the indexing phase
 async fn query_mapping(
-    ctx: &TestContext,
+    ctx: &mut TestContext,
     map: &MappingValuesExtractionArgs,
     table: &Table,
 ) -> Result<()> {
     let query_info = cook_query(table).await?;
     info!("QUERY on the testcase: {}", query_info.query);
     let parsed = parsil::prepare(&query_info.query)?;
-    let zktable = table.fetch_table(&table.name)?;
+    // the query to use to actually get the outputs expected
+    let exec_query = parsil::executor::generate_query_execution(&parsed, table)?;
+    let res = table.execute_row_query(&exec_query.to_string()).await?;
     info!(
-        "table name {:?} => columns name {:?}",
-        table.name,
-        zktable
-            .columns
-            .iter()
-            .map(|c| c.name.clone())
-            .collect::<Vec<_>>()
+        "Found {} results from query {}",
+        res.len(),
+        exec_query.to_string()
     );
+    print_vec_sql_rows(&res);
+    // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::resolve::resolve(&parsed, table)?;
-    run_query(ctx, table, query_info, pis)
+    prove_query(ctx, table, query_info, parsed, pis)
         .await
         .expect("unable to run universal query proof");
     Ok(())
 }
 
-async fn run_query(
-    ctx: &TestContext,
+async fn prove_query(
+    ctx: &mut TestContext,
     table: &Table,
     query: QueryCooking,
+    parsed: Query,
     pis: CircuitPis,
 ) -> Result<()> {
-    // right now we first test the universal query gadget on a single row
-    // 1. Get the all the cells including primary and secondary index
-    let example_epoch = query.epochs.last().cloned().unwrap();
-    let (row_ctx, _) = table
-        .row
-        .fetch_with_context_at(&query.example_row, example_epoch)
-        .await;
-    let cells = table
-        .cells_in_row(&query.example_row, example_epoch)
-        .await?;
-    let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(example_epoch));
-    let all_cells = once(primary_cell).chain(cells).collect::<Vec<_>>();
-    // 2. create input
-    let input = CircuitInput::new_universal_circuit(
-        &all_cells,
-        &pis.predication_operations,
-        &pis.result,
-        &query.placeholders,
-        row_ctx.is_leaf(),
-        &query.bounds,
-    )
-    .expect("unable to create universal query circuit inputs");
-    // 3. run proof
-    ctx.run_query_proof(input)?;
+    let rows_query = parsil::executor::generate_query_keys(&parsed, table)?;
+    let all_touched_rows = table.execute_row_query(&rows_query.to_string()).await?;
+    info!(
+        "Found {} ROW KEYS to process during proving time",
+        all_touched_rows.len()
+    );
+    let touched_rows: HashMap<BlockPrimaryIndex, RowTreeKey> = all_touched_rows
+        .into_iter()
+        .map(|r| {
+            let row_key = r
+                .get::<_, Option<Vec<u8>>>(0)
+                .map(RowTreeKey::from_bytea)
+                .context("unable to parse row key tree")?;
+            let block: Epoch = r.get::<_, i64>(1);
+            Ok((block as BlockPrimaryIndex, row_key))
+        })
+        .collect::<Result<_>>()?;
+    for (epoch, row_key) in &touched_rows {
+        // 1. Get the all the cells including primary and secondary index
+        let (row_ctx, row_payload) = table
+            .row
+            .fetch_with_context_at(row_key, *epoch as Epoch)
+            .await;
+        let cells = row_payload.cells.to_column_cells();
+        let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(*epoch));
+        let all_cells = once(primary_cell).chain(cells).collect::<Vec<_>>();
+        // 2. create input
+        let input = CircuitInput::new_universal_circuit(
+            &all_cells,
+            &pis.predication_operations,
+            &pis.result,
+            &query.placeholders,
+            row_ctx.is_leaf(),
+            &query.bounds,
+        )
+        .expect("unable to create universal query circuit inputs");
+        // 3. run proof if not ran already
+        let proof_key = ProofKey::QueryUniversal((*epoch, row_key.clone()));
+        if ctx.storage.get_proof_exact(&proof_key).is_err() {
+            let proof = ctx.run_query_proof(input)?;
+            ctx.storage.store_proof(proof_key, proof)?;
+        }
+    }
     Ok(())
 }
 
@@ -298,4 +327,18 @@ fn find_longest_consecutive_sequence(v: Vec<i64>) -> (usize, i64) {
         }
     }
     (longest, v[starting_idx])
+}
+
+fn print_vec_sql_rows(rows: &[PsqlRow]) {
+    if rows.len() == 0 {
+        println!("no rows returned");
+    }
+    let columns = rows.first().as_ref().unwrap().columns();
+    println!(
+        "{:?}",
+        columns.iter().map(|c| c.name().to_string()).join(" | ")
+    );
+    for row in rows {
+        println!("{:?}", row);
+    }
 }

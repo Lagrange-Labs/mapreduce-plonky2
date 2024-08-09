@@ -15,6 +15,7 @@ use plonky2::{
 };
 use ryhope::{storage::pgsql::ToFromBytea, tree::scapegoat, NodePayload};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use verifiable_db::query::universal_circuit::universal_circuit_inputs::ColumnCell;
 
 use super::{cell::CellTreeKey, ColumnID};
 
@@ -124,6 +125,14 @@ impl<PrimaryIndex: PartialEq + Eq + Default + Clone> CellCollection<PrimaryIndex
                 .map(|(id, cell)| (*id, cell.clone()))
                 .collect(),
         )
+    }
+
+    /// Return a vector of ColumnCells, which is necessary to give to the universal query gadget
+    pub fn to_column_cells(&self) -> Vec<ColumnCell> {
+        self.0
+            .iter()
+            .map(|(id, cell_info)| ColumnCell::new(*id, cell_info.value))
+            .collect()
     }
 }
 

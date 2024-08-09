@@ -82,7 +82,7 @@ async fn integrated_querying() -> Result<()> {
     ctx.build_params(ParamsType::Query).unwrap();
     info!("Params built");
     let mapping = TestCase::mapping_test_case(&ctx, TreeFactory::Load).await?;
-    mapping.test_query(&ctx).await?;
+    mapping.test_query(&mut ctx).await?;
     Ok(())
 }
 

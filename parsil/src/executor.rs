@@ -361,7 +361,7 @@ impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
     }
 }
 
-pub(crate) fn generate_query_execution<C: ContextProvider>(query: &Query, ctx: C) -> Result<Query> {
+pub fn generate_query_execution<C: ContextProvider>(query: &Query, ctx: C) -> Result<Query> {
     let mut executor = Executor::new(&ctx);
     let mut query_execution = query.clone();
     query_execution.visit(&mut executor)?;
@@ -370,7 +370,7 @@ pub(crate) fn generate_query_execution<C: ContextProvider>(query: &Query, ctx: C
     Ok(query_execution)
 }
 
-pub(crate) fn generate_query_keys<C: ContextProvider>(query: &Query, ctx: C) -> Result<Query> {
+pub fn generate_query_keys<C: ContextProvider>(query: &Query, ctx: C) -> Result<Query> {
     let mut pis = RowFetcher::new(&ctx);
     let mut query_pis = query.clone();
     pis.process(&mut query_pis)?;
