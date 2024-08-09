@@ -14,7 +14,7 @@ use plonky2::{
     plonk::config::{GenericHashOut, Hasher},
 };
 use ryhope::{storage::pgsql::ToFromBytea, tree::scapegoat, NodePayload};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{cell::CellTreeKey, ColumnID};
 
@@ -25,12 +25,29 @@ pub trait ToNonce {
     fn to_nonce(&self) -> RowTreeKeyNonce;
 }
 
+/// Serialize a U256 into its decimal representation
+fn u256_to_string<S: Serializer>(x: &U256, s: S) -> Result<S::Ok, S::Error> {
+    // U256 defaults to decimal stringization
+    s.serialize_str(&format!("{x}"))
+}
+
+/// Deserialize a U256 from its decimal representation
+fn string_to_u256<'de, D>(d: D) -> Result<U256, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    String::deserialize(d).and_then(|s| {
+        U256::from_str_radix(&s, 10).map_err(|e| serde::de::Error::custom(e.to_string()))
+    })
+}
+
 /// A unique identifier of a secondary-indexed row, from the secondary index value and an unique
 /// index since secondary index does not have to be unique.
 /// THis struct is kept in the JSON row as the "tree key".
 #[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RowTreeKey {
     /// Value of the secondary index of the row
+    #[serde(serialize_with = "u256_to_string", deserialize_with = "string_to_u256")]
     pub value: U256,
     /// An value such that the pair (value,rest) is unique accross all rows
     pub rest: RowTreeKeyNonce,
