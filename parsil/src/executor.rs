@@ -9,6 +9,7 @@ use sqlparser::ast::{
 
 use crate::{
     symbols::{ColumnKind, ContextProvider},
+    utils::parse_string,
     visitor::{AstPass, Visit},
 };
 
@@ -98,6 +99,28 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
                 opt_replace: None,
                 opt_rename: None,
             }));
+        Ok(())
+    }
+
+    fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
+        if let Some(replacement) = match expr {
+            Expr::Value(v) => match v {
+                Value::Number(_, _) => None,
+                Value::SingleQuotedString(s) => Some(Expr::Cast {
+                    kind: CastKind::DoubleColon,
+                    expr: Box::new(Expr::Value(Value::SingleQuotedString(format!(
+                        "{}",
+                        parse_string(s)?
+                    )))),
+                    data_type: UINT256,
+                    format: None,
+                }),
+                _ => None,
+            },
+            _ => None,
+        } {
+            *expr = replacement;
+        }
         Ok(())
     }
 
@@ -228,6 +251,28 @@ impl<'a, C: ContextProvider> Executor<'a, C> {
 }
 
 impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
+    fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
+        if let Some(replacement) = match expr {
+            Expr::Value(v) => match v {
+                Value::Number(_, _) => None,
+                Value::SingleQuotedString(s) => Some(Expr::Cast {
+                    kind: CastKind::DoubleColon,
+                    expr: Box::new(Expr::Value(Value::SingleQuotedString(format!(
+                        "{}",
+                        parse_string(s)?
+                    )))),
+                    data_type: UINT256,
+                    format: None,
+                }),
+                _ => None,
+            },
+            _ => None,
+        } {
+            *expr = replacement;
+        }
+        Ok(())
+    }
+
     fn post_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
         if let Some(replacement) = match &table_factor {
             TableFactor::Table {
