@@ -175,6 +175,9 @@ impl Table {
             index: index_tree,
         })
     }
+    pub fn row_table_name(&self) -> String {
+        row_table_name(&self.name)
+    }
 
     pub async fn new(genesis_block: u64, table_name: String, columns: TableColumns) -> Self {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());

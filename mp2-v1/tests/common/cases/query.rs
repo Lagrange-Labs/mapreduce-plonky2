@@ -117,7 +117,6 @@ async fn prove_query(
             .await;
         // API is gonna change on this but right now, we have to sort all the "rest" cells by index
         // in the tree, and put the primary one and secondary one in front
-        // The order of insertion is determined by the table columns order
         let rest_cells = table
             .columns
             .non_indexed_columns()
@@ -223,7 +222,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     let key_column = table.columns.secondary.name.clone();
     // Assuming this is mapping with only two columns !
     let value_column = table.columns.rest[0].name.clone();
-    let table_name = table.name.clone();
+    let table_name = table.row_table_name();
     // we set the block bounds
     let (longest_sequence, starting) = find_longest_consecutive_sequence(epochs.to_vec());
     // TODO: careful about off by one error. -1 because tree epoch starts at 1
