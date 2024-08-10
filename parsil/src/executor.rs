@@ -13,6 +13,29 @@ use crate::{
     visitor::{AstPass, Visit},
 };
 
+fn convert_number_string(expr: &mut Expr) -> Result<()> {
+    if let Some(replacement) = match expr {
+        Expr::Value(v) => match v {
+            Value::Number(_, _) => None,
+            Value::SingleQuotedString(s) => Expr::Cast {
+                kind: CastKind::DoubleColon,
+                expr: Box::new(Expr::Value(Value::SingleQuotedString(format!(
+                    "{}",
+                    parse_string(s)?
+                )))),
+                data_type: UINT256,
+                format: None,
+            }
+            .into(),
+            _ => None,
+        },
+        _ => None,
+    } {
+        *expr = replacement;
+    }
+    Ok(())
+}
+
 /// Generate an [`Expr`] encoding `generate_series(__valid_from, __valid_until)`
 fn expand_block_range() -> Expr {
     Expr::Function(Function {
@@ -103,25 +126,7 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
     }
 
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
-        if let Some(replacement) = match expr {
-            Expr::Value(v) => match v {
-                Value::Number(_, _) => None,
-                Value::SingleQuotedString(s) => Some(Expr::Cast {
-                    kind: CastKind::DoubleColon,
-                    expr: Box::new(Expr::Value(Value::SingleQuotedString(format!(
-                        "{}",
-                        parse_string(s)?
-                    )))),
-                    data_type: UINT256,
-                    format: None,
-                }),
-                _ => None,
-            },
-            _ => None,
-        } {
-            *expr = replacement;
-        }
-        Ok(())
+        convert_number_string(expr)
     }
 
     fn post_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
@@ -143,7 +148,7 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
                         if table_alias.columns.is_empty() {
                             None
                         } else {
-                            Some(table_alias.columns.clone())
+                            table_alias.columns.clone().into()
                         },
                     )
                 } else {
@@ -181,7 +186,7 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
                         }))
                         .collect();
 
-                Some(TableFactor::Derived {
+                TableFactor::Derived {
                     lateral: false,
                     subquery: Box::new(Query {
                         with: None,
@@ -231,7 +236,8 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
                         name: Ident::new(apparent_table_name),
                         columns: vec![],
                     }),
-                })
+                }
+                .into()
             }
             _ => None,
         } {
@@ -252,25 +258,7 @@ impl<'a, C: ContextProvider> Executor<'a, C> {
 
 impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
-        if let Some(replacement) = match expr {
-            Expr::Value(v) => match v {
-                Value::Number(_, _) => None,
-                Value::SingleQuotedString(s) => Some(Expr::Cast {
-                    kind: CastKind::DoubleColon,
-                    expr: Box::new(Expr::Value(Value::SingleQuotedString(format!(
-                        "{}",
-                        parse_string(s)?
-                    )))),
-                    data_type: UINT256,
-                    format: None,
-                }),
-                _ => None,
-            },
-            _ => None,
-        } {
-            *expr = replacement;
-        }
-        Ok(())
+        convert_number_string(expr)
     }
 
     fn post_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
@@ -302,7 +290,7 @@ impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
                             if table_alias.columns.is_empty() {
                                 None
                             } else {
-                                Some(table_alias.columns.clone())
+                                table_alias.columns.clone().into()
                             },
                         )
                     } else {
