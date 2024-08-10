@@ -593,7 +593,7 @@ impl ContextProvider for Table {
 impl ContextProvider for &Table {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         ensure!(
-            self.name == table_name,
+            self.row_table_name() == table_name,
             "names differ table {} vs requested {}",
             self.name,
             table_name
