@@ -15,7 +15,7 @@ use mp2_common::{
 use mp2_v1::{
     api::{generate_proof, CircuitInput, PublicParameters},
     length_extraction,
-    values_extraction::{self, identifier_single_var_column},
+    values_extraction::{self},
 };
 use rand::{thread_rng, Rng};
 use rlp::{Prototype, Rlp};

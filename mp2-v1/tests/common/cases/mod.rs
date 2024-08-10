@@ -89,13 +89,9 @@ impl UniqueMappingEntry {
         // we construct the two associated cells in the table. One of them will become
         // a SecondaryIndexCell depending on the secondary index type we have chosen
         // for this mapping.
-        let extract_key = MappingIndex::Key(deterministic_identifier_for_mapping_key_column(
-            slot, contract,
-        ));
+        let extract_key = MappingIndex::Key(identifier_for_mapping_key_column(slot, contract));
         let key_cell = self.to_cell(extract_key);
-        let extract_key = MappingIndex::Value(deterministic_identifier_for_mapping_value_column(
-            slot, contract,
-        ));
+        let extract_key = MappingIndex::Value(identifier_for_mapping_value_column(slot, contract));
         let value_cell = self.to_cell(extract_key);
         // then we look at which one is must be the secondary cell
         let (secondary, rest) = match index {
@@ -214,34 +210,4 @@ pub(crate) struct LengthExtractionArgs {
 pub(crate) struct ContractExtractionArgs {
     /// Storage slot
     pub(crate) slot: StorageSlot,
-}
-
-/// NOTE : these deterministic functions  are here just for ease of use in the test
-/// We should alwys use the publicly exported one
-pub(crate) fn deterministic_identifier_single_var_column(
-    slot: u8,
-    _contract_address: &Address,
-) -> u64 {
-    let mut rng = ChaCha8Rng::seed_from_u64(slot as u64);
-    let deterministic = Address::from_slice(&rng.gen::<[u8; 20]>());
-    identifier_single_var_column(slot, &deterministic)
-}
-
-pub(crate) fn deterministic_identifier_for_mapping_key_column(
-    slot: u8,
-    _contract_address: &Address,
-) -> u64 {
-    let mut rng = ChaCha8Rng::seed_from_u64(slot as u64);
-    let deterministic = Address::from_slice(&rng.gen::<[u8; 20]>());
-    identifier_for_mapping_key_column(slot, &deterministic)
-}
-
-/// Calculate `value_id = Poseidon(VAL || slot || contract_address)[0]` for mapping variable leaf.
-pub(crate) fn deterministic_identifier_for_mapping_value_column(
-    slot: u8,
-    _contract_address: &Address,
-) -> u64 {
-    let mut rng = ChaCha8Rng::seed_from_u64(slot as u64);
-    let deterministic = Address::from_slice(&rng.gen::<[u8; 20]>());
-    identifier_for_mapping_value_column(slot, &deterministic)
 }

@@ -37,7 +37,7 @@ use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifie
 
 pub type TableID = String;
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum IndexType {
     Primary,
     Secondary,
@@ -46,21 +46,18 @@ pub enum IndexType {
 
 impl IndexType {
     pub fn is_primary(&self) -> bool {
-        match self {
-            IndexType::Primary => true,
-            _ => false,
-        }
+        matches!(self, IndexType::Primary)
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TableColumn {
     pub name: String,
     pub identifier: ColumnID,
     pub index: IndexType,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TableColumns {
     pub primary: TableColumn,
     pub secondary: TableColumn,
@@ -438,6 +435,12 @@ impl Table {
             .context("while fetching current epoch")?;
         Ok(res)
     }
+    pub fn table_info(&self) -> TableInfo {
+        TableInfo {
+            table_name: self.name.clone(),
+            columns: self.columns.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -609,4 +612,10 @@ impl ContextProvider for &Table {
     fn output_ids(&self) -> Vec<u64> {
         todo!()
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableInfo {
+    pub columns: TableColumns,
+    pub table_name: String,
 }

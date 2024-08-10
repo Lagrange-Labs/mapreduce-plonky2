@@ -5,10 +5,7 @@ use crate::common::{
     cases::indexing::BLOCK_COLUMN_NAME, proof_storage::ProofKey, rowtree::MerkleRowTree,
 };
 
-use super::{
-    super::{context::TestContext, proof_storage::ProofStorage, table::Table},
-    MappingValuesExtractionArgs, TableSourceSlot, TestCase,
-};
+use super::super::{context::TestContext, proof_storage::ProofStorage, table::Table};
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::{Context, Result};
 use futures::{stream, StreamExt};
@@ -48,21 +45,20 @@ pub type CircuitInput = query::api::CircuitInput<
     MAX_NUM_RESULTS,
 >;
 
-impl TestCase {
-    pub async fn test_query(&self, ctx: &mut TestContext) -> Result<()> {
-        match self.source {
-            TableSourceSlot::Mapping((ref map, _)) => query_mapping(ctx, map, &self.table).await?,
-            _ => unimplemented!("yet"),
-        }
-        Ok(())
+pub enum TableType {
+    Mapping,
+    Single,
+}
+
+pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Result<()> {
+    match t {
+        TableType::Mapping => query_mapping(ctx, &table).await?,
+        _ => unimplemented!("yet"),
     }
+    Ok(())
 }
 /// Run a test query on the mapping table such as created during the indexing phase
-async fn query_mapping(
-    ctx: &mut TestContext,
-    map: &MappingValuesExtractionArgs,
-    table: &Table,
-) -> Result<()> {
+async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     let query_info = cook_query(table).await?;
     info!("QUERY on the testcase: {}", query_info.query);
     let parsed = parsil::prepare(&query_info.query)?;

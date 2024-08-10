@@ -3,15 +3,25 @@
 #![feature(generic_const_exprs)]
 #![feature(assert_matches)]
 
-use anyhow::Result;
+use std::{
+    fs::File,
+    io::{BufReader, BufWriter},
+    path::PathBuf,
+};
+
+use anyhow::{Context, Result};
 
 use common::{
-    cases::indexing::{ChangeType, TreeFactory, UpdateType},
-    context::{self, ParamsType},
-    proof_storage::{ProofKV, ProofStorage},
-    table::Table,
+    cases::{
+        indexing::{ChangeType, TreeFactory, UpdateType},
+        query::{test_query, TableType},
+    },
+    context::{self, ParamsType, TestContextConfig},
+    proof_storage::{ProofKV, ProofStorage, DEFAULT_PROOF_STORE_FOLDER},
+    table::{Table, TableInfo},
     TestCase, TestContext,
 };
+use envconfig::Envconfig;
 use log::info;
 use parsil::symbols::ContextProvider;
 use test_log::test;
@@ -40,6 +50,7 @@ pub(crate) mod common;
 //
 
 const PROOF_STORE_FILE: &str = "test_proofs.store";
+const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
 
 #[test(tokio::test)]
 async fn integrated_indexing() -> Result<()> {
@@ -68,6 +79,8 @@ async fn integrated_indexing() -> Result<()> {
         ChangeType::Deletion,
     ];
     mapping.run(&mut ctx, changes).await?;
+    // save columns information and table information in JSON so querying test can pick up
+    write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table.table_info())?;
     Ok(())
 }
 
@@ -75,15 +88,42 @@ async fn integrated_indexing() -> Result<()> {
 async fn integrated_querying() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test");
+    let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
     let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
     info!("Loading Anvil and contract");
     let mut ctx = context::new_local_chain(storage).await;
     info!("Building querying params");
     ctx.build_params(ParamsType::Query).unwrap();
     info!("Params built");
-    let mapping = TestCase::mapping_test_case(&ctx, TreeFactory::Load).await?;
-    mapping.test_query(&mut ctx).await?;
+    let table = Table::load(table_info.table_name, table_info.columns).await?;
+    test_query(&mut ctx, table, TableType::Mapping).await?;
     Ok(())
+}
+
+fn table_info_path(f: &str) -> PathBuf {
+    let cfg = TestContextConfig::init_from_env()
+        .context("while parsing configuration")
+        .unwrap();
+    let path = cfg
+        .params_dir
+        .unwrap_or(DEFAULT_PROOF_STORE_FOLDER.to_string());
+    let mut path = PathBuf::from(path);
+    path.push(f);
+    path
+}
+
+fn write_table_info(f: &str, info: TableInfo) -> Result<()> {
+    let file = File::create(f)?;
+    let writer = BufWriter::new(file);
+    serde_json::to_writer(writer, &info)?;
+    Ok(())
+}
+
+fn read_table_info(f: &str) -> Result<TableInfo> {
+    let file = File::open(f)?;
+    let reader = BufReader::new(file);
+    let info = serde_json::from_reader(reader)?;
+    Ok(info)
 }
 
 //#[test]

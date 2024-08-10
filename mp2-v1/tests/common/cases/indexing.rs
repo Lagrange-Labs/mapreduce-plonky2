@@ -18,9 +18,8 @@ use ryhope::storage::RoEpochKvStorage;
 use crate::common::{
     bindings::simple::Simple::{self, MappingChange, MappingOperation},
     cases::{
-        deterministic_identifier_for_mapping_key_column,
-        deterministic_identifier_for_mapping_value_column,
-        deterministic_identifier_single_var_column, MappingIndex,
+        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+        identifier_single_var_column, MappingIndex,
     },
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
@@ -116,10 +115,7 @@ impl TestCase {
             },
             secondary: TableColumn {
                 name: "column_value".to_string(),
-                identifier: deterministic_identifier_single_var_column(
-                    INDEX_SLOT,
-                    contract_address,
-                ),
+                identifier: identifier_single_var_column(INDEX_SLOT, contract_address),
                 index: IndexType::Secondary,
             },
             rest: SINGLE_SLOTS
@@ -128,8 +124,7 @@ impl TestCase {
                 .filter_map(|(i, slot)| match i {
                     _ if *slot == INDEX_SLOT => None,
                     _ => {
-                        let identifier =
-                            deterministic_identifier_single_var_column(*slot, contract_address);
+                        let identifier = identifier_single_var_column(*slot, contract_address);
                         Some(TableColumn {
                             name: format!("column_{}", i),
                             identifier,
@@ -171,10 +166,8 @@ impl TestCase {
         let index_genesis_block = ctx.block_number().await + 1;
         // to toggle off and on
         let value_as_index = true;
-        let value_id =
-            deterministic_identifier_for_mapping_value_column(MAPPING_SLOT, contract_address);
-        let key_id =
-            deterministic_identifier_for_mapping_key_column(MAPPING_SLOT, contract_address);
+        let value_id = identifier_for_mapping_value_column(MAPPING_SLOT, contract_address);
+        let key_id = identifier_for_mapping_key_column(MAPPING_SLOT, contract_address);
         let (index_identifier, mapping_index, cell_identifier) = match value_as_index {
             true => (value_id, MappingIndex::Value(value_id), key_id),
             false => (key_id, MappingIndex::Key(key_id), value_id),
@@ -828,8 +821,7 @@ impl TestCase {
                 let mut rest_cells = Vec::new();
                 for slot in args.slots.iter() {
                     let query = ProofQuery::new_simple_slot(self.contract_address, *slot as usize);
-                    let id =
-                        deterministic_identifier_single_var_column(*slot, &self.contract_address);
+                    let id = identifier_single_var_column(*slot, &self.contract_address);
                     // Instead of manually setting the value to U256, we really extract from the
                     // MPT proof to mimick the way to "see" update. Also, it ensures we are getting
                     // the formatting and endianness right.
