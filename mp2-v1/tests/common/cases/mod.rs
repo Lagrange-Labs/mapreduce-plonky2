@@ -3,7 +3,10 @@
 use alloy::primitives::{Address, U256};
 use indexing::TableRowValues;
 use log::debug;
-use mp2_common::eth::StorageSlot;
+use mp2_common::{
+    eth::StorageSlot,
+    utils::{pack_and_compute_poseidon_value, Endianness},
+};
 use mp2_test::utils::random_vector;
 use mp2_v1::{
     indexing::{
@@ -11,8 +14,13 @@ use mp2_v1::{
         cell::Cell,
         row::{RowTreeKey, ToNonce},
     },
-    values_extraction::{identifier_for_mapping_key_column, identifier_for_mapping_value_column},
+    values_extraction::{
+        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+        identifier_single_var_column,
+    },
 };
+use rand::{thread_rng, Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
 use super::{
     rowtree::SecondaryIndexCell,
@@ -81,9 +89,13 @@ impl UniqueMappingEntry {
         // we construct the two associated cells in the table. One of them will become
         // a SecondaryIndexCell depending on the secondary index type we have chosen
         // for this mapping.
-        let extract_key = MappingIndex::Key(identifier_for_mapping_key_column(slot, contract));
+        let extract_key = MappingIndex::Key(deterministic_identifier_for_mapping_key_column(
+            slot, contract,
+        ));
         let key_cell = self.to_cell(extract_key);
-        let extract_key = MappingIndex::Value(identifier_for_mapping_value_column(slot, contract));
+        let extract_key = MappingIndex::Value(deterministic_identifier_for_mapping_value_column(
+            slot, contract,
+        ));
         let value_cell = self.to_cell(extract_key);
         // then we look at which one is must be the secondary cell
         let (secondary, rest) = match index {
@@ -202,4 +214,29 @@ pub(crate) struct LengthExtractionArgs {
 pub(crate) struct ContractExtractionArgs {
     /// Storage slot
     pub(crate) slot: StorageSlot,
+}
+
+pub fn deterministic_identifier_single_var_column(slot: u8, contract_address: &Address) -> u64 {
+    let mut rng = ChaCha8Rng::seed_from_u64(slot as u64);
+    let deterministic = Address::from_slice(&rng.gen::<[u8; 20]>());
+    identifier_single_var_column(slot, &deterministic)
+}
+
+pub fn deterministic_identifier_for_mapping_key_column(
+    slot: u8,
+    contract_address: &Address,
+) -> u64 {
+    let mut rng = ChaCha8Rng::seed_from_u64(slot as u64);
+    let deterministic = Address::from_slice(&rng.gen::<[u8; 20]>());
+    identifier_for_mapping_key_column(slot, &deterministic)
+}
+
+/// Calculate `value_id = Poseidon(VAL || slot || contract_address)[0]` for mapping variable leaf.
+pub fn deterministic_identifier_for_mapping_value_column(
+    slot: u8,
+    contract_address: &Address,
+) -> u64 {
+    let mut rng = ChaCha8Rng::seed_from_u64(slot as u64);
+    let deterministic = Address::from_slice(&rng.gen::<[u8; 20]>());
+    deterministic_identifier_for_mapping_value_column(slot, &deterministic)
 }

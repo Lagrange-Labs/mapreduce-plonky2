@@ -19,7 +19,6 @@ use mp2_v1::{
     indexing::{
         block::BlockPrimaryIndex,
         row::{Row, RowTreeKey},
-        ColumnID,
     },
     values_extraction::identifier_block_column,
 };
@@ -33,7 +32,6 @@ use tokio_postgres::Row as PsqlRow;
 use verifiable_db::query::{
     self,
     aggregation::QueryBounds,
-    computational_hash_ids::PlaceholderIdentifier,
     universal_circuit::universal_circuit_inputs::{ColumnCell, PlaceholderId},
 };
 
@@ -68,6 +66,8 @@ async fn query_mapping(
     let query_info = cook_query(table).await?;
     info!("QUERY on the testcase: {}", query_info.query);
     let parsed = parsil::prepare(&query_info.query)?;
+    println!("QUERY table columns -> {:?}", table.columns.to_zkcolumns());
+
     // the query to use to actually get the outputs expected
     let exec_query = parsil::executor::generate_query_execution(&parsed, table)?;
     let res = table
@@ -82,7 +82,7 @@ async fn query_mapping(
         res.len(),
         exec_query.to_string()
     );
-    print_vec_sql_rows(&res, SqlType::Float);
+    print_vec_sql_rows(&res, SqlType::Numeric);
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::resolve::resolve(&parsed, table)?;
     prove_query(ctx, table, query_info, parsed, pis)
@@ -359,20 +359,20 @@ fn find_longest_consecutive_sequence(v: Vec<i64>) -> (usize, i64) {
 }
 
 pub enum SqlType {
-    Float,
+    Numeric,
 }
 
 impl SqlType {
     pub fn extract(&self, row: &PsqlRow, idx: usize) -> SqlReturn {
         match self {
-            SqlType::Float => SqlReturn::Float(row.get::<_, f64>(idx)),
+            SqlType::Numeric => SqlReturn::Numeric(row.get::<_, rust_decimal::Decimal>(idx)),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum SqlReturn {
-    Float(f64),
+    Numeric(rust_decimal::Decimal),
 }
 
 fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) {

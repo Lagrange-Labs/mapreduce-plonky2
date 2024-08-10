@@ -20,7 +20,11 @@ use ryhope::storage::RoEpochKvStorage;
 
 use crate::common::{
     bindings::simple::Simple::{self, MappingChange, MappingOperation},
-    cases::MappingIndex,
+    cases::{
+        deterministic_identifier_for_mapping_key_column,
+        deterministic_identifier_for_mapping_value_column,
+        deterministic_identifier_single_var_column, MappingIndex,
+    },
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::{
@@ -115,7 +119,10 @@ impl TestCase {
             },
             secondary: TableColumn {
                 name: "column_value".to_string(),
-                identifier: identifier_single_var_column(INDEX_SLOT, contract_address),
+                identifier: deterministic_identifier_single_var_column(
+                    INDEX_SLOT,
+                    contract_address,
+                ),
                 index: IndexType::Secondary,
             },
             rest: SINGLE_SLOTS
@@ -124,7 +131,8 @@ impl TestCase {
                 .filter_map(|(i, slot)| match i {
                     _ if *slot == INDEX_SLOT => None,
                     _ => {
-                        let identifier = identifier_single_var_column(*slot, contract_address);
+                        let identifier =
+                            deterministic_identifier_single_var_column(*slot, contract_address);
                         Some(TableColumn {
                             name: format!("column_{}", i),
                             identifier,
@@ -159,15 +167,17 @@ impl TestCase {
 
         let contract = Simple::deploy(&provider).await.unwrap();
         info!(
-            "Deployed Simple contract at address: {}",
+            "Deployed MAPPING Simple contract at address: {}",
             contract.address()
         );
         let contract_address = contract.address();
         let index_genesis_block = ctx.block_number().await + 1;
         // to toggle off and on
         let value_as_index = true;
-        let value_id = identifier_for_mapping_value_column(MAPPING_SLOT, contract_address);
-        let key_id = identifier_for_mapping_key_column(MAPPING_SLOT, contract_address);
+        let value_id =
+            deterministic_identifier_for_mapping_value_column(MAPPING_SLOT, contract_address);
+        let key_id =
+            deterministic_identifier_for_mapping_key_column(MAPPING_SLOT, contract_address);
         let (index_identifier, mapping_index, cell_identifier) = match value_as_index {
             true => (value_id, MappingIndex::Value(value_id), key_id),
             false => (key_id, MappingIndex::Key(key_id), value_id),
@@ -220,6 +230,7 @@ impl TestCase {
                 index: IndexType::None,
             }],
         };
+        debug!("MAPPING ZK COLUMNS -> {:?}", columns);
         let table = match factory {
             TreeFactory::New => {
                 Table::new(index_genesis_block, "mapping_table".to_string(), columns).await
