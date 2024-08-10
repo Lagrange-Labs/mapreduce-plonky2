@@ -425,10 +425,15 @@ impl Table {
         Ok(IndexUpdateResult { plan })
     }
 
-    pub async fn execute_row_query(&self, query: &str) -> Result<Vec<PsqlRow>> {
+    pub async fn execute_row_query(
+        &self,
+        query: &str,
+        min_block: BlockPrimaryIndex,
+        max_block: BlockPrimaryIndex,
+    ) -> Result<Vec<PsqlRow>> {
         let connection = self.db_pool.get().await.unwrap();
         let res = connection
-            .query(query, &[])
+            .query(query, &[&(min_block as i64), &(max_block as i64)])
             .await
             .context("while fetching current epoch")?;
         Ok(res)
@@ -595,7 +600,7 @@ impl ContextProvider for &Table {
         ensure!(
             self.row_table_name() == table_name,
             "names differ table {} vs requested {}",
-            self.name,
+            self.row_table_name(),
             table_name
         );
         self.to_zktable()

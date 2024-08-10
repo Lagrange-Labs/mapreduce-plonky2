@@ -8,7 +8,7 @@ use super::{
     super::{context::TestContext, proof_storage::ProofStorage, table::Table},
     MappingValuesExtractionArgs, TableSourceSlot, TestCase,
 };
-use alloy::primitives::U256;
+use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::{Context, Result};
 use futures::{stream, StreamExt};
 use itertools::Itertools;
@@ -69,7 +69,13 @@ async fn query_mapping(
     let parsed = parsil::prepare(&query_info.query)?;
     // the query to use to actually get the outputs expected
     let exec_query = parsil::executor::generate_query_execution(&parsed, table)?;
-    let res = table.execute_row_query(&exec_query.to_string()).await?;
+    let res = table
+        .execute_row_query(
+            &exec_query.to_string(),
+            query_info.min_block,
+            query_info.max_block,
+        )
+        .await?;
     info!(
         "Found {} results from query {}",
         res.len(),
@@ -93,7 +99,9 @@ async fn prove_query(
     pis: CircuitPis,
 ) -> Result<()> {
     let rows_query = parsil::executor::generate_query_keys(&parsed, table)?;
-    let all_touched_rows = table.execute_row_query(&rows_query.to_string()).await?;
+    let all_touched_rows = table
+        .execute_row_query(&rows_query.to_string(), query.min_block, query.max_block)
+        .await?;
     info!(
         "Found {} ROW KEYS to process during proving time",
         all_touched_rows.len()
@@ -163,6 +171,8 @@ struct QueryCooking {
     query: String,
     placeholders: HashMap<PlaceholderId, U256>,
     bounds: QueryBounds,
+    min_block: BlockPrimaryIndex,
+    max_block: BlockPrimaryIndex,
     // At the moment it returns the row key selected and the epochs to run the circuit on
     // This will get removed once we can serach through JSON in PSQL directly.
     example_row: RowTreeKey,
@@ -295,6 +305,8 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     );
     Ok(QueryCooking {
         bounds,
+        min_block: min_block as BlockPrimaryIndex,
+        max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
         example_row: longest_key.clone(),
