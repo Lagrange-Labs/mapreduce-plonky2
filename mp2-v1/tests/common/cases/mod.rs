@@ -216,15 +216,20 @@ pub(crate) struct ContractExtractionArgs {
     pub(crate) slot: StorageSlot,
 }
 
-pub fn deterministic_identifier_single_var_column(slot: u8, contract_address: &Address) -> u64 {
+/// NOTE : these deterministic functions  are here just for ease of use in the test
+/// We should alwys use the publicly exported one
+pub(crate) fn deterministic_identifier_single_var_column(
+    slot: u8,
+    _contract_address: &Address,
+) -> u64 {
     let mut rng = ChaCha8Rng::seed_from_u64(slot as u64);
     let deterministic = Address::from_slice(&rng.gen::<[u8; 20]>());
     identifier_single_var_column(slot, &deterministic)
 }
 
-pub fn deterministic_identifier_for_mapping_key_column(
+pub(crate) fn deterministic_identifier_for_mapping_key_column(
     slot: u8,
-    contract_address: &Address,
+    _contract_address: &Address,
 ) -> u64 {
     let mut rng = ChaCha8Rng::seed_from_u64(slot as u64);
     let deterministic = Address::from_slice(&rng.gen::<[u8; 20]>());
@@ -232,11 +237,11 @@ pub fn deterministic_identifier_for_mapping_key_column(
 }
 
 /// Calculate `value_id = Poseidon(VAL || slot || contract_address)[0]` for mapping variable leaf.
-pub fn deterministic_identifier_for_mapping_value_column(
+pub(crate) fn deterministic_identifier_for_mapping_value_column(
     slot: u8,
-    contract_address: &Address,
+    _contract_address: &Address,
 ) -> u64 {
     let mut rng = ChaCha8Rng::seed_from_u64(slot as u64);
     let deterministic = Address::from_slice(&rng.gen::<[u8; 20]>());
-    deterministic_identifier_for_mapping_value_column(slot, &deterministic)
+    identifier_for_mapping_value_column(slot, &deterministic)
 }

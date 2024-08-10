@@ -10,10 +10,7 @@ use mp2_v1::{
         row::{CellCollection, CellInfo, Row, RowTreeKey},
         ColumnID,
     },
-    values_extraction::{
-        identifier_block_column, identifier_for_mapping_key_column,
-        identifier_for_mapping_value_column, identifier_single_var_column,
-    },
+    values_extraction::identifier_block_column,
 };
 use rand::{Rng, SeedableRng};
 use ryhope::storage::RoEpochKvStorage;
@@ -831,7 +828,8 @@ impl TestCase {
                 let mut rest_cells = Vec::new();
                 for slot in args.slots.iter() {
                     let query = ProofQuery::new_simple_slot(self.contract_address, *slot as usize);
-                    let id = identifier_single_var_column(*slot, &self.contract_address);
+                    let id =
+                        deterministic_identifier_single_var_column(*slot, &self.contract_address);
                     // Instead of manually setting the value to U256, we really extract from the
                     // MPT proof to mimick the way to "see" update. Also, it ensures we are getting
                     // the formatting and endianness right.
