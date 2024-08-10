@@ -335,6 +335,56 @@ impl<F: RichField + Extendable<D>, const D: usize> SelectHashBuilder for Circuit
     }
 }
 
+pub trait SelectAccumulator {
+    /// Select `first_acc` or `second_acc` as output depending on the Boolean `cond`
+    fn select_accumulator(
+        &mut self,
+        cond: BoolTarget,
+        first_acc: &CurveTarget,
+        second_acc: &CurveTarget,
+    ) -> CurveTarget;
+}
+
+impl<F: RichField + Extendable<D>, const D: usize> SelectAccumulator for CircuitBuilder<F, D> {
+    fn select_accumulator(
+        &mut self,
+        cond: BoolTarget,
+        first_acc: &CurveTarget,
+        second_acc: &CurveTarget,
+    ) -> CurveTarget {
+        let CurveTarget((first_ext, first_bool)) = first_acc;
+        let CurveTarget((second_ext, second_bool)) = second_acc;
+
+        let selected_ext = [
+            QuinticExtensionTarget::new(
+                first_ext[0]
+                    .to_target_array()
+                    .iter()
+                    .zip(second_ext[0].to_target_array().iter())
+                    .map(|(first, second)| self.select(cond, *first, *second))
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            ),
+            QuinticExtensionTarget::new(
+                first_ext[1]
+                    .to_target_array()
+                    .iter()
+                    .zip(second_ext[1].to_target_array().iter())
+                    .map(|(first, second)| self.select(cond, *first, *second))
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            ),
+        ];
+
+        let selected_bool_target = self.select(cond, first_bool.target, second_bool.target);
+        let selected_bool = BoolTarget::new_unsafe(selected_bool_target);
+
+        CurveTarget((selected_ext, selected_bool))
+    }
+}
+
 pub trait ToFields<F: RichField> {
     fn to_fields(&self) -> Vec<F>;
 }
