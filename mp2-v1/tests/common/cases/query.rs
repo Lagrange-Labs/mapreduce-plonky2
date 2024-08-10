@@ -1,3 +1,4 @@
+use plonky2::field::types::Field;
 use std::{collections::HashMap, iter::once};
 
 use crate::common::{
@@ -81,7 +82,7 @@ async fn query_mapping(
         res.len(),
         exec_query.to_string()
     );
-    print_vec_sql_rows(&res);
+    print_vec_sql_rows(&res, SqlType::Float);
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::resolve::resolve(&parsed, table)?;
     prove_query(ctx, table, query_info, parsed, pis)
@@ -246,14 +247,8 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     // placeholders.generic(("generic", $3)),(generic,$4), (generic,$5))
     // WHERE price > $3 AND price < $4 <--
     let placeholders = HashMap::from([
-        (
-            PlaceholderIdentifier::GenericPlaceholder(1).identifier(),
-            U256::from(min_block),
-        ),
-        (
-            PlaceholderIdentifier::GenericPlaceholder(2).identifier(),
-            U256::from(max_block),
-        ),
+        (F::from_canonical_usize(1), U256::from(min_block)),
+        (F::from_canonical_usize(2), U256::from(max_block)),
     ]);
     // placeholders _values = [min_block,max_block,sec_address];
     // "$3" = secondary min placeholder
@@ -363,7 +358,24 @@ fn find_longest_consecutive_sequence(v: Vec<i64>) -> (usize, i64) {
     (longest, v[starting_idx])
 }
 
-fn print_vec_sql_rows(rows: &[PsqlRow]) {
+pub enum SqlType {
+    Float,
+}
+
+impl SqlType {
+    pub fn extract(&self, row: &PsqlRow, idx: usize) -> SqlReturn {
+        match self {
+            SqlType::Float => SqlReturn::Float(row.get::<_, f64>(idx)),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SqlReturn {
+    Float(f64),
+}
+
+fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) {
     if rows.len() == 0 {
         println!("no rows returned");
     }
@@ -373,6 +385,6 @@ fn print_vec_sql_rows(rows: &[PsqlRow]) {
         columns.iter().map(|c| c.name().to_string()).join(" | ")
     );
     for row in rows {
-        println!("{:?}", row);
+        println!("{:?}", types.extract(row, 0));
     }
 }
