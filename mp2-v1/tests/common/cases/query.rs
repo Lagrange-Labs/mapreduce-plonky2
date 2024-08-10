@@ -64,9 +64,9 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     let parsed = parsil::prepare(&query_info.query)?;
     println!("QUERY table columns -> {:?}", table.columns.to_zkcolumns());
     info!(
-+        "BOUNDS found on query: min {}, max {} - table.genesis_block {}",
-+        query_info.min_block, query_info.max_block, table.genesis_block
-+    );
+        "BOUNDS found on query: min {}, max {} - table.genesis_block {}",
+        query_info.min_block, query_info.max_block, table.genesis_block
+    );
 
     // the query to use to actually get the outputs expected
     let exec_query = parsil::executor::generate_query_execution(&parsed, table)?;
@@ -227,13 +227,14 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
                 max
             )
         });
+    let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> sequence of {:?} (sequence:  {:?})",
+        "Longest sequence is for key {longest_key:?} -> sequence of {:?} (sequence:  {:?}), hex -> {}",
         find_longest_consecutive_sequence(epochs.clone()),
         epochs,
+        key_value
     );
     // now we can fetch the key that we want
-    let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     let key_column = table.columns.secondary.name.clone();
     // Assuming this is mapping with only two columns !
     let value_column = table.columns.rest[0].name.clone();
@@ -298,8 +299,8 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     let query_str = format!(
         "SELECT AVG({value_column}) 
                 FROM {table_name} 
-                WHERE {BLOCK_COLUMN_NAME} > $1 
-                AND {BLOCK_COLUMN_NAME} < $2 
+                WHERE {BLOCK_COLUMN_NAME} >= $1 
+                AND {BLOCK_COLUMN_NAME} <= $2 
                 AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
