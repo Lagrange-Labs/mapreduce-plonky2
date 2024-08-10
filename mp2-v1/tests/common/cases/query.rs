@@ -63,6 +63,10 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     info!("QUERY on the testcase: {}", query_info.query);
     let parsed = parsil::prepare(&query_info.query)?;
     println!("QUERY table columns -> {:?}", table.columns.to_zkcolumns());
+    info!(
++        "BOUNDS found on query: min {}, max {} - table.genesis_block {}",
++        query_info.min_block, query_info.max_block, table.genesis_block
++    );
 
     // the query to use to actually get the outputs expected
     let exec_query = parsil::executor::generate_query_execution(&parsed, table)?;
