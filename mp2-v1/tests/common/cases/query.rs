@@ -69,8 +69,8 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     let res = table
         .execute_row_query(
             &exec_query.to_string(),
-            query_info.min_block,
-            query_info.max_block,
+            query_info.min_block - table.genesis_block as BlockPrimaryIndex + 1,
+            query_info.max_block - table.genesis_block as BlockPrimaryIndex + 1,
         )
         .await?;
     info!(
@@ -97,7 +97,11 @@ async fn prove_query(
 ) -> Result<()> {
     let rows_query = parsil::executor::generate_query_keys(&parsed, table)?;
     let all_touched_rows = table
-        .execute_row_query(&rows_query.to_string(), query.min_block, query.max_block)
+        .execute_row_query(
+            &rows_query.to_string(),
+            query.min_block - table.genesis_block as BlockPrimaryIndex + 1,
+            query.max_block - table.genesis_block as BlockPrimaryIndex + 1,
+        )
         .await?;
     info!(
         "Found {} ROW KEYS to process during proving time",
