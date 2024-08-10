@@ -126,14 +126,6 @@ impl<PrimaryIndex: PartialEq + Eq + Default + Clone> CellCollection<PrimaryIndex
                 .collect(),
         )
     }
-
-    /// Return a vector of ColumnCells, which is necessary to give to the universal query gadget
-    pub fn to_column_cells(&self) -> Vec<ColumnCell> {
-        self.0
-            .iter()
-            .map(|(id, cell_info)| ColumnCell::new(*id, cell_info.value))
-            .collect()
-    }
 }
 
 /// An utility wrapper to pass around that connects what we put in the JSON description and

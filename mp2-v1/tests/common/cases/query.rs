@@ -84,6 +84,7 @@ async fn query_mapping(
     Ok(())
 }
 
+/// Execute a query to know all the touched rows, and then call the universal circuit on all rows
 async fn prove_query(
     ctx: &mut TestContext,
     table: &Table,
@@ -114,9 +115,31 @@ async fn prove_query(
             .row
             .fetch_with_context_at(row_key, *epoch as Epoch)
             .await;
-        let cells = row_payload.cells.to_column_cells();
+        // API is gonna change on this but right now, we have to sort all the "rest" cells by index
+        // in the tree, and put the primary one and secondary one in front
+        // The order of insertion is determined by the table columns order
+        let rest_cells = table
+            .columns
+            .non_indexed_columns()
+            .iter()
+            .map(|tc| tc.identifier)
+            .filter_map(|id| {
+                row_payload
+                    .cells
+                    .find_by_column(id)
+                    .map(|info| ColumnCell::new(id, info.value))
+            })
+            .collect::<Vec<_>>();
+
+        let secondary_cell = ColumnCell::new(
+            row_payload.secondary_index_column,
+            row_payload.secondary_index_value(),
+        );
         let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(*epoch));
-        let all_cells = once(primary_cell).chain(cells).collect::<Vec<_>>();
+        let all_cells = once(primary_cell)
+            .chain(once(secondary_cell))
+            .chain(rest_cells)
+            .collect::<Vec<_>>();
         // 2. create input
         let input = CircuitInput::new_universal_circuit(
             &all_cells,
