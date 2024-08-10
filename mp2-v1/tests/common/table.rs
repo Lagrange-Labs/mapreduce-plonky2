@@ -542,10 +542,11 @@ pub enum TreeUpdateType {
 }
 
 impl Table {
-    fn into_zktable(&self) -> Result<ZkTable> {
-        let zk_columns = self.columns.into_zkcolumns();
+    fn to_zktable(&self) -> Result<ZkTable> {
+        let zk_columns = self.columns.to_zkcolumns();
         Ok(ZkTable {
-            name: self.name.clone(),
+            // NOTE : we always look data in the row table
+            name: self.row_table_name(),
             user_name: self.name.clone(),
             columns: zk_columns,
         })
@@ -557,17 +558,17 @@ impl Table {
 }
 
 impl TableColumns {
-    pub fn into_zkcolumns(&self) -> Vec<ZkColumn> {
+    pub fn to_zkcolumns(&self) -> Vec<ZkColumn> {
         once(&self.primary_column())
             .chain(once(&self.secondary_column()))
             .chain(self.rest.iter())
-            .map(|c| c.into_zkcolumn())
+            .map(|c| c.to_zkcolumn())
             .collect()
     }
 }
 
 impl TableColumn {
-    pub fn into_zkcolumn(&self) -> ZkColumn {
+    pub fn to_zkcolumn(&self) -> ZkColumn {
         ZkColumn {
             id: self.identifier,
             kind: match self.index {
@@ -597,7 +598,7 @@ impl ContextProvider for &Table {
             self.name,
             table_name
         );
-        self.into_zktable()
+        self.to_zktable()
     }
 
     fn output_ids(&self) -> Vec<u64> {
