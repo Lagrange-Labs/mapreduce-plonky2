@@ -287,9 +287,10 @@ impl ResultStructure {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ColumnCell {
-    pub(crate) value: U256,
-    pub(crate) id: F,
+    pub value: U256,
+    pub id: F,
 }
 
 impl ColumnCell {

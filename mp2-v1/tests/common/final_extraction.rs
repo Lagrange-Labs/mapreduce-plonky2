@@ -34,8 +34,8 @@ impl TestContext {
         let pproof = ProofWithVK::deserialize(&proof)?;
         let block = self.query_current_block().await;
 
-        let block_hash = HashOutput::try_from(block.header.hash.unwrap().0).unwrap();
-        let prev_block_hash = HashOutput::try_from(block.header.parent_hash.0).unwrap();
+        let block_hash = HashOutput::from(block.header.hash.unwrap().0);
+        let prev_block_hash = HashOutput::from(block.header.parent_hash.0);
 
         let pis = PublicInputs::from_slice(pproof.proof().public_inputs.as_slice());
         assert_eq!(pis.block_number(), block.header.number.unwrap());

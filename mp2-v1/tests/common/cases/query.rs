@@ -1,4 +1,4 @@
-use plonky2::field::types::Field;
+use plonky2::field::types::{Field, PrimeField64};
 use std::{collections::HashMap, iter::once};
 
 use crate::common::{
@@ -8,20 +8,22 @@ use crate::common::{
 use super::super::{context::TestContext, proof_storage::ProofStorage, table::Table};
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::{Context, Result};
-use futures::{stream, StreamExt};
+use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{array::ToField, F};
 use mp2_v1::{
     indexing::{
+        self,
         block::BlockPrimaryIndex,
-        row::{Row, RowTreeKey},
+        cell::MerkleCell,
+        row::{Row, RowPayload, RowTreeKey},
     },
     values_extraction::identifier_block_column,
 };
 use parsil::{resolve::CircuitPis, symbols::ContextProvider};
 use ryhope::{
-    storage::{pgsql::ToFromBytea, RoEpochKvStorage},
+    storage::{pgsql::ToFromBytea, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
     Epoch,
 };
 use sqlparser::ast::Query;
@@ -152,6 +154,7 @@ async fn prove_query(
             .chain(once(secondary_cell))
             .chain(rest_cells)
             .collect::<Vec<_>>();
+        check_correct_cells_tree(&all_cells, &row_payload);
         // 2. create input
         let input = CircuitInput::new_universal_circuit(
             &all_cells,
@@ -361,6 +364,37 @@ fn find_longest_consecutive_sequence(v: Vec<i64>) -> (usize, i64) {
         }
     }
     (longest, v[starting_idx])
+}
+
+async fn check_correct_cells_tree(
+    all_cells: &[ColumnCell],
+    payload: &RowPayload<BlockPrimaryIndex>,
+) -> Result<()> {
+    let local_cells = all_cells.iter().cloned().collect::<Vec<_>>();
+    let expected_cells_root = payload.cell_root_hash.clone();
+    let mut tree = indexing::cell::new_tree().await;
+    tree.in_transaction(|t| {
+        async move {
+            for (i, cell) in local_cells[2..].into_iter().enumerate() {
+                // putting 0 for primary index as it doesn't matter in the hash computation
+                t.store(
+                    i + 1,
+                    MerkleCell::new(cell.id.to_canonical_u64(), cell.value, 0),
+                )
+                .await?;
+            }
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("can't update cell tree");
+    let found_hash = tree.root_data().await.unwrap().hash;
+    assert_eq!(
+        expected_cells_root, found_hash,
+        "cells root hash not the same when given to circuit"
+    );
+    Ok(())
 }
 
 pub enum SqlType {
