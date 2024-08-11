@@ -507,8 +507,8 @@ impl AggregationOperation {
         }
     }
 
-    pub fn to_id(&self) -> usize {
-        Identifiers::AggregationOperations(*self).position()
+    pub fn to_id(&self) -> u64 {
+        Identifiers::AggregationOperations(*self).position() as u64
     }
 }
 

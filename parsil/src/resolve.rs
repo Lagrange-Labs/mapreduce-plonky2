@@ -369,14 +369,15 @@ impl<C: ContextProvider> Resolver<C> {
         } else {
             unreachable!()
         };
-
-        let result = ResultStructure {
-            result_operations: self.query_ops.ops.clone(),
-            output_items: root_scope.metadata().outputs.clone(),
-            // TODO: to fetch from the context
-            output_ids: vec![F::from_canonical_u8(0); root_scope.metadata().outputs.len()],
-            output_variant: aggregation,
-        };
+        // TODO: change that to each type of aggregation operation
+        let agg_ops_id = (0..root_scope.metadata().outputs.len())
+            .map(|_| AggregationOperation::AvgOp.to_id())
+            .collect();
+        let result = ResultStructure::new_for_query_with_aggregation(
+            self.query_ops.ops.clone(),
+            root_scope.metadata().outputs.clone(),
+            agg_ops_id,
+        );
 
         Ok(CircuitPis {
             result,
