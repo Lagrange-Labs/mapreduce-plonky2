@@ -20,6 +20,7 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecdsa::gadgets::biguint::BigUintTarget;
 use std::sync::OnceLock;
+use plonky2::plonk::config::GenericHashOut;
 
 pub type H = PoseidonHash;
 pub type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
@@ -30,6 +31,11 @@ static EMPTY_POSEIDON_HASH: OnceLock<HashOut<GoldilocksField>> = OnceLock::new()
 /// Get the static empty Poseidon hash.
 pub fn empty_poseidon_hash() -> &'static HashOut<GoldilocksField> {
     EMPTY_POSEIDON_HASH.get_or_init(|| H::hash_no_pad(&[]))
+}
+
+/// Get the static empty Poseidon hash.
+pub fn empty_poseidon_hash_as_vec() -> Vec<u8> {
+    empty_poseidon_hash().to_bytes()
 }
 
 /// Convert the hash target into a big integer target.
