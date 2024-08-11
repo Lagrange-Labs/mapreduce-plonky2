@@ -168,9 +168,11 @@ async fn prove_query(
         // 3. run proof if not ran already
         let proof_key = ProofKey::QueryUniversal((*epoch, row_key.clone()));
         if ctx.storage.get_proof_exact(&proof_key).is_err() {
+            info!("Universal query proof RUNNING for {epoch} -> {row_key:?} ");
             let proof = ctx.run_query_proof(input)?;
             ctx.storage.store_proof(proof_key, proof)?;
         }
+        info!("Universal query proof DONE for {epoch} -> {row_key:?} ");
     }
     Ok(())
 }
