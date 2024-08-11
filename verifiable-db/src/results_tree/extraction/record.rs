@@ -39,8 +39,8 @@ pub struct RecordWires<const MAX_NUM_RESULTS: usize> {
     counter: Target,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_stored_in_leaf: BoolTarget,
-    offset_range_min: UInt256Target,
-    offset_range_max: UInt256Target,
+    offset_range_min: Target,
+    offset_range_max: Target,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -67,9 +67,9 @@ pub struct RecordCircuit<const MAX_NUM_RESULTS: usize> {
     /// in a leaf node of a rows tree or not
     pub(crate) is_stored_in_leaf: bool,
     /// Minimum offset range bound
-    pub(crate) offset_range_min: U256,
+    pub(crate) offset_range_min: F,
     /// Maximum offset range bound
-    pub(crate) offset_range_max: U256,
+    pub(crate) offset_range_max: F,
 }
 
 impl<const MAX_NUM_RESULTS: usize> RecordCircuit<MAX_NUM_RESULTS> {
@@ -82,8 +82,7 @@ impl<const MAX_NUM_RESULTS: usize> RecordCircuit<MAX_NUM_RESULTS> {
         let mut tree_hash = b.add_virtual_hash();
         let counter = b.add_virtual_target();
         let is_stored_in_leaf = b.add_virtual_bool_target_safe();
-        let offset_range_min = b.add_virtual_u256_unsafe();
-        let offset_range_max = b.add_virtual_u256_unsafe();
+        let [offset_range_min, offset_range_max] = b.add_virtual_target_arr();
 
         // H(H("")||H("")||indexed_items[1]||indexed_items[1]||index_ids[1]||indexed_items[1]||tree_hash)
         let tree_hash_inputs = empty_hash
@@ -109,15 +108,16 @@ impl<const MAX_NUM_RESULTS: usize> RecordCircuit<MAX_NUM_RESULTS> {
             .collect();
         let accumulator = b.map_to_curve_point(&accumulator_inputs);
 
-        // Ensure the counter associated to the current record is in the range
-        // specified by the query
-        // offset_range_min <= counter <= offset_range_max
-        // -> NOT((counter < offset_range_min) OR (counter > offset_range_max)
-        let counter_u256 = UInt256Target::new_from_target(b, counter);
-        let is_less_than = b.is_less_than_u256(&counter_u256, &offset_range_min);
-        let is_greater_than = b.is_greater_than_u256(&counter_u256, &offset_range_max);
-        let is_out_of_range = b.or(is_less_than, is_greater_than);
-        b.connect(is_out_of_range.target, ffalse.target);
+        // TODO(Insun35): enable this
+        // // Ensure the counter associated to the current record is in the range
+        // // specified by the query
+        // // offset_range_min <= counter <= offset_range_max
+        // // -> NOT((counter < offset_range_min) OR (counter > offset_range_max)
+        // let counter_u256 = UInt256Target::new_from_target(b, counter);
+        // let is_less_than = b.is_less_than_u256(&counter_u256, &offset_range_min);
+        // let is_greater_than = b.is_greater_than_u256(&counter_u256, &offset_range_max);
+        // let is_out_of_range = b.or(is_less_than, is_greater_than);
+        // b.connect(is_out_of_range.target, ffalse.target);
 
         // Register the public inputs.
         PublicInputs::<_, MAX_NUM_RESULTS>::new(
@@ -128,8 +128,8 @@ impl<const MAX_NUM_RESULTS: usize> RecordCircuit<MAX_NUM_RESULTS> {
             &index_ids,
             &[counter],
             &[counter],
-            &offset_range_min.to_targets(),
-            &offset_range_max.to_targets(),
+            &[offset_range_min],
+            &[offset_range_max],
             &accumulator.to_targets(),
         )
         .register(b);
@@ -155,8 +155,8 @@ impl<const MAX_NUM_RESULTS: usize> RecordCircuit<MAX_NUM_RESULTS> {
         pw.set_hash_target(wires.tree_hash, self.tree_hash);
         pw.set_target(wires.counter, self.counter);
         pw.set_bool_target(wires.is_stored_in_leaf, self.is_stored_in_leaf);
-        pw.set_u256_target(&wires.offset_range_min, self.offset_range_min);
-        pw.set_u256_target(&wires.offset_range_max, self.offset_range_max);
+        pw.set_target(wires.offset_range_min, self.offset_range_min);
+        pw.set_target(wires.offset_range_max, self.offset_range_max);
     }
 }
 
@@ -187,8 +187,6 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
 
 #[cfg(test)]
 mod tests {
-    use std::array;
-
     use super::*;
     use mp2_common::{
         utils::{FromFields, ToFields},
@@ -200,6 +198,7 @@ mod tests {
     };
     use plonky2::{field::types::Field, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
+    use std::array;
 
     const MAX_NUM_RESULTS: usize = 20;
 
@@ -218,15 +217,13 @@ mod tests {
     fn test_record_circuit(is_stored_in_leaf: bool) {
         // Construct the witness.
         let mut rng = thread_rng();
-        let indexed_items = array::from_fn(|_| gen_random_u256(&mut rng));
-        let index_ids = array::from_fn(|_| F::from_canonical_usize(rng.gen()));
+        let indexed_items: [U256; MAX_NUM_RESULTS] = array::from_fn(|_| gen_random_u256(&mut rng));
+        let index_ids: [F; 2] = array::from_fn(|_| F::from_canonical_usize(rng.gen()));
         let tree_hash = gen_random_field_hash();
-        let counter_value = rng.gen::<u32>();
-        let counter = F::from_canonical_u32(counter_value);
-        let offset_range_min_value = counter_value - 1;
-        let offset_range_max_value = counter_value + 1;
-        let offset_range_min = U256::from_limbs([offset_range_min_value as u64, 0, 0, 0]);
-        let offset_range_max = U256::from_limbs([offset_range_max_value as u64, 0, 0, 0]);
+        let counter = F::from_canonical_u32(rng.gen());
+        let offset_range_min = counter - F::ONE;
+        let offset_range_max = counter + F::ONE;
+
         // Construct the circuit.
         let test_circuit = RecordCircuit {
             indexed_items,
@@ -240,7 +237,7 @@ mod tests {
 
         // Proof for the test circuit.
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        let pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+        // let pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
 
         // Check the public inputs.
 

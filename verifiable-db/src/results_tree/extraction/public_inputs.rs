@@ -40,9 +40,9 @@ pub enum ResultsExtractionPublicInputs {
     /// `max_counter`: `F` Maximum counter across the records in the
     /// subtree rooted in the current node
     MaxCounter,
-    /// `offset_range_min`: `F` lower bound of the range `[offset, limit + offset]` derived from the query
+    /// `offset_range_min`: `F` Lower bound of the range `[offset, limit + offset]` derived from the query
     OffsetRangeMin,
-    /// `offset_range_max`: `F` upper bound of the range `[offset, limit + offset]` derived from the query
+    /// `offset_range_max`: `F` Upper bound of the range `[offset, limit + offset]` derived from the query
     OffsetRangeMax,
     /// `D`: `Digest` order-agnostic digested employed to accumulate the result to be returned
     Accumulator,
