@@ -40,9 +40,9 @@ pub enum ResultsExtractionPublicInputs {
     /// `max_counter`: `F` Maximum counter across the records in the
     /// subtree rooted in the current node
     MaxCounter,
-    /// `offset_range_min`: `u256` lower bound of the range `[offset, limit + offset]` derived from the query
+    /// `offset_range_min`: `F` lower bound of the range `[offset, limit + offset]` derived from the query
     OffsetRangeMin,
-    /// `offset_range_max`: `u256` upper bound of the range `[offset, limit + offset]` derived from the query
+    /// `offset_range_max`: `F` upper bound of the range `[offset, limit + offset]` derived from the query
     OffsetRangeMax,
     /// `D`: `Digest` order-agnostic digested employed to accumulate the result to be returned
     Accumulator,
@@ -57,8 +57,8 @@ pub struct PublicInputs<'a, T, const S: usize> {
     idx_ids: &'a [T],
     min_cnt: &'a T,
     max_cnt: &'a T,
-    offset_range_min: &'a [T],
-    offset_range_max: &'a [T],
+    offset_range_min: &'a T,
+    offset_range_max: &'a T,
     acc: &'a [T],
 }
 
@@ -94,9 +94,9 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         // Maximum counter
         1,
         // Offset Range Min
-        NUM_LIMBS,
+        1,
         // Offset Range Max
-        NUM_LIMBS,
+        1,
         // accumulator
         CURVE_TARGET_LEN,
     ];
@@ -144,11 +144,11 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         self.max_cnt
     }
 
-    pub(crate) fn to_offset_range_min_raw(&self) -> &[T] {
+    pub(crate) fn to_offset_range_min_raw(&self) -> &T {
         self.offset_range_min
     }
 
-    pub(crate) fn to_offset_range_max_raw(&self) -> &[T] {
+    pub(crate) fn to_offset_range_max_raw(&self) -> &T {
         self.offset_range_max
     }
 
@@ -170,8 +170,8 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             idx_ids: &input[Self::PI_RANGES[4].clone()],
             min_cnt: &input[Self::PI_RANGES[5].clone()][0],
             max_cnt: &input[Self::PI_RANGES[6].clone()][0],
-            offset_range_min: &input[Self::PI_RANGES[7].clone()],
-            offset_range_max: &input[Self::PI_RANGES[8].clone()],
+            offset_range_min: &input[Self::PI_RANGES[7].clone()][0],
+            offset_range_max: &input[Self::PI_RANGES[8].clone()][0],
             acc: &input[Self::PI_RANGES[9].clone()],
         }
     }
@@ -196,8 +196,8 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             idx_ids,
             min_cnt: &min_cnt[0],
             max_cnt: &max_cnt[0],
-            offset_range_min,
-            offset_range_max,
+            offset_range_min: &offset_range_min[0],
+            offset_range_max: &offset_range_max[0],
             acc,
         }
     }
@@ -211,8 +211,8 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             .chain(self.idx_ids.iter())
             .chain(once(self.min_cnt))
             .chain(once(self.max_cnt))
-            .chain(self.offset_range_min.iter())
-            .chain(self.offset_range_max.iter())
+            .chain(once(self.offset_range_min))
+            .chain(once(self.offset_range_max))
             .chain(self.acc.iter())
             .cloned()
             .collect_vec()
@@ -230,8 +230,8 @@ impl<'a, const S: usize> PublicInputCommon for PublicInputs<'a, Target, S> {
         cb.register_public_inputs(self.idx_ids);
         cb.register_public_input(*self.min_cnt);
         cb.register_public_input(*self.max_cnt);
-        cb.register_public_inputs(self.offset_range_min);
-        cb.register_public_inputs(self.offset_range_max);
+        cb.register_public_input(*self.offset_range_min);
+        cb.register_public_input(*self.offset_range_max);
         cb.register_public_inputs(self.acc);
     }
 }
@@ -265,12 +265,12 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
         *self.to_max_counter_raw()
     }
 
-    pub fn offset_range_min_target(&self) -> UInt256Target {
-        UInt256Target::from_targets(self.to_offset_range_min_raw())
+    pub fn offset_range_min_target(&self) -> Target {
+        *self.to_offset_range_min_raw()
     }
 
-    pub fn offset_range_max_target(&self) -> UInt256Target {
-        UInt256Target::from_targets(self.to_offset_range_max_raw())
+    pub fn offset_range_max_target(&self) -> Target {
+        *self.to_offset_range_max_raw()
     }
 
     pub fn accumulator_target(&self) -> CurveTarget {
@@ -307,12 +307,12 @@ impl<'a, const S: usize> PublicInputs<'a, F, S> {
         *self.to_max_counter_raw()
     }
 
-    pub fn offset_range_min(&self) -> U256 {
-        U256::from_fields(self.to_offset_range_min_raw())
+    pub fn offset_range_min(&self) -> F {
+        *self.to_offset_range_min_raw()
     }
 
-    pub fn offset_range_max(&self) -> U256 {
-        U256::from_fields(self.to_offset_range_max_raw())
+    pub fn offset_range_max(&self) -> F {
+        *self.to_offset_range_max_raw()
     }
 
     pub fn accumulator(&self) -> WeierstrassPoint {
@@ -399,11 +399,11 @@ mod tests {
         );
         assert_eq!(
             &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::OffsetRangeMin)],
-            pis.to_offset_range_min_raw(),
+            &[*pis.to_offset_range_min_raw()],
         );
         assert_eq!(
             &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::OffsetRangeMax)],
-            pis.to_offset_range_max_raw(),
+            &[*pis.to_offset_range_max_raw()],
         );
         assert_eq!(
             &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::Accumulator)],
