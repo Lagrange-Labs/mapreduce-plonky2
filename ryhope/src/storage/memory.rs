@@ -1,8 +1,10 @@
-use anyhow::*;
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::{collections::HashMap, fmt::Debug};
+
+use anyhow::*;
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 use crate::tree::TreeTopology;
 use crate::{Epoch, InitSettings};
@@ -22,13 +24,19 @@ use super::{
 /// containing the initial value of the stored value, which corresponds to the
 /// behavior of a freshly created, empty tree, that has a non-null, initial
 /// state.
-pub struct VersionedStorage<T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>> {
+pub struct VersionedStorage<T>
+where
+    T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
+{
     /// Whether a transaction has been started and not yet commited.
     in_tx: bool,
     /// The successive states of the persisted value.
     ts: Vec<Option<T>>,
 }
-impl<T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>> VersionedStorage<T> {
+impl<T> VersionedStorage<T>
+where
+    T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
+{
     fn new(initial_state: T) -> Self {
         Self {
             in_tx: false,
@@ -36,8 +44,11 @@ impl<T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>> VersionedSto
         }
     }
 }
-impl<T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>> TransactionalStorage
-    for VersionedStorage<T>
+
+#[async_trait]
+impl<T> TransactionalStorage for VersionedStorage<T>
+where
+    T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
     fn start_transaction(&mut self) -> Result<()> {
         ensure!(!self.in_tx, "already in a trnsaction");
@@ -50,30 +61,33 @@ impl<T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>> Transactiona
         Ok(())
     }
 
-    fn commit_transaction(&mut self) -> Result<()> {
+    async fn commit_transaction(&mut self) -> Result<()> {
         ensure!(self.in_tx, "not in a transaction");
         self.in_tx = false;
         Ok(())
     }
 }
-impl<T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>> EpochStorage<T>
-    for VersionedStorage<T>
+
+#[async_trait]
+impl<T> EpochStorage<T> for VersionedStorage<T>
+where
+    T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
     fn current_epoch(&self) -> Epoch {
         (self.ts.len() - 1).try_into().unwrap()
     }
 
-    fn fetch_at(&self, epoch: Epoch) -> T {
+    async fn fetch_at(&self, epoch: Epoch) -> T {
         self.ts[epoch as usize].clone().unwrap()
     }
 
-    fn store(&mut self, t: T) {
+    async fn store(&mut self, t: T) {
         assert!(self.in_tx);
         let latest = self.ts.len() - 1;
         self.ts[latest] = Some(t);
     }
 
-    fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
+    async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
         ensure!(epoch >= 0, "unable to rollback before epoch 0");
         ensure!(
             epoch <= self.current_epoch(),
@@ -116,8 +130,11 @@ impl<K: Debug, V: Debug> VersionedKvStorage<K, V> {
     }
 }
 
-impl<K: Hash + Eq + Clone + Debug, V: Clone + Debug> RoEpochKvStorage<K, V>
-    for VersionedKvStorage<K, V>
+#[async_trait]
+impl<K, V> RoEpochKvStorage<K, V> for VersionedKvStorage<K, V>
+where
+    K: Hash + Eq + Clone + Debug + Send + Sync,
+    V: Clone + Debug + Send + Sync,
 {
     fn current_epoch(&self) -> Epoch {
         // There is a 1-1 mapping between the epoch and the position in the list of
@@ -125,7 +142,7 @@ impl<K: Hash + Eq + Clone + Debug, V: Clone + Debug> RoEpochKvStorage<K, V>
         (self.mem.len() - 1) as Epoch
     }
 
-    fn try_fetch_at(&self, k: &K, epoch: Epoch) -> Option<V> {
+    async fn try_fetch_at(&self, k: &K, epoch: Epoch) -> Option<V> {
         // To fetch a key at a given epoch, the list of diffs up to the
         // requested epoch is iterated in reverse. The first occurence of k,
         // i.e. the most recent one, will be the current value.
@@ -143,38 +160,47 @@ impl<K: Hash + Eq + Clone + Debug, V: Clone + Debug> RoEpochKvStorage<K, V>
     }
 
     // Expensive, but only used in test context.
-    fn size(&self) -> usize {
+    async fn size(&self) -> usize {
         let all_keys = self
             .mem
             .iter()
             .flat_map(|epoch| epoch.keys())
             .collect::<HashSet<_>>();
 
-        all_keys.iter().filter_map(|k| self.try_fetch(k)).count()
+        let mut count = 0;
+        for k in all_keys {
+            if self.try_fetch(k).await.is_some() {
+                count += 1;
+            }
+        }
+        count
     }
 }
 
-impl<K: Hash + Eq + Clone + Debug, V: Clone + Debug> EpochKvStorage<K, V>
-    for VersionedKvStorage<K, V>
+#[async_trait]
+impl<K, V> EpochKvStorage<K, V> for VersionedKvStorage<K, V>
+where
+    K: Hash + Eq + Clone + Debug + Send + Sync,
+    V: Clone + Debug + Send + Sync,
 {
-    fn remove(&mut self, k: K) -> Result<()> {
-        ensure!(self.try_fetch(&k).is_some(), "key not found");
+    async fn remove(&mut self, k: K) -> Result<()> {
+        ensure!(self.try_fetch(&k).await.is_some(), "key not found");
         self.mem.last_mut().unwrap().insert(k, None);
         Ok(())
     }
 
-    fn update(&mut self, k: K, new_value: V) -> Result<()> {
-        ensure!(self.try_fetch(&k).is_some(), "key not found");
+    async fn update(&mut self, k: K, new_value: V) -> Result<()> {
+        ensure!(self.try_fetch(&k).await.is_some(), "key not found");
         self.mem.last_mut().unwrap().insert(k, Some(new_value));
         Ok(())
     }
 
-    fn store(&mut self, k: K, value: V) -> Result<()> {
+    async fn store(&mut self, k: K, value: V) -> Result<()> {
         self.mem.last_mut().unwrap().insert(k, Some(value));
         Ok(())
     }
 
-    fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
+    async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
         ensure!(epoch >= 0, "unable to rollback before epoch 0");
         ensure!(
             epoch <= self.current_epoch(),
@@ -190,7 +216,7 @@ impl<K: Hash + Eq + Clone + Debug, V: Clone + Debug> EpochKvStorage<K, V>
 }
 
 /// A RAM-backed storage for tree data.
-pub struct InMemory<T: TreeTopology, V: Debug> {
+pub struct InMemory<T: TreeTopology, V: Debug + Sync> {
     /// Storage for tree state.
     state: VersionedStorage<<T as TreeTopology>::State>,
     /// Storage for topological data.
@@ -200,7 +226,7 @@ pub struct InMemory<T: TreeTopology, V: Debug> {
     /// Whether a transaction is currently opened.
     in_tx: bool,
 }
-impl<T: TreeTopology, V: Debug> InMemory<T, V> {
+impl<T: TreeTopology, V: Debug + Sync> InMemory<T, V> {
     pub fn new(tree_state: T::State) -> Self {
         Self {
             state: VersionedStorage::new(tree_state),
@@ -211,10 +237,11 @@ impl<T: TreeTopology, V: Debug> InMemory<T, V> {
     }
 }
 
-impl<T: TreeTopology, V: Debug> FromSettings<T::State> for InMemory<T, V> {
+#[async_trait]
+impl<T: TreeTopology, V: Debug + Sync> FromSettings<T::State> for InMemory<T, V> {
     type Settings = ();
 
-    fn from_settings(
+    async fn from_settings(
         init_settings: InitSettings<T::State>,
         _storage_settings: Self::Settings,
     ) -> Result<Self> {
@@ -227,9 +254,12 @@ impl<T: TreeTopology, V: Debug> FromSettings<T::State> for InMemory<T, V> {
     }
 }
 
-impl<T: TreeTopology, V: Clone + Debug> TreeStorage<T> for InMemory<T, V>
+#[async_trait]
+impl<T, V> TreeStorage<T> for InMemory<T, V>
 where
+    T: TreeTopology,
     T::Node: Clone,
+    V: Clone + Debug + Sync + Send,
 {
     type StateStorage = VersionedStorage<<T as TreeTopology>::State>;
     type NodeStorage = VersionedKvStorage<<T as TreeTopology>::Key, <T as TreeTopology>::Node>;
@@ -250,15 +280,15 @@ where
         &mut self.state
     }
 
-    fn born_at(&self, epoch: Epoch) -> Vec<T::Key> {
+    async fn born_at(&self, epoch: Epoch) -> Vec<T::Key> {
         self.nodes.mem[epoch as usize].keys().cloned().collect()
     }
 
-    fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
+    async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
         println!("Rolling back to {epoch}");
-        self.state.rollback_to(epoch)?;
-        self.nodes.rollback_to(epoch)?;
-        self.data.rollback_to(epoch)?;
+        self.state.rollback_to(epoch).await?;
+        self.nodes.rollback_to(epoch).await?;
+        self.data.rollback_to(epoch).await?;
 
         assert_eq!(self.state.current_epoch(), self.nodes.current_epoch());
         assert_eq!(self.state.current_epoch(), self.data.current_epoch());
@@ -267,10 +297,11 @@ where
     }
 }
 
-impl<T: TreeTopology, V: Clone + Debug> PayloadStorage<<T as TreeTopology>::Key, V>
-    for InMemory<T, V>
+impl<T, V> PayloadStorage<<T as TreeTopology>::Key, V> for InMemory<T, V>
 where
+    T: TreeTopology,
     <T as TreeTopology>::Key: Clone,
+    V: Clone + Debug + Send + Sync,
 {
     type DataStorage = VersionedKvStorage<<T as TreeTopology>::Key, V>;
 
@@ -283,7 +314,12 @@ where
     }
 }
 
-impl<T: TreeTopology, V: Clone + Debug> TransactionalStorage for InMemory<T, V> {
+#[async_trait]
+impl<T, V> TransactionalStorage for InMemory<T, V>
+where
+    T: TreeTopology,
+    V: Clone + Debug + Send + Sync,
+{
     fn start_transaction(&mut self) -> Result<()> {
         ensure!(!self.in_tx, "already in a transaction");
         self.state.start_transaction()?;
@@ -293,9 +329,9 @@ impl<T: TreeTopology, V: Clone + Debug> TransactionalStorage for InMemory<T, V> 
         Ok(())
     }
 
-    fn commit_transaction(&mut self) -> Result<()> {
+    async fn commit_transaction(&mut self) -> Result<()> {
         ensure!(self.in_tx, "not in a transaction");
-        self.state.commit_transaction()?;
+        self.state.commit_transaction().await?;
         self.in_tx = false;
         Ok(())
     }

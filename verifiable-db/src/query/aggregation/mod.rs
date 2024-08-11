@@ -1,13 +1,343 @@
-mod child_proven_single_path_node;
-mod full_node_index_leaf;
-mod full_node_with_one_child;
-mod full_node_with_two_children;
-mod non_existence_inter;
-mod non_existence_leaf;
+use anyhow::Result;
+use std::collections::HashMap;
+
+use alloy::primitives::U256;
+use itertools::Itertools;
+use mp2_common::{poseidon::empty_poseidon_hash, proof::ProofWithVK, types::HashOutput, F};
+use plonky2::{
+    field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::GenericHashOut,
+};
+
+pub(crate) mod child_proven_single_path_node;
+pub(crate) mod embedded_tree_proven_single_path_node;
+pub(crate) mod full_node_index_leaf;
+pub(crate) mod full_node_with_one_child;
+pub(crate) mod full_node_with_two_children;
+pub(crate) mod non_existence_inter;
+pub(crate) mod non_existence_leaf;
 mod output_computation;
-mod partial_node;
-mod subtree_proven_single_path_node;
+pub(crate) mod partial_node;
 mod utils;
+
+use super::{
+    computational_hash_ids::{Identifiers, Output},
+    universal_circuit::{
+        output_no_aggregation::Circuit as NoAggOutputCircuit,
+        output_with_aggregation::Circuit as AggOutputCircuit,
+        universal_circuit_inputs::{BasicOperation, ColumnCell, PlaceholderId, ResultStructure},
+        universal_query_circuit::UniversalQueryCircuitInputs,
+        ComputationalHash, PlaceholderHash,
+    },
+};
+
+#[derive(Clone, Debug)]
+/// Data structure storing the query bounds specified in the query for primary and secondary index
+pub struct QueryBounds {
+    pub(crate) min_query_primary: U256,
+    pub(crate) max_query_primary: U256,
+    pub(crate) min_query_secondary: U256,
+    pub(crate) max_query_secondary: U256,
+}
+
+impl QueryBounds {
+    /// Initialize `QueryBounds`. Bounds for secondary indexes are optional as they might not have been specified
+    /// in the query
+    pub fn new(
+        min_query_primary: U256,
+        max_query_primary: U256,
+        min_query_secondary: Option<U256>,
+        max_query_secondary: Option<U256>,
+    ) -> Self {
+        Self {
+            min_query_primary,
+            max_query_primary,
+            min_query_secondary: min_query_secondary.unwrap_or(U256::ZERO),
+            max_query_secondary: max_query_secondary.unwrap_or(U256::MAX),
+        }
+    }
+}
+
+/// Data structure containing all the information needed as input by aggregation circuits for a single node of the tree
+#[derive(Clone, Debug, Default)]
+pub struct NodeInfo {
+    /// The hash of the embedded tree at this node. It can be the hash of the row tree if this node is a node in
+    /// the index tree, or it can be a hash of the cells tree if this node is a node in a rows tree
+    pub(crate) embedded_tree_hash: HashOut<F>,
+    /// Hashes of the children of the current node, first left child and then right child hash. The hash of left/right child
+    /// is the empty hash (i.e., H("")) if there is no corresponding left/right child for the current node
+    pub(crate) child_hashes: [HashOut<F>; 2],
+    /// value stored in the node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
+    pub(crate) value: U256,
+    /// minimum value associated to the current node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
+    pub(crate) min: U256,
+    /// minimum value associated to the current node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
+    pub(crate) max: U256,
+}
+
+impl NodeInfo {
+    /// Instantiate a new `NodeInfo` from the data stored in the node and the
+    /// child hashes, if any
+    pub fn new(
+        embedded_tree_hash: &HashOutput,
+        left_child_hash: Option<&HashOutput>,
+        right_child_hash: Option<&HashOutput>,
+        value: U256,
+        min: U256,
+        max: U256,
+    ) -> Self {
+        let child_hashes = [
+            left_child_hash
+                .map(|hash| HashOut::from_bytes(hash.into()))
+                .unwrap_or(*empty_poseidon_hash()),
+            right_child_hash
+                .map(|hash| HashOut::from_bytes(hash.into()))
+                .unwrap_or(*empty_poseidon_hash()),
+        ];
+        Self {
+            embedded_tree_hash: HashOut::from_bytes(embedded_tree_hash.into()),
+            child_hashes,
+            value,
+            min,
+            max,
+        }
+    }
+}
+#[derive(Clone, Debug)]
+/// enum to specify whether a node is the left or right child of another node
+pub enum ChildPosition {
+    Left,
+    Right,
+}
+
+impl ChildPosition {
+    // convert `self` to a flag specifying whether a node is the left child of another node or not
+    pub(crate) fn to_flag(&self) -> bool {
+        match self {
+            ChildPosition::Left => true,
+            ChildPosition::Right => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CommonInputs {
+    pub(crate) is_rows_tree_node: bool,
+    pub(crate) min_query: U256,
+    pub(crate) max_query: U256,
+}
+
+impl CommonInputs {
+    pub(crate) fn new(is_rows_tree_node: bool, query_bounds: &QueryBounds) -> Self {
+        Self {
+            is_rows_tree_node,
+            min_query: if is_rows_tree_node {
+                query_bounds.min_query_secondary
+            } else {
+                query_bounds.min_query_primary
+            },
+            max_query: if is_rows_tree_node {
+                query_bounds.max_query_secondary
+            } else {
+                query_bounds.max_query_primary
+            },
+        }
+    }
+}
+/// Input data structure for circuits employed for nodes where both the children and the embedded tree are proven
+#[derive(Clone, Debug)]
+pub struct TwoProvenChildNodeInput {
+    /// Proof for the left child of the node being proven
+    pub(crate) left_child_proof: ProofWithVK,
+    /// Proof for the right child of the node being proven
+    pub(crate) right_child_proof: ProofWithVK,
+    /// Proof for the embedded tree stored in the current node
+    pub(crate) embedded_tree_proof: ProofWithVK,
+    /// Common inputs shared across all the circuits
+    pub(crate) common: CommonInputs,
+}
+/// Input data structure for circuits employed for nodes where one child and the embedded tree are proven
+#[derive(Clone, Debug)]
+pub struct OneProvenChildNodeInput {
+    /// Data related to the child not associated with a proof, if any
+    pub(crate) unproven_child: Option<NodeInfo>,
+    /// Proof for the proven child
+    pub(crate) proven_child_proof: ChildProof,
+    /// Proof for the embedded tree stored in the current node
+    pub(crate) embedded_tree_proof: ProofWithVK,
+    /// Common inputs shared across all the circuits
+    pub(crate) common: CommonInputs,
+}
+#[derive(Clone, Debug)]
+/// Data structure representing a proof for a child node
+pub struct ChildProof {
+    /// Actual proof
+    pub(crate) proof: ProofWithVK,
+    /// Flag specifying whether the child associated with `proof` is the left or right child of its parent
+    pub(crate) child_position: ChildPosition,
+}
+
+impl ChildProof {
+    pub fn new(proof: Vec<u8>, child_position: ChildPosition) -> Result<ChildProof> {
+        Ok(Self {
+            proof: ProofWithVK::deserialize(&proof)?,
+            child_position,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+/// Enum employed to specify whether a proof refers to a child node or the embedded tree stored in a node
+pub enum SubProof {
+    /// Proof refer to a child
+    Child(ChildProof),
+    /// Proof refer to the embedded tree stored in the node: can be either the proof for a single row
+    /// (if proving a rows tree node) of the proof for the root node of a rows tree (if proving an index tree node)
+    Embedded(ProofWithVK),
+}
+
+impl SubProof {
+    /// Initialize a new `SubProof::Child`
+    pub fn new_child_proof(proof: Vec<u8>, child_position: ChildPosition) -> Result<Self> {
+        Ok(SubProof::Child(ChildProof::new(proof, child_position)?))
+    }
+
+    /// Initialize a new `SubProof::Embedded`
+    pub fn new_embedded_tree_proof(proof: Vec<u8>) -> Result<Self> {
+        Ok(SubProof::Embedded(ProofWithVK::deserialize(&proof)?))
+    }
+}
+
+/// Input data structure for circuits employed for nodes where only one among children node and embedded tree is proven
+#[derive(Clone, Debug)]
+pub struct SinglePathInput {
+    /// Data about the left child of the node being proven, if any
+    pub(crate) left_child: Option<NodeInfo>,
+    /// Data about the right child of the node being proven, if any
+    pub(crate) right_child: Option<NodeInfo>,
+    /// Data about the node being proven
+    pub(crate) node_info: NodeInfo,
+    /// Proof of either a child node or of the embedded tree stored in the current node
+    pub(crate) subtree_proof: SubProof,
+    /// Common inputs shared across all the circuits
+    pub(crate) common: CommonInputs,
+}
+
+/// Data structure containing the computational hash and placeholder hash to be provided as input to
+/// non-existence circuits. These hashes are computed from the query specific data provided as input
+/// to the initialization method of this data structure
+pub struct QueryHashNonExistenceCircuits {
+    pub(crate) computational_hash: ComputationalHash,
+    pub(crate) placeholder_hash: PlaceholderHash,
+}
+
+impl QueryHashNonExistenceCircuits {
+    pub fn new<
+        const MAX_NUM_COLUMNS: usize,
+        const MAX_NUM_PREDICATE_OPS: usize,
+        const MAX_NUM_RESULT_OPS: usize,
+        const MAX_NUM_RESULTS: usize,
+    >(
+        column_cells: &[ColumnCell],
+        predicate_operations: &[BasicOperation],
+        results: &ResultStructure,
+        placeholder_values: &HashMap<PlaceholderId, U256>,
+        query_bounds: &QueryBounds,
+        is_rows_tree_node: bool,
+    ) -> Result<Self>
+    where
+        [(); MAX_NUM_RESULTS - 1]:,
+        [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    {
+        let column_ids = column_cells
+            .iter()
+            .map(|cell| cell.id.to_canonical_u64())
+            .collect_vec();
+        let computational_hash = ComputationalHash::from_bytes(
+            (&Identifiers::computational_hash_universal_circuit(
+                &column_ids,
+                predicate_operations,
+                results,
+            )?)
+                .into(),
+        );
+        let placeholder_hash = match results.output_variant {
+            Output::Aggregation => {
+                let circuit = UniversalQueryCircuitInputs::<
+                    MAX_NUM_COLUMNS,
+                    MAX_NUM_PREDICATE_OPS,
+                    MAX_NUM_RESULT_OPS,
+                    MAX_NUM_RESULTS,
+                    AggOutputCircuit<MAX_NUM_RESULTS>,
+                >::new(
+                    column_cells,
+                    predicate_operations,
+                    placeholder_values,
+                    false, // doesn't matter for placeholder hash computation
+                    query_bounds.min_query_secondary,
+                    query_bounds.max_query_secondary,
+                    results,
+                )?;
+                if is_rows_tree_node {
+                    circuit.placeholder_hash_without_query_bounds()
+                } else {
+                    circuit.placeholder_hash()
+                }
+            }
+            Output::NoAggregation => {
+                let circuit = UniversalQueryCircuitInputs::<
+                    MAX_NUM_COLUMNS,
+                    MAX_NUM_PREDICATE_OPS,
+                    MAX_NUM_RESULT_OPS,
+                    MAX_NUM_RESULTS,
+                    NoAggOutputCircuit<MAX_NUM_RESULTS>,
+                >::new(
+                    column_cells,
+                    predicate_operations,
+                    placeholder_values,
+                    false, // doesn't matter for placeholder hash computation
+                    query_bounds.min_query_secondary,
+                    query_bounds.max_query_secondary,
+                    results,
+                )?;
+                if is_rows_tree_node {
+                    circuit.placeholder_hash_without_query_bounds()
+                } else {
+                    circuit.placeholder_hash()
+                }
+            }
+        };
+        Ok(Self {
+            computational_hash,
+            placeholder_hash,
+        })
+    }
+}
+
+/// Input data structure for circuits employed to prove the non-existence of rows satisfying the query bounds
+#[derive(Clone, Debug)]
+pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
+    /// Data about the node being proven
+    pub(crate) node_info: NodeInfo,
+    /// Data about the child of the node, if any
+    pub(crate) child_info: Option<NodeInfo>,
+    /// Flag specifying whether the node hash a left or right child, if any
+    pub(crate) is_child_left: Option<bool>,
+    /// Value of the primary index associated to the current node
+    pub(crate) primary_index_value: U256,
+    /// Identifier of primary and secondary indexed columns
+    pub(crate) index_ids: [F; 2],
+    /// Computational hash associated to the query
+    pub(crate) computational_hash: ComputationalHash,
+    /// Placeholder hash associated to the query
+    pub(crate) placeholder_hash: PlaceholderHash,
+    /// Set of aggregation operations employed to aggregate results
+    pub(crate) aggregation_ops: [F; MAX_NUM_RESULTS],
+    /// Common inputs shared across all the circuits
+    pub(crate) common: CommonInputs,
+}
 
 #[cfg(test)]
 pub(crate) mod tests {

@@ -2,8 +2,9 @@
 
 use super::{
     branch::{BranchCircuit, BranchWires},
-    compute_leaf_mapping_key_id, compute_leaf_mapping_value_id, compute_leaf_single_id,
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},
+    identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+    identifier_single_var_column,
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
@@ -53,7 +54,7 @@ pub enum CircuitInput {
 impl CircuitInput {
     /// Create a circuit input for proving a leaf MPT node of single variable.
     pub fn new_single_variable_leaf(node: Vec<u8>, slot: u8, contract_address: &Address) -> Self {
-        let id = compute_leaf_single_id(slot, contract_address);
+        let id = identifier_single_var_column(slot, contract_address);
 
         CircuitInput::LeafSingle(LeafSingleCircuit {
             node,
@@ -69,8 +70,8 @@ impl CircuitInput {
         mapping_key: Vec<u8>,
         contract_address: &Address,
     ) -> Self {
-        let key_id = compute_leaf_mapping_key_id(slot, contract_address);
-        let value_id = compute_leaf_mapping_value_id(slot, contract_address);
+        let key_id = identifier_for_mapping_key_column(slot, contract_address);
+        let value_id = identifier_for_mapping_value_column(slot, contract_address);
 
         CircuitInput::LeafMapping(LeafMappingCircuit {
             node,
@@ -392,10 +393,10 @@ mod tests {
 
     use super::{
         super::{
-            compute_leaf_mapping_key_id, compute_leaf_mapping_metadata_digest,
-            compute_leaf_mapping_value_id, compute_leaf_mapping_values_digest,
-            compute_leaf_single_id, compute_leaf_single_metadata_digest,
-            compute_leaf_single_values_digest, public_inputs,
+            compute_leaf_mapping_metadata_digest, compute_leaf_mapping_values_digest,
+            compute_leaf_single_metadata_digest, compute_leaf_single_values_digest,
+            identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+            identifier_single_var_column, public_inputs,
         },
         *,
     };
@@ -482,7 +483,7 @@ mod tests {
         test_circuit_input(CircuitInput::LeafSingle(LeafSingleCircuit {
             node: proof.last().unwrap().to_vec(),
             slot: SimpleSlot::new(TEST_SLOT),
-            id: compute_leaf_single_id(TEST_SLOT, &contract_address),
+            id: identifier_single_var_column(TEST_SLOT, &contract_address),
         }));
 
         // Test for leaf mapping variable circuit.
@@ -491,8 +492,8 @@ mod tests {
         let encoded = test_circuit_input(CircuitInput::LeafMapping(LeafMappingCircuit {
             node: proof.last().unwrap().to_vec(),
             slot: MappingSlot::new(TEST_SLOT, test_data.mapping_key.unwrap().clone()),
-            key_id: compute_leaf_mapping_key_id(TEST_SLOT, &contract_address),
-            value_id: compute_leaf_mapping_value_id(TEST_SLOT, &contract_address),
+            key_id: identifier_for_mapping_key_column(TEST_SLOT, &contract_address),
+            value_id: identifier_for_mapping_value_column(TEST_SLOT, &contract_address),
         }));
 
         // Test for branch circuit.
@@ -651,9 +652,9 @@ mod tests {
 
     fn test_circuits(is_simple_aggregation: bool, num_children: usize) {
         let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let id = compute_leaf_single_id(TEST_SLOT, &contract_address);
-        let key_id = compute_leaf_mapping_key_id(TEST_SLOT, &contract_address);
-        let value_id = compute_leaf_mapping_value_id(TEST_SLOT, &contract_address);
+        let id = identifier_single_var_column(TEST_SLOT, &contract_address);
+        let key_id = identifier_for_mapping_key_column(TEST_SLOT, &contract_address);
+        let value_id = identifier_for_mapping_value_column(TEST_SLOT, &contract_address);
 
         let params = PublicParameters::build();
         let mut test_data =

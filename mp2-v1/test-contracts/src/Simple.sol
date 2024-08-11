@@ -2,6 +2,19 @@
 pragma solidity ^0.8.13;
 
 contract Simple {
+  enum MappingOperation {
+      Deletion,
+      Update,
+      Insertion
+    }
+
+    struct MappingChange {
+        uint256 key;
+        address value;
+        MappingOperation operation;
+    }
+
+
     // Test simple slots (slot 0 - 3)
     bool public s1;
     uint256 public s2;
@@ -9,12 +22,12 @@ contract Simple {
     address public s4;
 
     // Test mapping slots (slot 4)
-    mapping(address => uint256) public m1;
+    mapping(uint256 => address) public m1;
 
     // Test array (slot 5)
     uint256[] public arr1;
 
-    // Set the simple slots.
+        // Set the simple slots.
     function setSimples(
         bool newS1,
         uint256 newS2,
@@ -28,8 +41,18 @@ contract Simple {
     }
 
     // Set a mapping slot by key and value.
-    function setMapping(address key, uint256 value) public {
+    function setMapping(uint256 key, address value) public {
         m1[key] = value;
+    }
+
+    function changeMapping(MappingChange[] memory changes) public {
+      for (uint256 i = 0; i < changes.length; i++) {
+        if (changes[i].operation == MappingOperation.Deletion) {
+          delete m1[changes[i].key];
+        } else if (changes[i].operation == MappingOperation.Insertion || changes[i].operation == MappingOperation.Update) {
+          setMapping(changes[i].key,changes[i].value);
+        } 
+      }
     }
 
     // Add a value to the array.

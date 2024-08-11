@@ -26,6 +26,8 @@ mp2_common = { path = "../mp2-common" }
 recursion_framework = { path = "../recursion-framework" }
 ryhope = { path = "../ryhope" }
 verifiable-db = { path = "../verifiable-db" }
+derive_more = "0.99.18"
+hex.workspace = true
 
 [dev-dependencies]
 alloy.workspace = true
@@ -39,3 +41,6 @@ serial_test.workspace = true
 mp2_test = { path = "../mp2-test" }
 envconfig = "0.10.0"
 test-log = "0.2.16"
+jammdb = "0.11.0"
+bincode.workspace = true
+futures = "0.3.30"

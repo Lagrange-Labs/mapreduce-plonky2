@@ -1,5 +1,11 @@
 use std::collections::HashSet;
 
+use anyhow::*;
+use futures::FutureExt;
+use itertools::Itertools;
+use rand::{Rng, SeedableRng};
+use serde::{Deserialize, Serialize};
+
 use crate::{
     storage::{
         memory::InMemory,
@@ -13,10 +19,6 @@ use crate::{
     },
     InitSettings, MerkleTreeKvDb, NodePayload,
 };
-use anyhow::*;
-use itertools::Itertools;
-use rand::{Rng, SeedableRng};
-use serde::{Deserialize, Serialize};
 
 use super::TreeTransactionalStorage;
 
@@ -28,8 +30,8 @@ impl NodePayload for usize {}
 impl NodePayload for String {}
 impl NodePayload for i64 {}
 
-#[test]
-fn storage_in_memory() -> Result<()> {
+#[tokio::test]
+async fn storage_in_memory() -> Result<()> {
     type K = String;
     type V = usize;
 
@@ -39,31 +41,33 @@ fn storage_in_memory() -> Result<()> {
     let mut s = MerkleTreeKvDb::<TestTree, V, Storage>::new(
         InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
         (),
-    )?;
-    with_storage(&mut s)?;
+    )
+    .await?;
+
+    with_storage(&mut s).await?;
 
     for i in 1..=6 {
         println!("\nEpoch = {i}");
-        let ss = s.view_at(i);
-        s.tree().print(&ss);
-        s.diff_at(i).unwrap().print();
+        let mut ss = s.view_at(i);
+        s.tree().print(&mut ss).await;
+        s.diff_at(i).await.unwrap().print();
 
         match i {
             1 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).is_some())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
             }
             2 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).is_some())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
             }
             3 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).is_none())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_none())
             }
             4 => {}
             5 => {
-                assert!(ss.nodes().try_fetch(&"automne".to_string()).is_some())
+                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_some())
             }
             6 => {
-                assert!(ss.nodes().try_fetch(&"automne".to_string()).is_none())
+                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_none())
             }
             _ => {}
         }
@@ -72,8 +76,8 @@ fn storage_in_memory() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn storage_in_pgsql() -> Result<()> {
+#[tokio::test]
+async fn storage_in_pgsql() -> Result<()> {
     type K = String;
     type V = usize;
 
@@ -86,46 +90,51 @@ fn storage_in_pgsql() -> Result<()> {
             db_url: db_url(),
             table: "simple".to_string(),
         },
-    )?;
-    with_storage(&mut s)?;
+    )
+    .await?;
+    with_storage(&mut s).await?;
     println!("Old one");
-    s.print_tree();
+    s.print_tree().await;
 
-    let s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
+    let mut s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
         InitSettings::MustExist,
         SqlStorageSettings {
             db_url: db_url(),
             table: "simple".to_string(),
         },
-    )?;
+    )
+    .await?;
     println!("New one");
-    s2.print_tree();
+    s2.print_tree().await;
 
-    assert_eq!(s2.root_data(), s.root_data());
-    assert_eq!(s.tree().size(&s2.storage), s2.tree().size(&s2.storage));
+    assert_eq!(s2.root_data().await, s.root_data().await);
+    assert_eq!(
+        s.tree().size(&mut s2.storage).await,
+        s2.tree().size(&s2.storage).await
+    );
 
     for i in 1..=6 {
         println!("\nEpoch = {i}");
-        let ss = s.view_at(i);
-        s.tree().print(&ss);
-        s.diff_at(i).unwrap().print();
+        let mut ss = s.view_at(i);
+        s.tree().print(&mut ss).await;
+        s.diff_at(i).await.unwrap().print();
 
         match i {
             1 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).is_some())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
             }
             2 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).is_some())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
             }
             3 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).is_none())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_none())
             }
             4 => {}
             5 => {
-                assert!(ss.nodes().try_fetch(&"automne".to_string()).is_some())
+                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_some())
             }
             6 => {
-                assert!(ss.nodes().try_fetch(&"automne".to_string()).is_none())
+                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_none())
             }
             _ => {}
         }
@@ -199,8 +208,8 @@ impl From<&str> for ShaizedString {
     }
 }
 
-#[test]
-fn sbbst_storage_in_pgsql() -> Result<()> {
+#[tokio::test]
+async fn sbbst_storage_in_pgsql() -> Result<()> {
     type V = ShaizedString;
     type TestTree = sbbst::Tree;
     type SqlStorage = PgsqlStorage<TestTree, V>;
@@ -212,23 +221,34 @@ fn sbbst_storage_in_pgsql() -> Result<()> {
             db_url: db_url(),
             table: "simple_sbbst".to_string(),
         },
-    )?;
+    )
+    .await?;
 
-    s_psql.in_transaction(|t| {
-        for k in 1..10 {
-            t.store(k, format!("Node-{k}").into())?;
-        }
-        Ok(())
-    })?;
+    s_psql
+        .in_transaction(|t| {
+            Box::pin(async {
+                for k in 1..10 {
+                    t.store(k, format!("Node-{k}").into()).await?;
+                }
+                Ok(())
+            })
+        })
+        .await?;
 
-    s_psql.in_transaction(|t| {
-        t.update(3, "coucou".into())?;
-        t.update(8, "cava".into())?;
-        t.update(2, "bien".into())
-    })?;
+    s_psql
+        .in_transaction(|t| {
+            Box::pin(async {
+                t.update(3, "coucou".into()).await.unwrap();
+                t.update(8, "cava".into()).await.unwrap();
+                t.update(2, "bien".into()).await.unwrap();
+
+                Ok(())
+            })
+        })
+        .await?;
 
     println!("Old one");
-    s_psql.print_tree();
+    s_psql.print_tree().await;
 
     let s2 = MerkleTreeKvDb::<TestTree, V, SqlStorage>::new(
         InitSettings::MustExist,
@@ -236,73 +256,120 @@ fn sbbst_storage_in_pgsql() -> Result<()> {
             db_url: db_url(),
             table: "simple_sbbst".to_string(),
         },
-    )?;
+    )
+    .await?;
     println!("New one");
-    s2.print_tree();
-    assert_eq!(s_psql.root_data().unwrap().h, s2.root_data().unwrap().h);
+    s2.print_tree().await;
+    let string = s_psql.root_data().await.unwrap().h;
+    println!("Root hash = {string}");
+    let string1 = s2.root_data().await.unwrap().h;
+    assert_eq!(string, string1);
 
     for i in 1..=2 {
         println!("\nEpoch = {i}");
-        let ss = s2.view_at(i);
-        s2.tree().print(&ss);
-        s_psql.diff_at(i).unwrap().print();
+        let mut ss = s2.view_at(i);
+        s2.tree().print(&mut ss).await;
+        s_psql.diff_at(i).await.unwrap().print();
     }
 
     let mut s_ram = MerkleTreeKvDb::<TestTree, V, RamStorage>::new(
         InitSettings::Reset(sbbst::Tree::empty()),
         (),
-    )?;
-    s_ram.in_transaction(|t| {
-        for k in 1..10 {
-            t.store(k, format!("Node-{k}").into())?;
-        }
-        Ok(())
-    })?;
-    s_ram.in_transaction(|t| {
-        t.update(3, "coucou".into())?;
-        t.update(8, "cava".into())?;
-        t.update(2, "bien".into())
-    })?;
-    s_ram.print_tree();
+    )
+    .await?;
+    s_ram
+        .in_transaction(|t| {
+            Box::pin(async {
+                for k in 1..10 {
+                    t.store(k, format!("Node-{k}").into()).await?;
+                }
+                Ok(())
+            })
+        })
+        .await?;
+    s_ram
+        .in_transaction(|t| {
+            Box::pin(async {
+                t.update(3, "coucou".into()).await.unwrap();
+                t.update(8, "cava".into()).await.unwrap();
+                t.update(2, "bien".into()).await.unwrap();
 
-    assert_eq!(s2.root_data().unwrap().h, s_ram.root_data().unwrap().h);
+                Ok(())
+            })
+        })
+        .await?;
+    s_ram.print_tree().await;
 
-    Ok(())
-}
-
-fn with_storage<S: TreeTransactionalStorage<String, usize>>(s: &mut S) -> Result<()> {
-    s.in_transaction(|t| {
-        for k in "les sanglots longs des violons de automne blessent mon coeur langueur monotone"
-            .split_whitespace()
-        {
-            t.store(k.to_string(), k.len())?;
-        }
-        Ok(())
-    })?;
-
-    s.in_transaction(|t| t.remove("blessent".to_string()))?;
-
-    s.in_transaction(|t| t.remove("les".to_string()))?;
-
-    s.in_transaction(|t| t.remove("sanglots".to_string()))?;
-
-    s.in_transaction(|t| {
-        t.update("longs".to_string(), 95000)?;
-        t.update("des".to_string(), 36000)?;
-        t.remove("des".to_string())
-    })?;
-
-    s.in_transaction(|t| {
-        t.remove("automne".to_string())?;
-        t.remove("mon".to_string())?;
-        Ok(())
-    })?;
+    assert_eq!(
+        s2.root_data().await.unwrap().h,
+        s_ram.root_data().await.unwrap().h
+    );
 
     Ok(())
 }
 
-#[test]
-fn hashes() -> Result<()> {
+async fn with_storage<S: TreeTransactionalStorage<String, usize> + Send>(s: &mut S) -> Result<()> {
+    s.in_transaction(|t| {
+        Box::pin(async {
+            for k in
+                "les sanglots longs des violons de automne blessent mon coeur langueur monotone"
+                    .split_whitespace()
+            {
+                t.store(k.to_string(), k.len()).await.unwrap();
+            }
+            Ok(())
+        })
+    })
+    .await?;
+
+    s.in_transaction(|t| {
+        Box::pin(async {
+            t.remove("blessent".to_string()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await?;
+
+    s.in_transaction(|t| {
+        Box::pin(async {
+            t.remove("les".to_string()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await?;
+
+    s.in_transaction(|t| {
+        Box::pin(async {
+            t.remove("sanglots".to_string()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await?;
+
+    s.in_transaction(|t| {
+        Box::pin(async {
+            t.update("longs".to_string(), 95000).await.unwrap();
+            t.update("des".to_string(), 36000).await.unwrap();
+            t.remove("des".to_string()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await?;
+
+    s.in_transaction(|t| {
+        Box::pin(async {
+            t.remove("automne".to_string()).await.unwrap();
+            t.remove("mon".to_string()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn hashes() -> Result<()> {
     type K = i64;
     type V = ShaizedString;
 
@@ -310,89 +377,170 @@ fn hashes() -> Result<()> {
     type Storage = InMemory<Tree, V>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
-        InitSettings::Reset(scapegoat::Tree::empty(Alpha::fully_balanced())),
+        InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
         (),
-    )?;
+    )
+    .await?;
 
     s.in_transaction(|s| {
-        s.store(2, "cava".into())?;
-        s.store(1, "coucou".into())?;
-        s.store(3, "bien".into())
-    })?;
+        Box::pin(async {
+            s.store(2, "cava".into()).await?;
+            s.store(1, "coucou".into()).await?;
+            s.store(3, "bien".into()).await
+        })
+    })
+    .await?;
 
-    assert_eq!(s.storage.data().fetch(&1).h, sha256::digest("coucou"));
+    assert_eq!(s.storage.data().fetch(&1).await.h, sha256::digest("coucou"));
     assert_eq!(
-        s.storage.data().fetch(&2).h,
+        s.storage.data().fetch(&2).await.h,
         sha256::digest(
             sha256::digest("coucou") + &sha256::digest("bien") + &sha256::digest("cava")
         )
     );
-    assert_eq!(s.storage.data().fetch(&3).h, sha256::digest("bien"));
+    assert_eq!(s.storage.data().fetch(&3).await.h, sha256::digest("bien"));
     Ok(())
 }
 
-#[test]
-fn sbbst_requires_sequential_keys() -> Result<()> {
+#[tokio::test]
+async fn hashes_pgsql() -> Result<()> {
+    type K = i64;
+    type V = ShaizedString;
+
+    type Tree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<Tree, V>;
+
+    {
+        let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "test_hashes".into(),
+            },
+        )
+        .await?;
+
+        s.in_transaction(|s| {
+            Box::pin(async {
+                s.store(2, "cava".into()).await?;
+                s.store(1, "coucou".into()).await?;
+                s.store(3, "bien".into()).await
+            })
+        })
+        .await?;
+
+        assert_eq!(s.storage.data().fetch(&1).await.h, sha256::digest("coucou"));
+        assert_eq!(
+            s.storage.data().fetch(&2).await.h,
+            sha256::digest(
+                sha256::digest("coucou") + &sha256::digest("bien") + &sha256::digest("cava")
+            )
+        );
+        assert_eq!(s.storage.data().fetch(&3).await.h, sha256::digest("bien"));
+    }
+
+    {
+        let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::MustExist,
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "test_hashes".into(),
+            },
+        )
+        .await?;
+
+        s.in_transaction(|s| Box::pin(async { s.update(1, "oucouc".into()).await }))
+            .await?;
+
+        assert_eq!(s.storage.data().fetch(&1).await.h, sha256::digest("oucouc"));
+        assert_eq!(
+            s.storage.data().fetch(&2).await.h,
+            sha256::digest(
+                sha256::digest("oucouc") + &sha256::digest("bien") + &sha256::digest("cava")
+            )
+        );
+        assert_eq!(s.storage.data().fetch(&3).await.h, sha256::digest("bien"));
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn sbbst_requires_sequential_keys() -> Result<()> {
     type Tree = sbbst::Tree;
     type V = i64;
 
     type Storage = InMemory<Tree, V>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
-        InitSettings::Reset(sbbst::Tree::with_shift_and_capacity(10, 0)),
+        InitSettings::Reset(Tree::with_shift_and_capacity(10, 0)),
         (),
-    )?;
+    )
+    .await?;
 
-    s.start_transaction()?;
-    assert!(s.store(2, 2).is_err());
-    assert!(s.store(12, 2).is_err());
-    assert!(s.store(11, 2).is_ok());
-    assert!(s.store(12, 2).is_ok());
-    s.commit_transaction()?;
+    s.start_transaction().await?;
+    assert!(s.store(2, 2).await.is_err());
+    assert!(s.store(12, 2).await.is_err());
+    assert!(s.store(11, 2).await.is_ok());
+    assert!(s.store(12, 2).await.is_ok());
+    s.commit_transaction().await?;
 
     Ok(())
 }
 
-#[test]
-fn thousand_rows() -> Result<()> {
+#[tokio::test]
+async fn thousand_rows() -> Result<()> {
     type K = i64;
     type V = usize;
     type Tree = scapegoat::Tree<K>;
     type Storage = PgsqlStorage<Tree, V>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
-        InitSettings::Reset(scapegoat::Tree::empty(Alpha::fully_balanced())),
+        InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
         SqlStorageSettings {
             db_url: db_url(),
             table: "thousand".to_string(),
         },
-    )?;
+    )
+    .await?;
 
     let mut rng = rand::rngs::StdRng::seed_from_u64(0xc0c0);
 
     s.in_transaction(|s| {
-        for i in 0..1000 {
-            s.store(i, (10 * i).try_into().unwrap())?;
-        }
-        Ok(())
-    })?;
-    assert_eq!(s.size(), 1000);
+        Box::pin(async {
+            for i in 0..1000 {
+                s.store(i, (10 * i).try_into().unwrap()).await?;
+            }
+            Ok(())
+        })
+    })
+    .await?;
+    assert_eq!(s.size().await, 1000);
 
     let to_remove = (0..100)
         .map(|_| rng.gen_range(1..=1000))
         .collect::<HashSet<_>>();
 
-    let mt = s.in_transaction(|s| {
-        for k in to_remove.iter() {
-            s.remove(*k)?;
-        }
-        Ok(())
-    })?;
+    let to_remove_copy = to_remove.clone();
+
+    let mt = s
+        .in_transaction(|s| {
+            Box::pin({
+                let value = to_remove_copy.clone();
+                async move {
+                    for k in value.iter() {
+                        s.remove(*k).await?;
+                    }
+                    Ok(())
+                }
+            })
+        })
+        .await?;
     mt.print();
 
-    assert_eq!(s.size(), 1000 - to_remove.len());
+    assert_eq!(s.size().await, 1000 - to_remove.len());
     for k in to_remove {
-        assert!(s.try_fetch(&k).is_none());
+        assert!(s.try_fetch(&k).await.is_none());
     }
 
     println!("{}", rng.gen::<i32>());
@@ -400,34 +548,41 @@ fn thousand_rows() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn aggregation_memory() -> Result<()> {
+#[tokio::test]
+async fn aggregation_memory() -> Result<()> {
     type Tree = sbbst::Tree;
     type V = MinMaxi64;
 
     type Storage = InMemory<Tree, V>;
 
     let mut s =
-        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(sbbst::Tree::empty()), ())?;
+        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(sbbst::Tree::empty()), ())
+            .await?;
 
     s.in_transaction(|s| {
-        for i in 0..30 {
-            s.store(
-                i + 1,
-                MinMaxi64((i + 1).try_into().unwrap(), i as i64, i as i64),
-            )?;
-        }
-        Ok(())
-    })?;
+        Box::pin(async {
+            for i in 0..30 {
+                s.store(
+                    i + 1,
+                    MinMaxi64((i + 1).try_into().unwrap(), i as i64, i as i64),
+                )
+                .await?;
+            }
+            Ok(())
+        })
+    })
+    .await?;
 
-    let root_payload = s.fetch(&s.tree().root(&s.storage).unwrap());
+    let tree = s.tree();
+    let root = tree.root(&s.storage).await.unwrap();
+    let root_payload = s.fetch(&root).await;
     assert_eq!(root_payload.1, 1);
     assert_eq!(root_payload.2, 30);
     Ok(())
 }
 
-#[test]
-fn aggregation_pgsql() -> Result<()> {
+#[tokio::test]
+async fn aggregation_pgsql() -> Result<()> {
     type Tree = sbbst::Tree;
     type V = MinMaxi64;
 
@@ -438,68 +593,78 @@ fn aggregation_pgsql() -> Result<()> {
             db_url: db_url(),
             table: "agg".to_string(),
         },
-    )?;
+    )
+    .await?;
 
     s.in_transaction(|s| {
-        for i in 0..30 {
-            s.store(
-                i + 1,
-                MinMaxi64((i + 1).try_into().unwrap(), i as i64, i as i64),
-            )?;
-        }
-        Ok(())
-    })?;
+        Box::pin(async {
+            for i in 0..30 {
+                s.store(
+                    i + 1,
+                    MinMaxi64((i + 1).try_into().unwrap(), i as i64, i as i64),
+                )
+                .await?;
+            }
+            Ok(())
+        })
+    })
+    .await?;
 
-    let root_payload = s.fetch(&s.tree().root(&s.storage).unwrap());
+    let root_payload = s.fetch(&s.tree().root(&s.storage).await.unwrap()).await;
     assert_eq!(root_payload.1, 1);
     assert_eq!(root_payload.2, 30);
     Ok(())
 }
 
-fn test_rollback<S: EpochKvStorage<i64, MinMaxi64> + TreeTransactionalStorage<i64, MinMaxi64>>(
+async fn test_rollback<
+    S: EpochKvStorage<i64, MinMaxi64> + TreeTransactionalStorage<i64, MinMaxi64> + Send + Sync,
+>(
     s: &mut S,
 ) {
     for i in 0..3 {
         s.in_transaction(|s| {
-            s.store(2 * i, (2 * i).into())?;
-            s.store(2 * i + 1, (2 * i + 1).into())?;
-            Ok(())
+            Box::pin(async move {
+                s.store(2 * i, (2 * i).into()).await?;
+                s.store(2 * i + 1, (2 * i + 1).into()).await?;
+                Ok(())
+            })
         })
+        .await
         .unwrap();
     }
 
     assert_eq!(s.current_epoch(), 3);
-    assert_eq!(s.size(), 6);
+    assert_eq!(s.size().await, 6);
     for i in 0..=5 {
-        assert!(s.contains(&i.into()));
+        assert!(s.contains(&i.into()).await);
     }
 
     // Rollback twice to reach epoch 1
-    s.rollback_to(1).expect("failed to rollback to 1");
+    s.rollback_to(1).await.expect("failed to rollback to 1");
     assert_eq!(s.current_epoch(), 1);
-    assert_eq!(s.size(), 2);
+    assert_eq!(s.size().await, 2);
     for i in 0..=5 {
         if i <= 1 {
-            assert!(s.contains(&i.into()));
+            assert!(s.contains(&i.into()).await);
         } else {
-            assert!(!s.contains(&i.into()));
+            assert!(!s.contains(&i.into()).await);
         }
     }
 
     // rollback once to reach to epoch 0
-    s.rollback().unwrap();
+    s.rollback().await.unwrap();
     assert_eq!(s.current_epoch(), 0);
-    assert_eq!(s.size(), 0);
+    assert_eq!(s.size().await, 0);
     for i in 0..=5 {
-        assert!(!s.contains(&i.into()));
+        assert!(!s.contains(&i.into()).await);
     }
 
     // Can not rollback before epoch 0
-    assert!(s.rollback().is_err());
+    assert!(s.rollback().await.is_err());
 }
 
-#[test]
-fn rollback_memory() {
+#[tokio::test]
+async fn rollback_memory() {
     type K = i64;
     type V = MinMaxi64;
     type Tree = scapegoat::Tree<K>;
@@ -509,13 +674,14 @@ fn rollback_memory() {
         InitSettings::Reset(Tree::empty(Alpha::new(0.7))),
         (),
     )
+    .await
     .expect("unable to initialize tree");
 
-    test_rollback(&mut s);
+    test_rollback(&mut s).await;
 }
 
-#[test]
-fn rollback_psql() {
+#[tokio::test]
+async fn rollback_psql() {
     type K = i64;
     type V = MinMaxi64;
     type Tree = scapegoat::Tree<K>;
@@ -528,22 +694,117 @@ fn rollback_psql() {
             table: "rollback".to_string(),
         },
     )
+    .await
     .expect("unable to initialize tree");
 
-    test_rollback(&mut s);
+    test_rollback(&mut s).await;
 }
 
-#[test]
-fn context_at() {
+#[tokio::test]
+async fn context_at() {
     type Tree = sbbst::Tree;
     type V = MinMaxi64;
     type Storage = InMemory<Tree, V>;
-    let mut s =
-        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ()).unwrap();
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ())
+        .await
+        .unwrap();
 
-    s.in_transaction(|s| s.store(1, 1i64.into())).unwrap();
-    s.in_transaction(|s| s.store(2, 2i64.into())).unwrap();
+    s.in_transaction(|s| {
+        Box::pin(async {
+            s.store(1, 1i64.into()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+    s.in_transaction(|s| {
+        Box::pin(async {
+            s.store(2, 2i64.into()).await.unwrap();
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
 
-    assert_eq!(s.fetch_with_context_at(&1, 1).0.parent, None);
-    assert_eq!(s.fetch_with_context_at(&1, 2).0.parent, Some(2));
+    assert_eq!(s.fetch_with_context_at(&1, 1).await.0.parent, None);
+    assert_eq!(s.fetch_with_context_at(&1, 2).await.0.parent, Some(2));
+}
+
+/// Ensure that a tree created will see its state persisted even if it is empty.
+#[tokio::test]
+async fn initial_state() {
+    use crate::storage::EpochStorage;
+
+    type K = i64;
+    type V = MinMaxi64;
+    type Tree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<Tree, V>;
+
+    // Create an empty tree
+    {
+        let _ = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::Reset(Tree::empty(Alpha::new(0.8))),
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "empty_tree".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    {
+        let s_init = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::MustExist,
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "empty_tree".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let tree_state = s_init.storage.state().fetch().await;
+        assert_eq!(tree_state.alpha, Alpha::new(0.8));
+        assert_eq!(tree_state.node_count, 0);
+        println!("Tree alpha is {:?}", tree_state);
+    }
+}
+
+#[tokio::test]
+async fn dirties() {
+    type Tree = sbbst::Tree;
+    type V = MinMaxi64;
+    type Storage = InMemory<Tree, V>;
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ())
+        .await
+        .unwrap();
+
+    // Initial tree:
+    // (2 (1))
+    s.in_transaction(|s| {
+        async {
+            s.store(1, 1i64.into()).await.unwrap();
+            s.store(2, 2i64.into()).await.unwrap();
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+
+    // Initial tree = (2 (1))
+    // New tree = (2 (1 3)) --> dirties = { 2, 3 }
+    s.in_transaction(|s| {
+        async {
+            s.store(3, 2i64.into()).await.unwrap();
+            let dirties = s.touched().await;
+            assert!(dirties.contains(&2));
+            assert!(dirties.contains(&3));
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
 }

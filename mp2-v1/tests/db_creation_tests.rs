@@ -1,181 +1,214 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
-use std::str::FromStr;
+#![feature(assert_matches)]
+use std::future::Future;
 
-use alloy::primitives::Address;
+use alloy::primitives::U256;
+use anyhow::Result;
+
 use common::{
-    proof_storage::{ProofKey, TableID},
+    cases::local_simple::{ChangeType, UpdateType},
+    context,
+    proof_storage::{KeyValueDB, MemoryProofStorage, ProofKey},
+    rowtree::MerkleRowTree,
     TestCase, TestContext,
 };
 use log::info;
-use mp2_common::proof::{serialize_proof, ProofWithVK};
+use mp2_v1::indexing::{
+    cell::Cell,
+    row::{CellCollection, RowPayload, RowTreeKey},
+};
+use ryhope::{
+    storage::{
+        updatetree::{UpdatePlan, UpdateTree},
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
+    },
+    tree::scapegoat::{self, Alpha},
+    InitSettings,
+};
 use test_log::test;
 
 pub(crate) mod common;
 
-async fn prove_scalar_values<P: common::proof_storage::ProofStorage>(
-    ctx: &TestContext,
-    t: &TestCase,
-    contract_proof: &ProofWithVK,
-    block_proof: &[u8],
-    storage: &mut P,
-) {
-    let contract_address = Address::from_str(&t.contract_address).unwrap();
-    let table_id = TableID::new(&contract_address, &t.values_extraction_single.slots);
-    let single_values_proof = ctx
-        .prove_single_values_extraction(&t.contract_address, &t.values_extraction_single.slots)
-        .await;
-    info!("Generated Values Extraction (C.1) proof for single variables");
-
-    // final extraction for single variables
-    let extraction_proof = ctx
-        .prove_final_extraction(
-            contract_proof.serialize().unwrap(),
-            single_values_proof.serialize().unwrap(),
-            block_proof.to_vec(),
-            false,
-            None,
-        )
-        .await
-        .unwrap();
-    storage
-        .store_proof(
-            ProofKey::Extraction(ctx.block_number.as_number().unwrap() as usize),
-            extraction_proof.serialize().unwrap(),
-        )
-        .unwrap();
-    info!("Generated Final Extraction (C.5.1) proof for single variables");
-
-    let row = ctx
-        .build_and_prove_celltree(
-            &table_id,
-            &contract_address,
-            // NOTE: the 0th column is assumed to be the secondary index.
-            &t.values_extraction_single.slots,
-            storage,
-        )
-        .await;
-    info!("Generated final CELLs tree proofs for single variables");
-    // In the case of the scalars slots, there is a single node in the row tree.
-    let rows = vec![row];
-    let row_tree_proof_key = ctx.build_and_prove_rowtree(&table_id, &rows, storage).await;
-    info!("Generated final ROWs tree proofs for single variables");
-    let _ = ctx.build_and_prove_index_tree(&table_id, storage, &row_tree_proof_key);
-    info!("Generated final BLOCK tree proofs for single variables");
-}
-
-async fn prove_mappings_with_length(
-    ctx: &TestContext,
-    t: &TestCase,
-    contract_proof: &ProofWithVK,
-    block_proof: &[u8],
-    mapping_values_proof: &ProofWithVK,
-) {
-    let length_proof = ctx
-        .prove_length_extraction(
-            &t.contract_address,
-            t.length_extraction.slot,
-            t.length_extraction.value,
-        )
-        .await;
-    info!("Generated Length Extraction (C.2) proof");
-
-    let _ = ctx.prove_final_extraction(
-        contract_proof.serialize().unwrap(),
-        mapping_values_proof.serialize().unwrap(),
-        block_proof.to_vec(),
-        true,
-        Some(length_proof.serialize().unwrap()),
-    );
-    info!("Generated Final Extraction (C.5.1) proof for mapping (with length slot check)");
-}
-
-async fn prove_mappings_without_length(
-    ctx: &TestContext,
-    _t: &TestCase,
-    contract_proof: &ProofWithVK,
-    block_proof: &[u8],
-    mapping_values_proof: &ProofWithVK,
-) {
-    // final extraction for mappings without length slots
-    let _ = ctx.prove_final_extraction(
-        contract_proof.serialize().unwrap(),
-        mapping_values_proof.serialize().unwrap(),
-        block_proof.to_vec(),
-        true,
-        None,
-    );
-    info!("Generated Final Extraction (C.5.1) proof for mapping (without length slot check)");
-}
+//) {
+//    let length_proof = ctx
+//        .prove_length_extraction(
+//            &t.contract_address,
+//            t.length_extraction.slot,
+//            t.length_extraction.value,
+//        )
+//        .await;
+//    info!("Generated Length Extraction (C.2) proof");
+//
+//    let _ = ctx.prove_final_extraction(
+//        contract_proof.serialize().unwrap(),
+//        mapping_values_proof.serialize().unwrap(),
+//        block_proof.to_vec(),
+//        true,
+//        Some(length_proof.serialize().unwrap()),
+//    );
+//    info!("Generated Final Extraction (C.5.1) proof for mapping (with length slot check)");
+//}
 
 #[test(tokio::test)]
-async fn db_creation_integrated_tests() {
+async fn db_creation_integrated_tests() -> Result<()> {
     // Create the test context for mainnet.
     // let ctx = &mut TestContext::new_mainet();
     let _ = env_logger::try_init();
     // Create the test context for the local node.
-    let ctx = &mut TestContext::new_local_node().await;
+    //let storage = MemoryProofStorage::default();
+    info!("Loading proof storage");
+    let storage = KeyValueDB::new_from_env("test_proofs.store")?;
+    info!("Loading Anvil and contract");
+    let mut ctx = context::new_local_chain(storage).await;
+    info!("Initial Anvil block: {}", ctx.block_number().await);
     info!("Building params");
     // Build the parameters.
     ctx.build_params().unwrap();
 
     info!("Params built");
-
-    // Prove for each test case.
-    for t in &ctx.cases {
-        let contract_proof = ctx
-            .prove_contract_extraction(&t.contract_address, t.contract_extraction.slot.clone())
-            .await;
-        info!("Generated Contract Extraction (C.3) proof");
-
-        let block_proof = ctx.prove_block_extraction().await.unwrap();
-        info!("Generated Block Extraction (C.4) proof");
-
-        //
-        // Prove scalar slots
-        //
-        let mut scalar_proof_storage = common::proof_storage::MemoryProofStorage::default();
-        prove_scalar_values(
-            ctx,
-            t,
-            &contract_proof,
-            &serialize_proof(&block_proof).unwrap(),
-            &mut scalar_proof_storage,
-        )
-        .await;
-        info!("Generated Single Variables table");
-
-        //
-        // Prove mapping slots
-        //
-        let mapping_values_proof = ctx
-            .prove_mapping_values_extraction(
-                &t.contract_address,
-                t.values_extraction_mapping.slot,
-                t.values_extraction_mapping.mapping_keys.clone(),
-            )
-            .await;
-        info!("Generated Values Extraction (C.1) proof for mapping variable");
-
-        // // Prove mappings slots with length check
-        prove_mappings_with_length(
-            ctx,
-            t,
-            &contract_proof,
-            &serialize_proof(&block_proof).unwrap(),
-            &mapping_values_proof,
-        )
-        .await;
-
-        // // Prove mappings slots without length check
-        prove_mappings_without_length(
-            ctx,
-            t,
-            &contract_proof,
-            &serialize_proof(&block_proof).unwrap(),
-            &mapping_values_proof,
-        )
-        .await;
-    }
+    let mut single = TestCase::single_value_test_case(&ctx).await?;
+    let changes = vec![
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::SecondaryIndex),
+    ];
+    single.run(&mut ctx, changes.clone()).await?;
+    let mut mapping = TestCase::mapping_test_case(&ctx).await?;
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::SecondaryIndex),
+        ChangeType::Deletion,
+    ];
+    mapping.run(&mut ctx, changes).await?;
+    Ok(())
 }
+
+//#[test]
+//fn ryhope_scapegoat2() -> Result<()> {
+//    let mut row_tree = MerkleRowTree::new(
+//        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
+//        (),
+//    )
+//    .unwrap();
+//    let cell = Cell {
+//        id: 10,
+//        value: U256::from(10),
+//    };
+//    let payload = RowPayload {
+//        cells: CellCollection(vec![cell.clone(), cell.clone(), cell.clone()]),
+//        ..Default::default()
+//    };
+//    // RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [10] }/None (3)
+//    //   |RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [11] }/RowTreeKey { value: , rest: [10] } (2)
+//    //   |  |RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398834414), rest: [12] }/RowTreeKey { value: , rest: [11] } (1)
+//    let r10 = RowTreeKey {
+//        value: U256::from_str_radix("1056494154592187365319695072752373049978398833853", 10)
+//            .unwrap()
+//            .into(),
+//        rest: vec![10],
+//    };
+//    let r11 = RowTreeKey {
+//        value: U256::from_str_radix("1056494154592187365319695072752373049978398833853", 10)
+//            .unwrap()
+//            .into(),
+//        rest: vec![11],
+//    };
+//    let r12 = RowTreeKey {
+//        value: U256::from_str_radix("1056494154592187365319695072752373049978398834414", 10)
+//            .unwrap()
+//            .into(),
+//        rest: vec![12],
+//    };
+//    enum Update {
+//        Insert(RowTreeKey),
+//        Deletion(RowTreeKey),
+//    }
+//    let mut apply_update =
+//        |tree: &mut MerkleRowTree, updates: Vec<Update>| -> Result<UpdateTree<RowTreeKey>> {
+//            tree.in_transaction(|t| {
+//                for u in updates {
+//                    match u {
+//                        Update::Insert(k) => {
+//                            t.store(k, payload.clone())?;
+//                        }
+//                        Update::Deletion(k) => {
+//                            t.remove(k)?;
+//                        }
+//                    }
+//                }
+//                Ok(())
+//            })
+//        };
+//    println!("block 2");
+//    apply_update(
+//        &mut row_tree,
+//        vec![
+//            Update::Insert(r10.clone()),
+//            Update::Insert(r11.clone()),
+//            Update::Insert(r12),
+//        ],
+//    )?;
+//
+//    println!("block 3");
+//    // Insertion(Row { k: RowTreeKey { value: VectorU256(131889689160155728452442635557830924454313873897), rest: [13] },
+//    let r13 = RowTreeKey {
+//        value: U256::from_str_radix("131889689160155728452442635557830924454313873897", 10)
+//            .unwrap()
+//            .into(),
+//        rest: vec![13],
+//    };
+//    apply_update(&mut row_tree, vec![Update::Insert(r13)])?;
+//
+//    // Insertion(Row { k: RowTreeKey { value: VectorU256(760593967277233584130757083408460933562276361544), rest: [14] }, :
+//    println!("block 4");
+//    let r14 = RowTreeKey {
+//        value: U256::from_str_radix("760593967277233584130757083408460933562276361544", 10)
+//            .unwrap()
+//            .into(),
+//        rest: vec![14],
+//    };
+//    apply_update(&mut row_tree, vec![Update::Insert(r14)])?;
+//    // Deletion(RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [10] })
+//    // Insertion(Row { k: RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [15]
+//    println!("block 5");
+//    let r15 = RowTreeKey {
+//        value: U256::from_str_radix("1056494154592187365319695072752373049978398833853", 10)
+//            .unwrap()
+//            .into(),
+//        rest: vec![15],
+//    };
+//    apply_update(
+//        &mut row_tree,
+//        vec![Update::Deletion(r10), Update::Insert(r15)],
+//    )?;
+//
+//    //  Deletion(RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [11] })
+//    // Insertion(Row { k: RowTreeKey { value: VectorU256(252811549864805747143179347346470204140167719177), rest: [11] },
+//    println!("block 6");
+//    let r11_bis = RowTreeKey {
+//        value: U256::from_str_radix("252811549864805747143179347346470204140167719177", 10)
+//            .unwrap()
+//            .into(),
+//        rest: vec![11],
+//    };
+//
+//    apply_update(
+//        &mut row_tree,
+//        vec![Update::Deletion(r11), Update::Insert(r11_bis.clone())],
+//    )?;
+//    // Deletion(RowTreeKey { value: VectorU256(252811549864805747143179347346470204140167719177), rest: [11] }
+//    println!("block 7");
+//    println!("BEFORE");
+//    row_tree.print_tree();
+//    let ut = apply_update(&mut row_tree, vec![Update::Deletion(r11_bis)])?;
+//
+//    println!("AFTER");
+//    row_tree.print_tree();
+//    println!("UT: ------------------------");
+//    ut.print();
+//    println!("----------------------------");
+//    Ok(())
+//}

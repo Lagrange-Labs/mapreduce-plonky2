@@ -1,8 +1,10 @@
 //! This module offers facilities to “time-travel”, i.e. access the successive
 //! states of a tree at given epochs.
-use anyhow::*;
-use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
+
+use anyhow::*;
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 use crate::{tree::TreeTopology, Epoch};
 
@@ -11,7 +13,7 @@ use super::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TransactionalStorage
 /// An epoch-locked, read-only, view over an [`EpochStorage`].
 pub struct StorageView<
     's,
-    T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
+    T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + Send,
     S: EpochStorage<T>,
 >(
     /// The wrapped [`EpochStorage`]
@@ -21,44 +23,58 @@ pub struct StorageView<
     /// [ignore]
     PhantomData<T>,
 );
-impl<'s, T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>, S: EpochStorage<T>>
-    TransactionalStorage for StorageView<'s, T, S>
+
+#[async_trait]
+impl<
+        's,
+        T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + Send,
+        S: EpochStorage<T> + Sync,
+    > TransactionalStorage for StorageView<'s, T, S>
+where
+    T: Send,
 {
     fn start_transaction(&mut self) -> Result<()> {
         unimplemented!("storage views are read only")
     }
 
-    fn commit_transaction(&mut self) -> Result<()> {
+    async fn commit_transaction(&mut self) -> Result<()> {
         unimplemented!("storage views are read only")
     }
 }
-impl<'s, T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>, S: EpochStorage<T>>
-    EpochStorage<T> for StorageView<'s, T, S>
+
+#[async_trait]
+impl<
+        's,
+        T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + Send,
+        S: EpochStorage<T> + Sync,
+    > EpochStorage<T> for StorageView<'s, T, S>
+where
+    T: Send,
 {
     fn current_epoch(&self) -> Epoch {
         self.1
     }
 
-    fn fetch_at(&self, epoch: Epoch) -> T {
+    async fn fetch_at(&self, epoch: Epoch) -> T {
         if epoch != self.1 {
             unimplemented!(
                 "this storage view is locked at {}; {epoch} unreachable",
                 self.1
             )
         } else {
-            self.0.fetch_at(self.1)
+            self.0.fetch_at(self.1).await
         }
     }
 
-    fn fetch(&self) -> T {
-        self.0.fetch_at(self.1)
+    async fn fetch(&self) -> T {
+        self.0.fetch_at(self.1).await
     }
 
-    fn store(&mut self, _: T) {
+    async fn store(&mut self, _: T) {
         unimplemented!("storage views are read only")
     }
 
-    fn rollback_to(&mut self, _epoch: Epoch) -> Result<()> {
+    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<()> {
         unimplemented!("storage views are read only")
     }
 }
@@ -72,48 +88,52 @@ pub struct KvStorageAt<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>
     /// [ignore]
     PhantomData<T>,
 );
-impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>> RoEpochKvStorage<T::Key, T::Node>
-    for KvStorageAt<'a, T, S>
+
+#[async_trait]
+impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
+    RoEpochKvStorage<T::Key, T::Node> for KvStorageAt<'a, T, S>
 {
     fn current_epoch(&self) -> Epoch {
         self.1
     }
 
-    fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> Option<T::Node> {
+    async fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> Option<T::Node> {
         if epoch != self.1 {
             unimplemented!(
                 "this storage view is locked at {}; {epoch} unreachable",
                 self.1
             )
         } else {
-            self.0.try_fetch_at(k, self.1)
+            self.0.try_fetch_at(k, self.1).await
         }
     }
 
-    fn fetch(&self, k: &T::Key) -> T::Node {
-        self.0.fetch_at(k, self.1)
+    async fn fetch(&self, k: &T::Key) -> T::Node {
+        self.0.fetch_at(k, self.1).await
     }
 
-    fn size(&self) -> usize {
-        self.0.size()
+    async fn size(&self) -> usize {
+        self.0.size().await
     }
 }
-impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>> EpochKvStorage<T::Key, T::Node>
-    for KvStorageAt<'a, T, S>
+
+#[async_trait]
+impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
+    EpochKvStorage<T::Key, T::Node> for KvStorageAt<'a, T, S>
 {
-    fn remove(&mut self, _: T::Key) -> Result<()> {
+    async fn remove(&mut self, _: T::Key) -> Result<()> {
         unimplemented!("storage views are read only")
     }
 
-    fn update(&mut self, _: T::Key, _: T::Node) -> Result<()> {
+    async fn update(&mut self, _: T::Key, _: T::Node) -> Result<()> {
         unimplemented!("storage views are read only")
     }
 
-    fn store(&mut self, _: T::Key, _: T::Node) -> Result<()> {
+    async fn store(&mut self, _: T::Key, _: T::Node) -> Result<()> {
         unimplemented!("storage views are read only")
     }
 
-    fn rollback_to(&mut self, _epoch: Epoch) -> Result<()> {
+    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<()> {
         unimplemented!("storage views are read only")
     }
 }
@@ -143,8 +163,12 @@ impl<'a, T: TreeTopology + 'a, S: TreeStorage<T> + 'a> TreeStorageView<'a, T, S>
         }
     }
 }
-impl<'a, T: TreeTopology + 'a, S: TreeStorage<T> + 'a> TreeStorage<T>
+
+#[async_trait]
+impl<'a, T: TreeTopology + 'a + Send, S: TreeStorage<T> + 'a> TreeStorage<T>
     for TreeStorageView<'a, T, S>
+where
+    <S as TreeStorage<T>>::NodeStorage: Sync,
 {
     type StateStorage = StorageView<'a, T::State, S::StateStorage>;
     type NodeStorage = KvStorageAt<'a, T, S::NodeStorage>;
@@ -165,11 +189,11 @@ impl<'a, T: TreeTopology + 'a, S: TreeStorage<T> + 'a> TreeStorage<T>
         unimplemented!("storage views are read only")
     }
 
-    fn born_at(&self, epoch: Epoch) -> Vec<T::Key> {
-        self.wrapped.born_at(epoch)
+    async fn born_at(&self, epoch: Epoch) -> Vec<T::Key> {
+        self.wrapped.born_at(epoch).await
     }
 
-    fn rollback_to(&mut self, _epoch: Epoch) -> Result<()> {
+    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<()> {
         unimplemented!("storage views are read only")
     }
 }

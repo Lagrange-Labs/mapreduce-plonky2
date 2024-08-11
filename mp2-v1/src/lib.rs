@@ -19,5 +19,6 @@ pub mod api;
 pub mod block_extraction;
 pub mod contract_extraction;
 pub mod final_extraction;
+pub mod indexing;
 pub mod length_extraction;
 pub mod values_extraction;
