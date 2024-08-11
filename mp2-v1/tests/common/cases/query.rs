@@ -154,7 +154,7 @@ async fn prove_query(
             .chain(once(secondary_cell))
             .chain(rest_cells)
             .collect::<Vec<_>>();
-        check_correct_cells_tree(&all_cells, &row_payload);
+        check_correct_cells_tree(&all_cells, &row_payload).await?;
         // 2. create input
         let input = CircuitInput::new_universal_circuit(
             &all_cells,
