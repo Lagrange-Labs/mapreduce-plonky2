@@ -243,11 +243,8 @@ impl<C: ContextProvider> Resolver<C> {
                 };
                 let first_operand = self.to_operand(&first_operand);
                 let second_operand = self.to_operand(&second_operand);
-                let operation = BasicOperation {
-                    first_operand,
-                    second_operand: Some(second_operand),
-                    op,
-                };
+                let operation =
+                    BasicOperation::new_binary_operation(first_operand, second_operand, op);
                 let new_id = Wire::BasicOperation(match storage_target {
                     StorageTarget::Query => self.query_ops.insert(operation),
                     StorageTarget::Predicate => self
@@ -264,11 +261,8 @@ impl<C: ContextProvider> Resolver<C> {
                 UnaryOperator::Not => {
                     let first_operand = self.compile(expr, storage_target)?;
                     let first_operand = self.to_operand(&first_operand);
-                    let operation = BasicOperation {
-                        first_operand,
-                        second_operand: None,
-                        op: Operation::NotOp,
-                    };
+                    let operation =
+                        BasicOperation::new_unary_operation(first_operand, Operation::NotOp);
                     let new_id = Wire::BasicOperation(match storage_target {
                         StorageTarget::Query => self.query_ops.insert(operation),
                         StorageTarget::Predicate => self
