@@ -32,3 +32,5 @@ pub type MembershipHash = HashOut<F>;
 pub type ComputationalHashTarget = HashOutTarget;
 pub type PlaceholderHashTarget = HashOutTarget;
 pub type MembershipHashTarget = HashOutTarget;
+
+pub(crate) use cells::build_cells_tree;

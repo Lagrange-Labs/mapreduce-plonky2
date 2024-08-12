@@ -4,6 +4,7 @@ pub(crate) mod leaf_node;
 pub(crate) mod node_with_one_child;
 pub(crate) mod node_with_two_children;
 pub(crate) mod public_inputs;
+pub(crate) mod results_tree_with_duplicates;
 
 // Without this skipping config, the generic parameter was deleted when `cargo fmt`.
 #[rustfmt::skip]
