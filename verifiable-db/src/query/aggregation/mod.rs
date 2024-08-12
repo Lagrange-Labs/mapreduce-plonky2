@@ -1,18 +1,22 @@
-use anyhow::Result;
+use anyhow::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
-    poseidon::empty_poseidon_hash,
+    array::ToField,
+    poseidon::{empty_poseidon_hash, H},
     proof::ProofWithVK,
     serialization::{deserialize_long_array, serialize_long_array},
     types::HashOutput,
+    utils::ToFields,
     F,
 };
 use plonky2::{
-    field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::GenericHashOut,
+    field::types::PrimeField64,
+    hash::hash_types::HashOut,
+    plonk::config::{GenericHashOut, Hasher},
 };
 
 pub(crate) mod child_proven_single_path_node;
@@ -32,9 +36,11 @@ use super::{
     universal_circuit::{
         output_no_aggregation::Circuit as NoAggOutputCircuit,
         output_with_aggregation::Circuit as AggOutputCircuit,
-        universal_circuit_inputs::{BasicOperation, ColumnCell, PlaceholderId, ResultStructure},
+        universal_circuit_inputs::{
+            BasicOperation, ColumnCell, PlaceholderId, Placeholders, ResultStructure,
+        },
         universal_query_circuit::{
-            dummy_placeholder, placeholder_hash, placeholder_hash_without_query_bounds,
+            dummy_placeholder, placeholder_hash, placeholder_hash_without_query_bounds, QueryBound,
             UniversalQueryCircuitInputs,
         },
         ComputationalHash, PlaceholderHash,
@@ -42,12 +48,79 @@ use super::{
 };
 
 #[derive(Clone, Debug)]
+/// Data structure representing a query bound on secondary index
+pub struct QueryBoundSecondary {
+    /// value of the query bound. Could come either from a constant in the query or from a placeholder
+    pub(crate) value: U256,
+    /// Id of the placeholder from which the bound is taken; None if the bound comes from a constant
+    pub(crate) id: Option<PlaceholderId>,
+}
+
+/// Enumeration employed to specify whether a query bound for secondary indexed is taken in the query from
+/// a constant or from a placeholder
+pub enum QueryBoundSource {
+    // Query bound is a constant
+    Constant(U256),
+    /// Query bound taken from placeholder with id
+    Placeholder(PlaceholderId),
+}
+
+impl QueryBoundSource {
+    /// Get the payload corresponding to `self` query bound to be hashed in computational hash
+    pub(crate) fn get_payload_for_computational_hash(&self) -> U256 {
+        match self {
+            QueryBoundSource::Constant(value) => *value,
+            QueryBoundSource::Placeholder(id) => {
+                U256::from(<PlaceholderId as ToField<F>>::to_field(&id).to_canonical_u64())
+            }
+        }
+    }
+
+    pub(crate) fn add_query_bounds_to_computational_hash(
+        min_query: &Self,
+        max_query: &Self,
+        computational_hash: &ComputationalHash,
+    ) -> ComputationalHash {
+        let min_query = min_query.get_payload_for_computational_hash();
+        let max_query = max_query.get_payload_for_computational_hash();
+        let inputs = computational_hash
+            .to_vec()
+            .into_iter()
+            .chain(min_query.to_fields())
+            .chain(max_query.to_fields())
+            .collect_vec();
+        H::hash_no_pad(&inputs)
+    }
+}
+
+impl From<&QueryBoundSecondary> for QueryBoundSource {
+    fn from(value: &QueryBoundSecondary) -> Self {
+        match value.id {
+            Some(id) => QueryBoundSource::Placeholder(id),
+            None => QueryBoundSource::Constant(value.value),
+        }
+    }
+}
+
+impl QueryBoundSecondary {
+    pub fn new(placeholders: &Placeholders, source: QueryBoundSource) -> Result<Self> {
+        Ok(match source {
+            QueryBoundSource::Constant(value) => Self { value, id: None },
+            QueryBoundSource::Placeholder(id) => Self {
+                value: placeholders.get(&id)?,
+                id: Some(id),
+            },
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
 /// Data structure storing the query bounds specified in the query for primary and secondary index
 pub struct QueryBounds {
     pub(crate) min_query_primary: U256,
     pub(crate) max_query_primary: U256,
-    pub(crate) min_query_secondary: U256,
-    pub(crate) max_query_secondary: U256,
+    pub(crate) min_query_secondary: QueryBoundSecondary,
+    pub(crate) max_query_secondary: QueryBoundSecondary,
 }
 
 impl QueryBounds {
@@ -56,14 +129,20 @@ impl QueryBounds {
     pub fn new(
         min_query_primary: U256,
         max_query_primary: U256,
-        min_query_secondary: Option<U256>,
-        max_query_secondary: Option<U256>,
+        min_query_secondary: Option<QueryBoundSecondary>,
+        max_query_secondary: Option<QueryBoundSecondary>,
     ) -> Self {
         Self {
             min_query_primary,
             max_query_primary,
-            min_query_secondary: min_query_secondary.unwrap_or(U256::ZERO),
-            max_query_secondary: max_query_secondary.unwrap_or(U256::MAX),
+            min_query_secondary: min_query_secondary.unwrap_or(QueryBoundSecondary {
+                value: U256::ZERO,
+                id: None,
+            }),
+            max_query_secondary: max_query_secondary.unwrap_or(QueryBoundSecondary {
+                value: U256::MAX,
+                id: None,
+            }),
         }
     }
 }
@@ -145,12 +224,12 @@ impl CommonInputs {
         Self {
             is_rows_tree_node,
             min_query: if is_rows_tree_node {
-                query_bounds.min_query_secondary
+                query_bounds.min_query_secondary.value
             } else {
                 query_bounds.min_query_primary
             },
             max_query: if is_rows_tree_node {
-                query_bounds.max_query_secondary
+                query_bounds.max_query_secondary.value
             } else {
                 query_bounds.max_query_primary
             },
@@ -254,7 +333,7 @@ impl QueryHashNonExistenceCircuits {
         column_cells: &[ColumnCell],
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
-        placeholder_values: &HashMap<PlaceholderId, U256>,
+        placeholders: &Placeholders,
         query_bounds: &QueryBounds,
         is_rows_tree_node: bool,
     ) -> Result<Self>
@@ -267,14 +346,24 @@ impl QueryHashNonExistenceCircuits {
             .iter()
             .map(|cell| cell.id.to_canonical_u64())
             .collect_vec();
-        let computational_hash = ComputationalHash::from_bytes(
-            (&Identifiers::computational_hash_universal_circuit(
+        let computational_hash = if is_rows_tree_node {
+            Identifiers::computational_hash_without_query_bounds(
                 &column_ids,
                 predicate_operations,
                 results,
-            )?)
-                .into(),
-        );
+            )?
+        } else {
+            ComputationalHash::from_bytes(
+                (&Identifiers::computational_hash_universal_circuit(
+                    &column_ids,
+                    predicate_operations,
+                    results,
+                    &(&query_bounds.min_query_secondary).into(),
+                    &(&query_bounds.max_query_secondary).into(),
+                )?)
+                    .into(),
+            )
+        };
         let placeholder_hash_ids = CircuitInput::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
@@ -284,17 +373,13 @@ impl QueryHashNonExistenceCircuits {
             column_cells,
             predicate_operations,
             results,
-            placeholder_values,
+            placeholders,
             query_bounds,
         )?;
         let placeholder_hash = if is_rows_tree_node {
-            placeholder_hash_without_query_bounds(
-                &placeholder_hash_ids,
-                &placeholder_values,
-                &dummy_placeholder(query_bounds),
-            )
+            placeholder_hash_without_query_bounds(&placeholder_hash_ids, &placeholders)
         } else {
-            placeholder_hash(&placeholder_hash_ids, &placeholder_values, query_bounds)
+            placeholder_hash(&placeholder_hash_ids, &placeholders, query_bounds)
         }?;
         Ok(Self {
             computational_hash,
@@ -326,8 +411,17 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
         deserialize_with = "deserialize_long_array"
     )]
     pub(crate) aggregation_ops: [F; MAX_NUM_RESULTS],
-    /// Common inputs shared across all the circuits
-    pub(crate) common: CommonInputs,
+    /// Flag specifying whether the node being proven belongs to the rows tree or not
+    pub(crate) is_rows_tree_node: bool,
+    /// Minimum query bound found in the query for primary or secondary index, depending on
+    /// whether the node being proven belongs to the index tree or not
+    pub(crate) min_query: QueryBound,
+    /// Maximum query bound found in the query for primary or secondary index, depending on
+    /// whether the node being proven belongs to the index tree or not
+    pub(crate) max_query: QueryBound,
+    /// Value of the dummy placeholder, employed in placeholder hash in case one of the min/max
+    /// query index bounds are taken from a constant in the query
+    pub(crate) dummy_placeholder_value: U256,
 }
 
 #[cfg(test)]

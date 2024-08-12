@@ -48,7 +48,10 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 use std::array;
 
-use super::{NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN};
+use super::{
+    placeholders_check::{CheckedPlaceholder, CheckedPlaceholderTarget},
+    NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
+};
 
 // L: maximum number of results
 // S: maximum number of items in each result
@@ -77,15 +80,11 @@ pub struct RevelationWithoutResultsTreeWires<
     )]
     placeholder_values: [UInt256Target; PH],
     #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    placeholder_pos: [Target; PP],
-    #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    placeholder_pairs: [(Target, UInt256Target); PP],
+    to_be_checked_placeholders: [CheckedPlaceholderTarget; PP],
+    secondary_query_bound_placeholders: [CheckedPlaceholderTarget; 2],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -122,20 +121,19 @@ pub struct RevelationWithoutResultsTreeCircuit<
         deserialize_with = "deserialize_long_array"
     )]
     pub(crate) placeholder_values: [U256; PH],
-    /// The Position in `placeholder_ids` and `placeholder_values` arrays of the
-    /// corresponding pair in `placeholder_pairs`
+    /// Placeholders data to be provided to `check_placeholder` gadget to
+    /// check that placeholders employed in universal query circuit matches
+    /// with the `placeholder_values` exposed as public input by this proof
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    pub(crate) placeholder_pos: [usize; PP],
-    /// Pairs of the placeholder identifiers and values employed in the
-    /// universal query circuit operations
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) placeholder_pairs: [(F, U256); PP],
+    pub(crate) to_be_checked_placeholders: [CheckedPlaceholder; PP],
+    /// Placeholders data related to the placeholders employed in the
+    /// universal query circuit to hash the query bounds for the secondary
+    /// index; they are provided as well to `check_placeholder` gadget to
+    /// check the correctness of the placeholders employed for query bounds
+    pub(crate) secondary_query_bound_placeholders: [CheckedPlaceholder; 2],
 }
 
 impl<const L: usize, const S: usize, const PH: usize, const PP: usize>
@@ -156,14 +154,12 @@ where
 
         let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_safe());
         let placeholder_ids = b.add_virtual_target_arr();
-        // `placeholder_values` are exposed as public inputs to the Solidity constract
+        // `placeholder_values` are exposed as public inputs to the Solidity contract
         // which will not do range-check.
         let placeholder_values = array::from_fn(|_| b.add_virtual_u256());
-        let placeholder_pos = b.add_virtual_target_arr();
-        // Initialize `placeholder_pairs` as unsafe, since they're compared and used to
-        // compute the placeholder hash in `check_placeholders` function.
-        let placeholder_pairs =
-            array::from_fn(|_| (b.add_virtual_target(), b.add_virtual_u256_unsafe()));
+        let to_be_checked_placeholders = array::from_fn(|_| CheckedPlaceholderTarget::new(b));
+        let secondary_query_bound_placeholders =
+            array::from_fn(|_| CheckedPlaceholderTarget::new(b));
 
         // The operation cannot be ID for aggregation.
         let [op_avg, op_count] = [AggregationOperation::AvgOp, AggregationOperation::CountOp]
@@ -179,6 +175,8 @@ where
         let ops = query_proof.operation_ids_target();
         assert_eq!(ops.len(), S);
         let mut results = Vec::with_capacity(L * S);
+        // flag to determine whether entry count is zero
+        let is_entry_count_zero = b.add_virtual_bool_target_unsafe();
         ops.into_iter().enumerate().for_each(|(i, op)| {
             let is_op_avg = b.is_equal(op, op_avg);
             let is_op_count = b.is_equal(op, op_count);
@@ -189,6 +187,8 @@ where
 
             let result = b.select_u256(is_op_avg, &avg_result, &result);
             let result = b.select_u256(is_op_count, &entry_count, &result);
+
+            b.connect(is_divisor_zero.target, is_entry_count_zero.target);
 
             results.push(result);
 
@@ -216,8 +216,8 @@ where
             &is_placeholder_valid,
             &placeholder_ids,
             &placeholder_values,
-            &placeholder_pos,
-            &placeholder_pairs,
+            &to_be_checked_placeholders,
+            &secondary_query_bound_placeholders,
             &final_placeholder_hash,
         );
 
@@ -248,6 +248,7 @@ where
 
         let overflow = b.is_not_equal(overflow, zero).target;
 
+        let num_results = b.not(is_entry_count_zero);
         // Register the public innputs.
         PublicInputs::<_, L, S, PH>::new(
             &original_tree_proof.block_hash(),
@@ -257,7 +258,7 @@ where
             &[query_proof.num_matching_rows_target()],
             &[overflow],
             // The aggregation query proof only has one result.
-            &[one],
+            &[num_results.target],
             &results_slice,
             &[zero],
             &[zero],
@@ -268,8 +269,8 @@ where
             is_placeholder_valid,
             placeholder_ids,
             placeholder_values,
-            placeholder_pos,
-            placeholder_pairs,
+            to_be_checked_placeholders,
+            secondary_query_bound_placeholders,
         }
     }
 
@@ -289,16 +290,16 @@ where
             .iter()
             .zip(self.placeholder_values)
             .for_each(|(t, v)| pw.set_u256_target(t, v));
-        let placeholder_pos: [_; PP] = array::from_fn(|i| self.placeholder_pos[i].to_field());
-        pw.set_target_arr(&wires.placeholder_pos, &placeholder_pos);
         wires
-            .placeholder_pairs
+            .to_be_checked_placeholders
             .iter()
-            .zip(self.placeholder_pairs)
-            .for_each(|(t, v)| {
-                pw.set_target(t.0, v.0);
-                pw.set_u256_target(&t.1, v.1);
-            });
+            .zip(&self.to_be_checked_placeholders)
+            .for_each(|(t, v)| v.assign(pw, t));
+        wires
+            .secondary_query_bound_placeholders
+            .iter()
+            .zip(&self.secondary_query_bound_placeholders)
+            .for_each(|(t, v)| v.assign(pw, t));
     }
 }
 
@@ -426,8 +427,9 @@ mod tests {
                 num_placeholders: test_placeholders.num_placeholders,
                 placeholder_ids: test_placeholders.placeholder_ids,
                 placeholder_values: test_placeholders.placeholder_values,
-                placeholder_pos: test_placeholders.placeholder_pos,
-                placeholder_pairs: test_placeholders.placeholder_pairs,
+                to_be_checked_placeholders: test_placeholders.to_be_checked_placeholders,
+                secondary_query_bound_placeholders: test_placeholders
+                    .secondary_query_bound_placeholders,
             }
         }
     }

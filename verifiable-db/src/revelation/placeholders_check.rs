@@ -2,21 +2,61 @@
 //! compute and return the `num_placeholders` and the `placeholder_ids_hash`.
 
 use crate::query::{aggregation::QueryBounds, computational_hash_ids::PlaceholderIdentifier};
+use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     poseidon::{empty_poseidon_hash, H},
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target},
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{SelectHashBuilder, ToFields, ToTargets},
     F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
-    iop::target::{BoolTarget, Target},
+    iop::{
+        target::{BoolTarget, Target},
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::config::Hasher,
 };
+use serde::{Deserialize, Serialize};
 use std::{array, iter::once};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Data structure representing a placeholder target to be checked in the `check_placeholders` gadget
+pub(crate) struct CheckedPlaceholderTarget {
+    id: Target,
+    value: UInt256Target,
+    // expected position of the placeholder in placeholder ids and placeholder values arrays
+    pos: Target,
+}
+
+impl CheckedPlaceholderTarget {
+    pub(crate) fn new(b: &mut CBuilder) -> Self {
+        Self {
+            id: b.add_virtual_target(),
+            value: b.add_virtual_u256_unsafe(), // unsafe is ok since these targets are enforced to be equal to other UInt256Target allocated with safe
+            pos: b.add_virtual_target(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+/// Data structure representing a placeholder target to be checked in the `check_placeholders` gadget
+pub(crate) struct CheckedPlaceholder {
+    pub(crate) id: F,
+    pub(crate) value: U256,
+    pub(crate) pos: F,
+}
+
+impl CheckedPlaceholder {
+    pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &CheckedPlaceholderTarget) {
+        pw.set_target(wires.id, self.id);
+        pw.set_target(wires.pos, self.pos);
+        pw.set_u256_target(&wires.value, self.value);
+    }
+}
 
 /// This gadget checks that the placeholders identifiers and values employed to
 /// compute the `final_placeholder_hash` are found in placeholder_ids and
@@ -31,16 +71,14 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
     is_placeholder_valid: &[BoolTarget; PH],
     placeholder_ids: &[Target; PH],
     placeholder_values: &[UInt256Target; PH],
-    placeholder_pos: &[Target; PP],
-    placeholder_pairs: &[(Target, UInt256Target); PP],
+    to_be_checked_placeholder: &[CheckedPlaceholderTarget; PP],
+    secondary_query_bound_placeholder: &[CheckedPlaceholderTarget; 2], // placeholder pairs corresponding to query bounds for secondary index
     final_placeholder_hash: &HashOutTarget,
 ) -> (Target, HashOutTarget) {
     // Check the first 4 placeholder identifiers as constants.
     [
         PlaceholderIdentifier::MinQueryOnIdx1,
         PlaceholderIdentifier::MaxQueryOnIdx1,
-        PlaceholderIdentifier::MinQueryOnIdx2,
-        PlaceholderIdentifier::MaxQueryOnIdx2,
     ]
     .iter()
     .enumerate()
@@ -82,46 +120,57 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
             b.select_hash(is_placeholder_valid[i], &new_hash, &placeholder_ids_hash);
     }
 
+    // Pad the placeholder_ids to the next power of two for random_access.
+    let mut padded_placeholder_ids = placeholder_ids.to_vec();
+    let mut padded_placeholder_values = placeholder_values.to_vec();
+    let pad_len = PH.next_power_of_two();
+    assert!(
+        pad_len <= 64,
+        "random_access function cannot handle more than 64 elements"
+    );
+    padded_placeholder_ids.resize(pad_len, placeholder_ids[0]);
+    padded_placeholder_values.resize(pad_len, placeholder_values[0].clone());
+
+    let mut check_placeholder_pair = |id: &Target, value, pos| {
+        // Check that the pair (id, value) is same as:
+        // (placeholder_ids[pos], placeholder_values[pos])
+        let expected_id = b.random_access(pos, padded_placeholder_ids.clone());
+        let expected_value = b.random_access_u256(pos, &padded_placeholder_values);
+        b.connect(*id, expected_id);
+        b.enforce_equal_u256(value, &expected_value);
+    };
+
     // Check the placeholder hash of proof is computed only from expected placeholder values.
     let mut placeholder_hash_payload = vec![];
     for i in 0..PP {
         // Accumulate the placeholder identifiers and values for computing the
         // placeholder hash.
-        let (id, value) = &placeholder_pairs[i];
+        let CheckedPlaceholderTarget { id, value, pos } = &to_be_checked_placeholder[i];
         let payload = once(*id).chain(value.to_targets());
         placeholder_hash_payload.extend(payload);
 
-        // Pad the placeholder_ids to the next power of two for random_access.
-        let mut padded_placeholder_ids = placeholder_ids.to_vec();
-        let mut padded_placeholder_values = placeholder_values.to_vec();
-        let pad_len = PH.next_power_of_two();
-        assert!(
-            pad_len <= 64,
-            "random_access function cannot handle more than 64 elements"
-        );
-        padded_placeholder_ids.resize(pad_len, placeholder_ids[0]);
-        padded_placeholder_values.resize(pad_len, placeholder_values[0].clone());
+        check_placeholder_pair(id, value, *pos);
+    }
 
-        // Check that the pair (id, value) found in the current entry of
-        // placeholder_pairs is same as:
-        // (placeholder_ids[placeholder_pos[i]], placeholder_values[placeholder_pos[i]])
-        let expected_id = b.random_access(placeholder_pos[i], padded_placeholder_ids);
-        let expected_value = b.random_access_u256(placeholder_pos[i], &padded_placeholder_values);
-        b.connect(*id, expected_id);
-        b.enforce_equal_u256(value, &expected_value);
+    // check placeholders related to secondary index bounds
+    for i in 0..2 {
+        let CheckedPlaceholderTarget { id, value, pos } = &secondary_query_bound_placeholder[i];
+        check_placeholder_pair(id, value, *pos);
     }
 
     // Re-compute the placeholder hash from placeholder_pairs and minmum,
     // maximum query bounds. Then check it should be same with the specified
     // final placeholder hash.
-    let [min_i1, max_i1, min_i2, max_i2] = array::from_fn(|i| &placeholder_values[i]);
+    let [min_i1, max_i1] = array::from_fn(|i| &placeholder_values[i]);
     let placeholder_hash = b.hash_n_to_hash_no_pad::<H>(placeholder_hash_payload);
     // first_item = H(placeholder_hash || min_i2 || max_i2)
     let inputs = placeholder_hash
         .to_targets()
         .into_iter()
-        .chain(min_i2.to_targets())
-        .chain(max_i2.to_targets())
+        .chain(once(secondary_query_bound_placeholder[0].id))
+        .chain(secondary_query_bound_placeholder[0].value.to_targets())
+        .chain(once(secondary_query_bound_placeholder[1].id))
+        .chain(secondary_query_bound_placeholder[1].value.to_targets())
         .collect_vec();
     let first_item = b.hash_n_to_hash_no_pad::<H>(inputs);
     // final_placeholder_hash = H(first_item || min_i1 || max_i1)
@@ -143,8 +192,6 @@ pub(crate) fn placeholder_ids_hash(placeholder_ids: &[PlaceholderIdentifier]) ->
     [
         &PlaceholderIdentifier::MinQueryOnIdx1,
         &PlaceholderIdentifier::MaxQueryOnIdx1,
-        &PlaceholderIdentifier::MinQueryOnIdx2,
-        &PlaceholderIdentifier::MaxQueryOnIdx2,
     ]
     .into_iter()
     .chain(placeholder_ids)
@@ -174,8 +221,8 @@ mod tests {
         is_placeholder_valid: [BoolTarget; PH],
         placeholder_ids: [Target; PH],
         placeholder_values: [UInt256Target; PH],
-        placeholder_pos: [Target; PP],
-        placeholder_pairs: [(Target, UInt256Target); PP],
+        to_be_checked_placeholders: [CheckedPlaceholderTarget; PP],
+        secondary_query_bound_placeholders: [CheckedPlaceholderTarget; 2],
         final_placeholder_hash: HashOutTarget,
         exp_placeholder_ids_hash: HashOutTarget,
         exp_num_placeholders: Target,
@@ -188,9 +235,16 @@ mod tests {
             let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_unsafe());
             let placeholder_ids = b.add_virtual_target_arr();
             let placeholder_values = array::from_fn(|_| b.add_virtual_u256_unsafe());
-            let placeholder_pos = b.add_virtual_target_arr();
-            let placeholder_pairs =
-                array::from_fn(|_| (b.add_virtual_target(), b.add_virtual_u256_unsafe()));
+            let to_be_checked_placeholders = array::from_fn(|_| CheckedPlaceholderTarget {
+                id: b.add_virtual_target(),
+                value: b.add_virtual_u256_unsafe(),
+                pos: b.add_virtual_target(),
+            });
+            let secondary_query_bound_placeholders = array::from_fn(|_| CheckedPlaceholderTarget {
+                id: b.add_virtual_target(),
+                value: b.add_virtual_u256_unsafe(),
+                pos: b.add_virtual_target(),
+            });
             let [final_placeholder_hash, exp_placeholder_ids_hash] =
                 array::from_fn(|_| b.add_virtual_hash());
             let exp_num_placeholders = b.add_virtual_target();
@@ -201,8 +255,8 @@ mod tests {
                 &is_placeholder_valid,
                 &placeholder_ids,
                 &placeholder_values,
-                &placeholder_pos,
-                &placeholder_pairs,
+                &to_be_checked_placeholders,
+                &secondary_query_bound_placeholders,
                 &final_placeholder_hash,
             );
 
@@ -214,8 +268,8 @@ mod tests {
                 is_placeholder_valid,
                 placeholder_ids,
                 placeholder_values,
-                placeholder_pos,
-                placeholder_pairs,
+                to_be_checked_placeholders,
+                secondary_query_bound_placeholders,
                 final_placeholder_hash,
                 exp_placeholder_ids_hash,
                 exp_num_placeholders,
@@ -234,17 +288,16 @@ mod tests {
                 .iter()
                 .zip(self.placeholder_values)
                 .for_each(|(t, v)| pw.set_u256_target(t, v));
-            let placeholder_pos: [_; PP] =
-                array::from_fn(|i| F::from_canonical_usize(self.placeholder_pos[i]));
-            pw.set_target_arr(&wires.placeholder_pos, &placeholder_pos);
             wires
-                .placeholder_pairs
+                .to_be_checked_placeholders
                 .iter()
-                .zip(self.placeholder_pairs)
-                .for_each(|(t, v)| {
-                    pw.set_target(t.0, v.0);
-                    pw.set_u256_target(&t.1, v.1);
-                });
+                .zip(&self.to_be_checked_placeholders)
+                .for_each(|(t, v)| v.assign(pw, t));
+            wires
+                .secondary_query_bound_placeholders
+                .iter()
+                .zip(&self.secondary_query_bound_placeholders)
+                .for_each(|(t, v)| v.assign(pw, t));
             [
                 (wires.final_placeholder_hash, self.final_placeholder_hash),
                 (wires.exp_placeholder_ids_hash, self.placeholder_ids_hash),
