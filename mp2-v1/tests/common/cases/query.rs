@@ -125,6 +125,7 @@ async fn prove_query(
         "Found {} ROW KEYS to process during proving time",
         all_touched_rows.len()
     );
+    // group the rows per block number
     let touched_rows = all_touched_rows
         .into_iter()
         .map(|r| {
@@ -143,6 +144,7 @@ async fn prove_query(
                 acc
             },
         );
+    // prove the whole tree for each of the involved rows for each block
     for (epoch, row_keys) in &touched_rows {
         let all_paths = stream::iter(row_keys)
             .then(|row_key| async {
@@ -161,6 +163,7 @@ async fn prove_query(
         let proving_tree = UpdateTree::from_paths(all_paths, *epoch as Epoch);
         prove_tree_for_epoch(ctx, table, proving_tree, *epoch, row_keys, &pis, &query).await?;
     }
+    // TODO: aggregate accross all blocks
     Ok(())
 }
 
@@ -478,15 +481,20 @@ async fn prove_single_row(
     // 3. run proof if not ran already
     let proof_key = ProofKey::QueryUniversal((epoch as BlockPrimaryIndex, row_key.clone()));
     let proof = match ctx.storage.get_proof_exact(&proof_key) {
-        Ok(proof) => proof,
+        Ok(proof) => {
+            info!("Loading universal query proof for {epoch} -> {row_key:?}");
+            proof
+        }
         Err(_) => {
             info!("Universal query proof RUNNING for {epoch} -> {row_key:?} ");
-            let proof = ctx.run_query_proof(input)?;
+            let proof = ctx
+                .run_query_proof(input)
+                .expect("unable to generate universal proof for {epoch} -> {row_key:?}");
+            info!("Universal query proof DONE for {epoch} -> {row_key:?} ");
             ctx.storage.store_proof(proof_key, proof.clone())?;
             proof
         }
     };
-    info!("Universal query proof DONE for {epoch} -> {row_key:?} ");
     Ok(proof)
 }
 
