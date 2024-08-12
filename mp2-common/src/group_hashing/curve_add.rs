@@ -6,7 +6,7 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::{
-    curve::curve::Point,
+    curve::curve::{Point, WeierstrassPoint},
     gadgets::{
         base_field::CircuitBuilderGFp5,
         curve::{CircuitBuilderEcGFp5, CurveTarget},
@@ -18,6 +18,18 @@ pub fn add_curve_point(inputs: &[Point]) -> Point {
     assert!(!inputs.is_empty());
 
     inputs.iter().cloned().reduce(|acc, p| acc + p).unwrap()
+}
+
+/// Calculate the weierstrass point addition.
+pub fn add_weierstrass_point(inputs: &[WeierstrassPoint]) -> WeierstrassPoint {
+    assert!(!inputs.is_empty());
+
+    inputs
+        .iter()
+        .fold(Point::NEUTRAL, |acc, p| {
+            acc + Point::decode(p.encode()).unwrap()
+        })
+        .to_weierstrass()
 }
 
 /// Calculate the curve target addition.
