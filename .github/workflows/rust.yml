@@ -52,6 +52,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+      - name: Generate a random port number
+        run: echo PGSQL_PORT=$(shuf -i 5000-30000 -n1) > .env
       - name: Install foundry
         shell: devenv shell bash -- -e {0}
         run: cargo install --root ${HOME}/.cargo --git https://github.com/foundry-rs/foundry --rev c4a984f forge anvil

@@ -403,6 +403,69 @@ async fn hashes() -> Result<()> {
 }
 
 #[tokio::test]
+async fn hashes_pgsql() -> Result<()> {
+    type K = i64;
+    type V = ShaizedString;
+
+    type Tree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<Tree, V>;
+
+    {
+        let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "test_hashes".into(),
+            },
+        )
+        .await?;
+
+        s.in_transaction(|s| {
+            Box::pin(async {
+                s.store(2, "cava".into()).await?;
+                s.store(1, "coucou".into()).await?;
+                s.store(3, "bien".into()).await
+            })
+        })
+        .await?;
+
+        assert_eq!(s.storage.data().fetch(&1).await.h, sha256::digest("coucou"));
+        assert_eq!(
+            s.storage.data().fetch(&2).await.h,
+            sha256::digest(
+                sha256::digest("coucou") + &sha256::digest("bien") + &sha256::digest("cava")
+            )
+        );
+        assert_eq!(s.storage.data().fetch(&3).await.h, sha256::digest("bien"));
+    }
+
+    {
+        let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+            InitSettings::MustExist,
+            SqlStorageSettings {
+                db_url: db_url(),
+                table: "test_hashes".into(),
+            },
+        )
+        .await?;
+
+        s.in_transaction(|s| Box::pin(async { s.update(1, "oucouc".into()).await }))
+            .await?;
+
+        assert_eq!(s.storage.data().fetch(&1).await.h, sha256::digest("oucouc"));
+        assert_eq!(
+            s.storage.data().fetch(&2).await.h,
+            sha256::digest(
+                sha256::digest("oucouc") + &sha256::digest("bien") + &sha256::digest("cava")
+            )
+        );
+        assert_eq!(s.storage.data().fetch(&3).await.h, sha256::digest("bien"));
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn sbbst_requires_sequential_keys() -> Result<()> {
     type Tree = sbbst::Tree;
     type V = i64;

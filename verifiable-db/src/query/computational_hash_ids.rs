@@ -40,6 +40,7 @@ pub enum Identifiers {
     Output(Output),
     AggregationOperations(AggregationOperation),
     PlaceholderIdentifiers(PlaceholderIdentifier),
+    ResultIdentifiers(ResultIdentifier),
     // TODO
 }
 
@@ -62,6 +63,10 @@ impl Identifiers {
                 Identifiers::AggregationOperations(AggregationOperation::default()).offset()
                     + variant_count::<Output>()
             }
+            &Identifiers::ResultIdentifiers(_) => {
+                Identifiers::PlaceholderIdentifiers(PlaceholderIdentifier::default()).offset()
+                    + variant_count::<Output>()
+            }
         }
     }
     pub fn position(&self) -> usize {
@@ -73,6 +78,7 @@ impl Identifiers {
                 Identifiers::Output(o) => *o as usize,
                 Identifiers::AggregationOperations(ao) => *ao as usize,
                 Identifiers::PlaceholderIdentifiers(id) => id.position(),
+                Identifiers::ResultIdentifiers(ri) => *ri as usize,
             }
     }
     pub(crate) fn prefix_id_hash(&self, elements: Vec<F>) -> ComputationalHash {
@@ -584,5 +590,19 @@ impl PlaceholderIdentifier {
             Self::GenericPlaceholder(i) => self.discriminant() + i,
             _ => self.discriminant(),
         }
+    }
+}
+
+/// Result identifiers
+#[derive(Clone, Debug, Copy, Default)]
+pub enum ResultIdentifier {
+    #[default]
+    ResultNoDistinct,
+    ResultWithDistinct,
+}
+
+impl<F: RichField> ToField<F> for ResultIdentifier {
+    fn to_field(&self) -> F {
+        Identifiers::ResultIdentifiers(*self).to_field()
     }
 }
