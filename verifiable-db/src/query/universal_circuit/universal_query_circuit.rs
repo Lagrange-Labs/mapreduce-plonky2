@@ -57,7 +57,7 @@ use super::{
     output_with_aggregation::Circuit as AggOutputCircuit,
     universal_circuit_inputs::{
         BasicOperation, ColumnCell, InputOperand, Placeholder, PlaceholderId, Placeholders,
-        ResultStructure,
+        ResultStructure, RowCells,
     },
     ComputationalHashTarget, PlaceholderHash, PlaceholderHashTarget,
 };
@@ -357,18 +357,19 @@ where
     /// this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
     /// the caller of this method
     pub(crate) fn new(
-        column_cells: &[ColumnCell],
+        row_cells: &RowCells,
         predicate_operations: &[BasicOperation],
         placeholders: &Placeholders,
         is_leaf: bool,
         query_bounds: &QueryBounds,
         results: &ResultStructure,
     ) -> Result<Self> {
-        let num_columns = column_cells.len();
+        let num_columns = row_cells.num_columns();
         ensure!(
             num_columns <= MAX_NUM_COLUMNS,
             "number of columns is higher than the maximum value allowed"
         );
+        let column_cells = row_cells.to_cells();
         let padded_column_values = column_cells
             .iter()
             .map(|cell| cell.value)
@@ -946,7 +947,7 @@ where
 {
     /// Provide input values for universal circuit variant for queries with aggregation operations
     pub(crate) fn new_query_with_agg(
-        column_cells: &[ColumnCell],
+        column_cells: &RowCells,
         predicate_operations: &[BasicOperation],
         placeholders: &Placeholders,
         is_leaf: bool,
@@ -966,7 +967,7 @@ where
     }
     /// Provide input values for universal circuit variant for queries without aggregation operations
     pub(crate) fn new_query_no_agg(
-        column_cells: &[ColumnCell],
+        column_cells: &RowCells,
         predicate_operations: &[BasicOperation],
         placeholders: &Placeholders,
         is_leaf: bool,
@@ -1028,7 +1029,7 @@ mod tests {
             output_with_aggregation::Circuit as AggOutputCircuit,
             universal_circuit_inputs::{
                 BasicOperation, ColumnCell, InputOperand, OutputItem, PlaceholderId, Placeholders,
-                ResultStructure,
+                ResultStructure, RowCells,
             },
             universal_query_circuit::placeholder_hash,
             ComputationalHash,
@@ -1122,6 +1123,7 @@ mod tests {
             .zip(column_ids.iter())
             .map(|(&value, &id)| ColumnCell { value, id })
             .collect_vec();
+        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
         // define placeholders
         let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
         let second_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(1);
@@ -1296,7 +1298,7 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >::new_universal_circuit(
-            &column_cells,
+            &row_cells,
             &predicate_operations,
             &results,
             &placeholders,
@@ -1463,6 +1465,7 @@ mod tests {
             .zip(column_ids.iter())
             .map(|(&value, &id)| ColumnCell { value, id })
             .collect_vec();
+        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
         // define placeholders
         let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
         let second_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(1);
@@ -1663,7 +1666,7 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >::new_universal_circuit(
-            &column_cells,
+            &row_cells,
             &predicate_operations,
             &results,
             &placeholders,

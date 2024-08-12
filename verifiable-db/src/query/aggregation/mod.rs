@@ -37,7 +37,7 @@ use super::{
         output_no_aggregation::Circuit as NoAggOutputCircuit,
         output_with_aggregation::Circuit as AggOutputCircuit,
         universal_circuit_inputs::{
-            BasicOperation, ColumnCell, PlaceholderId, Placeholders, ResultStructure,
+            BasicOperation, ColumnCell, PlaceholderId, Placeholders, ResultStructure, RowCells,
         },
         universal_query_circuit::{
             dummy_placeholder, placeholder_hash, placeholder_hash_without_query_bounds, QueryBound,
@@ -330,7 +330,7 @@ impl QueryHashNonExistenceCircuits {
         const MAX_NUM_RESULT_OPS: usize,
         const MAX_NUM_RESULTS: usize,
     >(
-        column_cells: &[ColumnCell],
+        row_cells: &RowCells,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         placeholders: &Placeholders,
@@ -342,7 +342,8 @@ impl QueryHashNonExistenceCircuits {
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
         [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     {
-        let column_ids = column_cells
+        let column_ids = row_cells
+            .to_cells()
             .iter()
             .map(|cell| cell.id.to_canonical_u64())
             .collect_vec();
@@ -370,7 +371,7 @@ impl QueryHashNonExistenceCircuits {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >::ids_for_placeholder_hash(
-            column_cells,
+            row_cells,
             predicate_operations,
             results,
             placeholders,

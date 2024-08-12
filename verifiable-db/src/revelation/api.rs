@@ -351,7 +351,7 @@ mod tests {
             universal_circuit::{
                 universal_circuit_inputs::{
                     BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders,
-                    ResultStructure,
+                    ResultStructure, RowCells,
                 },
                 universal_query_circuit::placeholder_hash,
                 PlaceholderHash,
@@ -405,6 +405,7 @@ mod tests {
         let column_cells = (0..NUM_COLUMNS)
             .map(|_| ColumnCell::new(rng.gen(), gen_random_u256(rng)))
             .collect_vec();
+        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
         let placeholder_ids = [0, 1].map(|i| PlaceholderIdentifier::GenericPlaceholder(i));
         let predicate_operations = vec![
             // C4 < $2
@@ -460,7 +461,7 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_ITEMS_PER_OUTPUT,
         >::ids_for_placeholder_hash(
-            &column_cells,
+            &row_cells,
             &predicate_operations,
             &results,
             &placeholders,
@@ -478,7 +479,7 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_ITEMS_PER_OUTPUT,
         >(
-            &column_cells,
+            &row_cells,
             &predicate_operations,
             &results,
             &placeholders,

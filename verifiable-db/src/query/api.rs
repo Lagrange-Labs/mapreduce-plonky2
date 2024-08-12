@@ -41,7 +41,7 @@ use super::{
         output_no_aggregation::Circuit as NoAggOutputCircuit,
         output_with_aggregation::Circuit as AggOutputCircuit,
         universal_circuit_inputs::{
-            BasicOperation, ColumnCell, PlaceholderId, Placeholders, ResultStructure,
+            BasicOperation, ColumnCell, PlaceholderId, Placeholders, ResultStructure, RowCells,
         },
         universal_query_circuit::{
             dummy_placeholder, dummy_placeholder_from_query_bounds, placeholder_hash, QueryBound,
@@ -126,7 +126,7 @@ where
     /// this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
     /// the caller of this method
     pub fn new_universal_circuit(
-        column_cells: &[ColumnCell],
+        column_cells: &RowCells,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         placeholders: &Placeholders,
@@ -295,7 +295,7 @@ where
     /// in the same order, so that those ids can be provided as input to other circuits that need
     /// to recompute this hash
     pub fn ids_for_placeholder_hash(
-        column_cells: &[ColumnCell],
+        row_cells: &RowCells,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         placeholders: &Placeholders,
@@ -310,7 +310,7 @@ where
                     MAX_NUM_RESULTS,
                     AggOutputCircuit<MAX_NUM_RESULTS>,
                 >::new(
-                    column_cells,
+                    row_cells,
                     predicate_operations,
                     placeholders,
                     false, // doesn't matter for placeholder hash computation
@@ -327,7 +327,7 @@ where
                     MAX_NUM_RESULTS,
                     NoAggOutputCircuit<MAX_NUM_RESULTS>,
                 >::new(
-                    column_cells,
+                    row_cells,
                     predicate_operations,
                     placeholders,
                     false, // doesn't matter for placeholder hash computation
@@ -343,14 +343,14 @@ where
 
     /// Compute the `placeholder_hash` associated to a query
     pub fn placeholder_hash(
-        column_cells: &[ColumnCell],
+        row_cells: &RowCells,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         placeholders: &Placeholders,
         query_bounds: &QueryBounds,
     ) -> Result<HashOutput> {
         let placeholder_hash_ids = Self::ids_for_placeholder_hash(
-            column_cells,
+            row_cells,
             predicate_operations,
             results,
             placeholders,
@@ -836,6 +836,7 @@ mod tests {
         public_inputs::PublicInputs,
         universal_circuit::universal_circuit_inputs::{
             BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders, ResultStructure,
+            RowCells,
         },
     };
 
@@ -986,8 +987,9 @@ mod tests {
                 .zip(column_ids.iter())
                 .map(|(&value, &id)| ColumnCell::new(id, value))
                 .collect_vec();
+            let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
             let input = Input::new_universal_circuit(
-                &column_cells,
+                &row_cells,
                 &predicate_operations,
                 &results,
                 &placeholders,
@@ -1432,7 +1434,7 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &column_cells,
+            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
             &predicate_operations,
             &results,
             &placeholders,
@@ -1534,7 +1536,7 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &column_cells,
+            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
             &predicate_operations,
             &results,
             &placeholders,
@@ -1630,7 +1632,7 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &column_cells,
+            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
             &predicate_operations,
             &results,
             &placeholders,

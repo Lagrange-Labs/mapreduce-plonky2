@@ -1,5 +1,5 @@
 use anyhow::{anyhow, ensure, Context, Result};
-use serde::de::value;
+use serde::{de::value, Deserialize, Serialize};
 use std::collections::HashMap;
 
 use alloy::primitives::U256;
@@ -25,71 +25,59 @@ pub type PlaceholderId = PlaceholderIdentifier;
 
 #[derive(Clone, Debug)]
 /// Data structure employed to represent a set of placeholders, identified by their `PlaceholderId`
-pub struct Placeholders {
-    placeholder_values: HashMap<PlaceholderId, U256>,
-    min_query_primary: U256,
-    max_query_primary: U256,
-}
+pub struct Placeholders(HashMap<PlaceholderId, U256>);
 
 impl Placeholders {
     /// Initialize an empty set of placeholders
     pub fn new_empty(min_query_primary: U256, max_query_primary: U256) -> Self {
-        Self {
-            placeholder_values: HashMap::new(),
-            min_query_primary,
-            max_query_primary,
-        }
+        Self(
+            [
+                (PlaceholderId::MinQueryOnIdx1, min_query_primary),
+                (PlaceholderId::MaxQueryOnIdx1, max_query_primary),
+            ]
+            .into_iter()
+            .collect(),
+        )
     }
 
     /// Get the placeholder value corresponding to `id`, if found in the set of placeholders
     pub fn get(&self, id: &PlaceholderId) -> Result<U256> {
-        Ok(match id {
-            PlaceholderIdentifier::MinQueryOnIdx1 => self.min_query_primary,
-            PlaceholderIdentifier::MaxQueryOnIdx1 => self.max_query_primary,
-            PlaceholderIdentifier::GenericPlaceholder(_) => {
-                let value = self.placeholder_values.get(id);
-                ensure!(value.is_some(), "no placeholder found for id {:?}", id);
-                *value.unwrap()
-            }
-        })
+        let value = self.0.get(id);
+        ensure!(value.is_some(), "no placeholder found for id {:?}", id);
+        Ok(*value.unwrap())
     }
 
     /// Add a new placeholder to `self`
     pub fn insert(&mut self, id: PlaceholderId, value: U256) {
-        self.placeholder_values.insert(id, value);
+        self.0.insert(id, value);
     }
 
     /// Get the number of placeholders in `self`
     pub fn len(&self) -> usize {
-        // number of placeholders in placeholder values plus the 2 special primary query bounds placeholders
-        self.placeholder_values.len() + 2
+        // number of placeholders in placeholder values
+        self.0.len()
     }
 
     pub fn ids(&self) -> Vec<PlaceholderId> {
-        [
-            PlaceholderIdentifier::MinQueryOnIdx1,
-            PlaceholderIdentifier::MaxQueryOnIdx1,
-        ]
-        .into_iter()
-        .chain(self.placeholder_values.keys().cloned())
-        .collect_vec()
+        self.0.keys().cloned().collect_vec()
     }
 
     pub fn placeholder_values(&self) -> Vec<U256> {
-        [self.min_query_primary, self.max_query_primary]
-            .into_iter()
-            .chain(self.placeholder_values.values().cloned())
-            .collect_vec()
+        self.0.values().cloned().collect_vec()
     }
 }
 
 impl From<(Vec<(PlaceholderId, U256)>, U256, U256)> for Placeholders {
     fn from(value: (Vec<(PlaceholderId, U256)>, U256, U256)) -> Self {
-        Self {
-            placeholder_values: value.0.into_iter().collect::<HashMap<_, _>>(),
-            min_query_primary: value.1,
-            max_query_primary: value.2,
-        }
+        Self(
+            [
+                (PlaceholderId::MinQueryOnIdx1, value.1),
+                (PlaceholderId::MaxQueryOnIdx1, value.2),
+            ]
+            .into_iter()
+            .chain(value.0)
+            .collect(),
+        )
     }
 }
 
@@ -350,6 +338,7 @@ impl ResultStructure {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ColumnCell {
     pub(crate) value: U256,
     pub(crate) id: F,
@@ -361,5 +350,34 @@ impl ColumnCell {
             value,
             id: id.to_field(),
         }
+    }
+}
+
+pub struct RowCells {
+    primary: ColumnCell,
+    secondary: ColumnCell,
+    rest: Vec<ColumnCell>,
+}
+
+impl RowCells {
+    pub fn new(primary: &ColumnCell, secondary: &ColumnCell, rest: &[ColumnCell]) -> Self {
+        Self {
+            primary: primary.clone(),
+            secondary: secondary.clone(),
+            rest: rest.to_vec(),
+        }
+    }
+    /// Get number of columns in the row represented by `self`
+    pub fn num_columns(&self) -> usize {
+        self.rest.len() + 2
+    }
+
+    /// Return the set of column cells, placing primary and secondary index columns at the beginning of the array
+    pub(crate) fn to_cells(&self) -> Vec<ColumnCell> {
+        [&self.primary, &self.secondary]
+            .into_iter()
+            .chain(&self.rest)
+            .cloned()
+            .collect_vec()
     }
 }
