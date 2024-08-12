@@ -11,7 +11,7 @@ use storage::{
     EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
     TransactionalStorage, TreeStorage, TreeTransactionalStorage,
 };
-use tree::{MutableTree, NodeContext, PrintableTree, TreeTopology};
+use tree::{MutableTree, NodeContext, NodePath, PrintableTree, TreeTopology};
 
 pub mod storage;
 #[cfg(test)]
@@ -248,6 +248,20 @@ impl<
 
     pub async fn node_context(&self, k: &T::Key) -> Option<NodeContext<T::Key>> {
         self.tree.node_context(k, &self.storage).await
+    }
+
+    /// Return, if it exists, a [`NodePath`] for the given key in the underlying
+    /// tree representing its ascendance up to the tree root.
+    pub async fn lineage(&self, k: &T::Key) -> Option<NodePath<T::Key>> {
+        self.tree.lineage(k, &self.storage).await
+    }
+
+    /// Return, if it exists, a [`NodePath`] for the given key at the given
+    /// epoch in the underlying tree representing its ascendance up to the tree
+    /// root.
+    pub async fn lineage_at(&self, k: &T::Key, epoch: Epoch) -> Option<NodePath<T::Key>> {
+        let s = TreeStorageView::<'_, T, S>::new(&self.storage, epoch);
+        self.tree.lineage(k, &s).await
     }
 
     /// Return an epoch-locked, read-only, [`TreeStorage`] offering a view on
