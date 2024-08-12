@@ -161,7 +161,7 @@ async fn prove_query(
             .collect::<Vec<_>>()
             .await;
         let proving_tree = UpdateTree::from_paths(all_paths, *epoch as Epoch);
-        prove_tree_for_epoch(ctx, table, proving_tree, *epoch, row_keys, &pis, &query).await?;
+        prove_tree_for_epoch(ctx, table, proving_tree, *epoch, row_keys, &pis, &query).await;
     }
     // TODO: aggregate accross all blocks
     Ok(())
@@ -215,7 +215,25 @@ async fn prove_tree_for_epoch(
         } else {
             None
         };
-        let (node_ctx, payload) = table.row.fetch_with_context_at(&k, epoch as Epoch).await;
+        let (node_ctx, _) = table.row.fetch_with_context_at(&k, epoch as Epoch).await;
+        if node_ctx.is_leaf() {
+            // NOTE: if it is a leaf of the row tree, then there is no need to prove anything,
+            // since we're not "aggregating" any from below. So in this test, we just copy the
+            // proof to the expected aggregation location and move on.
+            // For the index tree however, we need to always generate an aggregate proof
+            let query_proof_key = ProofKey::QueryUniversal((epoch, k.clone()));
+            let agg_proof_key = ProofKey::QueryAggregate((epoch, k.clone()));
+            let query_proof = ctx
+                .storage
+                .get_proof_exact(&query_proof_key)
+                .expect("should be able to get query proof");
+            ctx.storage
+                .store_proof(agg_proof_key, query_proof)
+                .expect("unable to save agg proof");
+            proven_nodes.insert(k);
+            continue;
+        }
+
         // In the case we haven't proven anything under this node, it's the single path case
         // It is sufficient to check if this node is one of the leaves we in this update tree.Note
         // it is not the same meaning as a "leaf of a tree", here it just means is it the first
