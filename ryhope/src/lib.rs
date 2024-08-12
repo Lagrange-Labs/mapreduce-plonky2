@@ -119,8 +119,12 @@ impl<
     /// Compute a bottom-up-aggregated value on the payload of the nodes,
     /// recursively from the leaves up to the root node.
     async fn aggregate(&mut self, mut plan: UpdatePlan<T::Key>) -> Result<()> {
-        while let Some(Next::Ready(k)) = plan.next() {
-            let c = self.tree.node_context(&k, &self.storage).await.unwrap();
+        while let Some(Next::Ready(item)) = plan.next() {
+            let c = self
+                .tree
+                .node_context(&item.k, &self.storage)
+                .await
+                .unwrap();
             let mut child_data = vec![];
             for c in c.iter_children() {
                 if let Some(k) = c {
@@ -130,10 +134,10 @@ impl<
                 }
             }
 
-            let mut payload = self.storage.data().fetch(&k).await;
+            let mut payload = self.storage.data().fetch(&item.k).await;
             payload.aggregate(child_data.into_iter());
-            plan.done(&k)?;
-            self.storage.data_mut().store(k, payload).await?
+            plan.done(&item)?;
+            self.storage.data_mut().store(item.k, payload).await?
         }
         Ok(())
     }

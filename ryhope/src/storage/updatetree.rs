@@ -30,6 +30,8 @@ pub struct UpdateTreeNode<K: Clone + Hash + Eq> {
     children: BTreeSet<usize>,
     /// The key born by this node
     k: K,
+    /// Whether this node is a leaf of an update path
+    is_path_end: bool,
 }
 impl<K: Clone + Hash + Eq> UpdateTreeNode<K> {
     fn is_leaf(&self) -> bool {
@@ -71,6 +73,7 @@ impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
                     .copied(),
                 children: Default::default(),
                 k: current.to_owned(),
+                is_path_end: context.is_leaf(),
             });
             for c in context.iter_children().flatten() {
                 let c_i = self.rec_build(t, c, nodes).await;
@@ -119,6 +122,7 @@ impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
                     parent: None,
                     children: BTreeSet::new(),
                     k: root_k.clone(),
+                    is_path_end: path.is_empty(),
                 }],
                 idx: Default::default(),
             };
@@ -148,6 +152,7 @@ impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
                     parent: Some(current),
                     children: BTreeSet::new(),
                     k,
+                    is_path_end: path.is_empty(),
                 });
                 self.rec_from_path(new_i, path);
             }
@@ -212,6 +217,23 @@ pub enum Next<T: Clone> {
     NotYet,
 }
 
+/// The items that are produced by the [`WorkPlan`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkplanItem<T> {
+    /// The key
+    pub k: T,
+    /// Whether this item was a at the end of an update path
+    pub is_path_end: bool,
+}
+impl<T: Clone + Hash + PartialEq + Eq> From<&UpdateTreeNode<T>> for WorkplanItem<T> {
+    fn from(n: &UpdateTreeNode<T>) -> Self {
+        WorkplanItem {
+            k: n.k.clone(),
+            is_path_end: n.is_path_end,
+        }
+    }
+}
+
 /// An update plan to recompute all the hashes of the touched nodes stored in a
 /// given [`UpdateTree`] in such a way that children are always computed before
 /// their parents.
@@ -219,14 +241,14 @@ pub enum Next<T: Clone> {
 /// The [`Iterator`] implementation return either `None` when all nodes have
 /// been processed, or an instance of `Next` while there remains nodes to be
 /// processed. If `Next::Ready` is returned, then the given node can be safely
-/// processed. If `Next::NotYet` is returned, then there are still noded to
+/// processed. If `Next::NotYet` is returned, then there are still nodes to
 /// process, but their children have not been processed yet. In this case, the
 /// `[done(k)]` method shall be invoked to mark processed, which will allow
 /// `next()` to return their parents on its next invokation.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct UpdatePlan<T: Clone + Hash + Eq> {
     pub t: UpdateTree<T>,
-    ready: Vec<T>,
+    ready: Vec<WorkplanItem<T>>,
 }
 impl<T: Clone + Hash + Eq> UpdatePlan<T> {
     fn new(t: UpdateTree<T>) -> Self {
@@ -236,20 +258,24 @@ impl<T: Clone + Hash + Eq> UpdatePlan<T> {
         };
 
         // Mark all the leaves as being ready to be processed
-        for n in r.t.nodes.iter_mut() {
+        for n in r.t.nodes.iter() {
             if n.is_leaf() {
-                r.ready.push(n.k.clone());
+                r.ready.push(n.into());
             }
         }
 
         r
     }
 
-    pub fn done(&mut self, k: &T) -> Result<()> {
-        let i = *self.t.idx.get(k).ok_or_else(|| anyhow!("unknwown key"))?;
+    pub fn done(&mut self, item: &WorkplanItem<T>) -> Result<()> {
+        let i = *self
+            .t
+            .idx
+            .get(&item.k)
+            .ok_or_else(|| anyhow!("unknwown key"))?;
 
         // May happen when restarting a plan
-        self.ready.retain(|x| x != k);
+        self.ready.retain(|x| x.k != item.k);
 
         // Root node is hardcoded to 0
         if i == 0 {
@@ -259,14 +285,14 @@ impl<T: Clone + Hash + Eq> UpdatePlan<T> {
             debug_assert!(self.t.nodes[parent].children.contains(&i));
             self.t.nodes[parent].children.remove(&i);
             if self.t.nodes[parent].children.is_empty() {
-                self.ready.push(self.t.nodes[parent].k.clone());
+                self.ready.push((&self.t.nodes[parent]).into());
             }
         }
         Ok(())
     }
 }
 impl<T: Clone + Hash + Eq> Iterator for UpdatePlan<T> {
-    type Item = Next<T>;
+    type Item = Next<WorkplanItem<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.t.nodes.is_empty() {
@@ -311,7 +337,7 @@ mod test {
         loop {
             let mut done = vec![];
             while let Some(Next::Ready(k)) = workplan.next() {
-                println!("Doing {}", k);
+                println!("Doing {}", k.k);
                 done.push(k);
                 workplan.t.print();
             }

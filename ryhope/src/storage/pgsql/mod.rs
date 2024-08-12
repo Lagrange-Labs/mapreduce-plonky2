@@ -3,7 +3,6 @@ use crate::tree::TreeTopology;
 use crate::{Epoch, InitSettings};
 use std::collections::HashSet;
 use std::fmt::Debug;
-use std::hash::Hash;
 
 use self::storages::{
     CachedDbKvStore, CachedDbStore, DbConnector, NodeConnector, PayloadConnector,
