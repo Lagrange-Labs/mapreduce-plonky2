@@ -1,3 +1,6 @@
+//! The executor module converts a SQL query as provided by the user targeting a
+//! virtual contract-storage table into a query executable against the ryhope
+//! row tree tables.
 use anyhow::*;
 use log::*;
 use sqlparser::ast::{

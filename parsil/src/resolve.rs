@@ -19,7 +19,7 @@ use sqlparser::ast::{
     SelectItem, SetExpr, TableAlias, TableFactor, UnaryOperator, Value,
 };
 use verifiable_db::query::{
-    computational_hash_ids::{AggregationOperation, Operation, Output},
+    computational_hash_ids::{AggregationOperation, Operation},
     universal_circuit::universal_circuit_inputs::{
         BasicOperation, InputOperand, OutputItem, ResultStructure,
     },
@@ -352,32 +352,36 @@ impl<C: ContextProvider> Resolver<C> {
     fn to_pis(&self) -> Result<CircuitPis> {
         let root_scope = &self.scopes.scope_at(1);
 
-        let aggregation = if root_scope
+        let result = if root_scope
             .metadata()
             .aggregation
             .iter()
             .all(|&a| a == AggregationOperation::IdOp)
         {
-            Output::NoAggregation
+            ResultStructure::new_for_query_no_aggregation(
+                self.query_ops.ops.clone(),
+                root_scope.metadata().outputs.clone(),
+                vec![0; root_scope.metadata().outputs.len()],
+            )
         } else if root_scope
             .metadata()
             .aggregation
             .iter()
             .all(|&a| a != AggregationOperation::IdOp)
         {
-            Output::Aggregation
+            ResultStructure::new_for_query_with_aggregation(
+                self.query_ops.ops.clone(),
+                root_scope.metadata().outputs.clone(),
+                root_scope
+                    .metadata()
+                    .aggregation
+                    .iter()
+                    .map(|x| x.to_id())
+                    .collect(),
+            )
         } else {
             unreachable!()
         };
-        // TODO: change that to each type of aggregation operation
-        let agg_ops_id = (0..root_scope.metadata().outputs.len())
-            .map(|_| AggregationOperation::AvgOp.to_id())
-            .collect();
-        let result = ResultStructure::new_for_query_with_aggregation(
-            self.query_ops.ops.clone(),
-            root_scope.metadata().outputs.clone(),
-            agg_ops_id,
-        );
 
         Ok(CircuitPis {
             result,
