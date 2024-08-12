@@ -16,6 +16,32 @@ use crate::{
     visitor::{AstPass, Visit},
 };
 
+/// The SQL datatype to represent a UINT256
+const UINT256: DataType = DataType::Numeric(ExactNumberInfo::None);
+
+/// Generate an [`Expr`] encoding a call to the given function with the given
+/// arguments.
+fn funcall(fname: &str, args: Vec<Expr>) -> Expr {
+    Expr::Function(Function {
+        name: ObjectName(vec![Ident::new(fname)]),
+        parameters: FunctionArguments::None,
+        args: FunctionArguments::List(FunctionArgumentList {
+            duplicate_treatment: None,
+            args: args
+                .into_iter()
+                .map(|arg| FunctionArg::Unnamed(FunctionArgExpr::Expr(arg)))
+                .collect(),
+            clauses: vec![],
+        }),
+        filter: None,
+        null_treatment: None,
+        over: None,
+        within_group: vec![],
+    })
+}
+
+/// If the given expression is a string-encoded value, it is casted to a NUMERIC
+/// in place.
 fn convert_number_string(expr: &mut Expr) -> Result<()> {
     if let Some(replacement) = match expr {
         Expr::Value(v) => match v {
@@ -39,32 +65,32 @@ fn convert_number_string(expr: &mut Expr) -> Result<()> {
     Ok(())
 }
 
-/// Generate an [`Expr`] encoding `generate_series(__valid_from, __valid_until)`
-fn expand_block_range() -> Expr {
-    Expr::Function(Function {
-        name: ObjectName(vec![Ident::new("generate_series")]),
-        parameters: FunctionArguments::None,
-        args: FunctionArguments::List(FunctionArgumentList {
-            duplicate_treatment: None,
-            args: vec![
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new(
-                    "__valid_from",
-                )))),
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new(
-                    "__valid_until",
-                )))),
-            ],
-            clauses: vec![],
-        }),
-        filter: None,
-        null_treatment: None,
-        over: None,
-        within_group: vec![],
-    })
+/// When a function that may return a float is encountered, it is wrapped in a
+/// call to `FLOOR`.
+fn convert_funcalls(expr: &mut Expr) -> Result<()> {
+    if let Some(replacement) = match expr {
+        Expr::Function(Function { name, .. }) => match name.to_string().to_uppercase().as_str() {
+            "AVG" => funcall("CEIL", vec![expr.clone()]).into(),
+            _ => None,
+        },
+        _ => None,
+    } {
+        *expr = replacement;
+    }
+
+    Ok(())
 }
 
-/// The SQL datatype to represent a UINT256
-const UINT256: DataType = DataType::Numeric(ExactNumberInfo::None);
+/// Generate an [`Expr`] encoding `generate_series(__valid_from, __valid_until)`
+fn expand_block_range() -> Expr {
+    funcall(
+        "generate_series",
+        vec![
+            Expr::Identifier(Ident::new("__valid_from")),
+            Expr::Identifier(Ident::new("__valid_until")),
+        ],
+    )
+}
 
 /// Generate an [`Expr`] encoding for `payload -> cells -> '{id}' -> value
 fn fetch_from_payload(id: u64) -> Expr {
@@ -261,7 +287,9 @@ impl<'a, C: ContextProvider> Executor<'a, C> {
 
 impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
-        convert_number_string(expr)
+        convert_number_string(expr)?;
+        convert_funcalls(expr)?;
+        Ok(())
     }
 
     fn post_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
