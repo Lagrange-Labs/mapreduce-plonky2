@@ -1,6 +1,4 @@
-use super::{
-    cells::build_cells_tree, ComputationalHashTarget, MembershipHashTarget, COLUMN_INDEX_NUM,
-};
+use super::{cells::build_cells_tree, ComputationalHashTarget, MembershipHashTarget};
 use crate::query::computational_hash_ids::{Extraction, Identifiers};
 use alloy::primitives::U256;
 use mp2_common::{
@@ -81,9 +79,9 @@ impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
         let column_hash = build_column_hash(b, &input_wires);
 
         // Exclude the first 2 indexed columns to build the cells tree.
-        let input_values = &input_wires.column_values[COLUMN_INDEX_NUM..];
-        let input_ids = &input_wires.column_ids[COLUMN_INDEX_NUM..];
-        let is_real_value = &input_wires.is_real_column[COLUMN_INDEX_NUM..];
+        let input_values = &input_wires.column_values[2..];
+        let input_ids = &input_wires.column_ids[2..];
+        let is_real_value = &input_wires.is_real_column[2..];
         let tree_hash = build_cells_tree(b, input_values, input_ids, is_real_value);
 
         ColumnExtractionWires {
@@ -123,7 +121,7 @@ fn build_column_hash<const MAX_NUM_COLUMNS: usize>(
         let hash = Identifiers::Extraction(Extraction::Column)
             .prefix_id_hash_circuit(b, vec![input.column_ids[i]]);
 
-        if i < COLUMN_INDEX_NUM {
+        if i < 2 {
             hash
         } else {
             b.select_hash(input.is_real_column[i], &hash, &empty_hash)
@@ -198,7 +196,7 @@ mod tests {
 
             // Compute the expected column hash and tree hash.
             let column_hash = compute_column_hash(&columns);
-            let tree_hash = compute_cells_tree_hash(columns[COLUMN_INDEX_NUM..].to_vec()).await;
+            let tree_hash = compute_cells_tree_hash(columns[2..].to_vec()).await;
 
             // Construct the circuit input.
             let (mut column_ids, mut column_values): (Vec<_>, Vec<_>) =
