@@ -52,7 +52,8 @@ impl TestContext {
         // prod.
         let mut workplan = ut.into_workplan();
 
-        while let Some(Next::Ready(k)) = workplan.next() {
+        while let Some(Next::Ready(wk)) = workplan.next() {
+            let k = &wk.k;
             let (context, cell) = tree.fetch_with_context(&k).await;
 
             let proof = if context.is_leaf() {
@@ -145,7 +146,7 @@ impl TestContext {
                 table: table_id.clone(),
                 secondary: new_row_key.clone(),
                 primary,
-                tree_key: k,
+                tree_key: *k,
             };
 
             let pproof = ProofWithVK::deserialize(&proof).unwrap();
@@ -171,7 +172,7 @@ impl TestContext {
                         .unwrap()
                 )
             );
-            workplan.done(&k).unwrap();
+            workplan.done(&wk).unwrap();
         }
         let root = tree.root().await.unwrap();
         let root_data = tree.root_data().await.unwrap();

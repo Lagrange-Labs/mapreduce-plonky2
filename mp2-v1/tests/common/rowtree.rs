@@ -85,7 +85,8 @@ impl TestContext {
         debug!("PROVE_ROW_TREE -- BEGIN for block {}", primary);
         let t = &table.row;
         let mut workplan = ut.into_workplan();
-        while let Some(Next::Ready(k)) = workplan.next() {
+        while let Some(Next::Ready(wk)) = workplan.next() {
+            let k = &wk.k;
             let (context, row) = t.fetch_with_context(&k).await;
             let id = row.secondary_index_column;
             // Sec. index value
@@ -225,7 +226,7 @@ impl TestContext {
                 new_proof_key,
                 hex::encode(extract_hash_from_proof(&proof).unwrap().to_bytes())
             );
-            workplan.done(&k).unwrap();
+            workplan.done(&wk).unwrap();
         }
         let root = t.root().await.unwrap();
         let row = table.row.fetch(&root).await;

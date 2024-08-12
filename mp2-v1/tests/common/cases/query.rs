@@ -1,5 +1,12 @@
-use plonky2::field::types::{Field, PrimeField64};
-use std::{collections::HashMap, iter::once};
+use plonky2::{
+    field::types::{Field, PrimeField64},
+    plonk::config::GenericHashOut,
+};
+use std::{
+    collections::{HashMap, HashSet},
+    iter::once,
+    process::Child,
+};
 
 use crate::common::{
     cases::indexing::BLOCK_COLUMN_NAME, proof_storage::ProofKey, rowtree::MerkleRowTree,
@@ -8,10 +15,10 @@ use crate::common::{
 use super::super::{context::TestContext, proof_storage::ProofStorage, table::Table};
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::{Context, Result};
-use futures::{stream, FutureExt, StreamExt};
+use futures::{future::BoxFuture, io::empty, stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::{debug, info};
-use mp2_common::{array::ToField, F};
+use mp2_common::{array::ToField, poseidon::empty_poseidon_hash, types::HashOutput, F};
 use mp2_v1::{
     indexing::{
         self,
@@ -23,14 +30,19 @@ use mp2_v1::{
 };
 use parsil::{resolve::CircuitPis, symbols::ContextProvider};
 use ryhope::{
-    storage::{pgsql::ToFromBytea, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
+    storage::{
+        pgsql::ToFromBytea,
+        updatetree::{Next, UpdateTree},
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
+    },
+    tree::NodeContext,
     Epoch,
 };
 use sqlparser::ast::Query;
 use tokio_postgres::Row as PsqlRow;
 use verifiable_db::query::{
     self,
-    aggregation::QueryBounds,
+    aggregation::{ChildPosition, NodeInfo, QueryBounds, SubProof},
     universal_circuit::universal_circuit_inputs::{ColumnCell, PlaceholderId},
 };
 
@@ -113,68 +125,369 @@ async fn prove_query(
         "Found {} ROW KEYS to process during proving time",
         all_touched_rows.len()
     );
-    let touched_rows: HashMap<BlockPrimaryIndex, RowTreeKey> = all_touched_rows
+    let touched_rows = all_touched_rows
         .into_iter()
         .map(|r| {
             let row_key = r
                 .get::<_, Option<Vec<u8>>>(0)
                 .map(RowTreeKey::from_bytea)
-                .context("unable to parse row key tree")?;
+                .context("unable to parse row key tree")
+                .expect("");
             let block: Epoch = r.get::<_, i64>(1);
-            Ok((block as BlockPrimaryIndex, row_key))
+            (block as BlockPrimaryIndex, row_key)
         })
-        .collect::<Result<_>>()?;
-    for (epoch, row_key) in &touched_rows {
-        // 1. Get the all the cells including primary and secondary index
-        let (row_ctx, row_payload) = table
-            .row
-            .fetch_with_context_at(row_key, *epoch as Epoch)
-            .await;
-        // API is gonna change on this but right now, we have to sort all the "rest" cells by index
-        // in the tree, and put the primary one and secondary one in front
-        let rest_cells = table
-            .columns
-            .non_indexed_columns()
-            .iter()
-            .map(|tc| tc.identifier)
-            .filter_map(|id| {
-                row_payload
-                    .cells
-                    .find_by_column(id)
-                    .map(|info| ColumnCell::new(id, info.value))
-            })
-            .collect::<Vec<_>>();
-
-        let secondary_cell = ColumnCell::new(
-            row_payload.secondary_index_column,
-            row_payload.secondary_index_value(),
+        .fold(
+            HashMap::<BlockPrimaryIndex, HashSet<RowTreeKey>>::new(),
+            |mut acc, (block, row_key)| {
+                acc.entry(block).or_default().insert(row_key);
+                acc
+            },
         );
-        let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(*epoch));
-        let all_cells = once(primary_cell)
-            .chain(once(secondary_cell))
-            .chain(rest_cells)
-            .collect::<Vec<_>>();
-        check_correct_cells_tree(&all_cells, &row_payload).await?;
-        // 2. create input
-        let input = CircuitInput::new_universal_circuit(
-            &all_cells,
-            &pis.predication_operations,
-            &pis.result,
-            &query.placeholders,
-            row_ctx.is_leaf(),
-            &query.bounds,
-        )
-        .expect("unable to create universal query circuit inputs");
-        // 3. run proof if not ran already
-        let proof_key = ProofKey::QueryUniversal((*epoch, row_key.clone()));
-        if ctx.storage.get_proof_exact(&proof_key).is_err() {
-            info!("Universal query proof RUNNING for {epoch} -> {row_key:?} ");
-            let proof = ctx.run_query_proof(input)?;
-            ctx.storage.store_proof(proof_key, proof)?;
-        }
-        info!("Universal query proof DONE for {epoch} -> {row_key:?} ");
+    for (epoch, row_keys) in &touched_rows {
+        let all_paths = stream::iter(row_keys)
+            .then(|row_key| async {
+                // would be nice to make it work directly with async returning impl but seems
+                // difficult
+                table
+                    .row
+                    .lineage_at(row_key, *epoch as Epoch)
+                    .await
+                    .expect("node doesn't have a lineage?")
+                    .into_full_path()
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+            .await;
+        let proving_tree = UpdateTree::from_paths(all_paths, *epoch as Epoch);
+        prove_tree_for_epoch(ctx, table, proving_tree, *epoch, row_keys, &pis, &query).await?;
     }
     Ok(())
+}
+
+async fn prove_tree_for_epoch(
+    ctx: &mut TestContext,
+    table: &Table,
+    proving_tree: UpdateTree<RowTreeKey>,
+    epoch: BlockPrimaryIndex,
+    touched_keys: &HashSet<RowTreeKey>,
+    pis: &CircuitPis,
+    query: &QueryCooking,
+) -> Result<Vec<u8>> {
+    let mut workplan = proving_tree.into_workplan();
+    let mut proven_nodes = HashSet::new();
+    let fetch_only_proven_child = |nctx: NodeContext<RowTreeKey>,
+                                   cctx: &TestContext,
+                                   proven: &HashSet<RowTreeKey>|
+     -> (RowTreeKey, ChildPosition, Vec<u8>) {
+        let (child_key, pos) = match (nctx.left, nctx.right) {
+            (Some(left), Some(right)) => {
+                assert!(
+                    proven.contains(&left) ^ proven.contains(&right),
+                    "only one child should be already proven, not both"
+                );
+                if proven.contains(&left) {
+                    (left, ChildPosition::Left)
+                } else {
+                    (right, ChildPosition::Right)
+                }
+            }
+            (Some(left), None) if proven.contains(&left) => (left, ChildPosition::Left),
+            (None, Some(right)) if proven.contains(&right) => (right, ChildPosition::Right),
+            _ => panic!("stg's wrong in the tree"),
+        };
+        let child_proof_key = ProofKey::QueryAggregate((epoch, child_key.clone()));
+        let child_proof = cctx
+            .storage
+            .get_proof_exact(&child_proof_key)
+            .expect("key should already have been proven");
+        (child_key, pos, child_proof)
+    };
+    while let Some(Next::Ready(wk)) = workplan.next() {
+        let k = wk.k.clone();
+        // 1. first  we check if the row is actually amongst the rows that are satisfying the
+        //    query. In such case, we run the universal query circuit.
+        let is_satisfying_row = touched_keys.contains(&k);
+        let row_proof = if is_satisfying_row {
+            Some(prove_single_row(ctx, table, epoch, &k, pis, query).await?)
+        } else {
+            None
+        };
+        let (node_ctx, payload) = table.row.fetch_with_context_at(&k, epoch as Epoch).await;
+        // In the case we haven't proven anything under this node, it's the single path case
+        // It is sufficient to check if this node is one of the leaves we in this update tree.Note
+        // it is not the same meaning as a "leaf of a tree", here it just means is it the first
+        // node in the merkle path.
+        let input = if wk.is_path_end {
+            assert!(touched_keys.contains(&k),"the first node in merkle path should be a satisfying row, otherwise no need to have it there");
+            let (node_info, left_info, right_info) =
+                get_node_info(&table.row, &k, epoch as Epoch).await;
+            CircuitInput::new_single_path(
+                SubProof::new_embedded_tree_proof(row_proof.unwrap())?,
+                left_info,
+                right_info,
+                node_info,
+                true,
+                &query.bounds,
+            )
+            .expect("can't create leaf input")
+        } else {
+            // here we are guaranteed there is a node below that we have already proven
+            // It can not be a single path with the embedded tree only since that falls into the
+            // previous category ("is_path_end" == true) since update plan starts by the "leaves"
+            // of all the paths it has been given.
+            // So it means There is at least one child of this node that we have proven before.
+            // If this node is in query rows, then we use One/TwoProvenChildNode,
+            // If this node is not in the query touched rows, we use a SinglePath with proven child tree.
+            //
+            //
+            if !is_satisfying_row {
+                let (_, child_pos, child_proof) =
+                    fetch_only_proven_child(node_ctx, ctx, &proven_nodes);
+                let (node_info, left_info, right_info) =
+                    get_node_info(&table.row, &k, epoch as Epoch).await;
+                // we look which child is the one to load from storage, the one we already proved
+                CircuitInput::new_single_path(
+                    SubProof::new_child_proof(child_proof, child_pos)?,
+                    left_info,
+                    right_info,
+                    node_info,
+                    true,
+                    &query.bounds,
+                )
+                .expect("can't create leaf input")
+            } else {
+                // this case is easy, since all that's left is partial or full where both
+                // child(ren) and current node belong to query
+                if node_ctx.left.is_some() && node_ctx.right.is_some() {
+                    // full node case
+                    let left_proof_key =
+                        ProofKey::QueryAggregate((epoch, node_ctx.left.clone().unwrap()));
+                    let right_proof_key =
+                        ProofKey::QueryAggregate((epoch, node_ctx.right.clone().unwrap()));
+                    let left_proof = ctx
+                        .storage
+                        .get_proof_exact(&left_proof_key)
+                        .expect("can't load left proof for full node");
+                    let right_proof = ctx
+                        .storage
+                        .get_proof_exact(&right_proof_key)
+                        .expect("can't load right proof for full node");
+                    CircuitInput::new_full_node(
+                        left_proof,
+                        right_proof,
+                        row_proof.expect("should be a row proof here"),
+                        true,
+                        &query.bounds,
+                    )
+                    .expect("can't create full node circuit input")
+                } else {
+                    // partial case
+                    let (_, child_pos, child_proof) =
+                        fetch_only_proven_child(node_ctx, ctx, &proven_nodes);
+                    let (_, left_info, right_info) =
+                        get_node_info(&table.row, &k, epoch as Epoch).await;
+                    let unproven = match child_pos {
+                        ChildPosition::Left => right_info,
+                        ChildPosition::Right => left_info,
+                    };
+                    CircuitInput::new_partial_node(
+                        child_proof,
+                        row_proof.expect("should be row proof here too"),
+                        unproven,
+                        child_pos,
+                        true,
+                        &query.bounds,
+                    )
+                    .expect("can't build new partial node input")
+                }
+            }
+        };
+        let proof_key = ProofKey::QueryAggregate((epoch as BlockPrimaryIndex, k.clone()));
+        if ctx.storage.get_proof_exact(&proof_key).is_err() {
+            info!("AGGREGATE query proof RUNNING for {epoch} -> {k:?} ");
+            let proof = ctx.run_query_proof(input)?;
+            ctx.storage.store_proof(proof_key, proof.clone())?;
+        }
+        info!("Universal query proof DONE for {epoch} -> {k:?} ");
+        workplan.done(&wk)?;
+        proven_nodes.insert(k);
+    }
+    Ok(vec![])
+}
+
+// TODO: make it recursive with async - tentative in `fetch_child_info` but  it doesn't work,
+// recursion with async is weird.
+async fn get_node_info(
+    tree: &MerkleRowTree,
+    k: &RowTreeKey,
+    at: Epoch,
+) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>) {
+    // look at the left child first then right child, then build the node info
+    let (ctx, node_payload) = tree.fetch_with_context_at(k, at).await;
+    // this looks at the value of a child node (left and right), and fetches the grand child
+    // information to be able to build their respective node info.
+    let fetch_ni = async |k: Option<RowTreeKey>| -> (Option<NodeInfo>, Option<HashOutput>) {
+        match k {
+            None => (None, None),
+            Some(child_k) => {
+                let (child_ctx, child_payload) = tree.fetch_with_context_at(&child_k, at).await;
+                let child_left_hash = match child_ctx.left {
+                    Some(left_left_k) => Some(tree.fetch_at(&left_left_k, at).await.hash),
+                    None => None,
+                };
+                let child_right_hash = match child_ctx.right {
+                    Some(left_right_k) => Some(tree.fetch_at(&left_right_k, at).await.hash),
+                    None => None,
+                };
+                let left_ni = NodeInfo::new(
+                    &child_payload.cell_root_hash,
+                    child_left_hash.as_ref(),
+                    child_right_hash.as_ref(),
+                    child_payload.secondary_index_value(),
+                    child_payload.min,
+                    child_payload.max,
+                );
+                (Some(left_ni), Some(child_payload.hash))
+            }
+        }
+    };
+    let (left_node, left_hash) = fetch_ni(ctx.left).await;
+    let (right_node, right_hash) = fetch_ni(ctx.right).await;
+    (
+        NodeInfo::new(
+            &node_payload.cell_root_hash,
+            left_hash.as_ref(),
+            right_hash.as_ref(),
+            node_payload.secondary_index_value(),
+            node_payload.min,
+            node_payload.max,
+        ),
+        left_node,
+        right_node,
+    )
+}
+
+// Returns the node info belonging to this node. recurse is just used to indicate at which step in
+// the substree should we stop
+// Return is node info, node hash , left hash , right hash
+//async fn fetch_child_info(
+//    tree: &MerkleRowTree,
+//    k: RowTreeKey,
+//    at: Epoch,
+//    recurse: usize,
+//) -> BoxFuture<'static, (NodeInfo, HashOutput, Option<NodeInfo>, Option<NodeInfo>)> {
+//    async move {
+//        let (ctx, node_payload) = tree.fetch_with_context_at(&k, at).await;
+//        if recurse == 0 {
+//            let ni = NodeInfo::new(
+//                &node_payload.cell_root_hash,
+//                // if we stop recursing, we're at the grand child level so we don't carea bout the
+//                // child hashes
+//                None,
+//                None,
+//                node_payload.secondary_index_value(),
+//                node_payload.min,
+//                node_payload.max,
+//            );
+//            return (ni, node_payload.hash, None, None);
+//        }
+//        let (left_node, left_hash) = match ctx.left {
+//            Some(left_k) => {
+//                let (left_ni, left_hash, _, _) =
+//                    // TODO: find out this double await, it's weird but it works..
+//                    fetch_child_info(tree, left_k, at, recurse - 1).await.await;
+//                (Some(left_ni), Some(left_hash))
+//            }
+//            None => (None, None),
+//        };
+//        let (right_node, right_hash) = match ctx.right {
+//            Some(right_k) => {
+//                let (right_ni, right_hash, _, _) =
+//                    fetch_child_info(tree, right_k, at, recurse - 1).await.await;
+//                (Some(right_ni), Some(right_hash))
+//            }
+//            None => (None, None),
+//        };
+//
+//        return (
+//            NodeInfo::new(
+//                &node_payload.cell_root_hash,
+//                left_hash.as_ref(),
+//                right_hash.as_ref(),
+//                node_payload.secondary_index_value(),
+//                node_payload.min,
+//                node_payload.max,
+//            ),
+//            node_payload.hash,
+//            left_node,
+//            right_node,
+//        );
+//    }
+//    .boxed()
+//}
+
+async fn prove_single_row(
+    ctx: &mut TestContext,
+    table: &Table,
+    epoch: BlockPrimaryIndex,
+    row_key: &RowTreeKey,
+    pis: &CircuitPis,
+    query: &QueryCooking,
+) -> Result<Vec<u8>> {
+    // 1. Get the all the cells including primary and secondary index
+    let (row_ctx, row_payload) = table
+        .row
+        .fetch_with_context_at(row_key, epoch as Epoch)
+        .await;
+
+    // API is gonna change on this but right now, we have to sort all the "rest" cells by index
+    // in the tree, and put the primary one and secondary one in front
+    let rest_cells = table
+        .columns
+        .non_indexed_columns()
+        .iter()
+        .map(|tc| tc.identifier)
+        .filter_map(|id| {
+            row_payload
+                .cells
+                .find_by_column(id)
+                .map(|info| ColumnCell::new(id, info.value))
+        })
+        .collect::<Vec<_>>();
+
+    let secondary_cell = ColumnCell::new(
+        row_payload.secondary_index_column,
+        row_payload.secondary_index_value(),
+    );
+    let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(epoch));
+    let all_cells = once(primary_cell)
+        .chain(once(secondary_cell))
+        .chain(rest_cells)
+        .collect::<Vec<_>>();
+    check_correct_cells_tree(&all_cells, &row_payload).await?;
+    // 2. create input
+    let input = CircuitInput::new_universal_circuit(
+        &all_cells,
+        &pis.predication_operations,
+        &pis.result,
+        &query.placeholders,
+        row_ctx.is_leaf(),
+        &query.bounds,
+    )
+    .expect("unable to create universal query circuit inputs");
+    // 3. run proof if not ran already
+    let proof_key = ProofKey::QueryUniversal((epoch as BlockPrimaryIndex, row_key.clone()));
+    let proof = match ctx.storage.get_proof_exact(&proof_key) {
+        Ok(proof) => proof,
+        Err(_) => {
+            info!("Universal query proof RUNNING for {epoch} -> {row_key:?} ");
+            let proof = ctx.run_query_proof(input)?;
+            ctx.storage.store_proof(proof_key, proof.clone())?;
+            proof
+        }
+    };
+    info!("Universal query proof DONE for {epoch} -> {row_key:?} ");
+    Ok(proof)
 }
 
 struct QueryCooking {

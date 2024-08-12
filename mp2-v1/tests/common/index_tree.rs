@@ -44,7 +44,8 @@ impl TestContext {
         added_index: &IndexNode<BlockPrimaryIndex>,
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
-        while let Some(Next::Ready(k)) = workplan.next() {
+        while let Some(Next::Ready(wk)) = workplan.next() {
+            let k = &wk.k;
             let (context, node) = t.fetch_with_context(&k).await;
             let row_proof_key = RowProofIdentifier {
                 table: table_id.clone(),
@@ -185,13 +186,13 @@ impl TestContext {
             };
             let proof_key = IndexProofIdentifier {
                 table: table_id.clone(),
-                tree_key: k,
+                tree_key: k.clone(),
             };
             self.storage
                 .store_proof(ProofKey::Index(proof_key), proof)
                 .expect("unable to store index tree proof");
 
-            workplan.done(&k).unwrap();
+            workplan.done(&wk).unwrap();
         }
         let root = t.root().await.unwrap();
         let root_proof_key = IndexProofIdentifier {

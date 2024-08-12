@@ -1,12 +1,13 @@
 //! Custom types
 
-use crate::{array::Array, D};
+use crate::{array::Array, D, F};
 use anyhow::ensure;
 use derive_more::Deref;
 use plonky2::{
     field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},
+    hash::hash_types::HashOut,
     iop::target::Target,
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use serde::{Deserialize, Serialize};
@@ -93,5 +94,11 @@ impl<'a> From<&'a HashOutput> for &'a [u8] {
 impl<'a> From<&'a HashOutput> for Vec<u8> {
     fn from(value: &'a HashOutput) -> Self {
         value.0.to_vec()
+    }
+}
+
+impl From<HashOut<F>> for HashOutput {
+    fn from(value: HashOut<F>) -> Self {
+        value.to_bytes().try_into().unwrap()
     }
 }
