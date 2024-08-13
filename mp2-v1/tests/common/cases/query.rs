@@ -171,7 +171,10 @@ async fn prove_query(
                 // difficult
                 table
                     .row
-                    .lineage_at(row_key, *primary_value as Epoch)
+                    .lineage_at(
+                        row_key,
+                        from_block_to_epoch(*primary_value, table.genesis_block),
+                    )
                     .await
                     .expect("node doesn't have a lineage?")
                     .into_full_path()
