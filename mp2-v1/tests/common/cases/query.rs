@@ -185,6 +185,7 @@ async fn prove_query(
         let proving_tree = UpdateTree::from_paths(all_paths, *primary_value as Epoch);
         let planner = QueryPlanner {
             ctx,
+            genesis: table.genesis_block,
             query: query.clone(),
             pis: &pis,
             tree: &table.row,
@@ -215,6 +216,7 @@ async fn prove_query(
     let planner = QueryPlanner {
         ctx,
         query: query.clone(),
+        genesis: table.genesis_block,
         pis: &pis,
         tree: &table.index,
         columns: table.columns.clone(),
@@ -242,7 +244,7 @@ async fn prove_query_on_tree<'a, T, V, S, I>(
     mut planner: QueryPlanner<'a, T, V, S>,
     info: I,
     update: UpdateTree<<T as TreeTopology>::Key>,
-    epoch: BlockPrimaryIndex,
+    primary: BlockPrimaryIndex,
 ) -> Result<Vec<u8>>
 where
     I: TreeInfo<T, V, S>,
@@ -280,16 +282,19 @@ where
             _ => panic!("stg's wrong in the tree"),
         };
         let child_proof = info
-            .load_proof(cctx, epoch, &child_key)
+            .load_proof(cctx, primary, &child_key)
             .expect("key should already been proven");
         (pos, child_proof)
     };
     while let Some(Next::Ready(wk)) = workplan.next() {
         let k = wk.k.clone();
-        let (node_ctx, node_payload) = planner.tree.fetch_with_context_at(&k, epoch as Epoch).await;
+        let (node_ctx, node_payload) = planner
+            .tree
+            .fetch_with_context_at(&k, from_block_to_epoch(primary, planner.genesis))
+            .await;
         let is_satisfying_query = info.is_satisfying_query(&k);
         let embedded_proof = info
-            .load_or_prove_embedded(&mut planner, epoch, &k, &node_payload)
+            .load_or_prove_embedded(&mut planner, primary, &k, &node_payload)
             .await;
         if node_ctx.is_leaf() && info.is_row_tree() {
             // NOTE: if it is a leaf of the row tree, then there is no need to prove anything,
@@ -298,7 +303,7 @@ where
             // For the index tree however, we need to always generate an aggregate proof
             // unwrap is safe since we are a leaf and therefore there is an embedded proof since we
             // are guaranteed the row is satisfying the query
-            info.save_proof(&mut planner.ctx, epoch, &k, embedded_proof.unwrap())?;
+            info.save_proof(&mut planner.ctx, primary, &k, embedded_proof.unwrap())?;
             proven_nodes.insert(k);
             continue;
         }
@@ -312,8 +317,12 @@ where
                 info.is_satisfying_query(&k),
                 "first node in merkle path should always be a valid query one"
             );
-            let (node_info, left_info, right_info) =
-                get_node_info(&planner.tree, &k, epoch as Epoch).await;
+            let (node_info, left_info, right_info) = get_node_info(
+                &planner.tree,
+                &k,
+                from_block_to_epoch(primary, planner.genesis),
+            )
+            .await;
             CircuitInput::new_single_path(
                 SubProof::new_embedded_tree_proof(embedded_proof.unwrap())?,
                 left_info,
@@ -335,8 +344,12 @@ where
             if !is_satisfying_query {
                 let (child_pos, child_proof) =
                     fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
-                let (node_info, left_info, right_info) =
-                    get_node_info(&planner.tree, &k, epoch as Epoch).await;
+                let (node_info, left_info, right_info) = get_node_info(
+                    planner.tree,
+                    &k,
+                    from_block_to_epoch(primary, planner.genesis),
+                )
+                .await;
                 // we look which child is the one to load from storage, the one we already proved
                 CircuitInput::new_single_path(
                     SubProof::new_child_proof(child_proof, child_pos)?,
@@ -353,9 +366,9 @@ where
                 if node_ctx.left.is_some() && node_ctx.right.is_some() {
                     // full node case
                     let left_proof =
-                        info.load_proof(planner.ctx, epoch, node_ctx.left.as_ref().unwrap())?;
+                        info.load_proof(planner.ctx, primary, node_ctx.left.as_ref().unwrap())?;
                     let right_proof =
-                        info.load_proof(planner.ctx, epoch, node_ctx.right.as_ref().unwrap())?;
+                        info.load_proof(planner.ctx, primary, node_ctx.right.as_ref().unwrap())?;
                     CircuitInput::new_full_node(
                         left_proof,
                         right_proof,
@@ -369,7 +382,7 @@ where
                     let (child_pos, child_proof) =
                         fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                     let (_, left_info, right_info) =
-                        get_node_info(&planner.tree, &k, epoch as Epoch).await;
+                        get_node_info(planner.tree, &k, primary as Epoch).await;
                     let unproven = match child_pos {
                         ChildPosition::Left => right_info,
                         ChildPosition::Right => left_info,
@@ -386,12 +399,12 @@ where
                 }
             }
         };
-        if info.load_proof(planner.ctx, epoch, &k).is_err() {
-            info!("AGGREGATE query proof RUNNING for {epoch} -> {k:?} ");
+        if info.load_proof(planner.ctx, primary, &k).is_err() {
+            info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
             let proof = planner.ctx.run_query_proof(input)?;
-            info.save_proof(planner.ctx, epoch, &k, proof)?;
+            info.save_proof(planner.ctx, primary, &k, proof)?;
         }
-        info!("Universal query proof DONE for {epoch} -> {k:?} ");
+        info!("Universal query proof DONE for {primary} -> {k:?} ");
         workplan.done(&wk)?;
         proven_nodes.insert(k);
     }
@@ -411,6 +424,7 @@ where
         + Sync,
 {
     query: QueryCooking,
+    genesis: BlockPrimaryIndex,
     pis: &'a parsil::resolve::CircuitPis,
     ctx: &'a mut TestContext,
     tree: &'a MerkleTreeKvDb<T, V, S>,
