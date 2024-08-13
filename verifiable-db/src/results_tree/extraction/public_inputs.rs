@@ -49,7 +49,7 @@ pub enum ResultsExtractionPublicInputs {
 }
 
 #[derive(Clone, Debug)]
-pub struct PublicInputs<'a, T, const S: usize> {
+pub struct PublicInputs<'a, T> {
     h: &'a [T],
     min_val: &'a [T],
     max_val: &'a [T],
@@ -64,7 +64,7 @@ pub struct PublicInputs<'a, T, const S: usize> {
 
 const NUM_PUBLIC_INPUTS: usize = ResultsExtractionPublicInputs::Accumulator as usize + 1;
 
-impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
+impl<'a, T: Clone> PublicInputs<'a, T> {
     const PI_RANGES: [PublicInputRange; NUM_PUBLIC_INPUTS] = [
         Self::to_range(ResultsExtractionPublicInputs::TreeHash),
         Self::to_range(ResultsExtractionPublicInputs::MinValue),
@@ -219,7 +219,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
     }
 }
 
-impl<'a, const S: usize> PublicInputCommon for PublicInputs<'a, Target, S> {
+impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     const RANGES: &'static [PublicInputRange] = &Self::PI_RANGES;
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -236,7 +236,7 @@ impl<'a, const S: usize> PublicInputCommon for PublicInputs<'a, Target, S> {
     }
 }
 
-impl<'a, const S: usize> PublicInputs<'a, Target, S> {
+impl<'a> PublicInputs<'a, Target> {
     pub fn tree_hash_target(&self) -> HashOutTarget {
         HashOutTarget::try_from(self.to_tree_hash_raw()).unwrap()
     }
@@ -278,7 +278,7 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
     }
 }
 
-impl<'a, const S: usize> PublicInputs<'a, F, S> {
+impl<'a> PublicInputs<'a, F> {
     pub fn tree_hash(&self) -> HashOut<F> {
         HashOut::try_from(self.to_tree_hash_raw()).unwrap()
     }
@@ -346,8 +346,8 @@ mod tests {
         type Wires = Vec<Target>;
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let targets = c.add_virtual_target_arr::<{ PublicInputs::<Target, S>::total_len() }>();
-            let pi_targets = PublicInputs::<Target, S>::from_slice(targets.as_slice());
+            let targets = c.add_virtual_target_arr::<{ PublicInputs::<Target>::total_len() }>();
+            let pi_targets = PublicInputs::<Target>::from_slice(targets.as_slice());
             pi_targets.register_args(c);
             pi_targets.to_vec()
         }
@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn test_results_extraction_public_inputs() {
-        let pis_raw = random_vector::<u32>(PublicInputs::<F, S>::total_len()).to_fields();
+        let pis_raw = random_vector::<u32>(PublicInputs::<F>::total_len()).to_fields();
 
         // use public inputs in circuit
         let test_circuit = TestPublicInputs { pis: &pis_raw };
@@ -367,46 +367,45 @@ mod tests {
         assert_eq!(proof.public_inputs, pis_raw);
 
         // check public inputs are constructed correctly
-        let pis = PublicInputs::<F, S>::from_slice(&proof.public_inputs);
+        let pis = PublicInputs::<F>::from_slice(&proof.public_inputs);
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::TreeHash)],
+            &pis_raw[PublicInputs::<F>::to_range(ResultsExtractionPublicInputs::TreeHash)],
             pis.to_tree_hash_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::MinValue)],
+            &pis_raw[PublicInputs::<F>::to_range(ResultsExtractionPublicInputs::MinValue)],
             pis.to_min_value_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::MaxValue)],
+            &pis_raw[PublicInputs::<F>::to_range(ResultsExtractionPublicInputs::MaxValue)],
             pis.to_max_value_raw(),
         );
         assert_eq!(
-            &pis_raw
-                [PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::PrimaryIndexValue)],
+            &pis_raw[PublicInputs::<F>::to_range(ResultsExtractionPublicInputs::PrimaryIndexValue)],
             pis.to_primary_index_value_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::IndexIds)],
+            &pis_raw[PublicInputs::<F>::to_range(ResultsExtractionPublicInputs::IndexIds)],
             pis.to_index_ids_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::MinCounter)],
+            &pis_raw[PublicInputs::<F>::to_range(ResultsExtractionPublicInputs::MinCounter)],
             &[*pis.to_min_counter_raw()],
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::MaxCounter)],
+            &pis_raw[PublicInputs::<F>::to_range(ResultsExtractionPublicInputs::MaxCounter)],
             &[*pis.to_max_counter_raw()],
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::OffsetRangeMin)],
+            &pis_raw[PublicInputs::<F>::to_range(ResultsExtractionPublicInputs::OffsetRangeMin)],
             &[*pis.to_offset_range_min_raw()],
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::OffsetRangeMax)],
+            &pis_raw[PublicInputs::<F>::to_range(ResultsExtractionPublicInputs::OffsetRangeMax)],
             &[*pis.to_offset_range_max_raw()],
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(ResultsExtractionPublicInputs::Accumulator)],
+            &pis_raw[PublicInputs::<F>::to_range(ResultsExtractionPublicInputs::Accumulator)],
             pis.to_accumulator_raw(),
         );
     }

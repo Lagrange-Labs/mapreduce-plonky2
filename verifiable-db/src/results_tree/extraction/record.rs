@@ -23,12 +23,12 @@ use serde::{Deserialize, Serialize};
 use std::iter;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RecordWires<const MAX_NUM_RESULTS: usize> {
+pub struct RecordWires {
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    indexed_items: [UInt256Target; MAX_NUM_RESULTS],
+    indexed_items: [UInt256Target; 2],
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
@@ -44,14 +44,14 @@ pub struct RecordWires<const MAX_NUM_RESULTS: usize> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RecordCircuit<const MAX_NUM_RESULTS: usize> {
+pub struct RecordCircuit {
     /// Values of the indexed items for in this record;
     /// if there is no secondary indexed item, just place the dummy value `0`
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    pub(crate) indexed_items: [U256; MAX_NUM_RESULTS],
+    pub(crate) indexed_items: [U256; 2],
     /// Integer identifiers of the indexed items
     #[serde(
         serialize_with = "serialize_long_array",
@@ -72,12 +72,12 @@ pub struct RecordCircuit<const MAX_NUM_RESULTS: usize> {
     pub(crate) offset_range_max: F,
 }
 
-impl<const MAX_NUM_RESULTS: usize> RecordCircuit<MAX_NUM_RESULTS> {
-    pub fn build(b: &mut CBuilder) -> RecordWires<MAX_NUM_RESULTS> {
+impl RecordCircuit {
+    pub fn build(b: &mut CBuilder) -> RecordWires {
         let ffalse = b._false();
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
-        let indexed_items: [UInt256Target; MAX_NUM_RESULTS] = b.add_virtual_u256_arr_unsafe();
+        let indexed_items: [UInt256Target; 2] = b.add_virtual_u256_arr_unsafe();
         let index_ids: [Target; 2] = b.add_virtual_target_arr();
         let tree_hash = b.add_virtual_hash();
         let counter = b.add_virtual_target();
@@ -118,7 +118,7 @@ impl<const MAX_NUM_RESULTS: usize> RecordCircuit<MAX_NUM_RESULTS> {
         b.connect(is_out_of_range.target, ffalse.target);
 
         // Register the public inputs.
-        PublicInputs::<_, MAX_NUM_RESULTS>::new(
+        PublicInputs::new(
             &final_tree_hash.to_targets(),
             &indexed_items[1].to_targets(),
             &indexed_items[1].to_targets(),
@@ -143,7 +143,7 @@ impl<const MAX_NUM_RESULTS: usize> RecordCircuit<MAX_NUM_RESULTS> {
         }
     }
 
-    fn assign(&self, pw: &mut PartialWitness<F>, wires: &RecordWires<MAX_NUM_RESULTS>) {
+    fn assign(&self, pw: &mut PartialWitness<F>, wires: &RecordWires) {
         wires
             .indexed_items
             .iter()
@@ -161,13 +161,11 @@ impl<const MAX_NUM_RESULTS: usize> RecordCircuit<MAX_NUM_RESULTS> {
 /// Verified proof number = 0
 pub(crate) const NUM_VERIFIED_PROOFS: usize = 0;
 
-impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
-    for RecordWires<MAX_NUM_RESULTS>
-{
+impl CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS> for RecordWires {
     type CircuitBuilderParams = ();
-    type Inputs = RecordCircuit<MAX_NUM_RESULTS>;
+    type Inputs = RecordCircuit;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F, MAX_NUM_RESULTS>::total_len();
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::total_len();
 
     fn circuit_logic(
         builder: &mut CBuilder,
@@ -195,10 +193,8 @@ mod tests {
     use rand::{thread_rng, Rng};
     use std::array;
 
-    const MAX_NUM_RESULTS: usize = 20;
-
-    impl UserCircuit<F, D> for RecordCircuit<MAX_NUM_RESULTS> {
-        type Wires = RecordWires<MAX_NUM_RESULTS>;
+    impl UserCircuit<F, D> for RecordCircuit {
+        type Wires = RecordWires;
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             RecordCircuit::build(b)
@@ -232,7 +228,7 @@ mod tests {
 
         // Proof for the test circuit.
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        let pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+        let pi = PublicInputs::from_slice(&proof.public_inputs);
 
         // Check the public inputs.
 
