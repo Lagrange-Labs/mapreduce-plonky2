@@ -6,13 +6,14 @@ use sqlparser::ast::{
 };
 
 use crate::{
-    resolve::parse_placeholder,
-    utils::parse_string,
+    utils::{str_to_u256, ParsingSettings},
     visitor::{AstPass, Visit},
 };
 
 #[derive(Default)]
-struct Validator;
+struct Validator {
+    settings: ParsingSettings,
+}
 impl Validator {
     fn for_query(query: &mut Query) -> Result<Self> {
         if let SetExpr::Select(ref mut select) = *query.body {
@@ -115,9 +116,12 @@ impl AstPass for Validator {
             Expr::Value(v) => match v {
                 Value::Number(_, _) | Value::Boolean(_) => {}
                 Value::Placeholder(p) => {
-                    ensure!(parse_placeholder(p).is_ok(), "{}: invalid placeholder", p)
+                    self.settings
+                        .placeholders
+                        .resolve(p)
+                        .ok_or_else(|| anyhow!("{p}: unknown placeholder"))?;
                 }
-                Value::SingleQuotedString(s) => parse_string(s).map(|_| ())?,
+                Value::SingleQuotedString(s) => str_to_u256(s).map(|_| ())?,
                 Value::HexStringLiteral(_)
                 | Value::DollarQuotedString(_)
                 | Value::TripleSingleQuotedString(_)

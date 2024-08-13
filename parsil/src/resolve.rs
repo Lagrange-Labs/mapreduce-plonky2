@@ -6,8 +6,6 @@
 //!
 //! 2. wrap the original query into a CTE to expand CoW row spans into
 //!    individual column for each covered block number.
-use std::fmt::Debug;
-
 use alloy::primitives::U256;
 use anyhow::*;
 use log::warn;
@@ -18,6 +16,7 @@ use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Query, Select,
     SelectItem, SetExpr, TableAlias, TableFactor, UnaryOperator, Value,
 };
+use std::fmt::Debug;
 use verifiable_db::query::{
     computational_hash_ids::{AggregationOperation, Operation},
     universal_circuit::universal_circuit_inputs::{
@@ -27,7 +26,7 @@ use verifiable_db::query::{
 
 use crate::{
     symbols::{ColumnKind, ContextProvider, Handle, Kind, ScopeTable, Symbol},
-    utils::parse_string,
+    utils::{str_to_u256, ParsingSettings, Placeholder},
     visitor::{AstPass, Visit},
 };
 
@@ -35,7 +34,7 @@ use crate::{
 /// carries an index, whose sginification depends on the type of wire.
 #[derive(Debug, Clone, PartialEq)]
 enum Wire {
-    /// A wire indexing an operation, either in the SELECT-sepcific or
+    /// A wire indexing an operation, either in the SELECT-specific or
     /// WHERE-specific operation storage.
     BasicOperation(usize),
     /// A wire carrying a column index in the column register.
@@ -44,7 +43,7 @@ enum Wire {
     /// A wire referring to the given constant in the constant storage.
     Constant(usize),
     /// A wire referring to a placeholder, carrying its natural index.
-    PlaceHolder(usize),
+    PlaceHolder(Placeholder),
     /// A wire associating an aggregation function to an existing wire
     Aggregation(AggregationOperation, Box<Wire>),
 }
@@ -52,20 +51,10 @@ impl Wire {
     /// Extract the index carried by a wire.
     pub fn to_index(&self) -> usize {
         match self {
-            Wire::BasicOperation(index)
-            | Wire::Constant(index)
-            | Wire::ColumnId(index)
-            | Wire::PlaceHolder(index) => *index,
-            Wire::Aggregation(_, _) => unreachable!(),
+            Wire::BasicOperation(index) | Wire::Constant(index) | Wire::ColumnId(index) => *index,
+            Wire::PlaceHolder(_) | Wire::Aggregation(_, _) => unreachable!(),
         }
     }
-}
-
-pub(crate) fn parse_placeholder(p: &str) -> Result<usize> {
-    ensure!(p.starts_with("$"), "{p}: invalid placeholder");
-
-    let number = p.trim_start_matches('$');
-    number.parse().with_context(|| "failed to parse `{p}`")
 }
 
 impl Symbol<Wire> {
@@ -73,7 +62,6 @@ impl Symbol<Wire> {
         match self {
             Symbol::NamedExpression { payload, .. }
             | Symbol::Expression(payload)
-            | Symbol::MetaColumn { payload, .. }
             | Symbol::Column { payload, .. } => payload.clone(),
             Symbol::Alias { .. } => todo!(),
             Symbol::Wildcard => todo!(),
@@ -140,7 +128,22 @@ impl<T: PartialEq> UniqueStorage<T> {
     }
 }
 
+/// An interval used to constraint the secondary index of a query.
+#[derive(Debug, Default, Clone)]
+struct Bounds {
+    /// The higher bound, may be a constant or a placeholder
+    high: Option<InputOperand>,
+    /// The lower bound, may be a constant or a placeholder
+    low: Option<InputOperand>,
+}
+
 pub(crate) struct Resolver<C: ContextProvider> {
+    settings: ParsingSettings,
+    /// A handle to an object providing a register of the existing virtual
+    /// tables and their columns.
+    context: C,
+    /// The symbol table hierarchy for this query
+    scopes: ScopeTable<CircuitData, Wire>,
     /// A storage for the SELECT-involved operations.
     query_ops: UniqueStorage<BasicOperation>,
     /// The query-global immediate value storage.
@@ -148,21 +151,19 @@ pub(crate) struct Resolver<C: ContextProvider> {
     /// The query-global column storage, mapping a column index to a
     /// cryptographic column ID.
     columns: Vec<u64>,
-    /// The symbol table hierarchy for this query
-    scopes: ScopeTable<CircuitData, Wire>,
-    /// A handle to an object providing a register of the existing virtual
-    /// tables and their columns.
-    context: C,
+    secondary_index_bounds: Bounds,
 }
 impl<C: ContextProvider> Resolver<C> {
     /// Create a new empty [`Resolver`]
-    fn new(context: C) -> Self {
+    fn new(context: C, settings: ParsingSettings) -> Self {
         Resolver {
+            settings,
+            context,
             scopes: ScopeTable::<CircuitData, Wire>::new(),
             query_ops: Default::default(),
             constants: Default::default(),
             columns: Vec::new(),
-            context,
+            secondary_index_bounds: Default::default(),
         }
     }
 
@@ -174,8 +175,7 @@ impl<C: ContextProvider> Resolver<C> {
         let mut aggregations = Vec::new();
         for r in self.scopes.currently_reachable()?.into_iter() {
             match r {
-                Symbol::MetaColumn { payload: id, .. }
-                | Symbol::Column { payload: id, .. }
+                Symbol::Column { payload: id, .. }
                 | Symbol::NamedExpression { payload: id, .. }
                 | Symbol::Expression(id) => {
                     let (aggregation, output_item) = self.to_output_expression(id, false)?;
@@ -203,6 +203,327 @@ impl<C: ContextProvider> Resolver<C> {
         Wire::Constant(self.constants.insert(value))
     }
 
+    /// Return whether an [`InputOperand`] is only function of constants and/or
+    /// placeholders.
+    fn is_operand_static(&self, operand: &InputOperand) -> bool {
+        match operand {
+            InputOperand::Placeholder(_) | InputOperand::Constant(_) => true,
+            InputOperand::Column(_) => false,
+            InputOperand::PreviousValue(idx) => self.is_operation_static(&self.query_ops.ops[*idx]),
+        }
+    }
+
+    /// Return whether a [`BasicOperations`] is only function of constants and/or
+    /// placeholders.
+    fn is_operation_static(&self, op: &BasicOperation) -> bool {
+        self.is_operand_static(&op.first_operand)
+            && op
+                .second_operand
+                .map(|operand| self.is_operand_static(&operand))
+                .unwrap_or(true)
+    }
+
+    /// Return whether a [`Wire`] is only function of constants and/or
+    /// placeholders.
+    fn is_wire_static(&self, wire: &Wire) -> bool {
+        match wire {
+            Wire::BasicOperation(idx) => self.is_operation_static(&self.query_ops.ops[*idx]),
+            Wire::ColumnId(_) => false,
+            Wire::Constant(_) => true,
+            Wire::PlaceHolder(_) => true,
+            Wire::Aggregation(_, _) => false,
+        }
+    }
+
+    /// Return true if, within the current scope, the given symbol is
+    /// computable as an expression of constants and placeholders.
+    fn is_symbol_static(&self, s: &Symbol<Wire>) -> bool {
+        match s {
+            Symbol::Column { .. } => false,
+            Symbol::Alias { to, .. } => self.is_symbol_static(to),
+            Symbol::NamedExpression { payload, .. } => self.is_wire_static(&payload),
+            Symbol::Expression(_) => todo!(),
+            Symbol::Wildcard => false,
+        }
+    }
+
+    /// Return true if, within the current scope, the given expression is
+    /// computable as an expression of constants and placeholders.
+    fn is_expr_static(&self, e: &Expr) -> Result<bool> {
+        Ok(match e {
+            Expr::Identifier(s) => self.is_symbol_static(&self.scopes.resolve_freestanding(s)?),
+            Expr::CompoundIdentifier(c) => self.is_symbol_static(&self.scopes.resolve_compound(c)?),
+            Expr::BinaryOp { left, right, .. } => {
+                self.is_expr_static(left)? && self.is_expr_static(right)?
+            }
+            Expr::UnaryOp { expr, .. } => self.is_expr_static(expr)?,
+            Expr::Nested(e) => self.is_expr_static(e)?,
+            Expr::Value(_) => true,
+
+            _ => false,
+        })
+    }
+
+    /// Return whether the given `Symbol` encodes the secondary index column.
+    fn is_symbol_secondary_idx(&self, s: &Symbol<Wire>) -> bool {
+        match s {
+            Symbol::Column { kind, .. } => *kind == ColumnKind::SecondaryIndex,
+            Symbol::Alias { to, .. } => self.is_symbol_secondary_idx(to),
+            _ => false,
+        }
+    }
+
+    /// Return whether, in the current scope, the given expression refers to the
+    /// secondary index.
+    fn is_secondary_index(&self, expr: &Expr) -> Result<bool> {
+        Ok(match expr {
+            Expr::Identifier(s) => {
+                self.is_symbol_secondary_idx(&self.scopes.resolve_freestanding(s)?)
+            }
+            Expr::CompoundIdentifier(c) => {
+                self.is_symbol_secondary_idx(&self.scopes.resolve_compound(c)?)
+            }
+
+            _ => false,
+        })
+    }
+
+    /// Return whether the given [`Expr`] refers to a placeholder.
+    fn is_placeholder(&self, expr: &Expr) -> Result<Option<Placeholder>> {
+        Ok(match expr {
+            Expr::Identifier(s) => match self.scopes.resolve_freestanding(s)? {
+                Symbol::NamedExpression { payload, .. } | Symbol::Expression(payload) => {
+                    match payload {
+                        Wire::PlaceHolder(placeholder) => Some(placeholder.clone()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            },
+            Expr::CompoundIdentifier(compound) => match self.scopes.resolve_compound(compound)? {
+                Symbol::NamedExpression { payload, .. } | Symbol::Expression(payload) => {
+                    match payload {
+                        Wire::PlaceHolder(placeholder) => Some(placeholder.clone()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            },
+            Expr::Value(Value::Placeholder(_)) => todo!(),
+            _ => None,
+        })
+    }
+
+    /// If it is static, evaluate an expression and return its value.
+    ///
+    /// NOTE: this will be used (i) in optimization and (ii) when boundaries
+    /// will accept more complex expression.
+    fn const_eval(&self, expr: &Expr) -> Result<U256> {
+        #[allow(non_snake_case)]
+        let ONE = U256::from_str_radix("1", 2).unwrap();
+        const ZERO: U256 = U256::ZERO;
+
+        match expr {
+            Expr::Identifier(_) => todo!(),
+            Expr::CompoundIdentifier(_) => todo!(),
+            Expr::BinaryOp { left, op, right } => {
+                let left = self.const_eval(left)?;
+                let right = self.const_eval(right)?;
+                Ok(match op {
+                    BinaryOperator::Plus => left + right,
+                    BinaryOperator::Minus => left - right,
+                    BinaryOperator::Multiply => left * right,
+                    BinaryOperator::Divide => left / right,
+                    BinaryOperator::Modulo => left % right,
+                    BinaryOperator::Gt => {
+                        if left > right {
+                            ONE
+                        } else {
+                            ZERO
+                        }
+                    }
+                    BinaryOperator::Lt => {
+                        if left < right {
+                            ONE
+                        } else {
+                            ZERO
+                        }
+                    }
+                    BinaryOperator::GtEq => {
+                        if left >= right {
+                            ONE
+                        } else {
+                            ZERO
+                        }
+                    }
+                    BinaryOperator::LtEq => {
+                        if left <= right {
+                            ONE
+                        } else {
+                            ZERO
+                        }
+                    }
+                    BinaryOperator::Eq => {
+                        if left == right {
+                            ONE
+                        } else {
+                            ZERO
+                        }
+                    }
+                    BinaryOperator::NotEq => {
+                        if left != right {
+                            ONE
+                        } else {
+                            ZERO
+                        }
+                    }
+                    BinaryOperator::And => {
+                        if !left.is_zero() && !right.is_zero() {
+                            ONE
+                        } else {
+                            ZERO
+                        }
+                    }
+                    BinaryOperator::Or => {
+                        if !left.is_zero() || !right.is_zero() {
+                            ONE
+                        } else {
+                            ZERO
+                        }
+                    }
+                    BinaryOperator::Xor => {
+                        if !left.is_zero() ^ !right.is_zero() {
+                            ONE
+                        } else {
+                            ZERO
+                        }
+                    }
+                    _ => unreachable!(),
+                })
+            }
+            Expr::UnaryOp { op, expr } => {
+                let e = self.const_eval(expr)?;
+                Ok(match op {
+                    UnaryOperator::Plus => e,
+                    UnaryOperator::Not => {
+                        if e.is_zero() {
+                            ONE
+                        } else {
+                            ZERO
+                        }
+                    }
+                    _ => unreachable!(),
+                })
+            }
+            Expr::Nested(e) => self.const_eval(e),
+            Expr::Value(value) => match value {
+                Value::Number(s, _) | Value::SingleQuotedString(s) => str_to_u256(s),
+                Value::Boolean(b) => Ok(if *b { ONE } else { ZERO }),
+                Value::Placeholder(_) => todo!(),
+                _ => unreachable!(),
+            },
+            _ => bail!("`{expr}`: non-const expression"),
+        }
+    }
+
+    /// Pattern matches the expression to find, it possible, a bound for the
+    /// secondary index.
+    ///
+    /// For now, the only acceptable forms are:
+    ///   - sid <[=] <placeholder>
+    ///   - sid >[=] <placeholder>
+    ///   - sid = <placeholder>
+    fn maybe_set_secondary_index_boundary(&mut self, expr: &Expr) -> Result<()> {
+        if let Expr::BinaryOp { left, op, right } = expr {
+            if self.is_secondary_index(left)? && self.is_expr_static(right)? {
+                match op {
+                    // sid > $x
+                    BinaryOperator::Gt | BinaryOperator::GtEq => {
+                        if self.secondary_index_bounds.high.is_some() {
+                            // impossible to say which is higher between two
+                            // conflicting high bounds
+                            self.secondary_index_bounds.high = None;
+                        } else {
+                            // TODO: wait for final API
+                        }
+                    }
+                    BinaryOperator::Lt | BinaryOperator::LtEq => {
+                        if self.secondary_index_bounds.low.is_some() {
+                            // impossible to say which is lower between two
+                            // conflicting low bounds
+                            self.secondary_index_bounds.low = None;
+                        } else {
+                            // TODO: wait for final API
+                        }
+                    }
+                    BinaryOperator::Eq => {
+                        if self.secondary_index_bounds.low.is_some()
+                            || self.secondary_index_bounds.high.is_some()
+                        {
+                            self.secondary_index_bounds.low = None;
+                            self.secondary_index_bounds.high = None;
+                        } else {
+                            // TODO: wait for final API
+                        }
+                    }
+                    _ => {}
+                }
+            } else if self.is_secondary_index(right)? && self.is_expr_static(left)? {
+                match op {
+                    BinaryOperator::Gt | BinaryOperator::GtEq => {
+                        if self.secondary_index_bounds.low.is_some() {
+                            self.secondary_index_bounds.low = None;
+                        } else {
+                            // TODO: wait for final API
+                        }
+                    }
+                    BinaryOperator::Lt | BinaryOperator::LtEq => {
+                        if self.secondary_index_bounds.high.is_some() {
+                            // impossible to say which is lower between two
+                            // conflicting low bounds
+                            self.secondary_index_bounds.high = None;
+                        } else {
+                            // TODO: wait for final API
+                        }
+                    }
+                    BinaryOperator::Eq => {
+                        if self.secondary_index_bounds.low.is_some()
+                            || self.secondary_index_bounds.high.is_some()
+                        {
+                            self.secondary_index_bounds.low = None;
+                            self.secondary_index_bounds.high = None;
+                        } else {
+                            // TODO: wait for final API
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Recursively traverses the given expression (supposedly a WHERE clause)
+    /// to extract putative bounds on the secondary index. Only `AND`
+    /// combinators are traversed, as any other one would not statically
+    /// guarantee the predominance of the bound.
+    fn find_secondary_index_boundaries(&mut self, expr: &Expr) -> Result<()> {
+        self.maybe_set_secondary_index_boundary(expr)?;
+        match expr {
+            Expr::BinaryOp { left, op, right } => match op {
+                BinaryOperator::And => {
+                    self.find_secondary_index_boundaries(left)?;
+                    self.find_secondary_index_boundaries(right)?;
+                    Ok(())
+                }
+                _ => Ok(()),
+            },
+            Expr::Nested(e) => self.find_secondary_index_boundaries(e),
+            _ => Ok(()),
+        }
+    }
+
     /// Recursively convert the given expression into an assembly of circuit PI
     /// objects.
     ///
@@ -212,8 +533,13 @@ impl<C: ContextProvider> Resolver<C> {
         match expr {
             Expr::Value(v) => Ok(Symbol::Expression(match v {
                 Value::Number(x, _) => self.new_constant(x.parse().unwrap()),
-                Value::SingleQuotedString(s) => self.new_constant(parse_string(s)?),
-                Value::Placeholder(p) => Wire::PlaceHolder(parse_placeholder(p)?),
+                Value::SingleQuotedString(s) => self.new_constant(str_to_u256(s)?),
+                Value::Placeholder(p) => Wire::PlaceHolder(
+                    self.settings
+                        .placeholders
+                        .resolve(p)
+                        .ok_or_else(|| anyhow!("{p}: unknown placeholder"))?,
+                ),
                 _ => unreachable!(),
             })),
             Expr::Identifier(s) => Ok(Symbol::Expression(
@@ -314,7 +640,9 @@ impl<C: ContextProvider> Resolver<C> {
                 Wire::BasicOperation(idx) => InputOperand::PreviousValue(*idx),
                 Wire::ColumnId(idx) => InputOperand::Column(*idx),
                 Wire::Constant(idx) => InputOperand::Constant(self.constants.get(*idx).clone()),
-                Wire::PlaceHolder(idx) => InputOperand::Placeholder(F::from_canonical_usize(*idx)),
+                Wire::PlaceHolder(ph) => {
+                    InputOperand::Placeholder(F::from_canonical_usize(ph.id()))
+                }
                 Wire::Aggregation(_, _) => unreachable!("an aggregation can not be an operand"),
             },
             _ => unreachable!(),
@@ -387,6 +715,8 @@ impl<C: ContextProvider> Resolver<C> {
                 .map(|x| x.to_field())
                 .collect(),
             predication_operations: root_scope.metadata().predicates.ops.clone(),
+            // TODO:
+            secondary_index_bounds: self.secondary_index_bounds.clone(),
         })
     }
 }
@@ -408,6 +738,8 @@ pub struct CircuitPis {
     /// the WHERE predicate, if any. By convention, the root of the AST **MUST**
     /// be the last one in this list.
     pub predication_operations: Vec<BasicOperation>,
+    /// If any, the bounds for the secondary index
+    pub secondary_index_bounds: Bounds,
 }
 
 impl<C: ContextProvider> AstPass for Resolver<C> {
@@ -479,7 +811,7 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
                                 name: column.name.clone(),
                             },
                             payload: Wire::ColumnId(i),
-                            is_primary_index: column.kind == ColumnKind::PrimaryIndex,
+                            kind: column.kind,
                         };
 
                         self.scopes.current_scope_mut().insert(symbol)?;
@@ -539,11 +871,12 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
     }
 
     fn post_select(&mut self, select: &mut Select) -> Result<()> {
-        if let Some(predicate) = select.selection.as_mut() {
+        if let Some(where_clause) = select.selection.as_mut() {
             // As the expression are traversed depth-first, the top level
             // expression will mechnically find itself at the last position, as
             // required by the universal query circuit API.
-            self.compile(predicate, StorageTarget::Predicate)?;
+            self.find_secondary_index_boundaries(where_clause)?;
+            self.compile(where_clause, StorageTarget::Predicate)?;
         }
         self.exit_scope()
     }
@@ -592,9 +925,13 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
 }
 
 /// Convert a query so that it can be executed on a ryhope-generated db.
-pub fn resolve<C: ContextProvider>(q: &Query, context: C) -> Result<CircuitPis> {
+pub fn resolve<C: ContextProvider>(
+    q: &Query,
+    context: C,
+    settings: ParsingSettings,
+) -> Result<CircuitPis> {
     let mut converted_query = q.clone();
-    let mut resolver = Resolver::new(context);
+    let mut resolver = Resolver::new(context, settings);
     converted_query.visit(&mut resolver)?;
     println!("Original query:\n>> {}", q);
     println!("Translated query:\n>> {}", converted_query);
