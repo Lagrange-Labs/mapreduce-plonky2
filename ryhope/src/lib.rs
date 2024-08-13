@@ -41,11 +41,17 @@ pub enum InitSettings<T> {
     /// Fail to initialize if the data does not already exist.
     MustExist,
     /// Fail to initialize if the tree already exists, create with the given
-    /// state it otherwise.
+    /// state otherwise.
     MustNotExist(T),
+    /// Fail to initialize if the tree already exists, create with the given
+    /// state and starting at the given epoch otherwise.
+    MustNotExistAt(T, Epoch),
     /// Ensure that the tree is re-created with the given settings, erasing it
     /// if it exists.
     Reset(T),
+    /// Ensure that the tree is re-created with the given settings and at the
+    /// given initial epoch, erasing it if it exists.
+    ResetAt(T, Epoch),
 }
 
 /// An `MerkleTreeKvDb` wraps together:
