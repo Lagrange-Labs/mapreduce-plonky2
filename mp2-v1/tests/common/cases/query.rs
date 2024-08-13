@@ -159,7 +159,7 @@ async fn prove_query(
         );
     info!(
         "Found {} ROW KEYS to process during proving time -> {:?}",
-        all_touched_rows.len(),
+        touched_rows.len(),
         touched_rows.keys(),
     );
 
