@@ -167,120 +167,86 @@ async fn prove_query(
             .collect::<Vec<_>>()
             .await;
         let proving_tree = UpdateTree::from_paths(all_paths, *primary_value as Epoch);
-        prove_query_on_row_tree_for_epoch(
+        let planner = QueryPlanner {
             ctx,
-            table,
-            proving_tree,
-            *primary_value,
-            row_keys,
-            &pis,
-            &query,
-        )
-        .await?;
+            query: query.clone(),
+            pis: &pis,
+            tree: &table.row,
+            columns: table.columns.clone(),
+        };
+        let info = RowInfo {
+            satisfiying_rows: row_keys.clone(),
+        };
+        prove_query_on_tree(planner, info, proving_tree, *primary_value).await?;
     }
-    prove_query_on_index_tree(ctx, table, touched_rows.keys(), &query).await?;
-    Ok(())
-}
-
-async fn prove_query_on_index_tree<'a, I: IntoIterator<Item = &'a BlockPrimaryIndex>>(
-    ctx: &mut TestContext,
-    table: &Table,
-    primaries: I,
-    query: &QueryCooking,
-) -> Result<()> {
-    // Fetch the current version of the tree - it may be updated in other places too while proving
-    // this so we need to make sure we always fetch a specific version of the db !
-    let current_index_epoch = table.index.current_epoch();
-    // first create the update tree from all the touched epochs/block number
-    let all_paths = stream::iter(primaries)
+    // do the same for the single index tree now
+    let current_epoch = table.index.current_epoch();
+    let all_paths = stream::iter(touched_rows.keys())
         .then(|primary| async {
-            // would be nice to make it work directly with async returning impl but seems
-            // difficult
+            // NOTE : it is important to fetch the data at fixed epoch ! and this key fetched can be
+            // different
             table
                 .index
-                .lineage_at(primary, current_index_epoch)
+                .lineage_at(primary, current_epoch)
                 .await
-                .expect("node doesn't have a lineage?")
+                .expect("index node doesn't have lineage?")
                 .into_full_path()
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>()
         .await;
-
-    // create the proving tree from this so we can start proving it
-    let proving_tree = UpdateTree::from_paths(all_paths, current_index_epoch);
-    let mut workplan = proving_tree.into_workplan();
-    while let Some(Next::Ready(wk)) = workplan.next() {
-        let (node_ctx, node_payload) = table
-            .index
-            .fetch_with_context_at(&wk.k, current_index_epoch)
-            .await;
-        let node_index_as_block: BlockPrimaryIndex = node_payload.value.0.to();
-        let associated_row_key = node_payload.row_tree_root_key.clone();
-        let associated_row_proof_key =
-            ProofKey::QueryAggregateRow((node_index_as_block, associated_row_key));
-        let associated_row_proof = ctx
-            .storage
-            .get_proof_exact(&associated_row_proof_key)
-            .expect("can't find query row tree root for epoch {node_index_as_block}");
-        if wk.is_path_end {
-            // if it 's a terminating node in the merkle proofs, then there is no other index below
-            // satisfying the query, therefore, a single path with embedded proof
-            let (node_info, left_info, right_info) =
-                get_node_info(&table.index, &node_index_as_block, current_index_epoch).await;
-            CircuitInput::new_single_path(
-                SubProof::new_embedded_tree_proof(associated_row_proof)?,
-                left_info,
-                right_info,
-                node_info,
-                false,
-                &query.bounds,
-            )
-            .expect("can't create leaf input");
-        } else {
-            match query.bounds.is_primary_in_range(&node_payload.value.0) {
-                false => {
-                    // not in range so single path but with child proof
-                    let (node_info, left_info, right_info) =
-                        get_node_info(&table.index, &node_index_as_block, current_index_epoch)
-                            .await;
-                    // we look which child is the one to load from storage, the one we already proved
-                    CircuitInput::new_single_path(
-                        SubProof::new_child_proof(child_proof, child_pos)?,
-                        left_info,
-                        right_info,
-                        node_info,
-                        true,
-                        &query.bounds,
-                    )
-                    .expect("can't create leaf input");
-                }
-                true => {
-                    // in range
-                }
-            };
-        }
-
-        workplan.done(&wk)?;
-    }
+    let proving_tree = UpdateTree::from_paths(all_paths, current_epoch);
+    let planner = QueryPlanner {
+        ctx,
+        query: query.clone(),
+        pis: &pis,
+        tree: &table.index,
+        columns: table.columns.clone(),
+    };
+    let info = IndexInfo {
+        bounds: query.bounds.clone(),
+    };
+    prove_query_on_tree(
+        planner,
+        info,
+        proving_tree,
+        current_epoch as BlockPrimaryIndex,
+    )
+    .await?;
     Ok(())
 }
 
-async fn prove_query_on_row_tree_for_epoch(
-    ctx: &mut TestContext,
-    table: &Table,
-    proving_tree: UpdateTree<RowTreeKey>,
+/// Generic function as to how to handle the aggregation. It handles both aggregation in the row
+/// tree as well as in the index tree the same way. The TreeInfo trait is just here to bring some
+/// context, so savign and loading the proof at the right location depending if it's a row or index
+/// tree
+/// clippy doesn't see that it can not be done
+#[allow(clippy::needless_lifetimes)]
+async fn prove_query_on_tree<'a, T, V, S, I>(
+    mut planner: QueryPlanner<'a, T, V, S>,
+    info: I,
+    update: UpdateTree<<T as TreeTopology>::Key>,
     epoch: BlockPrimaryIndex,
-    touched_keys: &HashSet<RowTreeKey>,
-    pis: &CircuitPis,
-    query: &QueryCooking,
-) -> Result<Vec<u8>> {
-    let mut workplan = proving_tree.into_workplan();
+) -> Result<Vec<u8>>
+where
+    I: TreeInfo<T, V, S>,
+    <T as TreeTopology>::Key: std::hash::Hash,
+    T: TreeTopology + MutableTree,
+    // NOTICE the ToValue here to get the value associated to a node
+    V: NodePayload + Send + Sync + LagrangeNode,
+    S: TransactionalStorage
+        + TreeStorage<T>
+        + PayloadStorage<T::Key, V>
+        + FromSettings<T::State>
+        + Send
+        + Sync,
+{
+    let mut workplan = update.into_workplan();
     let mut proven_nodes = HashSet::new();
-    let fetch_only_proven_child = |nctx: NodeContext<RowTreeKey>,
+    let fetch_only_proven_child = |nctx: NodeContext<<T as TreeTopology>::Key>,
                                    cctx: &TestContext,
-                                   proven: &HashSet<RowTreeKey>|
-     -> (RowTreeKey, ChildPosition, Vec<u8>) {
+                                   proven: &HashSet<<T as TreeTopology>::Key>|
+     -> (ChildPosition, Vec<u8>) {
         let (child_key, pos) = match (nctx.left, nctx.right) {
             (Some(left), Some(right)) => {
                 assert!(
@@ -297,38 +263,26 @@ async fn prove_query_on_row_tree_for_epoch(
             (None, Some(right)) if proven.contains(&right) => (right, ChildPosition::Right),
             _ => panic!("stg's wrong in the tree"),
         };
-        let child_proof_key = ProofKey::QueryAggregateRow((epoch, child_key.clone()));
-        let child_proof = cctx
-            .storage
-            .get_proof_exact(&child_proof_key)
-            .expect("key should already have been proven");
-        (child_key, pos, child_proof)
+        let child_proof = info
+            .load_proof(cctx, epoch, &child_key)
+            .expect("key should already been proven");
+        (pos, child_proof)
     };
     while let Some(Next::Ready(wk)) = workplan.next() {
         let k = wk.k.clone();
-        // 1. first  we check if the row is actually amongst the rows that are satisfying the
-        //    query. In such case, we run the universal query circuit.
-        let is_satisfying_row = touched_keys.contains(&k);
-        let row_proof = if is_satisfying_row {
-            Some(prove_single_row(ctx, table, epoch, &k, pis, query).await?)
-        } else {
-            None
-        };
-        let (node_ctx, _) = table.row.fetch_with_context_at(&k, epoch as Epoch).await;
-        if node_ctx.is_leaf() {
+        let (node_ctx, node_payload) = planner.tree.fetch_with_context_at(&k, epoch as Epoch).await;
+        let is_satisfying_query = info.is_satisfying_query(&k);
+        let embedded_proof = info
+            .load_or_prove_embedded(&mut planner, epoch, &k, &node_payload)
+            .await;
+        if node_ctx.is_leaf() && info.is_row_tree() {
             // NOTE: if it is a leaf of the row tree, then there is no need to prove anything,
             // since we're not "aggregating" any from below. So in this test, we just copy the
             // proof to the expected aggregation location and move on.
             // For the index tree however, we need to always generate an aggregate proof
-            let query_proof_key = ProofKey::QueryUniversal((epoch, k.clone()));
-            let agg_proof_key = ProofKey::QueryAggregateRow((epoch, k.clone()));
-            let query_proof = ctx
-                .storage
-                .get_proof_exact(&query_proof_key)
-                .expect("should be able to get query proof");
-            ctx.storage
-                .store_proof(agg_proof_key, query_proof)
-                .expect("unable to save agg proof");
+            // unwrap is safe since we are a leaf and therefore there is an embedded proof since we
+            // are guaranteed the row is satisfying the query
+            info.save_proof(&mut planner.ctx, epoch, &k, embedded_proof.unwrap())?;
             proven_nodes.insert(k);
             continue;
         }
@@ -338,16 +292,19 @@ async fn prove_query_on_row_tree_for_epoch(
         // it is not the same meaning as a "leaf of a tree", here it just means is it the first
         // node in the merkle path.
         let input = if wk.is_path_end {
-            assert!(touched_keys.contains(&k),"the first node in merkle path should be a satisfying row, otherwise no need to have it there");
+            assert!(
+                info.is_satisfying_query(&k),
+                "first node in merkle path should always be a valid query one"
+            );
             let (node_info, left_info, right_info) =
-                get_node_info(&table.row, &k, epoch as Epoch).await;
+                get_node_info(&planner.tree, &k, epoch as Epoch).await;
             CircuitInput::new_single_path(
-                SubProof::new_embedded_tree_proof(row_proof.unwrap())?,
+                SubProof::new_embedded_tree_proof(embedded_proof.unwrap())?,
                 left_info,
                 right_info,
                 node_info,
-                true,
-                &query.bounds,
+                info.is_row_tree(),
+                &planner.query.bounds,
             )
             .expect("can't create leaf input")
         } else {
@@ -356,15 +313,14 @@ async fn prove_query_on_row_tree_for_epoch(
             // previous category ("is_path_end" == true) since update plan starts by the "leaves"
             // of all the paths it has been given.
             // So it means There is at least one child of this node that we have proven before.
-            // If this node is in query rows, then we use One/TwoProvenChildNode,
+            // If this node is satisfying query, then we use One/TwoProvenChildNode,
             // If this node is not in the query touched rows, we use a SinglePath with proven child tree.
             //
-            //
-            if !is_satisfying_row {
-                let (_, child_pos, child_proof) =
-                    fetch_only_proven_child(node_ctx, ctx, &proven_nodes);
+            if !is_satisfying_query {
+                let (child_pos, child_proof) =
+                    fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                 let (node_info, left_info, right_info) =
-                    get_node_info(&table.row, &k, epoch as Epoch).await;
+                    get_node_info(&planner.tree, &k, epoch as Epoch).await;
                 // we look which child is the one to load from storage, the one we already proved
                 CircuitInput::new_single_path(
                     SubProof::new_child_proof(child_proof, child_pos)?,
@@ -372,7 +328,7 @@ async fn prove_query_on_row_tree_for_epoch(
                     right_info,
                     node_info,
                     true,
-                    &query.bounds,
+                    &planner.query.bounds,
                 )
                 .expect("can't create leaf input")
             } else {
@@ -380,53 +336,44 @@ async fn prove_query_on_row_tree_for_epoch(
                 // child(ren) and current node belong to query
                 if node_ctx.left.is_some() && node_ctx.right.is_some() {
                     // full node case
-                    let left_proof_key =
-                        ProofKey::QueryAggregateRow((epoch, node_ctx.left.clone().unwrap()));
-                    let right_proof_key =
-                        ProofKey::QueryAggregateRow((epoch, node_ctx.right.clone().unwrap()));
-                    let left_proof = ctx
-                        .storage
-                        .get_proof_exact(&left_proof_key)
-                        .expect("can't load left proof for full node");
-                    let right_proof = ctx
-                        .storage
-                        .get_proof_exact(&right_proof_key)
-                        .expect("can't load right proof for full node");
+                    let left_proof =
+                        info.load_proof(planner.ctx, epoch, node_ctx.left.as_ref().unwrap())?;
+                    let right_proof =
+                        info.load_proof(planner.ctx, epoch, node_ctx.right.as_ref().unwrap())?;
                     CircuitInput::new_full_node(
                         left_proof,
                         right_proof,
-                        row_proof.expect("should be a row proof here"),
-                        true,
-                        &query.bounds,
+                        embedded_proof.expect("should be a embedded_proof here"),
+                        info.is_row_tree(),
+                        &planner.query.bounds,
                     )
                     .expect("can't create full node circuit input")
                 } else {
                     // partial case
-                    let (_, child_pos, child_proof) =
-                        fetch_only_proven_child(node_ctx, ctx, &proven_nodes);
+                    let (child_pos, child_proof) =
+                        fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                     let (_, left_info, right_info) =
-                        get_node_info(&table.row, &k, epoch as Epoch).await;
+                        get_node_info(&planner.tree, &k, epoch as Epoch).await;
                     let unproven = match child_pos {
                         ChildPosition::Left => right_info,
                         ChildPosition::Right => left_info,
                     };
                     CircuitInput::new_partial_node(
                         child_proof,
-                        row_proof.expect("should be row proof here too"),
+                        embedded_proof.expect("should be an embedded_proof here too"),
                         unproven,
                         child_pos,
-                        true,
-                        &query.bounds,
+                        info.is_row_tree(),
+                        &planner.query.bounds,
                     )
                     .expect("can't build new partial node input")
                 }
             }
         };
-        let proof_key = ProofKey::QueryAggregateRow((epoch as BlockPrimaryIndex, k.clone()));
-        if ctx.storage.get_proof_exact(&proof_key).is_err() {
+        if info.load_proof(planner.ctx, epoch, &k).is_err() {
             info!("AGGREGATE query proof RUNNING for {epoch} -> {k:?} ");
-            let proof = ctx.run_query_proof(input)?;
-            ctx.storage.store_proof(proof_key, proof.clone())?;
+            let proof = planner.ctx.run_query_proof(input)?;
+            info.save_proof(planner.ctx, epoch, &k, proof)?;
         }
         info!("Universal query proof DONE for {epoch} -> {k:?} ");
         workplan.done(&wk)?;
@@ -448,15 +395,16 @@ where
         + Sync,
 {
     query: QueryCooking,
-    pis: parsil::resolve::CircuitPis,
+    pis: &'a parsil::resolve::CircuitPis,
     ctx: &'a mut TestContext,
-    tree: MerkleTreeKvDb<T, V, S>,
+    tree: &'a MerkleTreeKvDb<T, V, S>,
     columns: TableColumns,
 }
 
 trait TreeInfo<T, V, S>
 where
     T: TreeTopology + MutableTree,
+    <T as TreeTopology>::Key: std::hash::Hash,
     // NOTICE the ToValue here to get the value associated to a node
     V: NodePayload + Send + Sync + LagrangeNode,
     S: TransactionalStorage
@@ -466,27 +414,26 @@ where
         + Send
         + Sync,
 {
-    type K = <T as TreeTopology>::Key;
     fn is_row_tree(&self) -> bool;
-    fn is_satisfying_query(&self, k: &Self::K) -> bool;
+    fn is_satisfying_query(&self, k: &<T as TreeTopology>::Key) -> bool;
     fn load_proof(
         &self,
         ctx: &TestContext,
         primary: BlockPrimaryIndex,
-        key: &Self::K,
+        key: &<T as TreeTopology>::Key,
     ) -> Result<Vec<u8>>;
     fn save_proof(
         &self,
         ctx: &mut TestContext,
-        primray: BlockPrimaryIndex,
-        key: &Self::K,
+        primary: BlockPrimaryIndex,
+        key: &<T as TreeTopology>::Key,
         proof: Vec<u8>,
     ) -> Result<()>;
     async fn load_or_prove_embedded<'a>(
         &self,
         planner: &mut QueryPlanner<'a, T, V, S>,
         primary: BlockPrimaryIndex,
-        k: &Self::K,
+        k: &<T as TreeTopology>::Key,
         v: &V,
     ) -> Option<Vec<u8>>;
 }
@@ -496,13 +443,11 @@ struct IndexInfo {
 }
 
 impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexInfo {
-    type K = <BlockTree as TreeTopology>::Key;
-
     fn is_row_tree(&self) -> bool {
         false
     }
 
-    fn is_satisfying_query(&self, k: &Self::K) -> bool {
+    fn is_satisfying_query(&self, k: &BlockPrimaryIndex) -> bool {
         let primary = U256::from(*k);
         self.bounds.is_primary_in_range(&primary)
     }
@@ -511,7 +456,7 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
         &self,
         ctx: &TestContext,
         primary: BlockPrimaryIndex,
-        key: &Self::K,
+        key: &BlockPrimaryIndex,
     ) -> Result<Vec<u8>> {
         assert_eq!(primary, *key);
         let proof_key = ProofKey::QueryAggregateIndex(primary);
@@ -522,7 +467,7 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
         &self,
         ctx: &mut TestContext,
         primary: BlockPrimaryIndex,
-        key: &Self::K,
+        key: &BlockPrimaryIndex,
         proof: Vec<u8>,
     ) -> Result<()> {
         assert_eq!(primary, *key);
@@ -534,7 +479,7 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
         &self,
         planner: &mut QueryPlanner<'a, BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>,
         primary: BlockPrimaryIndex,
-        k: &Self::K,
+        k: &BlockPrimaryIndex,
         v: &IndexNode<BlockPrimaryIndex>,
     ) -> Option<Vec<u8>> {
         assert_eq!(primary, *k);
@@ -560,7 +505,6 @@ struct RowInfo {
 }
 
 impl TreeInfo<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> for RowInfo {
-    type K = <RowTree as TreeTopology>::Key;
     fn is_row_tree(&self) -> bool {
         true
     }
@@ -808,6 +752,7 @@ async fn prove_single_row(
     Ok(proof)
 }
 
+#[derive(Clone, Debug)]
 struct QueryCooking {
     query: String,
     placeholders: HashMap<PlaceholderId, U256>,
