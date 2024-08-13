@@ -4,6 +4,7 @@ use crate::F;
 use num::BigUint;
 use plonky2::field::types::Field;
 use plonky2::field::types::PrimeField64;
+use plonky2::plonk::config::GenericHashOut;
 use plonky2::{
     field::{extension::Extendable, goldilocks_field::GoldilocksField},
     hash::{
@@ -30,6 +31,11 @@ static EMPTY_POSEIDON_HASH: OnceLock<HashOut<GoldilocksField>> = OnceLock::new()
 /// Get the static empty Poseidon hash.
 pub fn empty_poseidon_hash() -> &'static HashOut<GoldilocksField> {
     EMPTY_POSEIDON_HASH.get_or_init(|| H::hash_no_pad(&[]))
+}
+
+/// Get the static empty Poseidon hash.
+pub fn empty_poseidon_hash_as_vec() -> Vec<u8> {
+    empty_poseidon_hash().to_bytes()
 }
 
 /// Convert the hash target into a big integer target.
