@@ -73,6 +73,32 @@ pub struct RecordCircuit {
 }
 
 impl RecordCircuit {
+    pub fn new(
+        first_indexed_item: U256,
+        second_indexed_item: Option<U256>,
+        index_ids: [F; 2],
+        tree_hash: HashOut<F>,
+        counter: F,
+        is_stored_in_leaf: bool,
+        offset_range_min: F,
+        offset_range_max: F,
+    ) -> Self {
+        let indexed_items = [
+            first_indexed_item,
+            second_indexed_item.unwrap_or(U256::ZERO),
+        ];
+
+        Self {
+            indexed_items,
+            index_ids,
+            tree_hash,
+            counter,
+            is_stored_in_leaf,
+            offset_range_min,
+            offset_range_max,
+        }
+    }
+
     pub fn build(b: &mut CBuilder) -> RecordWires {
         let ffalse = b._false();
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
@@ -205,10 +231,15 @@ mod tests {
         }
     }
 
-    fn test_record_circuit(is_stored_in_leaf: bool) {
+    fn test_record_circuit(is_stored_in_leaf: bool, is_second_index_item_dummy: bool) {
         // Construct the witness.
         let mut rng = thread_rng();
-        let indexed_items = array::from_fn(|_| gen_random_u256(&mut rng));
+        let first_indexed_item = gen_random_u256(&mut rng);
+        let second_indexed_item = if is_second_index_item_dummy {
+            None
+        } else {
+            Some(gen_random_u256(&mut rng))
+        };
         let index_ids = array::from_fn(|_| F::from_canonical_usize(rng.gen()));
         let tree_hash = gen_random_field_hash();
         let counter = F::from_canonical_u32(rng.gen());
@@ -216,15 +247,16 @@ mod tests {
         let offset_range_max = counter + F::ONE;
 
         // Construct the circuit.
-        let test_circuit = RecordCircuit {
-            indexed_items,
+        let test_circuit = RecordCircuit::new(
+            first_indexed_item,
+            second_indexed_item,
             index_ids,
             tree_hash,
             counter,
             is_stored_in_leaf,
             offset_range_min,
             offset_range_max,
-        };
+        );
 
         // Proof for the test circuit.
         let proof = run_circuit::<F, D, C, _>(test_circuit);
@@ -240,10 +272,10 @@ mod tests {
                 .clone()
                 .into_iter()
                 .chain(empty_hash_fields)
-                .chain(indexed_items[1].to_fields())
-                .chain(indexed_items[1].to_fields())
+                .chain(second_indexed_item.unwrap_or(U256::ZERO).to_fields())
+                .chain(second_indexed_item.unwrap_or(U256::ZERO).to_fields())
                 .chain(iter::once(index_ids[1]))
-                .chain(indexed_items[1].to_fields())
+                .chain(second_indexed_item.unwrap_or(U256::ZERO).to_fields())
                 .chain(tree_hash.to_fields())
                 .collect();
             let exp_hash = H::hash_no_pad(&hash_inputs);
@@ -253,13 +285,13 @@ mod tests {
         };
 
         // Min value
-        assert_eq!(pi.min_value(), indexed_items[1]);
+        assert_eq!(pi.min_value(), second_indexed_item.unwrap_or(U256::ZERO));
 
         // Max value
-        assert_eq!(pi.max_value(), indexed_items[1]);
+        assert_eq!(pi.max_value(), second_indexed_item.unwrap_or(U256::ZERO));
 
         // Primary index value
-        assert_eq!(pi.primary_index_value(), indexed_items[0]);
+        assert_eq!(pi.primary_index_value(), first_indexed_item);
 
         // Index ids
         assert_eq!(pi.index_ids(), index_ids);
@@ -279,9 +311,9 @@ mod tests {
         // Accumulator
         {
             let accumulator_inputs: Vec<_> = iter::once(index_ids[0])
-                .chain(indexed_items[0].to_fields())
+                .chain(first_indexed_item.to_fields())
                 .chain(iter::once(index_ids[1]))
-                .chain(indexed_items[1].to_fields())
+                .chain(second_indexed_item.unwrap_or(U256::ZERO).to_fields())
                 .chain(tree_hash.to_fields())
                 .collect();
             let exp_accumulator = map_to_curve_point(&accumulator_inputs);
@@ -291,11 +323,21 @@ mod tests {
 
     #[test]
     fn test_record_circuit_storing_in_leaf() {
-        test_record_circuit(true);
+        test_record_circuit(true, false);
     }
 
     #[test]
     fn test_record_circuit_storing_in_inter() {
-        test_record_circuit(false);
+        test_record_circuit(false, false);
+    }
+
+    #[test]
+    fn test_record_circuit_storing_in_leaf_with_dummy_item() {
+        test_record_circuit(true, true);
+    }
+
+    #[test]
+    fn test_record_circuit_storing_in_inter_with_dummy_item() {
+        test_record_circuit(false, true);
     }
 }
