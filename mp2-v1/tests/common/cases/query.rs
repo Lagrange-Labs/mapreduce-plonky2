@@ -352,6 +352,8 @@ async fn get_node_info(
             None => (None, None),
             Some(child_k) => {
                 let (child_ctx, child_payload) = tree.fetch_with_context_at(&child_k, at).await;
+                // we need the grand child hashes for constructing the node info of the
+                // children of the node in argument
                 let child_left_hash = match child_ctx.left {
                     Some(left_left_k) => Some(tree.fetch_at(&left_left_k, at).await.hash),
                     None => None,

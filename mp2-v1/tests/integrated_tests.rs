@@ -114,14 +114,16 @@ fn table_info_path(f: &str) -> PathBuf {
 }
 
 fn write_table_info(f: &str, info: TableInfo) -> Result<()> {
-    let file = File::create(f)?;
+    let full_path = table_info_path(f);
+    let file = File::create(full_path)?;
     let writer = BufWriter::new(file);
     serde_json::to_writer(writer, &info)?;
     Ok(())
 }
 
 fn read_table_info(f: &str) -> Result<TableInfo> {
-    let file = File::open(f)?;
+    let full_path = table_info_path(f);
+    let file = File::open(full_path)?;
     let reader = BufReader::new(file);
     let info = serde_json::from_reader(reader)?;
     Ok(info)
