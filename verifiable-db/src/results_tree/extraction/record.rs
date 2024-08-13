@@ -104,7 +104,7 @@ impl RecordCircuit {
             .chain(indexed_items[0].to_targets())
             .chain(iter::once(index_ids[1]))
             .chain(indexed_items[1].to_targets())
-            .chain(final_tree_hash.to_targets())
+            .chain(tree_hash.to_targets())
             .collect();
         let accumulator = b.map_to_curve_point(&accumulator_inputs);
 
@@ -184,7 +184,7 @@ impl CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS> for RecordWires {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{utils::ToFields, C};
+    use mp2_common::{group_hashing::map_to_curve_point, utils::ToFields, C};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::{gen_random_field_hash, gen_random_u256},
@@ -275,6 +275,18 @@ mod tests {
 
         // Offset range max
         assert_eq!(pi.offset_range_max(), offset_range_max);
+
+        // Accumulator
+        {
+            let accumulator_inputs: Vec<_> = iter::once(index_ids[0])
+                .chain(indexed_items[0].to_fields())
+                .chain(iter::once(index_ids[1]))
+                .chain(indexed_items[1].to_fields())
+                .chain(tree_hash.to_fields())
+                .collect();
+            let exp_accumulator = map_to_curve_point(&accumulator_inputs);
+            assert_eq!(pi.accumulator(), exp_accumulator.to_weierstrass());
+        }
     }
 
     #[test]
