@@ -55,6 +55,10 @@ impl QueryBounds {
             max_query_secondary: max_query_secondary.unwrap_or(U256::MAX),
         }
     }
+
+    pub fn is_primary_in_range(&self, v: &U256) -> bool {
+        &self.min_query_primary <= v && v <= &self.max_query_secondary
+    }
 }
 
 /// Data structure containing all the information needed as input by aggregation circuits for a single node of the tree

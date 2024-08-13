@@ -29,7 +29,7 @@ use super::{
     TestContext,
 };
 
-type IndexStorage = PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>>;
+pub type IndexStorage = PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>>;
 pub type MerkleIndexTree = MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>;
 
 impl TestContext {

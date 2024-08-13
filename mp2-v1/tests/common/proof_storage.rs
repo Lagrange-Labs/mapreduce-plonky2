@@ -70,7 +70,8 @@ pub enum ProofKey {
     #[allow(clippy::upper_case_acronyms)]
     IVC(BlockPrimaryIndex),
     QueryUniversal((BlockPrimaryIndex, RowTreeKey)),
-    QueryAggregate((BlockPrimaryIndex, RowTreeKey)),
+    QueryAggregateRow((BlockPrimaryIndex, RowTreeKey)),
+    QueryAggregateIndex(BlockPrimaryIndex),
 }
 
 impl ProofKey {
@@ -124,8 +125,12 @@ impl Hash for ProofKey {
                 "query_universal".hash(state);
                 n.hash(state);
             }
-            ProofKey::QueryAggregate(n) => {
-                "query_aggregate".hash(state);
+            ProofKey::QueryAggregateRow(n) => {
+                "query_aggregate_row".hash(state);
+                n.hash(state);
+            }
+            ProofKey::QueryAggregateIndex(n) => {
+                "query_aggregate_index".hash(state);
                 n.hash(state);
             }
         }

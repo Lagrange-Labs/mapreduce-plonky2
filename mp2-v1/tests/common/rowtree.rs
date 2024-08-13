@@ -67,7 +67,7 @@ impl From<&SecondaryIndexCell> for RowTreeKey {
     }
 }
 
-type RowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
+pub type RowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
 pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>;
 
 impl TestContext {
