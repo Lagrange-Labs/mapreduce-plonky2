@@ -928,23 +928,11 @@ mod tests {
             U256::from(max_query_primary),
         ));
         let query_bounds = QueryBounds::new(
-            U256::from(min_query_primary),
-            U256::from(max_query_primary),
-            Some(
-                QueryBoundSecondary::new(
-                    &placeholders,
-                    QueryBoundSource::Constant(U256::from(min_query_secondary)),
-                )
-                .unwrap(),
-            ),
-            Some(
-                QueryBoundSecondary::new(
-                    &placeholders,
-                    QueryBoundSource::Placeholder(first_placeholder_id),
-                )
-                .unwrap(),
-            ),
-        );
+            &placeholders,
+            Some(QueryBoundSource::Constant(U256::from(min_query_secondary))),
+            Some(QueryBoundSource::Placeholder(first_placeholder_id)),
+        )
+        .unwrap();
 
         let params = Parameters::<
             MAX_NUM_COLUMNS,

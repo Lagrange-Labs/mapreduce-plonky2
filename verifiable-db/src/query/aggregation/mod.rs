@@ -32,7 +32,7 @@ mod utils;
 
 use super::{
     api::CircuitInput,
-    computational_hash_ids::{Identifiers, Output},
+    computational_hash_ids::{Identifiers, Output, PlaceholderIdentifier},
     universal_circuit::{
         output_no_aggregation::Circuit as NoAggOutputCircuit,
         output_with_aggregation::Circuit as AggOutputCircuit,
@@ -106,19 +106,20 @@ impl QueryBounds {
     /// Initialize `QueryBounds`. Bounds for secondary indexes are optional as they might not have been specified
     /// in the query
     pub fn new(
-        min_query_primary: U256,
-        max_query_primary: U256,
-        min_query_secondary: Option<QueryBoundSecondary>,
-        max_query_secondary: Option<QueryBoundSecondary>,
-    ) -> Self {
-        Self {
-            min_query_primary,
-            max_query_primary,
+        placeholders: &Placeholders,
+        min_query_secondary: Option<QueryBoundSource>,
+        max_query_secondary: Option<QueryBoundSource>,
+    ) -> Result<Self> {
+        Ok(Self {
+            min_query_primary: placeholders.get(&PlaceholderIdentifier::MinQueryOnIdx1)?,
+            max_query_primary: placeholders.get(&PlaceholderIdentifier::MaxQueryOnIdx1)?,
             min_query_secondary: min_query_secondary
-                .unwrap_or(QueryBoundSecondary::new_constant_bound(U256::ZERO)),
+                .map(|source| QueryBoundSecondary::new(placeholders, source))
+                .unwrap_or(Ok(QueryBoundSecondary::new_constant_bound(U256::ZERO)))?,
             max_query_secondary: max_query_secondary
-                .unwrap_or(QueryBoundSecondary::new_constant_bound(U256::MAX)),
-        }
+                .map(|source| QueryBoundSecondary::new(placeholders, source))
+                .unwrap_or(Ok(QueryBoundSecondary::new_constant_bound(U256::MAX)))?,
+        })
     }
 }
 

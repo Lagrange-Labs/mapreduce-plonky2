@@ -454,15 +454,15 @@ mod tests {
             output_items,
             aggregation_ops,
         );
-        let query_bounds = QueryBounds::new(U256::from(42), U256::from(76), None, None);
         let placeholders = Placeholders::from((
             placeholder_ids
                 .iter()
                 .map(|id| (*id, gen_random_u256(rng)))
                 .collect_vec(),
-            query_bounds.min_query_primary,
-            query_bounds.max_query_primary,
+            U256::from(42),
+            U256::from(76),
         ));
+        let query_bounds = QueryBounds::new(&placeholders, None, None).unwrap();
 
         let placeholder_hash_ids = QueryInput::<
             MAX_NUM_COLUMNS,

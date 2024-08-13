@@ -1441,26 +1441,19 @@ mod tests {
         );
 
         let query_bounds = QueryBounds::new(
-            U256::default(), // dummy values for primary index, we don't care here
-            U256::default(),
+            &placeholders,
+            Some(QueryBoundSource::Constant(min_query)),
             Some(
-                QueryBoundSecondary::new(&placeholders, QueryBoundSource::Constant(min_query))
-                    .unwrap(),
+                QueryBoundSource::Operation(BasicOperation {
+                    first_operand: InputOperand::Placeholder(third_placeholder_id),
+                    second_operand: Some(InputOperand::Constant(U256::from(1))),
+                    op: Operation::SubOp,
+                }), // the bound is computed as $3-1 since in the query we specified that C2 < $3,
+                    // while the bound computed in the circuit is expected to represent the maximum value
+                    // possible for C2 (i.e., C2 < $3 => C2 <= $3 - 1)
             ),
-            Some(
-                QueryBoundSecondary::new(
-                    &placeholders,
-                    QueryBoundSource::Operation(BasicOperation {
-                        first_operand: InputOperand::Placeholder(third_placeholder_id),
-                        second_operand: Some(InputOperand::Constant(U256::from(1))),
-                        op: Operation::SubOp,
-                    }), // the bound is computed as $3-1 since in the query we specified that C2 < $3,
-                        // while the bound computed in the circuit is expected to represent the maximum value
-                        // possible for C2 (i.e., C2 < $3 => C2 <= $3 - 1)
-                )
-                .unwrap(),
-            ),
-        );
+        )
+        .unwrap();
         let min_query_value = query_bounds.min_query_secondary.value;
         let max_query_value = query_bounds.max_query_secondary.value;
 
@@ -1818,20 +1811,11 @@ mod tests {
                 .collect_vec(),
         );
         let query_bounds = QueryBounds::new(
-            U256::default(), // dummy values for primary index, we don't care here
-            U256::default(),
-            Some(
-                QueryBoundSecondary::new(
-                    &placeholders,
-                    QueryBoundSource::Placeholder(third_placeholder_id),
-                )
-                .unwrap(),
-            ),
-            Some(
-                QueryBoundSecondary::new(&placeholders, QueryBoundSource::Constant(max_query))
-                    .unwrap(),
-            ),
-        );
+            &placeholders,
+            Some(QueryBoundSource::Placeholder(third_placeholder_id)),
+            Some(QueryBoundSource::Constant(max_query)),
+        )
+        .unwrap();
         let input = CircuitInput::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,

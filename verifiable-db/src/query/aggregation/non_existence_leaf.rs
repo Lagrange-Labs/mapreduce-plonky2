@@ -322,24 +322,12 @@ mod tests {
                 dummy_min_query_primary,
                 dummy_max_query_primary,
             ));
-
-            let min_query_secondary = QueryBoundSecondary::new(
-                &placeholders,
-                QueryBoundSource::Placeholder(first_placeholder_id),
-            )
-            .unwrap();
-
-            let max_query_secondary = QueryBoundSecondary::new(
-                &placeholders,
-                QueryBoundSource::Constant(max_query_value),
-            )
-            .unwrap();
             let query_bounds = QueryBounds::new(
-                dummy_min_query_primary, // dummy value, circuit will employ only bounds for secondary index
-                dummy_max_query_primary, // dummy value, circuit will employ only bounds for secondary index
-                Some(min_query_secondary),
-                Some(max_query_secondary),
-            );
+                &placeholders,
+                Some(QueryBoundSource::Placeholder(first_placeholder_id)),
+                Some(QueryBoundSource::Constant(max_query_value)),
+            )
+            .unwrap();
 
             (
                 QueryBound::new_secondary_index_bound(
