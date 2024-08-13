@@ -578,6 +578,7 @@ impl TreeInfo<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> for RowInfo {
                     ctx,
                     &planner.tree,
                     &planner.columns,
+                    planner.genesis,
                     primary,
                     &k,
                     &planner.pis,
@@ -720,13 +721,16 @@ async fn prove_single_row(
     ctx: &mut TestContext,
     tree: &MerkleRowTree,
     columns: &TableColumns,
-    epoch: BlockPrimaryIndex,
+    genesis: BlockPrimaryIndex,
+    primary: BlockPrimaryIndex,
     row_key: &RowTreeKey,
     pis: &CircuitPis,
     query: &QueryCooking,
 ) -> Result<Vec<u8>> {
     // 1. Get the all the cells including primary and secondary index
-    let (row_ctx, row_payload) = tree.fetch_with_context_at(row_key, epoch as Epoch).await;
+    let (row_ctx, row_payload) = tree
+        .fetch_with_context_at(row_key, from_block_to_epoch(primary, genesis) as Epoch)
+        .await;
 
     // API is gonna change on this but right now, we have to sort all the "rest" cells by index
     // in the tree, and put the primary one and secondary one in front
@@ -746,7 +750,7 @@ async fn prove_single_row(
         row_payload.secondary_index_column,
         row_payload.secondary_index_value(),
     );
-    let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(epoch));
+    let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(primary));
     let all_cells = once(primary_cell)
         .chain(once(secondary_cell))
         .chain(rest_cells)
@@ -763,18 +767,18 @@ async fn prove_single_row(
     )
     .expect("unable to create universal query circuit inputs");
     // 3. run proof if not ran already
-    let proof_key = ProofKey::QueryUniversal((epoch as BlockPrimaryIndex, row_key.clone()));
+    let proof_key = ProofKey::QueryUniversal((primary, row_key.clone()));
     let proof = match ctx.storage.get_proof_exact(&proof_key) {
         Ok(proof) => {
-            info!("Loading universal query proof for {epoch} -> {row_key:?}");
+            info!("Loading universal query proof for {primary} -> {row_key:?}");
             proof
         }
         Err(_) => {
-            info!("Universal query proof RUNNING for {epoch} -> {row_key:?} ");
+            info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");
             let proof = ctx
                 .run_query_proof(input)
                 .expect("unable to generate universal proof for {epoch} -> {row_key:?}");
-            info!("Universal query proof DONE for {epoch} -> {row_key:?} ");
+            info!("Universal query proof DONE for {primary} -> {row_key:?} ");
             ctx.storage.store_proof(proof_key, proof.clone())?;
             proof
         }
