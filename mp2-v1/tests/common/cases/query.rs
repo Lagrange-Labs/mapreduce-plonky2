@@ -161,7 +161,7 @@ async fn prove_query(
             .collect::<Vec<_>>()
             .await;
         let proving_tree = UpdateTree::from_paths(all_paths, *epoch as Epoch);
-        prove_tree_for_epoch(ctx, table, proving_tree, *epoch, row_keys, &pis, &query).await;
+        prove_tree_for_epoch(ctx, table, proving_tree, *epoch, row_keys, &pis, &query).await?;
     }
     // TODO: aggregate accross all blocks
     Ok(())
