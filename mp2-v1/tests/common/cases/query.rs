@@ -138,10 +138,6 @@ async fn prove_query(
             from_block_to_epoch(query.max_block, table.genesis_block) as BlockPrimaryIndex,
         )
         .await?;
-    info!(
-        "Found {} ROW KEYS to process during proving time",
-        all_touched_rows.len()
-    );
     // group the rows per block number
     let touched_rows = all_touched_rows
         .into_iter()
@@ -161,6 +157,12 @@ async fn prove_query(
                 acc
             },
         );
+    info!(
+        "Found {} ROW KEYS to process during proving time -> {:?}",
+        all_touched_rows.len(),
+        touched_rows.keys(),
+    );
+
     // prove the whole tree for each of the involved rows for each block
     for (primary_value, row_keys) in &touched_rows {
         let all_paths = stream::iter(row_keys)
