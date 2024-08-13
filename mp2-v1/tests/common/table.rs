@@ -119,7 +119,7 @@ async fn new_db_pool(db_url: &str) -> Result<DBPool> {
     Ok(db_pool)
 }
 pub struct Table {
-    pub(crate) genesis_block: u64,
+    pub(crate) genesis_block: BlockPrimaryIndex,
     pub(crate) name: TableID,
     pub(crate) columns: TableColumns,
     // NOTE: there is no cell tree because it's small and can be reconstructed
@@ -166,7 +166,7 @@ impl Table {
         Ok(Self {
             db_pool: new_db_pool(&db_url).await?,
             columns,
-            genesis_block: genesis as u64,
+            genesis_block: genesis as BlockPrimaryIndex,
             name: table_name,
             row: row_tree,
             index: index_tree,
@@ -204,7 +204,7 @@ impl Table {
                 .await
                 .expect("unable to create db pool"),
             columns,
-            genesis_block,
+            genesis_block: genesis_block as BlockPrimaryIndex,
             name: table_name,
             row: row_tree,
             index: index_tree,

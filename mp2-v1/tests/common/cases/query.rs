@@ -111,6 +111,17 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     Ok(())
 }
 
+/// CURRENTLY ryhope stores things with a shift - things will disappear soon when it stores
+/// directly the offset value
+fn from_block_to_epoch(b: BlockPrimaryIndex, genesis: BlockPrimaryIndex) -> Epoch {
+    (b - genesis as BlockPrimaryIndex + 1) as Epoch
+}
+fn from_epoch_to_block(e: Epoch, genesis: BlockPrimaryIndex) -> BlockPrimaryIndex {
+    // b - genesis + 1 = epoch
+    // b = epoch + genesis - 1
+    e as BlockPrimaryIndex + genesis - 1
+}
+
 /// Execute a query to know all the touched rows, and then call the universal circuit on all rows
 async fn prove_query(
     ctx: &mut TestContext,
@@ -123,8 +134,8 @@ async fn prove_query(
     let all_touched_rows = table
         .execute_row_query(
             &rows_query.to_string(),
-            query.min_block - table.genesis_block as BlockPrimaryIndex + 1,
-            query.max_block - table.genesis_block as BlockPrimaryIndex + 1,
+            from_block_to_epoch(query.min_block, table.genesis_block) as BlockPrimaryIndex,
+            from_block_to_epoch(query.max_block, table.genesis_block) as BlockPrimaryIndex,
         )
         .await?;
     info!(
@@ -140,8 +151,8 @@ async fn prove_query(
                 .map(RowTreeKey::from_bytea)
                 .context("unable to parse row key tree")
                 .expect("");
-            let block: Epoch = r.get::<_, i64>(1);
-            (block as BlockPrimaryIndex, row_key)
+            let epoch: Epoch = r.get::<_, i64>(1);
+            (from_epoch_to_block(epoch, table.genesis_block), row_key)
         })
         .fold(
             HashMap::<BlockPrimaryIndex, HashSet<RowTreeKey>>::new(),
@@ -823,8 +834,8 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     // we set the block bounds
     let (longest_sequence, starting) = find_longest_consecutive_sequence(epochs.to_vec());
     // TODO: careful about off by one error. -1 because tree epoch starts at 1
-    let min_block = starting as u64 + table.genesis_block - 1;
-    let max_block = min_block + longest_sequence as u64;
+    let min_block = from_epoch_to_block(starting, table.genesis_block);
+    let max_block = min_block + longest_sequence;
     // primary_min_placeholder = ".."
     // primary_max_placeholder = ".."
     // Address == $3 --> placeholders.hashmap empty, put in query bounds secondary_min = secondary_max = "$3""
