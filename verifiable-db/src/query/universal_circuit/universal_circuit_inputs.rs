@@ -14,7 +14,9 @@ use crate::query::{
     computational_hash_ids::{Operation, Output, PlaceholderIdentifier},
 };
 
-#[derive(Clone, Copy, Debug)]
+use super::universal_query_circuit::dummy_placeholder_id;
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 /// Data structure representing a placeholder in the query, given by its value and its identifier
 pub struct Placeholder {
     pub(crate) value: U256,
@@ -100,7 +102,7 @@ pub enum InputOperand {
 
 impl Default for InputOperand {
     fn default() -> Self {
-        InputOperand::Column(0)
+        InputOperand::Placeholder(dummy_placeholder_id())
     }
 }
 

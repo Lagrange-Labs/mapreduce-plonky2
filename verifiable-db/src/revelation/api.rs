@@ -39,7 +39,7 @@ use crate::{
             universal_circuit_inputs::{
                 BasicOperation, Placeholder, PlaceholderId, Placeholders, ResultStructure,
             },
-            universal_query_circuit::{dummy_placeholder, QueryBound},
+            universal_query_circuit::QueryBound,
             ComputationalHash,
         },
     },
@@ -200,13 +200,22 @@ impl<
             .collect::<Result<Vec<_>>>()?;
         // compute placeholders data to be hashed for secondary query bounds
         let min_query_secondary =
-            QueryBound::new_secondary_index_bound(&query_bounds.min_query_secondary);
+            QueryBound::new_secondary_index_bound(&placeholders, &query_bounds.min_query_secondary)
+                .unwrap();
         let max_query_secondary =
-            QueryBound::new_secondary_index_bound(&query_bounds.max_query_secondary);
+            QueryBound::new_secondary_index_bound(&placeholders, &query_bounds.max_query_secondary)
+                .unwrap();
         let secondary_query_bound_placeholders = [min_query_secondary, max_query_secondary]
             .into_iter()
-            .map(|query_bound| {
-                compute_checked_placeholder_for_id(PlaceholderId::from_fields(&[query_bound.id]))
+            .flat_map(|query_bound| {
+                [
+                    compute_checked_placeholder_for_id(PlaceholderId::from_fields(&[query_bound
+                        .operation
+                        .placeholder_ids[0]])),
+                    compute_checked_placeholder_for_id(PlaceholderId::from_fields(&[query_bound
+                        .operation
+                        .placeholder_ids[1]])),
+                ]
             })
             .collect::<Result<Vec<_>>>()?;
         let revelation_circuit = RevelationWithoutResultsTreeCircuit {
@@ -573,8 +582,8 @@ mod tests {
             &predicate_operations,
             &results,
             &HashOutput::try_from(metadata_hash.to_bytes()).unwrap(),
-            &(&query_bounds.min_query_secondary).into(),
-            &(&query_bounds.max_query_secondary).into(),
+            Some((&query_bounds.min_query_secondary).into()),
+            Some((&query_bounds.max_query_secondary).into()),
         )
         .unwrap();
         // then, check that it is the same exposed by the proof

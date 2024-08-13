@@ -40,7 +40,7 @@ use super::{
             BasicOperation, ColumnCell, PlaceholderId, Placeholders, ResultStructure, RowCells,
         },
         universal_query_circuit::{
-            dummy_placeholder, placeholder_hash, placeholder_hash_without_query_bounds, QueryBound,
+            placeholder_hash, placeholder_hash_without_query_bounds, QueryBound,
             UniversalQueryCircuitInputs,
         },
         ComputationalHash, PlaceholderHash,
@@ -52,10 +52,11 @@ use super::{
 pub struct QueryBoundSecondary {
     /// value of the query bound. Could come either from a constant in the query or from a placeholder
     pub(crate) value: U256,
-    /// Id of the placeholder from which the bound is taken; None if the bound comes from a constant
-    pub(crate) id: Option<PlaceholderId>,
+    pub(crate) overflow: bool,
+    pub(crate) source: QueryBoundSource,
 }
 
+#[derive(Clone, Debug)]
 /// Enumeration employed to specify whether a query bound for secondary indexed is taken in the query from
 /// a constant or from a placeholder
 pub enum QueryBoundSource {
@@ -63,54 +64,32 @@ pub enum QueryBoundSource {
     Constant(U256),
     /// Query bound taken from placeholder with id
     Placeholder(PlaceholderId),
-}
-
-impl QueryBoundSource {
-    /// Get the payload corresponding to `self` query bound to be hashed in computational hash
-    pub(crate) fn get_payload_for_computational_hash(&self) -> U256 {
-        match self {
-            QueryBoundSource::Constant(value) => *value,
-            QueryBoundSource::Placeholder(id) => {
-                U256::from(<PlaceholderId as ToField<F>>::to_field(&id).to_canonical_u64())
-            }
-        }
-    }
-
-    pub(crate) fn add_query_bounds_to_computational_hash(
-        min_query: &Self,
-        max_query: &Self,
-        computational_hash: &ComputationalHash,
-    ) -> ComputationalHash {
-        let min_query = min_query.get_payload_for_computational_hash();
-        let max_query = max_query.get_payload_for_computational_hash();
-        let inputs = computational_hash
-            .to_vec()
-            .into_iter()
-            .chain(min_query.to_fields())
-            .chain(max_query.to_fields())
-            .collect_vec();
-        H::hash_no_pad(&inputs)
-    }
+    /// Query bound computed with a basic operation
+    Operation(BasicOperation),
 }
 
 impl From<&QueryBoundSecondary> for QueryBoundSource {
     fn from(value: &QueryBoundSecondary) -> Self {
-        match value.id {
-            Some(id) => QueryBoundSource::Placeholder(id),
-            None => QueryBoundSource::Constant(value.value),
-        }
+        value.source.clone()
     }
 }
 
 impl QueryBoundSecondary {
     pub fn new(placeholders: &Placeholders, source: QueryBoundSource) -> Result<Self> {
-        Ok(match source {
-            QueryBoundSource::Constant(value) => Self { value, id: None },
-            QueryBoundSource::Placeholder(id) => Self {
-                value: placeholders.get(&id)?,
-                id: Some(id),
-            },
+        let (value, overflow) = QueryBound::compute_bound_value(placeholders, &source)?;
+        Ok(Self {
+            value,
+            overflow,
+            source,
         })
+    }
+
+    pub fn new_constant_bound(value: U256) -> Self {
+        Self {
+            value,
+            overflow: false,
+            source: QueryBoundSource::Constant(value),
+        }
     }
 }
 
@@ -135,14 +114,10 @@ impl QueryBounds {
         Self {
             min_query_primary,
             max_query_primary,
-            min_query_secondary: min_query_secondary.unwrap_or(QueryBoundSecondary {
-                value: U256::ZERO,
-                id: None,
-            }),
-            max_query_secondary: max_query_secondary.unwrap_or(QueryBoundSecondary {
-                value: U256::MAX,
-                id: None,
-            }),
+            min_query_secondary: min_query_secondary
+                .unwrap_or(QueryBoundSecondary::new_constant_bound(U256::ZERO)),
+            max_query_secondary: max_query_secondary
+                .unwrap_or(QueryBoundSecondary::new_constant_bound(U256::MAX)),
         }
     }
 }
@@ -359,8 +334,8 @@ impl QueryHashNonExistenceCircuits {
                     &column_ids,
                     predicate_operations,
                     results,
-                    &(&query_bounds.min_query_secondary).into(),
-                    &(&query_bounds.max_query_secondary).into(),
+                    Some((&query_bounds.min_query_secondary).into()),
+                    Some((&query_bounds.max_query_secondary).into()),
                 )?)
                     .into(),
             )
@@ -420,9 +395,6 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
     /// Maximum query bound found in the query for primary or secondary index, depending on
     /// whether the node being proven belongs to the index tree or not
     pub(crate) max_query: QueryBound,
-    /// Value of the dummy placeholder, employed in placeholder hash in case one of the min/max
-    /// query index bounds are taken from a constant in the query
-    pub(crate) dummy_placeholder_value: U256,
 }
 
 #[cfg(test)]

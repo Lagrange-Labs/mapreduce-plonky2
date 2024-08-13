@@ -5,12 +5,12 @@ use std::{
 };
 
 use alloy::primitives::U256;
-use anyhow::{anyhow, ensure, Error, Result};
+use anyhow::{anyhow, bail, ensure, Error, Result};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     default_config,
-    poseidon::empty_poseidon_hash,
+    poseidon::{empty_poseidon_hash, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
@@ -41,8 +41,10 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    aggregation::{QueryBoundSecondary, QueryBounds},
-    computational_hash_ids::{HashPermutation, Operation, Output, PlaceholderIdentifier},
+    aggregation::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
+    computational_hash_ids::{
+        ComputationalHashCache, HashPermutation, Operation, Output, PlaceholderIdentifier,
+    },
     public_inputs::PublicInputs,
     universal_circuit::{
         basic_operation::BasicOperationInputs, universal_circuit_inputs::OutputItem,
@@ -59,61 +61,66 @@ use super::{
         BasicOperation, ColumnCell, InputOperand, Placeholder, PlaceholderId, Placeholders,
         ResultStructure, RowCells,
     },
-    ComputationalHashTarget, PlaceholderHash, PlaceholderHashTarget,
+    ComputationalHash, ComputationalHashTarget, PlaceholderHash, PlaceholderHashTarget,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Wires representing a query bound in the universal circuit
-pub(crate) struct QueryBoundTarget {
-    /// Value of the query bound. Could come from either a constant in the query or from a placeholder
-    value: UInt256Target,
-    /// id of the placeholder employed in the query to specify the bound (if any)
-    id: Target,
-    /// Flag being true if `value` comes from a constant
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    is_constant: BoolTarget,
+pub(crate) type QueryBoundTarget = BasicOperationWires;
+
+/// Input wires for `QueryBoundTarget` (i.e., the wires that need to be assigned)
+pub(crate) type QueryBoundTargetInputs = BasicOperationInputWires;
+
+impl From<QueryBoundTarget> for QueryBoundTargetInputs {
+    fn from(value: QueryBoundTarget) -> Self {
+        value.input_wires
+    }
 }
 
 impl QueryBoundTarget {
-    pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, bound: &QueryBound) {
-        pw.set_u256_target(&self.value, bound.value);
-        pw.set_target(self.id, bound.id);
-        pw.set_bool_target(self.is_constant, bound.is_constant);
+    pub(crate) fn new(b: &mut CBuilder) -> Self {
+        let zero_u256 = b.zero_u256();
+        let zero = b.zero();
+        let empty_hash = b.constant_hash(*empty_poseidon_hash());
+        // The 0 constant provided as input value is used as a dummy operand in case the query bound
+        // is taken from a constant in the query: in this case, the query bound in the circuit is
+        // computed with the operation `InputOperand::Constant(query_bound) + input_values[0]`, which
+        // yields `query_bound` as output since `input_values[0] = 0`. The constant input values 0 is
+        // associated to the empty hash in the computational hash, which is provided as `input_hash[0]`
+        BasicOperationInputs::build(b, &[zero_u256], &[empty_hash], zero)
     }
 
-    pub(crate) fn new_from_value(b: &mut CBuilder, value: UInt256Target) -> Self {
-        Self {
-            value,
-            id: b.add_virtual_target(),
-            is_constant: b.add_virtual_bool_target_safe(),
-        }
+    /// Get the actual value of this query bound computed in the circuit
+    pub(crate) fn get_bound_value(&self) -> &UInt256Target {
+        &self.output_value
+    }
+
+    // Compute the number of overflows occurred during operations to compute query bounds
+    pub(crate) fn num_overflows_for_query_bound_operations(
+        b: &mut CBuilder,
+        min_query: &Self,
+        max_query: &Self,
+    ) -> Target {
+        b.add(min_query.num_overflows, max_query.num_overflows)
     }
 
     pub(crate) fn add_query_bounds_to_placeholder_hash(
         b: &mut CBuilder,
-        dummy_placeholder_value: &UInt256Target,
         min_query_bound: &Self,
         max_query_bound: &Self,
         placeholder_hash: &PlaceholderHashTarget,
     ) -> PlaceholderHashTarget {
-        let min_query_hashed = b.select_u256(
-            min_query_bound.is_constant,
-            &dummy_placeholder_value,
-            &min_query_bound.value,
-        );
-        let max_query_hashed = b.select_u256(
-            max_query_bound.is_constant,
-            &dummy_placeholder_value,
-            &max_query_bound.value,
-        );
         b.hash_n_to_hash_no_pad::<CHasher>(
             placeholder_hash
                 .elements
                 .iter()
-                .chain(once(&min_query_bound.id))
-                .chain(&min_query_hashed.to_targets())
-                .chain(once(&max_query_bound.id))
-                .chain(&max_query_hashed.to_targets())
+                .chain(once(&min_query_bound.input_wires.placeholder_ids[0]))
+                .chain(&min_query_bound.input_wires.placeholder_values[0].to_targets())
+                .chain(once(&min_query_bound.input_wires.placeholder_ids[1]))
+                .chain(&min_query_bound.input_wires.placeholder_values[1].to_targets())
+                .chain(once(&max_query_bound.input_wires.placeholder_ids[0]))
+                .chain(&max_query_bound.input_wires.placeholder_values[0].to_targets())
+                .chain(once(&max_query_bound.input_wires.placeholder_ids[1]))
+                .chain(&max_query_bound.input_wires.placeholder_values[1].to_targets())
                 .cloned()
                 .collect(),
         )
@@ -125,95 +132,258 @@ impl QueryBoundTarget {
         max_query_bound: &Self,
         computational_hash: &ComputationalHashTarget,
     ) -> ComputationalHashTarget {
-        let min_query_id_u256 = UInt256Target::new_from_target_unsafe(b, min_query_bound.id);
-        let max_query_id_u256 = UInt256Target::new_from_target_unsafe(b, max_query_bound.id);
-        let min_query_for_hash = b.select_u256(
-            min_query_bound.is_constant,
-            &min_query_bound.value,
-            &min_query_id_u256,
-        );
-        let max_query_for_hash = b.select_u256(
-            max_query_bound.is_constant,
-            &max_query_bound.value,
-            &max_query_id_u256,
-        );
         b.hash_n_to_hash_no_pad::<CHasher>(
             computational_hash
                 .to_targets()
                 .into_iter()
-                .chain(min_query_for_hash.to_targets())
-                .chain(max_query_for_hash.to_targets())
+                .chain(min_query_bound.output_hash.to_targets())
+                .chain(max_query_bound.output_hash.to_targets())
                 .collect_vec(),
         )
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+
+impl QueryBoundTargetInputs {
+    pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, bound: &QueryBound) {
+        bound.operation.assign(pw, &self);
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct QueryBound {
-    pub(crate) value: U256,
-    pub(crate) id: F,
-    pub(crate) is_constant: bool,
+    pub(crate) operation: BasicOperationInputs,
 }
 
 impl QueryBound {
-    pub(crate) fn new_secondary_index_bound(query_bounds: &QueryBoundSecondary) -> Self {
-        match query_bounds.id {
-            Some(id) => Self {
-                value: query_bounds.value,
-                id: id.to_field(),
-                is_constant: false,
-            },
-            None => Self {
-                value: query_bounds.value,
-                id: dummy_placeholder_id().to_field(),
-                is_constant: true,
-            },
-        }
-    }
-    /// Initialize a query bound for the primary index, with value `value`. The flag `is_min_bound`
+    /// Number of input values provided to the basic operation component computing the query bounds
+    /// in the circuit; currently it is 1 since the constant input value 0 is provided as a dummy
+    /// input value (see QueryBoundTarget::new()).
+    const NUM_INPUT_VALUES: usize = 1;
+
+    /// Initialize a query bound for the primary index, from the set of `placeholders` employed in the query,
+    /// which include also the primary index bounds by construction. The flag `is_min_bound`
     /// must be true iff the bound to be initialized is a lower bound in the range specified in the query
-    pub(crate) fn new_primary_index_bound(value: &U256, is_min_bound: bool) -> Self {
-        Self {
-            value: *value,
-            id: if is_min_bound {
-                PlaceholderIdentifier::MinQueryOnIdx1
-            } else {
-                PlaceholderIdentifier::MaxQueryOnIdx1
-            }
-            .to_field(),
-            is_constant: false, // for primary index, query bounds are always a placeholder
-        }
+    pub(crate) fn new_primary_index_bound(
+        placeholders: &Placeholders,
+        is_min_bound: bool,
+    ) -> Result<Self> {
+        let source = QueryBoundSource::Placeholder(if is_min_bound {
+            PlaceholderIdentifier::MinQueryOnIdx1
+        } else {
+            PlaceholderIdentifier::MaxQueryOnIdx1
+        });
+        Self::new_bound(placeholders, &source)
     }
 
-    /// Method to return the value to be hashed in placeholder hash for `self` query bound
-    fn get_bound_value_for_placeholder_hash(&self, dummy_placeholder: &Placeholder) -> U256 {
-        if self.is_constant {
-            dummy_placeholder.value
-        } else {
-            self.value
-        }
+    /// Initialize a query bound for the secondary index, from the set of placeholders employed in the query
+    /// and from the provided `bound`, which specifies how the query bound should be computed in the circuit
+    pub(crate) fn new_secondary_index_bound(
+        placeholders: &Placeholders,
+        bound: &QueryBoundSecondary,
+    ) -> Result<Self> {
+        let source = bound.into();
+        Self::new_bound(placeholders, &source)
+    }
+
+    /// Internal function employed to instantiate a new query bound
+    fn new_bound(placeholders: &Placeholders, source: &QueryBoundSource) -> Result<Self> {
+        let dummy_placeholder = dummy_placeholder(placeholders);
+        let op_inputs = match source {
+            QueryBoundSource::Constant(value) =>
+            // if the query bound is computed from a constant `value`, we instantiate the operation
+            // `value + input_values[0]` in the circuit, as in `QueryBoundTarget` construction we
+            // always set `input_values[0] = 0`. This trick allows to get the same constant `value`
+            // as output of the basic operation employed in the circuit to compute the query bound
+            {
+                BasicOperationInputs {
+                    constant_operand: *value,
+                    placeholder_values: [dummy_placeholder.value, dummy_placeholder.value],
+                    placeholder_ids: [
+                        dummy_placeholder.id.to_field(),
+                        dummy_placeholder.id.to_field(),
+                    ],
+                    first_input_selector: BasicOperationInputs::constant_operand_offset(
+                        Self::NUM_INPUT_VALUES,
+                    )
+                    .to_field(),
+                    second_input_selector: BasicOperationInputs::input_value_offset(0).to_field(),
+                    op_selector: Operation::AddOp.to_field(),
+                }
+            }
+            QueryBoundSource::Placeholder(id) =>
+            // if the query bound is computed from a placeholder with id `id`, we instantiate
+            // the operation `$id + 0` in the circuit, which will yield the value of placeholder
+            // $id (which should correspond to the query bound) as output
+            {
+                BasicOperationInputs {
+                    constant_operand: U256::ZERO,
+                    placeholder_values: [placeholders.get(id)?, dummy_placeholder.value],
+                    placeholder_ids: [id.to_field(), dummy_placeholder.id.to_field()],
+                    first_input_selector: BasicOperationInputs::first_placeholder_offset(
+                        Self::NUM_INPUT_VALUES,
+                    )
+                    .to_field(),
+                    second_input_selector: BasicOperationInputs::constant_operand_offset(
+                        Self::NUM_INPUT_VALUES,
+                    )
+                    .to_field(),
+                    op_selector: Operation::AddOp.to_field(),
+                }
+            }
+            QueryBoundSource::Operation(op) => {
+                // In this case we instantiate the basic operation `op`, checking that the operation
+                // satisfies the requirements for query bound operations (i.e., it involves only
+                // constant values and placeholders)
+                let mut constant_operand = U256::ZERO;
+                let mut process_input_op = |operand: &InputOperand| {
+                    Ok(match operand {
+                        InputOperand::Placeholder(id) =>
+                            (
+                                *id,
+                                None,
+                            ),
+                        InputOperand::Constant(value) => {
+                            constant_operand = *value;
+                            (
+                                dummy_placeholder.id,
+                                Some(BasicOperationInputs::constant_operand_offset(Self::NUM_INPUT_VALUES))
+                            )
+                        },
+                        _ => bail!("Invalid operand for query bound operation: must be either a placeholder or a constant"),
+                    })
+                };
+
+                let (first_placeholder_id, first_selector) = process_input_op(&op.first_operand)?;
+                let (second_placeholder_id, second_selector) = process_input_op(
+                    &op.second_operand.unwrap_or_default(), // Unary operation, so use a dummy operand
+                )?;
+                BasicOperationInputs {
+                    constant_operand,
+                    placeholder_values: [
+                        placeholders.get(&first_placeholder_id)?,
+                        placeholders.get(&second_placeholder_id)?,
+                    ],
+                    placeholder_ids: [
+                        first_placeholder_id.to_field(),
+                        second_placeholder_id.to_field(),
+                    ],
+                    first_input_selector: first_selector
+                        .unwrap_or(BasicOperationInputs::first_placeholder_offset(
+                            Self::NUM_INPUT_VALUES,
+                        ))
+                        .to_field(),
+                    second_input_selector: second_selector
+                        .unwrap_or(BasicOperationInputs::second_placeholder_offset(
+                            Self::NUM_INPUT_VALUES,
+                        ))
+                        .to_field(),
+                    op_selector: op.op.to_field(),
+                }
+            }
+        };
+        Ok(Self {
+            operation: op_inputs,
+        })
+    }
+
+    /// This method computes the value of a query bound
+    pub(crate) fn compute_bound_value(
+        placeholders: &Placeholders,
+        source: &QueryBoundSource,
+    ) -> Result<(U256, bool)> {
+        Ok(match source {
+            QueryBoundSource::Constant(value) => (*value, false),
+            QueryBoundSource::Placeholder(id) => (placeholders.get(id)?, false),
+            QueryBoundSource::Operation(op) => {
+                let (values, overflow) =
+                    BasicOperation::compute_operations(&[*op], &[], placeholders)?;
+                (values[0], overflow)
+            }
+        })
+    }
+
+    /// This method returns the basic operation employed in the circuit for the query bound which is
+    /// taken fromthe query as specify by the input `source`. It basically returns the same operations
+    /// that are instantiated in the circuit by the `new_bound` internal method
+    pub(crate) fn get_basic_operation(source: &QueryBoundSource) -> Result<BasicOperation> {
+        Ok(match source {
+            QueryBoundSource::Constant(value) =>
+            // convert to operation `value + input_value[0]`, which yield value as `input_value[0] = 0` in the circuit
+            {
+                BasicOperation {
+                    first_operand: InputOperand::Constant(*value),
+                    second_operand: Some(InputOperand::Column(0)),
+                    op: Operation::AddOp,
+                }
+            }
+            QueryBoundSource::Placeholder(id) =>
+            // convert to operation $id + 0
+            {
+                BasicOperation {
+                    first_operand: InputOperand::Placeholder(*id),
+                    second_operand: Some(InputOperand::Constant(U256::ZERO)),
+                    op: Operation::AddOp,
+                }
+            }
+            QueryBoundSource::Operation(op) => {
+                // validate operation for query bound
+                match op.first_operand {
+                    InputOperand::Constant(_) | InputOperand::Placeholder(_) => (),
+                    _ => bail!("Invalid operand for query bound operation: must be either a placeholder or a constant")
+                }
+                if let Some(operand) = op.second_operand {
+                    match operand {
+                        InputOperand::Constant(_) | InputOperand::Placeholder(_) => (),
+                        _ => bail!("Invalid operand for query bound operation: must be either a placeholder or a constant")     
+                    }
+                }
+                *op
+            }
+        })
     }
 
     pub(crate) fn add_secondary_query_bounds_to_placeholder_hash(
         min_query: &Self,
         max_query: &Self,
-        placeholders: &Placeholders,
         placeholder_hash: &PlaceholderHash,
     ) -> PlaceholderHash {
-        // the value to be hashed in placeholder hash is the actual value of the bound if it comes from
-        // a placeholder, a dummy one otherwise
-        let dummy_placeholder = dummy_placeholder(placeholders);
-        let min_query_value = min_query.get_bound_value_for_placeholder_hash(&dummy_placeholder);
-        let max_query_value = max_query.get_bound_value_for_placeholder_hash(&dummy_placeholder);
         hash_n_to_hash_no_pad::<_, HashPermutation>(
             &placeholder_hash
                 .to_vec()
                 .into_iter()
-                .chain(once(min_query.id))
-                .chain(min_query_value.to_fields())
-                .chain(once(max_query.id))
-                .chain(max_query_value.to_fields())
+                .chain(once(min_query.operation.placeholder_ids[0]))
+                .chain(min_query.operation.placeholder_values[0].to_fields())
+                .chain(once(min_query.operation.placeholder_ids[1]))
+                .chain(min_query.operation.placeholder_values[1].to_fields())
+                .chain(once(max_query.operation.placeholder_ids[0]))
+                .chain(max_query.operation.placeholder_values[0].to_fields())
+                .chain(once(max_query.operation.placeholder_ids[1]))
+                .chain(max_query.operation.placeholder_values[1].to_fields())
                 .collect_vec(),
         )
+    }
+
+    pub(crate) fn add_secondary_query_bounds_to_computational_hash(
+        min_query: &QueryBoundSource,
+        max_query: &QueryBoundSource,
+        computational_hash: &ComputationalHash,
+    ) -> Result<ComputationalHash> {
+        let min_query_op = Self::get_basic_operation(&min_query)?;
+        let max_query_op = Self::get_basic_operation(&max_query)?;
+        // initialize computational hash cache with the empty hash associated to the only input value (hardcoded to 0
+        // in the circuit) of the basic operation components employed for query bounds
+        let mut cache = ComputationalHashCache::new_from_column_hash(
+            Self::NUM_INPUT_VALUES,
+            &[*empty_poseidon_hash()],
+        )?;
+        let min_query_hash = Operation::basic_operation_hash(&mut cache, &[], &min_query_op)?;
+        let max_query_hash = Operation::basic_operation_hash(&mut cache, &[], &max_query_op)?;
+        let inputs = computational_hash
+            .to_vec()
+            .into_iter()
+            .chain(min_query_hash.to_fields())
+            .chain(max_query_hash.to_fields())
+            .collect_vec();
+        Ok(H::hash_no_pad(&inputs))
     }
 }
 
@@ -232,11 +402,9 @@ pub struct UniversalQueryCircuitWires<
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_leaf: BoolTarget,
     /// Lower bound of the range for the secondary index specified in the query
-    min_query: QueryBoundTarget,
+    min_query: QueryBoundTargetInputs,
     /// Upper bound of the range for the secondary index specified in the query
-    max_query: QueryBoundTarget,
-    /// Value of the dummy placeholder employed as default
-    dummy_placeholder_value: UInt256Target,
+    max_query: QueryBoundTargetInputs,
     /// Input wires for the `MAX_NUM_PREDICATE_OPS` basic operation components necessary
     /// to evaluate the filtering predicate
     #[serde(
@@ -318,8 +486,6 @@ pub struct UniversalQueryCircuitInputs<
     is_leaf: bool,
     min_query: QueryBound,
     max_query: QueryBound,
-    /// Value of the dummy placeholder for this query
-    dummy_placeholder_value: U256,
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
@@ -428,16 +594,21 @@ where
         let output_component_inputs =
             T::new(&selectors, &results.output_ids, results.output_ids.len())?;
 
-        let min_query = QueryBound::new_secondary_index_bound(&query_bounds.min_query_secondary);
+        let min_query = QueryBound::new_secondary_index_bound(
+            &placeholders,
+            &query_bounds.min_query_secondary,
+        )?;
 
-        let max_query = QueryBound::new_secondary_index_bound(&query_bounds.max_query_secondary);
+        let max_query = QueryBound::new_secondary_index_bound(
+            &placeholders,
+            &query_bounds.max_query_secondary,
+        )?;
 
         Ok(Self {
             column_extraction_inputs,
             is_leaf,
             min_query,
             max_query,
-            dummy_placeholder_value: placeholders.get(&PlaceholderIdentifier::default())?,
             filtering_predicate_inputs: predicate_ops_inputs,
             result_values_inputs: result_ops_inputs,
             output_component_inputs,
@@ -484,23 +655,27 @@ where
         let tree_hash = b.select_hash(is_leaf, &leaf_hash, &column_extraction_wires.tree_hash);
         // ensure that the value of second indexed column for the current record is in
         // the range specified by the query
-        let min_query_value = b.add_virtual_u256_unsafe();
-        let max_query_value = b.add_virtual_u256_unsafe();
-        let less_than_max = b.is_less_or_equal_than_u256(node_max, &max_query_value);
-        let greater_than_min = b.is_less_or_equal_than_u256(&min_query_value, node_min);
+        let min_query = QueryBoundTarget::new(b);
+        let max_query = QueryBoundTarget::new(b);
+        let min_query_value = min_query.get_bound_value();
+        let max_query_value = max_query.get_bound_value();
+        let less_than_max = b.is_less_or_equal_than_u256(node_max, max_query_value);
+        let greater_than_min = b.is_less_or_equal_than_u256(min_query_value, node_min);
         b.connect(less_than_max.target, _true.target);
         b.connect(greater_than_min.target, _true.target);
         // initialize input_values and input_hash input vectors for basic operation components employed to
         // evaluate the filtering predicate
         let mut input_values = column_extraction_wires.input_wires.column_values.to_vec();
         let mut input_hash = column_extraction_wires.column_hash.to_vec();
-        // initialize counter of overflows to 0
-        let mut num_overflows = zero;
         // Set of input wires for each of the `MAX_NUM_PREDICATE_OPS` basic operation components employed to
         // evaluate the filtering predicate
         let mut filtering_predicate_wires = Vec::with_capacity(MAX_NUM_PREDICATE_OPS);
         // Payload to compute the placeholder hash public input
         let mut placeholder_hash_payload = vec![];
+        // initialize counter of overflows to number of overflows occurred during query bound operations
+        let mut num_overflows =
+            QueryBoundTarget::num_overflows_for_query_bound_operations(b, &min_query, &max_query);
+
         for _ in 0..MAX_NUM_PREDICATE_OPS {
             let BasicOperationWires {
                 input_wires,
@@ -580,14 +755,9 @@ where
         // compute overflow flag
         let not_overflow = b.is_equal(num_overflows, zero);
         let overflow = b.not(not_overflow);
-        // placeholder_hash = H(H(placeholder_hash_payload) || min_query || max_query))
         let placeholder_hash = b.hash_n_to_hash_no_pad::<CHasher>(placeholder_hash_payload);
-        let dummy_placeholder_value = b.add_virtual_u256_unsafe();
-        let min_query = QueryBoundTarget::new_from_value(b, min_query_value);
-        let max_query = QueryBoundTarget::new_from_value(b, max_query_value);
         let placeholder_hash = QueryBoundTarget::add_query_bounds_to_placeholder_hash(
             b,
-            &dummy_placeholder_value,
             &min_query,
             &max_query,
             &placeholder_hash,
@@ -621,8 +791,8 @@ where
             &node_min.to_targets(),
             &node_max.to_targets(),
             &[*primary_index_id, *second_index_id],
-            &min_query.value.to_targets(),
-            &max_query.value.to_targets(),
+            &min_query_value.to_targets(),
+            &max_query_value.to_targets(),
             &[overflow.target],
             &computational_hash.to_targets(),
             &placeholder_hash.to_targets(),
@@ -632,9 +802,8 @@ where
         UniversalQueryCircuitWires {
             column_extraction_wires: column_extraction_wires.input_wires,
             is_leaf,
-            min_query,
-            max_query,
-            dummy_placeholder_value,
+            min_query: min_query.into(),
+            max_query: max_query.into(),
             filtering_predicate_ops: filtering_predicate_wires.try_into().unwrap(),
             result_value_ops: result_value_wires.try_into().unwrap(),
             output_component_wires: output_component_wires.input_wires(),
@@ -657,7 +826,6 @@ where
         pw.set_bool_target(wires.is_leaf, self.is_leaf);
         wires.min_query.assign(pw, &self.min_query);
         wires.max_query.assign(pw, &self.max_query);
-        pw.set_u256_target(&wires.dummy_placeholder_value, self.dummy_placeholder_value);
         self.filtering_predicate_inputs
             .iter()
             .zip(wires.filtering_predicate_ops.iter())
@@ -800,14 +968,14 @@ where
 
 /// Placeholder to be employed in the universal circuit as a dummy placeholder
 /// in the circuit
-pub(crate) fn dummy_placeholder(placeholders: &Placeholders) -> Placeholder {
+fn dummy_placeholder(placeholders: &Placeholders) -> Placeholder {
     Placeholder {
         value: placeholders.get(&dummy_placeholder_id()).unwrap(), // cannot fail since default placeholder is always associated to a value
         id: dummy_placeholder_id(),
     }
 }
 
-pub(crate) fn dummy_placeholder_from_query_bounds(query_bounds: &QueryBounds) -> Placeholder {
+fn dummy_placeholder_from_query_bounds(query_bounds: &QueryBounds) -> Placeholder {
     let placeholders = Placeholders::new_empty(
         query_bounds.min_query_primary,
         query_bounds.max_query_primary,
@@ -847,12 +1015,13 @@ pub(crate) fn placeholder_hash(
     // add query bounds to placeholder hash, which depend on whether such query bounds come from
     // a constant or a placeholder. This information is available in `query_bounds`, so we just
     // process it
-    let min_query = QueryBound::new_secondary_index_bound(&query_bounds.min_query_secondary);
-    let max_query = QueryBound::new_secondary_index_bound(&query_bounds.max_query_secondary);
+    let min_query =
+        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary)?;
+    let max_query =
+        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary)?;
     Ok(QueryBound::add_secondary_query_bounds_to_placeholder_hash(
         &min_query,
         &max_query,
-        &placeholders,
         &placeholder_hash,
     ))
 }
@@ -989,7 +1158,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{array, collections::HashMap, iter::once};
+    use std::{array, iter::once};
 
     use alloy::primitives::U256;
     use itertools::Itertools;
@@ -1025,8 +1194,6 @@ mod tests {
         },
         public_inputs::PublicInputs,
         universal_circuit::{
-            output_no_aggregation::Circuit as NoAggOutputCircuit,
-            output_with_aggregation::Circuit as AggOutputCircuit,
             universal_circuit_inputs::{
                 BasicOperation, ColumnCell, InputOperand, OutputItem, PlaceholderId, Placeholders,
                 ResultStructure, RowCells,
@@ -1106,12 +1273,9 @@ mod tests {
             .map(|i| {
                 if i == 1 {
                     // ensure that second column value is in the range specified by the query:
-                    // we sample a random u256 in range [0, max_query - min_query + 1) and then we
+                    // we sample a random u256 in range [0, max_query - min_query) and then we
                     // add min_query
-                    gen_random_u256(rng)
-                        .div_rem(max_query - min_query + U256::from(1))
-                        .1
-                        + min_query
+                    gen_random_u256(rng).div_rem(max_query - min_query).1 + min_query
                 } else {
                     gen_random_u256(rng)
                 }
@@ -1286,11 +1450,19 @@ mod tests {
             Some(
                 QueryBoundSecondary::new(
                     &placeholders,
-                    QueryBoundSource::Placeholder(third_placeholder_id),
+                    QueryBoundSource::Operation(BasicOperation {
+                        first_operand: InputOperand::Placeholder(third_placeholder_id),
+                        second_operand: Some(InputOperand::Constant(U256::from(1))),
+                        op: Operation::SubOp,
+                    }), // the bound is computed as $3-1 since in the query we specified that C2 < $3,
+                        // while the bound computed in the circuit is expected to represent the maximum value
+                        // possible for C2 (i.e., C2 < $3 => C2 <= $3 - 1)
                 )
                 .unwrap(),
             ),
         );
+        let min_query_value = query_bounds.min_query_secondary.value;
+        let max_query_value = query_bounds.max_query_secondary.value;
 
         let input = CircuitInput::<
             MAX_NUM_COLUMNS,
@@ -1385,8 +1557,8 @@ mod tests {
                     .as_slice(),
                 &predicate_operations,
                 &results,
-                &(&query_bounds.min_query_secondary).into(),
-                &(&query_bounds.max_query_secondary).into(),
+                Some((&query_bounds.min_query_secondary).into()),
+                Some((&query_bounds.max_query_secondary).into()),
             )
             .unwrap())
                 .into(),
@@ -1415,8 +1587,8 @@ mod tests {
         assert_eq!(column_values[1], pi.min_value());
         assert_eq!(column_values[1], pi.max_value());
         assert_eq!([column_ids[0], column_ids[1]], pi.index_ids());
-        assert_eq!(min_query, pi.min_query_value());
-        assert_eq!(max_query, pi.max_query_value());
+        assert_eq!(min_query_value, pi.min_query_value());
+        assert_eq!(max_query_value, pi.max_query_value());
         assert_eq!(placeholder_hash, pi.placeholder_hash());
         assert_eq!(computational_hash, pi.computational_hash());
         assert_eq!(predicate_err || result_err, pi.overflow_flag());
@@ -1433,7 +1605,7 @@ mod tests {
     }
 
     // test the following query:
-    // SELECT C1 < C2/45, C3*C4, C7, (C5-C6)%C1, C3*C4 - $1 FROM T WHERE ((NOT C5 != 42) OR C1*C7 <= C4/C6+C5 XOR C3 < $2) AND C2 > $3 AND C2 < 44
+    // SELECT C1 < C2/45, C3*C4, C7, (C5-C6)%C1, C3*C4 - $1 FROM T WHERE ((NOT C5 != 42) OR C1*C7 <= C4/C6+C5 XOR C3 < $2) AND C2 >= $3 AND C2 < 44
     async fn query_without_aggregation(single_result: bool, build_parameters: bool) {
         init_logging();
         const NUM_ACTUAL_COLUMNS: usize = 7;
@@ -1766,8 +1938,8 @@ mod tests {
                     .as_slice(),
                 &predicate_operations,
                 &results,
-                &(&query_bounds.min_query_secondary).into(),
-                &(&query_bounds.max_query_secondary).into(),
+                Some((&query_bounds.min_query_secondary).into()),
+                Some((&query_bounds.max_query_secondary).into()),
             )
             .unwrap())
                 .into(),

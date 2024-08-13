@@ -58,6 +58,9 @@ impl CheckedPlaceholder {
     }
 }
 
+/// Number of placeholders being hashed to include query bounds in the placeholder hash
+pub(crate) const NUM_SECONDARY_INDEX_PLACEHOLDERS: usize = 4;
+
 /// This gadget checks that the placeholders identifiers and values employed to
 /// compute the `final_placeholder_hash` are found in placeholder_ids and
 /// placeholder_values arrays respectively.
@@ -72,7 +75,8 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
     placeholder_ids: &[Target; PH],
     placeholder_values: &[UInt256Target; PH],
     to_be_checked_placeholder: &[CheckedPlaceholderTarget; PP],
-    secondary_query_bound_placeholder: &[CheckedPlaceholderTarget; 2], // placeholder pairs corresponding to query bounds for secondary index
+    secondary_query_bound_placeholder: &[CheckedPlaceholderTarget;
+         NUM_SECONDARY_INDEX_PLACEHOLDERS], // placeholder pairs corresponding to query bounds for secondary index
     final_placeholder_hash: &HashOutTarget,
 ) -> (Target, HashOutTarget) {
     // Check the first 4 placeholder identifiers as constants.
@@ -167,10 +171,15 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
     let inputs = placeholder_hash
         .to_targets()
         .into_iter()
-        .chain(once(secondary_query_bound_placeholder[0].id))
-        .chain(secondary_query_bound_placeholder[0].value.to_targets())
-        .chain(once(secondary_query_bound_placeholder[1].id))
-        .chain(secondary_query_bound_placeholder[1].value.to_targets())
+        .chain(
+            secondary_query_bound_placeholder
+                .iter()
+                .flat_map(|placeholder| {
+                    let mut placeholder_targets = vec![placeholder.id];
+                    placeholder_targets.extend_from_slice(&placeholder.value.to_targets());
+                    placeholder_targets
+                }),
+        )
         .collect_vec();
     let first_item = b.hash_n_to_hash_no_pad::<H>(inputs);
     // final_placeholder_hash = H(first_item || min_i1 || max_i1)
@@ -222,7 +231,8 @@ mod tests {
         placeholder_ids: [Target; PH],
         placeholder_values: [UInt256Target; PH],
         to_be_checked_placeholders: [CheckedPlaceholderTarget; PP],
-        secondary_query_bound_placeholders: [CheckedPlaceholderTarget; 2],
+        secondary_query_bound_placeholders:
+            [CheckedPlaceholderTarget; NUM_SECONDARY_INDEX_PLACEHOLDERS],
         final_placeholder_hash: HashOutTarget,
         exp_placeholder_ids_hash: HashOutTarget,
         exp_num_placeholders: Target,

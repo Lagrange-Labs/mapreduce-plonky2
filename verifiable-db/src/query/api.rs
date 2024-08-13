@@ -44,8 +44,8 @@ use super::{
             BasicOperation, ColumnCell, PlaceholderId, Placeholders, ResultStructure, RowCells,
         },
         universal_query_circuit::{
-            dummy_placeholder, dummy_placeholder_from_query_bounds, placeholder_hash, QueryBound,
-            UniversalCircuitInput, UniversalQueryCircuitInputs, UniversalQueryCircuitWires,
+            placeholder_hash, QueryBound, UniversalCircuitInput, UniversalQueryCircuitInputs,
+            UniversalQueryCircuitWires,
         },
         ComputationalHash, PlaceholderHash,
     },
@@ -253,6 +253,7 @@ where
         query_hashes: QueryHashNonExistenceCircuits,
         is_rows_tree_node: bool,
         query_bounds: &QueryBounds,
+        placeholders: &Placeholders,
     ) -> Result<Self> {
         let aggregation_ops = aggregation_ops
             .iter()
@@ -261,15 +262,15 @@ where
             .take(MAX_NUM_RESULTS)
             .collect_vec();
         let min_query = if is_rows_tree_node {
-            QueryBound::new_secondary_index_bound(&query_bounds.min_query_secondary)
+            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary)
         } else {
-            QueryBound::new_primary_index_bound(&query_bounds.min_query_primary, true)
-        };
+            QueryBound::new_primary_index_bound(placeholders, true)
+        }?;
         let max_query = if is_rows_tree_node {
-            QueryBound::new_secondary_index_bound(&query_bounds.max_query_secondary)
+            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary)
         } else {
-            QueryBound::new_primary_index_bound(&query_bounds.max_query_primary, false)
-        };
+            QueryBound::new_primary_index_bound(placeholders, false)
+        }?;
         Ok(CircuitInput::NonExistence(NonExistenceInput {
             node_info,
             child_info: child_info.clone().map(|info| info.0),
@@ -287,7 +288,6 @@ where
             is_rows_tree_node,
             min_query,
             max_query,
-            dummy_placeholder_value: dummy_placeholder_from_query_bounds(query_bounds).value,
         }))
     }
 
@@ -732,7 +732,6 @@ where
                 is_rows_tree_node,
                 min_query,
                 max_query,
-                dummy_placeholder_value,
             }) => {
                 match child_info {
                     Some(child_data) => {
@@ -742,7 +741,6 @@ where
                             is_left_child: is_child_left.unwrap(),
                             min_query,
                             max_query,
-                            dummy_placeholder_value,
                             value: node_info.value,
                             index_value: primary_index_value,
                             child_value: child_data.value,
@@ -772,7 +770,6 @@ where
                             is_rows_tree_node: is_rows_tree_node,
                             min_query: min_query,
                             max_query: max_query,
-                            dummy_placeholder_value,
                             value: node_info.value,
                             index_value: primary_index_value,
                             index_ids,
@@ -1451,6 +1448,7 @@ mod tests {
             query_hashes,
             false,
             &query_bounds,
+            &placeholders,
         )
         .unwrap();
         let proof_0 = params.generate_proof(input).unwrap();
@@ -1553,6 +1551,7 @@ mod tests {
             query_hashes,
             false,
             &query_bounds,
+            &placeholders,
         )
         .unwrap();
         let proof_1 = params.generate_proof(input).unwrap();
@@ -1649,6 +1648,7 @@ mod tests {
             query_hashes,
             true,
             &query_bounds,
+            &placeholders,
         )
         .unwrap();
         let proof_2 = params.generate_proof(input).unwrap();

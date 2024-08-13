@@ -49,7 +49,9 @@ use serde::{Deserialize, Serialize};
 use std::array;
 
 use super::{
-    placeholders_check::{CheckedPlaceholder, CheckedPlaceholderTarget},
+    placeholders_check::{
+        CheckedPlaceholder, CheckedPlaceholderTarget, NUM_SECONDARY_INDEX_PLACEHOLDERS,
+    },
     NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
 };
 
@@ -84,7 +86,8 @@ pub struct RevelationWithoutResultsTreeWires<
         deserialize_with = "deserialize_long_array"
     )]
     to_be_checked_placeholders: [CheckedPlaceholderTarget; PP],
-    secondary_query_bound_placeholders: [CheckedPlaceholderTarget; 2],
+    secondary_query_bound_placeholders:
+        [CheckedPlaceholderTarget; NUM_SECONDARY_INDEX_PLACEHOLDERS],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -133,7 +136,8 @@ pub struct RevelationWithoutResultsTreeCircuit<
     /// universal query circuit to hash the query bounds for the secondary
     /// index; they are provided as well to `check_placeholder` gadget to
     /// check the correctness of the placeholders employed for query bounds
-    pub(crate) secondary_query_bound_placeholders: [CheckedPlaceholder; 2],
+    pub(crate) secondary_query_bound_placeholders:
+        [CheckedPlaceholder; NUM_SECONDARY_INDEX_PLACEHOLDERS],
 }
 
 impl<const L: usize, const S: usize, const PH: usize, const PP: usize>

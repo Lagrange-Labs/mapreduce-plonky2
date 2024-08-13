@@ -26,6 +26,7 @@ use plonky2::{
     plonk::config::{GenericHashOut, Hasher},
 };
 use plonky2_ecgfp5::curve::curve::Point;
+use serde::{Deserialize, Serialize};
 
 use crate::revelation::placeholders_check::placeholder_ids_hash;
 
@@ -35,6 +36,7 @@ use super::{
         universal_circuit_inputs::{
             BasicOperation, InputOperand, OutputItem, PlaceholderId, ResultStructure,
         },
+        universal_query_circuit::QueryBound,
         ComputationalHash, ComputationalHashTarget,
     },
 };
@@ -129,20 +131,22 @@ impl Identifiers {
         column_ids: &[u64],
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
-        min_query_secondary: &QueryBoundSource,
-        max_query_secondary: &QueryBoundSource,
+        min_query_secondary: Option<QueryBoundSource>,
+        max_query_secondary: Option<QueryBoundSource>,
     ) -> Result<HashOutput> {
         let computational_hash = Self::computational_hash_without_query_bounds(
             column_ids,
             predicate_operations,
             results,
         )?;
+        let min_query = min_query_secondary.unwrap_or(QueryBoundSource::Constant(U256::ZERO));
+        let max_query = max_query_secondary.unwrap_or(QueryBoundSource::Constant(U256::MAX));
         // compute values to be hashed for min and max query bounds
-        let hash_with_query_bounds = QueryBoundSource::add_query_bounds_to_computational_hash(
-            min_query_secondary,
-            max_query_secondary,
+        let hash_with_query_bounds = QueryBound::add_secondary_query_bounds_to_computational_hash(
+            &min_query,
+            &max_query,
             &computational_hash,
-        );
+        )?;
         Ok(HashOutput::try_from(hash_with_query_bounds.to_bytes()).unwrap())
     }
 
@@ -152,8 +156,8 @@ impl Identifiers {
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         metadata_hash: &HashOutput,
-        min_query_secondary: &QueryBoundSource,
-        max_query_secondary: &QueryBoundSource,
+        min_query_secondary: Option<QueryBoundSource>,
+        max_query_secondary: Option<QueryBoundSource>,
     ) -> Result<HashOutput> {
         let hash = Identifiers::computational_hash_universal_circuit(
             column_ids,
@@ -568,7 +572,9 @@ impl AggregationOperation {
 }
 
 /// Placeholder identifiers
-#[derive(Clone, Debug, Copy, Default, Eq, Hash, PartialEq, PartialOrd, Ord)]
+#[derive(
+    Clone, Debug, Copy, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub enum PlaceholderIdentifier {
     // MIN_I1
     #[default]

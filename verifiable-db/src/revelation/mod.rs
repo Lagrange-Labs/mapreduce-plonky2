@@ -43,7 +43,9 @@ pub(crate) mod tests {
         utils::ToFields,
     };
     use mp2_test::utils::random_vector;
-    use placeholders_check::{placeholder_ids_hash, CheckedPlaceholder};
+    use placeholders_check::{
+        placeholder_ids_hash, CheckedPlaceholder, NUM_SECONDARY_INDEX_PLACEHOLDERS,
+    };
     use plonky2::{
         field::types::PrimeField64, hash::hash_types::HashOut, iop::target::Target,
         plonk::config::Hasher,
@@ -63,7 +65,8 @@ pub(crate) mod tests {
         pub(crate) placeholder_ids: [F; PH],
         pub(crate) placeholder_values: [U256; PH],
         pub(crate) to_be_checked_placeholders: [CheckedPlaceholder; PP],
-        pub(crate) secondary_query_bound_placeholders: [CheckedPlaceholder; 2],
+        pub(crate) secondary_query_bound_placeholders:
+            [CheckedPlaceholder; NUM_SECONDARY_INDEX_PLACEHOLDERS],
         pub(crate) final_placeholder_hash: HashOut<F>,
         // Output result for `check_placeholders` function
         pub(crate) placeholder_ids_hash: HashOut<F>,
@@ -153,10 +156,15 @@ pub(crate) mod tests {
             let inputs = placeholder_hash
                 .to_fields()
                 .into_iter()
-                .chain(once(secondary_query_bound_placeholders[0].id))
-                .chain(secondary_query_bound_placeholders[0].value.to_fields())
-                .chain(once(secondary_query_bound_placeholders[1].id))
-                .chain(secondary_query_bound_placeholders[1].value.to_fields())
+                .chain(
+                    secondary_query_bound_placeholders
+                        .iter()
+                        .flat_map(|placeholder| {
+                            let mut placeholder_fes = vec![placeholder.id];
+                            placeholder_fes.extend_from_slice(&placeholder.value.to_fields());
+                            placeholder_fes
+                        }),
+                )
                 .collect_vec();
             let query_placeholder_hash = H::hash_no_pad(&inputs);
             // final_placeholder_hash = H(query_placeholder_hash || min_i1 || max_i1)
