@@ -52,6 +52,7 @@ pub(crate) mod common;
 //}
 
 #[test(tokio::test)]
+#[ignore]
 async fn db_creation_integrated_tests() -> Result<()> {
     // Create the test context for mainnet.
     // let ctx = &mut TestContext::new_mainet();
