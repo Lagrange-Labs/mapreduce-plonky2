@@ -784,9 +784,7 @@ struct QueryCooking {
 async fn cook_query(table: &Table) -> Result<QueryCooking> {
     let mut all_table = HashMap::new();
     let max = table.row.current_epoch();
-    // TODO: change this from ryhope support
-    const BLOCKS_PROCESSED: i64 = 6;
-    let min = max - BLOCKS_PROCESSED + 1; // +1 because max is inclusive
+    let min = table.row.initial_epoch() + 1;
     for block in (min..=max).rev() {
         println!("Querying for block {block}");
         let rows = collect_all_at(&table.row, block).await?;
