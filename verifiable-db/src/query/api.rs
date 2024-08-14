@@ -70,7 +70,9 @@ use recursion_framework::{
         prepare_recursive_circuit_for_circuit_set, RecursiveCircuitInfo, RecursiveCircuits,
     },
 };
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // we need to clone data if we fix by put variants inside a `Box`
 pub enum CircuitInput<
     const MAX_NUM_COLUMNS: usize,
@@ -354,7 +356,7 @@ where
         )
     }
 }
-
+#[derive(Serialize, Deserialize)]
 pub struct Parameters<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,

@@ -195,6 +195,7 @@ where
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct QueryParameters<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
@@ -224,6 +225,7 @@ pub struct QueryParameters<
         WrapCircuitParams<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>,
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum QueryCircuitInput<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
@@ -277,7 +279,7 @@ where
     [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
 {
     /// Build `QueryParameters` from serialized `ParamsInfo` of `PublicParamaters`
-    pub fn build_query_params(preprocessing_params_info: &[u8]) -> Result<Self> {
+    pub fn build_params(preprocessing_params_info: &[u8]) -> Result<Self> {
         let params_info: ParamsInfo = bincode::deserialize(preprocessing_params_info)?;
         let query_params = QueryParams::build();
         let revelation_params = RevelationParams::build(

@@ -71,6 +71,11 @@ pub struct PublicParameters {
     tree_creation:
         verifiable_db::api::PublicParameters<final_extraction::PublicInputs<'static, Target>>,
 }
+impl PublicParameters {
+    pub fn get_params_info(&self) -> Result<Vec<u8>> {
+        self.tree_creation.get_params_info()
+    }
+}
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
