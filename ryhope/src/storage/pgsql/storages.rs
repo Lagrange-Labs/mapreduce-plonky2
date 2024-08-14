@@ -129,10 +129,10 @@ where
     }
 }
 
-// Void nodes are used by the SBBST
 pub struct NodeConnector;
 
 #[async_trait]
+// Void nodes are used by the SBBST
 impl<K> DbConnector<K, ()> for NodeConnector
 where
     K: ToFromBytea + Send + Sync,
@@ -284,6 +284,7 @@ where
 pub struct CachedDbStore<V: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> {
     /// A pointer to the DB client
     db: DBPool,
+    initial_epoch: Epoch,
     in_tx: bool,
     dirty: bool,
     epoch: Epoch,
@@ -291,12 +292,13 @@ pub struct CachedDbStore<V: Debug + Clone + Sync + Serialize + for<'a> Deseriali
     pub(super) cache: RwLock<Option<V>>,
 }
 impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStore<T> {
-    pub fn new(epoch: Epoch, table: String, db: DBPool) -> Self {
+    pub fn new(initial_epoch: Epoch, current_epoch: Epoch, table: String, db: DBPool) -> Self {
         Self {
+            initial_epoch,
             db,
             in_tx: false,
             dirty: true,
-            epoch,
+            epoch: current_epoch,
             table,
             cache: RwLock::new(None),
         }
@@ -305,7 +307,7 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
     /// Initialize a new store, with the given state. The initial state is
     /// immediately persisted, as the DB representation of the payload must be
     /// valid even if it is never modified further by the user.
-    pub async fn with_value(epoch: Epoch, table: String, db: DBPool, t: T) -> Result<Self> {
+    pub async fn with_value(initial_epoch: Epoch, table: String, db: DBPool, t: T) -> Result<Self> {
         {
             let connection = db.get().await.unwrap();
             connection
@@ -315,16 +317,17 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
                      VALUES ($1, $1, $2)",
                         table
                     ),
-                    &[&epoch, &Json(t.clone())],
+                    &[&initial_epoch, &Json(t.clone())],
                 )
                 .await?;
         }
 
         Ok(Self {
             db,
+            initial_epoch,
             in_tx: false,
             dirty: true,
-            epoch,
+            epoch: initial_epoch,
             table,
             cache: RwLock::new(Some(t)),
         })
@@ -428,7 +431,12 @@ where
     }
 
     async fn rollback_to(&mut self, new_epoch: Epoch) -> Result<()> {
-        ensure!(new_epoch >= 0, "unable to rollback before epoch 0");
+        ensure!(
+            new_epoch >= self.initial_epoch,
+            "unable to rollback to {} before initial epoch {}",
+            new_epoch,
+            self.initial_epoch
+        );
         ensure!(
             new_epoch < self.current_epoch(),
             "unable to rollback into the future: requested epoch ({}) > current epoch ({})",
@@ -475,6 +483,8 @@ where
     V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V>,
 {
+    /// The initial epoch
+    initial_epoch: Epoch,
     /// The latest *commited* epoch
     epoch: Epoch,
     /// A pointer to the DB client
@@ -491,9 +501,10 @@ where
     V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V>,
 {
-    pub fn new(epoch: Epoch, table: String, db: DBPool) -> Self {
+    pub fn new(initial_epoch: Epoch, current_epoch: Epoch, table: String, db: DBPool) -> Self {
         CachedDbKvStore {
-            epoch,
+            initial_epoch,
+            epoch: current_epoch,
             table,
             db: db.clone(),
             cache: Default::default(),
@@ -597,7 +608,12 @@ where
     }
 
     async fn rollback_to(&mut self, new_epoch: Epoch) -> Result<()> {
-        ensure!(new_epoch >= 0, "unable to rollback before epoch 0");
+        ensure!(
+            new_epoch >= self.initial_epoch,
+            "unable to rollback to {} before initial epoch {}",
+            new_epoch,
+            self.initial_epoch
+        );
         ensure!(
             new_epoch < self.current_epoch(),
             "unable to rollback into the future: requested epoch ({}) > current epoch ({})",
