@@ -784,17 +784,21 @@ struct QueryCooking {
 async fn cook_query(table: &Table) -> Result<QueryCooking> {
     let mut all_table = HashMap::new();
     let max = table.row.current_epoch();
-    for epoch in (1..=max).rev() {
-        let rows = collect_all_at(&table.row, epoch).await?;
+    // TODO: change this from ryhope support
+    const BLOCKS_PROCESSED: i64 = 6;
+    let min = max - BLOCKS_PROCESSED + 1; // +1 because max is inclusive
+    for block in (min..=max).rev() {
+        println!("Querying for block {block}");
+        let rows = collect_all_at(&table.row, block).await?;
         debug!(
             "Collecting {} rows at epoch {} (rows_keys {:?})",
             rows.len(),
-            epoch,
+            block,
             rows.iter().map(|r| r.k.value).collect::<Vec<_>>()
         );
         for row in rows {
-            let epochs = all_table.entry(row.k.clone()).or_insert(Vec::new());
-            epochs.push(epoch);
+            let blocks = all_table.entry(row.k.clone()).or_insert(Vec::new());
+            blocks.push(block);
         }
     }
     // sort the epochs

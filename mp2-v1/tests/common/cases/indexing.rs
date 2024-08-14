@@ -101,8 +101,6 @@ impl TestCase {
 
         // + 1 because we are going to deploy some update to contract in a transaction, which for
         // Anvil means it's a new block
-        // TODO: change sbbst such that it doesn't require this max . Though we still need the
-        // correct shift.
         let indexing_genesis_block = ctx.block_number().await + 1;
         // Defining the columns structure of the table from the source slots
         // This is depending on what is our data source, mappings and CSV both have their o
@@ -163,6 +161,10 @@ impl TestCase {
             contract.address()
         );
         let contract_address = contract.address();
+        // index genesis block is the first block where I start processing the data. it is one
+        // block more than the deploy block
+        // + 1 because we are going to deploy some update to contract in a transaction, which for
+        // Anvil means it's a new block
         let index_genesis_block = ctx.block_number().await + 1;
         // to toggle off and on
         let value_as_index = true;
