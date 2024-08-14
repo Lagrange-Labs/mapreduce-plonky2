@@ -4,7 +4,13 @@ use std::collections::HashMap;
 
 use alloy::primitives::U256;
 use itertools::Itertools;
-use mp2_common::{poseidon::empty_poseidon_hash, proof::ProofWithVK, serialization::{deserialize_long_array, serialize_long_array}, types::HashOutput, F};
+use mp2_common::{
+    poseidon::empty_poseidon_hash,
+    proof::ProofWithVK,
+    serialization::{deserialize_long_array, serialize_long_array},
+    types::HashOutput,
+    F,
+};
 use plonky2::{
     field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::GenericHashOut,
 };
@@ -315,7 +321,10 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
     /// Placeholder hash associated to the query
     pub(crate) placeholder_hash: PlaceholderHash,
     /// Set of aggregation operations employed to aggregate results
-    #[serde(serialize_with="serialize_long_array", deserialize_with="deserialize_long_array")]
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     pub(crate) aggregation_ops: [F; MAX_NUM_RESULTS],
     /// Common inputs shared across all the circuits
     pub(crate) common: CommonInputs,
