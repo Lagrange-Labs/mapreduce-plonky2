@@ -94,11 +94,11 @@ impl<P: ProofStorage> TestContext<P> {
             // column id, then searching for the cell info in the row payload about this
             // identifier. We now have the primary index for which the cells proof have been
             // generated.
-            let cell_root_primary = row.fetch_cell_root_info().primary;
+            let cell_root_primary = row.fetch_cell_root_info().unwrap().primary;
             let cell_proof_key = CellProofIdentifier {
                 table: table.id.clone(),
                 primary: cell_root_primary,
-                tree_key: row.cell_root_key,
+                tree_key: row.cell_root_key.unwrap(),
                 secondary: k.clone(), // the cells proofs is already stored under the new key, even in the
                                       // case of a fresh row, see celltree.rs for more info, see
                                       // celltree.rs for more info
@@ -117,7 +117,7 @@ impl<P: ProofStorage> TestContext<P> {
             let cell_root_hash_from_row = row.cell_root_hash.clone();
             assert_eq!(
                 hex::encode(cell_root_hash_from_proof.clone()),
-                hex::encode(cell_root_hash_from_row.0),
+                hex::encode(cell_root_hash_from_row.unwrap().0),
                 "cell root proof from proof vs row is different - cell root info = {:?}, row {:?}",
                 row.fetch_cell_root_info(),
                 row.cells,
@@ -277,7 +277,7 @@ impl<P: ProofStorage> TestContext<P> {
         assert_eq!(
             hex::encode(tree_hash.0), hex::encode(proved_hash.0),
             "mismatch between row tree root hash as computed by ryhope and mp2 (row.id {:?}, value {:?} , row.cell_hash {:?})",
-            root_row.secondary_index_column, root_row.secondary_index_value(),hex::encode(root_row.cell_root_hash.0)
+            root_row.secondary_index_column, root_row.secondary_index_value(),hex::encode(root_row.cell_root_hash.unwrap().0)
 
         );
         Ok(IndexNode {

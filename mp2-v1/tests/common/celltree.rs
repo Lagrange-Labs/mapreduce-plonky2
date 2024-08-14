@@ -295,12 +295,14 @@ impl<P: ProofStorage> TestContext<P> {
 
         RowPayload {
             secondary_index_column: table.columns.secondary_column().identifier,
-            cell_root_key: root_key,
-            cell_root_hash: tree_hash,
-            cell_root_column: table
-                .columns
-                .column_id_of_cells_index(root_key)
-                .expect("unable to find column id of root cells"),
+            cell_root_key: Some(root_key),
+            cell_root_hash: Some(tree_hash),
+            cell_root_column: Some(
+                table
+                    .columns
+                    .column_id_of_cells_index(root_key)
+                    .expect("unable to find column id of root cells"),
+            ),
             cells: updated_cells,
             ..Default::default()
         }
