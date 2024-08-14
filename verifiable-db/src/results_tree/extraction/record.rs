@@ -258,12 +258,13 @@ mod tests {
             offset_range_max,
         );
 
+        let second_indexed_item = test_circuit.indexed_items[1];
+
         // Proof for the test circuit.
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
 
         // Check the public inputs.
-
         // Tree hash
         if is_stored_in_leaf {
             let empty_hash = empty_poseidon_hash();
@@ -272,10 +273,10 @@ mod tests {
                 .clone()
                 .into_iter()
                 .chain(empty_hash_fields)
-                .chain(second_indexed_item.unwrap_or(U256::ZERO).to_fields())
-                .chain(second_indexed_item.unwrap_or(U256::ZERO).to_fields())
+                .chain(second_indexed_item.to_fields())
+                .chain(second_indexed_item.to_fields())
                 .chain(iter::once(index_ids[1]))
-                .chain(second_indexed_item.unwrap_or(U256::ZERO).to_fields())
+                .chain(second_indexed_item.to_fields())
                 .chain(tree_hash.to_fields())
                 .collect();
             let exp_hash = H::hash_no_pad(&hash_inputs);
@@ -285,10 +286,10 @@ mod tests {
         };
 
         // Min value
-        assert_eq!(pi.min_value(), second_indexed_item.unwrap_or(U256::ZERO));
+        assert_eq!(pi.min_value(), second_indexed_item);
 
         // Max value
-        assert_eq!(pi.max_value(), second_indexed_item.unwrap_or(U256::ZERO));
+        assert_eq!(pi.max_value(), second_indexed_item);
 
         // Primary index value
         assert_eq!(pi.primary_index_value(), first_indexed_item);
@@ -313,7 +314,7 @@ mod tests {
             let accumulator_inputs: Vec<_> = iter::once(index_ids[0])
                 .chain(first_indexed_item.to_fields())
                 .chain(iter::once(index_ids[1]))
-                .chain(second_indexed_item.unwrap_or(U256::ZERO).to_fields())
+                .chain(second_indexed_item.to_fields())
                 .chain(tree_hash.to_fields())
                 .collect();
             let exp_accumulator = map_to_curve_point(&accumulator_inputs);
