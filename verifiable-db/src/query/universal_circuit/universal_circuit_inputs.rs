@@ -8,16 +8,16 @@ use mp2_common::{
     F,
 };
 
-use crate::query::computational_hash_ids::{Operation, Output};
+use crate::query::computational_hash_ids::{Operation, Output, PlaceholderIdentifier};
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 /// Data structure representing a placeholder in the query, given by its value and its identifier
 pub struct Placeholder {
     pub(crate) value: U256,
     pub(crate) id: PlaceholderId,
 }
 
-pub type PlaceholderId = F;
+pub type PlaceholderId = PlaceholderIdentifier;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// Enumeration representing all the possible types of input operands for a basic operation
@@ -75,6 +75,22 @@ impl BasicOperation {
         }
     }
 
+    /// Return the ids of the placeholders employed as operands of `self`, if any
+    pub(crate) fn extract_placeholder_ids(&self) -> Vec<PlaceholderId> {
+        let first_id = match self.first_operand {
+            InputOperand::Placeholder(p) => Some(p),
+            _ => None,
+        };
+        let second_id = self.second_operand.map(|op| match op {
+            InputOperand::Placeholder(p) => Some(p),
+            _ => None,
+        });
+        [first_id, second_id.flatten()]
+            .into_iter()
+            .filter_map(|id| id)
+            .collect_vec()
+    }
+
     /// Compute the results of the `operations` provided as input, employing the provided
     /// `column_values` as the operands for the operations having `InputOperand::Column`
     /// operands and the provided `placeholder_values` for the operations having `InputOperand::Placeholder`
@@ -93,7 +109,7 @@ impl BasicOperation {
                 Ok(match operand {
                     InputOperand::Placeholder(p) => {
                         *placeholder_values.get(p).ok_or_else(|| {
-                            anyhow!("No placeholder value found associated to id {}", p)
+                            anyhow!("No placeholder value found associated to id {:?}", p)
                         })?
                     }
                     InputOperand::Constant(v) => *v,

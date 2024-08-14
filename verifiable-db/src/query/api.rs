@@ -42,7 +42,8 @@ use super::{
         output_with_aggregation::Circuit as AggOutputCircuit,
         universal_circuit_inputs::{BasicOperation, ColumnCell, PlaceholderId, ResultStructure},
         universal_query_circuit::{
-            UniversalCircuitInput, UniversalQueryCircuitInputs, UniversalQueryCircuitWires,
+            placeholder_hash, UniversalCircuitInput, UniversalQueryCircuitInputs,
+            UniversalQueryCircuitWires,
         },
         ComputationalHash, PlaceholderHash,
     },
@@ -69,7 +70,9 @@ use recursion_framework::{
         prepare_recursive_circuit_for_circuit_set, RecursiveCircuitInfo, RecursiveCircuits,
     },
 };
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // we need to clone data if we fix by put variants inside a `Box`
 pub enum CircuitInput<
     const MAX_NUM_COLUMNS: usize,
@@ -105,6 +108,7 @@ impl<
 where
     [(); MAX_NUM_RESULTS - 1]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
     /// Initialize input for universal circuit to prove the execution of a query over a
     /// single row, from the following inputs:
@@ -134,8 +138,7 @@ where
                     predicate_operations,
                     placeholder_values,
                     is_leaf,
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
+                    query_bounds,
                     results,
                 )?,
                 Output::NoAggregation => UniversalCircuitInput::new_query_no_agg(
@@ -143,8 +146,7 @@ where
                     predicate_operations,
                     placeholder_values,
                     is_leaf,
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
+                    query_bounds,
                     results,
                 )?,
             },
@@ -274,15 +276,17 @@ where
         }))
     }
 
-    /// Compute the `placeholder_hash` associated to a query
-    pub fn placeholder_hash(
+    /// This method returns the ids of the placeholders employed to compute the placeholder hash,
+    /// in the same order, so that those ids can be provided as input to other circuits that need
+    /// to recompute this hash
+    pub fn ids_for_placeholder_hash(
         column_cells: &[ColumnCell],
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         placeholder_values: &HashMap<PlaceholderId, U256>,
         query_bounds: &QueryBounds,
-    ) -> Result<HashOutput> {
-        let hash = match results.output_variant {
+    ) -> Result<[PlaceholderId; 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]> {
+        Ok(match results.output_variant {
             Output::Aggregation => {
                 let circuit = UniversalQueryCircuitInputs::<
                     MAX_NUM_COLUMNS,
@@ -295,11 +299,10 @@ where
                     predicate_operations,
                     placeholder_values,
                     false, // doesn't matter for placeholder hash computation
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
+                    query_bounds,
                     results,
                 )?;
-                circuit.placeholder_hash()
+                circuit.ids_for_placeholder_hash()
             }
             Output::NoAggregation => {
                 let circuit = UniversalQueryCircuitInputs::<
@@ -313,13 +316,32 @@ where
                     predicate_operations,
                     placeholder_values,
                     false, // doesn't matter for placeholder hash computation
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
+                    query_bounds,
                     results,
                 )?;
-                circuit.placeholder_hash()
+                circuit.ids_for_placeholder_hash()
             }
-        };
+        }
+        .try_into()
+        .unwrap())
+    }
+
+    /// Compute the `placeholder_hash` associated to a query
+    pub fn placeholder_hash(
+        column_cells: &[ColumnCell],
+        predicate_operations: &[BasicOperation],
+        results: &ResultStructure,
+        placeholder_values: &HashMap<PlaceholderId, U256>,
+        query_bounds: &QueryBounds,
+    ) -> Result<HashOutput> {
+        let placeholder_hash_ids = Self::ids_for_placeholder_hash(
+            column_cells,
+            predicate_operations,
+            results,
+            placeholder_values,
+            query_bounds,
+        )?;
+        let hash = placeholder_hash(&placeholder_hash_ids, placeholder_values, query_bounds)?;
         // add primary query bounds to placeholder hash
         HashOutput::try_from(
             hash_n_to_hash_no_pad::<_, HashPermutation>(
@@ -334,7 +356,7 @@ where
         )
     }
 }
-
+#[derive(Serialize, Deserialize)]
 pub struct Parameters<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
@@ -754,6 +776,10 @@ where
         });
 
         proof.serialize()
+    }
+
+    pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.circuit_set
     }
 }
 

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
-use plonky2::hash::hash_types::HashOut;
+use plonky2::{hash::hash_types::HashOut, plonk::circuit_data::CircuitData};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
@@ -106,6 +106,14 @@ impl PublicParameters {
             .set
             .generate_proof(&self.ivc, [prev_proof], [&vd], input)?;
         ProofWithVK::from((proof, self.ivc.circuit_data().verifier_only.clone())).serialize()
+    }
+
+    pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.set
+    }
+
+    pub(crate) fn get_ivc_circuit_data(&self) -> &CircuitData<F, C, D> {
+        self.ivc.circuit_data()
     }
 }
 

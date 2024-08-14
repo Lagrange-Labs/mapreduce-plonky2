@@ -5,7 +5,7 @@ use std::{
 };
 
 use alloy::primitives::U256;
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, ensure, Error, Result};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
@@ -16,11 +16,11 @@ use mp2_common::{
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{SelectHashBuilder, ToFields, ToTargets},
+    utils::{FromFields, SelectHashBuilder, ToFields, ToTargets},
     CHasher, C, D, F,
 };
 use plonky2::{
-    field::types::Field,
+    field::{goldilocks_field::GoldilocksField, types::Field},
     hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonHash},
     iop::{
         target::{BoolTarget, Target},
@@ -41,7 +41,8 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    computational_hash_ids::{HashPermutation, Operation, Output},
+    aggregation::QueryBounds,
+    computational_hash_ids::{HashPermutation, Operation, Output, PlaceholderIdentifier},
     public_inputs::PublicInputs,
     universal_circuit::{
         basic_operation::BasicOperationInputs, universal_circuit_inputs::OutputItem,
@@ -200,8 +201,7 @@ where
         predicate_operations: &[BasicOperation],
         placeholder_values: &HashMap<PlaceholderId, U256>,
         is_leaf: bool,
-        min_query: U256,
-        max_query: U256,
+        query_bounds: &QueryBounds,
         results: &ResultStructure,
     ) -> Result<Self> {
         let num_columns = column_cells.len();
@@ -237,10 +237,12 @@ where
         let predicate_ops_inputs = Self::compute_operation_inputs::<MAX_NUM_PREDICATE_OPS>(
             predicate_operations,
             placeholder_values,
+            query_bounds,
         )?;
         let result_ops_inputs = Self::compute_operation_inputs::<MAX_NUM_RESULT_OPS>(
             &results.result_operations,
             placeholder_values,
+            query_bounds,
         )?;
         let selectors = results.output_items.iter().enumerate().map(|(i, item)| {
             Ok(
@@ -270,8 +272,8 @@ where
         Ok(Self {
             column_extraction_inputs,
             is_leaf,
-            min_query,
-            max_query,
+            min_query: query_bounds.min_query_secondary,
+            max_query: query_bounds.max_query_secondary,
             filtering_predicate_inputs: predicate_ops_inputs,
             result_values_inputs: result_ops_inputs,
             output_component_inputs,
@@ -494,41 +496,18 @@ where
             .assign(pw, &wires.output_component_wires);
     }
 
-    /// Utility method to compute the placeholder hash for `self` without including the query bounds on secondary index
-    pub(crate) fn placeholder_hash_without_query_bounds(&self) -> PlaceholderHash {
-        let inputs = self
-            .filtering_predicate_inputs
+    /// This method returns the ids of the placeholders employed to compute the placeholder hash,
+    /// in the same order, so that those ids can be provided as input to other circuits that need
+    /// to recompute this hash
+    pub(crate) fn ids_for_placeholder_hash(&self) -> Vec<PlaceholderId> {
+        self.filtering_predicate_inputs
             .iter()
-            .flat_map(|op_inputs| {
-                once(op_inputs.placeholder_ids[0])
-                    .chain(op_inputs.placeholder_values[0].to_fields())
-                    .chain(once(op_inputs.placeholder_ids[1]))
-                    .chain(op_inputs.placeholder_values[1].to_fields())
-                    .collect_vec()
-            })
+            .flat_map(|op_inputs| vec![op_inputs.placeholder_ids[0], op_inputs.placeholder_ids[1]])
             .chain(self.result_values_inputs.iter().flat_map(|op_inputs| {
-                once(op_inputs.placeholder_ids[0])
-                    .chain(op_inputs.placeholder_values[0].to_fields())
-                    .chain(once(op_inputs.placeholder_ids[1]))
-                    .chain(op_inputs.placeholder_values[1].to_fields())
-                    .collect_vec()
+                vec![op_inputs.placeholder_ids[0], op_inputs.placeholder_ids[1]]
             }))
-            .collect_vec();
-        hash_n_to_hash_no_pad::<_, HashPermutation>(&inputs)
-    }
-
-    /// Compute the placeholder hash for the given instance of `self`
-    pub(crate) fn placeholder_hash(&self) -> PlaceholderHash {
-        let placeholders_hash = self.placeholder_hash_without_query_bounds();
-        // add query bounds to placeholder hash
-        hash_n_to_hash_no_pad::<_, HashPermutation>(
-            &placeholders_hash
-                .to_vec()
-                .into_iter()
-                .chain(self.min_query.to_fields())
-                .chain(self.max_query.to_fields())
-                .collect_vec(),
-        )
+            .map(|id| PlaceholderIdentifier::from_fields(&[id]))
+            .collect_vec()
     }
 
     /// Utility function to compute the `BasicOperationInputs` corresponding to the set of `operations` specified
@@ -537,15 +516,9 @@ where
     fn compute_operation_inputs<const MAX_NUM_OPS: usize>(
         operations: &[BasicOperation],
         placeholder_values: &HashMap<PlaceholderId, U256>,
+        query_bounds: &QueryBounds,
     ) -> Result<[BasicOperationInputs; MAX_NUM_OPS]> {
-        let default_placeholder = placeholder_values
-            .iter()
-            .next()
-            .map(|(id, value)| Placeholder {
-                id: *id,
-                value: *value,
-            })
-            .unwrap_or_default();
+        let dummy_placeholder = dummy_placeholder(query_bounds);
         // starting offset in the input values provided to basic operation component where the output values
         // of `operations` will be found. It is computed as follows since these operations will be placed
         // at the end of these functions in the last slots among the `MAX_NUM_OPS` available, as expected
@@ -566,7 +539,7 @@ where
                 match operand {
                     InputOperand::Placeholder(p) => {
                         let placeholder_value = *placeholder_values.get(&p)
-                            .ok_or_else(|| anyhow!("No placeholder value found associated to id {}", p))?;
+                            .ok_or_else(|| anyhow!("No placeholder value found associated to id {:?}", p))?;
                         (
                             Some(placeholder_value),
                             Some(p),
@@ -612,12 +585,12 @@ where
                 false
             )?;
             let placeholder_values = [
-                first_placeholder_value.unwrap_or(default_placeholder.value),
-                second_placeholder_value.unwrap_or(default_placeholder.value)
+                first_placeholder_value.unwrap_or(dummy_placeholder.value),
+                second_placeholder_value.unwrap_or(dummy_placeholder.value)
             ];
             let placeholder_ids = [
-                first_placeholder_id.unwrap_or(default_placeholder.id),
-                second_placeholder_id.unwrap_or(default_placeholder.id),
+                first_placeholder_id.unwrap_or(dummy_placeholder.id).to_field(),
+                second_placeholder_id.unwrap_or(dummy_placeholder.id).to_field(),
             ];
             Ok(BasicOperationInputs {
                 constant_operand,
@@ -635,8 +608,11 @@ where
             // dummy operation
             BasicOperationInputs {
                 constant_operand: U256::ZERO,
-                placeholder_values: [default_placeholder.value, default_placeholder.value],
-                placeholder_ids: [default_placeholder.id, default_placeholder.id],
+                placeholder_values: [dummy_placeholder.value, dummy_placeholder.value],
+                placeholder_ids: [
+                    dummy_placeholder.id.to_field(),
+                    dummy_placeholder.id.to_field(),
+                ],
                 first_input_selector: F::ZERO,
                 second_input_selector: F::ZERO,
                 op_selector: Operation::EqOp.to_field(),
@@ -648,6 +624,66 @@ where
         .try_into()
         .unwrap())
     }
+}
+
+/// Placeholder to be employed in the universal circuit as a dummy placeholder
+/// in the circuit
+pub(crate) fn dummy_placeholder(query_bounds: &QueryBounds) -> Placeholder {
+    Placeholder {
+        value: query_bounds.min_query_secondary,
+        id: PlaceholderIdentifier::MinQueryOnIdx2,
+    }
+}
+
+/// Utility method to compute the placeholder hash for the placeholders provided as input, without including the
+/// query bounds on the secondary index
+pub(crate) fn placeholder_hash_without_query_bounds(
+    placeholder_ids: &[PlaceholderId],
+    placeholder_values: &HashMap<PlaceholderId, U256>,
+    dummy_placeholder: &Placeholder,
+) -> Result<PlaceholderHash> {
+    let inputs = placeholder_ids
+        .iter()
+        .map(|id| {
+            Ok(once(id.to_field())
+                .chain(if *id == dummy_placeholder.id {
+                    dummy_placeholder.value.to_fields()
+                } else {
+                    placeholder_values
+                        .get(id)
+                        .ok_or(Error::msg(format!(
+                            "placeholder id {:?} with no corresponding placeholder value",
+                            id
+                        )))?
+                        .to_fields()
+                })
+                .collect_vec())
+        })
+        .flatten_ok()
+        .collect::<Result<Vec<F>>>()?;
+    Ok(hash_n_to_hash_no_pad::<_, HashPermutation>(&inputs))
+}
+
+/// Compute the placeholder hash for the placeholders and query bounds provided as input
+pub(crate) fn placeholder_hash(
+    placeholder_ids: &[PlaceholderId],
+    placeholder_values: &HashMap<PlaceholderId, U256>,
+    query_bounds: &QueryBounds,
+) -> Result<PlaceholderHash> {
+    let placeholders_hash = placeholder_hash_without_query_bounds(
+        placeholder_ids,
+        placeholder_values,
+        &dummy_placeholder(query_bounds),
+    )?;
+    // add query bounds to placeholder hash
+    Ok(hash_n_to_hash_no_pad::<_, HashPermutation>(
+        &placeholders_hash
+            .to_vec()
+            .into_iter()
+            .chain(query_bounds.min_query_secondary.to_fields())
+            .chain(query_bounds.max_query_secondary.to_fields())
+            .collect_vec(),
+    ))
 }
 
 impl<
@@ -694,6 +730,7 @@ where
     }
 }
 
+#[derive(Serialize, Deserialize)]
 /// Inputs for the 2 variant of universal query circuit
 pub enum UniversalCircuitInput<
     const MAX_NUM_COLUMNS: usize,
@@ -743,8 +780,7 @@ where
         predicate_operations: &[BasicOperation],
         placeholder_values: &HashMap<PlaceholderId, U256>,
         is_leaf: bool,
-        min_query_secondary: U256,
-        max_query_secondary: U256,
+        query_bounds: &QueryBounds,
         results: &ResultStructure,
     ) -> Result<Self> {
         Ok(UniversalCircuitInput::QueryWithAgg(
@@ -753,8 +789,7 @@ where
                 predicate_operations,
                 placeholder_values,
                 is_leaf,
-                min_query_secondary,
-                max_query_secondary,
+                query_bounds,
                 results,
             )?,
         ))
@@ -765,8 +800,7 @@ where
         predicate_operations: &[BasicOperation],
         placeholder_values: &HashMap<PlaceholderId, U256>,
         is_leaf: bool,
-        min_query_secondary: U256,
-        max_query_secondary: U256,
+        query_bounds: &QueryBounds,
         results: &ResultStructure,
     ) -> Result<Self> {
         Ok(UniversalCircuitInput::QueryNoAgg(
@@ -775,18 +809,10 @@ where
                 predicate_operations,
                 placeholder_values,
                 is_leaf,
-                min_query_secondary,
-                max_query_secondary,
+                query_bounds,
                 results,
             )?,
         ))
-    }
-
-    pub(crate) fn placeholder_hash(&self) -> PlaceholderHash {
-        match self {
-            UniversalCircuitInput::QueryWithAgg(c) => c.placeholder_hash(),
-            UniversalCircuitInput::QueryNoAgg(c) => c.placeholder_hash(),
-        }
     }
 }
 
@@ -824,14 +850,17 @@ mod tests {
         api::{CircuitInput, Parameters},
         computational_hash_ids::{
             AggregationOperation, HashPermutation, Identifiers, Operation, Output,
+            PlaceholderIdentifier,
         },
         public_inputs::PublicInputs,
         universal_circuit::{
             output_no_aggregation::Circuit as NoAggOutputCircuit,
             output_with_aggregation::Circuit as AggOutputCircuit,
             universal_circuit_inputs::{
-                BasicOperation, ColumnCell, InputOperand, OutputItem, ResultStructure,
+                BasicOperation, ColumnCell, InputOperand, OutputItem, PlaceholderId,
+                ResultStructure,
             },
+            universal_query_circuit::placeholder_hash,
             ComputationalHash,
         },
     };
@@ -924,8 +953,8 @@ mod tests {
             .map(|(&value, &id)| ColumnCell { value, id })
             .collect_vec();
         // define placeholders
-        let first_placeholder_id = F::from_canonical_usize(1);
-        let second_placeholder_id = F::from_canonical_usize(2);
+        let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
+        let second_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(1);
         let placeholder_values = [first_placeholder_id, second_placeholder_id]
             .iter()
             .map(|id| (*id, gen_random_u256(rng)))
@@ -1068,6 +1097,13 @@ mod tests {
                 .collect_vec(),
         );
 
+        let query_bounds = QueryBounds::new(
+            U256::default(), // dummy values for primary index, we don't care here
+            U256::default(),
+            Some(min_query),
+            Some(max_query),
+        );
+
         let input = CircuitInput::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
@@ -1079,12 +1115,7 @@ mod tests {
             &results,
             &placeholder_values,
             is_leaf,
-            &QueryBounds::new(
-                U256::default(), // dummy values for primary index, we don't care here
-                U256::default(),
-                Some(min_query),
-                Some(max_query),
-            ),
+            &query_bounds,
         )
         .unwrap();
 
@@ -1154,7 +1185,9 @@ mod tests {
         } else {
             unreachable!()
         };
-        let placeholder_hash = circuit.placeholder_hash();
+        let placeholder_hash_ids = circuit.ids_for_placeholder_hash();
+        let placeholder_hash =
+            placeholder_hash(&placeholder_hash_ids, &placeholder_values, &query_bounds).unwrap();
         let computational_hash = ComputationalHash::from_bytes(
             (&Identifiers::computational_hash_universal_circuit(
                 column_ids
@@ -1243,8 +1276,8 @@ mod tests {
             .map(|(&value, &id)| ColumnCell { value, id })
             .collect_vec();
         // define placeholders
-        let first_placeholder_id = F::from_canonical_usize(1);
-        let second_placeholder_id = F::from_canonical_usize(2);
+        let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
+        let second_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(1);
         let placeholder_values = [first_placeholder_id, second_placeholder_id]
             .iter()
             .map(|id| (*id, gen_random_u256(rng)))
@@ -1414,7 +1447,12 @@ mod tests {
                 .map(|id| id.to_canonical_u64())
                 .collect_vec(),
         );
-
+        let query_bounds = QueryBounds::new(
+            U256::default(), // dummy values for primary index, we don't care here
+            U256::default(),
+            Some(min_query),
+            Some(max_query),
+        );
         let input = CircuitInput::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
@@ -1426,12 +1464,7 @@ mod tests {
             &results,
             &placeholder_values,
             is_leaf,
-            &QueryBounds::new(
-                U256::default(), // dummy values for primary index, we don't care here
-                U256::default(),
-                Some(min_query),
-                Some(max_query),
-            ),
+            &query_bounds,
         )
         .unwrap();
 
@@ -1514,7 +1547,9 @@ mod tests {
             } else {
                 unreachable!()
             };
-        let placeholder_hash = circuit.placeholder_hash();
+        let placeholder_hash_ids = circuit.ids_for_placeholder_hash();
+        let placeholder_hash =
+            placeholder_hash(&placeholder_hash_ids, &placeholder_values, &query_bounds).unwrap();
         let computational_hash = ComputationalHash::from_bytes(
             (&Identifiers::computational_hash_universal_circuit(
                 column_ids

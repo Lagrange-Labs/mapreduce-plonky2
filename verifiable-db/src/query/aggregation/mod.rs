@@ -1,9 +1,16 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use alloy::primitives::U256;
 use itertools::Itertools;
-use mp2_common::{poseidon::empty_poseidon_hash, proof::ProofWithVK, types::HashOutput, F};
+use mp2_common::{
+    poseidon::empty_poseidon_hash,
+    proof::ProofWithVK,
+    serialization::{deserialize_long_array, serialize_long_array},
+    types::HashOutput,
+    F,
+};
 use plonky2::{
     field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::GenericHashOut,
 };
@@ -20,12 +27,16 @@ pub(crate) mod partial_node;
 mod utils;
 
 use super::{
+    api::CircuitInput,
     computational_hash_ids::{Identifiers, Output},
     universal_circuit::{
         output_no_aggregation::Circuit as NoAggOutputCircuit,
         output_with_aggregation::Circuit as AggOutputCircuit,
         universal_circuit_inputs::{BasicOperation, ColumnCell, PlaceholderId, ResultStructure},
-        universal_query_circuit::UniversalQueryCircuitInputs,
+        universal_query_circuit::{
+            dummy_placeholder, placeholder_hash, placeholder_hash_without_query_bounds,
+            UniversalQueryCircuitInputs,
+        },
         ComputationalHash, PlaceholderHash,
     },
 };
@@ -58,7 +69,7 @@ impl QueryBounds {
 }
 
 /// Data structure containing all the information needed as input by aggregation circuits for a single node of the tree
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct NodeInfo {
     /// The hash of the embedded tree at this node. It can be the hash of the row tree if this node is a node in
     /// the index tree, or it can be a hash of the cells tree if this node is a node in a rows tree
@@ -105,7 +116,7 @@ impl NodeInfo {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 /// enum to specify whether a node is the left or right child of another node
 pub enum ChildPosition {
     Left,
@@ -122,7 +133,7 @@ impl ChildPosition {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct CommonInputs {
     pub(crate) is_rows_tree_node: bool,
     pub(crate) min_query: U256,
@@ -147,7 +158,7 @@ impl CommonInputs {
     }
 }
 /// Input data structure for circuits employed for nodes where both the children and the embedded tree are proven
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TwoProvenChildNodeInput {
     /// Proof for the left child of the node being proven
     pub(crate) left_child_proof: ProofWithVK,
@@ -159,7 +170,7 @@ pub struct TwoProvenChildNodeInput {
     pub(crate) common: CommonInputs,
 }
 /// Input data structure for circuits employed for nodes where one child and the embedded tree are proven
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OneProvenChildNodeInput {
     /// Data related to the child not associated with a proof, if any
     pub(crate) unproven_child: Option<NodeInfo>,
@@ -170,7 +181,7 @@ pub struct OneProvenChildNodeInput {
     /// Common inputs shared across all the circuits
     pub(crate) common: CommonInputs,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Data structure representing a proof for a child node
 pub struct ChildProof {
     /// Actual proof
@@ -188,7 +199,7 @@ impl ChildProof {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Enum employed to specify whether a proof refers to a child node or the embedded tree stored in a node
 pub enum SubProof {
     /// Proof refer to a child
@@ -211,7 +222,7 @@ impl SubProof {
 }
 
 /// Input data structure for circuits employed for nodes where only one among children node and embedded tree is proven
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SinglePathInput {
     /// Data about the left child of the node being proven, if any
     pub(crate) left_child: Option<NodeInfo>,
@@ -250,6 +261,7 @@ impl QueryHashNonExistenceCircuits {
     where
         [(); MAX_NUM_RESULTS - 1]:,
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+        [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     {
         let column_ids = column_cells
             .iter()
@@ -263,52 +275,27 @@ impl QueryHashNonExistenceCircuits {
             )?)
                 .into(),
         );
-        let placeholder_hash = match results.output_variant {
-            Output::Aggregation => {
-                let circuit = UniversalQueryCircuitInputs::<
-                    MAX_NUM_COLUMNS,
-                    MAX_NUM_PREDICATE_OPS,
-                    MAX_NUM_RESULT_OPS,
-                    MAX_NUM_RESULTS,
-                    AggOutputCircuit<MAX_NUM_RESULTS>,
-                >::new(
-                    column_cells,
-                    predicate_operations,
-                    placeholder_values,
-                    false, // doesn't matter for placeholder hash computation
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
-                    results,
-                )?;
-                if is_rows_tree_node {
-                    circuit.placeholder_hash_without_query_bounds()
-                } else {
-                    circuit.placeholder_hash()
-                }
-            }
-            Output::NoAggregation => {
-                let circuit = UniversalQueryCircuitInputs::<
-                    MAX_NUM_COLUMNS,
-                    MAX_NUM_PREDICATE_OPS,
-                    MAX_NUM_RESULT_OPS,
-                    MAX_NUM_RESULTS,
-                    NoAggOutputCircuit<MAX_NUM_RESULTS>,
-                >::new(
-                    column_cells,
-                    predicate_operations,
-                    placeholder_values,
-                    false, // doesn't matter for placeholder hash computation
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
-                    results,
-                )?;
-                if is_rows_tree_node {
-                    circuit.placeholder_hash_without_query_bounds()
-                } else {
-                    circuit.placeholder_hash()
-                }
-            }
-        };
+        let placeholder_hash_ids = CircuitInput::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >::ids_for_placeholder_hash(
+            column_cells,
+            predicate_operations,
+            results,
+            placeholder_values,
+            query_bounds,
+        )?;
+        let placeholder_hash = if is_rows_tree_node {
+            placeholder_hash_without_query_bounds(
+                &placeholder_hash_ids,
+                &placeholder_values,
+                &dummy_placeholder(query_bounds),
+            )
+        } else {
+            placeholder_hash(&placeholder_hash_ids, &placeholder_values, query_bounds)
+        }?;
         Ok(Self {
             computational_hash,
             placeholder_hash,
@@ -317,7 +304,7 @@ impl QueryHashNonExistenceCircuits {
 }
 
 /// Input data structure for circuits employed to prove the non-existence of rows satisfying the query bounds
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
     /// Data about the node being proven
     pub(crate) node_info: NodeInfo,
@@ -334,6 +321,10 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
     /// Placeholder hash associated to the query
     pub(crate) placeholder_hash: PlaceholderHash,
     /// Set of aggregation operations employed to aggregate results
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     pub(crate) aggregation_ops: [F; MAX_NUM_RESULTS],
     /// Common inputs shared across all the circuits
     pub(crate) common: CommonInputs,

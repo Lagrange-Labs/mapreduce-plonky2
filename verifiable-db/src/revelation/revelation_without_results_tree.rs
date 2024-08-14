@@ -1,33 +1,54 @@
 //! The revelation circuit handling the queries where we don't need to build the results tree
 
 use crate::{
-    ivc::PublicInputs as OriginalTreePublicInputs,
+    ivc::{PublicInputs as OriginalTreePublicInputs, NUM_IO},
     query::{
         computational_hash_ids::AggregationOperation,
-        public_inputs::PublicInputs as QueryProofPublicInputs,
+        public_inputs::PublicInputs as QueryProofPublicInputs, PI_LEN,
     },
     revelation::{placeholders_check::check_placeholders, PublicInputs},
 };
 use alloy::primitives::U256;
+use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
-    poseidon::H,
+    default_config,
+    poseidon::{empty_poseidon_hash, H},
+    proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{
-        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+        deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
+        serialize_long_array,
     },
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
-    F,
+    C, D, F,
 };
-use plonky2::iop::{
-    target::{BoolTarget, Target},
-    witness::{PartialWitness, WitnessWrite},
+use plonky2::{
+    hash::poseidon::PoseidonHash,
+    iop::{
+        target::{BoolTarget, Target},
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::VerifierOnlyCircuitData,
+        config::{GenericConfig, Hasher},
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+    },
+};
+use recursion_framework::{
+    circuit_builder::CircuitLogicWires,
+    framework::{
+        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::array;
+
+use super::{NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN};
 
 // L: maximum number of results
 // S: maximum number of items in each result
@@ -281,16 +302,98 @@ where
     }
 }
 
+pub struct CircuitBuilderParams {
+    pub(crate) query_circuit_set: RecursiveCircuits<F, C, D>,
+    pub(crate) preprocessing_circuit_set: RecursiveCircuits<F, C, D>,
+    pub(crate) preprocessing_vk: VerifierOnlyCircuitData<C, D>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RecursiveCircuitWires<const L: usize, const S: usize, const PH: usize, const PP: usize> {
+    revelation_circuit: RevelationWithoutResultsTreeWires<L, S, PH, PP>,
+    query_verifier: RecursiveCircuitsVerifierTarget<D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    preprocessing_proof: ProofWithPublicInputsTarget<D>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecursiveCircuitInputs<const L: usize, const S: usize, const PH: usize, const PP: usize>
+{
+    pub(crate) inputs: RevelationWithoutResultsTreeCircuit<L, S, PH, PP>,
+    pub(crate) query_proof: ProofWithVK,
+    pub(crate) preprocessing_proof: ProofWithPublicInputs<F, C, D>,
+    pub(crate) query_circuit_set: RecursiveCircuits<F, C, D>,
+}
+
+impl<const L: usize, const S: usize, const PH: usize, const PP: usize> CircuitLogicWires<F, D, 0>
+    for RecursiveCircuitWires<L, S, PH, PP>
+where
+    [(); S - 1]:,
+    [(); NUM_QUERY_IO::<S>]:,
+    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+{
+    type CircuitBuilderParams = CircuitBuilderParams;
+
+    type Inputs = RecursiveCircuitInputs<L, S, PH, PP>;
+
+    const NUM_PUBLIC_INPUTS: usize = REVELATION_PI_LEN::<L, S, PH>;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        let query_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, { NUM_QUERY_IO::<S> }>::new(
+            default_config(),
+            &builder_parameters.query_circuit_set,
+        );
+        let query_verifier = query_verifier.verify_proof_in_circuit_set(builder);
+        let preprocessing_verifier =
+            RecursiveCircuitsVerifierGagdet::<F, C, D, NUM_PREPROCESSING_IO>::new(
+                default_config(),
+                &builder_parameters.preprocessing_circuit_set,
+            );
+        let preprocessing_proof = preprocessing_verifier.verify_proof_fixed_circuit_in_circuit_set(
+            builder,
+            &builder_parameters.preprocessing_vk,
+        );
+        let query_pi = QueryProofPublicInputs::from_slice(
+            query_verifier.get_public_input_targets::<F, { NUM_QUERY_IO::<S> }>(),
+        );
+        let preprocessing_pi =
+            OriginalTreePublicInputs::from_slice(&preprocessing_proof.public_inputs);
+        let revelation_circuit =
+            RevelationWithoutResultsTreeCircuit::build(builder, &query_pi, &preprocessing_pi);
+
+        Self {
+            revelation_circuit,
+            query_verifier,
+            preprocessing_proof,
+        }
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
+        let (proof, verifier_data) = (&inputs.query_proof).into();
+        self.query_verifier
+            .set_target(pw, &inputs.query_circuit_set, proof, verifier_data)?;
+        pw.set_proof_with_pis_target(&self.preprocessing_proof, &inputs.preprocessing_proof);
+        inputs.inputs.assign(pw, &self.revelation_circuit);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        ivc::public_inputs::H_RANGE as ORIGINAL_TREE_H_RANGE,
         query::{
             aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
             public_inputs::QueryPublicInputs,
         },
-        revelation::tests::TestPlaceholders,
+        revelation::tests::{
+            compute_results_from_query_proof, random_original_tree_proof, TestPlaceholders,
+            ORIGINAL_TREE_PI_LEN,
+        },
     };
     use mp2_common::{utils::ToFields, C, D};
     use mp2_test::{
@@ -316,7 +419,6 @@ mod tests {
     const NUM_PLACEHOLDERS: usize = 5;
 
     const QUERY_PI_LEN: usize = crate::query::PI_LEN::<S>;
-    const ORIGINAL_TREE_PI_LEN: usize = OriginalTreePublicInputs::<Target>::TOTAL_LEN;
 
     impl From<&TestPlaceholders<PH, PP>> for RevelationWithoutResultsTreeCircuit<L, S, PH, PP> {
         fn from(test_placeholders: &TestPlaceholders<PH, PP>) -> Self {
@@ -396,16 +498,6 @@ mod tests {
         proof
     }
 
-    /// Generate a random original tree proof.
-    fn random_original_tree_proof(query_pi: &QueryProofPublicInputs<F, S>) -> Vec<F> {
-        let mut proof = random_vector::<u32>(ORIGINAL_TREE_PI_LEN).to_fields();
-
-        // Set the tree hash.
-        proof[ORIGINAL_TREE_H_RANGE].copy_from_slice(query_pi.to_hash_raw());
-
-        proof
-    }
-
     /// Utility function for testing the revelation circuit with results tree
     fn test_revelation_without_results_tree_circuit(ops: &[F; S], entry_count: Option<u32>) {
         let rng = &mut thread_rng();
@@ -434,7 +526,6 @@ mod tests {
         let pi = PublicInputs::<_, L, S, PH>::from_slice(&proof.public_inputs);
 
         // Initialize the overflow flag to false.
-        let mut overflow = false;
         let entry_count = query_pi.num_matching_rows();
 
         // Check the public inputs.
@@ -469,43 +560,13 @@ mod tests {
         );
         // Entry count
         assert_eq!(pi.entry_count(), entry_count);
-        // Result values
-        {
-            // Convert the entry count to an Uint256.
-            let entry_count = U256::from(entry_count.to_canonical_u64());
-
-            let [op_avg, op_count] = [AggregationOperation::AvgOp, AggregationOperation::CountOp]
-                .map(|op| op.to_field());
-
-            // Compute the results array, and deal with AVG and COUNT operations if any.
-            let ops = query_pi.operation_ids();
-            let result = array::from_fn(|i| {
-                let value = query_pi.value_at_index(i);
-
-                let op = ops[i];
-                if op == op_avg {
-                    match value.checked_div(entry_count) {
-                        Some(dividend) => dividend,
-                        None => {
-                            // Set the overflow flag to true if the divisor is zero.
-                            overflow = true;
-                            U256::ZERO
-                        }
-                    }
-                } else if op == op_count {
-                    entry_count
-                } else {
-                    value
-                }
-            });
-
-            let mut exp_results = [[U256::ZERO; S]; L];
-            exp_results[0] = result;
-
-            assert_eq!(pi.result_values(), exp_results);
-        }
+        // check results
+        let (result, overflow) = compute_results_from_query_proof(&query_pi);
+        let mut exp_results = [[U256::ZERO; S]; L];
+        exp_results[0] = result;
+        assert_eq!(pi.result_values(), exp_results);
         // overflow flag
-        assert_eq!(pi.overflow_flag(), query_pi.overflow_flag() || overflow);
+        assert_eq!(pi.overflow_flag(), overflow);
         // Query limit
         assert_eq!(pi.query_limit(), F::ZERO);
         // Query offset
