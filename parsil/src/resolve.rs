@@ -25,6 +25,7 @@ use verifiable_db::query::{
 };
 
 use crate::{
+    errors::ValidationError,
     symbols::{ColumnKind, ContextProvider, Handle, Kind, ScopeTable, Symbol},
     utils::{str_to_u256, ParsingSettings, Placeholder},
     visitor::{AstPass, Visit},
@@ -664,8 +665,12 @@ impl<C: ContextProvider> Resolver<C> {
                 ensure!(!in_aggregation, "recursive aggregation detected");
                 Ok((agg, self.to_output_expression(*sub_wire_id, true)?.1))
             }
-            Wire::Constant(_) => bail!("top-level immediate values are not supported"),
-            Wire::PlaceHolder(_) => bail!("top-level placeholders are not supported"),
+            Wire::Constant(_) => bail!(ValidationError::UnsupportedFeature(
+                "top-level immediate values".into()
+            )),
+            Wire::PlaceHolder(_) => bail!(ValidationError::UnsupportedFeature(
+                "top-level placeholders".into()
+            )),
         }
     }
 
@@ -760,8 +765,7 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
                 } else {
                     ensure!(
                         name.0.len() == 1,
-                        "compounded table names unsupported: `{}`",
-                        name
+                        ValidationError::CompoundTableName(name.to_string())
                     );
 
                     // The actual table being referenced
@@ -889,12 +893,12 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
                         .compile(&mut order_by_expr.expr, StorageTarget::Query)?
                         .to_wire_id();
                     ensure!(
-                        self.scopes.currently_reachable()?
+                        self.scopes
+                            .currently_reachable()?
                             .iter()
                             .map(|s| s.to_wire_id())
                             .any(|w| w == wire_id),
-                        "ORDER BY criterions must be a subset of the SELECT expressions; `{}` not found",
-                        order_by_expr
+                        ValidationError::SpecialOrderBy(order_by_expr.to_string())
                     )
                 }
             }

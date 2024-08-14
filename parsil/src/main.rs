@@ -4,6 +4,7 @@ use log::Level;
 use parsil::prepare;
 use symbols::FileContextProvider;
 
+mod errors;
 mod executor;
 mod expand;
 mod parser;
