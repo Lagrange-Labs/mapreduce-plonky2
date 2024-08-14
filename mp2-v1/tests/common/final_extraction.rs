@@ -1,4 +1,4 @@
-use mp2_common::{proof::ProofWithVK, types::HashOutput, utils::ToFields};
+use mp2_common::{keccak::OutputHash, proof::ProofWithVK, types::HashOutput, utils::ToFields};
 use mp2_v1::{
     api,
     final_extraction::{CircuitInput, PublicInputs},

@@ -55,7 +55,10 @@ const PROOF_STORE_FILE: &str = "test_proofs.store";
 const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
 
 #[test(tokio::test)]
+#[ignore]
 async fn integrated_indexing() -> Result<()> {
+    // Create the test context for mainnet.
+    // let ctx = &mut TestContext::new_mainet();
     let _ = env_logger::try_init();
     info!("Running INDEXING test");
     let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;

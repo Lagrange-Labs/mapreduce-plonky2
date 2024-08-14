@@ -128,14 +128,27 @@ impl<T: Clone + Debug> Debug for CachedValue<T> {
     }
 }
 
+<<<<<<< HEAD
 /// The settings required to instantiate a [`PgsqlStorage`] from a PgSQL server.
 #[derive(Clone, Debug)]
 pub struct SqlStorageSettings {
+=======
+/// Multiple ways to get a connection to the database server.
+pub enum SqlServerConnection {
+>>>>>>> main
     /// Connection information to the PgSQL server; may be defined in k=v
     /// format, or as a URI.
-    pub db_url: String,
+    NewConnection(String),
+    /// An existing connection pool
+    Pool(DBPool),
+}
+
+/// The settings required to instantiate a [`PgsqlStorage`] from a PgSQL server.
+pub struct SqlStorageSettings {
     /// The table to use.
     pub table: String,
+    /// A way to connect to the DB server
+    pub source: SqlServerConnection,
 }
 
 pub struct PgsqlStorage<T: TreeTopology, V>
@@ -179,9 +192,10 @@ where
     ) -> Result<Self> {
         match init_settings {
             InitSettings::MustExist => {
-                Self::load_existing(&storage_settings.db_url, storage_settings.table).await
+                Self::load_existing(&storage_settings.source, storage_settings.table).await
             }
             InitSettings::MustNotExist(tree_state) => {
+<<<<<<< HEAD
                 Self::create_new_at(
                     &storage_settings.db_url,
                     storage_settings.table,
@@ -202,6 +216,13 @@ where
             InitSettings::Reset(tree_settings) => {
                 Self::reset_at(
                     &storage_settings.db_url,
+=======
+                Self::create_new(&storage_settings.source, storage_settings.table, tree_state).await
+            }
+            InitSettings::Reset(tree_settings) => {
+                Self::reset(
+                    &storage_settings.source,
+>>>>>>> main
                     storage_settings.table,
                     tree_settings,
                     0,
@@ -251,6 +272,7 @@ where
     /// associated tables in the specified table.
     ///
     /// Will fail if the table already exists.
+<<<<<<< HEAD
     pub async fn create_new_at(
         db_url: &str,
         table: String,
@@ -260,6 +282,14 @@ where
         debug!("connecting to {db_url}...");
         let db_pool = Self::init_db_pool(db_url).await?;
         debug!("connection successful.");
+=======
+    pub async fn create_new(
+        db_src: &SqlServerConnection,
+        table: String,
+        tree_state: T::State,
+    ) -> Result<Self> {
+        let db_pool = Self::init_db_pool(db_src).await?;
+>>>>>>> main
 
         ensure!(
             fetch_epoch_data(db_pool.clone(), &table).await.is_err(),
@@ -284,10 +314,8 @@ where
     /// Initialize the storage backend from an existing table in database.
     ///
     /// Fails if the specified table does not exist.
-    pub async fn load_existing(db_url: &str, table: String) -> Result<Self> {
-        debug!("connecting to {db_url}...");
-        let db_pool = Self::init_db_pool(db_url).await?;
-        debug!("connection successful.");
+    pub async fn load_existing(db_src: &SqlServerConnection, table: String) -> Result<Self> {
+        let db_pool = Self::init_db_pool(db_src).await?;
 
         let (initial_epoch, latest_epoch) = fetch_epoch_data(db_pool.clone(), &table)
             .await
@@ -314,6 +342,7 @@ where
 
     /// Create a new tree storage and its associated table in the specified
     /// table, deleting it if it already exists.
+<<<<<<< HEAD
     pub async fn reset_at(
         db_url: &str,
         table: String,
@@ -323,6 +352,14 @@ where
         debug!("connecting to {db_url}...");
         let db_pool = Self::init_db_pool(db_url).await?;
         debug!("connection successful.");
+=======
+    pub async fn reset(
+        db_src: &SqlServerConnection,
+        table: String,
+        tree_state: T::State,
+    ) -> Result<Self> {
+        let db_pool = Self::init_db_pool(db_src).await?;
+>>>>>>> main
 
         delete_storage_table(db_pool.clone(), &table).await?;
         Self::create_tables(db_pool.clone(), &table).await?;
@@ -359,16 +396,22 @@ where
     }
 
     /// Initialize a DB pool.
-    pub async fn init_db_pool(db_url: &str) -> Result<DBPool> {
-        let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
-            .with_context(|| format!("while connecting to postgreSQL with `{}`", db_url))?;
+    pub async fn init_db_pool(db_src: &SqlServerConnection) -> Result<DBPool> {
+        match db_src {
+            SqlServerConnection::NewConnection(db_url) => {
+                info!("Connecting to `{db_url}`");
+                let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
+                    .with_context(|| format!("while connecting to postgreSQL with `{}`", db_url))?;
+                let db_pool = DBPool::builder()
+                    .build(db_manager)
+                    .await
+                    .context("while creating the db_pool")?;
+                debug!("connection successful.");
 
-        let db_pool = DBPool::builder()
-            .build(db_manager)
-            .await
-            .context("while creating the db_pool")?;
-
-        Ok(db_pool)
+                Ok(db_pool)
+            }
+            SqlServerConnection::Pool(pool) => Ok(pool.clone()),
+        }
     }
 
     /// Create the tables required to store the a tree. For a given tree, two

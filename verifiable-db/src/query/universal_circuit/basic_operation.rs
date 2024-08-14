@@ -23,7 +23,7 @@ use super::ComputationalHashTarget;
 /// Input wires for basic operation component
 pub struct BasicOperationInputWires {
     /// value to be employed for constant operand, if any, in the basic operation
-    constant_operand: UInt256Target,
+    pub(crate) constant_operand: UInt256Target,
     /// value to be employed in case the current operation involves placeholders
     pub(crate) placeholder_values: [UInt256Target; 2],
     /// identifier of the placeholder employed in the current operation
@@ -270,7 +270,7 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::query::{
-        computational_hash_ids::{ComputationalHashCache, Operation},
+        computational_hash_ids::{ComputationalHashCache, Operation, PlaceholderIdentifier},
         universal_circuit::{
             universal_circuit_inputs::{BasicOperation, InputOperand},
             ComputationalHash, ComputationalHashTarget,
@@ -365,7 +365,10 @@ mod tests {
         let constant_operand = gen_u256_input(rng);
         let placeholder_values = array::from_fn(|_| gen_u256_input(rng));
         let input_hash = array::from_fn(|_| gen_random_field_hash());
-        let placeholder_ids = array::from_fn(|_| F::from_canonical_u8(rng.gen()));
+        let placeholder_ids = array::from_fn(|_| {
+            let id: u8 = rng.gen();
+            PlaceholderIdentifier::GenericPlaceholder(id as usize)
+        });
         let first_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));
         let second_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));
         let op_selector = op_identifier.to_field();
@@ -373,7 +376,7 @@ mod tests {
         let component = BasicOperationInputs {
             constant_operand,
             placeholder_values,
-            placeholder_ids,
+            placeholder_ids: placeholder_ids.map(|id| id.to_field()),
             first_input_selector,
             second_input_selector,
             op_selector,

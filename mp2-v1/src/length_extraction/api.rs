@@ -19,7 +19,6 @@ use super::{
     BranchLengthWires, ExtensionLengthWires, LeafLengthCircuit, LeafLengthWires, PublicInputs,
 };
 
-#[cfg(test)]
 pub mod utils {
     use mp2_common::{group_hashing::map_to_curve_point, types::GFp};
     use plonky2::field::types::Field;

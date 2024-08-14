@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     storage::{
         memory::InMemory,
-        pgsql::{PgsqlStorage, SqlStorageSettings},
+        pgsql::{PgsqlStorage, SqlServerConnection, SqlStorageSettings},
         EpochKvStorage, PayloadStorage, RoEpochKvStorage, TreeStorage,
     },
     tree::{
@@ -157,9 +157,72 @@ async fn storage_in_pgsql() -> Result<()> {
     _storage_in_pgsql(0).await
 }
 
+<<<<<<< HEAD
 #[tokio::test]
 async fn shifted_storage_in_pgsql() -> Result<()> {
     _storage_in_pgsql(438).await
+=======
+    type TestTree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<TestTree, V>;
+
+    let mut s = MerkleTreeKvDb::<TestTree, V, Storage>::new(
+        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
+        SqlStorageSettings {
+            table: "simple".to_string(),
+            source: SqlServerConnection::NewConnection(db_url()),
+        },
+    )
+    .await?;
+    with_storage(&mut s).await?;
+    println!("Old one");
+    s.print_tree().await;
+
+    let mut s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
+        InitSettings::MustExist,
+        SqlStorageSettings {
+            table: "simple".to_string(),
+            source: SqlServerConnection::NewConnection(db_url()),
+        },
+    )
+    .await?;
+    println!("New one");
+    s2.print_tree().await;
+
+    assert_eq!(s2.root_data().await, s.root_data().await);
+    assert_eq!(
+        s.tree().size(&mut s2.storage).await,
+        s2.tree().size(&s2.storage).await
+    );
+
+    for i in 1..=6 {
+        println!("\nEpoch = {i}");
+        let mut ss = s.view_at(i);
+        s.tree().print(&mut ss).await;
+        s.diff_at(i).await.unwrap().print();
+
+        match i {
+            1 => {
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
+            }
+            2 => {
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
+            }
+            3 => {
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_none())
+            }
+            4 => {}
+            5 => {
+                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_some())
+            }
+            6 => {
+                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_none())
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+>>>>>>> main
 }
 
 /// A simple payload carrying a value, and aggregating the min and max of values
@@ -237,7 +300,7 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
     let mut s_psql = MerkleTreeKvDb::<TestTree, V, SqlStorage>::new(
         InitSettings::Reset(sbbst::Tree::empty()),
         SqlStorageSettings {
-            db_url: db_url(),
+            source: SqlServerConnection::NewConnection(db_url()),
             table: "simple_sbbst".to_string(),
         },
     )
@@ -272,7 +335,7 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
     let s2 = MerkleTreeKvDb::<TestTree, V, SqlStorage>::new(
         InitSettings::MustExist,
         SqlStorageSettings {
-            db_url: db_url(),
+            source: SqlServerConnection::NewConnection(db_url()),
             table: "simple_sbbst".to_string(),
         },
     )
@@ -433,7 +496,7 @@ async fn hashes_pgsql() -> Result<()> {
         let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
             InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
             SqlStorageSettings {
-                db_url: db_url(),
+                source: SqlServerConnection::NewConnection(db_url()),
                 table: "test_hashes".into(),
             },
         )
@@ -462,7 +525,7 @@ async fn hashes_pgsql() -> Result<()> {
         let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
             InitSettings::MustExist,
             SqlStorageSettings {
-                db_url: db_url(),
+                source: SqlServerConnection::NewConnection(db_url()),
                 table: "test_hashes".into(),
             },
         )
@@ -517,7 +580,7 @@ async fn thousand_rows() -> Result<()> {
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
         SqlStorageSettings {
-            db_url: db_url(),
+            source: SqlServerConnection::NewConnection(db_url()),
             table: "thousand".to_string(),
         },
     )
@@ -609,7 +672,7 @@ async fn aggregation_pgsql() -> Result<()> {
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::ResetAt(Tree::empty(), 32),
         SqlStorageSettings {
-            db_url: db_url(),
+            source: SqlServerConnection::NewConnection(db_url()),
             table: "agg".to_string(),
         },
     )
@@ -731,7 +794,7 @@ async fn rollback_psql() {
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::new(0.7))),
         SqlStorageSettings {
-            db_url: db_url(),
+            source: SqlServerConnection::NewConnection(db_url()),
             table: "rollback".to_string(),
         },
     )
@@ -807,7 +870,7 @@ async fn initial_state() {
         let _ = MerkleTreeKvDb::<Tree, V, Storage>::new(
             InitSettings::Reset(Tree::empty(Alpha::new(0.8))),
             SqlStorageSettings {
-                db_url: db_url(),
+                source: SqlServerConnection::NewConnection(db_url()),
                 table: "empty_tree".to_string(),
             },
         )
@@ -819,7 +882,7 @@ async fn initial_state() {
         let s_init = MerkleTreeKvDb::<Tree, V, Storage>::new(
             InitSettings::MustExist,
             SqlStorageSettings {
-                db_url: db_url(),
+                source: SqlServerConnection::NewConnection(db_url()),
                 table: "empty_tree".to_string(),
             },
         )

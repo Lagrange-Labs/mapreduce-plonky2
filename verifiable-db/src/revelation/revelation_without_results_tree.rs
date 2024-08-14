@@ -1,33 +1,59 @@
 //! The revelation circuit handling the queries where we don't need to build the results tree
 
 use crate::{
-    ivc::PublicInputs as OriginalTreePublicInputs,
+    ivc::{PublicInputs as OriginalTreePublicInputs, NUM_IO},
     query::{
         computational_hash_ids::AggregationOperation,
-        public_inputs::PublicInputs as QueryProofPublicInputs,
+        public_inputs::PublicInputs as QueryProofPublicInputs, PI_LEN,
     },
     revelation::{placeholders_check::check_placeholders, PublicInputs},
 };
 use alloy::primitives::U256;
+use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
-    poseidon::H,
+    default_config,
+    poseidon::{empty_poseidon_hash, H},
+    proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{
-        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+        deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
+        serialize_long_array,
     },
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
-    F,
+    C, D, F,
 };
-use plonky2::iop::{
-    target::{BoolTarget, Target},
-    witness::{PartialWitness, WitnessWrite},
+use plonky2::{
+    hash::poseidon::PoseidonHash,
+    iop::{
+        target::{BoolTarget, Target},
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::VerifierOnlyCircuitData,
+        config::{GenericConfig, Hasher},
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+    },
+};
+use recursion_framework::{
+    circuit_builder::CircuitLogicWires,
+    framework::{
+        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::array;
+
+use super::{
+    placeholders_check::{
+        CheckedPlaceholder, CheckedPlaceholderTarget, NUM_SECONDARY_INDEX_PLACEHOLDERS,
+    },
+    NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
+};
 
 // L: maximum number of results
 // S: maximum number of items in each result
@@ -56,15 +82,12 @@ pub struct RevelationWithoutResultsTreeWires<
     )]
     placeholder_values: [UInt256Target; PH],
     #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    placeholder_pos: [Target; PP],
-    #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    placeholder_pairs: [(Target, UInt256Target); PP],
+    to_be_checked_placeholders: [CheckedPlaceholderTarget; PP],
+    secondary_query_bound_placeholders:
+        [CheckedPlaceholderTarget; NUM_SECONDARY_INDEX_PLACEHOLDERS],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -101,20 +124,20 @@ pub struct RevelationWithoutResultsTreeCircuit<
         deserialize_with = "deserialize_long_array"
     )]
     pub(crate) placeholder_values: [U256; PH],
-    /// The Position in `placeholder_ids` and `placeholder_values` arrays of the
-    /// corresponding pair in `placeholder_pairs`
+    /// Placeholders data to be provided to `check_placeholder` gadget to
+    /// check that placeholders employed in universal query circuit matches
+    /// with the `placeholder_values` exposed as public input by this proof
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    pub(crate) placeholder_pos: [usize; PP],
-    /// Pairs of the placeholder identifiers and values employed in the
-    /// universal query circuit operations
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) placeholder_pairs: [(F, U256); PP],
+    pub(crate) to_be_checked_placeholders: [CheckedPlaceholder; PP],
+    /// Placeholders data related to the placeholders employed in the
+    /// universal query circuit to hash the query bounds for the secondary
+    /// index; they are provided as well to `check_placeholder` gadget to
+    /// check the correctness of the placeholders employed for query bounds
+    pub(crate) secondary_query_bound_placeholders:
+        [CheckedPlaceholder; NUM_SECONDARY_INDEX_PLACEHOLDERS],
 }
 
 impl<const L: usize, const S: usize, const PH: usize, const PP: usize>
@@ -135,14 +158,12 @@ where
 
         let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_safe());
         let placeholder_ids = b.add_virtual_target_arr();
-        // `placeholder_values` are exposed as public inputs to the Solidity constract
+        // `placeholder_values` are exposed as public inputs to the Solidity contract
         // which will not do range-check.
         let placeholder_values = array::from_fn(|_| b.add_virtual_u256());
-        let placeholder_pos = b.add_virtual_target_arr();
-        // Initialize `placeholder_pairs` as unsafe, since they're compared and used to
-        // compute the placeholder hash in `check_placeholders` function.
-        let placeholder_pairs =
-            array::from_fn(|_| (b.add_virtual_target(), b.add_virtual_u256_unsafe()));
+        let to_be_checked_placeholders = array::from_fn(|_| CheckedPlaceholderTarget::new(b));
+        let secondary_query_bound_placeholders =
+            array::from_fn(|_| CheckedPlaceholderTarget::new(b));
 
         // The operation cannot be ID for aggregation.
         let [op_avg, op_count] = [AggregationOperation::AvgOp, AggregationOperation::CountOp]
@@ -158,6 +179,8 @@ where
         let ops = query_proof.operation_ids_target();
         assert_eq!(ops.len(), S);
         let mut results = Vec::with_capacity(L * S);
+        // flag to determine whether entry count is zero
+        let is_entry_count_zero = b.add_virtual_bool_target_unsafe();
         ops.into_iter().enumerate().for_each(|(i, op)| {
             let is_op_avg = b.is_equal(op, op_avg);
             let is_op_count = b.is_equal(op, op_count);
@@ -168,6 +191,8 @@ where
 
             let result = b.select_u256(is_op_avg, &avg_result, &result);
             let result = b.select_u256(is_op_count, &entry_count, &result);
+
+            b.connect(is_divisor_zero.target, is_entry_count_zero.target);
 
             results.push(result);
 
@@ -195,8 +220,8 @@ where
             &is_placeholder_valid,
             &placeholder_ids,
             &placeholder_values,
-            &placeholder_pos,
-            &placeholder_pairs,
+            &to_be_checked_placeholders,
+            &secondary_query_bound_placeholders,
             &final_placeholder_hash,
         );
 
@@ -227,6 +252,7 @@ where
 
         let overflow = b.is_not_equal(overflow, zero).target;
 
+        let num_results = b.not(is_entry_count_zero);
         // Register the public innputs.
         PublicInputs::<_, L, S, PH>::new(
             &original_tree_proof.block_hash(),
@@ -236,7 +262,7 @@ where
             &[query_proof.num_matching_rows_target()],
             &[overflow],
             // The aggregation query proof only has one result.
-            &[one],
+            &[num_results.target],
             &results_slice,
             &[zero],
             &[zero],
@@ -247,8 +273,8 @@ where
             is_placeholder_valid,
             placeholder_ids,
             placeholder_values,
-            placeholder_pos,
-            placeholder_pairs,
+            to_be_checked_placeholders,
+            secondary_query_bound_placeholders,
         }
     }
 
@@ -268,16 +294,96 @@ where
             .iter()
             .zip(self.placeholder_values)
             .for_each(|(t, v)| pw.set_u256_target(t, v));
-        let placeholder_pos: [_; PP] = array::from_fn(|i| self.placeholder_pos[i].to_field());
-        pw.set_target_arr(&wires.placeholder_pos, &placeholder_pos);
         wires
-            .placeholder_pairs
+            .to_be_checked_placeholders
             .iter()
-            .zip(self.placeholder_pairs)
-            .for_each(|(t, v)| {
-                pw.set_target(t.0, v.0);
-                pw.set_u256_target(&t.1, v.1);
-            });
+            .zip(&self.to_be_checked_placeholders)
+            .for_each(|(t, v)| v.assign(pw, t));
+        wires
+            .secondary_query_bound_placeholders
+            .iter()
+            .zip(&self.secondary_query_bound_placeholders)
+            .for_each(|(t, v)| v.assign(pw, t));
+    }
+}
+
+pub struct CircuitBuilderParams {
+    pub(crate) query_circuit_set: RecursiveCircuits<F, C, D>,
+    pub(crate) preprocessing_circuit_set: RecursiveCircuits<F, C, D>,
+    pub(crate) preprocessing_vk: VerifierOnlyCircuitData<C, D>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RecursiveCircuitWires<const L: usize, const S: usize, const PH: usize, const PP: usize> {
+    revelation_circuit: RevelationWithoutResultsTreeWires<L, S, PH, PP>,
+    query_verifier: RecursiveCircuitsVerifierTarget<D>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    preprocessing_proof: ProofWithPublicInputsTarget<D>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecursiveCircuitInputs<const L: usize, const S: usize, const PH: usize, const PP: usize>
+{
+    pub(crate) inputs: RevelationWithoutResultsTreeCircuit<L, S, PH, PP>,
+    pub(crate) query_proof: ProofWithVK,
+    pub(crate) preprocessing_proof: ProofWithPublicInputs<F, C, D>,
+    pub(crate) query_circuit_set: RecursiveCircuits<F, C, D>,
+}
+
+impl<const L: usize, const S: usize, const PH: usize, const PP: usize> CircuitLogicWires<F, D, 0>
+    for RecursiveCircuitWires<L, S, PH, PP>
+where
+    [(); S - 1]:,
+    [(); NUM_QUERY_IO::<S>]:,
+    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+{
+    type CircuitBuilderParams = CircuitBuilderParams;
+
+    type Inputs = RecursiveCircuitInputs<L, S, PH, PP>;
+
+    const NUM_PUBLIC_INPUTS: usize = REVELATION_PI_LEN::<L, S, PH>;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<F, D>,
+        _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
+        builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        let query_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, { NUM_QUERY_IO::<S> }>::new(
+            default_config(),
+            &builder_parameters.query_circuit_set,
+        );
+        let query_verifier = query_verifier.verify_proof_in_circuit_set(builder);
+        let preprocessing_verifier =
+            RecursiveCircuitsVerifierGagdet::<F, C, D, NUM_PREPROCESSING_IO>::new(
+                default_config(),
+                &builder_parameters.preprocessing_circuit_set,
+            );
+        let preprocessing_proof = preprocessing_verifier.verify_proof_fixed_circuit_in_circuit_set(
+            builder,
+            &builder_parameters.preprocessing_vk,
+        );
+        let query_pi = QueryProofPublicInputs::from_slice(
+            query_verifier.get_public_input_targets::<F, { NUM_QUERY_IO::<S> }>(),
+        );
+        let preprocessing_pi =
+            OriginalTreePublicInputs::from_slice(&preprocessing_proof.public_inputs);
+        let revelation_circuit =
+            RevelationWithoutResultsTreeCircuit::build(builder, &query_pi, &preprocessing_pi);
+
+        Self {
+            revelation_circuit,
+            query_verifier,
+            preprocessing_proof,
+        }
+    }
+
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
+        let (proof, verifier_data) = (&inputs.query_proof).into();
+        self.query_verifier
+            .set_target(pw, &inputs.query_circuit_set, proof, verifier_data)?;
+        pw.set_proof_with_pis_target(&self.preprocessing_proof, &inputs.preprocessing_proof);
+        inputs.inputs.assign(pw, &self.revelation_circuit);
+        Ok(())
     }
 }
 
@@ -285,12 +391,14 @@ where
 mod tests {
     use super::*;
     use crate::{
-        ivc::public_inputs::H_RANGE as ORIGINAL_TREE_H_RANGE,
         query::{
             aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
             public_inputs::QueryPublicInputs,
         },
-        revelation::tests::TestPlaceholders,
+        revelation::tests::{
+            compute_results_from_query_proof, random_original_tree_proof, TestPlaceholders,
+            ORIGINAL_TREE_PI_LEN,
+        },
     };
     use mp2_common::{utils::ToFields, C, D};
     use mp2_test::{
@@ -316,7 +424,6 @@ mod tests {
     const NUM_PLACEHOLDERS: usize = 5;
 
     const QUERY_PI_LEN: usize = crate::query::PI_LEN::<S>;
-    const ORIGINAL_TREE_PI_LEN: usize = OriginalTreePublicInputs::<Target>::TOTAL_LEN;
 
     impl From<&TestPlaceholders<PH, PP>> for RevelationWithoutResultsTreeCircuit<L, S, PH, PP> {
         fn from(test_placeholders: &TestPlaceholders<PH, PP>) -> Self {
@@ -324,8 +431,9 @@ mod tests {
                 num_placeholders: test_placeholders.num_placeholders,
                 placeholder_ids: test_placeholders.placeholder_ids,
                 placeholder_values: test_placeholders.placeholder_values,
-                placeholder_pos: test_placeholders.placeholder_pos,
-                placeholder_pairs: test_placeholders.placeholder_pairs,
+                to_be_checked_placeholders: test_placeholders.to_be_checked_placeholders,
+                secondary_query_bound_placeholders: test_placeholders
+                    .secondary_query_bound_placeholders,
             }
         }
     }
@@ -396,16 +504,6 @@ mod tests {
         proof
     }
 
-    /// Generate a random original tree proof.
-    fn random_original_tree_proof(query_pi: &QueryProofPublicInputs<F, S>) -> Vec<F> {
-        let mut proof = random_vector::<u32>(ORIGINAL_TREE_PI_LEN).to_fields();
-
-        // Set the tree hash.
-        proof[ORIGINAL_TREE_H_RANGE].copy_from_slice(query_pi.to_hash_raw());
-
-        proof
-    }
-
     /// Utility function for testing the revelation circuit with results tree
     fn test_revelation_without_results_tree_circuit(ops: &[F; S], entry_count: Option<u32>) {
         let rng = &mut thread_rng();
@@ -434,7 +532,6 @@ mod tests {
         let pi = PublicInputs::<_, L, S, PH>::from_slice(&proof.public_inputs);
 
         // Initialize the overflow flag to false.
-        let mut overflow = false;
         let entry_count = query_pi.num_matching_rows();
 
         // Check the public inputs.
@@ -469,43 +566,13 @@ mod tests {
         );
         // Entry count
         assert_eq!(pi.entry_count(), entry_count);
-        // Result values
-        {
-            // Convert the entry count to an Uint256.
-            let entry_count = U256::from(entry_count.to_canonical_u64());
-
-            let [op_avg, op_count] = [AggregationOperation::AvgOp, AggregationOperation::CountOp]
-                .map(|op| op.to_field());
-
-            // Compute the results array, and deal with AVG and COUNT operations if any.
-            let ops = query_pi.operation_ids();
-            let result = array::from_fn(|i| {
-                let value = query_pi.value_at_index(i);
-
-                let op = ops[i];
-                if op == op_avg {
-                    match value.checked_div(entry_count) {
-                        Some(dividend) => dividend,
-                        None => {
-                            // Set the overflow flag to true if the divisor is zero.
-                            overflow = true;
-                            U256::ZERO
-                        }
-                    }
-                } else if op == op_count {
-                    entry_count
-                } else {
-                    value
-                }
-            });
-
-            let mut exp_results = [[U256::ZERO; S]; L];
-            exp_results[0] = result;
-
-            assert_eq!(pi.result_values(), exp_results);
-        }
+        // check results
+        let (result, overflow) = compute_results_from_query_proof(&query_pi);
+        let mut exp_results = [[U256::ZERO; S]; L];
+        exp_results[0] = result;
+        assert_eq!(pi.result_values(), exp_results);
         // overflow flag
-        assert_eq!(pi.overflow_flag(), query_pi.overflow_flag() || overflow);
+        assert_eq!(pi.overflow_flag(), overflow);
         // Query limit
         assert_eq!(pi.query_limit(), F::ZERO);
         // Query offset
