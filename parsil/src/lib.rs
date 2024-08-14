@@ -12,6 +12,8 @@ mod utils;
 mod validate;
 mod visitor;
 
+pub use utils::ParsingSettings;
+
 /// Given an SQL `query`:
 ///  - parse it;
 ///  - ensure that it validates Lagrange requirements;

@@ -60,16 +60,9 @@ impl PlaceholderRegister {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ParsingSettings {
     pub(crate) placeholders: PlaceholderRegister,
-}
-impl std::default::Default for ParsingSettings {
-    fn default() -> Self {
-        Self {
-            placeholders: Default::default(),
-        }
-    }
 }
 
 /// Convert a string to a U256. Case is not conserved, and the string may be

@@ -178,25 +178,22 @@ impl Table {
 
     pub async fn new(genesis_block: u64, table_name: String, columns: TableColumns) -> Self {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
-        let row_tree = MerkleRowTree::new(
-            InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
-            SqlStorageSettings {
-                db_url: db_url.clone(),
-                table: row_table_name(&table_name),
-            },
+        let db_settings = SqlStorageSettings {
+            db_url: db_url.clone(),
+            table: index_table_name(&table_name),
+        };
+
+        let row_tree = ryhope::new_row_tree(
+            genesis_block as Epoch,
+            Alpha::new(0.8),
+            db_settings.clone(),
+            true,
         )
         .await
         .unwrap();
-        let index_tree = MerkleIndexTree::new(
-            //InitSettings::Reset(sbbst::Tree::empty()),
-            InitSettings::Reset(sbbst::Tree::with_shift((genesis_block - 1) as usize)),
-            SqlStorageSettings {
-                db_url: db_url.clone(),
-                table: index_table_name(&table_name),
-            },
-        )
-        .await
-        .unwrap();
+        let index_tree = ryhope::new_index_tree(genesis_block as Epoch, db_settings, true)
+            .await
+            .unwrap();
 
         columns.self_assert();
         Self {

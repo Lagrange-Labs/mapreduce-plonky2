@@ -33,7 +33,7 @@ use mp2_v1::{
     },
     values_extraction::identifier_block_column,
 };
-use parsil::{resolve::CircuitPis, symbols::ContextProvider};
+use parsil::{resolve::CircuitPis, symbols::ContextProvider, ParsingSettings};
 use ryhope::{
     storage::{
         pgsql::ToFromBytea,
@@ -104,22 +104,11 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
     // the query to use to fetch all the rows keys involved in the result tree.
-    let pis = parsil::resolve::resolve(&parsed, table)?;
+    let pis = parsil::resolve::resolve(&parsed, table, ParsingSettings::default())?;
     prove_query(ctx, table, query_info, parsed, pis)
         .await
         .expect("unable to run universal query proof");
     Ok(())
-}
-
-/// CURRENTLY ryhope stores things with a shift - things will disappear soon when it stores
-/// directly the offset value
-fn from_block_to_epoch(b: BlockPrimaryIndex, genesis: BlockPrimaryIndex) -> Epoch {
-    (b - genesis as BlockPrimaryIndex + 1) as Epoch
-}
-fn from_epoch_to_block(e: Epoch, genesis: BlockPrimaryIndex) -> BlockPrimaryIndex {
-    // b - genesis + 1 = epoch
-    // b = epoch + genesis - 1
-    e as BlockPrimaryIndex + genesis - 1
 }
 
 /// Execute a query to know all the touched rows, and then call the universal circuit on all rows
@@ -132,11 +121,7 @@ async fn prove_query(
 ) -> Result<()> {
     let rows_query = parsil::executor::generate_query_keys(&parsed, table)?;
     let all_touched_rows = table
-        .execute_row_query(
-            &rows_query.to_string(),
-            from_block_to_epoch(query.min_block, table.genesis_block) as BlockPrimaryIndex,
-            from_block_to_epoch(query.max_block, table.genesis_block) as BlockPrimaryIndex,
-        )
+        .execute_row_query(&rows_query.to_string(), query.min_block, query.max_block)
         .await?;
     // group the rows per block number
     let touched_rows = all_touched_rows
@@ -147,8 +132,8 @@ async fn prove_query(
                 .map(RowTreeKey::from_bytea)
                 .context("unable to parse row key tree")
                 .expect("");
-            let epoch: Epoch = r.get::<_, i64>(1);
-            (from_epoch_to_block(epoch, table.genesis_block), row_key)
+            let block: Epoch = r.get::<_, i64>(1);
+            (block as BlockPrimaryIndex, row_key)
         })
         .fold(
             HashMap::<BlockPrimaryIndex, HashSet<RowTreeKey>>::new(),
@@ -171,10 +156,8 @@ async fn prove_query(
                 // difficult
                 table
                     .row
-                    .lineage_at(
-                        row_key,
-                        from_block_to_epoch(*primary_value, table.genesis_block),
-                    )
+                    // since the epoch starts at genesis we can directly give the block number !
+                    .lineage_at(row_key, *primary_value as Epoch)
                     .await
                     .expect("node doesn't have a lineage?")
                     .into_full_path()
@@ -290,7 +273,9 @@ where
         let k = wk.k.clone();
         let (node_ctx, node_payload) = planner
             .tree
-            .fetch_with_context_at(&k, from_block_to_epoch(primary, planner.genesis))
+            // since epoch starts at genesis now, we can directly give the value of the block
+            // number as epoch number
+            .fetch_with_context_at(&k, primary as Epoch)
             .await;
         let is_satisfying_query = info.is_satisfying_query(&k);
         let embedded_proof = info
@@ -317,12 +302,9 @@ where
                 info.is_satisfying_query(&k),
                 "first node in merkle path should always be a valid query one"
             );
-            let (node_info, left_info, right_info) = get_node_info(
-                &planner.tree,
-                &k,
-                from_block_to_epoch(primary, planner.genesis),
-            )
-            .await;
+            let (node_info, left_info, right_info) =
+            // we can use primary as epoch now that tree stores epoch from genesis
+                get_node_info(&planner.tree, &k, primary as Epoch).await;
             CircuitInput::new_single_path(
                 SubProof::new_embedded_tree_proof(embedded_proof.unwrap())?,
                 left_info,
@@ -347,7 +329,8 @@ where
                 let (node_info, left_info, right_info) = get_node_info(
                     planner.tree,
                     &k,
-                    from_block_to_epoch(primary, planner.genesis),
+                    // we can use primary as epoch since storage starts epoch at genesis
+                    primary as Epoch,
                 )
                 .await;
                 // we look which child is the one to load from storage, the one we already proved
@@ -578,7 +561,6 @@ impl TreeInfo<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> for RowInfo {
                     ctx,
                     &planner.tree,
                     &planner.columns,
-                    planner.genesis,
                     primary,
                     &k,
                     &planner.pis,
@@ -721,16 +703,14 @@ async fn prove_single_row(
     ctx: &mut TestContext,
     tree: &MerkleRowTree,
     columns: &TableColumns,
-    genesis: BlockPrimaryIndex,
     primary: BlockPrimaryIndex,
     row_key: &RowTreeKey,
     pis: &CircuitPis,
     query: &QueryCooking,
 ) -> Result<Vec<u8>> {
     // 1. Get the all the cells including primary and secondary index
-    let (row_ctx, row_payload) = tree
-        .fetch_with_context_at(row_key, from_block_to_epoch(primary, genesis) as Epoch)
-        .await;
+    // Note we can use the primary as epoch since now epoch == primary in the storage
+    let (row_ctx, row_payload) = tree.fetch_with_context_at(row_key, primary as Epoch).await;
 
     // API is gonna change on this but right now, we have to sort all the "rest" cells by index
     // in the tree, and put the primary one and secondary one in front
@@ -857,7 +837,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     // we set the block bounds
     let (longest_sequence, starting) = find_longest_consecutive_sequence(epochs.to_vec());
     // TODO: careful about off by one error. -1 because tree epoch starts at 1
-    let min_block = from_epoch_to_block(starting, table.genesis_block);
+    let min_block = starting as BlockPrimaryIndex;
     let max_block = min_block + longest_sequence;
     // primary_min_placeholder = ".."
     // primary_max_placeholder = ".."

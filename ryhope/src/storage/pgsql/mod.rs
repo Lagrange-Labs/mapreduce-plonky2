@@ -130,6 +130,7 @@ impl<T: Clone + Debug> Debug for CachedValue<T> {
 }
 
 /// The settings required to instantiate a [`PgsqlStorage`] from a PgSQL server.
+#[derive(Clone, Debug)]
 pub struct SqlStorageSettings {
     /// Connection information to the PgSQL server; may be defined in k=v
     /// format, or as a URI.
