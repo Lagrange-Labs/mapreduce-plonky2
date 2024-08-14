@@ -417,7 +417,14 @@ where
             )
             .await
             .map(|row| row.get::<_, Json<T>>(0).0)
-            .expect("failed to fetch state")
+            .with_context(|| {
+                anyhow!(
+                    "failed to fetch state from `{}_meta` at epoch `{}`",
+                    self.table,
+                    epoch
+                )
+            })
+            .unwrap()
     }
 
     async fn store(&mut self, t: T) {

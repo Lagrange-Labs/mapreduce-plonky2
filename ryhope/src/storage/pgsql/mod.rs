@@ -128,14 +128,8 @@ impl<T: Clone + Debug> Debug for CachedValue<T> {
     }
 }
 
-<<<<<<< HEAD
-/// The settings required to instantiate a [`PgsqlStorage`] from a PgSQL server.
-#[derive(Clone, Debug)]
-pub struct SqlStorageSettings {
-=======
 /// Multiple ways to get a connection to the database server.
 pub enum SqlServerConnection {
->>>>>>> main
     /// Connection information to the PgSQL server; may be defined in k=v
     /// format, or as a URI.
     NewConnection(String),
@@ -195,9 +189,8 @@ where
                 Self::load_existing(&storage_settings.source, storage_settings.table).await
             }
             InitSettings::MustNotExist(tree_state) => {
-<<<<<<< HEAD
                 Self::create_new_at(
-                    &storage_settings.db_url,
+                    &storage_settings.source,
                     storage_settings.table,
                     tree_state,
                     0,
@@ -206,7 +199,7 @@ where
             }
             InitSettings::MustNotExistAt(tree_state, epoch) => {
                 Self::create_new_at(
-                    &storage_settings.db_url,
+                    &storage_settings.source,
                     storage_settings.table,
                     tree_state,
                     epoch,
@@ -215,14 +208,7 @@ where
             }
             InitSettings::Reset(tree_settings) => {
                 Self::reset_at(
-                    &storage_settings.db_url,
-=======
-                Self::create_new(&storage_settings.source, storage_settings.table, tree_state).await
-            }
-            InitSettings::Reset(tree_settings) => {
-                Self::reset(
                     &storage_settings.source,
->>>>>>> main
                     storage_settings.table,
                     tree_settings,
                     0,
@@ -231,7 +217,7 @@ where
             }
             InitSettings::ResetAt(tree_settings, initial_epoch) => {
                 Self::reset_at(
-                    &storage_settings.db_url,
+                    &storage_settings.source,
                     storage_settings.table,
                     tree_settings,
                     initial_epoch,
@@ -272,24 +258,13 @@ where
     /// associated tables in the specified table.
     ///
     /// Will fail if the table already exists.
-<<<<<<< HEAD
     pub async fn create_new_at(
-        db_url: &str,
+        db_src: &SqlServerConnection,
         table: String,
         tree_state: T::State,
         epoch: Epoch,
     ) -> Result<Self> {
-        debug!("connecting to {db_url}...");
-        let db_pool = Self::init_db_pool(db_url).await?;
-        debug!("connection successful.");
-=======
-    pub async fn create_new(
-        db_src: &SqlServerConnection,
-        table: String,
-        tree_state: T::State,
-    ) -> Result<Self> {
         let db_pool = Self::init_db_pool(db_src).await?;
->>>>>>> main
 
         ensure!(
             fetch_epoch_data(db_pool.clone(), &table).await.is_err(),
@@ -342,24 +317,13 @@ where
 
     /// Create a new tree storage and its associated table in the specified
     /// table, deleting it if it already exists.
-<<<<<<< HEAD
     pub async fn reset_at(
-        db_url: &str,
+        db_src: &SqlServerConnection,
         table: String,
         tree_state: T::State,
         initial_epoch: Epoch,
     ) -> Result<Self> {
-        debug!("connecting to {db_url}...");
-        let db_pool = Self::init_db_pool(db_url).await?;
-        debug!("connection successful.");
-=======
-    pub async fn reset(
-        db_src: &SqlServerConnection,
-        table: String,
-        tree_state: T::State,
-    ) -> Result<Self> {
         let db_pool = Self::init_db_pool(db_src).await?;
->>>>>>> main
 
         delete_storage_table(db_pool.clone(), &table).await?;
         Self::create_tables(db_pool.clone(), &table).await?;
