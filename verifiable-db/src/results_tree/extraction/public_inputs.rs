@@ -336,7 +336,6 @@ mod tests {
         plonk::circuit_builder::CircuitBuilder,
     };
 
-    const S: usize = 10;
     #[derive(Clone, Debug)]
     struct TestPublicInputs<'a> {
         pis: &'a [F],
