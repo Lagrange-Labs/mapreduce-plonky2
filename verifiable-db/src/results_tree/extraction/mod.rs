@@ -2,6 +2,7 @@ use mp2_common::F;
 use public_inputs::PublicInputs;
 
 pub(crate) mod full_node;
+pub(crate) mod partial_node;
 pub(crate) mod public_inputs;
 pub(crate) mod record;
 
