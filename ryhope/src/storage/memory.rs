@@ -159,6 +159,10 @@ where
     K: Hash + Eq + Clone + Debug + Send + Sync,
     V: Clone + Debug + Send + Sync,
 {
+    fn initial_epoch(&self) -> Epoch {
+        self.epoch_offset
+    }
+
     fn current_epoch(&self) -> Epoch {
         // There is a 1-1 mapping between the epoch and the position in the list of
         // diffs; epoch 0 being the initial empty state.

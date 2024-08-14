@@ -314,6 +314,11 @@ impl<
         S: TransactionalStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
     > RoEpochKvStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
 {
+    /// Return the first registered time stamp of the storage
+    fn initial_epoch(&self) -> Epoch {
+        self.storage.data().initial_epoch()
+    }
+
     fn current_epoch(&self) -> Epoch {
         self.storage.data().current_epoch()
     }

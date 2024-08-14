@@ -1,11 +1,10 @@
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
-
 use anyhow::*;
 use async_trait::async_trait;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use postgres_types::Json;
 use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 use tokio::sync::RwLock;
 use tokio_postgres;
 use tokio_postgres::{NoTls, Row};
@@ -525,6 +524,10 @@ where
     V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V> + Sync,
 {
+    fn initial_epoch(&self) -> Epoch {
+        self.initial_epoch
+    }
+
     fn current_epoch(&self) -> Epoch {
         self.epoch
     }

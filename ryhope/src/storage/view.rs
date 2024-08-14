@@ -80,40 +80,44 @@ where
 }
 
 /// An epoch-locked, read-only, view over an [`EpochKvStorage`].
-pub struct KvStorageAt<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>>(
-    /// The wrapped [`EpochKvStorage`]
-    &'a S,
-    /// The target epoch
-    Epoch,
+pub struct KvStorageAt<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>> {
+    /// The wrapped [`RoEpochKvStorage`]
+    wrapped: &'a S,
+    /// The epoch at which the wrapped storage is being looked at
+    current_epoch: Epoch,
     /// [ignore]
-    PhantomData<T>,
-);
+    _p: PhantomData<T>,
+}
 
 #[async_trait]
 impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
     RoEpochKvStorage<T::Key, T::Node> for KvStorageAt<'a, T, S>
 {
+    fn initial_epoch(&self) -> Epoch {
+        self.wrapped.initial_epoch()
+    }
+
     fn current_epoch(&self) -> Epoch {
-        self.1
+        self.current_epoch
     }
 
     async fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> Option<T::Node> {
-        if epoch != self.1 {
+        if epoch != self.current_epoch {
             unimplemented!(
                 "this storage view is locked at {}; {epoch} unreachable",
-                self.1
+                self.current_epoch
             )
         } else {
-            self.0.try_fetch_at(k, self.1).await
+            self.wrapped.try_fetch_at(k, self.current_epoch).await
         }
     }
 
     async fn fetch(&self, k: &T::Key) -> T::Node {
-        self.0.fetch_at(k, self.1).await
+        self.wrapped.fetch_at(k, self.current_epoch).await
     }
 
     async fn size(&self) -> usize {
-        self.0.size().await
+        self.wrapped.size().await
     }
 }
 
@@ -158,7 +162,11 @@ impl<'a, T: TreeTopology + 'a, S: TreeStorage<T> + 'a> TreeStorageView<'a, T, S>
             wrapped: s,
             epoch,
             state: StorageView(s.state(), epoch, PhantomData),
-            nodes: KvStorageAt(s.nodes(), epoch, PhantomData),
+            nodes: KvStorageAt {
+                wrapped: s.nodes(),
+                current_epoch: epoch,
+                _p: PhantomData,
+            },
             _t: PhantomData,
         }
     }
