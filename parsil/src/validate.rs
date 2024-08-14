@@ -6,6 +6,7 @@ use sqlparser::ast::{
 };
 
 use crate::{
+    errors::ValidationError,
     utils::{str_to_u256, ParsingSettings},
     visitor::{AstPass, Visit},
 };
@@ -33,10 +34,10 @@ impl Validator {
                             ..
                         }
                 )),
-                "query projection must not mix aggregates and scalars"
+                ValidationError::MixedQuery,
             );
         } else {
-            bail!("query body should be a SELECT statement")
+            bail!(ValidationError::NotASelect)
         }
 
         Ok(Self::default())
@@ -46,7 +47,7 @@ impl AstPass for Validator {
     fn pre_unary_operator(&mut self, unary_operator: &mut UnaryOperator) -> Result<()> {
         match unary_operator {
             UnaryOperator::Plus | UnaryOperator::Not => Ok(()),
-            _ => bail!("{unary_operator}: unsupported operator"),
+            _ => bail!(ValidationError::UnsupportedUnaryOperator(*unary_operator)),
         }
     }
 
@@ -67,7 +68,7 @@ impl AstPass for Validator {
             | BinaryOperator::Or
             | BinaryOperator::Xor => Ok(()),
 
-            _ => bail!("{op}: unsupported operator"),
+            _ => bail!(ValidationError::UnsupportedBinaryOperator(op.clone())),
         }
     }
 
@@ -88,28 +89,29 @@ impl AstPass for Validator {
             Expr::Function(funcall) => {
                 ensure!(
                     funcall.name.0.len() == 1,
-                    "{}: unknown function `{}`",
-                    funcall,
-                    funcall.name
+                    ValidationError::UnknownFunction(funcall.name.to_string())
                 );
 
                 if let FunctionArguments::List(arglist) = &mut funcall.args {
                     ensure!(
                         arglist.args.len() == 1,
-                        "expected one argument in `{}`, found `{}`",
-                        funcall,
-                        funcall.args
+                        ValidationError::InvalidArity(
+                            funcall.name.to_string(),
+                            1,
+                            arglist.args.len()
+                        )
                     );
                     match &mut arglist.args[0] {
                         FunctionArg::Unnamed(FunctionArgExpr::Expr(_)) => {}
-                        _ => bail!("{}: unexpected argument type", arglist.args[0]),
+                        _ => bail!(ValidationError::InvalidFunctionArgument(
+                            arglist.args[0].to_string()
+                        )),
                     }
                 } else {
-                    bail!(
-                        "expected one argument for `{}`, found `{}`",
-                        funcall,
+                    bail!(ValidationError::InvalidFunctionArgument(format!(
+                        "{}",
                         funcall.args
-                    );
+                    )));
                 }
             }
 
@@ -119,7 +121,7 @@ impl AstPass for Validator {
                     self.settings
                         .placeholders
                         .resolve(p)
-                        .ok_or_else(|| anyhow!("{p}: unknown placeholder"))?;
+                        .ok_or_else(|| ValidationError::UnknownPlaceholder(p.to_string()))?;
                 }
                 Value::SingleQuotedString(s) => str_to_u256(s).map(|_| ())?,
                 Value::HexStringLiteral(_)
@@ -137,11 +139,10 @@ impl AstPass for Validator {
                 | Value::TripleDoubleQuotedRawStringLiteral(_)
                 | Value::NationalStringLiteral(_)
                 | Value::DoubleQuotedString(_)
-                | Value::Null => bail!("{v}: unsupported type of value"),
+                | Value::Null => bail!(ValidationError::UnsupportedImmediateValue(v.to_string())),
             },
             Expr::Subquery(s) => {
-                // NOTE: here to enable nested queries
-                bail!("{s}: nested selects not supported");
+                bail!(ValidationError::NestedSelect(s.to_string()));
             }
 
             Expr::AnyOp { .. }
@@ -193,7 +194,7 @@ impl AstPass for Validator {
             | Expr::Prior(_)
             | Expr::Lambda(_)
             | Expr::Map(_) => {
-                bail!("{expr}: unsupported")
+                bail!(ValidationError::UnsupportedFeature(expr.to_string()))
             }
         }
         Ok(())
@@ -202,14 +203,31 @@ impl AstPass for Validator {
     fn pre_select_item(&mut self, p: &mut SelectItem) -> Result<()> {
         match p {
             SelectItem::Wildcard(w) => {
-                ensure!(w.opt_ilike.is_none(), "ILIKE is not supported");
-                ensure!(w.opt_exclude.is_none(), "EXCLUDE is not supported");
-                ensure!(w.opt_except.is_none(), "EXCEPT is not supported");
-                ensure!(w.opt_replace.is_none(), "REPLACE is not supported");
-                ensure!(w.opt_rename.is_none(), "RENAME is not supported");
+                ensure!(
+                    w.opt_ilike.is_none(),
+                    ValidationError::UnsupportedFeature("ILIKE".into())
+                );
+                ensure!(
+                    w.opt_exclude.is_none(),
+                    ValidationError::UnsupportedFeature("EXCLUDE".into())
+                );
+                ensure!(
+                    w.opt_except.is_none(),
+                    ValidationError::UnsupportedFeature("EXCEPT".into())
+                );
+                ensure!(
+                    w.opt_replace.is_none(),
+                    ValidationError::UnsupportedFeature("REPLACE".into())
+                );
+                ensure!(
+                    w.opt_rename.is_none(),
+                    ValidationError::UnsupportedFeature("RENAME".into())
+                );
                 Ok(())
             }
-            SelectItem::QualifiedWildcard(_, _) => bail!("{p}: not supported"),
+            SelectItem::QualifiedWildcard(_, _) => {
+                bail!(ValidationError::UnsupportedFeature(p.to_string()))
+            }
             _ => Ok(()),
         }
     }
@@ -219,7 +237,7 @@ impl AstPass for Validator {
             TableFactor::Table { .. } => Ok(()),
             TableFactor::Derived { .. } => {
                 // NOTE: when the time comes, let us be careful of LATERAL joins
-                bail!("{j}: nested selects not supported");
+                bail!(ValidationError::NestedSelect(j.to_string()));
             }
             TableFactor::TableFunction { .. }
             | TableFactor::Function { .. }
@@ -228,7 +246,9 @@ impl AstPass for Validator {
             | TableFactor::NestedJoin { .. }
             | TableFactor::Pivot { .. }
             | TableFactor::Unpivot { .. }
-            | TableFactor::MatchRecognize { .. } => bail!("{:#?}: unsupported relation", j),
+            | TableFactor::MatchRecognize { .. } => {
+                bail!(ValidationError::UnsupportedJointure(format!("{j}:#?")))
+            }
         }
     }
 
@@ -246,50 +266,71 @@ impl AstPass for Validator {
             | JoinOperator::RightAnti(_)
             | JoinOperator::CrossApply
             | JoinOperator::OuterApply
-            | JoinOperator::AsOf { .. } => bail!("{:?}: non-standard syntax", j),
+            | JoinOperator::AsOf { .. } => {
+                bail!(ValidationError::NonStandardSql(format!("{j:#?}")))
+            }
         }
     }
 
     fn pre_distinct(&mut self, distinct: &mut Distinct) -> Result<()> {
         match distinct {
             Distinct::Distinct => Ok(()),
-            Distinct::On(_) => bail!("`DISTINCT ON` unsupported"),
+            Distinct::On(_) => bail!(ValidationError::UnsupportedFeature("DISTINCT ON".into())),
         }
     }
 
     fn pre_offset(&mut self, offset: &mut Offset) -> Result<()> {
         match offset.rows {
             OffsetRows::None => Ok(()),
-            OffsetRows::Row | OffsetRows::Rows => bail!("{}: unsupported", offset),
+            OffsetRows::Row | OffsetRows::Rows => {
+                bail!(ValidationError::UnsupportedFeature(offset.to_string()))
+            }
         }
     }
 
     fn pre_select(&mut self, s: &mut Select) -> Result<()> {
-        ensure!(s.top.is_none(), "TOP is an MSSQL syntax");
-        ensure!(s.into.is_none(), "{s}: SELECT ... INTO not supported");
-        ensure!(s.lateral_views.is_empty(), "LATERAL VIEW unsupported");
+        ensure!(
+            s.top.is_none(),
+            ValidationError::NonStandardSql("TOP".into())
+        );
+        ensure!(
+            s.into.is_none(),
+            ValidationError::UnsupportedFeature("SELECT ... INTO not supported".into())
+        );
+        ensure!(
+            s.lateral_views.is_empty(),
+            ValidationError::UnsupportedFeature("LATERAL VIEW".into())
+        );
         match &s.group_by {
-            GroupByExpr::All(_) => bail!("{}: non-standard syntax", s.group_by),
-            GroupByExpr::Expressions(es, _) => ensure!(es.is_empty(), "GROUP BY not supported"),
+            GroupByExpr::All(_) => bail!(ValidationError::NonStandardSql(s.group_by.to_string())),
+            GroupByExpr::Expressions(es, _) => ensure!(
+                es.is_empty(),
+                ValidationError::UnsupportedFeature("GROUP BY".into())
+            ),
         };
-        ensure!(s.cluster_by.is_empty(), "CLUSTER BY not supported");
+        ensure!(
+            s.cluster_by.is_empty(),
+            ValidationError::UnsupportedFeature("CLUSTER BY".into())
+        );
         ensure!(
             s.distribute_by.is_empty(),
-            "DISTRIBUTE BY is a Spark-specific syntax extension"
+            ValidationError::NonStandardSql("DISTRIBUTE BY".into())
         );
-        ensure!(s.named_window.is_empty(), "windows are not supporrted");
+        ensure!(
+            s.named_window.is_empty(),
+            ValidationError::UnsupportedFeature("windows".into())
+        );
         ensure!(
             s.qualify.is_none(),
-            "QUALIFY is a Snowflake-specific extension"
+            ValidationError::UnsupportedFeature("QUALIFY".into())
         );
         ensure!(
             s.value_table_mode.is_none(),
-            "{:?}: BigQuery-specific extension",
-            s.value_table_mode
+            ValidationError::NonStandardSql(s.value_table_mode.unwrap().to_string())
         );
         ensure!(
             s.connect_by.is_none(),
-            "STARTING WITH ... CONNECT BY: OracleSQL-specific syntax extension"
+            ValidationError::NonStandardSql("STARTING WITH ... CONNECT BY".into())
         );
         Ok(())
     }
@@ -297,10 +338,12 @@ impl AstPass for Validator {
     fn pre_set_expr(&mut self, s: &mut SetExpr) -> Result<()> {
         match s {
             SetExpr::Select(_) => Ok(()),
-            SetExpr::Query(_) => bail!("{s}: nested queries are not supported"),
-            SetExpr::SetOperation { .. } => bail!("{s}: set operations are not supported"),
+            SetExpr::Query(_) => {
+                bail!(ValidationError::NestedSelect(s.to_string()))
+            }
+            SetExpr::SetOperation { .. } => bail!(ValidationError::SetOperation(s.to_string())),
             SetExpr::Values(_) | SetExpr::Insert(_) | SetExpr::Update(_) | SetExpr::Table(_) => {
-                bail!("{s}: mutable queries not supported")
+                bail!(ValidationError::MutableQueries(s.to_string()))
             }
         }
     }
@@ -308,12 +351,11 @@ impl AstPass for Validator {
     fn pre_order_by(&mut self, o: &mut OrderBy) -> Result<()> {
         ensure!(
             o.exprs.len() <= 2,
-            "ORDER BY only supports up to 2 criterions"
+            ValidationError::OrderByArity(format!("{o:?}"), 2)
         );
         ensure!(
             o.interpolate.is_none(),
-            "{:?}: unsupported clickhouse extension",
-            o.interpolate
+            ValidationError::NonStandardSql(format!("{:?}", o.interpolate.as_ref().unwrap()))
         );
         Ok(())
     }
@@ -327,11 +369,26 @@ impl AstPass for Validator {
     }
 
     fn pre_query(&mut self, q: &mut Query) -> Result<()> {
-        ensure!(q.with.is_none(), "CTEs are not supported");
-        ensure!(q.limit_by.is_empty(), "LIMIT BY not supported");
-        ensure!(q.locks.is_empty(), "locks not supported");
-        ensure!(q.for_clause.is_none(), "FOR is an MSSQL extension");
-        ensure!(q.fetch.is_none(), "FETCH is an MSSQL extension");
+        ensure!(
+            q.with.is_none(),
+            ValidationError::UnsupportedFeature("CTEs".into())
+        );
+        ensure!(
+            q.limit_by.is_empty(),
+            ValidationError::UnsupportedFeature("LIMIT BY".into())
+        );
+        ensure!(
+            q.locks.is_empty(),
+            ValidationError::UnsupportedFeature("locks".into())
+        );
+        ensure!(
+            q.for_clause.is_none(),
+            ValidationError::NonStandardSql("FOR".into())
+        );
+        ensure!(
+            q.fetch.is_none(),
+            ValidationError::NonStandardSql("FETCH".into())
+        );
         Ok(())
     }
 }
