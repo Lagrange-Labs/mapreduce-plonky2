@@ -1,7 +1,11 @@
 //! Module handling the non-existence intermediate node for query aggregation circuits
 
 use crate::query::{
-    aggregation::output_computation::compute_dummy_output_targets, public_inputs::PublicInputs,
+    aggregation::output_computation::compute_dummy_output_targets,
+    public_inputs::PublicInputs,
+    universal_circuit::universal_query_circuit::{
+        QueryBound, QueryBoundTarget, QueryBoundTargetInputs,
+    },
 };
 use alloy::primitives::U256;
 use anyhow::Result;
@@ -37,8 +41,8 @@ pub struct NonExistenceInterNodeWires<const MAX_NUM_RESULTS: usize> {
     is_rows_tree_node: BoolTarget,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_left_child: BoolTarget,
-    min_query: UInt256Target,
-    max_query: UInt256Target,
+    min_query: QueryBoundTargetInputs,
+    max_query: QueryBoundTargetInputs,
     value: UInt256Target,
     index_value: UInt256Target,
     child_value: UInt256Target,
@@ -75,10 +79,9 @@ pub struct NonExistenceInterNodeCircuit<const MAX_NUM_RESULTS: usize> {
     /// Minimum range bound specified in the query for the indexed column
     /// It's a range bound for the primary indexed column for index tree,
     /// and secondary indexed column for rows tree.
-    pub(crate) min_query: U256,
+    pub(crate) min_query: QueryBound,
     /// Maximum range bound specified in the query for the indexed column
-    pub(crate) max_query: U256,
-    /// Value stored in the current node
+    pub(crate) max_query: QueryBound,
     pub(crate) value: U256,
     /// Value of the indexed column for the row stored in the current node
     /// (meaningful only if the current node belongs to a rows tree,
@@ -124,30 +127,38 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         let is_left_child = b.add_virtual_bool_target_unsafe();
         // Initialize as unsafe, since all these Uint256s are either exposed as
         // public inputs or passed as inputs for hash computation.
-        let [min_query, max_query, value, index_value, child_value, child_min, child_max] =
+        let [value, index_value, child_value, child_min, child_max] =
             b.add_virtual_u256_arr_unsafe();
+        // compute min and max query bounds for secondary index
+
         let index_ids = b.add_virtual_target_arr();
         let ops = b.add_virtual_target_arr();
         let [subtree_hash, computational_hash, placeholder_hash, child_subtree_hash, grand_child_hash1, grand_child_hash2] =
             array::from_fn(|_| b.add_virtual_hash());
 
+        let min_query = QueryBoundTarget::new(b);
+        let max_query = QueryBoundTarget::new(b);
+
+        let min_query_value = min_query.get_bound_value();
+        let max_query_value = max_query.get_bound_value();
+
         let [min_query_targets, max_query_targets] =
-            [&min_query, &max_query].map(|v| v.to_targets());
+            [&min_query_value, &max_query_value].map(|v| v.to_targets());
         let column_id = b.select(is_rows_tree_node, index_ids[1], index_ids[0]);
 
         // Enforce that the value associated to the current node is out of the range
         // specified by the query:
         // value < MIN_query OR value > MAX_query
-        let is_value_less_than_min = b.is_less_than_u256(&value, &min_query);
-        let is_value_greater_than_max = b.is_less_than_u256(&max_query, &value);
+        let is_value_less_than_min = b.is_less_than_u256(&value, &min_query_value);
+        let is_value_greater_than_max = b.is_less_than_u256(&max_query_value, &value);
         let is_out_of_range = b.or(is_value_less_than_min, is_value_greater_than_max);
         b.connect(is_out_of_range.target, ttrue.target);
 
         // Enforce that the records found in the subtree rooted in the child node
         // are all out of the range specified by the query. If it's the left child,
         // ensure child_max < MIN_query, otherwise child_min > MAX_query.
-        let is_child_less_than_min = b.is_less_than_u256(&child_max, &min_query);
-        let is_child_greater_than_max = b.is_less_than_u256(&max_query, &child_min);
+        let is_child_less_than_min = b.is_less_than_u256(&child_max, &min_query_value);
+        let is_child_greater_than_max = b.is_less_than_u256(&max_query_value, &child_min);
         let is_out_of_range = b.select(
             is_left_child,
             is_child_less_than_min.target,
@@ -197,17 +208,31 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         );
 
         // We add the query bounds to the placeholder hash only if the current node is in a rows tree.
-        let inputs = placeholder_hash
-            .to_targets()
-            .into_iter()
-            .chain(min_query_targets.clone())
-            .chain(max_query_targets.clone())
-            .collect();
-        let placeholder_hash_with_query_bounds = b.hash_n_to_hash_no_pad::<H>(inputs);
+        let placeholder_hash_with_query_bounds =
+            QueryBoundTarget::add_query_bounds_to_placeholder_hash(
+                b,
+                &min_query,
+                &max_query,
+                &placeholder_hash,
+            );
         let new_placeholder_hash = b.select_hash(
             is_rows_tree_node,
             &placeholder_hash_with_query_bounds,
             &placeholder_hash,
+        );
+        // We add the query bounds to the computational hash only if the current
+        // node is in a rows tree.
+        let computational_hash_with_query_bounds =
+            QueryBoundTarget::add_query_bounds_to_computational_hash(
+                b,
+                &min_query,
+                &max_query,
+                &computational_hash,
+            );
+        let new_computational_hash = b.select_hash(
+            is_rows_tree_node,
+            &computational_hash_with_query_bounds,
+            &computational_hash,
         );
 
         // Register the public inputs.
@@ -223,7 +248,7 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
             &min_query_targets,
             &max_query_targets,
             &[ffalse.target],
-            &computational_hash.to_targets(),
+            &new_computational_hash.to_targets(),
             &new_placeholder_hash.to_targets(),
         )
         .register(b);
@@ -233,8 +258,8 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         NonExistenceInterNodeWires {
             is_rows_tree_node,
             is_left_child,
-            min_query,
-            max_query,
+            min_query: min_query.into(),
+            max_query: max_query.into(),
             value,
             index_value,
             child_value,
@@ -262,8 +287,6 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         .iter()
         .for_each(|(t, v)| pw.set_bool_target(*t, *v));
         [
-            (&wires.min_query, self.min_query),
-            (&wires.max_query, self.max_query),
             (&wires.value, self.value),
             (&wires.index_value, self.index_value),
             (&wires.child_value, self.child_value),
@@ -272,6 +295,8 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         ]
         .iter()
         .for_each(|(t, v)| pw.set_u256_target(t, *v));
+        wires.min_query.assign(pw, &self.min_query);
+        wires.max_query.assign(pw, &self.max_query);
         pw.set_target_arr(&wires.index_ids, &self.index_ids);
         pw.set_target_arr(&wires.ops, &self.ops);
         [
@@ -317,18 +342,22 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::query::{
         aggregation::{
             output_computation::tests::compute_dummy_output_values,
-            tests::random_aggregation_operations,
+            tests::random_aggregation_operations, QueryBoundSecondary, QueryBoundSource,
+            QueryBounds,
         },
         computational_hash_ids::{AggregationOperation, Identifiers},
+        universal_circuit::universal_circuit_inputs::{Placeholder, PlaceholderId, Placeholders},
     };
     use mp2_common::{array::ToField, poseidon::H, utils::ToFields, C};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        utils::{gen_random_field_hash, random_vector},
+        utils::{gen_random_field_hash, gen_random_u256, random_vector},
     };
     use plonky2::{
         field::types::{Field, Sample},
@@ -357,20 +386,23 @@ mod tests {
         is_left_child: bool,
         ops: [F; MAX_NUM_RESULTS],
     ) {
-        let min_query = U256::from(1000);
-        let max_query = U256::from(3000);
+        let min_query_value = U256::from(1000);
+        let max_query_value = U256::from(3000);
 
-        let mut rng = thread_rng();
+        let mut rng = &mut thread_rng();
         // value < MIN_query OR value > MAX_query
-        let value = *[min_query - U256::from(1), max_query + U256::from(1)]
-            .choose(&mut rng)
-            .unwrap();
+        let value = *[
+            min_query_value - U256::from(1),
+            max_query_value + U256::from(1),
+        ]
+        .choose(&mut rng)
+        .unwrap();
         let [child_min, child_max] = if is_left_child {
             // child_max < MIN_query
-            [U256::from_limbs(rng.gen()), min_query - U256::from(1)]
+            [U256::from_limbs(rng.gen()), min_query_value - U256::from(1)]
         } else {
             // child_min > MAX_query
-            [max_query + U256::from(1), U256::from_limbs(rng.gen())]
+            [max_query_value + U256::from(1), U256::from_limbs(rng.gen())]
         };
         let [index_value, child_value] = array::from_fn(|_| U256::from_limbs(rng.gen()));
         let index_ids = F::rand_array();
@@ -378,12 +410,52 @@ mod tests {
             array::from_fn(|_| gen_random_field_hash());
         let grand_child_hashes = [grand_child_hash1, grand_child_hash2];
 
+        let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
+
+        let (min_query, max_query, placeholders) = if is_rows_tree_node {
+            let dummy_min_query_primary = U256::ZERO; //dummy value, circuit will employ only bounds for secondary index
+            let dummy_max_query_primary = U256::MAX; //dummy value, circuit will employ only bounds for secondary index
+            let placeholders = Placeholders::from((
+                vec![(first_placeholder_id, max_query_value)],
+                dummy_min_query_primary,
+                dummy_max_query_primary,
+            ));
+
+            let query_bounds = QueryBounds::new(
+                &&placeholders,
+                Some(QueryBoundSource::Constant(min_query_value)),
+                Some(QueryBoundSource::Placeholder(first_placeholder_id)),
+            )
+            .unwrap();
+            (
+                QueryBound::new_secondary_index_bound(
+                    &placeholders,
+                    &query_bounds.min_query_secondary,
+                )
+                .unwrap(),
+                QueryBound::new_secondary_index_bound(
+                    &placeholders,
+                    &query_bounds.max_query_secondary,
+                )
+                .unwrap(),
+                placeholders,
+            )
+        } else {
+            // min_query and max_query should be primary index bounds
+            let placeholders = Placeholders::new_empty(min_query_value, max_query_value);
+            (
+                QueryBound::new_primary_index_bound(&placeholders, true).unwrap(),
+                QueryBound::new_primary_index_bound(&placeholders, false).unwrap(),
+                placeholders,
+            )
+        };
+
         // Construct the test circuit.
         let test_circuit = NonExistenceInterNodeCircuit {
             is_rows_tree_node,
             is_left_child,
-            min_query,
-            max_query,
+            min_query: min_query.clone(),
+            max_query: max_query.clone(),
             value,
             index_value,
             child_value,
@@ -402,9 +474,6 @@ mod tests {
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
 
-        let [min_query_fields, max_query_fields, value_fields] =
-            [&min_query, &max_query, &value].map(|v| v.to_fields());
-
         // node_min = is_left_child ? child_min : value
         // node_max = is_left_child ? value : child_max
         let [node_min, node_max] = if is_left_child {
@@ -417,7 +486,6 @@ mod tests {
         // Tree hash
         {
             let empty_hash = empty_poseidon_hash();
-            let empty_hash_fields = empty_hash.to_fields();
             let column_id = if is_rows_tree_node {
                 index_ids[1]
             } else {
@@ -478,23 +546,33 @@ mod tests {
         // Index IDs
         assert_eq!(pi.index_ids(), index_ids);
         // Minimum query
-        assert_eq!(pi.min_query_value(), min_query);
+        assert_eq!(pi.min_query_value(), min_query_value);
         // Maximum query
-        assert_eq!(pi.max_query_value(), max_query);
+        assert_eq!(pi.max_query_value(), max_query_value);
         // overflow_flag
         assert!(!pi.overflow_flag());
         // Computational hash
-        assert_eq!(pi.computational_hash(), computational_hash);
+        {
+            let exp_hash = if is_rows_tree_node {
+                QueryBound::add_secondary_query_bounds_to_computational_hash(
+                    &QueryBoundSource::Constant(min_query_value),
+                    &QueryBoundSource::Placeholder(first_placeholder_id),
+                    &computational_hash,
+                )
+                .unwrap()
+            } else {
+                computational_hash
+            };
+            assert_eq!(pi.computational_hash(), exp_hash);
+        }
         // Placeholder hash
         {
             let exp_hash = if is_rows_tree_node {
-                let inputs: Vec<_> = placeholder_hash
-                    .to_fields()
-                    .into_iter()
-                    .chain(min_query_fields)
-                    .chain(max_query_fields)
-                    .collect();
-                H::hash_no_pad(&inputs)
+                QueryBound::add_secondary_query_bounds_to_placeholder_hash(
+                    &min_query,
+                    &max_query,
+                    &placeholder_hash,
+                )
             } else {
                 placeholder_hash
             };

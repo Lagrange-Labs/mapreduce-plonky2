@@ -23,7 +23,7 @@ use super::ComputationalHashTarget;
 /// Input wires for basic operation component
 pub struct BasicOperationInputWires {
     /// value to be employed for constant operand, if any, in the basic operation
-    constant_operand: UInt256Target,
+    pub(crate) constant_operand: UInt256Target,
     /// value to be employed in case the current operation involves placeholders
     pub(crate) placeholder_values: [UInt256Target; 2],
     /// identifier of the placeholder employed in the current operation

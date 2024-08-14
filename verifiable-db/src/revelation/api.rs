@@ -12,6 +12,7 @@ use mp2_common::{
     default_config,
     proof::{deserialize_proof, ProofWithVK},
     types::HashOutput,
+    utils::FromFields,
     C, D, F,
 };
 use plonky2::{
@@ -30,14 +31,19 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::query::{
-    aggregation::QueryBounds,
-    computational_hash_ids::{HashPermutation, Identifiers, PlaceholderIdentifier},
-    universal_circuit::{
-        universal_circuit_inputs::{BasicOperation, Placeholder, PlaceholderId, ResultStructure},
-        universal_query_circuit::dummy_placeholder,
-        ComputationalHash,
+use crate::{
+    query::{
+        aggregation::QueryBounds,
+        computational_hash_ids::{HashPermutation, Identifiers, PlaceholderIdentifier},
+        universal_circuit::{
+            universal_circuit_inputs::{
+                BasicOperation, Placeholder, PlaceholderId, Placeholders, ResultStructure,
+            },
+            universal_query_circuit::QueryBound,
+            ComputationalHash,
+        },
     },
+    revelation::placeholders_check::CheckedPlaceholder,
 };
 
 use super::{
@@ -126,101 +132,100 @@ impl<
     /// - `preprocessing_proof`: Proof of construction of the tree over which the query was performed, generated with the
     ///     IVC set of circuit
     /// - `query_bounds`: bounds on values of primary and secondary indexes specified in the query
-    /// - `placeholder_values`: set of placeholder values employed for the placeholders found in the query. They must be
-    ///     less than `MAX_NUM_PLACEHOLDERS`
+    /// - `placeholders`: set of placeholders employed in the query. They must be less than `MAX_NUM_PLACEHOLDERS`
     /// - `placeholder_hash_ids`: Identifiers of the placeholders employed to compute the placeholder hash; they can be
     ///     obtained by the method `ids_for_placeholder_hash` of `query::api::Parameters`
     pub fn new_revelation_no_results_tree(
         query_proof: Vec<u8>,
         preprocessing_proof: Vec<u8>,
         query_bounds: &QueryBounds,
-        placeholder_values: &HashMap<PlaceholderId, U256>,
+        placeholders: &Placeholders,
         placeholder_hash_ids: [PlaceholderId; NUM_PLACEHOLDERS_HASHED],
     ) -> Result<Self> {
         let query_proof = ProofWithVK::deserialize(&query_proof)?;
         let preprocessing_proof = deserialize_proof(&preprocessing_proof)?;
-        let num_placeholders = placeholder_values.len() + 4;
+        let num_placeholders = placeholders.len();
         ensure!(
             num_placeholders <= MAX_NUM_PLACEHOLDERS,
             "number of placeholders provided is more than the maximum number of placeholders"
         );
-        // get placeholder ids from `placeholder_values` map and sort them to ensure that they are provided
+        // get placeholder ids from `placeholders` and sort them to ensure that they are provided
         // in the correct order to the circuit
-        let mut sorted_placeholder_ids = placeholder_values.keys().cloned().collect_vec();
+        let mut sorted_placeholder_ids = placeholders.ids();
         sorted_placeholder_ids.sort();
-        let (padded_placeholder_ids, padded_placeholder_values): (Vec<F>, Vec<_>) = [
-            (
-                &PlaceholderIdentifier::MinQueryOnIdx1,
-                &query_bounds.min_query_primary,
-            ),
-            (
-                &PlaceholderIdentifier::MaxQueryOnIdx1,
-                &query_bounds.max_query_primary,
-            ),
-            (
-                &PlaceholderIdentifier::MinQueryOnIdx2,
-                &query_bounds.min_query_secondary,
-            ),
-            (
-                &PlaceholderIdentifier::MaxQueryOnIdx2,
-                &query_bounds.max_query_secondary,
-            ),
-        ]
-        .into_iter()
-        .chain(
+        let (padded_placeholder_ids, padded_placeholder_values): (Vec<F>, Vec<_>) =
             sorted_placeholder_ids
                 .iter()
-                .map(|id| (id, placeholder_values.get(id).unwrap())),
-        )
-        // pad placeholder ids and values with the first items in the arrays, as expected by the circuit
-        .chain(repeat((
-            &PlaceholderIdentifier::MinQueryOnIdx1,
-            &query_bounds.min_query_primary,
-        )))
-        .take(MAX_NUM_PLACEHOLDERS)
-        .map(|(id, value)| {
-            let id: F = id.to_field();
-            (id, *value)
-        })
-        .unzip();
-        let dummy_placeholder = dummy_placeholder(query_bounds);
-        let placeholder_pairs = placeholder_hash_ids
-            .into_iter()
-            .map(|id| {
-                let value = if id == dummy_placeholder.id {
-                    dummy_placeholder.value
-                } else {
-                    let value = placeholder_values.get(&id);
-                    ensure!(value.is_some(), "no placeholder found for id {:?}", id);
-                    *value.unwrap()
-                };
-                Ok((id.to_field(), value))
+                .map(|id| (*id, placeholders.get(id).unwrap()))
+                // pad placeholder ids and values with the first items in the arrays, as expected by the circuit
+                .chain(repeat((
+                    PlaceholderIdentifier::MinQueryOnIdx1,
+                    placeholders
+                        .get(&PlaceholderIdentifier::MinQueryOnIdx1)
+                        .unwrap(),
+                )))
+                .take(MAX_NUM_PLACEHOLDERS)
+                .map(|(id, value)| {
+                    let id: F = id.to_field();
+                    (id, value)
+                })
+                .unzip();
+        let compute_checked_placeholder_for_id = |placeholder_id: PlaceholderIdentifier| {
+            let value = placeholders.get(&placeholder_id)?;
+            // locate placeholder with id `placeholder_id` in `padded_placeholder_ids`
+            let pos = padded_placeholder_ids
+                .iter()
+                .find_position(|&&id| id == placeholder_id.to_field());
+            ensure!(
+                pos.is_some(),
+                "placeholder with id {:?} not found in padded placeholder ids",
+                placeholder_id
+            );
+            // sanity check: `padded_placeholder_values[pos] = value`
+            assert_eq!(
+                padded_placeholder_values[pos.unwrap().0],
+                value,
+                "placehoder values doesn't match for id {:?}",
+                placeholder_id
+            );
+            Ok(CheckedPlaceholder {
+                id: placeholder_id.to_field(),
+                value,
+                pos: pos.unwrap().0.to_field(),
             })
+        };
+        let to_be_checked_placeholders = placeholder_hash_ids
+            .into_iter()
+            .map(|placeholder_id| compute_checked_placeholder_for_id(placeholder_id))
             .collect::<Result<Vec<_>>>()?;
-
-        let placeholder_pos = placeholder_pairs
-            .iter()
-            .map(|(lookup_id, value)| {
-                // locate placeholder with id `lookup_id` in `padded_placeholder_ids`
-                let pos = padded_placeholder_ids
-                    .iter()
-                    .find_position(|id| **id == *lookup_id);
-                ensure!(
-                    pos.is_some(),
-                    "placeholder with id {:?} not found in padded placeholder ids",
-                    lookup_id
-                );
-                // sanity check: `padded_placeholder_values[pos] = value`
-                assert_eq!(&padded_placeholder_values[pos.unwrap().0], value,);
-                Ok(pos.unwrap().0)
+        // compute placeholders data to be hashed for secondary query bounds
+        let min_query_secondary =
+            QueryBound::new_secondary_index_bound(&placeholders, &query_bounds.min_query_secondary)
+                .unwrap();
+        let max_query_secondary =
+            QueryBound::new_secondary_index_bound(&placeholders, &query_bounds.max_query_secondary)
+                .unwrap();
+        let secondary_query_bound_placeholders = [min_query_secondary, max_query_secondary]
+            .into_iter()
+            .flat_map(|query_bound| {
+                [
+                    compute_checked_placeholder_for_id(PlaceholderId::from_fields(&[query_bound
+                        .operation
+                        .placeholder_ids[0]])),
+                    compute_checked_placeholder_for_id(PlaceholderId::from_fields(&[query_bound
+                        .operation
+                        .placeholder_ids[1]])),
+                ]
             })
             .collect::<Result<Vec<_>>>()?;
         let revelation_circuit = RevelationWithoutResultsTreeCircuit {
             num_placeholders,
             placeholder_ids: padded_placeholder_ids.try_into().unwrap(),
             placeholder_values: padded_placeholder_values.try_into().unwrap(),
-            placeholder_pos: placeholder_pos.try_into().unwrap(),
-            placeholder_pairs: placeholder_pairs.try_into().unwrap(),
+            to_be_checked_placeholders: to_be_checked_placeholders.try_into().unwrap(),
+            secondary_query_bound_placeholders: secondary_query_bound_placeholders
+                .try_into()
+                .unwrap(),
         };
 
         Ok(CircuitInput::NoResultsTree {
@@ -354,7 +359,8 @@ mod tests {
             public_inputs::{PublicInputs as QueryPI, QueryPublicInputs},
             universal_circuit::{
                 universal_circuit_inputs::{
-                    BasicOperation, ColumnCell, InputOperand, OutputItem, ResultStructure,
+                    BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders,
+                    ResultStructure, RowCells,
                 },
                 universal_query_circuit::placeholder_hash,
                 PlaceholderHash,
@@ -408,6 +414,7 @@ mod tests {
         let column_cells = (0..NUM_COLUMNS)
             .map(|_| ColumnCell::new(rng.gen(), gen_random_u256(rng)))
             .collect_vec();
+        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
         let placeholder_ids = [0, 1].map(|i| PlaceholderIdentifier::GenericPlaceholder(i));
         let predicate_operations = vec![
             // C4 < $2
@@ -447,11 +454,15 @@ mod tests {
             output_items,
             aggregation_ops,
         );
-        let placeholder_values = placeholder_ids
-            .iter()
-            .map(|id| (*id, gen_random_u256(rng)))
-            .collect::<HashMap<_, _>>();
-        let query_bounds = QueryBounds::new(U256::from(42), U256::from(76), None, None);
+        let placeholders = Placeholders::from((
+            placeholder_ids
+                .iter()
+                .map(|id| (*id, gen_random_u256(rng)))
+                .collect_vec(),
+            U256::from(42),
+            U256::from(76),
+        ));
+        let query_bounds = QueryBounds::new(&placeholders, None, None).unwrap();
 
         let placeholder_hash_ids = QueryInput::<
             MAX_NUM_COLUMNS,
@@ -459,10 +470,10 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_ITEMS_PER_OUTPUT,
         >::ids_for_placeholder_hash(
-            &column_cells,
+            &row_cells,
             &predicate_operations,
             &results,
-            &placeholder_values,
+            &placeholders,
             &query_bounds,
         )
         .unwrap();
@@ -477,10 +488,10 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_ITEMS_PER_OUTPUT,
         >(
-            &column_cells,
+            &row_cells,
             &predicate_operations,
             &results,
-            &placeholder_values,
+            &placeholders,
             &query_bounds,
             false, // we need to generate values as if we are in an index tree node
         )
@@ -530,7 +541,7 @@ mod tests {
             query_proof,
             preprocessing_proof,
             &query_bounds,
-            &placeholder_values,
+            &placeholders,
             placeholder_hash_ids,
         )
         .unwrap();
@@ -544,20 +555,9 @@ mod tests {
             pi.original_block_hash(),
             preprocessing_pi.block_hash_fields()
         );
-        assert_eq!(
-            pi.num_placeholders(),
-            (placeholder_values.len() + 4).to_field(),
-        );
+        assert_eq!(pi.num_placeholders(), (placeholders.len()).to_field(),);
         // check that each placeholder value in `pi.placeholder_values` is either found in placeholder values or it is a query bound
-        let expected_values = [
-            query_bounds.min_query_primary,
-            query_bounds.max_query_primary,
-            query_bounds.min_query_secondary,
-            query_bounds.max_query_secondary,
-        ]
-        .into_iter()
-        .chain(placeholder_values.values().cloned())
-        .collect_vec();
+        let expected_values = placeholders.placeholder_values();
         assert!(pi.placeholder_values().into_iter().all(|value| {
             expected_values
                 .iter()
@@ -582,6 +582,8 @@ mod tests {
             &predicate_operations,
             &results,
             &HashOutput::try_from(metadata_hash.to_bytes()).unwrap(),
+            Some((&query_bounds.min_query_secondary).into()),
+            Some((&query_bounds.max_query_secondary).into()),
         )
         .unwrap();
         // then, check that it is the same exposed by the proof
