@@ -645,9 +645,6 @@ impl PlaceholderIdentifier {
             _ => self.discriminant(),
         }
     }
-    pub fn identifier(&self) -> PlaceholderId {
-        self.to_field()
-    }
 }
 
 /// Result identifiers

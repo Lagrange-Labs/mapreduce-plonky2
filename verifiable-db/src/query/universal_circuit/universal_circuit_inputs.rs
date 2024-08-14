@@ -102,7 +102,7 @@ pub enum InputOperand {
 impl std::fmt::Debug for InputOperand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InputOperand::Placeholder(i) => write!(f, "${i}"),
+            InputOperand::Placeholder(i) => write!(f, "${i:?}"),
             InputOperand::Constant(x) => write!(f, "{x}"),
             InputOperand::Column(id) => write!(f, "C[{id}]"),
             InputOperand::PreviousValue(previous) => write!(f, "@{previous}"),

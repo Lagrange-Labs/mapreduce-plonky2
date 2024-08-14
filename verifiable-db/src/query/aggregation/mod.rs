@@ -123,7 +123,7 @@ impl QueryBounds {
     }
 
     pub fn is_primary_in_range(&self, v: &U256) -> bool {
-        &self.min_query_primary <= v && v <= &self.max_query_secondary
+        &self.min_query_primary <= v && v <= &self.max_query_primary
     }
 }
 
