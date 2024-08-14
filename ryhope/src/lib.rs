@@ -11,7 +11,7 @@ use storage::{
     EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
     TransactionalStorage, TreeStorage, TreeTransactionalStorage,
 };
-use tree::{MutableTree, NodeContext, NodePath, PrintableTree, TreeTopology};
+use tree::{sbbst, MutableTree, NodeContext, NodePath, PrintableTree, TreeTopology};
 
 pub mod storage;
 #[cfg(test)]
@@ -416,4 +416,39 @@ impl<
     pub async fn print_tree(&self) {
         self.tree.print(&self.storage).await
     }
+}
+
+/// Create a new index tree-specific `EpochTreeStorage` from the given parameters.
+///
+/// * `genesis_block` - the first block number that will be inserted
+/// * `storage_settings` - the settings to build the storage backend
+/// * `reset_if_exist` - if true, an existing tree would be deleted
+///
+/// Fails if the tree construction or either of the storage initialization
+/// failed.
+pub async fn new_index_tree<
+    V: NodePayload + Send + Sync,
+    S: TransactionalStorage
+        + TreeStorage<sbbst::Tree>
+        + PayloadStorage<sbbst::NodeIdx, V>
+        + FromSettings<sbbst::State>,
+>(
+    genesis_block: Epoch,
+    storage_settings: S::Settings,
+    reset_if_exist: bool,
+) -> Result<MerkleTreeKvDb<sbbst::Tree, V, S>> {
+    ensure!(genesis_block > 0, "the genesis block must be positive");
+
+    let initial_epoch = genesis_block - 1;
+    let tree_settings = sbbst::Tree::with_shift(initial_epoch.try_into()?);
+
+    MerkleTreeKvDb::new(
+        if reset_if_exist {
+            InitSettings::ResetAt(tree_settings, initial_epoch)
+        } else {
+            InitSettings::MustNotExistAt(tree_settings, initial_epoch)
+        },
+        storage_settings,
+    )
+    .await
 }
