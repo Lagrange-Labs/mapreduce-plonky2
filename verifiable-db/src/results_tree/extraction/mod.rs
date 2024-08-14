@@ -4,6 +4,7 @@ use public_inputs::PublicInputs;
 pub(crate) mod child_included_single_path_node;
 pub(crate) mod full_node;
 pub(crate) mod no_child_included_single_path_node;
+pub(crate) mod no_results_in_chunk;
 pub(crate) mod partial_node;
 pub(crate) mod public_inputs;
 pub(crate) mod record;
