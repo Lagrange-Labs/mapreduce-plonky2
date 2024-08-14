@@ -61,7 +61,7 @@ fn main() -> Result<()> {
         Command::Circuit {} => {
             let ctx = FileContextProvider::from_file("tests/context.json")?;
             let query = prepare(&args.request)?;
-            resolve::resolve(&query, ctx)?;
+            resolve::resolve(&query, ctx, Default::default())?;
         }
         Command::Query { kind } => {
             let ctx = FileContextProvider::from_file("tests/context.json")?;

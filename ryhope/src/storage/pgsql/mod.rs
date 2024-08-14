@@ -182,13 +182,38 @@ where
                 Self::load_existing(&storage_settings.db_url, storage_settings.table).await
             }
             InitSettings::MustNotExist(tree_state) => {
-                Self::create_new(&storage_settings.db_url, storage_settings.table, tree_state).await
+                Self::create_new_at(
+                    &storage_settings.db_url,
+                    storage_settings.table,
+                    tree_state,
+                    0,
+                )
+                .await
+            }
+            InitSettings::MustNotExistAt(tree_state, epoch) => {
+                Self::create_new_at(
+                    &storage_settings.db_url,
+                    storage_settings.table,
+                    tree_state,
+                    epoch,
+                )
+                .await
             }
             InitSettings::Reset(tree_settings) => {
-                Self::reset(
+                Self::reset_at(
                     &storage_settings.db_url,
                     storage_settings.table,
                     tree_settings,
+                    0,
+                )
+                .await
+            }
+            InitSettings::ResetAt(tree_settings, initial_epoch) => {
+                Self::reset_at(
+                    &storage_settings.db_url,
+                    storage_settings.table,
+                    tree_settings,
+                    initial_epoch,
                 )
                 .await
             }
@@ -201,16 +226,16 @@ where
 /// initial state to the database, even if the tree is left empty.
 ///
 /// Fail if the DB query fails.
-async fn fetch_current_epoch(db: DBPool, table: &str) -> Result<i64> {
+async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64)> {
     let connection = db.get().await.unwrap();
     connection
         .query_one(
-            &format!("SELECT MAX(__valid_until) FROM {table}_meta",),
+            &format!("SELECT MIN(__valid_from), MAX(__valid_until) FROM {table}_meta",),
             &[],
         )
         .await
-        .map(|r| r.get(0))
-        .context("while fetching current epoch")
+        .map(|r| (r.get(0), r.get(1)))
+        .context("while fetching current epoch data")
 }
 
 impl<T, V> PgsqlStorage<T, V>
@@ -222,31 +247,36 @@ where
     T::State: Sync + Clone,
     NodeConnector: DbConnector<T::Key, T::Node>,
 {
-    /// Create a new tree storage and its associated table in the specified table.
+    /// Create a new tree storage with the given initial epoch and its
+    /// associated tables in the specified table.
     ///
     /// Will fail if the table already exists.
-    pub async fn create_new(db_url: &str, table: String, tree_state: T::State) -> Result<Self> {
+    pub async fn create_new_at(
+        db_url: &str,
+        table: String,
+        tree_state: T::State,
+        epoch: Epoch,
+    ) -> Result<Self> {
         debug!("connecting to {db_url}...");
         let db_pool = Self::init_db_pool(db_url).await?;
         debug!("connection successful.");
 
         ensure!(
-            fetch_current_epoch(db_pool.clone(), &table).await.is_err(),
+            fetch_epoch_data(db_pool.clone(), &table).await.is_err(),
             "table `{table}` already exists"
         );
         Self::create_tables(db_pool.clone(), &table).await?;
 
-        let epoch = 0;
         let r = Self {
             table: table.clone(),
             db: db_pool.clone(),
             epoch,
             in_tx: false,
-            nodes: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
+            nodes: CachedDbKvStore::new(epoch, epoch, table.clone(), db_pool.clone()),
             state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
                 .await
                 .context("failed to store initial state")?,
-            data: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
+            data: CachedDbKvStore::new(epoch, epoch, table.clone(), db_pool.clone()),
         };
         Ok(r)
     }
@@ -259,7 +289,7 @@ where
         let db_pool = Self::init_db_pool(db_url).await?;
         debug!("connection successful.");
 
-        let latest_epoch = fetch_current_epoch(db_pool.clone(), &table)
+        let (initial_epoch, latest_epoch) = fetch_epoch_data(db_pool.clone(), &table)
             .await
             .with_context(|| format!("table `{table}` does not exist"))?;
         info!("latest epoch is {latest_epoch}");
@@ -268,9 +298,14 @@ where
             table: table.clone(),
             db: db_pool.clone(),
             epoch: latest_epoch,
-            state: CachedDbStore::new(latest_epoch, table.clone(), db_pool.clone()),
-            nodes: CachedDbKvStore::new(latest_epoch, table.clone(), db_pool.clone()),
-            data: CachedDbKvStore::new(latest_epoch, table.clone(), db_pool.clone()),
+            state: CachedDbStore::new(initial_epoch, latest_epoch, table.clone(), db_pool.clone()),
+            nodes: CachedDbKvStore::new(
+                initial_epoch,
+                latest_epoch,
+                table.clone(),
+                db_pool.clone(),
+            ),
+            data: CachedDbKvStore::new(initial_epoch, latest_epoch, table.clone(), db_pool.clone()),
             in_tx: false,
         };
 
@@ -279,25 +314,44 @@ where
 
     /// Create a new tree storage and its associated table in the specified
     /// table, deleting it if it already exists.
-    pub async fn reset(db_url: &str, table: String, tree_state: T::State) -> Result<Self> {
+    pub async fn reset_at(
+        db_url: &str,
+        table: String,
+        tree_state: T::State,
+        initial_epoch: Epoch,
+    ) -> Result<Self> {
         debug!("connecting to {db_url}...");
         let db_pool = Self::init_db_pool(db_url).await?;
         debug!("connection successful.");
 
         delete_storage_table(db_pool.clone(), &table).await?;
         Self::create_tables(db_pool.clone(), &table).await?;
-        let epoch = 0;
 
         let r = Self {
             table: table.clone(),
             db: db_pool.clone(),
-            epoch,
-            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
-                .await
-                .context("failed to store initial state")?,
+            epoch: initial_epoch,
+            state: CachedDbStore::with_value(
+                initial_epoch,
+                table.clone(),
+                db_pool.clone(),
+                tree_state,
+            )
+            .await
+            .context("failed to store initial state")?,
 
-            nodes: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
-            data: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
+            nodes: CachedDbKvStore::new(
+                initial_epoch,
+                initial_epoch,
+                table.clone(),
+                db_pool.clone(),
+            ),
+            data: CachedDbKvStore::new(
+                initial_epoch,
+                initial_epoch,
+                table.clone(),
+                db_pool.clone(),
+            ),
             in_tx: false,
         };
 

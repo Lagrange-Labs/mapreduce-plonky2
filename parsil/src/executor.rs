@@ -12,7 +12,7 @@ use sqlparser::ast::{
 
 use crate::{
     symbols::{ColumnKind, ContextProvider},
-    utils::parse_string,
+    utils::str_to_u256,
     visitor::{AstPass, Visit},
 };
 
@@ -50,7 +50,7 @@ fn convert_number_string(expr: &mut Expr) -> Result<()> {
                 kind: CastKind::DoubleColon,
                 expr: Box::new(Expr::Value(Value::SingleQuotedString(format!(
                     "{}",
-                    parse_string(s)?
+                    str_to_u256(s)?
                 )))),
                 data_type: UINT256,
                 format: None,

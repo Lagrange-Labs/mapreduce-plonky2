@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::{prepare, resolve::resolve, symbols::FileContextProvider};
+use crate::{prepare, resolve::resolve, symbols::FileContextProvider, utils::ParsingSettings};
 
 /// NOTE: queries that may bother us in the future
 const CAREFUL: &[&str] = &[
@@ -78,7 +78,7 @@ fn must_resolve() -> Result<()> {
     ] {
         let ctx = FileContextProvider::from_file("tests/context.json")?;
         let query = prepare(q)?;
-        resolve(&query, ctx)?;
+        resolve(&query, ctx, ParsingSettings::default())?;
     }
     Ok(())
 }
@@ -88,6 +88,6 @@ fn ref_query() -> Result<()> {
     let q = "SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99";
     let query = prepare(q)?;
     let ctx = FileContextProvider::from_file("tests/context.json")?;
-    let exposed = resolve(&query, ctx)?;
+    let exposed = resolve(&query, ctx, ParsingSettings::default())?;
     Ok(())
 }
