@@ -12,9 +12,6 @@ use plonky2::plonk::{
 use poseidon2_plonky2::poseidon2_goldilock::Poseidon2GoldilocksConfig;
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
-mod benches;
-
 pub mod array;
 pub mod eth;
 pub mod group_hashing;
@@ -66,7 +63,9 @@ struct ByteProofTuple {
 #[cfg(test)]
 mod test {
     use crate::{
-        serialization::circuit_data_serialization::{CustomGateSerializer, SerializableRichField}, utils::{keccak256, verify_proof_tuple}, ByteProofTuple, ProofTuple, C, F
+        serialization::circuit_data_serialization::{CustomGateSerializer, SerializableRichField},
+        utils::{keccak256, verify_proof_tuple},
+        ByteProofTuple, ProofTuple, C, F,
     };
     use anyhow::Result;
     use plonky2::field::types::Field;

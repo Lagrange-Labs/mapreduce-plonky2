@@ -138,7 +138,8 @@ mod test {
     };
     use mp2_test::{
         circuit::{prove_circuit, setup_circuit, UserCircuit},
-        eth::get_sepolia_url, log::init_logging,
+        eth::get_sepolia_url,
+        log::init_logging,
     };
 
     use plonky2::iop::witness::PartialWitness;
