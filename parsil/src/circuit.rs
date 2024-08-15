@@ -25,7 +25,7 @@ use verifiable_db::query::{
 use crate::{
     errors::ValidationError,
     symbols::{ColumnKind, ContextProvider, Handle, Kind, ScopeTable, Symbol},
-    utils::{str_to_u256, ParsingSettings},
+    utils::{str_to_u256, ParsilSettings},
     visitor::{AstPass, Visit},
 };
 
@@ -138,11 +138,8 @@ struct Bounds {
     low: Option<QueryBoundSource>,
 }
 
-pub(crate) struct Resolver<C: ContextProvider> {
-    settings: ParsingSettings,
-    /// A handle to an object providing a register of the existing virtual
-    /// tables and their columns.
-    context: C,
+pub(crate) struct Assembler<'a, C: ContextProvider> {
+    settings: &'a ParsilSettings<C>,
     /// The symbol table hierarchy for this query
     scopes: ScopeTable<CircuitData, Wire>,
     /// A storage for the SELECT-involved operations.
@@ -154,12 +151,41 @@ pub(crate) struct Resolver<C: ContextProvider> {
     columns: Vec<u64>,
     secondary_index_bounds: Bounds,
 }
-impl<C: ContextProvider> Resolver<C> {
+impl<'a, C: ContextProvider> Assembler<'a, C> {
+    pub fn validate(query: &Query, settings: &'a ParsilSettings<C>) -> Result<()> {
+        let mut converted_query = query.clone();
+        let mut resolver = Assembler::new(settings);
+        converted_query.visit(&mut resolver)?;
+        resolver.prepare_result()?;
+        Ok(())
+    }
+
+    pub fn assemble(q: &Query, settings: &ParsilSettings<C>) -> Result<CircuitPis> {
+        let mut converted_query = q.clone();
+        let mut resolver = Assembler::new(settings);
+        converted_query.visit(&mut resolver)?;
+        println!("Original query:\n>> {}", q);
+        println!("Translated query:\n>> {}", converted_query);
+
+        resolver.scopes.pretty();
+
+        println!("Query ops:");
+        for (i, op) in resolver.query_ops.ops.iter().enumerate() {
+            println!("     {i}: {op:?}");
+        }
+
+        let pis = resolver.to_pis(&Placeholders::new_empty(U256::ZERO, U256::ZERO))?;
+
+        println!("Sent to circuit:");
+        println!("{:#?}", pis);
+
+        Ok(pis)
+    }
+
     /// Create a new empty [`Resolver`]
-    fn new(context: C, settings: ParsingSettings) -> Self {
-        Resolver {
+    fn new(settings: &'a ParsilSettings<C>) -> Self {
+        Assembler {
             settings,
-            context,
             scopes: ScopeTable::<CircuitData, Wire>::new(),
             query_ops: Default::default(),
             constants: Default::default(),
@@ -459,12 +485,9 @@ impl<C: ContextProvider> Resolver<C> {
             Expr::Value(v) => Ok(Symbol::Expression(match v {
                 Value::Number(x, _) => self.new_constant(x.parse().unwrap()),
                 Value::SingleQuotedString(s) => self.new_constant(str_to_u256(s)?),
-                Value::Placeholder(p) => Wire::PlaceHolder(
-                    self.settings
-                        .placeholders
-                        .resolve(p)
-                        .ok_or_else(|| anyhow!("{p}: unknown placeholder"))?,
-                ),
+                Value::Placeholder(p) => {
+                    Wire::PlaceHolder(self.settings.placeholders.resolve_placeholder(p)?)
+                }
                 _ => unreachable!(),
             })),
             Expr::Identifier(s) => Ok(Symbol::Expression(
@@ -604,41 +627,50 @@ impl<C: ContextProvider> Resolver<C> {
         }
     }
 
+    /// Generate a [`ResultStructure`] from the parsed query; fails if it does
+    /// not satisfy the circuit requirements.
+    fn prepare_result(&self) -> Result<ResultStructure> {
+        let root_scope = &self.scopes.scope_at(1);
+
+        Ok(
+            if root_scope
+                .metadata()
+                .aggregation
+                .iter()
+                .all(|&a| a == AggregationOperation::IdOp)
+            {
+                ResultStructure::new_for_query_no_aggregation(
+                    self.query_ops.ops.clone(),
+                    root_scope.metadata().outputs.clone(),
+                    vec![0; root_scope.metadata().outputs.len()],
+                )
+            } else if root_scope
+                .metadata()
+                .aggregation
+                .iter()
+                .all(|&a| a != AggregationOperation::IdOp)
+            {
+                ResultStructure::new_for_query_with_aggregation(
+                    self.query_ops.ops.clone(),
+                    root_scope.metadata().outputs.clone(),
+                    root_scope
+                        .metadata()
+                        .aggregation
+                        .iter()
+                        .map(|x| x.to_id())
+                        .collect(),
+                )
+            } else {
+                unreachable!()
+            },
+        )
+    }
+
     /// Generate appropriate universal query circuit PIs from the root context
     /// of this Resolver.
     fn to_pis(&self, placeholders: &Placeholders) -> Result<CircuitPis> {
+        let result = self.prepare_result()?;
         let root_scope = &self.scopes.scope_at(1);
-
-        let result = if root_scope
-            .metadata()
-            .aggregation
-            .iter()
-            .all(|&a| a == AggregationOperation::IdOp)
-        {
-            ResultStructure::new_for_query_no_aggregation(
-                self.query_ops.ops.clone(),
-                root_scope.metadata().outputs.clone(),
-                vec![0; root_scope.metadata().outputs.len()],
-            )
-        } else if root_scope
-            .metadata()
-            .aggregation
-            .iter()
-            .all(|&a| a != AggregationOperation::IdOp)
-        {
-            ResultStructure::new_for_query_with_aggregation(
-                self.query_ops.ops.clone(),
-                root_scope.metadata().outputs.clone(),
-                root_scope
-                    .metadata()
-                    .aggregation
-                    .iter()
-                    .map(|x| x.to_id())
-                    .collect(),
-            )
-        } else {
-            unreachable!()
-        };
 
         Ok(CircuitPis {
             result,
@@ -681,7 +713,7 @@ pub struct CircuitPis {
     pub bounds: QueryBounds,
 }
 
-impl<C: ContextProvider> AstPass for Resolver<C> {
+impl<'a, C: ContextProvider> AstPass for Assembler<'a, C> {
     fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
         match &table_factor {
             TableFactor::Table {
@@ -706,7 +738,11 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
                     let concrete_table_name = &name.0[0].value;
 
                     // Fetch all the column declared in this table
-                    let table_columns = self.context.fetch_table(&concrete_table_name)?.columns;
+                    let table_columns = self
+                        .settings
+                        .context
+                        .fetch_table(&concrete_table_name)?
+                        .columns;
 
                     // Extract the apparent table name (either the concrete one
                     // or its alia), and, if they exist, the aliased column
@@ -860,31 +896,4 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
         self.scopes.current_scope_mut().provides(provided);
         Ok(())
     }
-}
-
-/// Convert a query so that it can be executed on a ryhope-generated db.
-pub fn resolve<C: ContextProvider>(
-    q: &Query,
-    context: C,
-    settings: ParsingSettings,
-) -> Result<CircuitPis> {
-    let mut converted_query = q.clone();
-    let mut resolver = Resolver::new(context, settings);
-    converted_query.visit(&mut resolver)?;
-    println!("Original query:\n>> {}", q);
-    println!("Translated query:\n>> {}", converted_query);
-
-    resolver.scopes.pretty();
-
-    println!("Query ops:");
-    for (i, op) in resolver.query_ops.ops.iter().enumerate() {
-        println!("     {i}: {op:?}");
-    }
-
-    let pis = resolver.to_pis(&Placeholders::new_empty(U256::ZERO, U256::ZERO))?;
-
-    println!("Sent to circuit:");
-    println!("{:#?}", pis);
-
-    Ok(pis)
 }

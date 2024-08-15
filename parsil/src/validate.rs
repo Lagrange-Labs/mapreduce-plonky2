@@ -7,15 +7,19 @@ use sqlparser::ast::{
 
 use crate::{
     errors::ValidationError,
-    utils::{str_to_u256, ParsingSettings},
+    symbols::ContextProvider,
+    utils::{str_to_u256, ParsilSettings},
     visitor::{AstPass, Visit},
 };
 
-struct Validator {
-    settings: ParsingSettings,
+/// Ensure that a top-level [`Query`] is compatible with the currently
+/// implemented subset of SQL.
+pub struct SqlValidator<'a, C: ContextProvider> {
+    settings: &'a ParsilSettings<C>,
 }
-impl Validator {
-    fn for_query(settings: ParsingSettings, query: &mut Query) -> Result<Self> {
+impl<'a, C: ContextProvider> SqlValidator<'a, C> {
+    /// Instantiate a new [`Validator`] and validate this query with it.
+    pub fn validate(settings: &'a ParsilSettings<C>, query: &mut Query) -> Result<()> {
         if let SetExpr::Select(ref mut select) = *query.body {
             ensure!(
                 select.projection.iter().all(|s| !matches!(
@@ -39,10 +43,11 @@ impl Validator {
             bail!(ValidationError::NotASelect)
         }
 
-        Ok(Self { settings })
+        let mut validator = Self { settings };
+        query.visit(&mut validator)
     }
 }
-impl AstPass for Validator {
+impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
     fn pre_unary_operator(&mut self, unary_operator: &mut UnaryOperator) -> Result<()> {
         match unary_operator {
             UnaryOperator::Plus | UnaryOperator::Not => Ok(()),
@@ -117,10 +122,7 @@ impl AstPass for Validator {
             Expr::Value(v) => match v {
                 Value::Number(_, _) | Value::Boolean(_) => {}
                 Value::Placeholder(p) => {
-                    self.settings
-                        .placeholders
-                        .resolve(p)
-                        .ok_or_else(|| ValidationError::UnknownPlaceholder(p.to_string()))?;
+                    self.settings.placeholders.resolve_placeholder(p)?;
                 }
                 Value::SingleQuotedString(s) => str_to_u256(s).map(|_| ())?,
                 Value::HexStringLiteral(_)
@@ -390,11 +392,4 @@ impl AstPass for Validator {
         );
         Ok(())
     }
-}
-
-/// Ensure that a top-level [`Query`] is compatible with the currently
-/// implemented subset of SQL.
-pub fn validate(settings: ParsingSettings, query: &mut Query) -> Result<()> {
-    let mut validator = Validator::for_query(settings, query)?;
-    query.visit(&mut validator)
 }

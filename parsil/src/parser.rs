@@ -6,11 +6,11 @@ use sqlparser::{
     parser::Parser,
 };
 
-use crate::{utils::ParsingSettings, validate::validate};
+use crate::{symbols::ContextProvider, utils::ParsilSettings};
 
 const DIALECT: AnsiDialect = AnsiDialect {};
 
-pub fn parse(settings: ParsingSettings, req: &str) -> Result<Query> {
+pub fn parse<C: ContextProvider>(_settings: &ParsilSettings<C>, req: &str) -> Result<Query> {
     debug!("Parsing `{req}`");
     let mut parsed =
         Parser::parse_sql(&DIALECT, req).with_context(|| format!("trying to parse `{req}`"))?;
@@ -22,7 +22,6 @@ pub fn parse(settings: ParsingSettings, req: &str) -> Result<Query> {
     );
 
     if let Statement::Query(ref mut query) = &mut parsed[0] {
-        validate(settings, query)?;
         Ok(*query.clone())
     } else {
         bail!("expected query, found `{}`", parsed[0])

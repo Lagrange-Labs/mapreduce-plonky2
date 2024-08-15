@@ -27,6 +27,9 @@ pub enum ValidationError {
     #[error("`{0}`: unknown placeholder")]
     UnknownPlaceholder(String),
 
+    #[error("`{0}` is not used")]
+    MissingPlaceholder(String),
+
     #[error("`{0}`: unsupported immediate value")]
     UnsupportedImmediateValue(String),
 

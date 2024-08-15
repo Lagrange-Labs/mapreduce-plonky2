@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::{prepare, resolve::resolve, symbols::FileContextProvider, utils::ParsingSettings};
+use crate::{check, resolve::resolve, symbols::FileContextProvider, utils::ParsilSettings};
 
 /// NOTE: queries that may bother us in the future
 const CAREFUL: &[&str] = &[
@@ -25,7 +25,7 @@ fn must_accept() -> Result<()> {
         "SELECT '0b01001'",
         "SELECT '0o1234567'",
     ] {
-        prepare(q)?;
+        check(q)?;
     }
     Ok(())
 }
@@ -62,7 +62,7 @@ fn must_reject() {
         // Invalid digit
         "SELECT '0o12345678'",
     ] {
-        assert!(dbg!(prepare(q)).is_err())
+        assert!(dbg!(check(q)).is_err())
     }
 }
 
@@ -77,8 +77,8 @@ fn must_resolve() -> Result<()> {
         "SELECT foo, bar FROM table2 ORDER BY foo, bar",
     ] {
         let ctx = FileContextProvider::from_file("tests/context.json")?;
-        let query = prepare(q)?;
-        resolve(&query, ctx, ParsingSettings::default())?;
+        let query = check(q)?;
+        resolve(&query, ctx, ParsilSettings::default())?;
     }
     Ok(())
 }
@@ -86,8 +86,8 @@ fn must_resolve() -> Result<()> {
 #[test]
 fn ref_query() -> Result<()> {
     let q = "SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99";
-    let query = prepare(q)?;
+    let query = check(q)?;
     let ctx = FileContextProvider::from_file("tests/context.json")?;
-    let exposed = resolve(&query, ctx, ParsingSettings::default())?;
+    let exposed = resolve(&query, ctx, ParsilSettings::default())?;
     Ok(())
 }

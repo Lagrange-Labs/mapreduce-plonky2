@@ -1,5 +1,5 @@
-use anyhow::{anyhow, ensure, Context, Result};
-use serde::{de::value, Deserialize, Serialize};
+use anyhow::{ensure, Context, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use alloy::primitives::U256;
@@ -9,10 +9,7 @@ use mp2_common::{
     F,
 };
 
-use crate::query::{
-    aggregation::QueryBounds,
-    computational_hash_ids::{Operation, Output, PlaceholderIdentifier},
-};
+use crate::query::computational_hash_ids::{Operation, Output, PlaceholderIdentifier};
 
 use super::universal_query_circuit::dummy_placeholder_id;
 

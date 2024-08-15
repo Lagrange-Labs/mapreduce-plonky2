@@ -2,14 +2,15 @@ use anyhow::*;
 use clap::{Parser, Subcommand};
 use log::Level;
 use sqlparser::ast::Query;
-use symbols::FileContextProvider;
-use utils::{ParsingSettings, PlaceholderRegister};
+use symbols::{ContextProvider, FileContextProvider};
+use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
 
+mod circuit;
 mod errors;
 mod executor;
 mod expand;
 mod parser;
-mod resolve;
+mod placeholders;
 mod symbols;
 mod utils;
 mod validate;
@@ -47,7 +48,7 @@ enum QueryKind {
     Keys,
 }
 
-fn prepare(settings: ParsingSettings, query: &str) -> Result<Query> {
+fn prepare<C: ContextProvider>(settings: &ParsilSettings<C>, query: &str) -> Result<Query> {
     let mut query = parser::parse(settings, query)?;
     expand::expand(&mut query);
     Ok(query)
@@ -56,27 +57,25 @@ fn prepare(settings: ParsingSettings, query: &str) -> Result<Query> {
 fn main() -> Result<()> {
     let args = Args::parse();
     stderrlog::new().verbosity(Level::Debug).init().unwrap();
-    let settings = ParsingSettings {
-        placeholders: PlaceholderRegister::default(3),
+    let settings = ParsilSettings {
+        context: FileContextProvider::from_file("tests/context.json")?,
+        placeholders: PlaceholderSettings::with_freestanding(3),
     };
+    let query = parse_and_validate(&args.request, &settings)?;
 
     match args.command {
         Command::Debug {} => {
             println!("Query string:\n{}", &args.request);
-            let query = prepare(settings, &args.request)?;
             if args.verbose {
                 println!("{:#?}", query);
             }
             println!("Final query:\n{}", query);
         }
         Command::Circuit {} => {
-            let ctx = FileContextProvider::from_file("tests/context.json")?;
-            let query = prepare(settings.clone(), &args.request)?;
-            resolve::resolve(&query, ctx, settings)?;
+            circuit::Assembler::assemble(&query, &settings)?;
         }
         Command::Query { kind } => {
             let ctx = FileContextProvider::from_file("tests/context.json")?;
-            let query = prepare(settings, &args.request)?;
             println!(
                 "{}",
                 match kind {

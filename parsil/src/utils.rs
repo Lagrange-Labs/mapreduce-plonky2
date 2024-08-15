@@ -1,8 +1,13 @@
 use alloy::primitives::U256;
 use anyhow::*;
-use sqlparser::ast::{BinaryOperator, Expr, UnaryOperator, Value};
+use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
 use std::str::FromStr;
 use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
+
+use crate::{
+    circuit::Assembler, errors::ValidationError, expand, parser,
+    placeholders::PlaceholderValidator, symbols::ContextProvider, validate::SqlValidator,
+};
 
 /// This register handle all operations related to placeholder registration,
 /// lookup an validation.
@@ -42,9 +47,75 @@ impl PlaceholderRegister {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ParsingSettings {
-    pub placeholders: PlaceholderRegister,
+#[derive(Debug)]
+pub struct ParsilSettings<C: ContextProvider> {
+    /// A handle to an object providing a register of the existing virtual
+    /// tables and their columns.
+    pub context: C,
+    pub(crate) placeholders: PlaceholderSettings,
+}
+
+#[derive(Debug)]
+pub struct PlaceholderSettings {
+    /// The placeholder for the minimal value of the primary index
+    pub min_block_placeholder: String,
+    /// The placeholder for the maximal value of the primary index
+    pub max_block_placeholder: String,
+    /// The number of free-standing `$i` placeholders
+    pub max_free_placeholders: usize,
+}
+impl PlaceholderSettings {
+    pub fn with_freestanding(n: usize) -> Self {
+        Self::with_freestanding_and_blocks("$MIN_BLOCK", "$MAX_BLOCK", n)
+    }
+
+    pub fn with_freestanding_and_blocks(min_block: &str, max_block: &str, n: usize) -> Self {
+        Self {
+            min_block_placeholder: min_block.to_string(),
+            max_block_placeholder: max_block.to_string(),
+            max_free_placeholders: n,
+        }
+    }
+
+    /// Ensure that the given placeholder is valid, and update the validator
+    /// internal state accordingly.
+    pub fn resolve_placeholder(&self, name: &str) -> Result<PlaceholderIdentifier> {
+        if self.min_block_placeholder == name {
+            return Ok(PlaceholderIdentifier::MinQueryOnIdx1);
+        }
+
+        if self.max_block_placeholder == name {
+            return Ok(PlaceholderIdentifier::MaxQueryOnIdx1);
+        }
+
+        if name.starts_with('$') {
+            let i = name
+                .trim_start_matches('$')
+                .parse::<usize>()
+                .map_err(|_| ValidationError::UnknownPlaceholder(name.to_owned()))?;
+
+            if i <= self.max_free_placeholders {
+                bail!(ValidationError::UnknownPlaceholder(name.to_owned()))
+            } else {
+                Ok(PlaceholderIdentifier::Generic(i))
+            }
+        } else {
+            bail!(ValidationError::UnknownPlaceholder(name.to_owned()))
+        }
+    }
+}
+
+pub fn parse_and_validate<C: ContextProvider>(
+    query: &str,
+    settings: &ParsilSettings<C>,
+) -> Result<Query> {
+    let mut query = parser::parse(&settings, query)?;
+    expand::expand(&mut query);
+
+    PlaceholderValidator::validate(&settings, &mut query)?;
+    SqlValidator::validate(&settings, &mut query)?;
+    Assembler::validate(&query, &settings)?;
+    Ok(query)
 }
 
 /// Convert a string to a U256. Case is not conserved, and the string may be

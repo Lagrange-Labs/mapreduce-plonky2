@@ -33,7 +33,7 @@ use mp2_v1::{
     },
     values_extraction::identifier_block_column,
 };
-use parsil::{resolve::CircuitPis, symbols::ContextProvider, ParsingSettings};
+use parsil::{resolve::CircuitPis, symbols::ContextProvider, ParsilSettings};
 use ryhope::{
     storage::{
         pgsql::ToFromBytea,
@@ -81,7 +81,7 @@ pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Re
 async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     let query_info = cook_query(table).await?;
     info!("QUERY on the testcase: {}", query_info.query);
-    let parsed = parsil::prepare(&query_info.query)?;
+    let parsed = parsil::check(&query_info.query)?;
     println!("QUERY table columns -> {:?}", table.columns.to_zkcolumns());
     info!(
         "BOUNDS found on query: min {}, max {} - table.genesis_block {}",
@@ -894,10 +894,10 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
         Some(longest_key.value),
     );
     let query_str = format!(
-        "SELECT AVG({value_column}) 
-                FROM {table_name} 
-                WHERE {BLOCK_COLUMN_NAME} >= $1 
-                AND {BLOCK_COLUMN_NAME} <= $2 
+        "SELECT AVG({value_column})
+                FROM {table_name}
+                WHERE {BLOCK_COLUMN_NAME} >= $1
+                AND {BLOCK_COLUMN_NAME} <= $2
                 AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
