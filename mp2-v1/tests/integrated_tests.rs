@@ -181,6 +181,7 @@ async fn test_empty_mpt() -> Result<()> {
     //let leaf_value: Vec<u8> = rlp::decode(&tuple)?;
     //let uvalue = U256::from_be_slice(&leaf_value);
     //println!("EXTRACTED value of slot 0 {}", uvalue);
+    // DOESN?T work because i can't set an empty address erf..
     contract
         .setMapping(U256::from(10), Address::from_slice(&vec![]))
         .send()
