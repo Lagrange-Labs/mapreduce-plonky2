@@ -11,12 +11,11 @@ use crate::{
     visitor::{AstPass, Visit},
 };
 
-#[derive(Default)]
 struct Validator {
     settings: ParsingSettings,
 }
 impl Validator {
-    fn for_query(query: &mut Query) -> Result<Self> {
+    fn for_query(settings: ParsingSettings, query: &mut Query) -> Result<Self> {
         if let SetExpr::Select(ref mut select) = *query.body {
             ensure!(
                 select.projection.iter().all(|s| !matches!(
@@ -40,7 +39,7 @@ impl Validator {
             bail!(ValidationError::NotASelect)
         }
 
-        Ok(Self::default())
+        Ok(Self { settings })
     }
 }
 impl AstPass for Validator {
@@ -395,7 +394,7 @@ impl AstPass for Validator {
 
 /// Ensure that a top-level [`Query`] is compatible with the currently
 /// implemented subset of SQL.
-pub fn validate(query: &mut Query) -> Result<()> {
-    let mut validator = Validator::for_query(query)?;
+pub fn validate(settings: ParsingSettings, query: &mut Query) -> Result<()> {
+    let mut validator = Validator::for_query(settings, query)?;
     query.visit(&mut validator)
 }

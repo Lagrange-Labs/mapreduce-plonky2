@@ -9,14 +9,11 @@
 use alloy::primitives::U256;
 use anyhow::*;
 use log::warn;
-use mp2_common::array::ToField;
-use mp2_common::F;
-use plonky2::field::types::Field;
+use mp2_common::{array::ToField, F};
 use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Query, Select,
     SelectItem, SetExpr, TableAlias, TableFactor, UnaryOperator, Value,
 };
-use std::{collections::HashMap, fmt::Debug};
 use verifiable_db::query::{
     aggregation::{QueryBoundSource, QueryBounds},
     computational_hash_ids::{AggregationOperation, Operation, PlaceholderIdentifier},
@@ -302,144 +299,6 @@ impl<C: ContextProvider> Resolver<C> {
 
             _ => false,
         })
-    }
-
-    /// Return whether the given [`Expr`] refers to a placeholder.
-    fn is_placeholder(&self, expr: &Expr) -> Result<Option<PlaceholderIdentifier>> {
-        Ok(match expr {
-            Expr::Identifier(s) => match self.scopes.resolve_freestanding(s)? {
-                Symbol::NamedExpression { payload, .. } | Symbol::Expression(payload) => {
-                    match payload {
-                        Wire::PlaceHolder(placeholder) => Some(placeholder.clone()),
-                        _ => None,
-                    }
-                }
-                _ => None,
-            },
-            Expr::CompoundIdentifier(compound) => match self.scopes.resolve_compound(compound)? {
-                Symbol::NamedExpression { payload, .. } | Symbol::Expression(payload) => {
-                    match payload {
-                        Wire::PlaceHolder(placeholder) => Some(placeholder.clone()),
-                        _ => None,
-                    }
-                }
-                _ => None,
-            },
-            Expr::Value(Value::Placeholder(_)) => todo!(),
-            _ => None,
-        })
-    }
-
-    /// If it is static, evaluate an expression and return its value.
-    ///
-    /// NOTE: this will be used (i) in optimization and (ii) when boundaries
-    /// will accept more complex expression.
-    fn const_eval(&self, expr: &Expr) -> Result<U256> {
-        #[allow(non_snake_case)]
-        let ONE = U256::from_str_radix("1", 2).unwrap();
-        const ZERO: U256 = U256::ZERO;
-
-        match expr {
-            Expr::Identifier(_) => todo!(),
-            Expr::CompoundIdentifier(_) => todo!(),
-            Expr::BinaryOp { left, op, right } => {
-                let left = self.const_eval(left)?;
-                let right = self.const_eval(right)?;
-                Ok(match op {
-                    BinaryOperator::Plus => left + right,
-                    BinaryOperator::Minus => left - right,
-                    BinaryOperator::Multiply => left * right,
-                    BinaryOperator::Divide => left / right,
-                    BinaryOperator::Modulo => left % right,
-                    BinaryOperator::Gt => {
-                        if left > right {
-                            ONE
-                        } else {
-                            ZERO
-                        }
-                    }
-                    BinaryOperator::Lt => {
-                        if left < right {
-                            ONE
-                        } else {
-                            ZERO
-                        }
-                    }
-                    BinaryOperator::GtEq => {
-                        if left >= right {
-                            ONE
-                        } else {
-                            ZERO
-                        }
-                    }
-                    BinaryOperator::LtEq => {
-                        if left <= right {
-                            ONE
-                        } else {
-                            ZERO
-                        }
-                    }
-                    BinaryOperator::Eq => {
-                        if left == right {
-                            ONE
-                        } else {
-                            ZERO
-                        }
-                    }
-                    BinaryOperator::NotEq => {
-                        if left != right {
-                            ONE
-                        } else {
-                            ZERO
-                        }
-                    }
-                    BinaryOperator::And => {
-                        if !left.is_zero() && !right.is_zero() {
-                            ONE
-                        } else {
-                            ZERO
-                        }
-                    }
-                    BinaryOperator::Or => {
-                        if !left.is_zero() || !right.is_zero() {
-                            ONE
-                        } else {
-                            ZERO
-                        }
-                    }
-                    BinaryOperator::Xor => {
-                        if !left.is_zero() ^ !right.is_zero() {
-                            ONE
-                        } else {
-                            ZERO
-                        }
-                    }
-                    _ => unreachable!(),
-                })
-            }
-            Expr::UnaryOp { op, expr } => {
-                let e = self.const_eval(expr)?;
-                Ok(match op {
-                    UnaryOperator::Plus => e,
-                    UnaryOperator::Not => {
-                        if e.is_zero() {
-                            ONE
-                        } else {
-                            ZERO
-                        }
-                    }
-                    _ => unreachable!(),
-                })
-            }
-            Expr::Nested(e) => self.const_eval(e),
-            Expr::Value(value) => match value {
-                Value::Number(s, _) | Value::SingleQuotedString(s) => str_to_u256(s),
-                Value::Boolean(b) => Ok(if *b { ONE } else { ZERO }),
-                Value::Placeholder(_) => todo!(),
-                _ => unreachable!(),
-            },
-            _ => bail!("`{expr}`: non-const expression"),
-        }
     }
 
     /// Convert the given [`Expr`] a [`QueryBoundSource`]. It is assumed that

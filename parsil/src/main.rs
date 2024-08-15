@@ -1,8 +1,9 @@
 use anyhow::*;
 use clap::{Parser, Subcommand};
 use log::Level;
-use parsil::prepare;
+use sqlparser::ast::Query;
 use symbols::FileContextProvider;
+use utils::{ParsingSettings, PlaceholderRegister};
 
 mod errors;
 mod executor;
@@ -46,14 +47,23 @@ enum QueryKind {
     Keys,
 }
 
+fn prepare(settings: ParsingSettings, query: &str) -> Result<Query> {
+    let mut query = parser::parse(settings, query)?;
+    expand::expand(&mut query);
+    Ok(query)
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     stderrlog::new().verbosity(Level::Debug).init().unwrap();
+    let settings = ParsingSettings {
+        placeholders: PlaceholderRegister::default(3),
+    };
 
     match args.command {
         Command::Debug {} => {
             println!("Query string:\n{}", &args.request);
-            let query = prepare(&args.request)?;
+            let query = prepare(settings, &args.request)?;
             if args.verbose {
                 println!("{:#?}", query);
             }
@@ -61,12 +71,12 @@ fn main() -> Result<()> {
         }
         Command::Circuit {} => {
             let ctx = FileContextProvider::from_file("tests/context.json")?;
-            let query = prepare(&args.request)?;
-            resolve::resolve(&query, ctx, Default::default())?;
+            let query = prepare(settings.clone(), &args.request)?;
+            resolve::resolve(&query, ctx, settings)?;
         }
         Command::Query { kind } => {
             let ctx = FileContextProvider::from_file("tests/context.json")?;
-            let query = prepare(&args.request)?;
+            let query = prepare(settings, &args.request)?;
             println!(
                 "{}",
                 match kind {

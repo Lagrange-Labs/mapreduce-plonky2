@@ -1,5 +1,6 @@
 use anyhow::Result;
 use sqlparser::ast::Query;
+use utils::ParsingSettings;
 
 pub mod errors;
 pub mod executor;
@@ -13,16 +14,14 @@ mod utils;
 mod validate;
 mod visitor;
 
-pub use utils::ParsingSettings;
-
 /// Given an SQL `query`:
 ///  - parse it;
 ///  - ensure that it validates Lagrange requirements;
 ///  - expand it into base operations processable by the proof system.
 ///
 /// Return an error if any of these steps failed.
-pub fn prepare(query: &str) -> Result<Query> {
-    let mut query = parser::parse(query)?;
+pub fn prepare(settings: ParsingSettings, query: &str) -> Result<Query> {
+    let mut query = parser::parse(settings, query)?;
     expand::expand(&mut query);
     Ok(query)
 }
