@@ -1,6 +1,9 @@
 use anyhow::Result;
 
-use crate::{check, resolve::resolve, symbols::FileContextProvider, utils::ParsilSettings};
+use crate::{
+    symbols::FileContextProvider,
+    utils::{parse_and_validate, ParsilSettings, PlaceholderSettings},
+};
 
 /// NOTE: queries that may bother us in the future
 const CAREFUL: &[&str] = &[
@@ -12,6 +15,11 @@ const CAREFUL: &[&str] = &[
 
 #[test]
 fn must_accept() -> Result<()> {
+    let settings = ParsilSettings {
+        context: FileContextProvider::from_file("tests/context.json")?,
+        placeholders: PlaceholderSettings::with_freestanding(3),
+    };
+
     for q in [
         "SELECT 25",
         "SELECT q, r FROM pipo WHERE block = 3",
@@ -25,13 +33,18 @@ fn must_accept() -> Result<()> {
         "SELECT '0b01001'",
         "SELECT '0o1234567'",
     ] {
-        check(q)?;
+        parse_and_validate(q, &settings)?;
     }
     Ok(())
 }
 
 #[test]
 fn must_reject() {
+    let settings = ParsilSettings {
+        context: FileContextProvider::from_file("tests/context.json").unwrap(),
+        placeholders: PlaceholderSettings::with_freestanding(3),
+    };
+
     for q in [
         // Mixing aggregates and scalars
         "SELECT q, MIN(r) FROM pipo WHERE block = 3",
@@ -62,12 +75,16 @@ fn must_reject() {
         // Invalid digit
         "SELECT '0o12345678'",
     ] {
-        assert!(dbg!(check(q)).is_err())
+        assert!(dbg!(parse_and_validate(q, &settings)).is_err())
     }
 }
 
 #[test]
 fn must_resolve() -> Result<()> {
+    let settings = ParsilSettings {
+        context: FileContextProvider::from_file("tests/context.json")?,
+        placeholders: PlaceholderSettings::with_freestanding(3),
+    };
     for q in [
         "SELECT foo FROM table2",
         "SELECT foo FROM table2 WHERE bar < 3",
@@ -76,18 +93,19 @@ fn must_resolve() -> Result<()> {
         "SELECT foo, bar FROM table2 ORDER BY bar",
         "SELECT foo, bar FROM table2 ORDER BY foo, bar",
     ] {
-        let ctx = FileContextProvider::from_file("tests/context.json")?;
-        let query = check(q)?;
-        resolve(&query, ctx, ParsilSettings::default())?;
+        parse_and_validate(q, &settings);
     }
     Ok(())
 }
 
 #[test]
 fn ref_query() -> Result<()> {
+    let settings = ParsilSettings {
+        context: FileContextProvider::from_file("tests/context.json")?,
+        placeholders: PlaceholderSettings::with_freestanding(3),
+    };
+
     let q = "SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99";
-    let query = check(q)?;
-    let ctx = FileContextProvider::from_file("tests/context.json")?;
-    let exposed = resolve(&query, ctx, ParsilSettings::default())?;
+    let query = parse_and_validate(q, &settings)?;
     Ok(())
 }
