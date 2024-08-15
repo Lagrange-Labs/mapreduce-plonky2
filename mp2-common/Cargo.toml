@@ -40,3 +40,4 @@ rstest.workspace = true
 
 [features]
 ci = ["mp2_test/ci"]
+original_poseidon = []

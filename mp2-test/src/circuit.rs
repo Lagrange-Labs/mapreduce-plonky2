@@ -409,7 +409,7 @@ pub fn prove_circuit<
     let now = std::time::Instant::now();
     u.prove(&mut pw, &setup.0);
     let proof = setup.1.prove(pw).expect("invalid proof");
-    println!("[+] Proof generated in {:?}s", now.elapsed().as_secs());
+    println!("[+] Proof generated in {:?}ms", now.elapsed().as_millis());
     setup
         .2
         .verify(proof.clone())
