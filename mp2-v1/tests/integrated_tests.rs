@@ -11,6 +11,7 @@ use std::{
     path::PathBuf,
 };
 
+use alloy::{eips::BlockNumberOrTag, primitives::U256, providers::ProviderBuilder};
 use anyhow::{Context, Result};
 
 use common::{
@@ -25,6 +26,7 @@ use common::{
 };
 use envconfig::Envconfig;
 use log::info;
+use mp2_common::eth::ProofQuery;
 use parsil::symbols::ContextProvider;
 use test_log::test;
 
@@ -131,6 +133,50 @@ fn read_table_info(f: &str) -> Result<TableInfo> {
     let reader = BufReader::new(file);
     let info = serde_json::from_reader(reader)?;
     Ok(info)
+}
+
+use crate::common::bindings::simple::Simple::{self};
+#[tokio::test]
+async fn test_empty_mpt() -> Result<()> {
+    let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
+    let mut ctx = context::new_local_chain(storage).await;
+    info!("Building querying params");
+    let mut single = TestCase::single_value_test_case(&ctx, TreeFactory::New).await?;
+    let provider = ProviderBuilder::new()
+        .with_recommended_fillers()
+        .wallet(ctx.wallet())
+        .on_http(ctx.rpc_url.parse().unwrap());
+
+    let contract = Simple::new(single.contract_address, &provider);
+    let value = U256::from(10);
+    contract
+        .setS2(value)
+        .send()
+        .await
+        .unwrap()
+        .watch()
+        .await
+        .unwrap();
+    let bn = ctx.block_number().await;
+    let query = ProofQuery::new_simple_slot(single.contract_address, 0);
+    let response = ctx
+        .query_mpt_proof(&query, BlockNumberOrTag::Number(bn))
+        .await;
+    println!(
+        "GIVEN VALUE of slot 0 : {}",
+        response.storage_proof[0].value
+    );
+    let leaf = response.storage_proof[0].proof.last().unwrap().to_vec();
+    println!("LEAF: {:?}", leaf);
+    println!(
+        "--> len of proof = {}",
+        response.storage_proof[0].proof.len()
+    );
+    let tuple = rlp::decode_list(&leaf);
+    let leaf_value: Vec<u8> = rlp::decode(&tuple)?;
+    let uvalue = U256::from_be_slice(&leaf_value);
+    println!("EXTRACTED value of slot 0 {}", uvalue);
+    Ok(())
 }
 
 //#[test]

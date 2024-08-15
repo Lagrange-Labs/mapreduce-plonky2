@@ -978,7 +978,11 @@ mod tests {
                 .zip(column_ids.iter())
                 .map(|(&value, &id)| ColumnCell::new(id, value))
                 .collect_vec();
-            let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
+            let row_cells = RowCells::new(
+                column_cells[0].clone(),
+                column_cells[1].clone(),
+                column_cells[2..].to_vec(),
+            );
             let input = Input::new_universal_circuit(
                 &row_cells,
                 &predicate_operations,
@@ -1425,7 +1429,11 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
+            &RowCells::new(
+                column_cells[0].clone(),
+                column_cells[1].clone(),
+                column_cells[2..].to_vec(),
+            ),
             &predicate_operations,
             &results,
             &placeholders,
@@ -1528,7 +1536,11 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
+            &RowCells::new(
+                column_cells[0].clone(),
+                column_cells[1].clone(),
+                column_cells[2..].to_vec(),
+            ),
             &predicate_operations,
             &results,
             &placeholders,
@@ -1625,7 +1637,11 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
+            &RowCells::new(
+                column_cells[0].clone(),
+                column_cells[1].clone(),
+                column_cells[2..].to_vec(),
+            ),
             &predicate_operations,
             &results,
             &placeholders,

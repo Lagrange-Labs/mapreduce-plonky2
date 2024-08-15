@@ -1,6 +1,6 @@
 //! Utility structs and functions used for integration tests
 use anyhow::Result;
-mod bindings;
+pub mod bindings;
 mod block_extraction;
 pub mod cases;
 pub mod celltree;

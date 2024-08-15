@@ -72,7 +72,7 @@ fn main() -> Result<()> {
             println!("Final query:\n{}", query);
         }
         Command::Circuit {} => {
-            circuit::Assembler::assemble(&query, &settings)?;
+            circuit::Assembler::validate(&query, &settings)?;
         }
         Command::Query { kind } => {
             let ctx = FileContextProvider::from_file("tests/context.json")?;

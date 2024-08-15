@@ -414,7 +414,11 @@ mod tests {
         let column_cells = (0..NUM_COLUMNS)
             .map(|_| ColumnCell::new(rng.gen(), gen_random_u256(rng)))
             .collect_vec();
-        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
+        let row_cells = RowCells::new(
+            column_cells[0].clone(),
+            column_cells[1].clone(),
+            column_cells[2..].to_vec(),
+        );
         let placeholder_ids = [0, 1].map(|i| PlaceholderIdentifier::Generic(i));
         let predicate_operations = vec![
             // C4 < $2

@@ -131,7 +131,7 @@ impl TestContext {
                     id,
                     value,
                     hex::encode(cell_root_hash_from_proof.clone()),
-                    hex::encode(row.cell_root_hash.unwrap(),0)
+                    hex::encode(row.cell_root_hash.unwrap().0)
                 );
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)

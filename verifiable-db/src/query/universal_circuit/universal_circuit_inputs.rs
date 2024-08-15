@@ -382,11 +382,11 @@ pub struct RowCells {
 }
 
 impl RowCells {
-    pub fn new(primary: &ColumnCell, secondary: &ColumnCell, rest: &[ColumnCell]) -> Self {
+    pub fn new(primary: ColumnCell, secondary: ColumnCell, rest: Vec<ColumnCell>) -> Self {
         Self {
-            primary: primary.clone(),
-            secondary: secondary.clone(),
-            rest: rest.to_vec(),
+            primary,
+            secondary,
+            rest,
         }
     }
     /// Get number of columns in the row represented by `self`

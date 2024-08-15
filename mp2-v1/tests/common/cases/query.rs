@@ -52,7 +52,9 @@ use tokio_postgres::Row as PsqlRow;
 use verifiable_db::query::{
     self,
     aggregation::{ChildPosition, NodeInfo, QueryBounds, SubProof},
-    universal_circuit::universal_circuit_inputs::{ColumnCell, PlaceholderId, Placeholders},
+    universal_circuit::universal_circuit_inputs::{
+        ColumnCell, PlaceholderId, Placeholders, RowCells,
+    },
 };
 
 pub const NUM_COLUMNS: usize = 3;
@@ -738,17 +740,13 @@ async fn prove_single_row(
         row_payload.secondary_index_value(),
     );
     let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(primary));
-    let all_cells = once(primary_cell)
-        .chain(once(secondary_cell))
-        .chain(rest_cells)
-        .collect::<Vec<_>>();
-    check_correct_cells_tree(&all_cells, &row_payload).await?;
+    let row = RowCells::new(primary_cell, secondary_cell, rest_cells);
     // 2. create input
     let input = CircuitInput::new_universal_circuit(
-        &all_cells,
+        &row,
         &pis.predication_operations,
         &pis.result,
-        &Placeholders(query.placeholders),
+        &query.placeholders,
         row_ctx.is_leaf(),
         &query.bounds,
     )
@@ -776,7 +774,7 @@ async fn prove_single_row(
 #[derive(Clone, Debug)]
 struct QueryCooking {
     query: String,
-    placeholders: HashMap<PlaceholderId, U256>,
+    placeholders: Placeholders,
     bounds: QueryBounds,
     min_block: BlockPrimaryIndex,
     max_block: BlockPrimaryIndex,
@@ -894,12 +892,8 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     //          * we can't have "sec_index < $3" OR "sec_index > $4"
     //          * but we can have "sec_index < $3 AND (price < $3 -10 OR sec_index * price < $4 + 20")
     //              * only the first predicate is used in range query
-    let bounds = QueryBounds::new(
-        U256::from(min_block),
-        U256::from(max_block),
-        Some(longest_key.value),
-        Some(longest_key.value),
-    );
+    let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
+    let bounds = QueryBounds::new(&placeholders, None, None)?;
     let query_str = format!(
         "SELECT AVG({value_column})
                 FROM {table_name}
@@ -972,7 +966,11 @@ async fn check_correct_cells_tree(
     payload: &RowPayload<BlockPrimaryIndex>,
 ) -> Result<()> {
     let local_cells = all_cells.iter().cloned().collect::<Vec<_>>();
-    let expected_cells_root = payload.cell_root_hash.clone();
+    let expected_cells_root = payload
+        .cell_root_hash
+        .clone()
+        .or(Some(HashOutput::from(*empty_poseidon_hash())))
+        .unwrap();
     let mut tree = indexing::cell::new_tree().await;
     tree.in_transaction(|t| {
         async move {
@@ -1057,7 +1055,7 @@ impl<T: Eq + Default + std::fmt::Debug + Clone> LagrangeNode for RowPayload<T> {
     }
 
     fn embedded_hash(&self) -> HashOutput {
-        self.cell_root_hash.clone()
+        self.cell_root_hash.clone().unwrap()
     }
 }
 

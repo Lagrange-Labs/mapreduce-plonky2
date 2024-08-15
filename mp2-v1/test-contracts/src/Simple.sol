@@ -39,6 +39,9 @@ contract Simple {
         s3 = newS3;
         s4 = newS4;
     }
+    function setS2(uint256 newS2) public {
+      s2 = newS2;
+    }
 
     // Set a mapping slot by key and value.
     function setMapping(uint256 key, address value) public {

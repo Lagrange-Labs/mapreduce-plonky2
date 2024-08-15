@@ -1287,7 +1287,11 @@ mod tests {
             .zip(column_ids.iter())
             .map(|(&value, &id)| ColumnCell { value, id })
             .collect_vec();
-        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
+        let row_cells = RowCells::new(
+            column_cells[0].clone(),
+            column_cells[1].clone(),
+            column_cells[2..].to_vec(),
+        );
         // define placeholders
         let first_placeholder_id = PlaceholderId::Generic(0);
         let second_placeholder_id = PlaceholderIdentifier::Generic(1);
@@ -1630,7 +1634,11 @@ mod tests {
             .zip(column_ids.iter())
             .map(|(&value, &id)| ColumnCell { value, id })
             .collect_vec();
-        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
+        let row_cells = RowCells::new(
+            column_cells[0].clone(),
+            column_cells[1].clone(),
+            column_cells[2..].to_vec(),
+        );
         // define placeholders
         let first_placeholder_id = PlaceholderId::Generic(0);
         let second_placeholder_id = PlaceholderIdentifier::Generic(1);
