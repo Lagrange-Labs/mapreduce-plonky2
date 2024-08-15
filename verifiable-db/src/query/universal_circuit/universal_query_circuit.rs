@@ -333,7 +333,7 @@ impl QueryBound {
                 if let Some(operand) = op.second_operand {
                     match operand {
                         InputOperand::Constant(_) | InputOperand::Placeholder(_) => (),
-                        _ => bail!("Invalid operand for query bound operation: must be either a placeholder or a constant")     
+                        _ => bail!("Invalid operand for query bound operation: must be either a placeholder or a constant")
                     }
                 }
                 *op
@@ -1289,8 +1289,8 @@ mod tests {
             .collect_vec();
         let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
         // define placeholders
-        let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
-        let second_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(1);
+        let first_placeholder_id = PlaceholderId::Generic(0);
+        let second_placeholder_id = PlaceholderIdentifier::Generic(1);
         let mut placeholders = Placeholders::new_empty(
             U256::default(),
             U256::default(), // dummy values
@@ -1299,7 +1299,7 @@ mod tests {
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is the max query bound
-        let third_placeholder_id = PlaceholderId::GenericPlaceholder(2);
+        let third_placeholder_id = PlaceholderId::Generic(2);
         placeholders.insert(third_placeholder_id, max_query);
 
         // build predicate operations
@@ -1632,8 +1632,8 @@ mod tests {
             .collect_vec();
         let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
         // define placeholders
-        let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
-        let second_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(1);
+        let first_placeholder_id = PlaceholderId::Generic(0);
+        let second_placeholder_id = PlaceholderIdentifier::Generic(1);
         let mut placeholders = Placeholders::new_empty(
             U256::default(),
             U256::default(), // dummy values
@@ -1642,7 +1642,7 @@ mod tests {
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is the min query bound
-        let third_placeholder_id = PlaceholderId::GenericPlaceholder(2);
+        let third_placeholder_id = PlaceholderId::Generic(2);
         placeholders.insert(third_placeholder_id, min_query);
 
         // build predicate operations

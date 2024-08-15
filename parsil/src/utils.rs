@@ -1,29 +1,14 @@
 use alloy::primitives::U256;
 use anyhow::*;
 use std::str::FromStr;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Placeholder {
-    LowerBlock(usize),
-    HigherBlock(usize),
-    Standard(usize),
-}
-impl Placeholder {
-    pub(crate) fn id(&self) -> usize {
-        match self {
-            Placeholder::LowerBlock(id)
-            | Placeholder::HigherBlock(id)
-            | Placeholder::Standard(id) => *id,
-        }
-    }
-}
+use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
 
 /// This register handle all operations related to placeholder registration,
 /// lookup an validation.
 #[derive(Debug)]
 pub(crate) struct PlaceholderRegister {
     /// The set of available placeholders.
-    register: Vec<(String, Placeholder)>,
+    register: Vec<(String, PlaceholderIdentifier)>,
 }
 impl std::default::Default for PlaceholderRegister {
     /// Instantiate a test-appropriate register with block, block max, and three
@@ -31,11 +16,11 @@ impl std::default::Default for PlaceholderRegister {
     fn default() -> Self {
         PlaceholderRegister {
             register: vec![
-                ("$min_block".into(), Placeholder::LowerBlock(0)),
-                ("$max_block".into(), Placeholder::HigherBlock(1)),
-                ("$1".into(), Placeholder::Standard(2)),
-                ("$2".into(), Placeholder::Standard(3)),
-                ("$3".into(), Placeholder::Standard(4)),
+                ("$min_block".into(), PlaceholderIdentifier::MinQueryOnIdx1),
+                ("$max_block".into(), PlaceholderIdentifier::MaxQueryOnIdx1),
+                ("$1".into(), PlaceholderIdentifier::Generic(1)),
+                ("$2".into(), PlaceholderIdentifier::Generic(1)),
+                ("$3".into(), PlaceholderIdentifier::Generic(1)),
             ],
         }
     }
@@ -43,7 +28,7 @@ impl std::default::Default for PlaceholderRegister {
 impl PlaceholderRegister {
     /// Given a placeholder name, return, if it exists, the associated
     /// [`Placeholder`].
-    pub(crate) fn resolve(&self, s: &str) -> Option<Placeholder> {
+    pub(crate) fn resolve(&self, s: &str) -> Option<PlaceholderIdentifier> {
         self.register
             .iter()
             .find(|(name, _)| name == s)

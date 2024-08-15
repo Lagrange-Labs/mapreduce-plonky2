@@ -927,7 +927,7 @@ mod tests {
             output_items,
             aggregation_op_ids.clone(),
         );
-        let first_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(0);
+        let first_placeholder_id = PlaceholderIdentifier::Generic(0);
         let placeholders = Placeholders::from((
             vec![(first_placeholder_id, U256::from(max_query_secondary))],
             U256::from(min_query_primary),

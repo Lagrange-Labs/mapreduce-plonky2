@@ -415,7 +415,7 @@ mod tests {
             .map(|_| ColumnCell::new(rng.gen(), gen_random_u256(rng)))
             .collect_vec();
         let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
-        let placeholder_ids = [0, 1].map(|i| PlaceholderIdentifier::GenericPlaceholder(i));
+        let placeholder_ids = [0, 1].map(|i| PlaceholderIdentifier::Generic(i));
         let predicate_operations = vec![
             // C4 < $2
             BasicOperation::new_binary_operation(

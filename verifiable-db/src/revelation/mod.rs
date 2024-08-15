@@ -85,7 +85,7 @@ pub(crate) mod tests {
             // Create an array of sample placeholder identifiers,
             // will set the first 4 to the query bounds as below.
             let mut placeholder_ids: [PlaceholderIdentifier; PH] =
-                array::from_fn(|_| PlaceholderIdentifier::GenericPlaceholder(rng.gen()));
+                array::from_fn(|_| PlaceholderIdentifier::Generic(rng.gen()));
             let mut placeholder_values = array::from_fn(|_| U256::from_limbs(rng.gen()));
 
             // Set the first 2 placeholder identifiers as below constants.

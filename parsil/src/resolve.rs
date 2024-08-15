@@ -16,18 +16,19 @@ use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Query, Select,
     SelectItem, SetExpr, TableAlias, TableFactor, UnaryOperator, Value,
 };
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug};
 use verifiable_db::query::{
-    computational_hash_ids::{AggregationOperation, Operation},
+    aggregation::{QueryBoundSource, QueryBounds},
+    computational_hash_ids::{AggregationOperation, Operation, PlaceholderIdentifier},
     universal_circuit::universal_circuit_inputs::{
-        BasicOperation, InputOperand, OutputItem, ResultStructure,
+        BasicOperation, InputOperand, OutputItem, Placeholders, ResultStructure,
     },
 };
 
 use crate::{
     errors::ValidationError,
     symbols::{ColumnKind, ContextProvider, Handle, Kind, ScopeTable, Symbol},
-    utils::{str_to_u256, ParsingSettings, Placeholder},
+    utils::{str_to_u256, ParsingSettings},
     visitor::{AstPass, Visit},
 };
 
@@ -44,7 +45,7 @@ enum Wire {
     /// A wire referring to the given constant in the constant storage.
     Constant(usize),
     /// A wire referring to a placeholder, carrying its natural index.
-    PlaceHolder(Placeholder),
+    PlaceHolder(PlaceholderIdentifier),
     /// A wire associating an aggregation function to an existing wire
     Aggregation(AggregationOperation, Box<Wire>),
 }
@@ -86,12 +87,14 @@ struct CircuitData {
 /// During the compilation step, the resulting operations and wires may be
 /// stored either as query operations if the apply to the SELECTed terms, or as
 /// predicate operations if the make up the WHERE term.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum StorageTarget {
     /// Store the compilation object as SELECT-related
     Query,
     /// Store the compilation object as WHERE-related
     Predicate,
+    /// An immediately accumulating storage target
+    Immediate(Vec<BasicOperation>),
 }
 
 /// A light wrapper over a Vec that avoids inserting twice the same element,
@@ -132,10 +135,10 @@ impl<T: PartialEq> UniqueStorage<T> {
 /// An interval used to constraint the secondary index of a query.
 #[derive(Debug, Default, Clone)]
 struct Bounds {
-    /// The higher bound, may be a constant or a placeholder
-    high: Option<InputOperand>,
-    /// The lower bound, may be a constant or a placeholder
-    low: Option<InputOperand>,
+    /// The higher bound, may be a constant or a static expression
+    high: Option<QueryBoundSource>,
+    /// The lower bound, may be a constant or a static expression
+    low: Option<QueryBoundSource>,
 }
 
 pub(crate) struct Resolver<C: ContextProvider> {
@@ -265,6 +268,18 @@ impl<C: ContextProvider> Resolver<C> {
         })
     }
 
+    /// Return the depth of the given expression, in terms of [`BasicOperation`] it will take to encode.
+    fn depth(&self, e: &Expr) -> usize {
+        match e {
+            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => 0,
+            Expr::BinaryOp { left, right, .. } => 1 + self.depth(left).max(self.depth(right)),
+            Expr::UnaryOp { expr, .. } => 1 + self.depth(expr),
+            Expr::Nested(e) => self.depth(e),
+            Expr::Value(_) => 0,
+            _ => unreachable!(),
+        }
+    }
+
     /// Return whether the given `Symbol` encodes the secondary index column.
     fn is_symbol_secondary_idx(&self, s: &Symbol<Wire>) -> bool {
         match s {
@@ -290,7 +305,7 @@ impl<C: ContextProvider> Resolver<C> {
     }
 
     /// Return whether the given [`Expr`] refers to a placeholder.
-    fn is_placeholder(&self, expr: &Expr) -> Result<Option<Placeholder>> {
+    fn is_placeholder(&self, expr: &Expr) -> Result<Option<PlaceholderIdentifier>> {
         Ok(match expr {
             Expr::Identifier(s) => match self.scopes.resolve_freestanding(s)? {
                 Symbol::NamedExpression { payload, .. } | Symbol::Expression(payload) => {
@@ -427,6 +442,42 @@ impl<C: ContextProvider> Resolver<C> {
         }
     }
 
+    /// Convert the given [`Expr`] a [`QueryBoundSource`]. It is assumed that
+    /// the input expression has already been checked for correctness for use as
+    /// a SID bound, which means that it resolves correctly, that its depth is
+    /// less than two, and that it is static.
+    fn expression_to_boundary(&mut self, expr: &Expr) -> QueryBoundSource {
+        // A SID can only be bound by only one BasicOperation, that must not be
+        // stored along the query operations. Therefore we use an immediate
+        // storage, whose length will later down checked to be less than two.
+        let mut store = StorageTarget::Immediate(Vec::new());
+
+        // Compile the voundary expression into this storage...
+        let wire = self.compile(expr, &mut store).unwrap();
+        if let StorageTarget::Immediate(ops) = store {
+            assert!(ops.len() <= 1);
+
+            // ...then convert the resulting Wire into a QueryBoundSource
+            match wire {
+                Symbol::Expression(e) => match e {
+                    Wire::BasicOperation(id) => {
+                        // Safety check
+                        assert_eq!(id, 0);
+                        QueryBoundSource::Operation(ops[0].clone())
+                    }
+                    Wire::Constant(id) => {
+                        QueryBoundSource::Constant(self.constants.ops[id].clone())
+                    }
+                    Wire::PlaceHolder(ph) => QueryBoundSource::Placeholder(ph),
+                    _ => unreachable!(),
+                },
+                _ => unreachable!(),
+            }
+        } else {
+            unreachable!();
+        }
+    }
+
     /// Pattern matches the expression to find, it possible, a bound for the
     /// secondary index.
     ///
@@ -436,65 +487,79 @@ impl<C: ContextProvider> Resolver<C> {
     ///   - sid = <placeholder>
     fn maybe_set_secondary_index_boundary(&mut self, expr: &Expr) -> Result<()> {
         if let Expr::BinaryOp { left, op, right } = expr {
-            if self.is_secondary_index(left)? && self.is_expr_static(right)? {
+            if self.is_secondary_index(left)?
+                // SID can only be computed from constants and placeholders
+                && self.is_expr_static(right)?
+                // SID can only be defined by up to one level of BasicOperation
+                && self.depth(right) <= 1
+            {
+                let bound = Some(self.expression_to_boundary(right));
                 match op {
-                    // sid > $x
+                    // $sid > x
                     BinaryOperator::Gt | BinaryOperator::GtEq => {
-                        if self.secondary_index_bounds.high.is_some() {
-                            // impossible to say which is higher between two
-                            // conflicting high bounds
-                            self.secondary_index_bounds.high = None;
-                        } else {
-                            // TODO: wait for final API
-                        }
-                    }
-                    BinaryOperator::Lt | BinaryOperator::LtEq => {
                         if self.secondary_index_bounds.low.is_some() {
-                            // impossible to say which is lower between two
+                            // impossible to say which is higher between two
                             // conflicting low bounds
                             self.secondary_index_bounds.low = None;
                         } else {
-                            // TODO: wait for final API
+                            self.secondary_index_bounds.low = bound;
                         }
                     }
+                    // $sid < x
+                    BinaryOperator::Lt | BinaryOperator::LtEq => {
+                        if self.secondary_index_bounds.high.is_some() {
+                            // impossible to say which is lower between two
+                            // conflicting high bounds
+                            self.secondary_index_bounds.high = None;
+                        } else {
+                            self.secondary_index_bounds.high = bound;
+                        }
+                    }
+                    // $sid = x
                     BinaryOperator::Eq => {
                         if self.secondary_index_bounds.low.is_some()
-                            || self.secondary_index_bounds.high.is_some()
+                            && self.secondary_index_bounds.high.is_some()
                         {
                             self.secondary_index_bounds.low = None;
                             self.secondary_index_bounds.high = None;
                         } else {
-                            // TODO: wait for final API
+                            self.secondary_index_bounds.low = bound.clone();
+                            self.secondary_index_bounds.high = bound;
                         }
                     }
                     _ => {}
                 }
             } else if self.is_secondary_index(right)? && self.is_expr_static(left)? {
+                let bound = Some(self.expression_to_boundary(left));
                 match op {
+                    // x > $sid
                     BinaryOperator::Gt | BinaryOperator::GtEq => {
-                        if self.secondary_index_bounds.low.is_some() {
-                            self.secondary_index_bounds.low = None;
-                        } else {
-                            // TODO: wait for final API
-                        }
-                    }
-                    BinaryOperator::Lt | BinaryOperator::LtEq => {
                         if self.secondary_index_bounds.high.is_some() {
-                            // impossible to say which is lower between two
-                            // conflicting low bounds
                             self.secondary_index_bounds.high = None;
                         } else {
-                            // TODO: wait for final API
+                            self.secondary_index_bounds.high = bound;
                         }
                     }
+                    // x < $sid
+                    BinaryOperator::Lt | BinaryOperator::LtEq => {
+                        if self.secondary_index_bounds.low.is_some() {
+                            // impossible to say which is lower between two
+                            // conflicting high bounds
+                            self.secondary_index_bounds.low = None;
+                        } else {
+                            self.secondary_index_bounds.low = bound;
+                        }
+                    }
+                    // x = $sid
                     BinaryOperator::Eq => {
                         if self.secondary_index_bounds.low.is_some()
-                            || self.secondary_index_bounds.high.is_some()
+                            && self.secondary_index_bounds.high.is_some()
                         {
                             self.secondary_index_bounds.low = None;
                             self.secondary_index_bounds.high = None;
                         } else {
-                            // TODO: wait for final API
+                            self.secondary_index_bounds.low = bound.clone();
+                            self.secondary_index_bounds.high = bound;
                         }
                     }
                     _ => {}
@@ -530,7 +595,7 @@ impl<C: ContextProvider> Resolver<C> {
     ///
     /// `storage_target` determines whether the circuit ojects should be stored
     /// in the SELECT-specific or the WHERE-specific storage target.
-    fn compile(&mut self, expr: &mut Expr, storage_target: StorageTarget) -> Result<Symbol<Wire>> {
+    fn compile(&mut self, expr: &Expr, storage_target: &mut StorageTarget) -> Result<Symbol<Wire>> {
         match expr {
             Expr::Value(v) => Ok(Symbol::Expression(match v {
                 Value::Number(x, _) => self.new_constant(x.parse().unwrap()),
@@ -580,6 +645,10 @@ impl<C: ContextProvider> Resolver<C> {
                         .metadata_mut()
                         .predicates
                         .insert(operation),
+                    StorageTarget::Immediate(ops) => {
+                        ops.push(operation);
+                        ops.len() - 1
+                    }
                 });
 
                 Ok(Symbol::Expression(new_id))
@@ -598,6 +667,10 @@ impl<C: ContextProvider> Resolver<C> {
                             .metadata_mut()
                             .predicates
                             .insert(operation),
+                        StorageTarget::Immediate(ops) => {
+                            ops.push(operation);
+                            ops.len() - 1
+                        }
                     });
                     Ok(Symbol::Expression(new_id))
                 }
@@ -614,8 +687,8 @@ impl<C: ContextProvider> Resolver<C> {
                     _ => unreachable!(),
                 };
 
-                if let FunctionArguments::List(arglist) = &mut funcall.args {
-                    match &mut arglist.args[0] {
+                if let FunctionArguments::List(arglist) = &funcall.args {
+                    match &arglist.args[0] {
                         FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) => {
                             let wire = self.compile(e, storage_target)?;
                             Ok(Symbol::Expression(Wire::Aggregation(
@@ -641,9 +714,7 @@ impl<C: ContextProvider> Resolver<C> {
                 Wire::BasicOperation(idx) => InputOperand::PreviousValue(*idx),
                 Wire::ColumnId(idx) => InputOperand::Column(*idx),
                 Wire::Constant(idx) => InputOperand::Constant(self.constants.get(*idx).clone()),
-                Wire::PlaceHolder(ph) => {
-                    InputOperand::Placeholder(F::from_canonical_usize(ph.id()))
-                }
+                Wire::PlaceHolder(ph) => InputOperand::Placeholder(*ph),
                 Wire::Aggregation(_, _) => unreachable!("an aggregation can not be an operand"),
             },
             _ => unreachable!(),
@@ -676,7 +747,7 @@ impl<C: ContextProvider> Resolver<C> {
 
     /// Generate appropriate universal query circuit PIs from the root context
     /// of this Resolver.
-    fn to_pis(&self) -> Result<CircuitPis> {
+    fn to_pis(&self, placeholders: &Placeholders) -> Result<CircuitPis> {
         let root_scope = &self.scopes.scope_at(1);
 
         let result = if root_scope
@@ -720,8 +791,12 @@ impl<C: ContextProvider> Resolver<C> {
                 .map(|x| x.to_field())
                 .collect(),
             predication_operations: root_scope.metadata().predicates.ops.clone(),
-            // TODO:
-            secondary_index_bounds: self.secondary_index_bounds.clone(),
+            bounds: QueryBounds::new(
+                placeholders,
+                self.secondary_index_bounds.low.clone(),
+                self.secondary_index_bounds.high.clone(),
+            )
+            .context("while setting query bounds")?,
         })
     }
 }
@@ -744,7 +819,7 @@ pub struct CircuitPis {
     /// be the last one in this list.
     pub predication_operations: Vec<BasicOperation>,
     /// If any, the bounds for the secondary index
-    pub secondary_index_bounds: Bounds,
+    pub bounds: QueryBounds,
 }
 
 impl<C: ContextProvider> AstPass for Resolver<C> {
@@ -880,7 +955,7 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
             // expression will mechnically find itself at the last position, as
             // required by the universal query circuit API.
             self.find_secondary_index_boundaries(where_clause)?;
-            self.compile(where_clause, StorageTarget::Predicate)?;
+            self.compile(where_clause, &mut StorageTarget::Predicate)?;
         }
         self.exit_scope()
     }
@@ -890,7 +965,7 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
             if let Some(order_by) = query.order_by.as_mut() {
                 for order_by_expr in order_by.exprs.iter_mut() {
                     let wire_id = self
-                        .compile(&mut order_by_expr.expr, StorageTarget::Query)?
+                        .compile(&mut order_by_expr.expr, &mut StorageTarget::Query)?
                         .to_wire_id();
                     ensure!(
                         self.scopes
@@ -913,12 +988,12 @@ impl<C: ContextProvider> AstPass for Resolver<C> {
         let provided = match select_item {
             SelectItem::ExprWithAlias { expr, alias } => Symbol::NamedExpression {
                 name: Handle::Simple(alias.value.clone()),
-                payload: self.compile(expr, StorageTarget::Query)?.to_wire_id(),
+                payload: self.compile(expr, &mut StorageTarget::Query)?.to_wire_id(),
             },
             SelectItem::UnnamedExpr(e) => match e {
                 Expr::Identifier(i) => self.scopes.resolve_freestanding(i)?,
                 Expr::CompoundIdentifier(is) => self.scopes.resolve_compound(is)?,
-                _ => Symbol::Expression(self.compile(e, StorageTarget::Query)?.to_wire_id()),
+                _ => Symbol::Expression(self.compile(e, &mut StorageTarget::Query)?.to_wire_id()),
             },
             SelectItem::Wildcard(_) => Symbol::Wildcard,
             SelectItem::QualifiedWildcard(_, _) => unreachable!(),
@@ -947,8 +1022,10 @@ pub fn resolve<C: ContextProvider>(
         println!("     {i}: {op:?}");
     }
 
-    println!("Sent to circuit:");
-    println!("{:#?}", resolver.to_pis()?);
+    let pis = resolver.to_pis(&Placeholders::new_empty(U256::ZERO, U256::ZERO))?;
 
-    resolver.to_pis()
+    println!("Sent to circuit:");
+    println!("{:#?}", pis);
+
+    Ok(pis)
 }

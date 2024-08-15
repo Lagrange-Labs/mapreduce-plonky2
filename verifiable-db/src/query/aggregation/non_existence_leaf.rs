@@ -312,7 +312,7 @@ mod tests {
         let [subtree_hash, computational_hash, placeholder_hash] =
             array::from_fn(|_| gen_random_field_hash());
 
-        let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
+        let first_placeholder_id = PlaceholderId::Generic(0);
 
         let (min_query, max_query, placeholders) = if is_rows_tree_node {
             let dummy_min_query_primary = U256::ZERO; //dummy value, circuit will employ only bounds for secondary index

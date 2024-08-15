@@ -607,7 +607,7 @@ pub enum PlaceholderIdentifier {
     // MAX_I1
     MaxQueryOnIdx1,
     // $1, $2 ...
-    GenericPlaceholder(usize),
+    Generic(usize),
 }
 
 impl<F: RichField> ToField<F> for PlaceholderIdentifier {
@@ -619,11 +619,11 @@ impl<F: RichField> ToField<F> for PlaceholderIdentifier {
 impl<F: RichField> FromFields<F> for PlaceholderIdentifier {
     fn from_fields(t: &[F]) -> Self {
         let generic_placeholder_start_value =
-            <Self as ToField<F>>::to_field(&Self::GenericPlaceholder(0)).to_canonical_u64();
+            <Self as ToField<F>>::to_field(&Self::Generic(0)).to_canonical_u64();
         match t[0] {
             f if <Self as ToField<F>>::to_field(&Self::MinQueryOnIdx1) == f => Self::MinQueryOnIdx1,
             f if <Self as ToField<F>>::to_field(&Self::MaxQueryOnIdx1) == f => Self::MaxQueryOnIdx1,
-            f => Self::GenericPlaceholder(
+            f => Self::Generic(
                 f.to_canonical_u64()
                     .checked_sub(generic_placeholder_start_value)
                     .expect("invalid field element for PlaceholderIdentifier")
@@ -641,7 +641,7 @@ impl PlaceholderIdentifier {
 
     pub(crate) fn position(&self) -> usize {
         match self {
-            Self::GenericPlaceholder(i) => self.discriminant() + i,
+            Self::Generic(i) => self.discriminant() + i,
             _ => self.discriminant(),
         }
     }
