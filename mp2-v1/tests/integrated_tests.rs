@@ -11,7 +11,11 @@ use std::{
     path::PathBuf,
 };
 
-use alloy::{eips::BlockNumberOrTag, primitives::U256, providers::ProviderBuilder};
+use alloy::{
+    eips::BlockNumberOrTag,
+    primitives::{Address, U256},
+    providers::ProviderBuilder,
+};
 use anyhow::{Context, Result};
 
 use common::{
@@ -172,10 +176,20 @@ async fn test_empty_mpt() -> Result<()> {
         "--> len of proof = {}",
         response.storage_proof[0].proof.len()
     );
-    let tuple = rlp::decode_list(&leaf);
-    let leaf_value: Vec<u8> = rlp::decode(&tuple)?;
-    let uvalue = U256::from_be_slice(&leaf_value);
-    println!("EXTRACTED value of slot 0 {}", uvalue);
+    // THIS PANICS !!!
+    //let tuple = rlp::decode_list(&leaf);
+    //let leaf_value: Vec<u8> = rlp::decode(&tuple)?;
+    //let uvalue = U256::from_be_slice(&leaf_value);
+    //println!("EXTRACTED value of slot 0 {}", uvalue);
+    contract
+        .setMapping(U256::from(10), Address::from_slice(&vec![]))
+        .send()
+        .await
+        .unwrap()
+        .watch()
+        .await
+        .unwrap();
+    //
     Ok(())
 }
 

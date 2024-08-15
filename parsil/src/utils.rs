@@ -64,9 +64,16 @@ pub struct PlaceholderSettings {
     /// The number of free-standing `$i` placeholders
     pub max_free_placeholders: usize,
 }
+
+pub const DEFAULT_MIN_BLOCK_PLACEHOLDER: &str = "$MIN_BLOCK";
+pub const DEFAULT_MAX_BLOCK_PLACEHOLDER: &str = "$MAX_BLOCK";
 impl PlaceholderSettings {
     pub fn with_freestanding(n: usize) -> Self {
-        Self::with_freestanding_and_blocks("$MIN_BLOCK", "$MAX_BLOCK", n)
+        Self::with_freestanding_and_blocks(
+            DEFAULT_MIN_BLOCK_PLACEHOLDER,
+            DEFAULT_MAX_BLOCK_PLACEHOLDER,
+            n,
+        )
     }
 
     pub fn with_freestanding_and_blocks(min_block: &str, max_block: &str, n: usize) -> Self {

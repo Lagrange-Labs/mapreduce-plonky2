@@ -35,7 +35,7 @@ use mp2_v1::{
 };
 use parsil::{
     circuit::CircuitPis, parse_and_validate, symbols::ContextProvider, ParsilSettings,
-    PlaceholderSettings,
+    PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{
@@ -853,10 +853,6 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     // secondary_min = $3, and secondary_max = "$5", placeholders.put(generic, "$4")
     // placeholders.generic(("generic", $3)),(generic,$4), (generic,$5))
     // WHERE price > $3 AND price < $4 <--
-    let placeholders = HashMap::from([
-        (F::from_canonical_usize(1), U256::from(min_block)),
-        (F::from_canonical_usize(2), U256::from(max_block)),
-    ]);
     // placeholders _values = [min_block,max_block,sec_address];
     // "$3" = secondary min placeholder
     // "$4" = secondary max placeholder
@@ -894,11 +890,12 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     //              * only the first predicate is used in range query
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
     let bounds = QueryBounds::new(&placeholders, None, None)?;
+
     let query_str = format!(
         "SELECT AVG({value_column})
                 FROM {table_name}
-                WHERE {BLOCK_COLUMN_NAME} >= $1
-                AND {BLOCK_COLUMN_NAME} <= $2
+                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER} 
+                AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
                 AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
