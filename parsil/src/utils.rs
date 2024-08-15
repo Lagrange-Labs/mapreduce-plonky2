@@ -52,7 +52,7 @@ pub struct ParsilSettings<C: ContextProvider> {
     /// A handle to an object providing a register of the existing virtual
     /// tables and their columns.
     pub context: C,
-    pub(crate) placeholders: PlaceholderSettings,
+    pub placeholders: PlaceholderSettings,
 }
 
 #[derive(Debug)]
@@ -94,7 +94,7 @@ impl PlaceholderSettings {
                 .parse::<usize>()
                 .map_err(|_| ValidationError::UnknownPlaceholder(name.to_owned()))?;
 
-            if i <= self.max_free_placeholders {
+            if i > self.max_free_placeholders {
                 bail!(ValidationError::UnknownPlaceholder(name.to_owned()))
             } else {
                 Ok(PlaceholderIdentifier::Generic(i))

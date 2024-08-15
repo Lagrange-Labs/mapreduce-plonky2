@@ -19,8 +19,9 @@ use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
 use plonky2::field::types::Field;
 use ryhope::{
     storage::{
-        pgsql::SqlStorageSettings, updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage,
-        TreeTransactionalStorage,
+        pgsql::{SqlServerConnection, SqlStorageSettings},
+        updatetree::UpdateTree,
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
     tree::{
         sbbst,
@@ -145,8 +146,8 @@ impl Table {
         let row_tree = MerkleRowTree::new(
             InitSettings::MustExist,
             SqlStorageSettings {
-                db_url: db_url.clone(),
                 table: row_table_name(&table_name),
+                source: SqlServerConnection::NewConnection(db_url.clone()),
             },
         )
         .await
@@ -154,7 +155,7 @@ impl Table {
         let index_tree = MerkleIndexTree::new(
             InitSettings::MustExist,
             SqlStorageSettings {
-                db_url: db_url.clone(),
+                source: SqlServerConnection::NewConnection(db_url.clone()),
                 table: index_table_name(&table_name),
             },
         )
@@ -179,11 +180,11 @@ impl Table {
     pub async fn new(genesis_block: u64, table_name: String, columns: TableColumns) -> Self {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
         let db_settings_index = SqlStorageSettings {
-            db_url: db_url.clone(),
+            source: SqlServerConnection::NewConnection(db_url.clone()),
             table: index_table_name(&table_name),
         };
         let db_settings_row = SqlStorageSettings {
-            db_url: db_url.clone(),
+            source: SqlServerConnection::NewConnection(db_url.clone()),
             table: row_table_name(&table_name),
         };
 
@@ -395,7 +396,7 @@ impl Table {
             let root = self.row.root_data().await.unwrap();
             println!(
                 " ++ After row update, row cell tree root tree proof hash = {:?}",
-                hex::encode(root.cell_root_hash.0)
+                hex::encode(root.cell_root_hash.unwrap().0)
             );
             self.row.print_tree().await;
             println!("\n+++++++++++++++++++++++++++++++++\n");
@@ -475,7 +476,7 @@ pub struct RowUpdateResult {
 
 #[derive(Debug, Clone)]
 pub struct CellsUpdate<PrimaryIndex> {
-    /// Row key where to fetch the previous cells existing. In case  of  
+    /// Row key where to fetch the previous cells existing. In case  of
     /// a secondary index value changing, that means a deletion + insertion.
     /// So tree logic should fetch the cells from the to-be-deleted row first
     ///     * In case there is no update of secondary index value, this value is

@@ -1,14 +1,16 @@
 use anyhow::Result;
 use symbols::ContextProvider;
-use utils::{parse_and_validate, ParsilSettings};
+pub use utils::parse_and_validate;
+pub use utils::ParsilSettings;
+pub use utils::PlaceholderSettings;
 
-mod circuit;
+pub mod circuit;
 pub mod errors;
-mod executor;
+pub mod executor;
 mod expand;
 mod parser;
 mod placeholders;
-mod symbols;
+pub mod symbols;
 #[cfg(test)]
 mod tests;
 mod utils;

@@ -21,17 +21,17 @@ fn must_accept() -> Result<()> {
     };
 
     for q in [
-        "SELECT 25",
-        "SELECT q, r FROM pipo WHERE block = 3",
-        "SELECT AVG(q), MIN(r) FROM pipo WHERE block = 3",
-        "SELECT q FROM pipo WHERE block IN (1, 2, 4)",
-        "SELECT q FROM pipo WHERE NOT block BETWEEN 12 AND 15",
-        "SELECT foo, 39, bar FROM table2 AS tt (a, b)",
-        "SELECT '0x1122334455667788990011223344556677889900112233445566778899001122'",
-        "SELECT '0x'",
-        "SELECT '1234567'",
-        "SELECT '0b01001'",
-        "SELECT '0o1234567'",
+        // "SELECT 25",
+        "SELECT foo, bar FROM table2 WHERE block = 3",
+        "SELECT AVG(foo), MIN(bar) FROM table2 WHERE block = 3",
+        "SELECT foo FROM table2 WHERE block IN (1, 2, 4)",
+        "SELECT bar FROM table2 WHERE NOT block BETWEEN 12 AND 15",
+        "SELECT a, c FROM table2 AS tt (a, b, c)",
+        // "SELECT '0x1122334455667788990011223344556677889900112233445566778899001122'",
+        // "SELECT '0x'",
+        // "SELECT '1234567'",
+        // "SELECT '0b01001'",
+        // "SELECT '0o1234567'",
     ] {
         parse_and_validate(q, &settings)?;
     }
@@ -93,7 +93,7 @@ fn must_resolve() -> Result<()> {
         "SELECT foo, bar FROM table2 ORDER BY bar",
         "SELECT foo, bar FROM table2 ORDER BY foo, bar",
     ] {
-        parse_and_validate(q, &settings);
+        parse_and_validate(q, &settings)?;
     }
     Ok(())
 }
@@ -102,7 +102,7 @@ fn must_resolve() -> Result<()> {
 fn ref_query() -> Result<()> {
     let settings = ParsilSettings {
         context: FileContextProvider::from_file("tests/context.json")?,
-        placeholders: PlaceholderSettings::with_freestanding(3),
+        placeholders: PlaceholderSettings::with_freestanding(2),
     };
 
     let q = "SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99";

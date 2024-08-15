@@ -33,7 +33,10 @@ use mp2_v1::{
     },
     values_extraction::identifier_block_column,
 };
-use parsil::{resolve::CircuitPis, symbols::ContextProvider, ParsilSettings};
+use parsil::{
+    circuit::CircuitPis, parse_and_validate, symbols::ContextProvider, ParsilSettings,
+    PlaceholderSettings,
+};
 use ryhope::{
     storage::{
         pgsql::ToFromBytea,
@@ -49,7 +52,7 @@ use tokio_postgres::Row as PsqlRow;
 use verifiable_db::query::{
     self,
     aggregation::{ChildPosition, NodeInfo, QueryBounds, SubProof},
-    universal_circuit::universal_circuit_inputs::{ColumnCell, PlaceholderId},
+    universal_circuit::universal_circuit_inputs::{ColumnCell, PlaceholderId, Placeholders},
 };
 
 pub const NUM_COLUMNS: usize = 3;
@@ -79,9 +82,13 @@ pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Re
 }
 /// Run a test query on the mapping table such as created during the indexing phase
 async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
+    let settings = ParsilSettings {
+        context: table,
+        placeholders: PlaceholderSettings::with_freestanding(2),
+    };
     let query_info = cook_query(table).await?;
     info!("QUERY on the testcase: {}", query_info.query);
-    let parsed = parsil::check(&query_info.query)?;
+    let parsed = parse_and_validate(&query_info.query, &settings)?;
     println!("QUERY table columns -> {:?}", table.columns.to_zkcolumns());
     info!(
         "BOUNDS found on query: min {}, max {} - table.genesis_block {}",
@@ -104,7 +111,7 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
     // the query to use to fetch all the rows keys involved in the result tree.
-    let pis = parsil::resolve::resolve(&parsed, table, ParsingSettings::default())?;
+    let pis = parsil::circuit::assemble(&parsed, &settings)?;
     prove_query(ctx, table, query_info, parsed, pis)
         .await
         .expect("unable to run universal query proof");
@@ -408,7 +415,7 @@ where
 {
     query: QueryCooking,
     genesis: BlockPrimaryIndex,
-    pis: &'a parsil::resolve::CircuitPis,
+    pis: &'a parsil::circuit::CircuitPis,
     ctx: &'a mut TestContext,
     tree: &'a MerkleTreeKvDb<T, V, S>,
     columns: TableColumns,
@@ -741,7 +748,7 @@ async fn prove_single_row(
         &all_cells,
         &pis.predication_operations,
         &pis.result,
-        &query.placeholders,
+        &Placeholders(query.placeholders),
         row_ctx.is_leaf(),
         &query.bounds,
     )

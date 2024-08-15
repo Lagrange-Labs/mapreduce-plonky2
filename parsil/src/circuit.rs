@@ -160,28 +160,6 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         Ok(())
     }
 
-    pub fn assemble(q: &Query, settings: &ParsilSettings<C>) -> Result<CircuitPis> {
-        let mut converted_query = q.clone();
-        let mut resolver = Assembler::new(settings);
-        converted_query.visit(&mut resolver)?;
-        println!("Original query:\n>> {}", q);
-        println!("Translated query:\n>> {}", converted_query);
-
-        resolver.scopes.pretty();
-
-        println!("Query ops:");
-        for (i, op) in resolver.query_ops.ops.iter().enumerate() {
-            println!("     {i}: {op:?}");
-        }
-
-        let pis = resolver.to_pis(&Placeholders::new_empty(U256::ZERO, U256::ZERO))?;
-
-        println!("Sent to circuit:");
-        println!("{:#?}", pis);
-
-        Ok(pis)
-    }
-
     /// Create a new empty [`Resolver`]
     fn new(settings: &'a ParsilSettings<C>) -> Self {
         Assembler {
@@ -896,4 +874,26 @@ impl<'a, C: ContextProvider> AstPass for Assembler<'a, C> {
         self.scopes.current_scope_mut().provides(provided);
         Ok(())
     }
+}
+
+pub fn assemble<C: ContextProvider>(q: &Query, settings: &ParsilSettings<C>) -> Result<CircuitPis> {
+    let mut converted_query = q.clone();
+    let mut resolver = Assembler::new(settings);
+    converted_query.visit(&mut resolver)?;
+    println!("Original query:\n>> {}", q);
+    println!("Translated query:\n>> {}", converted_query);
+
+    resolver.scopes.pretty();
+
+    println!("Query ops:");
+    for (i, op) in resolver.query_ops.ops.iter().enumerate() {
+        println!("     {i}: {op:?}");
+    }
+
+    let pis = resolver.to_pis(&Placeholders::new_empty(U256::ZERO, U256::ZERO))?;
+
+    println!("Sent to circuit:");
+    println!("{:#?}", pis);
+
+    Ok(pis)
 }

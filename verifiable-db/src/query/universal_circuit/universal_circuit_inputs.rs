@@ -24,7 +24,7 @@ pub type PlaceholderId = PlaceholderIdentifier;
 
 #[derive(Clone, Debug)]
 /// Data structure employed to represent a set of placeholders, identified by their `PlaceholderId`
-pub struct Placeholders(HashMap<PlaceholderId, U256>);
+pub struct Placeholders(pub HashMap<PlaceholderId, U256>);
 
 impl Placeholders {
     /// Initialize an empty set of placeholders
