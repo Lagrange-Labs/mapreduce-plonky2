@@ -1,4 +1,5 @@
 use anyhow::{anyhow, ensure, Context, Result};
+use serde::{de::value, Deserialize, Serialize};
 use std::collections::HashMap;
 
 use alloy::primitives::U256;
@@ -8,16 +9,79 @@ use mp2_common::{
     F,
 };
 
-use crate::query::computational_hash_ids::{Operation, Output};
+use crate::query::{
+    aggregation::QueryBounds,
+    computational_hash_ids::{Operation, Output, PlaceholderIdentifier},
+};
 
-#[derive(Clone, Copy, Debug, Default)]
+use super::universal_query_circuit::dummy_placeholder_id;
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 /// Data structure representing a placeholder in the query, given by its value and its identifier
 pub struct Placeholder {
     pub(crate) value: U256,
     pub(crate) id: PlaceholderId,
 }
 
-pub type PlaceholderId = F;
+pub type PlaceholderId = PlaceholderIdentifier;
+
+#[derive(Clone, Debug)]
+/// Data structure employed to represent a set of placeholders, identified by their `PlaceholderId`
+pub struct Placeholders(HashMap<PlaceholderId, U256>);
+
+impl Placeholders {
+    /// Initialize an empty set of placeholders
+    pub fn new_empty(min_query_primary: U256, max_query_primary: U256) -> Self {
+        Self(
+            [
+                (PlaceholderId::MinQueryOnIdx1, min_query_primary),
+                (PlaceholderId::MaxQueryOnIdx1, max_query_primary),
+            ]
+            .into_iter()
+            .collect(),
+        )
+    }
+
+    /// Get the placeholder value corresponding to `id`, if found in the set of placeholders
+    pub fn get(&self, id: &PlaceholderId) -> Result<U256> {
+        let value = self.0.get(id);
+        ensure!(value.is_some(), "no placeholder found for id {:?}", id);
+        Ok(*value.unwrap())
+    }
+
+    /// Add a new placeholder to `self`
+    pub fn insert(&mut self, id: PlaceholderId, value: U256) {
+        self.0.insert(id, value);
+    }
+
+    /// Get the number of placeholders in `self`
+    pub fn len(&self) -> usize {
+        // number of placeholders in placeholder values
+        self.0.len()
+    }
+
+    pub fn ids(&self) -> Vec<PlaceholderId> {
+        self.0.keys().cloned().collect_vec()
+    }
+
+    pub fn placeholder_values(&self) -> Vec<U256> {
+        self.0.values().cloned().collect_vec()
+    }
+}
+
+impl From<(Vec<(PlaceholderId, U256)>, U256, U256)> for Placeholders {
+    fn from(value: (Vec<(PlaceholderId, U256)>, U256, U256)) -> Self {
+        Self(
+            [
+                (PlaceholderId::MinQueryOnIdx1, value.1),
+                (PlaceholderId::MaxQueryOnIdx1, value.2),
+            ]
+            .into_iter()
+            .chain(value.0)
+            .collect(),
+        )
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// Enumeration representing all the possible types of input operands for a basic operation
@@ -38,7 +102,7 @@ pub enum InputOperand {
 
 impl Default for InputOperand {
     fn default() -> Self {
-        InputOperand::Column(0)
+        InputOperand::Placeholder(dummy_placeholder_id())
     }
 }
 
@@ -75,15 +139,31 @@ impl BasicOperation {
         }
     }
 
+    /// Return the ids of the placeholders employed as operands of `self`, if any
+    pub(crate) fn extract_placeholder_ids(&self) -> Vec<PlaceholderId> {
+        let first_id = match self.first_operand {
+            InputOperand::Placeholder(p) => Some(p),
+            _ => None,
+        };
+        let second_id = self.second_operand.map(|op| match op {
+            InputOperand::Placeholder(p) => Some(p),
+            _ => None,
+        });
+        [first_id, second_id.flatten()]
+            .into_iter()
+            .filter_map(|id| id)
+            .collect_vec()
+    }
+
     /// Compute the results of the `operations` provided as input, employing the provided
     /// `column_values` as the operands for the operations having `InputOperand::Column`
-    /// operands and the provided `placeholder_values` for the operations having `InputOperand::Placeholder`
+    /// operands and the provided `placeholders` for the operations having `InputOperand::Placeholder`
     /// operands. The method returns also a flag which specifies if an arithemtic error
     /// has occurred throughout any of these operations
     pub(crate) fn compute_operations(
         operations: &[Self],
         column_values: &[U256],
-        placeholder_values: &HashMap<PlaceholderId, U256>,
+        placeholders: &Placeholders,
     ) -> Result<(Vec<U256>, bool)> {
         let mut results = Vec::with_capacity(operations.len());
         let mut arithmetic_error = false;
@@ -91,11 +171,7 @@ impl BasicOperation {
         for (i, op) in operations.iter().enumerate() {
             let get_input_value = |operand: &InputOperand| {
                 Ok(match operand {
-                    InputOperand::Placeholder(p) => {
-                        *placeholder_values.get(p).ok_or_else(|| {
-                            anyhow!("No placeholder value found associated to id {}", p)
-                        })?
-                    }
+                    InputOperand::Placeholder(p) => placeholders.get(p)?,
                     InputOperand::Constant(v) => *v,
                     InputOperand::Column(index) => {
                         ensure!(
@@ -211,17 +287,17 @@ pub struct ResultStructure {
 impl ResultStructure {
     /// Compute output values to be returned for the current row, employing the provided
     /// `column_values` as the operands for the operations having `InputOperand::Column`
-    /// operands, and the provided `placeholder_values` for the operations having `InputOperand::Placeholder`
+    /// operands, and the provided `placeholders` for the operations having `InputOperand::Placeholder`
     /// operands.
     pub(crate) fn compute_output_values(
         &self,
         column_values: &[U256],
-        placeholder_values: &HashMap<PlaceholderId, U256>,
+        placeholders: &Placeholders,
     ) -> Result<(Vec<U256>, bool)> {
         let (res, overflow_err) = BasicOperation::compute_operations(
             &self.result_operations,
             column_values,
-            placeholder_values,
+            placeholders,
         )?;
         let results = self
             .output_items
@@ -264,6 +340,7 @@ impl ResultStructure {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ColumnCell {
     pub(crate) value: U256,
     pub(crate) id: F,
@@ -275,5 +352,34 @@ impl ColumnCell {
             value,
             id: id.to_field(),
         }
+    }
+}
+
+pub struct RowCells {
+    primary: ColumnCell,
+    secondary: ColumnCell,
+    rest: Vec<ColumnCell>,
+}
+
+impl RowCells {
+    pub fn new(primary: &ColumnCell, secondary: &ColumnCell, rest: &[ColumnCell]) -> Self {
+        Self {
+            primary: primary.clone(),
+            secondary: secondary.clone(),
+            rest: rest.to_vec(),
+        }
+    }
+    /// Get number of columns in the row represented by `self`
+    pub fn num_columns(&self) -> usize {
+        self.rest.len() + 2
+    }
+
+    /// Return the set of column cells, placing primary and secondary index columns at the beginning of the array
+    pub(crate) fn to_cells(&self) -> Vec<ColumnCell> {
+        [&self.primary, &self.secondary]
+            .into_iter()
+            .chain(&self.rest)
+            .cloned()
+            .collect_vec()
     }
 }

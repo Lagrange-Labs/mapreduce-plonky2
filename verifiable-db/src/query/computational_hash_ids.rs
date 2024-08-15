@@ -17,16 +17,28 @@ use mp2_common::{
     CHasher, F,
 };
 use plonky2::{
-    field::types::Field,
-    hash::{hash_types::RichField, hashing::hash_n_to_hash_no_pad},
+    field::types::{Field, PrimeField64},
+    hash::{
+        hash_types::{HashOut, RichField},
+        hashing::hash_n_to_hash_no_pad,
+    },
     iop::target::{BoolTarget, Target},
     plonk::config::{GenericHashOut, Hasher},
 };
 use plonky2_ecgfp5::curve::curve::Point;
+use serde::{Deserialize, Serialize};
 
-use super::universal_circuit::{
-    universal_circuit_inputs::{BasicOperation, InputOperand, OutputItem, ResultStructure},
-    ComputationalHash, ComputationalHashTarget,
+use crate::revelation::placeholders_check::placeholder_ids_hash;
+
+use super::{
+    aggregation::{QueryBoundSource, QueryBounds},
+    universal_circuit::{
+        universal_circuit_inputs::{
+            BasicOperation, InputOperand, OutputItem, PlaceholderId, ResultStructure,
+        },
+        universal_query_circuit::QueryBound,
+        ComputationalHash, ComputationalHashTarget,
+    },
 };
 
 pub enum Identifiers {
@@ -89,11 +101,13 @@ impl Identifiers {
         b.hash_n_to_hash_no_pad::<CHasher>(inputs)
     }
 
-    pub fn computational_hash_universal_circuit(
+    /// Internal method employed to comput the computational hash corresponding to a query represented by the
+    /// provided inputs, without including the query bounds portion of the computational hash
+    pub(crate) fn computational_hash_without_query_bounds(
         column_ids: &[u64],
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
-    ) -> Result<HashOutput> {
+    ) -> Result<ComputationalHash> {
         let mut cache = ComputationalHashCache::new(column_ids.len());
         let column_ids = column_ids.iter().map(|id| id.to_field()).collect_vec();
         let predicate_ops_hash =
@@ -101,17 +115,81 @@ impl Identifiers {
         let predicate_hash = predicate_ops_hash.last().unwrap();
         let result_ops_hash =
             Operation::operation_hash(&results.result_operations, &column_ids, &mut cache)?;
-        results
-            .output_variant
-            .output_hash(
-                predicate_hash,
-                &mut cache,
-                &column_ids,
-                &result_ops_hash,
-                &results.output_items,
-                &results.output_ids,
-            )
-            .map(|hash| HashOutput::try_from(hash.to_bytes()).unwrap())
+        results.output_variant.output_hash(
+            predicate_hash,
+            &mut cache,
+            &column_ids,
+            &result_ops_hash,
+            &results.output_items,
+            &results.output_ids,
+        )
+    }
+
+    /// Compute the computational hash computed by the universal circuit for the query represented
+    /// by the given inputs
+    pub fn computational_hash_universal_circuit(
+        column_ids: &[u64],
+        predicate_operations: &[BasicOperation],
+        results: &ResultStructure,
+        min_query_secondary: Option<QueryBoundSource>,
+        max_query_secondary: Option<QueryBoundSource>,
+    ) -> Result<HashOutput> {
+        let computational_hash = Self::computational_hash_without_query_bounds(
+            column_ids,
+            predicate_operations,
+            results,
+        )?;
+        let min_query = min_query_secondary.unwrap_or(QueryBoundSource::Constant(U256::ZERO));
+        let max_query = max_query_secondary.unwrap_or(QueryBoundSource::Constant(U256::MAX));
+        // compute values to be hashed for min and max query bounds
+        let hash_with_query_bounds = QueryBound::add_secondary_query_bounds_to_computational_hash(
+            &min_query,
+            &max_query,
+            &computational_hash,
+        )?;
+        Ok(HashOutput::try_from(hash_with_query_bounds.to_bytes()).unwrap())
+    }
+
+    /// Compute the computational hash.
+    pub fn computational_hash(
+        column_ids: &[u64],
+        predicate_operations: &[BasicOperation],
+        results: &ResultStructure,
+        metadata_hash: &HashOutput,
+        min_query_secondary: Option<QueryBoundSource>,
+        max_query_secondary: Option<QueryBoundSource>,
+    ) -> Result<HashOutput> {
+        let hash = Identifiers::computational_hash_universal_circuit(
+            column_ids,
+            predicate_operations,
+            results,
+            min_query_secondary,
+            max_query_secondary,
+        )?;
+        // compute placeholder ids array from operations of the query
+        let mut placeholder_ids = predicate_operations
+            .iter()
+            .chain(&results.result_operations)
+            .flat_map(|op| op.extract_placeholder_ids())
+            .collect_vec();
+        placeholder_ids.sort();
+
+        // compute placeholder id hash
+        let placeholder_id_hash = placeholder_ids_hash(&placeholder_ids);
+
+        //ToDo: add ORDER BY info and DISTINCT info for queries without the results tree, when adding results tree
+        // circuits APIs
+
+        let inputs = ComputationalHash::from_bytes((&hash).into())
+            .to_vec()
+            .into_iter()
+            .chain(placeholder_id_hash.to_vec())
+            .chain(HashOut::<F>::from_bytes(metadata_hash.into()).to_vec())
+            .collect_vec();
+
+        Ok(HashOutput::try_from(
+            hash_n_to_hash_no_pad::<F, HashPermutation>(&inputs).to_bytes(),
+        )?)
     }
 }
 
@@ -248,7 +326,9 @@ impl Operation {
     ) -> Result<ComputationalHash> {
         let mut compute_operand_hash = |operand: &InputOperand| -> Result<ComputationalHash> {
             Ok(match operand {
-                InputOperand::Placeholder(p) => hash_n_to_hash_no_pad::<_, HashPermutation>(&[*p]),
+                InputOperand::Placeholder(p) => {
+                    hash_n_to_hash_no_pad::<_, HashPermutation>(&[p.to_field()])
+                }
                 InputOperand::Constant(value) => {
                     hash_n_to_hash_no_pad::<_, HashPermutation>(&value.to_fields())
                 }
@@ -492,17 +572,15 @@ impl AggregationOperation {
 }
 
 /// Placeholder identifiers
-#[derive(Clone, Debug, Copy, Default)]
+#[derive(
+    Clone, Debug, Copy, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub enum PlaceholderIdentifier {
     // MIN_I1
     #[default]
     MinQueryOnIdx1,
     // MAX_I1
     MaxQueryOnIdx1,
-    // MIN_I2
-    MinQueryOnIdx2,
-    // MAX_I2
-    MaxQueryOnIdx2,
     // $1, $2 ...
     GenericPlaceholder(usize),
 }
@@ -510,6 +588,23 @@ pub enum PlaceholderIdentifier {
 impl<F: RichField> ToField<F> for PlaceholderIdentifier {
     fn to_field(&self) -> F {
         Identifiers::PlaceholderIdentifiers(*self).to_field()
+    }
+}
+
+impl<F: RichField> FromFields<F> for PlaceholderIdentifier {
+    fn from_fields(t: &[F]) -> Self {
+        let generic_placeholder_start_value =
+            <Self as ToField<F>>::to_field(&Self::GenericPlaceholder(0)).to_canonical_u64();
+        match t[0] {
+            f if <Self as ToField<F>>::to_field(&Self::MinQueryOnIdx1) == f => Self::MinQueryOnIdx1,
+            f if <Self as ToField<F>>::to_field(&Self::MaxQueryOnIdx1) == f => Self::MaxQueryOnIdx1,
+            f => Self::GenericPlaceholder(
+                f.to_canonical_u64()
+                    .checked_sub(generic_placeholder_start_value)
+                    .expect("invalid field element for PlaceholderIdentifier")
+                    as usize,
+            ),
+        }
     }
 }
 

@@ -1,8 +1,10 @@
 //! Module including the revelation circuits for query
 
+use crate::{ivc::NUM_IO, query::PI_LEN as QUERY_PI_LEN};
 use mp2_common::F;
 
-mod placeholders_check;
+pub mod api;
+pub(crate) mod placeholders_check;
 mod public_inputs;
 mod revelation_without_results_tree;
 
@@ -16,10 +18,23 @@ pub use public_inputs::PublicInputs;
 pub(crate) const PI_LEN<const L: usize, const S: usize, const PH: usize>: usize =
     PublicInputs::<F, L, S, PH>::total_len();
 
+pub(crate) const NUM_PREPROCESSING_IO: usize = NUM_IO;
+#[rustfmt::skip]
+pub(crate) const NUM_QUERY_IO<const S: usize>: usize = QUERY_PI_LEN::<S>;
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::query::computational_hash_ids::PlaceholderIdentifier;
+    use crate::{
+        ivc::{
+            public_inputs::H_RANGE as ORIGINAL_TREE_H_RANGE,
+            PublicInputs as OriginalTreePublicInputs,
+        },
+        query::{
+            computational_hash_ids::{AggregationOperation, PlaceholderIdentifier},
+            public_inputs::PublicInputs as QueryPublicInputs,
+        },
+    };
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
@@ -27,9 +42,18 @@ pub(crate) mod tests {
         poseidon::{empty_poseidon_hash, H},
         utils::ToFields,
     };
-    use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
+    use mp2_test::utils::random_vector;
+    use placeholders_check::{
+        placeholder_ids_hash, CheckedPlaceholder, NUM_SECONDARY_INDEX_PLACEHOLDERS,
+    };
+    use plonky2::{
+        field::types::PrimeField64, hash::hash_types::HashOut, iop::target::Target,
+        plonk::config::Hasher,
+    };
     use rand::{thread_rng, Rng};
     use std::{array, iter::once};
+
+    pub(crate) const ORIGINAL_TREE_PI_LEN: usize = OriginalTreePublicInputs::<Target>::TOTAL_LEN;
 
     // Placeholders for testing
     // PH: maximum number of unique placeholder IDs and values bound for query
@@ -40,8 +64,9 @@ pub(crate) mod tests {
         pub(crate) num_placeholders: usize,
         pub(crate) placeholder_ids: [F; PH],
         pub(crate) placeholder_values: [U256; PH],
-        pub(crate) placeholder_pos: [usize; PP],
-        pub(crate) placeholder_pairs: [(F, U256); PP],
+        pub(crate) to_be_checked_placeholders: [CheckedPlaceholder; PP],
+        pub(crate) secondary_query_bound_placeholders:
+            [CheckedPlaceholder; NUM_SECONDARY_INDEX_PLACEHOLDERS],
         pub(crate) final_placeholder_hash: HashOut<F>,
         // Output result for `check_placeholders` function
         pub(crate) placeholder_ids_hash: HashOut<F>,
@@ -59,23 +84,23 @@ pub(crate) mod tests {
 
             // Create an array of sample placeholder identifiers,
             // will set the first 4 to the query bounds as below.
-            let mut placeholder_ids: [F; PH] =
-                array::from_fn(|_| PlaceholderIdentifier::GenericPlaceholder(rng.gen()).to_field());
+            let mut placeholder_ids: [PlaceholderIdentifier; PH] =
+                array::from_fn(|_| PlaceholderIdentifier::GenericPlaceholder(rng.gen()));
             let mut placeholder_values = array::from_fn(|_| U256::from_limbs(rng.gen()));
-            let placeholder_pos = array::from_fn(|_| rng.gen_range(0..PH));
-            let mut placeholder_pairs: [_; PP] =
-                array::from_fn(|_| (rng.gen::<u32>().to_field(), U256::from_limbs(rng.gen())));
 
-            // Set the first 4 placeholder identifiers as below constants.
+            // Set the first 2 placeholder identifiers as below constants.
             [
                 PlaceholderIdentifier::MinQueryOnIdx1,
                 PlaceholderIdentifier::MaxQueryOnIdx1,
-                PlaceholderIdentifier::MinQueryOnIdx2,
-                PlaceholderIdentifier::MaxQueryOnIdx2,
             ]
             .iter()
             .enumerate()
-            .for_each(|(i, id)| placeholder_ids[i] = id.to_field());
+            .for_each(|(i, id)| placeholder_ids[i] = *id);
+
+            // Compute the hash of placeholder identifiers.
+            let placeholder_ids_hash = placeholder_ids_hash(&placeholder_ids[2..num_placeholders]);
+
+            // Re-compute placeholder hash
 
             // Set the last invalid items found in placeholder_ids and
             // placeholder_values to placeholder_ids[0] and
@@ -84,42 +109,62 @@ pub(crate) mod tests {
                 placeholder_ids[i] = placeholder_ids[0];
                 placeholder_values[i] = placeholder_values[0];
             }
-
-            // Compute the hash of placeholder identifiers.
-            let placeholder_ids_hash = placeholder_ids[0..num_placeholders].iter().fold(
-                *empty_poseidon_hash(),
-                |acc, id| {
-                    let inputs = acc.to_fields().into_iter().chain(once(*id)).collect_vec();
-                    H::hash_no_pad(&inputs)
-                },
-            );
+            let placeholder_ids: [F; PH] = placeholder_ids
+                .into_iter()
+                .map(|id| id.to_field())
+                .collect_vec()
+                .try_into()
+                .unwrap();
 
             let mut placeholder_hash_payload = vec![];
-            for i in 0..PP {
-                // Set the entry of placeholder_pairs to
-                // (placeholder_ids[placeholder_pos[i]], placeholder_values[placeholder_pos[i]]).
-                let pos = placeholder_pos[i];
+            let to_be_checked_placeholders = array::from_fn(|_| {
+                let pos = rng.gen_range(0..PH);
+                // Set the current `CheckedPlaceholder` to
+                // (placeholder_ids[pos], placeholder_values[pos]).
                 let id = placeholder_ids[pos];
                 let value = placeholder_values[pos];
-                placeholder_pairs[i] = (id, value);
 
                 // Accumulate the placeholder identifiers and values for computing the
                 // placeholder hash.
                 let mut payload = once(id).chain(value.to_fields()).collect_vec();
                 placeholder_hash_payload.append(&mut payload);
-            }
+                CheckedPlaceholder {
+                    id,
+                    value,
+                    pos: pos.to_field(),
+                }
+            });
+
+            let secondary_query_bound_placeholders = array::from_fn(|_| {
+                let pos = rng.gen_range(0..PH);
+                let id = placeholder_ids[pos];
+                let value = placeholder_values[pos];
+
+                CheckedPlaceholder {
+                    id,
+                    value,
+                    pos: pos.to_field(),
+                }
+            });
 
             // Re-compute the placeholder hash from placeholder_pairs and minmum,
             // maximum query bounds. Then check it should be same with the specified
             // final placeholder hash.
-            let [min_i1, max_i1, min_i2, max_i2] = array::from_fn(|i| &placeholder_values[i]);
+            let [min_i1, max_i1] = array::from_fn(|i| &placeholder_values[i]);
             let placeholder_hash = H::hash_no_pad(&placeholder_hash_payload);
             // query_placeholder_hash = H(placeholder_hash || min_i2 || max_i2)
             let inputs = placeholder_hash
                 .to_fields()
                 .into_iter()
-                .chain(min_i2.to_fields())
-                .chain(max_i2.to_fields())
+                .chain(
+                    secondary_query_bound_placeholders
+                        .iter()
+                        .flat_map(|placeholder| {
+                            let mut placeholder_fes = vec![placeholder.id];
+                            placeholder_fes.extend_from_slice(&placeholder.value.to_fields());
+                            placeholder_fes
+                        }),
+                )
                 .collect_vec();
             let query_placeholder_hash = H::hash_no_pad(&inputs);
             // final_placeholder_hash = H(query_placeholder_hash || min_i1 || max_i1)
@@ -137,8 +182,8 @@ pub(crate) mod tests {
                 num_placeholders,
                 placeholder_ids,
                 placeholder_values,
-                placeholder_pos,
-                placeholder_pairs,
+                to_be_checked_placeholders,
+                secondary_query_bound_placeholders,
                 final_placeholder_hash,
                 placeholder_ids_hash,
                 query_placeholder_hash,
@@ -146,5 +191,55 @@ pub(crate) mod tests {
                 max_query,
             }
         }
+    }
+
+    /// Generate a random original tree proof.
+    pub(crate) fn random_original_tree_proof<const S: usize>(
+        query_pi: &QueryPublicInputs<F, S>,
+    ) -> Vec<F> {
+        let mut proof = random_vector::<u32>(ORIGINAL_TREE_PI_LEN).to_fields();
+
+        // Set the tree hash.
+        proof[ORIGINAL_TREE_H_RANGE].copy_from_slice(query_pi.to_hash_raw());
+
+        proof
+    }
+
+    pub(crate) fn compute_results_from_query_proof<const S: usize>(
+        query_pi: &QueryPublicInputs<F, S>,
+    ) -> ([U256; S], bool)
+    where
+        [(); S - 1]:,
+    {
+        // Convert the entry count to an Uint256.
+        let entry_count = U256::from(query_pi.num_matching_rows().to_canonical_u64());
+        let mut overflow = false;
+
+        let [op_avg, op_count] =
+            [AggregationOperation::AvgOp, AggregationOperation::CountOp].map(|op| op.to_field());
+
+        // Compute the results array, and deal with AVG and COUNT operations if any.
+        let ops = query_pi.operation_ids();
+        let result = array::from_fn(|i| {
+            let value = query_pi.value_at_index(i);
+
+            let op = ops[i];
+            if op == op_avg {
+                match value.checked_div(entry_count) {
+                    Some(dividend) => dividend,
+                    None => {
+                        // Set the overflow flag to true if the divisor is zero.
+                        overflow = true;
+                        U256::ZERO
+                    }
+                }
+            } else if op == op_count {
+                entry_count
+            } else {
+                value
+            }
+        });
+
+        (result, query_pi.overflow_flag() || overflow)
     }
 }

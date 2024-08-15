@@ -4,6 +4,7 @@
 use anyhow::Result;
 use log::{debug, info};
 use mp2_v1::{
+    api::{metadata_hash, SlotInputs},
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
@@ -44,6 +45,7 @@ use alloy::{
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     proof::ProofWithVK,
+    types::HashOutput,
 };
 use std::{assert_matches::assert_matches, str::FromStr};
 
@@ -210,9 +212,9 @@ impl TestCase {
         let bn = ctx.block_number().await as BlockPrimaryIndex;
 
         // we first run the initial preprocessing and db creation.
-        self.run_mpt_preprocessing(ctx, bn).await?;
+        let metadata_hash = self.run_mpt_preprocessing(ctx, bn).await?;
         // then we run the creation of our tree
-        self.run_lagrange_preprocessing(ctx, bn, table_row_updates)
+        self.run_lagrange_preprocessing(ctx, bn, table_row_updates, &metadata_hash)
             .await?;
 
         log::info!("FIRST block {bn} finished proving. Moving on to update",);
@@ -225,8 +227,8 @@ impl TestCase {
             // NOTE: we don't show copy on write here - the fact of only reproving what has been
             // updated, as this is not new from v0.
             // TODO: implement copy on write mechanism for MPT
-            self.run_mpt_preprocessing(ctx, bn).await?;
-            self.run_lagrange_preprocessing(ctx, bn, table_row_updates)
+            let metadata_hash = self.run_mpt_preprocessing(ctx, bn).await?;
+            self.run_lagrange_preprocessing(ctx, bn, table_row_updates, &metadata_hash)
                 .await?;
         }
         Ok(())
@@ -241,6 +243,7 @@ impl TestCase {
         // Note there is only one entry for a single variable update, but multiple for mappings for
         // example
         updates: Vec<TableRowUpdate<BlockPrimaryIndex>>,
+        expected_metadata_hash: &HashOutput,
     ) -> Result<()> {
         let current_block = ctx.block_number().await;
         // apply the new cells to the trees
@@ -358,18 +361,26 @@ impl TestCase {
             .prove_update_index_tree(bn, &self.table, updates.plan)
             .await;
         info!("Generated final BLOCK tree proofs for block {current_block}");
-        let _ = ctx.prove_ivc(&self.table.id, bn, &self.table.index).await;
+        let _ = ctx
+            .prove_ivc(
+                &self.table.id,
+                bn,
+                &self.table.index,
+                expected_metadata_hash,
+            )
+            .await;
         info!("Generated final IVC proof for block {}", current_block,);
 
         Ok(())
     }
 
-    // separate function only dealing with preprocessing MPT proofs
+    // separate function only dealing with preprocessing MPT proofs; it returns the expected metadata hash,
+    // which can be later compared with what it is computed in the circuits
     async fn run_mpt_preprocessing<P: ProofStorage>(
         &self,
         ctx: &mut TestContext<P>,
         bn: BlockPrimaryIndex,
-    ) -> Result<()> {
+    ) -> Result<HashOutput> {
         let contract_proof_key = ProofKey::ContractExtraction((self.contract_address, bn));
         let contract_proof = match ctx.storage.get_proof_exact(&contract_proof_key) {
             Ok(proof) => {
@@ -423,7 +434,7 @@ impl TestCase {
         // we construct the proof key for both mappings and single variable in the same way since
         // it is derived from the table id which should be different for any tables we create.
         let proof_key = ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex));
-        let (value_proof, compound, length) = match self.source {
+        let (value_proof, compound, length, metadata_hash) = match self.source {
             // first lets do without length
             TableSourceSlot::Mapping((ref mapping, _)) => {
                 let mapping_root_proof = match ctx.storage.get_proof_exact(&proof_key) {
@@ -450,8 +461,10 @@ impl TestCase {
                         mapping_values_proof
                     }
                 };
+                let slot_input = SlotInputs::Mapping(mapping.slot);
+                let metadata_hash = metadata_hash(slot_input, &self.contract_address);
                 // it's a compoound value type of proof since we're not using the length
-                (mapping_root_proof, true, None)
+                (mapping_root_proof, true, None, metadata_hash)
             }
             TableSourceSlot::SingleValues(ref args) => {
                 let single_value_proof = match ctx.storage.get_proof_exact(&proof_key) {
@@ -473,8 +486,10 @@ impl TestCase {
                         single_values_proof
                     }
                 };
+                let slot_input = SlotInputs::Simple(args.slots.clone());
+                let metadata_hash = metadata_hash(slot_input, &self.contract_address);
                 // we're just proving a single set of a value
-                (single_value_proof, false, None)
+                (single_value_proof, false, None, metadata_hash)
             }
         };
         // final extraction for single variables combining the different proofs generated before
@@ -491,7 +506,7 @@ impl TestCase {
             info!("Generated Final Extraction (C.5.1) proof for block {bn}");
         }
         info!("Generated ALL MPT preprocessing proofs for block {bn}");
-        Ok(())
+        Ok(metadata_hash)
     }
 
     // Returns the table updated

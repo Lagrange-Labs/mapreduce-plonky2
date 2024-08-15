@@ -40,9 +40,12 @@ use super::{
     universal_circuit::{
         output_no_aggregation::Circuit as NoAggOutputCircuit,
         output_with_aggregation::Circuit as AggOutputCircuit,
-        universal_circuit_inputs::{BasicOperation, ColumnCell, PlaceholderId, ResultStructure},
+        universal_circuit_inputs::{
+            BasicOperation, ColumnCell, PlaceholderId, Placeholders, ResultStructure, RowCells,
+        },
         universal_query_circuit::{
-            UniversalCircuitInput, UniversalQueryCircuitInputs, UniversalQueryCircuitWires,
+            placeholder_hash, QueryBound, UniversalCircuitInput, UniversalQueryCircuitInputs,
+            UniversalQueryCircuitWires,
         },
         ComputationalHash, PlaceholderHash,
     },
@@ -69,7 +72,9 @@ use recursion_framework::{
         prepare_recursive_circuit_for_circuit_set, RecursiveCircuitInfo, RecursiveCircuits,
     },
 };
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // we need to clone data if we fix by put variants inside a `Box`
 pub enum CircuitInput<
     const MAX_NUM_COLUMNS: usize,
@@ -105,6 +110,7 @@ impl<
 where
     [(); MAX_NUM_RESULTS - 1]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
     /// Initialize input for universal circuit to prove the execution of a query over a
     /// single row, from the following inputs:
@@ -112,7 +118,7 @@ where
     /// - `predicate_operations`: Set of operations employed to compute the filtering predicate of the query for the
     ///     row being proven
     /// - `results`: Data structure specifying how the results for each row are computed according to the query
-    /// - `placeholder_values`: Set of values employed for placeholder in the query
+    /// - `placeholders`: Set of placeholders employed in the query
     /// - `is_leaf`: Flag specifying whether the row being proven is stored in a leaf node of the rows tree or not
     /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
     /// Note that the following assumption is expected on the structure of the inputs:
@@ -120,10 +126,10 @@ where
     /// this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
     /// the caller of this method
     pub fn new_universal_circuit(
-        column_cells: &[ColumnCell],
+        column_cells: &RowCells,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
-        placeholder_values: &HashMap<PlaceholderId, U256>,
+        placeholders: &Placeholders,
         is_leaf: bool,
         query_bounds: &QueryBounds,
     ) -> Result<Self> {
@@ -132,19 +138,17 @@ where
                 Output::Aggregation => UniversalCircuitInput::new_query_with_agg(
                     column_cells,
                     predicate_operations,
-                    placeholder_values,
+                    placeholders,
                     is_leaf,
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
+                    query_bounds,
                     results,
                 )?,
                 Output::NoAggregation => UniversalCircuitInput::new_query_no_agg(
                     column_cells,
                     predicate_operations,
-                    placeholder_values,
+                    placeholders,
                     is_leaf,
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
+                    query_bounds,
                     results,
                 )?,
             },
@@ -249,6 +253,7 @@ where
         query_hashes: QueryHashNonExistenceCircuits,
         is_rows_tree_node: bool,
         query_bounds: &QueryBounds,
+        placeholders: &Placeholders,
     ) -> Result<Self> {
         let aggregation_ops = aggregation_ops
             .iter()
@@ -256,6 +261,16 @@ where
             .chain(repeat(AggregationOperation::default().to_field()))
             .take(MAX_NUM_RESULTS)
             .collect_vec();
+        let min_query = if is_rows_tree_node {
+            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary)
+        } else {
+            QueryBound::new_primary_index_bound(placeholders, true)
+        }?;
+        let max_query = if is_rows_tree_node {
+            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary)
+        } else {
+            QueryBound::new_primary_index_bound(placeholders, false)
+        }?;
         Ok(CircuitInput::NonExistence(NonExistenceInput {
             node_info,
             child_info: child_info.clone().map(|info| info.0),
@@ -270,19 +285,23 @@ where
             computational_hash: query_hashes.computational_hash,
             placeholder_hash: query_hashes.placeholder_hash,
             aggregation_ops: aggregation_ops.try_into().unwrap(),
-            common: CommonInputs::new(is_rows_tree_node, query_bounds),
+            is_rows_tree_node,
+            min_query,
+            max_query,
         }))
     }
 
-    /// Compute the `placeholder_hash` associated to a query
-    pub fn placeholder_hash(
-        column_cells: &[ColumnCell],
+    /// This method returns the ids of the placeholders employed to compute the placeholder hash,
+    /// in the same order, so that those ids can be provided as input to other circuits that need
+    /// to recompute this hash
+    pub fn ids_for_placeholder_hash(
+        row_cells: &RowCells,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
-        placeholder_values: &HashMap<PlaceholderId, U256>,
+        placeholders: &Placeholders,
         query_bounds: &QueryBounds,
-    ) -> Result<HashOutput> {
-        let hash = match results.output_variant {
+    ) -> Result<[PlaceholderId; 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]> {
+        Ok(match results.output_variant {
             Output::Aggregation => {
                 let circuit = UniversalQueryCircuitInputs::<
                     MAX_NUM_COLUMNS,
@@ -291,15 +310,14 @@ where
                     MAX_NUM_RESULTS,
                     AggOutputCircuit<MAX_NUM_RESULTS>,
                 >::new(
-                    column_cells,
+                    row_cells,
                     predicate_operations,
-                    placeholder_values,
+                    placeholders,
                     false, // doesn't matter for placeholder hash computation
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
+                    query_bounds,
                     results,
                 )?;
-                circuit.placeholder_hash()
+                circuit.ids_for_placeholder_hash()
             }
             Output::NoAggregation => {
                 let circuit = UniversalQueryCircuitInputs::<
@@ -309,17 +327,36 @@ where
                     MAX_NUM_RESULTS,
                     NoAggOutputCircuit<MAX_NUM_RESULTS>,
                 >::new(
-                    column_cells,
+                    row_cells,
                     predicate_operations,
-                    placeholder_values,
+                    placeholders,
                     false, // doesn't matter for placeholder hash computation
-                    query_bounds.min_query_secondary,
-                    query_bounds.max_query_secondary,
+                    query_bounds,
                     results,
                 )?;
-                circuit.placeholder_hash()
+                circuit.ids_for_placeholder_hash()
             }
-        };
+        }
+        .try_into()
+        .unwrap())
+    }
+
+    /// Compute the `placeholder_hash` associated to a query
+    pub fn placeholder_hash(
+        row_cells: &RowCells,
+        predicate_operations: &[BasicOperation],
+        results: &ResultStructure,
+        placeholders: &Placeholders,
+        query_bounds: &QueryBounds,
+    ) -> Result<HashOutput> {
+        let placeholder_hash_ids = Self::ids_for_placeholder_hash(
+            row_cells,
+            predicate_operations,
+            results,
+            placeholders,
+            query_bounds,
+        )?;
+        let hash = placeholder_hash(&placeholder_hash_ids, placeholders, query_bounds)?;
         // add primary query bounds to placeholder hash
         HashOutput::try_from(
             hash_n_to_hash_no_pad::<_, HashPermutation>(
@@ -334,7 +371,7 @@ where
         )
     }
 }
-
+#[derive(Serialize, Deserialize)]
 pub struct Parameters<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
@@ -692,16 +729,18 @@ where
                 computational_hash,
                 placeholder_hash,
                 aggregation_ops,
-                common,
+                is_rows_tree_node,
+                min_query,
+                max_query,
             }) => {
                 match child_info {
                     Some(child_data) => {
                         // intermediate node
                         let input = NonExistenceInterNodeCircuit {
-                            is_rows_tree_node: common.is_rows_tree_node,
+                            is_rows_tree_node,
                             is_left_child: is_child_left.unwrap(),
-                            min_query: common.min_query,
-                            max_query: common.max_query,
+                            min_query,
+                            max_query,
                             value: node_info.value,
                             index_value: primary_index_value,
                             child_value: child_data.value,
@@ -728,9 +767,9 @@ where
                     None => {
                         // leaf node
                         let input = NonExistenceLeafCircuit {
-                            is_rows_tree_node: common.is_rows_tree_node,
-                            min_query: common.min_query,
-                            max_query: common.max_query,
+                            is_rows_tree_node: is_rows_tree_node,
+                            min_query: min_query,
+                            max_query: max_query,
                             value: node_info.value,
                             index_value: primary_index_value,
                             index_ids,
@@ -754,6 +793,10 @@ where
         });
 
         proof.serialize()
+    }
+
+    pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.circuit_set
     }
 }
 
@@ -780,13 +823,17 @@ mod tests {
 
     use crate::query::{
         aggregation::{
-            ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits, SubProof,
+            ChildPosition, NodeInfo, QueryBoundSecondary, QueryBoundSource, QueryBounds,
+            QueryHashNonExistenceCircuits, SubProof,
         },
         api::{CircuitInput, Parameters},
-        computational_hash_ids::{AggregationOperation, HashPermutation, Operation},
+        computational_hash_ids::{
+            AggregationOperation, HashPermutation, Operation, PlaceholderIdentifier,
+        },
         public_inputs::PublicInputs,
         universal_circuit::universal_circuit_inputs::{
-            BasicOperation, ColumnCell, InputOperand, OutputItem, ResultStructure,
+            BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders, ResultStructure,
+            RowCells,
         },
     };
 
@@ -809,7 +856,7 @@ mod tests {
 
     #[test]
     fn test_api() {
-        // Simple query for testing SELECT SUM(C1 + C3) FROM T WHERE C3 >= 5 AND C1 > 56 AND C1 <= 67 AND C2 > 34 AND C2 <= 78
+        // Simple query for testing SELECT SUM(C1 + C3) FROM T WHERE C3 >= 5 AND C1 > 56 AND C1 <= 67 AND C2 > 34 AND C2 <= $1
         let rng = &mut thread_rng();
         const NUM_COLUMNS: usize = 3;
         const MAX_NUM_COLUMNS: usize = 20;
@@ -874,12 +921,18 @@ mod tests {
             output_items,
             aggregation_op_ids.clone(),
         );
-        let query_bounds = QueryBounds::new(
+        let first_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(0);
+        let placeholders = Placeholders::from((
+            vec![(first_placeholder_id, U256::from(max_query_secondary))],
             U256::from(min_query_primary),
             U256::from(max_query_primary),
-            Some(U256::from(min_query_secondary)),
-            Some(U256::from(max_query_secondary)),
-        );
+        ));
+        let query_bounds = QueryBounds::new(
+            &placeholders,
+            Some(QueryBoundSource::Constant(U256::from(min_query_secondary))),
+            Some(QueryBoundSource::Placeholder(first_placeholder_id)),
+        )
+        .unwrap();
 
         let params = Parameters::<
             MAX_NUM_COLUMNS,
@@ -919,11 +972,12 @@ mod tests {
                 .zip(column_ids.iter())
                 .map(|(&value, &id)| ColumnCell::new(id, value))
                 .collect_vec();
+            let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
             let input = Input::new_universal_circuit(
-                &column_cells,
+                &row_cells,
                 &predicate_operations,
                 &results,
-                &HashMap::new(),
+                &placeholders,
                 is_leaf,
                 &query_bounds,
             )
@@ -1073,8 +1127,8 @@ mod tests {
                         if value[2] >= U256::from(5)
                             && value[0] >= query_bounds.min_query_primary
                             && value[0] <= query_bounds.max_query_primary
-                            && value[1] >= query_bounds.min_query_secondary
-                            && value[1] <= query_bounds.max_query_secondary
+                            && value[1] >= query_bounds.min_query_secondary.value
+                            && value[1] <= query_bounds.max_query_secondary.value
                         {
                             let (sum, overflow) = value[0].overflowing_add(value[2]);
                             let new_overflow = acc.1 || overflow;
@@ -1365,10 +1419,10 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &column_cells,
+            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
             &predicate_operations,
             &results,
-            &HashMap::new(),
+            &placeholders,
             &query_bounds,
             false,
         )
@@ -1382,6 +1436,7 @@ mod tests {
             query_hashes,
             false,
             &query_bounds,
+            &placeholders,
         )
         .unwrap();
         let proof_0 = params.generate_proof(input).unwrap();
@@ -1467,10 +1522,10 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &column_cells,
+            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
             &predicate_operations,
             &results,
-            &HashMap::new(),
+            &placeholders,
             &query_bounds,
             false,
         )
@@ -1484,6 +1539,7 @@ mod tests {
             query_hashes,
             false,
             &query_bounds,
+            &placeholders,
         )
         .unwrap();
         let proof_1 = params.generate_proof(input).unwrap();
@@ -1563,10 +1619,10 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &column_cells,
+            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
             &predicate_operations,
             &results,
-            &HashMap::new(),
+            &placeholders,
             &query_bounds,
             true,
         )
@@ -1580,6 +1636,7 @@ mod tests {
             query_hashes,
             true,
             &query_bounds,
+            &placeholders,
         )
         .unwrap();
         let proof_2 = params.generate_proof(input).unwrap();
