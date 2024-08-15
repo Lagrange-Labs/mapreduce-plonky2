@@ -9,12 +9,16 @@ use crate::{
 };
 use anyhow::Result;
 use mp2_common::{
-    default_config, group_hashing::CircuitBuilderGroupHashing, poseidon::empty_poseidon_hash,
-    proof::ProofWithVK, public_inputs::PublicInputCommon, types::CBuilder, utils::ToTargets,
+    default_config,
+    group_hashing::CircuitBuilderGroupHashing,
+    poseidon::{empty_poseidon_hash, H},
+    proof::ProofWithVK,
+    public_inputs::PublicInputCommon,
+    types::CBuilder,
+    utils::ToTargets,
     CHasher, C, D, F,
 };
 use plonky2::{
-    hash::poseidon::PoseidonHash,
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
@@ -146,7 +150,7 @@ impl<E> CircuitLogicWires<F, D, 0> for RecursiveLeafWires<E>
 where
     E: ExtractionPIWrap + Serialize + DeserializeOwned,
     [(); E::PI::TOTAL_LEN]:,
-    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+    [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     // Final extraction circuit set + rows tree circuit set
     type CircuitBuilderParams = (RecursiveCircuits<F, C, D>, RecursiveCircuits<F, C, D>);

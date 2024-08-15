@@ -6,9 +6,10 @@
 #![feature(generic_const_items)]
 use plonky2::plonk::{
     circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
-    config::{GenericConfig, PoseidonGoldilocksConfig},
+    config::GenericConfig,
     proof::ProofWithPublicInputs,
 };
+use poseidon2_plonky2::poseidon2_goldilock::Poseidon2GoldilocksConfig;
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -34,7 +35,7 @@ pub mod u256;
 pub mod utils;
 
 pub const D: usize = 2;
-pub type C = PoseidonGoldilocksConfig;
+pub type C = Poseidon2GoldilocksConfig;
 pub type F = <C as GenericConfig<D>>::F;
 pub type CHasher = <C as GenericConfig<D>>::Hasher;
 
@@ -63,7 +64,7 @@ struct ByteProofTuple {
 mod test {
     use crate::{
         utils::{keccak256, verify_proof_tuple},
-        ByteProofTuple, ProofTuple,
+        ByteProofTuple, ProofTuple, C, F,
     };
     use anyhow::Result;
     use plonky2::field::types::Field;
@@ -72,7 +73,7 @@ mod test {
         hash::hash_types::RichField,
         plonk::{
             circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
-            config::{GenericConfig, PoseidonGoldilocksConfig},
+            config::GenericConfig,
             proof::CompressedProofWithPublicInputs,
         },
     };
@@ -87,8 +88,6 @@ mod test {
     use rand::Rng;
 
     const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     impl ByteProofTuple {
         fn from_proof_tuple<

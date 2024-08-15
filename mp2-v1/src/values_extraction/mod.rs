@@ -2,12 +2,12 @@ use alloy::primitives::Address;
 use mp2_common::{
     eth::left_pad32,
     group_hashing::map_to_curve_point,
+    poseidon::H,
     types::{GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
     utils::{pack_and_compute_poseidon_value, Endianness, Packer, ToFields},
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
-    hash::poseidon::PoseidonHash,
     plonk::config::Hasher,
 };
 use plonky2_ecgfp5::curve::curve::Point as Digest;
@@ -43,7 +43,7 @@ pub fn identifier_single_var_column(slot: u8, contract_address: &Address) -> u64
         .chain(packed_contract_address)
         .collect();
 
-    PoseidonHash::hash_no_pad(&inputs).elements[0].to_canonical_u64()
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
 }
 
 /// Calculate `key_id = Poseidon(KEY || slot || contract_address)[0]` for mapping variable leaf.

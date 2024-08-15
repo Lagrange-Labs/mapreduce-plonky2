@@ -7,8 +7,10 @@ mod tests {
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::plonk::config::GenericConfig;
     use std::time::Instant;
+
+    use crate::{C, D, F};
 
     #[test]
     fn compare_quin_random_access() -> Result<()> {
@@ -20,9 +22,6 @@ mod tests {
 
         let comparison = |k: usize| {
             // common to both circuits
-            const D: usize = 2;
-            type C = PoseidonGoldilocksConfig;
-            type F = <C as GenericConfig<D>>::F;
 
             // both versions of the circuit need to capture this information
             let bits_of_length: usize = k;

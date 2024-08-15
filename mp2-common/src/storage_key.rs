@@ -297,16 +297,14 @@ mod test {
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
+        C, D, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
         iop::{target::Target, witness::PartialWitness},
-        plonk::{
-            circuit_builder::CircuitBuilder,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
-        },
+        plonk::{circuit_builder::CircuitBuilder, config::GenericConfig},
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
@@ -384,10 +382,6 @@ mod test {
             self.m.assign(pw, &wires.0);
         }
     }
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     #[test]
     fn test_mapping_slot_key_derivation() {

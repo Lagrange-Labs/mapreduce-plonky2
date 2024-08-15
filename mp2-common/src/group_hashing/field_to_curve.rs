@@ -1,15 +1,13 @@
 //! Field-to-curve point conversion arithmetic and circuit functions
 
+use crate::poseidon::{HashableField, H};
+
 use super::EXTENSION_DEGREE as N;
 use plonky2::{
     field::extension::{quintic::QuinticExtension, Extendable, FieldExtension},
-    hash::{
-        hash_types::RichField,
-        hashing::hash_n_to_m_no_pad,
-        poseidon::{PoseidonHash, PoseidonPermutation},
-    },
+    hash::{hash_types::RichField, hashing::hash_n_to_m_no_pad},
     iop::target::Target,
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, config::Hasher},
 };
 use plonky2_ecgfp5::{
     curve::curve::Point,
@@ -37,11 +35,11 @@ where
 /// Convert the field values to a curve points.
 pub fn map_to_curve_point<F>(values: &[F]) -> Point
 where
-    F: RichField + Extendable<N>,
+    F: HashableField + Extendable<N>,
     QuinticExtension<F>: ToCurvePoint,
 {
     // Calculate the Poseidon hash and output N values of base field.
-    let hash: [F; N] = hash_n_to_m_no_pad::<F, PoseidonPermutation<F>>(values, N)
+    let hash: [F; N] = hash_n_to_m_no_pad::<F, <H as Hasher<F>>::Permutation>(values, N)
         .try_into()
         .unwrap();
 
@@ -55,12 +53,12 @@ pub(crate) fn map_to_curve_target<F, const D: usize>(
     targets: &[Target],
 ) -> CurveTarget
 where
-    F: RichField + Extendable<D> + Extendable<N>,
+    F: HashableField + Extendable<D> + Extendable<N>,
     CircuitBuilder<F, D>: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
 {
     // Calculate the Poseidon hash for inputs.
     let hash = b
-        .hash_n_to_m_no_pad::<PoseidonHash>(targets.to_vec(), N)
+        .hash_n_to_m_no_pad::<H>(targets.to_vec(), N)
         .try_into()
         .unwrap();
 
@@ -71,24 +69,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::group_hashing::CircuitBuilderGroupHashing;
+    use crate::{group_hashing::CircuitBuilderGroupHashing, C, D, F};
     use anyhow::Result;
     use plonky2::{
         field::{extension::quintic::QuinticExtension, types::Field},
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
-            circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
+            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
         },
     };
     use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
     use rand::Rng;
 
     const ARITY: usize = 1;
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     /// Test field to curve point conversion.
     #[test]

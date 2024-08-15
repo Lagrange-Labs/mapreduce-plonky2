@@ -57,13 +57,14 @@ use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     default_config,
+    poseidon::H,
     proof::ProofWithVK,
     types::HashOutput,
     utils::{Fieldable, ToFields},
     C, D, F,
 };
 use plonky2::{
-    hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonHash},
+    hash::hashing::hash_n_to_hash_no_pad,
     plonk::config::{GenericHashOut, Hasher},
 };
 use recursion_framework::{
@@ -472,7 +473,7 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_RESULTS - 1]:,
     [(); PI_LEN::<MAX_NUM_RESULTS>]:,
-    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+    [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     /// Build `Parameters` for query circuits
     pub fn build() -> Self {

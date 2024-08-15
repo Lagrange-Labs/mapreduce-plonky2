@@ -92,19 +92,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use plonky2::plonk::{
-        circuit_data::CircuitConfig,
-        config::{GenericConfig, PoseidonGoldilocksConfig},
-    };
+    use mp2_common::{C, D, F};
+    use plonky2::plonk::circuit_data::CircuitConfig;
 
     use super::{build_data_for_universal_verifier, RECURSION_THRESHOLD};
 
     #[test]
     fn test_common_data_for_recursion() {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-
         let cd = build_data_for_universal_verifier::<F, C, D>(
             CircuitConfig::standard_recursion_config(),
             3,

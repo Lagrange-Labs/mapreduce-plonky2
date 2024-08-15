@@ -1,5 +1,7 @@
 //! Map to curve circuit functions
 
+use crate::{C, D, F};
+
 use super::{
     field_to_curve::ToCurveTarget,
     utils::{a_sw, b_sw, neg_b_div_a_sw, neg_z_inv_sw, two_thirds, z_sw},
@@ -110,9 +112,7 @@ mod tests {
         },
         iop::witness::PartialWitness,
         plonk::{
-            circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
+            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
         },
     };
     use plonky2_ecgfp5::{
@@ -120,10 +120,6 @@ mod tests {
     };
     use rand::thread_rng;
     use std::array;
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     /// Test simplified SWU method.
     #[test]

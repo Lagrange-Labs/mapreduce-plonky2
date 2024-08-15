@@ -1,5 +1,7 @@
 use crate::benches::test::{bench_simple_circuit, run_benchs, BenchResult};
 use crate::keccak::{self, KeccakWires};
+use crate::poseidon::{HashPermutation, HashableField, H};
+use crate::{C, D, F};
 use itertools::Itertools;
 use log::info;
 use mp2_test::{
@@ -8,12 +10,12 @@ use mp2_test::{
 };
 use plonky2::field::types::Sample;
 use plonky2::gates::exponentiation::ExponentiationGate;
+use plonky2::plonk::config::Hasher;
 use plonky2::{
     field::extension::Extendable,
     hash::{
         hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         hashing::hash_n_to_hash_no_pad,
-        poseidon::{PoseidonHash, PoseidonPermutation},
     },
     iop::{
         target::Target,
@@ -21,7 +23,7 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        config::{AlgebraicHasher, GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
+        config::{AlgebraicHasher, GenericConfig, GenericHashOut},
         proof::ProofWithPublicInputs,
     },
 };
@@ -59,7 +61,7 @@ impl<F, const ELEMS: usize> PoseidonCircuit<F, ELEMS> {
 impl<F, const D: usize, const ELEMS: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
     for PoseidonCircuit<F, ELEMS>
 where
-    F: RichField + Extendable<D>,
+    F: HashableField + Extendable<D>,
 {
     fn build_recursive(
         b: &mut CircuitBuilder<F, D>,
@@ -80,17 +82,17 @@ where
 
 impl<F, const D: usize, const N: usize> UserCircuit<F, D> for PoseidonCircuit<F, N>
 where
-    F: RichField + Extendable<D>,
+    F: HashableField + Extendable<D>,
 {
     type Wires = PoseidonWires<N>;
     fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
         let inputs = b.add_virtual_target_arr::<N>();
-        let outputs = b.hash_n_to_hash_no_pad::<PoseidonHash>(inputs.to_vec());
+        let outputs = b.hash_n_to_hash_no_pad::<H>(inputs.to_vec());
         PoseidonWires { inputs, outputs }
     }
     fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
         pw.set_target_arr(&wires.inputs, &self.inputs);
-        let output = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&self.inputs);
+        let output = hash_n_to_hash_no_pad::<F, <H as Hasher<F>>::Permutation>(&self.inputs);
         pw.set_hash_target(wires.outputs, output);
     }
 }
@@ -100,10 +102,6 @@ impl<F, const ELEMS: usize> Benchable for PoseidonCircuit<F, ELEMS> {
         ELEMS
     }
 }
-
-const D: usize = 2;
-type C = PoseidonGoldilocksConfig;
-type F = <C as GenericConfig<D>>::F;
 
 #[test]
 fn bench_recursion_noop() {
@@ -158,7 +156,7 @@ struct RepeatedPoseidon<F, const ELEMS: usize, const N: usize> {
 impl<F, const D: usize, const ELEMS: usize, const N: usize> UserCircuit<F, D>
     for RepeatedPoseidon<F, ELEMS, N>
 where
-    F: RichField + Extendable<D>,
+    F: HashableField + Extendable<D>,
 {
     type Wires = [PoseidonWires<ELEMS>; N];
     fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
