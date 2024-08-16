@@ -82,7 +82,7 @@ fn main() -> Result<()> {
                 println!("placeholders mapping: {:?}", translated.placeholder_mapping);
             }
             QueryKind::Keys => {
-                println!("{}", executor::generate_query_keys(&query, &settings)?)
+                println!("{}", executor::generate_query_keys(&mut query, &settings)?)
             }
         },
     }

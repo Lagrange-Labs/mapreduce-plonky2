@@ -153,11 +153,15 @@ fn fetch_from_payload(id: u64) -> Expr {
 /// query, used then to generate the values public inputs for the query
 /// circuits.
 struct RowFetcher<'a, C: ContextProvider> {
-    context: &'a C,
+    settings: &'a ParsilSettings<C>,
+    largest_placeholder: usize,
 }
 impl<'a, C: ContextProvider> RowFetcher<'a, C> {
-    fn new(context: &'a C) -> Self {
-        Self { context }
+    fn new(settings: &'a ParsilSettings<C>, largest_placeholder: usize) -> Self {
+        Self {
+            settings,
+            largest_placeholder,
+        }
     }
 
     fn process(&mut self, query: &mut Query) -> Result<()> {
@@ -189,6 +193,21 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
         Ok(())
     }
 
+    fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
+        if let Expr::Value(Value::Placeholder(ref mut name)) = expr {
+            match self.settings.placeholders.resolve_placeholder(name)? {
+                PlaceholderIdentifier::MinQueryOnIdx1 => {
+                    *name = format!("${}", self.largest_placeholder + 1);
+                }
+                PlaceholderIdentifier::MaxQueryOnIdx1 => {
+                    *name = format!("${}", self.largest_placeholder + 2);
+                }
+                PlaceholderIdentifier::Generic(_) => {}
+            }
+        }
+        Ok(())
+    }
+
     fn post_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
         if let Some(replacement) = match table_factor {
             TableFactor::Table { name, alias, .. } => {
@@ -196,7 +215,7 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
                 let concrete_table_name = &name.0[0].value;
 
                 // Fetch all the column declared in this table
-                let table = self.context.fetch_table(&concrete_table_name)?;
+                let table = self.settings.context.fetch_table(&concrete_table_name)?;
                 let table_columns = &table.columns;
 
                 // Extract the apparent table name (either the concrete one
@@ -498,10 +517,12 @@ pub fn generate_query_execution<C: ContextProvider>(
 }
 
 pub fn generate_query_keys<C: ContextProvider>(
-    query: &Query,
+    query: &mut Query,
     settings: &ParsilSettings<C>,
 ) -> Result<Query> {
-    let mut pis = RowFetcher::new(&settings.context);
+    let largest_placeholder = placeholders::validate(settings, query)?;
+
+    let mut pis = RowFetcher::new(settings, largest_placeholder);
     let mut query_pis = query.clone();
     pis.process(&mut query_pis)?;
     info!("PIs: {query_pis}");
