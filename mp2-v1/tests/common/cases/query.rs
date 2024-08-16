@@ -90,7 +90,7 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     };
     let query_info = cook_query(table).await?;
     info!("QUERY on the testcase: {}", query_info.query);
-    let parsed = parse_and_validate(&query_info.query, &settings)?;
+    let mut parsed = parse_and_validate(&query_info.query, &settings)?;
     println!("QUERY table columns -> {:?}", table.columns.to_zkcolumns());
     info!(
         "BOUNDS found on query: min {}, max {} - table.genesis_block {}",
@@ -98,10 +98,10 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     );
 
     // the query to use to actually get the outputs expected
-    let exec_query = parsil::executor::generate_query_execution(&parsed, table)?;
+    let exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
     let res = table
         .execute_row_query(
-            &exec_query.to_string(),
+            &exec_query.query.to_string(),
             query_info.min_block - table.genesis_block as BlockPrimaryIndex + 1,
             query_info.max_block - table.genesis_block as BlockPrimaryIndex + 1,
         )
@@ -109,12 +109,12 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     info!(
         "Found {} results from query {}",
         res.len(),
-        exec_query.to_string()
+        exec_query.query.to_string()
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::circuit::assemble(&parsed, &settings)?;
-    prove_query(ctx, table, query_info, parsed, pis)
+    prove_query(ctx, table, query_info, parsed, pis, &settings)
         .await
         .expect("unable to run universal query proof");
     Ok(())
@@ -127,8 +127,9 @@ async fn prove_query(
     query: QueryCooking,
     parsed: Query,
     pis: CircuitPis,
+    settings: &ParsilSettings<&Table>,
 ) -> Result<()> {
-    let rows_query = parsil::executor::generate_query_keys(&parsed, table)?;
+    let rows_query = parsil::executor::generate_query_keys(&parsed, settings)?;
     let all_touched_rows = table
         .execute_row_query(&rows_query.to_string(), query.min_block, query.max_block)
         .await?;
