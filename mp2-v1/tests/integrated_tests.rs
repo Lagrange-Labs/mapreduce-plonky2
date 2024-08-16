@@ -61,7 +61,6 @@ const PROOF_STORE_FILE: &str = "test_proofs.store";
 const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
 
 #[test(tokio::test)]
-#[ignore]
 async fn integrated_indexing() -> Result<()> {
     // Create the test context for mainnet.
     // let ctx = &mut TestContext::new_mainet();
@@ -141,58 +140,58 @@ fn read_table_info(f: &str) -> Result<TableInfo> {
 
 use crate::common::bindings::simple::Simple::{self};
 #[tokio::test]
-async fn test_empty_mpt() -> Result<()> {
-    let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
-    let mut ctx = context::new_local_chain(storage).await;
-    info!("Building querying params");
-    let mut single = TestCase::single_value_test_case(&ctx, TreeFactory::New).await?;
-    let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
-        .wallet(ctx.wallet())
-        .on_http(ctx.rpc_url.parse().unwrap());
-
-    let contract = Simple::new(single.contract_address, &provider);
-    let value = U256::from(10);
-    contract
-        .setS2(value)
-        .send()
-        .await
-        .unwrap()
-        .watch()
-        .await
-        .unwrap();
-    let bn = ctx.block_number().await;
-    let query = ProofQuery::new_simple_slot(single.contract_address, 0);
-    let response = ctx
-        .query_mpt_proof(&query, BlockNumberOrTag::Number(bn))
-        .await;
-    println!(
-        "GIVEN VALUE of slot 0 : {}",
-        response.storage_proof[0].value
-    );
-    let leaf = response.storage_proof[0].proof.last().unwrap().to_vec();
-    println!("LEAF: {:?}", leaf);
-    println!(
-        "--> len of proof = {}",
-        response.storage_proof[0].proof.len()
-    );
-    // THIS PANICS !!!
-    //let tuple = rlp::decode_list(&leaf);
-    //let leaf_value: Vec<u8> = rlp::decode(&tuple)?;
-    //let uvalue = U256::from_be_slice(&leaf_value);
-    //println!("EXTRACTED value of slot 0 {}", uvalue);
-    // DOESN?T work because i can't set an empty address erf..
-    contract
-        .setMapping(U256::from(10), Address::from_slice(&vec![]))
-        .send()
-        .await
-        .unwrap()
-        .watch()
-        .await
-        .unwrap();
-    //
-    Ok(())
-}
+//async fn test_empty_mpt() -> Result<()> {
+//    let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
+//    let mut ctx = context::new_local_chain(storage).await;
+//    info!("Building querying params");
+//    let mut single = TestCase::single_value_test_case(&ctx, TreeFactory::New).await?;
+//    let provider = ProviderBuilder::new()
+//        .with_recommended_fillers()
+//        .wallet(ctx.wallet())
+//        .on_http(ctx.rpc_url.parse().unwrap());
+//
+//    let contract = Simple::new(single.contract_address, &provider);
+//    let value = U256::from(10);
+//    contract
+//        .setS2(value)
+//        .send()
+//        .await
+//        .unwrap()
+//        .watch()
+//        .await
+//        .unwrap();
+//    let bn = ctx.block_number().await;
+//    let query = ProofQuery::new_simple_slot(single.contract_address, 0);
+//    let response = ctx
+//        .query_mpt_proof(&query, BlockNumberOrTag::Number(bn))
+//        .await;
+//    println!(
+//        "GIVEN VALUE of slot 0 : {}",
+//        response.storage_proof[0].value
+//    );
+//    let leaf = response.storage_proof[0].proof.last().unwrap().to_vec();
+//    println!("LEAF: {:?}", leaf);
+//    println!(
+//        "--> len of proof = {}",
+//        response.storage_proof[0].proof.len()
+//    );
+//    // THIS PANICS !!!
+//    //let tuple = rlp::decode_list(&leaf);
+//    //let leaf_value: Vec<u8> = rlp::decode(&tuple)?;
+//    //let uvalue = U256::from_be_slice(&leaf_value);
+//    //println!("EXTRACTED value of slot 0 {}", uvalue);
+//    // DOESN?T work because i can't set an empty address erf..
+//    contract
+//        .setMapping(U256::from(10), Address::from_slice(&vec![]))
+//        .send()
+//        .await
+//        .unwrap()
+//        .watch()
+//        .await
+//        .unwrap();
+//    //
+//    Ok(())
+//}
 
 //#[test]
 //fn ryhope_scapegoat2() -> Result<()> {
