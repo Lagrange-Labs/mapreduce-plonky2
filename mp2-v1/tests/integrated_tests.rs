@@ -138,8 +138,8 @@ fn read_table_info(f: &str) -> Result<TableInfo> {
     Ok(info)
 }
 
-use crate::common::bindings::simple::Simple::{self};
-#[tokio::test]
+//use crate::common::bindings::simple::Simple::{self};
+//#[tokio::test]
 //async fn test_empty_mpt() -> Result<()> {
 //    let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
 //    let mut ctx = context::new_local_chain(storage).await;
