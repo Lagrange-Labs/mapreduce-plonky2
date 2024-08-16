@@ -1,6 +1,8 @@
 //! The executor module converts a SQL query as provided by the user targeting a
 //! virtual contract-storage table into a query executable against the ryhope
 //! row tree tables.
+use std::collections::HashMap;
+
 use anyhow::*;
 use log::*;
 use sqlparser::ast::{
@@ -9,12 +11,45 @@ use sqlparser::ast::{
     Query, Select, SelectItem, SetExpr, TableAlias, TableFactor, TableWithJoins, Value,
     WildcardAdditionalOptions,
 };
+use verifiable_db::query::{
+    computational_hash_ids::PlaceholderIdentifier,
+    universal_circuit::universal_circuit_inputs::{PlaceholderId, Placeholders},
+};
 
 use crate::{
+    placeholders,
     symbols::{ColumnKind, ContextProvider},
     utils::str_to_u256,
     visitor::{AstPass, Visit},
+    ParsilSettings,
 };
+
+/// A data structure wrapping a zkSQL query converted into a pgSQL able to be
+/// executed on zkTables and its accompanying metadata.
+#[derive(Debug)]
+pub struct TranslatedQuery {
+    /// The translated query, should be converted to string
+    pub query: Query,
+    /// Where each placeholder from the zkSQL query should be put in the array
+    /// of PgSQL placeholder.
+    pub placeholder_mapping: HashMap<PlaceholderId, usize>,
+}
+impl TranslatedQuery {
+    /// How many PgSQL placeholders should be allocated
+    pub fn placeholder_count(&self) -> usize {
+        self.placeholder_mapping.len()
+    }
+
+    /// From the [`Placeholders`] generated for the circuit public inputs,
+    /// generate a list of placeholders that can be used in a PgSQL query.
+    pub fn convert_placeholders(&self, placeholders: &Placeholders) -> Vec<String> {
+        let mut r = vec![String::new(); self.placeholder_count()];
+        for (name, value) in placeholders.0.iter() {
+            r[self.placeholder_mapping[name]] = format!("'{}'::NUMERIC", value);
+        }
+        r
+    }
+}
 
 /// The SQL datatype to represent a UINT256
 const UINT256: DataType = DataType::Numeric(ExactNumberInfo::None);
@@ -277,11 +312,11 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
 }
 
 struct Executor<'a, C: ContextProvider> {
-    context: &'a C,
+    settings: &'a ParsilSettings<C>,
 }
 impl<'a, C: ContextProvider> Executor<'a, C> {
-    fn new(context: &'a C) -> Self {
-        Self { context }
+    fn new(settings: &'a ParsilSettings<C>) -> Self {
+        Self { settings }
     }
 }
 
@@ -309,7 +344,7 @@ impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
                     let concrete_table_name = &name.0[0].value;
 
                     // Fetch all the column declared in this table
-                    let table = self.context.fetch_table(&concrete_table_name)?;
+                    let table = self.settings.context.fetch_table(&concrete_table_name)?;
                     let table_columns = &table.columns;
 
                     // Extract the apparent table name (either the concrete one
@@ -425,17 +460,33 @@ impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
     }
 }
 
-pub fn generate_query_execution<C: ContextProvider>(query: &Query, ctx: C) -> Result<Query> {
-    let mut executor = Executor::new(&ctx);
+pub fn generate_query_execution<C: ContextProvider>(
+    query: &mut Query,
+    settings: &ParsilSettings<C>,
+) -> Result<TranslatedQuery> {
+    let largest_placeholder = placeholders::validate(settings, query)?;
+    let mut executor = Executor::new(settings);
     let mut query_execution = query.clone();
     query_execution.visit(&mut executor)?;
     info!("EXEC: {query_execution}");
 
-    Ok(query_execution)
+    Ok(TranslatedQuery {
+        query: query_execution,
+        placeholder_mapping: (1..=largest_placeholder)
+            .map(|i| PlaceholderId::Generic(i))
+            .chain(std::iter::once(PlaceholderId::MinQueryOnIdx1))
+            .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
+            .enumerate()
+            .map(|(i, p)| (p, i))
+            .collect(),
+    })
 }
 
-pub fn generate_query_keys<C: ContextProvider>(query: &Query, ctx: C) -> Result<Query> {
-    let mut pis = RowFetcher::new(&ctx);
+pub fn generate_query_keys<C: ContextProvider>(
+    query: &Query,
+    settings: &ParsilSettings<C>,
+) -> Result<Query> {
+    let mut pis = RowFetcher::new(&settings.context);
     let mut query_pis = query.clone();
     pis.process(&mut query_pis)?;
     info!("PIs: {query_pis}");

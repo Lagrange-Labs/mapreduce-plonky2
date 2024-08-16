@@ -152,14 +152,6 @@ pub(crate) struct Assembler<'a, C: ContextProvider> {
     secondary_index_bounds: Bounds,
 }
 impl<'a, C: ContextProvider> Assembler<'a, C> {
-    pub fn validate(query: &Query, settings: &'a ParsilSettings<C>) -> Result<()> {
-        let mut converted_query = query.clone();
-        let mut resolver = Assembler::new(settings);
-        converted_query.visit(&mut resolver)?;
-        resolver.prepare_result()?;
-        Ok(())
-    }
-
     /// Create a new empty [`Resolver`]
     fn new(settings: &'a ParsilSettings<C>) -> Self {
         Assembler {
@@ -874,6 +866,14 @@ impl<'a, C: ContextProvider> AstPass for Assembler<'a, C> {
         self.scopes.current_scope_mut().provides(provided);
         Ok(())
     }
+}
+
+pub fn validate<C: ContextProvider>(query: &Query, settings: &ParsilSettings<C>) -> Result<()> {
+    let mut converted_query = query.clone();
+    let mut resolver = Assembler::new(settings);
+    converted_query.visit(&mut resolver)?;
+    resolver.prepare_result()?;
+    Ok(())
 }
 
 pub fn assemble<C: ContextProvider>(q: &Query, settings: &ParsilSettings<C>) -> Result<CircuitPis> {

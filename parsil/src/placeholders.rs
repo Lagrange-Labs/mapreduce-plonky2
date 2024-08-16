@@ -20,15 +20,6 @@ pub struct PlaceholderValidator<'a, C: ContextProvider> {
     current_max_freestanding: usize,
 }
 impl<'a, C: ContextProvider> PlaceholderValidator<'a, C> {
-    /// Instantiate a [`PlaceholderValidator`], then run ot on the given query.
-    /// Return the number of used free-standing placeholders if successful, or
-    /// an error if the placeholder use is inappropriate.
-    pub fn validate(settings: &'a ParsilSettings<C>, query: &mut Query) -> Result<usize> {
-        let mut validator = Self::new(settings);
-        query.visit(&mut validator)?;
-        validator.close()
-    }
-
     /// Instantiate a new [`PlaceholderValidator`] from the given settings.
     fn new(settings: &'a ParsilSettings<C>) -> Self {
         Self {
@@ -70,4 +61,16 @@ impl<'a, C: ContextProvider> AstPass for PlaceholderValidator<'a, C> {
         }
         Ok(())
     }
+}
+
+/// Instantiate a [`PlaceholderValidator`], then run ot on the given query.
+/// Return the number of used free-standing placeholders if successful, or
+/// an error if the placeholder use is inappropriate.
+pub fn validate<C: ContextProvider>(
+    settings: &ParsilSettings<C>,
+    query: &mut Query,
+) -> Result<usize> {
+    let mut validator = PlaceholderValidator::new(settings);
+    query.visit(&mut validator)?;
+    validator.close()
 }

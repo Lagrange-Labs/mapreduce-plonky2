@@ -5,8 +5,12 @@ use std::str::FromStr;
 use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
 
 use crate::{
-    circuit::Assembler, errors::ValidationError, expand, parser,
-    placeholders::PlaceholderValidator, symbols::ContextProvider, validate::SqlValidator,
+    circuit::{self, Assembler},
+    errors::ValidationError,
+    expand, parser,
+    placeholders::{self, PlaceholderValidator},
+    symbols::ContextProvider,
+    validate::{self, SqlValidator},
 };
 
 /// This register handle all operations related to placeholder registration,
@@ -68,20 +72,39 @@ pub struct PlaceholderSettings {
 pub const DEFAULT_MIN_BLOCK_PLACEHOLDER: &str = "$MIN_BLOCK";
 pub const DEFAULT_MAX_BLOCK_PLACEHOLDER: &str = "$MAX_BLOCK";
 impl PlaceholderSettings {
+    /// Generate a [`PlaceholderSettings`] with the default min. and max.
+    /// primary index placeholders and the specified number of generic
+    /// placeholders.
     pub fn with_freestanding(n: usize) -> Self {
         Self::with_freestanding_and_blocks(
             DEFAULT_MIN_BLOCK_PLACEHOLDER,
             DEFAULT_MAX_BLOCK_PLACEHOLDER,
             n,
         )
+        .unwrap()
     }
 
-    pub fn with_freestanding_and_blocks(min_block: &str, max_block: &str, n: usize) -> Self {
-        Self {
+    /// Generate a [`PlaceholderSettings`] with the given names for min. and
+    /// max. primary index, and the specified number of generic placeholders.
+    pub fn with_freestanding_and_blocks(
+        min_block: &str,
+        max_block: &str,
+        n: usize,
+    ) -> Result<Self> {
+        ensure!(
+            min_block.starts_with('$'),
+            "placeholders must start with '$'"
+        );
+        ensure!(
+            max_block.starts_with('$'),
+            "placeholders must start with '$'"
+        );
+
+        Ok(Self {
             min_block_placeholder: min_block.to_string(),
             max_block_placeholder: max_block.to_string(),
             max_free_placeholders: n,
-        }
+        })
     }
 
     /// Ensure that the given placeholder is valid, and update the validator
@@ -112,6 +135,8 @@ impl PlaceholderSettings {
     }
 }
 
+/// Parse and validate the given zkSQL query string against the current
+/// implementation.
 pub fn parse_and_validate<C: ContextProvider>(
     query: &str,
     settings: &ParsilSettings<C>,
@@ -119,9 +144,9 @@ pub fn parse_and_validate<C: ContextProvider>(
     let mut query = parser::parse(&settings, query)?;
     expand::expand(&mut query);
 
-    PlaceholderValidator::validate(&settings, &mut query)?;
-    SqlValidator::validate(&settings, &mut query)?;
-    Assembler::validate(&query, &settings)?;
+    placeholders::validate(&settings, &mut query)?;
+    validate::validate(&settings, &mut query)?;
+    circuit::validate(&query, &settings)?;
     Ok(query)
 }
 

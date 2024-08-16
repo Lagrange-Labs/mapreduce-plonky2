@@ -61,7 +61,7 @@ fn main() -> Result<()> {
         context: FileContextProvider::from_file("tests/context.json")?,
         placeholders: PlaceholderSettings::with_freestanding(3),
     };
-    let query = parse_and_validate(&args.request, &settings)?;
+    let mut query = parse_and_validate(&args.request, &settings)?;
 
     match args.command {
         Command::Debug {} => {
@@ -72,18 +72,19 @@ fn main() -> Result<()> {
             println!("Final query:\n{}", query);
         }
         Command::Circuit {} => {
-            circuit::Assembler::validate(&query, &settings)?;
+            circuit::validate(&query, &settings)?;
         }
-        Command::Query { kind } => {
-            let ctx = FileContextProvider::from_file("tests/context.json")?;
-            println!(
-                "{}",
-                match kind {
-                    QueryKind::Execute => executor::generate_query_execution(&query, ctx)?,
-                    QueryKind::Keys => executor::generate_query_keys(&query, ctx)?,
-                }
-            );
-        }
+        Command::Query { kind } => match kind {
+            QueryKind::Execute => {
+                let translated = executor::generate_query_execution(&mut query, &settings)?;
+
+                println!("{}", translated.query);
+                println!("placeholders mapping: {:?}", translated.placeholder_mapping);
+            }
+            QueryKind::Keys => {
+                println!("{}", executor::generate_query_keys(&query, &settings)?)
+            }
+        },
     }
 
     Ok(())

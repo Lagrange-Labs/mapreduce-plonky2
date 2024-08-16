@@ -17,36 +17,6 @@ use crate::{
 pub struct SqlValidator<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
 }
-impl<'a, C: ContextProvider> SqlValidator<'a, C> {
-    /// Instantiate a new [`Validator`] and validate this query with it.
-    pub fn validate(settings: &'a ParsilSettings<C>, query: &mut Query) -> Result<()> {
-        if let SetExpr::Select(ref mut select) = *query.body {
-            ensure!(
-                select.projection.iter().all(|s| !matches!(
-                    s,
-                    SelectItem::UnnamedExpr(Expr::Function(_))
-                        | SelectItem::ExprWithAlias {
-                            expr: Expr::Function(_),
-                            ..
-                        }
-                )) | select.projection.iter().all(|s| matches!(
-                    s,
-                    SelectItem::UnnamedExpr(Expr::Function(_))
-                        | SelectItem::ExprWithAlias {
-                            expr: Expr::Function(_),
-                            ..
-                        }
-                )),
-                ValidationError::MixedQuery,
-            );
-        } else {
-            bail!(ValidationError::NotASelect)
-        }
-
-        let mut validator = Self { settings };
-        query.visit(&mut validator)
-    }
-}
 impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
     fn pre_unary_operator(&mut self, unary_operator: &mut UnaryOperator) -> Result<()> {
         match unary_operator {
@@ -392,4 +362,32 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
         );
         Ok(())
     }
+}
+/// Instantiate a new [`Validator`] and validate this query with it.
+pub fn validate<C: ContextProvider>(settings: &ParsilSettings<C>, query: &mut Query) -> Result<()> {
+    if let SetExpr::Select(ref mut select) = *query.body {
+        ensure!(
+            select.projection.iter().all(|s| !matches!(
+                s,
+                SelectItem::UnnamedExpr(Expr::Function(_))
+                    | SelectItem::ExprWithAlias {
+                        expr: Expr::Function(_),
+                        ..
+                    }
+            )) | select.projection.iter().all(|s| matches!(
+                s,
+                SelectItem::UnnamedExpr(Expr::Function(_))
+                    | SelectItem::ExprWithAlias {
+                        expr: Expr::Function(_),
+                        ..
+                    }
+            )),
+            ValidationError::MixedQuery,
+        );
+    } else {
+        bail!(ValidationError::NotASelect)
+    }
+
+    let mut validator = SqlValidator { settings };
+    query.visit(&mut validator)
 }
