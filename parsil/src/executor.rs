@@ -189,10 +189,6 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
         Ok(())
     }
 
-    fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
-        convert_number_string(expr)
-    }
-
     fn post_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
         if let Some(replacement) = match table_factor {
             TableFactor::Table { name, alias, .. } => {
@@ -313,10 +309,14 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
 
 struct Executor<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
+    largest_placeholder: usize,
 }
 impl<'a, C: ContextProvider> Executor<'a, C> {
-    fn new(settings: &'a ParsilSettings<C>) -> Self {
-        Self { settings }
+    fn new(settings: &'a ParsilSettings<C>, largest_placeholder: usize) -> Self {
+        Self {
+            settings,
+            largest_placeholder,
+        }
     }
 }
 
@@ -324,6 +324,19 @@ impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         convert_number_string(expr)?;
         convert_funcalls(expr)?;
+
+        if let Expr::Value(Value::Placeholder(ref mut name)) = expr {
+            match self.settings.placeholders.resolve_placeholder(name)? {
+                PlaceholderIdentifier::MinQueryOnIdx1 => {
+                    *name = format!("${}", self.largest_placeholder + 1);
+                }
+                PlaceholderIdentifier::MaxQueryOnIdx1 => {
+                    *name = format!("${}", self.largest_placeholder + 2);
+                }
+                PlaceholderIdentifier::Generic(_) => {}
+            }
+        }
+
         Ok(())
     }
 
@@ -465,20 +478,22 @@ pub fn generate_query_execution<C: ContextProvider>(
     settings: &ParsilSettings<C>,
 ) -> Result<TranslatedQuery> {
     let largest_placeholder = placeholders::validate(settings, query)?;
-    let mut executor = Executor::new(settings);
+
+    let mut executor = Executor::new(settings, largest_placeholder);
     let mut query_execution = query.clone();
     query_execution.visit(&mut executor)?;
-    info!("EXEC: {query_execution}");
+
+    let placeholder_mapping = (1..=largest_placeholder)
+        .map(|i| PlaceholderId::Generic(i))
+        .chain(std::iter::once(PlaceholderId::MinQueryOnIdx1))
+        .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
+        .enumerate()
+        .map(|(i, p)| (p, i))
+        .collect();
 
     Ok(TranslatedQuery {
         query: query_execution,
-        placeholder_mapping: (1..=largest_placeholder)
-            .map(|i| PlaceholderId::Generic(i))
-            .chain(std::iter::once(PlaceholderId::MinQueryOnIdx1))
-            .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
-            .enumerate()
-            .map(|(i, p)| (p, i))
-            .collect(),
+        placeholder_mapping,
     })
 }
 
