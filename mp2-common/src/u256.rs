@@ -65,6 +65,18 @@ pub fn is_less_than_or_equal_to_u256_arr<const L: usize>(
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct UInt256Target([U32Target; NUM_LIMBS]);
 
+impl PartialEq for UInt256Target {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.iter().zip(other.0.iter()).all(
+            |(s, o)| {
+                s.0 == o.0
+            }
+        )
+    }
+}
+
+impl Eq for UInt256Target {}
+
 pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
     /// Add a UInt256Target without any range-check on the limbs
     fn add_virtual_u256_unsafe(&mut self) -> UInt256Target;
@@ -804,8 +816,10 @@ impl UInt256Target {
         Ok(UInt256Target(
             (0..NUM_LIMBS)
                 .map(|_| buffer.read_target().map(U32Target))
-                .rev() // targets are serialized in big-endian order, so we need to reverse them to get little-endian
                 .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .rev() // targets are serialized in big-endian order, so we need to reverse them to get little-endian
+                .collect_vec()
                 .try_into()
                 .unwrap(),
         ))

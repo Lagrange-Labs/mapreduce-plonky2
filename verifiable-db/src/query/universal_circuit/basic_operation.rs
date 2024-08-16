@@ -19,7 +19,7 @@ use crate::query::computational_hash_ids::Operation;
 
 use super::ComputationalHashTarget;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 /// Input wires for basic operation component
 pub struct BasicOperationInputWires {
     /// value to be employed for constant operand, if any, in the basic operation

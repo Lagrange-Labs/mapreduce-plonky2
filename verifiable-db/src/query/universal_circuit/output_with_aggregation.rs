@@ -25,7 +25,7 @@ use super::{
     ComputationalHashTarget,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 /// Input wires for output with aggregation component
 pub struct InputWires<const MAX_NUM_RESULTS: usize> {
     /// Selectors employed to choose which item, among the inputs ones,
@@ -53,7 +53,7 @@ pub struct InputWires<const MAX_NUM_RESULTS: usize> {
     is_output_valid: [BoolTarget; MAX_NUM_RESULTS],
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 /// Input + output wires for output component for queries with result aggregation
 pub struct Wires<const MAX_NUM_RESULTS: usize> {
     input_wires: InputWires<MAX_NUM_RESULTS>,
@@ -63,7 +63,7 @@ pub struct Wires<const MAX_NUM_RESULTS: usize> {
     output_hash: ComputationalHashTarget,
 }
 /// Input witness values for output component for queries with result aggregation
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Circuit<const MAX_NUM_RESULTS: usize> {
     #[serde(
         serialize_with = "serialize_long_array",

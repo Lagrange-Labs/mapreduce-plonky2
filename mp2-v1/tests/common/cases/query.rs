@@ -21,7 +21,7 @@ use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::{Context, Result};
 use futures::{future::BoxFuture, io::empty, stream, FutureExt, StreamExt};
 use itertools::Itertools;
-use log::{debug, info};
+use log::{debug, info, warn};
 use mp2_common::{array::ToField, poseidon::empty_poseidon_hash, types::HashOutput, F};
 use mp2_v1::{
     indexing::{
@@ -102,8 +102,8 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     let res = table
         .execute_row_query(
             &exec_query.query.to_string(),
-            query_info.min_block - table.genesis_block as BlockPrimaryIndex + 1,
-            query_info.max_block - table.genesis_block as BlockPrimaryIndex + 1,
+            query_info.min_block, // - table.genesis_block as BlockPrimaryIndex + 1,
+            query_info.max_block, //- table.genesis_block as BlockPrimaryIndex + 1,
         )
         .await?;
     info!(
@@ -113,7 +113,7 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
     // the query to use to fetch all the rows keys involved in the result tree.
-    let pis = parsil::circuit::assemble(&parsed, &settings)?;
+    let pis = parsil::circuit::assemble(&parsed, &settings, &query_info.placeholders)?;
     prove_query(ctx, table, query_info, parsed, pis, &settings)
         .await
         .expect("unable to run universal query proof");
@@ -125,11 +125,11 @@ async fn prove_query(
     ctx: &mut TestContext,
     table: &Table,
     query: QueryCooking,
-    parsed: Query,
+    mut parsed: Query,
     pis: CircuitPis,
     settings: &ParsilSettings<&Table>,
 ) -> Result<()> {
-    let rows_query = parsil::executor::generate_query_keys(&parsed, settings)?;
+    let rows_query = parsil::executor::generate_query_keys(&mut parsed, settings)?;
     let all_touched_rows = table
         .execute_row_query(&rows_query.to_string(), query.min_block, query.max_block)
         .await?;
@@ -215,7 +215,7 @@ async fn prove_query(
         columns: table.columns.clone(),
     };
     let info = IndexInfo {
-        bounds: query.bounds.clone(),
+        bounds: pis.bounds.clone(),
     };
     prove_query_on_tree(
         planner,
@@ -300,6 +300,7 @@ where
             // are guaranteed the row is satisfying the query
             info.save_proof(&mut planner.ctx, primary, &k, embedded_proof.unwrap())?;
             proven_nodes.insert(k);
+            workplan.done(&wk)?;
             continue;
         }
 
@@ -308,6 +309,7 @@ where
         // it is not the same meaning as a "leaf of a tree", here it just means is it the first
         // node in the merkle path.
         let input = if wk.is_path_end {
+            info!("node {primary}:{k:?} is at path end");
             assert!(
                 info.is_satisfying_query(&k),
                 "first node in merkle path should always be a valid query one"
@@ -321,7 +323,7 @@ where
                 right_info,
                 node_info,
                 info.is_row_tree(),
-                &planner.query.bounds,
+                &planner.pis.bounds,
             )
             .expect("can't create leaf input")
         } else {
@@ -349,8 +351,8 @@ where
                     left_info,
                     right_info,
                     node_info,
-                    true,
-                    &planner.query.bounds,
+                    info.is_row_tree(),
+                    &planner.pis.bounds,
                 )
                 .expect("can't create leaf input")
             } else {
@@ -367,7 +369,7 @@ where
                         right_proof,
                         embedded_proof.expect("should be a embedded_proof here"),
                         info.is_row_tree(),
-                        &planner.query.bounds,
+                        &planner.pis.bounds,
                     )
                     .expect("can't create full node circuit input")
                 } else {
@@ -386,7 +388,7 @@ where
                         unproven,
                         child_pos,
                         info.is_row_tree(),
-                        &planner.query.bounds,
+                        &planner.pis.bounds,
                     )
                     .expect("can't build new partial node input")
                 }
@@ -394,6 +396,8 @@ where
         };
         if info.load_proof(planner.ctx, primary, &k).is_err() {
             info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
+            debug!("node info for {primary}, {k:?}: {:?}", get_node_info(&planner.tree, &k, primary as Epoch).await);
+            //debug!("input for {primary}, {k:?}: {:?}", input);
             let proof = planner.ctx.run_query_proof(input)?;
             info.save_proof(planner.ctx, primary, &k, proof)?;
         }
@@ -481,8 +485,8 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
         primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
     ) -> Result<Vec<u8>> {
-        assert_eq!(primary, *key);
-        let proof_key = ProofKey::QueryAggregateIndex(primary);
+        //assert_eq!(primary, *key);
+        let proof_key = ProofKey::QueryAggregateIndex(*key);
         ctx.storage.get_proof_exact(&proof_key)
     }
 
@@ -493,8 +497,8 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
         key: &BlockPrimaryIndex,
         proof: Vec<u8>,
     ) -> Result<()> {
-        assert_eq!(primary, *key);
-        let proof_key = ProofKey::QueryAggregateIndex(primary);
+        //assert_eq!(primary, *key);
+        let proof_key = ProofKey::QueryAggregateIndex(*key);
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -505,7 +509,7 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
         k: &BlockPrimaryIndex,
         v: &IndexNode<BlockPrimaryIndex>,
     ) -> Option<Vec<u8>> {
-        assert_eq!(primary, *k);
+        //assert_eq!(primary, *k);
         if self.is_satisfying_query(k) {
             // load the proof of the row root for this query
             // We assume it is already proven, otherwise, there is a flaw in the logic
@@ -749,7 +753,7 @@ async fn prove_single_row(
         &pis.result,
         &query.placeholders,
         row_ctx.is_leaf(),
-        &query.bounds,
+        &pis.bounds,
     )
     .expect("unable to create universal query circuit inputs");
     // 3. run proof if not ran already
@@ -776,7 +780,6 @@ async fn prove_single_row(
 struct QueryCooking {
     query: String,
     placeholders: Placeholders,
-    bounds: QueryBounds,
     min_block: BlockPrimaryIndex,
     max_block: BlockPrimaryIndex,
     // At the moment it returns the row key selected and the epochs to run the circuit on
@@ -890,8 +893,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     //          * but we can have "sec_index < $3 AND (price < $3 -10 OR sec_index * price < $4 + 20")
     //              * only the first predicate is used in range query
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
-    let bounds = QueryBounds::new(&placeholders, None, None)?;
-
+    
     let query_str = format!(
         "SELECT AVG({value_column})
                 FROM {table_name}
@@ -900,7 +902,6 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
                 AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
-        bounds,
         min_block: min_block as BlockPrimaryIndex,
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,

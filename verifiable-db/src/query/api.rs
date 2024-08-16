@@ -75,7 +75,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // we need to clone data if we fix by put variants inside a `Box`
 pub enum CircuitInput<
     const MAX_NUM_COLUMNS: usize,
@@ -940,13 +940,18 @@ mod tests {
         )
         .unwrap();
 
-        let params = Parameters::<
+        let mut params = Parameters::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >::build();
 
+        // Test serialization of params
+        let serialized_params = bincode::serialize(&params).unwrap();
+        // use deserialized params to generate proofs
+        params = bincode::deserialize(&serialized_params).unwrap();
+        
         type Input = CircuitInput<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,

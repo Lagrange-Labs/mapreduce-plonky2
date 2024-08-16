@@ -387,7 +387,7 @@ impl QueryBound {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 /// Input wires for the universal query circuit
 pub struct UniversalQueryCircuitWires<
     const MAX_NUM_COLUMNS: usize,
@@ -397,7 +397,7 @@ pub struct UniversalQueryCircuitWires<
     T: OutputComponent<MAX_NUM_RESULTS>,
 > {
     /// Input wires for column extraction component
-    column_extraction_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
+    pub(crate) column_extraction_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
     /// flag specifying whether the given row is stored in a leaf node of a rows tree or not
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_leaf: BoolTarget,
@@ -457,7 +457,7 @@ pub trait OutputComponentWires {
     /// - It is a `UInt256Target` in the output for queries with aggregation operations
     type FirstT: ToTargets;
     /// Input wires of the output component
-    type InputWires: Serialize + for<'a> Deserialize<'a> + Clone + Debug;
+    type InputWires: Serialize + for<'a> Deserialize<'a> + Clone + Debug + Eq + PartialEq;
 
     /// Get the identifiers of the aggregation operations specified in the query to aggregate the
     /// results (e.g., `SUM`, `AVG`)
@@ -1070,7 +1070,7 @@ where
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 /// Inputs for the 2 variant of universal query circuit
 pub enum UniversalCircuitInput<
     const MAX_NUM_COLUMNS: usize,

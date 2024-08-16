@@ -876,7 +876,7 @@ pub fn validate<C: ContextProvider>(query: &Query, settings: &ParsilSettings<C>)
     Ok(())
 }
 
-pub fn assemble<C: ContextProvider>(q: &Query, settings: &ParsilSettings<C>) -> Result<CircuitPis> {
+pub fn assemble<C: ContextProvider>(q: &Query, settings: &ParsilSettings<C>, placeholders: &Placeholders) -> Result<CircuitPis> {
     let mut converted_query = q.clone();
     let mut resolver = Assembler::new(settings);
     converted_query.visit(&mut resolver)?;
@@ -890,7 +890,7 @@ pub fn assemble<C: ContextProvider>(q: &Query, settings: &ParsilSettings<C>) -> 
         println!("     {i}: {op:?}");
     }
 
-    let pis = resolver.to_pis(&Placeholders::new_empty(U256::ZERO, U256::ZERO))?;
+    let pis = resolver.to_pis(&placeholders)?;
 
     println!("Sent to circuit:");
     println!("{:#?}", pis);
