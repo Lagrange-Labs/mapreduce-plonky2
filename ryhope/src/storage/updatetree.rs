@@ -148,6 +148,8 @@ impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
                     panic!("duplicated key found in path");
                 }
                 self.nodes[current].children.insert(new_i);
+                // we add a children to current, so `is_path_end` should be false
+                self.nodes[current].is_path_end = false;
                 self.nodes.push(UpdateTreeNode {
                     parent: Some(current),
                     children: BTreeSet::new(),
