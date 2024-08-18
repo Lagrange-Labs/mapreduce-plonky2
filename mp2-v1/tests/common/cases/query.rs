@@ -450,18 +450,16 @@ where
                 }
             }
         };
-        if info.load_proof(planner.ctx, primary, &k).is_err() {
-            info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
-            debug!(
-                "node info for {primary}, {k:?}: {:?}",
-                get_node_info(&planner.tree, &k, primary as Epoch).await
-            );
-            //debug!("input for {primary}, {k:?}: {:?}", input);
-            let proof = planner
-                .ctx
-                .run_query_proof(GlobalCircuitInput::Query(input))?;
-            info.save_proof(planner.ctx, primary, &k, proof)?;
-        }
+        info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
+        debug!(
+            "node info for {primary}, {k:?}: {:?}",
+            get_node_info(&planner.tree, &k, primary as Epoch).await
+        );
+        //debug!("input for {primary}, {k:?}: {:?}", input);
+        let proof = planner
+            .ctx
+            .run_query_proof(GlobalCircuitInput::Query(input))?;
+        info.save_proof(planner.ctx, primary, &k, proof)?;
         info!("Universal query proof DONE for {primary} -> {k:?} ");
         workplan.done(&wk)?;
         proven_nodes.insert(k);
@@ -760,20 +758,14 @@ async fn prove_single_row(
     .expect("unable to create universal query circuit inputs");
     // 3. run proof if not ran already
     let proof_key = ProofKey::QueryUniversal((primary, row_key.clone()));
-    let proof = match ctx.storage.get_proof_exact(&proof_key) {
-        Ok(proof) => {
-            info!("Loading universal query proof for {primary} -> {row_key:?}");
-            proof
-        }
-        Err(_) => {
-            info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");
-            let proof = ctx
-                .run_query_proof(GlobalCircuitInput::Query(input))
-                .expect("unable to generate universal proof for {epoch} -> {row_key:?}");
-            info!("Universal query proof DONE for {primary} -> {row_key:?} ");
-            ctx.storage.store_proof(proof_key, proof.clone())?;
-            proof
-        }
+    let proof = {
+        info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");
+        let proof = ctx
+            .run_query_proof(GlobalCircuitInput::Query(input))
+            .expect("unable to generate universal proof for {epoch} -> {row_key:?}");
+        info!("Universal query proof DONE for {primary} -> {row_key:?} ");
+        ctx.storage.store_proof(proof_key, proof.clone())?;
+        proof
     };
     Ok(proof)
 }
