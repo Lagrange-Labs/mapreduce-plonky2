@@ -496,7 +496,6 @@ where
         info!("Building non-existence circuits..");
         let non_existence_leaf = builder.build_circuit(());
         let non_existence_intermediate = builder.build_circuit(());
-        info!("All query circuits parameters generated!");
 
         let circuits = vec![
             prepare_recursive_circuit_for_circuit_set(&circuit_with_agg),
@@ -951,7 +950,7 @@ mod tests {
         let serialized_params = bincode::serialize(&params).unwrap();
         // use deserialized params to generate proofs
         params = bincode::deserialize(&serialized_params).unwrap();
-        
+
         type Input = CircuitInput<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,

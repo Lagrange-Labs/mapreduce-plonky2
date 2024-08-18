@@ -12,6 +12,7 @@ use crate::{
 };
 use alloy::primitives::U256;
 use anyhow::Result;
+use log::info;
 use mp2_common::{
     default_config,
     proof::{serialize_proof, ProofWithVK},
@@ -282,12 +283,15 @@ where
     pub fn build_params(preprocessing_params_info: &[u8]) -> Result<Self> {
         let params_info: ParamsInfo = bincode::deserialize(preprocessing_params_info)?;
         let query_params = QueryParams::build();
+        info!("Building the revelation circuit parameters...");
         let revelation_params = RevelationParams::build(
             query_params.get_circuit_set(),
             &params_info.preprocessing_circuit_set,
             &params_info.preprocessing_vk,
         );
+        info!("Building the final wrapping circuit parameters...");
         let wrap_circuit = WrapCircuitParams::build(revelation_params.get_circuit_set());
+        info!("All QUERY parameters built !");
         Ok(Self {
             query_params,
             revelation_params,
