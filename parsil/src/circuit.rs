@@ -679,7 +679,7 @@ pub struct CircuitPis {
     /// the WHERE predicate, if any. By convention, the root of the AST **MUST**
     /// be the last one in this list.
     pub predication_operations: Vec<BasicOperation>,
-    /// If any, the bounds for the secondary index
+    /// the bounds for primary and secondary index if any
     pub bounds: QueryBounds,
 }
 
@@ -876,7 +876,11 @@ pub fn validate<C: ContextProvider>(query: &Query, settings: &ParsilSettings<C>)
     Ok(())
 }
 
-pub fn assemble<C: ContextProvider>(q: &Query, settings: &ParsilSettings<C>, placeholders: &Placeholders) -> Result<CircuitPis> {
+pub fn assemble<C: ContextProvider>(
+    q: &Query,
+    settings: &ParsilSettings<C>,
+    placeholders: &Placeholders,
+) -> Result<CircuitPis> {
     let mut converted_query = q.clone();
     let mut resolver = Assembler::new(settings);
     converted_query.visit(&mut resolver)?;

@@ -113,6 +113,9 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
+    pub const fn num_placeholders_ids() -> usize {
+        2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)
+    }
     /// Initialize input for universal circuit to prove the execution of a query over a
     /// single row, from the following inputs:
     /// - `column_cells`: set of columns (including primary and secondary indexes) of the row being proven

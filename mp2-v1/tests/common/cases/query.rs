@@ -81,6 +81,13 @@ pub type QueryCircuitInput = verifiable_db::query::api::CircuitInput<
     MAX_NUM_ITEMS_PER_OUTPUT,
 >;
 
+pub type RevelationCircuitInput = verifiable_db::revelation::api::CircuitInput<
+    MAX_NUM_OUTPUTS,
+    MAX_NUM_ITEMS_PER_OUTPUT,
+    MAX_NUM_PLACEHOLDERS,
+    { QueryCircuitInput::num_placeholders_ids() },
+>;
+
 pub enum TableType {
     Mapping,
     Single,
@@ -235,6 +242,44 @@ async fn prove_query(
         current_epoch as BlockPrimaryIndex,
     )
     .await?;
+    prove_revelation(ctx, table, &query, &pis, current_epoch).await?;
+    info!("Revelation done!");
+    Ok(())
+}
+
+async fn prove_revelation(
+    ctx: &TestContext,
+    table: &Table,
+    query: &QueryCooking,
+    pis: &CircuitPis,
+    tree_epoch: Epoch,
+) -> Result<()> {
+    // load the query proof, which is at the root of the tree
+    let query_proof = {
+        let root_key = table.index.root_at(tree_epoch).await.unwrap();
+        let proof_key = ProofKey::QueryAggregateIndex(root_key);
+        ctx.storage.get_proof_exact(&proof_key)?
+    };
+    // load the preprocessing proof at the same epoch
+    let indexing_proof = {
+        let pk = ProofKey::IVC(tree_epoch as BlockPrimaryIndex);
+        ctx.storage.get_proof_exact(&pk)?
+    };
+    let pis_hash = QueryCircuitInput::ids_for_placeholder_hash(
+        &RowCells::default(),
+        &pis.predication_operations,
+        &pis.result,
+        &query.placeholders,
+        &pis.bounds,
+    )?;
+    let input = RevelationCircuitInput::new_revelation_no_results_tree(
+        query_proof,
+        indexing_proof,
+        &pis.bounds,
+        &query.placeholders,
+        pis_hash,
+    )?;
+    let proof = ctx.run_query_proof(GlobalCircuitInput::Revelation(input))?;
     Ok(())
 }
 
@@ -669,65 +714,6 @@ where
         right_node,
     )
 }
-
-// Returns the node info belonging to this node. recurse is just used to indicate at which step in
-// the substree should we stop
-// Return is node info, node hash , left hash , right hash
-//async fn fetch_child_info(
-//    tree: &MerkleRowTree,
-//    k: RowTreeKey,
-//    at: Epoch,
-//    recurse: usize,
-//) -> BoxFuture<'static, (NodeInfo, HashOutput, Option<NodeInfo>, Option<NodeInfo>)> {
-//    async move {
-//        let (ctx, node_payload) = tree.fetch_with_context_at(&k, at).await;
-//        if recurse == 0 {
-//            let ni = NodeInfo::new(
-//                &node_payload.cell_root_hash,
-//                // if we stop recursing, we're at the grand child level so we don't carea bout the
-//                // child hashes
-//                None,
-//                None,
-//                node_payload.secondary_index_value(),
-//                node_payload.min,
-//                node_payload.max,
-//            );
-//            return (ni, node_payload.hash, None, None);
-//        }
-//        let (left_node, left_hash) = match ctx.left {
-//            Some(left_k) => {
-//                let (left_ni, left_hash, _, _) =
-//                    // TODO: find out this double await, it's weird but it works..
-//                    fetch_child_info(tree, left_k, at, recurse - 1).await.await;
-//                (Some(left_ni), Some(left_hash))
-//            }
-//            None => (None, None),
-//        };
-//        let (right_node, right_hash) = match ctx.right {
-//            Some(right_k) => {
-//                let (right_ni, right_hash, _, _) =
-//                    fetch_child_info(tree, right_k, at, recurse - 1).await.await;
-//                (Some(right_ni), Some(right_hash))
-//            }
-//            None => (None, None),
-//        };
-//
-//        return (
-//            NodeInfo::new(
-//                &node_payload.cell_root_hash,
-//                left_hash.as_ref(),
-//                right_hash.as_ref(),
-//                node_payload.secondary_index_value(),
-//                node_payload.min,
-//                node_payload.max,
-//            ),
-//            node_payload.hash,
-//            left_node,
-//            right_node,
-//        );
-//    }
-//    .boxed()
-//}
 
 async fn prove_single_row(
     ctx: &mut TestContext,
