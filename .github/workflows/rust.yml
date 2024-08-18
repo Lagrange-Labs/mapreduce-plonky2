@@ -68,3 +68,5 @@ jobs:
           CI_RPC_URL: ${{ secrets.CI_RPC_URL }}
           CI_SEPOLIA: ${{ secrets.CI_SEPOLIA }}
           CI_ETH: ${{ secrets.CI_ETH }}
+          LPN_PARAMS_DIR: $HOME/ci_params/
+          LPN_PARAMS_REBUILD: "true"

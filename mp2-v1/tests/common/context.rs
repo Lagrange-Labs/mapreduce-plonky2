@@ -18,14 +18,17 @@ use std::{
     io::{BufReader, BufWriter},
     path::PathBuf,
 };
-use verifiable_db::query;
+use verifiable_db::{api::QueryParameters, query};
 
 use crate::common::mkdir_all;
 
 use super::{
     cases::{
         self,
-        query::{MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULTS, MAX_NUM_RESULT_OPS},
+        query::{
+            MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
+            MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULTS, MAX_NUM_RESULT_OPS,
+        },
     },
     proof_storage::{ProofKV, ProofStorage},
 };
@@ -51,11 +54,13 @@ pub(crate) struct TestContext {
     /// Parameters
     pub(crate) params: Option<PublicParameters>,
     pub(crate) query_params: Option<
-        query::api::Parameters<
+        verifiable_db::api::QueryParameters<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
+            MAX_NUM_OUTPUTS,
+            MAX_NUM_ITEMS_PER_OUTPUT,
+            MAX_NUM_PLACEHOLDERS,
         >,
     >,
     pub(crate) storage: ProofKV,
@@ -125,20 +130,24 @@ impl ParamsType {
         Ok(())
     }
 
-    pub fn build(&self, ctx: &mut TestContext) -> Result<()>
+    pub fn build(&self, ctx: &mut TestContext, path: PathBuf) -> Result<()>
     where
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
         [(); MAX_NUM_RESULTS - 1]:,
     {
         match self {
             ParamsType::Query => {
+                // load indexing info if we can
+                let mut info_path = path.clone();
+                info_path.pop();
+                info_path.push(INDEX_INFO_FILE);
+                let index_info: Vec<u8> = bincode::deserialize_from(BufReader::new(
+                    File::open(&info_path).with_context(|| format!("while opening {path:?}"))?,
+                ))
+                .context("while parsing MP2 parameters")?;
+
                 info!("building the mp2 querying parameters");
-                let params = query::api::Parameters::<
-                    MAX_NUM_COLUMNS,
-                    MAX_NUM_PREDICATE_OPS,
-                    MAX_NUM_RESULT_OPS,
-                    MAX_NUM_RESULTS,
-                >::build();
+                let params = QueryParameters::build_params(&index_info)?;
                 ctx.query_params = Some(params);
                 Ok(())
             }
@@ -157,7 +166,7 @@ impl ParamsType {
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
         [(); MAX_NUM_RESULTS - 1]:,
     {
-        self.build(ctx)?;
+        self.build(ctx, path.clone())?;
         match self {
             ParamsType::Query => {
                 bincode::serialize_into(
@@ -175,11 +184,22 @@ impl ParamsType {
                     ),
                     &ctx.params.as_ref().unwrap(),
                 )?;
+                // info necessary for the query set
+                let info = ctx.params.as_ref().unwrap().get_params_info()?;
+                let mut info_path = path.clone();
+                info_path.pop();
+                info_path.push(INDEX_INFO_FILE);
+                bincode::serialize_into(
+                    BufWriter::new(File::create(&info_path).context("error creating info file")?),
+                    &info,
+                )?;
                 Ok(())
             }
         }
     }
 }
+
+const INDEX_INFO_FILE: &str = "index.info";
 
 impl TestContext {
     pub(crate) fn wallet(&self) -> EthereumWallet {
@@ -206,8 +226,7 @@ impl TestContext {
                 };
             }
             None => {
-                info!("recomputing parameters");
-                p.build(self)?;
+                panic!("CI should save params on disk so tests can run faster");
             }
         }
 
@@ -256,7 +275,7 @@ impl TestContext {
         self.rpc = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
     }
 
-    pub fn run_query_proof(&self, input: cases::query::CircuitInput) -> Result<Vec<u8>> {
+    pub fn run_query_proof(&self, input: cases::query::GlobalCircuitInput) -> Result<Vec<u8>> {
         self.query_params.as_ref().unwrap().generate_proof(input)
     }
 }

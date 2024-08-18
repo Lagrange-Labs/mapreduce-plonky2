@@ -57,17 +57,28 @@ use verifiable_db::query::{
     },
 };
 
-pub const NUM_COLUMNS: usize = 3;
-pub const MAX_NUM_COLUMNS: usize = 20;
-pub const MAX_NUM_PREDICATE_OPS: usize = 20;
 pub const MAX_NUM_RESULT_OPS: usize = 20;
 pub const MAX_NUM_RESULTS: usize = 10;
+pub const MAX_NUM_OUTPUTS: usize = 3;
+pub const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
+pub const MAX_NUM_PLACEHOLDERS: usize = 15;
+pub const MAX_NUM_COLUMNS: usize = 20;
+pub const MAX_NUM_PREDICATE_OPS: usize = 20;
 
-pub type CircuitInput = query::api::CircuitInput<
+pub type GlobalCircuitInput = verifiable_db::api::QueryCircuitInput<
     MAX_NUM_COLUMNS,
     MAX_NUM_PREDICATE_OPS,
     MAX_NUM_RESULT_OPS,
-    MAX_NUM_RESULTS,
+    MAX_NUM_OUTPUTS,
+    MAX_NUM_ITEMS_PER_OUTPUT,
+    MAX_NUM_PLACEHOLDERS,
+>;
+
+pub type QueryCircuitInput = verifiable_db::query::api::CircuitInput<
+    MAX_NUM_COLUMNS,
+    MAX_NUM_PREDICATE_OPS,
+    MAX_NUM_RESULT_OPS,
+    MAX_NUM_ITEMS_PER_OUTPUT,
 >;
 
 pub enum TableType {
@@ -317,7 +328,7 @@ where
             let (node_info, left_info, right_info) =
             // we can use primary as epoch now that tree stores epoch from genesis
                 get_node_info(&planner.tree, &k, primary as Epoch).await;
-            CircuitInput::new_single_path(
+            QueryCircuitInput::new_single_path(
                 SubProof::new_embedded_tree_proof(embedded_proof.unwrap())?,
                 left_info,
                 right_info,
@@ -346,7 +357,7 @@ where
                 )
                 .await;
                 // we look which child is the one to load from storage, the one we already proved
-                CircuitInput::new_single_path(
+                QueryCircuitInput::new_single_path(
                     SubProof::new_child_proof(child_proof, child_pos)?,
                     left_info,
                     right_info,
@@ -364,7 +375,7 @@ where
                         info.load_proof(planner.ctx, primary, node_ctx.left.as_ref().unwrap())?;
                     let right_proof =
                         info.load_proof(planner.ctx, primary, node_ctx.right.as_ref().unwrap())?;
-                    CircuitInput::new_full_node(
+                    QueryCircuitInput::new_full_node(
                         left_proof,
                         right_proof,
                         embedded_proof.expect("should be a embedded_proof here"),
@@ -382,7 +393,7 @@ where
                         ChildPosition::Left => right_info,
                         ChildPosition::Right => left_info,
                     };
-                    CircuitInput::new_partial_node(
+                    QueryCircuitInput::new_partial_node(
                         child_proof,
                         embedded_proof.expect("should be an embedded_proof here too"),
                         unproven,
@@ -396,9 +407,14 @@ where
         };
         if info.load_proof(planner.ctx, primary, &k).is_err() {
             info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
-            debug!("node info for {primary}, {k:?}: {:?}", get_node_info(&planner.tree, &k, primary as Epoch).await);
+            debug!(
+                "node info for {primary}, {k:?}: {:?}",
+                get_node_info(&planner.tree, &k, primary as Epoch).await
+            );
             //debug!("input for {primary}, {k:?}: {:?}", input);
-            let proof = planner.ctx.run_query_proof(input)?;
+            let proof = planner
+                .ctx
+                .run_query_proof(GlobalCircuitInput::Query(input))?;
             info.save_proof(planner.ctx, primary, &k, proof)?;
         }
         info!("Universal query proof DONE for {primary} -> {k:?} ");
@@ -747,7 +763,7 @@ async fn prove_single_row(
     let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(primary));
     let row = RowCells::new(primary_cell, secondary_cell, rest_cells);
     // 2. create input
-    let input = CircuitInput::new_universal_circuit(
+    let input = QueryCircuitInput::new_universal_circuit(
         &row,
         &pis.predication_operations,
         &pis.result,
@@ -766,7 +782,7 @@ async fn prove_single_row(
         Err(_) => {
             info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");
             let proof = ctx
-                .run_query_proof(input)
+                .run_query_proof(GlobalCircuitInput::Query(input))
                 .expect("unable to generate universal proof for {epoch} -> {row_key:?}");
             info!("Universal query proof DONE for {primary} -> {row_key:?} ");
             ctx.storage.store_proof(proof_key, proof.clone())?;
@@ -893,7 +909,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     //          * but we can have "sec_index < $3 AND (price < $3 -10 OR sec_index * price < $4 + 20")
     //              * only the first predicate is used in range query
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
-    
+
     let query_str = format!(
         "SELECT AVG({value_column})
                 FROM {table_name}
