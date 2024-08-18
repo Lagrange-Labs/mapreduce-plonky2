@@ -327,7 +327,7 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::query::{
-        aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
+        aggregation::{random_aggregation_operations, random_aggregation_public_inputs},
         PI_LEN,
     };
 

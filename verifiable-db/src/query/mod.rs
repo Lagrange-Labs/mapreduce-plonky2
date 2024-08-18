@@ -9,4 +9,4 @@ pub mod universal_circuit;
 
 // Without this skipping config, the generic parameter was deleted when `cargo fmt`.
 #[rustfmt::skip]
-pub(crate) const PI_LEN<const MAX_NUM_RESULTS: usize>: usize = PublicInputs::<F, MAX_NUM_RESULTS>::total_len();
+pub const PI_LEN<const MAX_NUM_RESULTS: usize>: usize = PublicInputs::<F, MAX_NUM_RESULTS>::total_len();

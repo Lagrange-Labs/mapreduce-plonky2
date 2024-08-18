@@ -159,9 +159,9 @@ where
 pub(crate) mod tests {
     use super::*;
     use crate::query::{
-        aggregation::tests::{
-            compute_output_item_value, random_aggregation_operations,
-            random_aggregation_public_inputs,
+        aggregation::{
+            random_aggregation_operations, random_aggregation_public_inputs,
+            tests::compute_output_item_value,
         },
         PI_LEN,
     };

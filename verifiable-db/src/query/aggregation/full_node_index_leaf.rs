@@ -135,7 +135,7 @@ mod tests {
     use super::*;
     use crate::query::{
         aggregation::{
-            tests::{random_aggregation_operations, random_aggregation_public_inputs},
+            random_aggregation_operations, random_aggregation_public_inputs,
             utils::tests::unify_subtree_proof,
         },
         PI_LEN,
