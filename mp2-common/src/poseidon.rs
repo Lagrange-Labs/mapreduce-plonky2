@@ -1,6 +1,8 @@
 use crate::types::CBuilder;
+use crate::utils::ToFields;
 use crate::utils::ToTargets;
 use crate::F;
+use itertools::Itertools;
 use num::BigUint;
 use plonky2::field::types::Field;
 use plonky2::field::types::PrimeField64;
@@ -25,6 +27,10 @@ use std::sync::OnceLock;
 pub type H = PoseidonHash;
 pub type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
 
+/// The flattened length of Poseidon hash, each original field is splitted from an
+/// Uint64 into two Uint32.
+pub const FLATTEN_POSEIDON_LEN: usize = NUM_HASH_OUT_ELTS * 2;
+
 /// The static variable of Empty Poseidon hash
 static EMPTY_POSEIDON_HASH: OnceLock<HashOut<GoldilocksField>> = OnceLock::new();
 
@@ -38,28 +44,62 @@ pub fn empty_poseidon_hash_as_vec() -> Vec<u8> {
     empty_poseidon_hash().to_bytes()
 }
 
+// Split the hash element into low and high of Uint32.
+fn split_hash_element_to_low_high(b: &mut CBuilder, element: Target) -> [Target; 2] {
+    let ttrue = b._true();
+    let zero = b.zero();
+    let p1 = b.constant(F::from_canonical_u32(u32::MAX));
+
+    let (low, high) = b.split_low_high(element, 32, 64);
+    let low_zero = b.is_equal(low, zero);
+    let high_high = b.is_equal(high, p1);
+    let not_high_high = b.not(high_high);
+    let valid = b.or(low_zero, not_high_high);
+    b.connect(valid.target, ttrue.target);
+
+    [low, high]
+}
+
+/// Flatten the hash target to construct a big-endian Uint32 array.
+pub fn flatten_poseidon_hash_target(
+    b: &mut CBuilder,
+    h: HashOutTarget,
+) -> [Target; FLATTEN_POSEIDON_LEN] {
+    h.to_targets()
+        .into_iter()
+        .flat_map(|t| {
+            let [low, high] = split_hash_element_to_low_high(b, t);
+            // Follow big-endian.
+            [high, low]
+        })
+        .collect_vec()
+        .try_into()
+        .unwrap()
+}
+
+/// Flatten the hash value to construct a big-endian Uint32 array.
+pub fn flatten_poseidon_hash_value(h: HashOut<F>) -> [F; FLATTEN_POSEIDON_LEN] {
+    h.to_fields()
+        .iter()
+        .flat_map(|f| {
+            let u = f.to_canonical_u64();
+            // [high, low] for big-endian.
+            [u >> 32, u & u32::MAX as u64].map(|u| F::from_canonical_u32(u as u32))
+        })
+        .collect_vec()
+        .try_into()
+        .unwrap()
+}
+
 /// Convert the hash target into a big integer target.
 pub fn hash_to_int_target(b: &mut CBuilder, h: HashOutTarget) -> BigUintTarget {
-    let zero = b.zero();
-    let p1 = b.constant(F::from_canonical_usize((1 << 32) - 1));
-    let _tru = b._true();
     let limbs = h
         .to_targets()
         .into_iter()
         // reason to take 2 is because 128 bit  width scalar is enough
         // when it comes from a random oracle to do scalar mul
         .take(2)
-        .flat_map(|t| {
-            // Split the hash element into low and high of Uint32. The `split_low_high`
-            // function handles the range check in internal.
-            let (low, high) = b.split_low_high(t, 32, 64);
-            let low_zero = b.is_equal(low, zero);
-            let high_high = b.is_equal(high, p1);
-            let not_high_high = b.not(high_high);
-            let valid = b.or(low_zero, not_high_high);
-            b.connect(valid.target, _tru.target);
-            [low, high].map(U32Target)
-        })
+        .flat_map(|t| split_hash_element_to_low_high(b, t).map(U32Target))
         .collect();
 
     BigUintTarget { limbs }
@@ -125,8 +165,10 @@ mod tests {
     use crate::default_config;
     use crate::utils::ToFields;
     use crate::C;
-    use mp2_test::circuit::{run_circuit, UserCircuit};
-    use mp2_test::utils::random_vector;
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
     use plonky2::{
         field::types::Field,
         hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
@@ -136,6 +178,32 @@ mod tests {
     use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 
     use super::*;
+
+    #[test]
+    fn test_poseidon_hash_flattening() {
+        // Generate the test hash.
+        let hash = HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
+
+        // Flatten the hash values.
+        let fields = flatten_poseidon_hash_value(hash);
+
+        let config = default_config();
+        let mut b = CBuilder::new(config);
+
+        // Flatten the hash targets.
+        let hash = b.constant_hash(hash);
+        let targets = flatten_poseidon_hash_target(&mut b, hash);
+
+        // Check if as expected.
+        fields.into_iter().zip_eq(targets).for_each(|(f, t)| {
+            let exp = b.constant(f);
+            b.connect(t, exp);
+        });
+
+        let cd = b.build::<C>();
+        let pw = PartialWitness::new();
+        cd.prove(pw).unwrap();
+    }
 
     #[test]
     fn test_hash_to_int() {

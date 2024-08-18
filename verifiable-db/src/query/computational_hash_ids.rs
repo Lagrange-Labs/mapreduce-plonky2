@@ -187,9 +187,15 @@ impl Identifiers {
             .chain(HashOut::<F>::from_bytes(metadata_hash.into()).to_vec())
             .collect_vec();
 
-        Ok(HashOutput::try_from(
-            hash_n_to_hash_no_pad::<F, HashPermutation>(&inputs).to_bytes(),
-        )?)
+        HashOutput::try_from(
+            hash_n_to_hash_no_pad::<F, HashPermutation>(&inputs)
+                .to_fields()
+                .iter()
+                // The converted `[u8; 32]` could construct a `bytes32` of Solidity directly,
+                // and use as an Uint256 in the verifier contract.
+                .flat_map(|f| f.to_canonical_u64().to_be_bytes())
+                .collect_vec(),
+        )
     }
 }
 
