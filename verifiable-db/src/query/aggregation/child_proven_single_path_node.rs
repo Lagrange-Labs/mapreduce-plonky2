@@ -193,7 +193,7 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
 mod tests {
     use super::*;
     use crate::query::{
-        aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
+        aggregation::{random_aggregation_operations, random_aggregation_public_inputs},
         PI_LEN,
     };
     use mp2_common::{poseidon::H, utils::ToFields, C, D};

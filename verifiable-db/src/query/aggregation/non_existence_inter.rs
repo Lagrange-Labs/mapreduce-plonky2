@@ -347,9 +347,8 @@ mod tests {
     use super::*;
     use crate::query::{
         aggregation::{
-            output_computation::tests::compute_dummy_output_values,
-            tests::random_aggregation_operations, QueryBoundSecondary, QueryBoundSource,
-            QueryBounds,
+            output_computation::tests::compute_dummy_output_values, random_aggregation_operations,
+            QueryBoundSecondary, QueryBoundSource, QueryBounds,
         },
         computational_hash_ids::{AggregationOperation, Identifiers},
         universal_circuit::universal_circuit_inputs::{Placeholder, PlaceholderId, Placeholders},

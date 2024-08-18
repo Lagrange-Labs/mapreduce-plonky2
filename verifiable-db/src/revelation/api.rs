@@ -320,7 +320,7 @@ where
         proof.serialize()
     }
 
-    pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+    pub fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
         &self.circuit_set
     }
 }
@@ -349,8 +349,8 @@ mod tests {
         ivc::PublicInputs as PreprocessingPI,
         query::{
             aggregation::{
-                tests::{random_aggregation_operations, random_aggregation_public_inputs},
-                QueryBounds, QueryHashNonExistenceCircuits,
+                random_aggregation_operations, random_aggregation_public_inputs, QueryBounds,
+                QueryHashNonExistenceCircuits,
             },
             api::CircuitInput as QueryInput,
             computational_hash_ids::{
@@ -364,7 +364,8 @@ mod tests {
         },
         revelation::{
             api::{CircuitInput, Parameters},
-            tests::{compute_results_from_query_proof, random_original_tree_proof},
+            random_original_tree_proof,
+            tests::compute_results_from_query_proof,
             PublicInputs, NUM_PREPROCESSING_IO, NUM_QUERY_IO,
         },
     };

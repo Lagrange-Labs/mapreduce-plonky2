@@ -199,10 +199,8 @@ mod tests {
     use super::*;
     use crate::query::{
         aggregation::{
-            tests::{
-                compute_output_item_value, random_aggregation_operations,
-                random_aggregation_public_inputs,
-            },
+            random_aggregation_operations, random_aggregation_public_inputs,
+            tests::compute_output_item_value,
             utils::tests::{unify_child_proof, unify_subtree_proof},
         },
         PI_LEN,
