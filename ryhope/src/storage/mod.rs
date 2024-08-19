@@ -1,9 +1,9 @@
-use std::{fmt::Debug, hash::Hash};
-
 use anyhow::*;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use std::{fmt::Debug, hash::Hash};
+use tokio_postgres::Transaction;
 
 use crate::{tree::TreeTopology, Epoch, InitSettings};
 
@@ -243,6 +243,30 @@ pub trait TransactionalStorage {
     }
 }
 
+/// This trait is similar to [`TransactionalStorage`], but let the caller re-use
+/// an existing SQL transaction rather than letting the implementer handle
+/// transaction creation & execution.
+#[async_trait]
+pub(crate) trait SqlTransactionStorage: TransactionalStorage {
+    /// Similar to the [`commit`] method of [`TransactionalStorage`], but
+    /// re-using a given transaction.
+    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()>;
+
+    /// Types implementing this trait may implement this method if there is code
+    /// they want to have run after the transaction successful execution, _e.g._
+    /// to clean up inner state and/or caches.
+    ///
+    /// This hook **MUST** be called after the **SUCCESSFUL** execution of the
+    /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
+    /// transaction execution failed.
+    fn commit_success(&mut self);
+
+    /// This hook **MUST** be called after the **FAILED** execution of the
+    /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
+    /// transaction execution is successful.
+    fn commit_failed(&mut self);
+}
+
 /// Similar to [`TransactionalStorage`], but returns a [`Minitree`] of the
 /// affected [`Key`]s on transaction commit.
 pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send + Sync>:
@@ -293,4 +317,37 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
         }
         self.commit_transaction().await
     }
+}
+
+/// This trait is similar to [`TreeTransactionalStorage`], but let the caller
+/// re-use an existing SQL transaction rather than letting the implementer
+/// handle transaction creation & execution.
+///
+/// This trait requires that the caller take care of the following precautions:
+///
+///   * a **single** transaction in a **single** connection must be used;
+///
+///   * the `post_commit` hook **must** be called after, and only after, a
+///   successful SQL transaction execution.
+#[async_trait]
+pub trait SqlTreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send + Sync>:
+    TreeTransactionalStorage<K, V>
+{
+    /// Similar to the [`commit`] method of [`TreeTransactionalStorage`], but
+    /// re-using a given transaction.
+    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<UpdateTree<K>>;
+
+    /// Types implementing this trait may implement this method if there is code
+    /// they want to have run after the transaction successful execution, _e.g._
+    /// to clean up inner state and/or caches.
+    ///
+    /// This hook **MUST** be called after the **SUCCESSFUL** execution of the
+    /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
+    /// transaction execution failed.
+    fn commit_success(&mut self);
+
+    /// This hook **MUST** be called after the **FAILED** execution of the
+    /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
+    /// transaction execution is successful.
+    fn commit_failed(&mut self);
 }

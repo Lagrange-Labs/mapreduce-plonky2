@@ -1,19 +1,23 @@
 use std::collections::HashSet;
 
 use anyhow::*;
+use bb8_postgres::PostgresConnectionManager;
 use futures::FutureExt;
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
+use tokio_postgres::NoTls;
+
+pub type DBPool = bb8::Pool<PostgresConnectionManager<NoTls>>;
 
 use crate::{
     storage::{
         memory::InMemory,
         pgsql::{PgsqlStorage, SqlServerConnection, SqlStorageSettings},
-        EpochKvStorage, PayloadStorage, RoEpochKvStorage, TreeStorage,
+        EpochKvStorage, PayloadStorage, RoEpochKvStorage, SqlTreeTransactionalStorage, TreeStorage,
     },
     tree::{
-        sbbst,
+        sbbst::{self, Tree},
         scapegoat::{self, Alpha},
         PrintableTree, TreeTopology,
     },
@@ -169,6 +173,12 @@ async fn shifted_storage_in_pgsql() -> Result<()> {
 struct MinMaxi64(i64, i64, i64);
 impl From<i64> for MinMaxi64 {
     fn from(x: i64) -> Self {
+        MinMaxi64(x, x, x)
+    }
+}
+impl From<i32> for MinMaxi64 {
+    fn from(x: i32) -> Self {
+        let x = x as i64;
         MinMaxi64(x, x, x)
     }
 }
@@ -869,4 +879,104 @@ async fn dirties() {
     })
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn grouped_txs() -> Result<()> {
+    // Create 2 KvDb that will be commited in unison
+    let db_manager = PostgresConnectionManager::new_from_stringlike(db_url(), NoTls)
+        .with_context(|| format!("while connecting to postgreSQL with `{}`", db_url()))
+        .context("failed to connect to PgSQL")?;
+    let db_pool = DBPool::builder()
+        .build(db_manager)
+        .await
+        .context("while creating the db_pool")?;
+
+    type K = i64;
+    type V = MinMaxi64;
+
+    type SbbstTree = sbbst::Tree;
+    type SbbstStorage = PgsqlStorage<SbbstTree, V>;
+    type ScapeTree = scapegoat::Tree<K>;
+    type ScapeStorage = PgsqlStorage<ScapeTree, V>;
+
+    let mut t1 = MerkleTreeKvDb::<SbbstTree, V, SbbstStorage>::new(
+        InitSettings::Reset(Tree::empty()),
+        SqlStorageSettings {
+            table: "nested_sbbst".into(),
+            source: SqlServerConnection::Pool(db_pool.clone()),
+        },
+    )
+    .await
+    .context("while initializing SBBST")?;
+
+    let mut t2 = MerkleTreeKvDb::<ScapeTree, V, ScapeStorage>::new(
+        InitSettings::Reset(scapegoat::Tree::empty(Alpha::fully_balanced())),
+        SqlStorageSettings {
+            table: "nested_scape".into(),
+            source: SqlServerConnection::Pool(db_pool.clone()),
+        },
+    )
+    .await
+    .context("while initializing scapegoat")?;
+
+    // First batch - success
+    let mut binding = db_pool.get().await?;
+    let mut tx = binding.transaction().await?;
+
+    t1.start_transaction().await?;
+    t2.start_transaction().await?;
+
+    t1.store(1, 456.into()).await?;
+    t1.store(2, 789.into()).await?;
+
+    t2.store(8786384, 456.into()).await?;
+    t2.store(4, 329.into()).await?;
+    t2.store(88, 15.into()).await?;
+
+    t1.commit_in(&mut tx).await?;
+    t2.commit_in(&mut tx).await?;
+
+    tx.commit().await?;
+
+    t1.commit_success();
+    t2.commit_success();
+
+    assert_eq!(t1.size().await, 2);
+    assert_eq!(t2.size().await, 3);
+
+    assert!(t2.try_fetch(&4).await.is_some());
+    assert!(t2.try_fetch(&5).await.is_none());
+
+    // Second batch - made to fail
+    let mut tx = binding.transaction().await?;
+    t1.start_transaction().await?;
+    t2.start_transaction().await?;
+
+    t1.store(3, 456.into()).await?;
+    t1.store(4, 789.into()).await?;
+
+    t2.store(578943, 542.into()).await?;
+
+    t1.commit_in(&mut tx).await?;
+    t2.commit_in(&mut tx).await?;
+
+    tx.rollback().await?;
+    t1.commit_failed();
+    t2.commit_failed();
+
+    // Size should not have changed
+    assert_eq!(t1.size().await, 2);
+    assert_eq!(t2.size().await, 3);
+
+    // Old data must still be there
+    assert!(t2.try_fetch(&4).await.is_some());
+    assert!(t2.try_fetch(&5).await.is_none());
+
+    // New insertion must have failed
+    assert!(t1.try_fetch(&3).await.is_none());
+    assert!(t1.try_fetch(&4).await.is_none());
+    assert!(t2.try_fetch(&578943).await.is_none());
+
+    Ok(())
 }

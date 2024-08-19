@@ -6,9 +6,10 @@ use postgres_types::Json;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 use tokio::sync::RwLock;
-use tokio_postgres;
+use tokio_postgres::{self, Transaction};
 use tokio_postgres::{NoTls, Row};
 
+use crate::storage::SqlTransactionStorage;
 use crate::{
     storage::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TransactionalStorage},
     tree::scapegoat,
@@ -211,7 +212,7 @@ where
             .query(
                 &format!(
                     "SELECT parent, left_child, right_child, subtree_size FROM {}
-                 WHERE key=$1 AND __valid_from<=$2 AND $2<=__valid_until",
+                       WHERE key=$1 AND __valid_from <= $2 AND $2 <= __valid_until",
                     table
                 ),
                 &[&k.to_bytea(), &epoch],
@@ -283,10 +284,15 @@ where
 pub struct CachedDbStore<V: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> {
     /// A pointer to the DB client
     db: DBPool,
+    /// The first valid epoch
     initial_epoch: Epoch,
+    /// Whether a transaction is in process
     in_tx: bool,
+    /// True if the wrapped state has been modified
     dirty: bool,
+    /// The current epoch
     epoch: Epoch,
+    /// The table in which the data must be persisted
     table: String,
     pub(super) cache: RwLock<Option<V>>,
 }
@@ -331,6 +337,48 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
             cache: RwLock::new(Some(t)),
         })
     }
+
+    async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
+        ensure!(self.in_tx, "not in a transaction");
+
+        if self.dirty {
+            let state = self.cache.read().await.clone();
+            db_tx
+                .query(
+                    &format!(
+                        "INSERT INTO {}_meta (__valid_from, __valid_until, payload)
+                     VALUES ($1, $1, $2)",
+                        self.table
+                    ),
+                    &[&(self.epoch + 1), &Json(state)],
+                )
+                .await?;
+        } else {
+            db_tx
+                .query(
+                    &format!(
+                        "UPDATE {}_meta SET __valid_until = $1 + 1 WHERE __valid_until = $1",
+                        self.table
+                    ),
+                    &[&(self.epoch)],
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    fn on_commit_success(&mut self) {
+        self.epoch += 1;
+        self.dirty = false;
+        self.in_tx = false;
+    }
+
+    fn on_commit_failed(&mut self) {
+        let _ = self.cache.get_mut().take();
+        self.dirty = false;
+        self.in_tx = false;
+    }
 }
 
 #[async_trait]
@@ -346,37 +394,38 @@ where
     }
 
     async fn commit_transaction(&mut self) -> Result<()> {
-        ensure!(self.in_tx, "not in a transaction");
-
-        let connection = self.db.get().await.unwrap();
-        if self.dirty {
-            let state = self.cache.read().await.clone();
-            connection
-                .query(
-                    &format!(
-                        "INSERT INTO {}_meta (__valid_from, __valid_until, payload)
-                     VALUES ($1, $1, $2)",
-                        self.table
-                    ),
-                    &[&(self.epoch + 1), &Json(state)],
-                )
-                .await?;
+        let pool = self.db.clone();
+        let mut connection = pool.get().await.unwrap();
+        let mut db_tx = connection
+            .transaction()
+            .await
+            .expect("unable to create DB transaction");
+        self.commit_in_transaction(&mut db_tx).await?;
+        let err = db_tx.commit().await;
+        if err.is_ok() {
+            self.on_commit_success()
         } else {
-            connection
-                .query(
-                    &format!(
-                        "UPDATE {}_meta SET __valid_until = $1 + 1 WHERE __valid_until = $1",
-                        self.table
-                    ),
-                    &[&(self.epoch)],
-                )
-                .await?;
-        }
+            self.on_commit_failed()
+        };
+        err.context("while commiting transaction")
+    }
+}
 
-        self.epoch += 1;
-        self.dirty = false;
-        self.in_tx = false;
-        Ok(())
+#[async_trait]
+impl<T> SqlTransactionStorage for CachedDbStore<T>
+where
+    T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
+{
+    async fn commit_in(&mut self, tx: &mut tokio_postgres::Transaction<'_>) -> Result<()> {
+        self.commit_in_transaction(tx).await
+    }
+
+    fn commit_success(&mut self) {
+        self.on_commit_success()
+    }
+
+    fn commit_failed(&mut self) {
+        self.on_commit_failed()
     }
 }
 
@@ -518,9 +567,13 @@ where
         }
     }
 
-    pub fn new_epoch(&mut self) {
-        self.epoch += 1;
+    pub fn clear(&mut self) {
         self.cache.get_mut().clear();
+    }
+
+    pub fn new_epoch(&mut self) {
+        self.clear();
+        self.epoch += 1;
     }
 }
 

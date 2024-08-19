@@ -803,7 +803,11 @@ where
 
     async fn size<S: TreeStorage<Tree<K>>>(&self, s: &S) -> usize {
         if let Some(root) = s.state().fetch().await.root.as_ref() {
-            s.nodes().fetch(root).await.subtree_size
+            s.nodes()
+                .try_fetch(root)
+                .await
+                .expect(&format!("Failed to fetch {:?}", root))
+                .subtree_size
         } else {
             0
         }
