@@ -6,6 +6,7 @@ use mp2_common::F;
 pub mod api;
 pub(crate) mod placeholders_check;
 mod public_inputs;
+mod revelation_with_results_tree;
 mod revelation_without_results_tree;
 
 pub use public_inputs::PublicInputs;
