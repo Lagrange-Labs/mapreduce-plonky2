@@ -349,7 +349,7 @@ mod tests {
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::plonk::config::GenericConfig;
 
     use crate::array::Array;
     use crate::rlp::{
@@ -357,6 +357,7 @@ mod tests {
         MAX_LEN_BYTES,
     };
     use crate::utils::{keccak256, less_than_or_equal_to, IntTargetWriter};
+    use crate::{C, D, F};
 
     use super::quin_selector;
 
@@ -415,9 +416,6 @@ mod tests {
         let root = hex::decode("f851a0afd82fd956b6402e358eb2e18ed40295a4d819a3e473282f257b41d913f70476808080808080808080808080a0c63a5260ddf114504213daf4b15a236fd2d33726768f44e896487326f7c136f6808080").unwrap();
         println!("[+] Child hash {}", hex::encode(keccak256(&child)));
         let exp_offsets = visit_branch_node(&root);
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         const N_ITEMS: usize = 17;
         let config = CircuitConfig::standard_recursion_config();
         let mut pw = PartialWitness::new();
@@ -443,9 +441,6 @@ mod tests {
     }
     #[test]
     fn test_custom_rlp_list() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let (mut trie, key) = generate_random_storage_mpt::<4, 32>();
         let mut proof = trie.get_proof(&key).unwrap();
         proof.reverse();
@@ -496,9 +491,6 @@ mod tests {
         assert!(first_item_header.header_len == h0_len);
         assert!(first_item_header.value_len == header0.value_len);
 
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
         let mut pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -543,9 +535,6 @@ mod tests {
     // TODO: replace these tests by deterministic tests by cr
     #[test]
     fn test_data_len() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
         let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -573,9 +562,6 @@ mod tests {
     // encoding in RLP and give that to circuit. Right now we just don't know what these vectors hold.
     #[test]
     fn test_decode_len() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
         let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -744,9 +730,6 @@ mod tests {
             100, 50, 211, 205, 202, 115, 60, 49, 128,
         ];
 
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
 
         let pw = PartialWitness::new();
@@ -788,10 +771,6 @@ mod tests {
     }
     #[test]
     fn test_compact_decode() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-
         struct TestCase {
             input: [u8; MAX_ENC_KEY_LEN],
             key_len: usize,

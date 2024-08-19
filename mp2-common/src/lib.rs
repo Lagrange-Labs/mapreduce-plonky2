@@ -9,10 +9,8 @@ use plonky2::plonk::{
     config::{GenericConfig, PoseidonGoldilocksConfig},
     proof::ProofWithPublicInputs,
 };
+use poseidon2_plonky2::poseidon2_goldilock::Poseidon2GoldilocksConfig;
 use serde::{Deserialize, Serialize};
-
-#[cfg(test)]
-mod benches;
 
 pub mod array;
 pub mod eth;
@@ -34,7 +32,10 @@ pub mod u256;
 pub mod utils;
 
 pub const D: usize = 2;
+#[cfg(feature = "original_poseidon")]
 pub type C = PoseidonGoldilocksConfig;
+#[cfg(not(feature = "original_poseidon"))]
+pub type C = Poseidon2GoldilocksConfig;
 pub type F = <C as GenericConfig<D>>::F;
 pub type CHasher = <C as GenericConfig<D>>::Hasher;
 
@@ -62,8 +63,9 @@ struct ByteProofTuple {
 #[cfg(test)]
 mod test {
     use crate::{
+        serialization::circuit_data_serialization::{CustomGateSerializer, SerializableRichField},
         utils::{keccak256, verify_proof_tuple},
-        ByteProofTuple, ProofTuple,
+        ByteProofTuple, ProofTuple, C, F,
     };
     use anyhow::Result;
     use plonky2::field::types::Field;
@@ -72,7 +74,7 @@ mod test {
         hash::hash_types::RichField,
         plonk::{
             circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
-            config::{GenericConfig, PoseidonGoldilocksConfig},
+            config::GenericConfig,
             proof::CompressedProofWithPublicInputs,
         },
     };
@@ -87,12 +89,10 @@ mod test {
     use rand::Rng;
 
     const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     impl ByteProofTuple {
         fn from_proof_tuple<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F>,
             const D: usize,
         >(
@@ -105,7 +105,7 @@ mod test {
                 .to_bytes()
                 .map_err(|e| anyhow::anyhow!("can't serialize vk: {:?}", e))?;
             //let common_data = bincode::serialize(&cd)?;
-            let gate_serializer = plonky2_crypto::u32::gates::HashGateSerializer;
+            let gate_serializer = CustomGateSerializer;
             let common_data = cd
                 .to_bytes(&gate_serializer)
                 .map_err(|e| anyhow::anyhow!("can't serialize cd: {:?}", e))?; // nikko TODO: this is a hack, we need to serialize the cd properly
@@ -119,7 +119,7 @@ mod test {
         }
 
         fn into_proof_tuple<
-            F: RichField + Extendable<D>,
+            F: SerializableRichField<D>,
             C: GenericConfig<D, F = F>,
             const D: usize,
         >(
@@ -129,7 +129,7 @@ mod test {
             let vd = VerifierOnlyCircuitData::from_bytes(btp.verification_data)
                 .map_err(|e| anyhow::anyhow!(e))?;
             //let cd: CommonCircuitData<F, D> = bincode::deserialize(&btp.common_data)?;
-            let gate_serializer = plonky2_crypto::u32::gates::HashGateSerializer;
+            let gate_serializer = CustomGateSerializer;
             let cd = CommonCircuitData::<F, D>::from_bytes(btp.common_data, &gate_serializer)
                 .map_err(|e| anyhow::anyhow!("can't deserialize common data {:?}", e))?;
             let compressed_proof =

@@ -10,10 +10,10 @@ use super::{
 };
 use alloy::primitives::U256;
 use anyhow::Result;
-use mp2_common::{default_config, proof::ProofWithVK, types::HashOutput, C, D, F};
+use mp2_common::{default_config, poseidon::H, proof::ProofWithVK, types::HashOutput, C, D, F};
 use plonky2::{
     field::types::Field,
-    hash::{hash_types::HashOut, poseidon::PoseidonHash},
+    hash::hash_types::HashOut,
     plonk::config::{GenericHashOut, Hasher},
 };
 use recursion_framework::{
@@ -129,7 +129,7 @@ impl<E> PublicParameters<E>
 where
     E: ExtractionPIWrap,
     [(); E::PI::TOTAL_LEN]:,
-    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+    [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     /// Generates the circuit parameters for the circuits.
     pub fn build(
@@ -310,7 +310,7 @@ mod tests {
     where
         E: ExtractionPIWrap,
         [(); E::PI::TOTAL_LEN]:,
-        [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+        [(); <H as Hasher<F>>::HASH_SIZE]:,
     {
         fn new() -> Result<Self> {
             let extraction_set = TestingRecursiveCircuits::<F, C, D, EXTRACTION_IO_LEN>::default();

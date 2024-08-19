@@ -6,10 +6,10 @@ use mp2_common::{
     rlp::MAX_KEY_NIBBLE_LEN,
     types::GFp,
     utils::{keccak256, Endianness, Packer, ToFields},
-    D,
+    C, D,
 };
 use mp2_test::circuit::{prove_circuit, setup_circuit};
-use plonky2::{field::types::Field, plonk::config::PoseidonGoldilocksConfig};
+use plonky2::field::types::Field;
 use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
 
 use crate::{
@@ -34,8 +34,8 @@ fn prove_and_verify_length_extraction_circuit_for_pudgy() {
 
     // setup the circuits
 
-    let setup_leaf = setup_circuit::<_, D, PoseidonGoldilocksConfig, LeafLengthCircuit>();
-    let setup_branch = setup_circuit::<_, D, PoseidonGoldilocksConfig, BranchTestCircuit>();
+    let setup_leaf = setup_circuit::<_, D, C, LeafLengthCircuit>();
+    let setup_branch = setup_circuit::<_, D, C, BranchTestCircuit>();
 
     // Pudgy leaf
 

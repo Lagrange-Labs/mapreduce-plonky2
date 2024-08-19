@@ -66,7 +66,7 @@ pub mod test {
         }
 
         fn primary_index_value(&self) -> Vec<Target> {
-            self.block_number().to_targets()
+            self.block_number_target().to_targets()
         }
         fn register_args(&self, cb: &mut CircuitBuilder<F, D>) {
             self.generic_register_args(cb)
@@ -159,7 +159,7 @@ pub mod test {
             CurveTarget::from_targets(self.dm)
         }
 
-        pub fn block_number(&self) -> UInt256Target {
+        pub fn block_number_target(&self) -> UInt256Target {
             UInt256Target::from_targets(self.bn)
         }
     }

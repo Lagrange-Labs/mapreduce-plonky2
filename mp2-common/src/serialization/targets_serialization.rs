@@ -184,17 +184,11 @@ mod tests {
     use plonky2::{
         iop::target::Target,
         plonk::{
-            circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
+            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
         },
     };
     use rstest::rstest;
     use serde::{Deserialize, Serialize};
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     #[rstest]
     #[case(2, 4)]
@@ -202,6 +196,8 @@ mod tests {
     #[case(3, 0)]
     #[case(0, 0)]
     fn test_targets_serialization(#[case] cap_height: usize, #[case] merkle_proof_height: usize) {
+        use crate::{C, D, F};
+
         #[derive(Serialize, Deserialize)]
         struct TestSerialization<T: FromBytes + ToBytes>(
             #[serde(serialize_with = "serialize", deserialize_with = "deserialize")] T,

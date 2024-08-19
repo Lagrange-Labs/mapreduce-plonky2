@@ -160,14 +160,13 @@ pub(crate) mod test {
 
     use plonky2::field::types::Sample;
     use plonky2::gates::noop::NoopGate;
-    use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
     use super::*;
     use crate::{
         circuit_builder::{tests::LeafCircuitWires, CircuitLogicWires},
         framework::tests::check_panic,
     };
-    use mp2_common::serialization::circuit_data_serialization::SerializableRichField;
+    use mp2_common::{serialization::circuit_data_serialization::SerializableRichField, C, D, F};
 
     use serial_test::serial;
 
@@ -266,9 +265,6 @@ pub(crate) mod test {
     #[test]
     #[serial]
     fn test_wrap_circuit_keys() {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         const INPUT_SIZE: usize = 8;
 
         let config = CircuitConfig::standard_recursion_config();
@@ -328,10 +324,6 @@ pub(crate) mod test {
 
     #[test]
     fn test_wrapping_base_circuit_with_domain_separator() {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-
         let config = CircuitConfig::standard_recursion_config();
 
         let mut builder = CircuitBuilder::<F, D>::new(config.clone());

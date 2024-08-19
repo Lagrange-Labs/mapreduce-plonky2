@@ -242,8 +242,8 @@ where
 mod tests {
     use std::array;
 
+    use mp2_common::{C, D, F};
     use plonky2::field::types::Sample;
-    use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
     use crate::{
         circuit_builder::tests::{RecursiveCircuitWires, NUM_PUBLIC_INPUTS_TEST_CIRCUITS},
@@ -303,10 +303,6 @@ mod tests {
 
         recursive_circuit.circuit_data().verify(proof).unwrap();
     }
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     #[test]
     #[serial]

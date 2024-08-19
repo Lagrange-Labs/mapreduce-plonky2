@@ -65,7 +65,7 @@ pub struct PublicInputs<'a, T> {
 
 impl<'a> PublicInputs<'a, Target> {
     /// Get the merkle hash of the subtree this proof has processed.
-    pub fn root_hash(&self) -> OutputHash {
+    pub fn root_hash_target(&self) -> OutputHash {
         OutputHash::from_targets(self.root_hash_info())
     }
 
@@ -81,12 +81,12 @@ impl<'a> PublicInputs<'a, Target> {
     }
 
     /// Get the values digest defined over the public inputs.
-    pub fn values_digest(&self) -> CurveTarget {
+    pub fn values_digest_target(&self) -> CurveTarget {
         convert_point_to_curve_target(self.values_digest_info())
     }
 
     /// Get the metadata digest defined over the public inputs.
-    pub fn metadata_digest(&self) -> CurveTarget {
+    pub fn metadata_digest_target(&self) -> CurveTarget {
         convert_point_to_curve_target(self.metadata_digest_info())
     }
 }

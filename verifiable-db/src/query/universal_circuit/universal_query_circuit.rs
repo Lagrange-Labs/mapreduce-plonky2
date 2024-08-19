@@ -21,7 +21,7 @@ use mp2_common::{
 };
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::{hash_types::HashOutTarget, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonHash},
+    hash::{hash_types::HashOutTarget, hashing::hash_n_to_hash_no_pad},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},

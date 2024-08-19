@@ -1,12 +1,14 @@
 //! A state tree Merkle opening with internal variable depth.
 
-use crate::serialization::{deserialize, serialize};
+use crate::{
+    poseidon::{HashableField, H},
+    serialization::{deserialize, serialize},
+};
 use plonky2::{
     field::extension::Extendable,
     hash::{
         hash_types::{HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         merkle_proofs::MerkleProofTarget,
-        poseidon::PoseidonHash,
     },
     iop::{
         target::{BoolTarget, Target},
@@ -52,7 +54,7 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
         positions: &[BoolTarget],
     ) -> Self
     where
-        F: RichField + Extendable<D>,
+        F: HashableField + Extendable<D>,
     {
         assert_eq!(
             siblings.siblings.len(),
@@ -87,7 +89,7 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
         }
         cb.connect(acc, depth);
 
-        let mut root = cb.hash_n_to_hash_no_pad::<PoseidonHash>(leaf_data.to_vec());
+        let mut root = cb.hash_n_to_hash_no_pad::<H>(leaf_data.to_vec());
 
         for d in 0..MAX_DEPTH {
             // always hash up to depth to preserve the same circuit structure, regardless of the
@@ -140,12 +142,11 @@ mod tests {
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::{goldilocks_field::GoldilocksField, types::Field},
-        hash::{
-            hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation,
-        },
-        plonk::config::PoseidonGoldilocksConfig,
+        hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
     };
     use rand::{rngs::StdRng, RngCore, SeedableRng};
+
+    use crate::{poseidon::HashPermutation, C};
 
     use super::*;
 
@@ -158,7 +159,7 @@ mod tests {
         let depth = 3;
         let circuit = TestVariableDepthCircuit::from_seed_with_depth(seed, depth);
         let root = circuit.root.elements.to_vec();
-        let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit);
+        let proof = run_circuit::<_, _, C, _>(circuit);
 
         assert_eq!(root, proof.public_inputs);
     }
@@ -197,10 +198,8 @@ mod tests {
                 TEST_MAX_DEPTH
             ];
 
-            let mut root = hash_n_to_hash_no_pad::<
-                GoldilocksField,
-                PoseidonPermutation<GoldilocksField>,
-            >(leaf_data.as_slice());
+            let mut root =
+                hash_n_to_hash_no_pad::<GoldilocksField, HashPermutation>(leaf_data.as_slice());
 
             for d in 0..depth as usize {
                 let pos = (rng.next_u32() & 1) == 1;
@@ -222,9 +221,8 @@ mod tests {
                     preimage.extend_from_slice(&siblings[d].elements);
                 }
 
-                root = hash_n_to_hash_no_pad::<GoldilocksField, PoseidonPermutation<GoldilocksField>>(
-                    preimage.as_slice(),
-                );
+                root =
+                    hash_n_to_hash_no_pad::<GoldilocksField, HashPermutation>(preimage.as_slice());
             }
 
             let depth = GoldilocksField::from_canonical_u32(depth);

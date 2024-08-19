@@ -31,6 +31,7 @@ pub use curve_add::{add_curve_point, add_weierstrass_point};
 /// Field-to-curve and curve point addition functions
 pub use field_to_curve::map_to_curve_point;
 
+use crate::poseidon::HashableField;
 use crate::types::CURVE_TARGET_LEN;
 use crate::utils::ToTargets;
 use crate::{
@@ -59,7 +60,7 @@ pub trait CircuitBuilderGroupHashing {
 
 impl<F, const D: usize> CircuitBuilderGroupHashing for CircuitBuilder<F, D>
 where
-    F: RichField + Extendable<D> + Extendable<EXTENSION_DEGREE>,
+    F: HashableField + Extendable<D> + Extendable<EXTENSION_DEGREE>,
     Self: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
 {
     fn add_curve_point(&mut self, targets: &[CurveTarget]) -> CurveTarget {

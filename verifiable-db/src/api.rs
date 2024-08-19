@@ -15,12 +15,12 @@ use anyhow::Result;
 use log::info;
 use mp2_common::{
     default_config,
+    poseidon::H,
     proof::{serialize_proof, ProofWithVK},
     serialization::{deserialize, serialize},
     C, D, F,
 };
 use plonky2::{
-    hash::poseidon::PoseidonHash,
     iop::witness::PartialWitness,
     plonk::{
         circuit_builder::CircuitBuilder,
@@ -152,7 +152,7 @@ impl<
     > WrapCircuitParams<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
 where
     [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
-    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+    [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
         let mut builder = CircuitBuilder::new(default_config());

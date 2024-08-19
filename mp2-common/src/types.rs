@@ -4,7 +4,7 @@ use crate::{array::Array, D, F};
 use anyhow::ensure;
 use derive_more::Deref;
 use plonky2::{
-    field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},
+    field::{extension::quintic::QuinticExtension, iop::target::Target, goldilocks_field::GoldilocksField},
     hash::hash_types::HashOut,
     iop::target::Target,
     plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
@@ -13,13 +13,13 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use serde::{Deserialize, Serialize};
 
 /// Default field
-pub type GFp = GoldilocksField;
+pub type GFp = F;
 
 /// Quintic extension field
-pub type GFp5 = QuinticExtension<GFp>;
+pub type GFp5 = QuinticExtension<F>;
 
 /// Default circuit builder
-pub type CBuilder = CircuitBuilder<GoldilocksField, D>;
+pub type CBuilder = CircuitBuilder<F, D>;
 
 /// Length of an U64
 pub const U64_LEN: usize = 8;

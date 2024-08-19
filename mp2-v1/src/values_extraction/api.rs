@@ -609,6 +609,7 @@ mod tests {
                 &contract_address,
             )
         };
+        let now = std::time::Instant::now();
         let leaf_proof1 = generate_proof(&params, leaf_input1).unwrap();
         {
             let lp = ProofWithVK::deserialize(&leaf_proof1).unwrap();
@@ -616,6 +617,10 @@ mod tests {
             let (_, ptr) = pub1.mpt_key_info();
             assert_eq!(ptr, GFp::ZERO);
         }
+        println!(
+            "Proof for leaf 1 generated in {} ms",
+            now.elapsed().as_millis()
+        );
 
         println!("Proving leaf 2...");
         let leaf_input2 = if is_simple_aggregation {
@@ -632,7 +637,12 @@ mod tests {
                 &contract_address,
             )
         };
+        let now = std::time::Instant::now();
         let leaf_proof2 = generate_proof(&params, leaf_input2).unwrap();
+        println!(
+            "Proof for leaf 2 generated in {} ms",
+            now.elapsed().as_millis()
+        );
 
         println!("Proving branch...");
         let branch_input = if is_simple_aggregation {
@@ -646,8 +656,12 @@ mod tests {
                 vec![leaf_proof1, leaf_proof2],
             )
         };
-
+        let now = std::time::Instant::now();
         generate_proof(&params, branch_input).unwrap();
+        println!(
+            "Proof for branch node generated in {} ms",
+            now.elapsed().as_millis()
+        );
     }
 
     fn test_circuits(is_simple_aggregation: bool, num_children: usize) {

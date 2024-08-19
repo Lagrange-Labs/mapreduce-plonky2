@@ -10,13 +10,14 @@ use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     default_config,
+    poseidon::H,
     proof::{deserialize_proof, ProofWithVK},
     types::HashOutput,
     utils::FromFields,
     C, D, F,
 };
 use plonky2::{
-    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonHash},
+    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
     plonk::{
         circuit_data::VerifierOnlyCircuitData,
         config::{GenericHashOut, Hasher},
@@ -249,7 +250,7 @@ impl<
 where
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
     [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
-    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+    [(); <H as Hasher<F>>::HASH_SIZE]:,
     [(); PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
 {
     pub fn build(

@@ -422,15 +422,12 @@ mod test {
             witness::PartialWitness,
         },
         plonk::{
-            circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
+            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
         },
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, RngCore};
 
-    use crate::eth::ProofQuery;
     use crate::keccak::{HASH_LEN, PACKED_HASH_LEN};
     use crate::rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN};
     use crate::utils::{Endianness, PackerTarget};
@@ -438,15 +435,12 @@ mod test {
         array::Array,
         utils::{find_index_subvector, keccak256},
     };
+    use crate::{eth::ProofQuery, C, D, F};
 
     use super::{
         utils::{bytes_to_nibbles, nibbles_to_bytes, visit_node, visit_proof},
         Circuit, InputWires, MPTKeyWire, OutputWires, MAX_LEAF_VALUE_LEN, NB_ITEMS_LEAF, PAD_LEN,
     };
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     #[derive(Clone, Debug)]
     struct TestCircuit<const DEPTH: usize, const NODE_LEN: usize> {
