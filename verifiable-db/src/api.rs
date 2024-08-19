@@ -135,7 +135,7 @@ struct ParamsInfo {
 /// Wrapper circuit around the different type of revelation circuits we expose. Reason we need one is to be able
 /// to always keep the same succinct wrapper circuit and Groth16 circuit regardless of the end result we submit
 /// onchain.
-pub struct WrapCircuitParams<
+struct WrapCircuitParams<
     const MAX_NUM_OUTPUTS: usize,
     const MAX_NUM_ITEMS_PER_OUTPUT: usize,
     const MAX_NUM_PLACEHOLDERS: usize,
@@ -154,7 +154,7 @@ where
     [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
     [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
 {
-    pub fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
+    fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
         let mut builder = CircuitBuilder::new(default_config());
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<
             F,
@@ -178,7 +178,7 @@ where
         }
     }
 
-    pub fn generate_proof(
+    fn generate_proof(
         &self,
         revelation_circuit_set: &RecursiveCircuits<F, C, D>,
         query_proof: &ProofWithVK,

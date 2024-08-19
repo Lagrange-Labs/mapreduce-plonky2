@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     iter::{once, repeat},
     mem::variant_count,
 };
@@ -34,7 +34,8 @@ use super::{
     aggregation::{QueryBoundSource, QueryBounds},
     universal_circuit::{
         universal_circuit_inputs::{
-            BasicOperation, InputOperand, OutputItem, PlaceholderId, ResultStructure,
+            BasicOperation, InputOperand, OutputItem, PlaceholderId, PlaceholderIdsSet,
+            ResultStructure,
         },
         universal_query_circuit::QueryBound,
         ComputationalHash, ComputationalHashTarget,
@@ -104,12 +105,12 @@ impl Identifiers {
     /// Internal method employed to comput the computational hash corresponding to a query represented by the
     /// provided inputs, without including the query bounds portion of the computational hash
     pub(crate) fn computational_hash_without_query_bounds(
-        column_ids: &[u64],
+        column_ids: &ColumnIDs,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
     ) -> Result<ComputationalHash> {
+        let column_ids = column_ids.to_vec();
         let mut cache = ComputationalHashCache::new(column_ids.len());
-        let column_ids = column_ids.iter().map(|id| id.to_field()).collect_vec();
         let predicate_ops_hash =
             Operation::operation_hash(predicate_operations, &column_ids, &mut cache)?;
         let predicate_hash = predicate_ops_hash.last().unwrap();
@@ -128,7 +129,7 @@ impl Identifiers {
     /// Compute the computational hash computed by the universal circuit for the query represented
     /// by the given inputs
     pub fn computational_hash_universal_circuit(
-        column_ids: &[u64],
+        column_ids: &ColumnIDs,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         min_query_secondary: Option<QueryBoundSource>,
@@ -152,7 +153,7 @@ impl Identifiers {
 
     /// Compute the computational hash.
     pub fn computational_hash(
-        column_ids: &[u64],
+        column_ids: &ColumnIDs,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         metadata_hash: &HashOutput,
@@ -163,19 +164,42 @@ impl Identifiers {
             column_ids,
             predicate_operations,
             results,
-            min_query_secondary,
-            max_query_secondary,
+            min_query_secondary.clone(),
+            max_query_secondary.clone(),
         )?;
-        // compute placeholder ids array from operations of the query
-        let mut placeholder_ids = predicate_operations
-            .iter()
-            .chain(&results.result_operations)
-            .flat_map(|op| op.extract_placeholder_ids())
-            .collect_vec();
-        placeholder_ids.sort();
+        // compute set of placeholder ids from operations of the query and from query bounds
+        let placeholder_ids_set = PlaceholderIdsSet::from(
+            predicate_operations
+                .iter()
+                .chain(&results.result_operations)
+                .flat_map(|op| op.extract_placeholder_ids())
+                // add special placeholders for primary index query bounds to the (sorted) set of placeholder ids
+                .chain([
+                    PlaceholderIdentifier::MinQueryOnIdx1,
+                    PlaceholderIdentifier::MaxQueryOnIdx1,
+                ])
+                // add placeholders employed in secondary query bounds (if any)
+                .chain(
+                    [min_query_secondary, max_query_secondary]
+                        .into_iter()
+                        .flat_map(|query_bound| {
+                            query_bound
+                                .map(|bound| match bound {
+                                    QueryBoundSource::Placeholder(id) => Some(vec![id]),
+                                    QueryBoundSource::Operation(op) => {
+                                        Some(op.extract_placeholder_ids())
+                                    }
+                                    QueryBoundSource::Constant(_) => None,
+                                })
+                                .flatten()
+                                // If None, return a placeholder that is for sure already in the set
+                                .unwrap_or(vec![PlaceholderIdentifier::MinQueryOnIdx1])
+                        }),
+                ),
+        );
 
         // compute placeholder id hash
-        let placeholder_id_hash = placeholder_ids_hash(&placeholder_ids);
+        let placeholder_id_hash = placeholder_ids_hash(placeholder_ids_set);
 
         //ToDo: add ORDER BY info and DISTINCT info for queries without the results tree, when adding results tree
         // circuits APIs
@@ -196,6 +220,30 @@ impl Identifiers {
 impl<F: RichField> ToField<F> for Identifiers {
     fn to_field(&self) -> F {
         F::from_canonical_usize(self.position())
+    }
+}
+/// Data structure to provide identifiers of columns of a table to compute computational hash
+#[derive(Clone, Debug)]
+pub struct ColumnIDs {
+    pub(crate) primary: F,
+    pub(crate) secondary: F,
+    pub(crate) rest: Vec<F>,
+}
+
+impl ColumnIDs {
+    pub fn new(primary_id: u64, secondary_id: u64, rest_ids: Vec<u64>) -> Self {
+        Self {
+            primary: primary_id.to_field(),
+            secondary: secondary_id.to_field(),
+            rest: rest_ids.into_iter().map(|id| id.to_field()).collect_vec(),
+        }
+    }
+
+    pub(crate) fn to_vec(&self) -> Vec<F> {
+        [self.primary, self.secondary]
+            .into_iter()
+            .chain(self.rest.clone())
+            .collect_vec()
     }
 }
 

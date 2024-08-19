@@ -1,5 +1,6 @@
 use plonky2::{
     field::types::{Field, PrimeField64},
+    hash::hash_types::HashOut,
     plonk::config::GenericHashOut,
 };
 use std::{
@@ -22,7 +23,13 @@ use anyhow::{Context, Result};
 use futures::{future::BoxFuture, io::empty, stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::{debug, info, warn};
-use mp2_common::{array::ToField, poseidon::empty_poseidon_hash, types::HashOutput, F};
+use mp2_common::{
+    array::ToField,
+    poseidon::empty_poseidon_hash,
+    proof::{deserialize_proof, ProofWithVK},
+    types::HashOutput,
+    C, D, F,
+};
 use mp2_v1::{
     indexing::{
         self,
@@ -49,12 +56,17 @@ use ryhope::{
 };
 use sqlparser::ast::Query;
 use tokio_postgres::Row as PsqlRow;
-use verifiable_db::query::{
-    self,
-    aggregation::{ChildPosition, NodeInfo, QueryBounds, SubProof},
-    universal_circuit::universal_circuit_inputs::{
-        ColumnCell, PlaceholderId, Placeholders, RowCells,
+use verifiable_db::{
+    ivc::PublicInputs as IndexingPIS,
+    query::{
+        self,
+        aggregation::{ChildPosition, NodeInfo, QueryBoundSource, QueryBounds, SubProof},
+        computational_hash_ids::{ColumnIDs, Identifiers},
+        universal_circuit::universal_circuit_inputs::{
+            ColumnCell, PlaceholderId, Placeholders, RowCells,
+        },
     },
+    revelation::PublicInputs,
 };
 
 pub const MAX_NUM_RESULT_OPS: usize = 20;
@@ -87,6 +99,9 @@ pub type RevelationCircuitInput = verifiable_db::revelation::api::CircuitInput<
     MAX_NUM_PLACEHOLDERS,
     { QueryCircuitInput::num_placeholders_ids() },
 >;
+
+pub type RevelationPublicInputs<'a> =
+    PublicInputs<'a, F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>;
 
 pub enum TableType {
     Mapping,
@@ -132,7 +147,7 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     print_vec_sql_rows(&res, SqlType::Numeric);
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::circuit::assemble(&parsed, &settings, &query_info.placeholders)?;
-    prove_query(ctx, table, query_info, parsed, pis, &settings)
+    prove_query(ctx, table, query_info, parsed, pis, &settings, res)
         .await
         .expect("unable to run universal query proof");
     Ok(())
@@ -146,6 +161,7 @@ async fn prove_query(
     mut parsed: Query,
     pis: CircuitPis,
     settings: &ParsilSettings<&Table>,
+    res: Vec<PsqlRow>,
 ) -> Result<()> {
     let rows_query = parsil::executor::generate_query_keys(&mut parsed, settings)?;
     let all_touched_rows = table
@@ -242,7 +258,18 @@ async fn prove_query(
         current_epoch as BlockPrimaryIndex,
     )
     .await?;
-    prove_revelation(ctx, table, &query, &pis, current_epoch).await?;
+    let proof = prove_revelation(ctx, table, &query, &pis, current_epoch).await?;
+    info!("Revelation proof done! Checking public inputs...");
+    check_final_outputs(
+        proof,
+        ctx,
+        table,
+        &query,
+        &pis,
+        current_epoch,
+        touched_rows.len(),
+        res,
+    )?;
     info!("Revelation done!");
     Ok(())
 }
@@ -253,7 +280,7 @@ async fn prove_revelation(
     query: &QueryCooking,
     pis: &CircuitPis,
     tree_epoch: Epoch,
-) -> Result<()> {
+) -> Result<Vec<u8>> {
     // load the query proof, which is at the root of the tree
     let query_proof = {
         let root_key = table.index.root_at(tree_epoch).await.unwrap();
@@ -266,7 +293,6 @@ async fn prove_revelation(
         ctx.storage.get_proof_exact(&pk)?
     };
     let pis_hash = QueryCircuitInput::ids_for_placeholder_hash(
-        &RowCells::default(),
         &pis.predication_operations,
         &pis.result,
         &query.placeholders,
@@ -280,6 +306,97 @@ async fn prove_revelation(
         pis_hash,
     )?;
     let proof = ctx.run_query_proof(GlobalCircuitInput::Revelation(input))?;
+    Ok(proof)
+}
+
+fn check_final_outputs(
+    revelation_proof: Vec<u8>,
+    ctx: &TestContext,
+    table: &Table,
+    query: &QueryCooking,
+    pis: &CircuitPis,
+    tree_epoch: Epoch,
+    num_touched_rows: usize,
+    res: Vec<PsqlRow>,
+) -> Result<()> {
+    // fetch indexing proof, whose public inputs are needed to check correctness of revelation proof outputs
+    let indexing_proof = {
+        let pk = ProofKey::IVC(tree_epoch as BlockPrimaryIndex);
+        ctx.storage.get_proof_exact(&pk)?
+    };
+    let deserialized_indexing_proof = ProofWithVK::deserialize(&indexing_proof)?;
+    let indexing_pis = IndexingPIS::from_slice(&deserialized_indexing_proof.proof().public_inputs);
+
+    let deserialized_proof = deserialize_proof::<F, C, D>(&revelation_proof)?;
+    let revelation_pis = RevelationPublicInputs::from_slice(&deserialized_proof.public_inputs);
+    // check original blockchain hash. ToDo: access it from Anvil
+    assert_eq!(
+        indexing_pis.block_hash_fields(),
+        revelation_pis.original_block_hash(),
+    );
+    // check computational hash
+    let metadata_hash = HashOutput::try_from(
+        HashOut::<F>::from_vec(indexing_pis.metadata_hash().to_vec()).to_bytes(),
+    )?;
+    let column_ids = ColumnIDs::new(
+        table.columns.primary.identifier,
+        table.columns.secondary.identifier,
+        table
+            .columns
+            .non_indexed_columns()
+            .into_iter()
+            .map(|column| column.identifier)
+            .collect_vec(),
+    );
+    let expected_computational_hash = Identifiers::computational_hash(
+        &column_ids,
+        &pis.predication_operations,
+        &pis.result,
+        &metadata_hash,
+        Some(QueryBoundSource::Constant(query.example_row.value)), //ToDo: need to get this from parsil
+        Some(QueryBoundSource::Constant(query.example_row.value)),
+    )?;
+    assert_eq!(
+        HashOutput::try_from(revelation_pis.computational_hash().to_bytes())?,
+        expected_computational_hash,
+    );
+    // check num placeholders
+    let expected_num_placeholders = query.placeholders.len();
+    assert_eq!(
+        expected_num_placeholders as u64,
+        revelation_pis.num_placeholders().to_canonical_u64(),
+    );
+    // check placeholder values
+    let expected_placeholder_values = query.placeholders.placeholder_values();
+    assert_eq!(
+        expected_placeholder_values,
+        revelation_pis.placeholder_values()[..expected_num_placeholders], // consider only the valid placeholders
+    );
+    // check entry count
+    assert_eq!(
+        num_touched_rows as u64,
+        revelation_pis.entry_count().to_canonical_u64(),
+    );
+    // check there were no overflow errors
+    assert!(!revelation_pis.overflow_flag(),);
+    // check number of results
+    assert_eq!(
+        res.len() as u64,
+        revelation_pis.num_results().to_canonical_u64(),
+    );
+    // check results
+    res.into_iter()
+        .zip(revelation_pis.result_values().into_iter())
+        .for_each(|(expected_res, res)| {
+            (0..expected_res.len()).for_each(|i| {
+                let SqlReturn::Numeric(expected_res) = SqlType::Numeric.extract(&expected_res, i);
+                assert_eq!(
+                    U256::from_str_radix(&expected_res.to_string(), 10).unwrap(),
+                    res[i],
+                );
+            })
+        });
+
     Ok(())
 }
 

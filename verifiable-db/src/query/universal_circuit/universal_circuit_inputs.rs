@@ -1,6 +1,6 @@
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{btree_set, BTreeSet, HashMap};
 
 use alloy::primitives::U256;
 use itertools::Itertools;
@@ -21,6 +21,31 @@ pub struct Placeholder {
 }
 
 pub type PlaceholderId = PlaceholderIdentifier;
+
+/// Define a set of placeholder ids which can be iterated over
+/// following the ids expected for placeholders as outputs of
+/// the revelation circuit
+#[derive(Clone, Debug)]
+pub(crate) struct PlaceholderIdsSet(BTreeSet<PlaceholderId>);
+
+impl<I: Iterator<Item = PlaceholderId>> From<I> for PlaceholderIdsSet {
+    fn from(value: I) -> Self {
+        Self(value.collect::<BTreeSet<PlaceholderId>>())
+    }
+}
+
+/// Implement an iterator over the set of placeholder ids which return
+/// the ids according to the order expected in the public inputs of the
+/// revelation circuit
+impl IntoIterator for PlaceholderIdsSet {
+    type Item = PlaceholderId;
+
+    type IntoIter = btree_set::IntoIter<PlaceholderId>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
 
 #[derive(Clone, Debug)]
 /// Data structure employed to represent a set of placeholders, identified by their `PlaceholderId`
@@ -57,12 +82,22 @@ impl Placeholders {
         self.0.len()
     }
 
-    pub fn ids(&self) -> Vec<PlaceholderId> {
-        self.0.keys().cloned().collect_vec()
+    /// Return set of placeholders ids, in the order expected in the public inputs of the final
+    /// proof
+    pub fn ids(&self) -> Vec<PlaceholderIdentifier> {
+        let sorted_ids = PlaceholderIdsSet::from(self.0.keys().cloned());
+        sorted_ids.into_iter().collect_vec()
     }
 
+    /// Return placeholder values in the order expected in the public inputs of the final
+    /// proof
     pub fn placeholder_values(&self) -> Vec<U256> {
-        self.0.values().cloned().collect_vec()
+        self.ids()
+            .iter()
+            .map(
+                |id| self.get(id).unwrap(), // safe to unwrap since we get ids from `self.ids`
+            )
+            .collect_vec()
     }
 }
 
