@@ -38,30 +38,48 @@ impl AstPass for Expander {
             } => {
                 *e = if *negated {
                     // NOT INLIST := old != list[0] AND old != list[1] ... AND TRUE
-                    Expr::Nested(Box::new(list.iter_mut().fold(TRUE.clone(), |ax, l| {
-                        Expr::BinaryOp {
-                            left: Box::new(Expr::BinaryOp {
+                    Expr::Nested(Box::new(list.iter_mut().enumerate().fold(
+                        TRUE.clone(),
+                        |ax, (i, l)| {
+                            let eq_op = Expr::BinaryOp {
                                 left: Box::new(l.clone()),
                                 op: BinaryOperator::NotEq,
                                 right: expr.clone(),
-                            }),
-                            op: BinaryOperator::And,
-                            right: Box::new(ax),
-                        }
-                    })))
+                            };
+                            if i == 0 {
+                                // save first AND, which is a dummy one
+                                eq_op
+                            } else {
+                                Expr::BinaryOp {
+                                    left: Box::new(eq_op),
+                                    op: BinaryOperator::And,
+                                    right: Box::new(ax),
+                                }
+                            }
+                        },
+                    )))
                 } else {
                     // INLIST := old == list[0] OR old == list[1] ... OR FALSE
-                    Expr::Nested(Box::new(list.iter_mut().fold(FALSE.clone(), |ax, l| {
-                        Expr::BinaryOp {
-                            left: Box::new(Expr::BinaryOp {
+                    Expr::Nested(Box::new(list.iter_mut().enumerate().fold(
+                        FALSE.clone(),
+                        |ax, (i, l)| {
+                            let eq_op = Expr::BinaryOp {
                                 left: Box::new(l.clone()),
                                 op: BinaryOperator::Eq,
                                 right: expr.clone(),
-                            }),
-                            op: BinaryOperator::Or,
-                            right: Box::new(ax),
-                        }
-                    })))
+                            };
+                            if i == 0 {
+                                // save first OR, which is a dummy one
+                                eq_op
+                            } else {
+                                Expr::BinaryOp {
+                                    left: Box::new(eq_op),
+                                    op: BinaryOperator::Or,
+                                    right: Box::new(ax),
+                                }
+                            }
+                        },
+                    )))
                 }
             }
             Expr::Between {
