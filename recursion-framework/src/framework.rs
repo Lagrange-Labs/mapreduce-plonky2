@@ -276,9 +276,10 @@ pub(crate) mod tests {
     use std::array;
     use std::marker::PhantomData;
 
+    use mp2_common::{C, D, F};
     use plonky2::field::types::Sample;
     use plonky2::iop::witness::WitnessWrite;
-    use plonky2::plonk::{circuit_data::CircuitConfig, config::PoseidonGoldilocksConfig};
+    use plonky2::plonk::circuit_data::CircuitConfig;
     use rstest::{fixture, rstest};
     use serial_test::serial;
 
@@ -406,10 +407,6 @@ pub(crate) mod tests {
             Ok(())
         }
     }
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     // data structure to test the `RecursiveCircuits` framework and its serialization/deserialization
     #[derive(Serialize, Deserialize)]

@@ -128,20 +128,21 @@ mod test {
         eips::BlockNumberOrTag,
         providers::{Provider, ProviderBuilder},
     };
-    use mp2_common::{eth::left_pad_generic, u256, utils::ToFields};
+    use mp2_common::{eth::left_pad_generic, u256, utils::ToFields, C, F};
 
     use mp2_common::{
         eth::BlockUtil,
-        types::{CBuilder, GFp},
+        types::CBuilder,
         utils::{Endianness, Packer},
         D,
     };
     use mp2_test::{
         circuit::{prove_circuit, setup_circuit, UserCircuit},
         eth::get_sepolia_url,
+        log::init_logging,
     };
 
-    use plonky2::{iop::witness::PartialWitness, plonk::config::PoseidonGoldilocksConfig};
+    use plonky2::iop::witness::PartialWitness;
 
     use super::{public_inputs::PublicInputs, BlockCircuit, BlockWires};
     use anyhow::Result;
@@ -180,10 +181,10 @@ mod test {
             left_pad_generic::<u32, NUM_LIMBS>(&block_number_buff.pack(Endianness::Big))
                 .to_fields();
 
-        let setup = setup_circuit::<_, D, PoseidonGoldilocksConfig, SepoliaBlockCircuit>();
+        let setup = setup_circuit::<_, D, C, SepoliaBlockCircuit>();
         let circuit = SepoliaBlockCircuit::new(rlp_headers).unwrap();
         let proof = prove_circuit(&setup, &circuit);
-        let pi = PublicInputs::<GFp>::from_slice(&proof.public_inputs);
+        let pi = PublicInputs::<F>::from_slice(&proof.public_inputs);
 
         assert_eq!(pi.prev_block_hash_raw(), &prev_block_hash);
         assert_eq!(pi.block_hash_raw(), &block_hash);
@@ -202,14 +203,14 @@ mod test {
         Ok(())
     }
 
-    impl UserCircuit<GFp, D> for BlockCircuit {
+    impl UserCircuit<F, D> for BlockCircuit {
         type Wires = BlockWires;
 
         fn build(cb: &mut CBuilder) -> Self::Wires {
             Self::build(cb)
         }
 
-        fn prove(&self, pw: &mut PartialWitness<GFp>, wires: &Self::Wires) {
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.assign(pw, wires);
         }
     }

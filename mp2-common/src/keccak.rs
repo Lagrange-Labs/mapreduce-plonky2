@@ -295,16 +295,14 @@ mod test {
         array::{Array, Vector, VectorWire},
         keccak::{compute_size_with_padding, ByteKeccakWires, OutputByteHash, HASH_LEN},
         utils::{keccak256, read_le_u32},
+        C, F,
     };
     use mp2_test::circuit::{run_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit};
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
         iop::{target::Target, witness::PartialWitness},
-        plonk::{
-            circuit_builder::CircuitBuilder,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
-        },
+        plonk::{circuit_builder::CircuitBuilder, config::GenericConfig},
     };
     use rand::{thread_rng, Rng};
 
@@ -393,8 +391,6 @@ mod test {
         rng.fill(&mut arr[..SIZE]);
         let exp = keccak256(&arr[..SIZE]);
         const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let circuit = TestKeccak::<PADDED_LEN> {
             c: KeccakCircuit::<PADDED_LEN>::new(arr.to_vec()).unwrap(),
             exp,
@@ -447,8 +443,6 @@ mod test {
         rng.fill(&mut arr[..SIZE]);
         let exp = keccak256(&arr[..SIZE]);
         const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let circuit = TestKeccak::<PADDED_LEN> {
             c: KeccakCircuit::<PADDED_LEN>::new(arr.to_vec()).unwrap(),
             exp,

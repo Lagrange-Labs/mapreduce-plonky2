@@ -27,3 +27,6 @@ mp2_test = { path = "../mp2-test" }
 rand.workspace = true
 serial_test.workspace = true
 tokio.workspace = true
+
+[features]
+original_poseidon = ["mp2_common/original_poseidon"]

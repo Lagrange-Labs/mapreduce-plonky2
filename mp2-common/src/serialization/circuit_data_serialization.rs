@@ -64,6 +64,8 @@ use plonky2_ecgfp5::{
     curve::base_field::InverseOrZero,
     gadgets::base_field::{QuinticQuotientGenerator, QuinticSqrtGenerator},
 };
+use poseidon2_plonky2::poseidon2_gate::{Poseidon2Gate, Poseidon2Generator};
+use poseidon2_plonky2::poseidon2_hash::Poseidon2;
 
 use crate::u256::UInt256DivGenerator;
 
@@ -99,7 +101,7 @@ impl<C: GenericConfig<D>, const D: usize> FromBytes for VerifierOnlyCircuitData<
     }
 }
 
-impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> FromBytes
+impl<F: SerializableRichField<D>, C: GenericConfig<D, F = F>, const D: usize> FromBytes
     for VerifierCircuitData<F, C, D>
 {
     fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
@@ -107,7 +109,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> F
     }
 }
 
-impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> ToBytes
+impl<F: SerializableRichField<D>, C: GenericConfig<D, F = F>, const D: usize> ToBytes
     for VerifierCircuitData<F, C, D>
 {
     fn to_bytes(&self) -> Vec<u8> {
@@ -147,14 +149,14 @@ where
     }
 }
 
-impl<F: RichField + Extendable<D>, const D: usize> ToBytes for CommonCircuitData<F, D> {
+impl<F: SerializableRichField<D>, const D: usize> ToBytes for CommonCircuitData<F, D> {
     fn to_bytes(&self) -> Vec<u8> {
         self.to_bytes(&CustomGateSerializer)
             .expect("Writing to a byte-vector cannot fail.")
     }
 }
 
-impl<F: RichField + Extendable<D>, const D: usize> FromBytes for CommonCircuitData<F, D> {
+impl<F: SerializableRichField<D>, const D: usize> FromBytes for CommonCircuitData<F, D> {
     fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
         Ok(Self::from_bytes(bytes.to_vec(), &CustomGateSerializer)?)
     }
@@ -162,11 +164,11 @@ impl<F: RichField + Extendable<D>, const D: usize> FromBytes for CommonCircuitDa
 /// Trait alias for `RichField` types compatible with the serialization of `CircuitData` provided
 /// in this crate
 pub trait SerializableRichField<const D: usize>:
-    RichField + Extendable<D> + Extendable<5> + InverseOrZero
+    RichField + Extendable<D> + Extendable<5> + InverseOrZero + Poseidon2
 {
 }
 
-impl<const D: usize, T: RichField + Extendable<D> + Extendable<5> + InverseOrZero>
+impl<const D: usize, T: RichField + Extendable<D> + Extendable<5> + InverseOrZero + Poseidon2>
     SerializableRichField<D> for T
 {
 }
@@ -202,6 +204,7 @@ where
         NonzeroTestGenerator,
         PoseidonGenerator<F, D>,
         PoseidonMdsGenerator<D>,
+        Poseidon2Generator<F, D>,
         QuotientGeneratorExtension<D>,
         RandomAccessGenerator<F, D>,
         RandomValueGenerator,
@@ -230,7 +233,7 @@ where
 
 /// Serializer for the set of gates employed in our map-reduce circuits
 pub struct CustomGateSerializer;
-impl<F: RichField + Extendable<D>, const D: usize> GateSerializer<F, D> for CustomGateSerializer {
+impl<F: SerializableRichField<D>, const D: usize> GateSerializer<F, D> for CustomGateSerializer {
     impl_gate_serializer! {
         DefaultGateSerializer,
         ArithmeticGate,
@@ -246,6 +249,7 @@ impl<F: RichField + Extendable<D>, const D: usize> GateSerializer<F, D> for Cust
         NoopGate,
         PoseidonMdsGate<F, D>,
         PoseidonGate<F, D>,
+        Poseidon2Gate<F, D>,
         PublicInputGate,
         RandomAccessGate<F, D>,
         ReducingExtensionGate<D>,
@@ -267,15 +271,13 @@ pub(super) mod tests {
     use plonky2::field::types::{Field, Sample};
     use plonky2::{
         gates::noop::NoopGate,
-        plonk::{
-            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig,
-            config::PoseidonGoldilocksConfig,
-        },
+        plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
     };
     use rstest::rstest;
     use serde::{Deserialize, Serialize};
 
     use crate::serialization::{deserialize, serialize};
+    use crate::{C, D, F};
 
     use super::*;
 
@@ -296,10 +298,6 @@ pub(super) mod tests {
 
         builder.build::<C>()
     }
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     #[test]
     fn test_circuit_data_serialization() {

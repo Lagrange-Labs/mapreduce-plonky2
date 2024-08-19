@@ -74,7 +74,7 @@ impl<const D: usize> UniversalVerifierTarget<D> {
 /// proofs being verified by the universal verifier, which are computed just once when initializing
 /// `UniversalVerifierBuilder`
 pub(crate) struct UniversalVerifierBuilder<
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     const D: usize,
     const NUM_PUBLIC_INPUTS: usize,
 > {
@@ -175,7 +175,8 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
 mod tests {
     use std::array;
 
-    use plonky2::plonk::{circuit_data::CircuitData, config::PoseidonGoldilocksConfig};
+    use mp2_common::{C, D, F};
+    use plonky2::plonk::circuit_data::CircuitData;
 
     use plonky2::field::types::Sample;
 
@@ -390,10 +391,6 @@ mod tests {
             &self.wrap_circuit.final_proof_circuit_data()
         }
     }
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     #[test]
     fn test_circuit_with_universal_verifier() {

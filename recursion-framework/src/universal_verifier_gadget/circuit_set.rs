@@ -291,12 +291,8 @@ mod tests {
     use crate::framework::tests::check_panic;
 
     use super::*;
+    use mp2_common::{C, D, F};
     use plonky2::field::types::Sample;
-    use plonky2::plonk::config::PoseidonGoldilocksConfig;
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     #[test]
     fn test_circuit_set_gadgets() {

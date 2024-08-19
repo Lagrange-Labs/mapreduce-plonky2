@@ -1,6 +1,7 @@
 use anyhow::Result;
 use hashbrown::HashMap;
 use log::{debug, info};
+use mp2_common::{C, D, F};
 use plonky2::gates::noop::NoopGate;
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::WitnessWrite;
@@ -18,17 +19,13 @@ use plonky2::{
             CircuitData, CommonCircuitData, VerifierCircuitData, VerifierCircuitTarget,
             VerifierOnlyCircuitData,
         },
-        config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig},
+        config::{AlgebraicHasher, GenericConfig},
     },
 };
 use recursion_framework::{
     circuit_builder::CircuitLogicWires, framework_testing::DummyCircuitWires,
 };
 use std::fmt::Debug;
-
-const D: usize = 2;
-type C = PoseidonGoldilocksConfig;
-type F = <C as GenericConfig<D>>::F;
 
 /// Bundle containing the raw proof, the verification key, and some common data
 /// necessary for prover and verifier.
@@ -412,7 +409,7 @@ pub fn prove_circuit<
     let now = std::time::Instant::now();
     u.prove(&mut pw, &setup.0);
     let proof = setup.1.prove(pw).expect("invalid proof");
-    println!("[+] Proof generated in {:?}s", now.elapsed().as_secs());
+    println!("[+] Proof generated in {:?}ms", now.elapsed().as_millis());
     setup
         .2
         .verify(proof.clone())

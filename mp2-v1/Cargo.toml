@@ -44,3 +44,6 @@ test-log = "0.2.16"
 jammdb = "0.11.0"
 bincode.workspace = true
 futures = "0.3.30"
+
+[features]
+original_poseidon = ["mp2_common/original_poseidon"]

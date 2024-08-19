@@ -1,18 +1,20 @@
 use crate::types::CBuilder;
 use crate::utils::ToFields;
 use crate::utils::ToTargets;
+use crate::C;
+use crate::D;
 use crate::F;
 use itertools::Itertools;
 use num::BigUint;
 use plonky2::field::types::Field;
 use plonky2::field::types::PrimeField64;
+use plonky2::plonk::config::GenericConfig;
 use plonky2::plonk::config::GenericHashOut;
 use plonky2::{
     field::{extension::Extendable, goldilocks_field::GoldilocksField},
     hash::{
         hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
         hashing::PlonkyPermutation,
-        poseidon::PoseidonHash,
     },
     iop::target::{BoolTarget, Target},
     plonk::{
@@ -22,10 +24,16 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecdsa::gadgets::biguint::BigUintTarget;
+use poseidon2_plonky2::poseidon2_hash::Poseidon2;
 use std::sync::OnceLock;
 
-pub type H = PoseidonHash;
-pub type P = <PoseidonHash as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
+pub trait HashableField: RichField + Poseidon2 {}
+
+impl<T: RichField + Poseidon2> HashableField for T {}
+
+pub type H = <C as GenericConfig<D>>::Hasher;
+pub type P = <H as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
+pub type HashPermutation = <H as Hasher<F>>::Permutation;
 
 /// The flattened length of Poseidon hash, each original field is splitted from an
 /// Uint64 into two Uint32.
@@ -128,7 +136,7 @@ pub fn hash_maybe_swap<F, const D: usize>(
     do_swap: BoolTarget,
 ) -> HashOutTarget
 where
-    F: RichField + Extendable<D>,
+    F: HashableField + Extendable<D>,
 {
     let zero = b.zero();
 
@@ -172,9 +180,8 @@ mod tests {
     use plonky2::field::types::Sample;
     use plonky2::{
         field::types::Field,
-        hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
+        hash::hashing::hash_n_to_hash_no_pad,
         iop::witness::{PartialWitness, WitnessWrite},
-        plonk::config::PoseidonGoldilocksConfig,
     };
     use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 
@@ -232,40 +239,36 @@ mod tests {
 
     #[test]
     fn hash_maybe_swap_is_equivalent_to_hash_n_false() {
-        let a = [GoldilocksField::ZERO; NUM_HASH_OUT_ELTS];
-        let b = [GoldilocksField::ONE; NUM_HASH_OUT_ELTS];
+        let a = [F::ZERO; NUM_HASH_OUT_ELTS];
+        let b = [F::ONE; NUM_HASH_OUT_ELTS];
 
         let preimage: Vec<_> = a.iter().chain(b.iter()).copied().collect();
-        let h = hash_n_to_hash_no_pad::<GoldilocksField, PoseidonPermutation<GoldilocksField>>(
-            preimage.as_slice(),
-        );
+        let h = hash_n_to_hash_no_pad::<F, HashPermutation>(preimage.as_slice());
 
         let circuit = TestHashSwapCircuit {
             a,
             b,
             do_swap: false,
         };
-        let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit);
+        let proof = run_circuit::<_, _, C, _>(circuit);
 
         assert_eq!(&h.elements[..], proof.public_inputs.as_slice());
     }
 
     #[test]
     fn hash_maybe_swap_is_equivalent_to_hash_n_true() {
-        let a = [GoldilocksField::ZERO; NUM_HASH_OUT_ELTS];
-        let b = [GoldilocksField::ONE; NUM_HASH_OUT_ELTS];
+        let a = [F::ZERO; NUM_HASH_OUT_ELTS];
+        let b = [F::ONE; NUM_HASH_OUT_ELTS];
 
         let preimage: Vec<_> = a.iter().chain(b.iter()).copied().collect();
-        let h = hash_n_to_hash_no_pad::<GoldilocksField, PoseidonPermutation<GoldilocksField>>(
-            preimage.as_slice(),
-        );
+        let h = hash_n_to_hash_no_pad::<F, HashPermutation>(preimage.as_slice());
 
         let circuit = TestHashSwapCircuit {
             a: b,
             b: a,
             do_swap: true,
         };
-        let proof = run_circuit::<_, _, PoseidonGoldilocksConfig, _>(circuit);
+        let proof = run_circuit::<_, _, C, _>(circuit);
 
         assert_eq!(&h.elements[..], proof.public_inputs.as_slice());
     }

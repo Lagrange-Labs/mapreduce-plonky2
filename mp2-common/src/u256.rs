@@ -977,7 +977,6 @@ mod tests {
         plonk::{
             circuit_builder::CircuitBuilder,
             circuit_data::{CircuitConfig, CircuitData},
-            config::PoseidonGoldilocksConfig,
             proof::ProofWithPublicInputs,
         },
     };
@@ -990,15 +989,12 @@ mod tests {
         types::GFp,
         u256::NUM_LIMBS,
         utils::FromFields,
+        C, D, F,
     };
 
     use super::{
         is_less_than_or_equal_to_u256_arr, CircuitBuilderU256, UInt256Target, WitnessWriteU256,
     };
-
-    const D: usize = 2;
-    type F = GFp;
-    type C = PoseidonGoldilocksConfig;
 
     #[derive(Clone, Debug)]
     struct TestCreateOne;
