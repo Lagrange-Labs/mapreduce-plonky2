@@ -48,15 +48,15 @@ impl ExtensionNodeCircuit {
 
         // Constrain the extracted hash is the one exposed by the proof.
         let packed_child_hash = wires.value.pack(b, Endianness::Little);
-        let given_child_hash = child_proof.root_hash();
+        let given_child_hash = child_proof.root_hash_target();
         packed_child_hash.enforce_equal(b, &given_child_hash);
 
         // Expose the public inputs.
         PublicInputsArgs {
             h: &root.output_array,
             k: &wires.key,
-            dv: child_proof.values_digest(),
-            dm: child_proof.metadata_digest(),
+            dv: child_proof.values_digest_target(),
+            dm: child_proof.metadata_digest_target(),
             n: child_proof.n(),
         }
         .register(b);

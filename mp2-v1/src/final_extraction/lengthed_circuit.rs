@@ -1,6 +1,5 @@
 use mp2_common::{
-    default_config, proof::ProofWithVK, public_inputs::PublicInputCommon, types::GFp,
-    utils::ToTargets, C, D, F,
+    default_config, proof::ProofWithVK, public_inputs::PublicInputCommon, utils::ToTargets, C, D, F,
 };
 use plonky2::{
     field::types::Field,
@@ -35,7 +34,7 @@ struct LengthedWires {}
 
 impl LengthedCircuit {
     fn build(
-        b: &mut CircuitBuilder<GFp, 2>,
+        b: &mut CircuitBuilder<F, D>,
         block_pi: &[Target],
         contract_pi: &[Target],
         value_pi: &[Target],
@@ -43,7 +42,7 @@ impl LengthedCircuit {
     ) -> LengthedWires {
         let base_wires = base_circuit::BaseCircuit::build(b, block_pi, contract_pi, value_pi);
         let value_pi = values_extraction::PublicInputs::<Target>::new(value_pi);
-        let dv = value_pi.values_digest().to_targets();
+        let dv = value_pi.values_digest_target().to_targets();
 
         let len_pi = length_extraction::PublicInputs::<Target>::from_slice(length_pi);
         // pseudo code:
@@ -52,12 +51,14 @@ impl LengthedCircuit {
         // assert length_proof.H == value_proof.H
         // dm += length_proof.DM
         let mpt_key = len_pi.mpt_key_wire();
-        let minus_one = b.constant(GFp::NEG_ONE);
+        let minus_one = b.constant(F::NEG_ONE);
         b.connect(mpt_key.pointer, minus_one);
         let length_n = len_pi.length();
         let value_n = &value_pi.n();
         b.connect(*length_n, *value_n);
-        len_pi.root_hash().enforce_equal(b, &value_pi.root_hash());
+        len_pi
+            .root_hash()
+            .enforce_equal(b, &value_pi.root_hash_target());
         let final_dm = b.curve_add(base_wires.dm, len_pi.metadata_digest());
         PublicInputs::new(
             &base_wires.bh,
@@ -70,7 +71,7 @@ impl LengthedCircuit {
         LengthedWires {}
     }
 
-    fn assign(&self, _pw: &mut PartialWitness<GFp>, _wires: &LengthedWires) {}
+    fn assign(&self, _pw: &mut PartialWitness<F>, _wires: &LengthedWires) {}
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -152,19 +153,13 @@ mod test {
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{
-        iop::witness::WitnessWrite,
-        plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
-    };
-    pub const D: usize = 2;
-    pub type C = PoseidonGoldilocksConfig;
-    pub type F = <C as GenericConfig<D>>::F;
+    use plonky2::{iop::witness::WitnessWrite, plonk::config::GenericConfig};
 
     #[derive(Clone, Debug)]
     struct TestLengthedCircuit {
         circuit: LengthedCircuit,
         pis: ProofsPi,
-        len_pi: Vec<GFp>,
+        len_pi: Vec<F>,
     }
 
     struct TestLengthedWires {
@@ -173,9 +168,9 @@ mod test {
         len_pi: Vec<Target>,
     }
 
-    impl UserCircuit<GFp, 2> for TestLengthedCircuit {
+    impl UserCircuit<F, D> for TestLengthedCircuit {
         type Wires = TestLengthedWires;
-        fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<GFp, 2>) -> Self::Wires {
+        fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>) -> Self::Wires {
             let pis = ProofsPiTarget::new(c);
             let len_pi =
                 c.add_virtual_targets(length_extraction::PublicInputs::<Target>::TOTAL_LEN);
@@ -192,7 +187,7 @@ mod test {
                 len_pi,
             }
         }
-        fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<GFp>, wires: &Self::Wires) {
+        fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<F>, wires: &Self::Wires) {
             wires.pis.assign(pw, &self.pis);
             self.circuit.assign(pw, &wires.circuit);
             pw.set_target_arr(&wires.len_pi, &self.len_pi);

@@ -1,12 +1,14 @@
 use std::{array, iter::once};
 
+use mp2_common::poseidon::H;
 use mp2_common::serialization::{
     circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array,
 };
+use mp2_common::{C, D, F};
 use plonky2::field::types::{Field, Sample};
 use plonky2::{
     field::types::PrimeField64,
-    hash::{hash_types::NUM_HASH_OUT_ELTS, poseidon::PoseidonHash},
+    hash::hash_types::NUM_HASH_OUT_ELTS,
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
@@ -14,7 +16,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::CircuitConfig,
-        config::{GenericConfig, GenericHashOut, Hasher, PoseidonGoldilocksConfig},
+        config::{GenericConfig, GenericHashOut, Hasher},
         proof::ProofWithPublicInputsTarget,
     },
 };
@@ -83,7 +85,7 @@ impl<F: SerializableRichField<D>, const D: usize, const INPUT_CHUNK_SIZE: usize>
             // sum input to accumulator only if it is even
             builder.mul_add(parity, input, sum)
         });
-        let hash_target = builder.hash_n_to_hash_no_pad::<PoseidonHash>(input_targets.to_vec());
+        let hash_target = builder.hash_n_to_hash_no_pad::<H>(input_targets.to_vec());
         builder.register_public_input(sum_target);
         builder.register_public_inputs(&hash_target.elements);
         Self { input_targets }
@@ -121,7 +123,7 @@ impl<F: SerializableRichField<D>, const D: usize, const ARITY: usize> CircuitLog
             .iter()
             .flat_map(|&proof_t| proof_t.public_inputs[1..NUM_PUBLIC_INPUTS].to_vec())
             .collect::<Vec<_>>();
-        let cumulative_hash = builder.hash_n_to_hash_no_pad::<PoseidonHash>(hash_input);
+        let cumulative_hash = builder.hash_n_to_hash_no_pad::<H>(hash_input);
         builder.register_public_input(sum_target);
         builder.register_public_inputs(&cumulative_hash.elements);
 
@@ -132,10 +134,6 @@ impl<F: SerializableRichField<D>, const D: usize, const ARITY: usize> CircuitLog
         Ok(())
     }
 }
-
-const D: usize = 2;
-type C = PoseidonGoldilocksConfig;
-type F = <C as GenericConfig<D>>::F;
 
 #[test]
 #[serial]
@@ -163,7 +161,7 @@ fn test_map_reduce_circuits() {
 
     let mut dataset_chunk_digests = dataset
         .chunks(INPUT_CHUNK_SIZE)
-        .map(|chunk| PoseidonHash::hash_no_pad(chunk))
+        .map(|chunk| H::hash_no_pad(chunk))
         .collect::<Vec<_>>();
     while dataset_chunk_digests.len() != 1 {
         let new_dataset_chunk_digests = dataset_chunk_digests
@@ -173,7 +171,7 @@ fn test_map_reduce_circuits() {
                     .iter()
                     .flat_map(|hash| hash.to_vec())
                     .collect::<Vec<_>>();
-                PoseidonHash::hash_no_pad(&inputs)
+                H::hash_no_pad(&inputs)
             })
             .collect::<Vec<_>>();
         dataset_chunk_digests = new_dataset_chunk_digests;
@@ -282,7 +280,7 @@ fn test_reduce_circuit_with_testing_framework() {
     let testing_framework = TestingRecursiveCircuits::new(&circuit_builder, circuit_set);
 
     let test_public_inputs = array::from_fn(|_| {
-        let hash = PoseidonHash::hash_no_pad(F::rand_vec(8).as_slice());
+        let hash = H::hash_no_pad(F::rand_vec(8).as_slice());
         once(F::rand())
             .chain(hash.to_vec().into_iter())
             .collect::<Vec<_>>()
@@ -297,7 +295,7 @@ fn test_reduce_circuit_with_testing_framework() {
     let sum_of_even = test_public_inputs
         .iter()
         .fold(F::ZERO, |acc, pub_input| acc + pub_input[0]);
-    let cumulative_hash = PoseidonHash::hash_no_pad(
+    let cumulative_hash = H::hash_no_pad(
         test_public_inputs
             .iter()
             .flat_map(|pub_inp| pub_inp[1..NUM_PUBLIC_INPUTS].to_vec())

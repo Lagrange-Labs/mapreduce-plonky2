@@ -14,7 +14,7 @@ use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     default_config,
-    poseidon::{empty_poseidon_hash, H},
+    poseidon::H,
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{
@@ -27,7 +27,6 @@ use mp2_common::{
     C, D, F,
 };
 use plonky2::{
-    hash::poseidon::PoseidonHash,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -335,7 +334,7 @@ impl<const L: usize, const S: usize, const PH: usize, const PP: usize> CircuitLo
 where
     [(); S - 1]:,
     [(); NUM_QUERY_IO::<S>]:,
-    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+    [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     type CircuitBuilderParams = CircuitBuilderParams;
 

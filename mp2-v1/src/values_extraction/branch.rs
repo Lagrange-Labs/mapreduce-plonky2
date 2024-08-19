@@ -103,11 +103,11 @@ where
             let should_process = less_than(b, it, n_proof_valid, 4);
 
             // Accumulate the values digest.
-            let child_digest = proof_inputs.values_digest();
+            let child_digest = proof_inputs.values_digest_target();
             let child_digest = b.curve_select(should_process, child_digest, zero_point);
             values_digest = b.curve_add(values_digest, child_digest);
 
-            let child_digest = proof_inputs.metadata_digest();
+            let child_digest = proof_inputs.metadata_digest_target();
             if i > 0 {
                 // Check if the metadata digests are same for `multiple` aggregation type.
                 let is_equal = b.curve_eq(metadata_digest, child_digest);
@@ -147,7 +147,7 @@ where
             let packed_hash = Array::<U32Target, PACKED_HASH_LEN> {
                 arr: hash.arr.pack(b, Endianness::Little).try_into().unwrap(),
             };
-            let child_hash = proof_inputs.root_hash();
+            let child_hash = proof_inputs.root_hash_target();
             packed_hash.enforce_equal(b, &child_hash);
 
             // We now check that the MPT key at this point is equal to the one
