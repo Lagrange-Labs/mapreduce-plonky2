@@ -951,7 +951,7 @@ mod tests {
         let serialized_params = bincode::serialize(&params).unwrap();
         // use deserialized params to generate proofs
         params = bincode::deserialize(&serialized_params).unwrap();
-        
+
         type Input = CircuitInput<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,

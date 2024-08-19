@@ -67,11 +67,7 @@ pub struct UInt256Target([U32Target; NUM_LIMBS]);
 
 impl PartialEq for UInt256Target {
     fn eq(&self, other: &Self) -> bool {
-        self.0.iter().zip(other.0.iter()).all(
-            |(s, o)| {
-                s.0 == o.0
-            }
-        )
+        self.0.iter().zip(other.0.iter()).all(|(s, o)| s.0 == o.0)
     }
 }
 

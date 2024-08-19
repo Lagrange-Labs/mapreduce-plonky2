@@ -6,7 +6,7 @@ pub use utils::PlaceholderSettings;
 pub use utils::DEFAULT_MAX_BLOCK_PLACEHOLDER;
 pub use utils::DEFAULT_MIN_BLOCK_PLACEHOLDER;
 
-pub mod circuit;
+pub mod assembler;
 pub mod errors;
 pub mod executor;
 mod expand;

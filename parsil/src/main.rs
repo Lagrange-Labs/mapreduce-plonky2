@@ -5,7 +5,7 @@ use sqlparser::ast::Query;
 use symbols::{ContextProvider, FileContextProvider};
 use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
 
-mod circuit;
+mod assembler;
 mod errors;
 mod executor;
 mod expand;
@@ -72,7 +72,7 @@ fn main() -> Result<()> {
             println!("Final query:\n{}", query);
         }
         Command::Circuit {} => {
-            circuit::validate(&query, &settings)?;
+            assembler::validate(&query, &settings)?;
         }
         Command::Query { kind } => match kind {
             QueryKind::Execute => {
