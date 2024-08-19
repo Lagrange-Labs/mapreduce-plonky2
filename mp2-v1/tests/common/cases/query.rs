@@ -122,7 +122,7 @@ pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Re
 async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     let settings = ParsilSettings {
         context: table,
-        placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS),
+        placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
     };
     let query_info = cook_query(table).await?;
     info!("QUERY on the testcase: {}", query_info.query);
