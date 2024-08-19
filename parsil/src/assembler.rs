@@ -636,9 +636,32 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         )
     }
 
-    /// Generate appropriate universal query circuit PIs from the root context
-    /// of this Resolver.
-    fn to_pis(&self, placeholders: &Placeholders) -> Result<CircuitPis> {
+    /// Generate appropriate universal query circuit PIs in static mode from the
+    /// root context of this Resolver.
+    fn to_static_inputs(&self) -> Result<CircuitPis<StaticQueryBounds>> {
+        let result = self.prepare_result()?;
+        let root_scope = &self.scopes.scope_at(1);
+
+        Ok(CircuitPis {
+            result,
+            column_ids: self.columns.clone(),
+            query_aggregations: root_scope
+                .metadata()
+                .aggregation
+                .iter()
+                .map(|x| x.to_field())
+                .collect(),
+            predication_operations: root_scope.metadata().predicates.ops.clone(),
+            bounds: StaticQueryBounds::without_values(
+                self.secondary_index_bounds.low.clone(),
+                self.secondary_index_bounds.high.clone(),
+            ),
+        })
+    }
+
+    /// Generate appropriate universal query circuit PIs in runtime mode from
+    /// the root context of this Resolver.
+    fn to_dynamic_inputs(&self, placeholders: &Placeholders) -> Result<CircuitPis<QueryBounds>> {
         let result = self.prepare_result()?;
         let root_scope = &self.scopes.scope_at(1);
 
@@ -662,10 +685,62 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     }
 }
 
+/// A trait unifying [`StaticQueryBounds`] and [`QueryBounds`] construction to
+/// place them in a [`CircuitPis`] that may be either build in static mode (i.e.
+/// no reference to runtime value) at query registration time, or in dynamic
+/// mode at query execution time.
+trait BuildableBounds: Sized {
+    fn without_values(low: Option<QueryBoundSource>, high: Option<QueryBoundSource>) -> Self;
+
+    fn with_values(
+        placeholders: &Placeholders,
+        low: Option<QueryBoundSource>,
+        high: Option<QueryBoundSource>,
+    ) -> Result<Self>;
+}
+
+/// Similar to [`QueryBounds`], but only containing the static expressions
+/// defining the query bounds, without any reference to runtime values.
+pub struct StaticQueryBounds {
+    pub min_query_secondary: Option<QueryBoundSource>,
+    pub max_query_secondary: Option<QueryBoundSource>,
+}
+
+impl BuildableBounds for StaticQueryBounds {
+    fn without_values(low: Option<QueryBoundSource>, high: Option<QueryBoundSource>) -> Self {
+        Self {
+            min_query_secondary: low,
+            max_query_secondary: high,
+        }
+    }
+
+    fn with_values(
+        _: &Placeholders,
+        _: Option<QueryBoundSource>,
+        _: Option<QueryBoundSource>,
+    ) -> Result<Self> {
+        unreachable!()
+    }
+}
+
+impl BuildableBounds for QueryBounds {
+    fn without_values(_: Option<QueryBoundSource>, _: Option<QueryBoundSource>) -> Self {
+        unreachable!()
+    }
+
+    fn with_values(
+        placeholders: &Placeholders,
+        low: Option<QueryBoundSource>,
+        high: Option<QueryBoundSource>,
+    ) -> Result<Self> {
+        QueryBounds::new(placeholders, low, high)
+    }
+}
+
 /// This struct contains all the data required to build the public inputs of the
 /// universal query circuit for a given query.
 #[derive(Debug)]
-pub struct CircuitPis {
+pub struct CircuitPis<T: BuildableBounds> {
     /// The [`ResultStructure`] taken as input by the universal query circuit
     pub result: ResultStructure,
     /// A list of [`AggregationOperation`] matching 1-1 the outputs in
@@ -679,9 +754,16 @@ pub struct CircuitPis {
     /// the WHERE predicate, if any. By convention, the root of the AST **MUST**
     /// be the last one in this list.
     pub predication_operations: Vec<BasicOperation>,
-    /// the bounds for primary and secondary index if any
-    pub bounds: QueryBounds,
+    /// If any, the bounds for the secondary index
+    pub bounds: T,
 }
+
+/// Circuit PIs in static mode, i.e. without reference to runtime placeholder
+/// values.
+pub type StaticCircuitPis = CircuitPis<StaticQueryBounds>;
+/// Circuit PIs in dynamic mode, i.e. with the placeholder values set at query
+/// runtime.
+pub type DynamicCircuitPis = CircuitPis<QueryBounds>;
 
 impl<'a, C: ContextProvider> AstPass for Assembler<'a, C> {
     fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
@@ -868,36 +950,39 @@ impl<'a, C: ContextProvider> AstPass for Assembler<'a, C> {
     }
 }
 
+/// Validate the given query, ensuring that it satisfies all the requirements of
+/// the circuit.
 pub fn validate<C: ContextProvider>(query: &Query, settings: &ParsilSettings<C>) -> Result<()> {
     let mut converted_query = query.clone();
     let mut resolver = Assembler::new(settings);
     converted_query.visit(&mut resolver)?;
-    resolver.prepare_result()?;
-    Ok(())
+    resolver.prepare_result().map(|_| ())
 }
 
-pub fn assemble<C: ContextProvider>(
+/// Generate static circuit public inputs, i.e. without reference to runtime
+/// placeholder values.
+pub fn assemble_static<C: ContextProvider>(
+    q: &Query,
+    settings: &ParsilSettings<C>,
+) -> Result<StaticCircuitPis> {
+    let mut converted_query = q.clone();
+
+    let mut resolver = Assembler::new(settings);
+    converted_query.visit(&mut resolver)?;
+
+    resolver.to_static_inputs()
+}
+
+/// Generate dynamic circuit public inputs, i.e. referencing runtime placeholder
+/// values.
+pub fn assemble_dynamic<C: ContextProvider>(
     q: &Query,
     settings: &ParsilSettings<C>,
     placeholders: &Placeholders,
-) -> Result<CircuitPis> {
+) -> Result<DynamicCircuitPis> {
     let mut converted_query = q.clone();
     let mut resolver = Assembler::new(settings);
     converted_query.visit(&mut resolver)?;
-    println!("Original query:\n>> {}", q);
-    println!("Translated query:\n>> {}", converted_query);
 
-    resolver.scopes.pretty();
-
-    println!("Query ops:");
-    for (i, op) in resolver.query_ops.ops.iter().enumerate() {
-        println!("     {i}: {op:?}");
-    }
-
-    let pis = resolver.to_pis(&placeholders)?;
-
-    println!("Sent to circuit:");
-    println!("{:#?}", pis);
-
-    Ok(pis)
+    resolver.to_dynamic_inputs(&placeholders)
 }

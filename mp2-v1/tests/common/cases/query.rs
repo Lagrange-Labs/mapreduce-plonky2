@@ -41,8 +41,11 @@ use mp2_v1::{
     values_extraction::identifier_block_column,
 };
 use parsil::{
-    circuit::CircuitPis, parse_and_validate, symbols::ContextProvider, ParsilSettings,
-    PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
+    assembler::{CircuitPis, DynamicCircuitPis, StaticCircuitPis},
+    parse_and_validate,
+    symbols::ContextProvider,
+    ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
+    DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{
@@ -145,9 +148,7 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
         exec_query.query.to_string()
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
-    // the query to use to fetch all the rows keys involved in the result tree.
-    let pis = parsil::circuit::assemble(&parsed, &settings, &query_info.placeholders)?;
-    prove_query(ctx, table, query_info, parsed, pis, &settings, res)
+    prove_query(ctx, table, query_info, parsed, &settings, res)
         .await
         .expect("unable to run universal query proof");
     Ok(())
@@ -159,10 +160,12 @@ async fn prove_query(
     table: &Table,
     query: QueryCooking,
     mut parsed: Query,
-    pis: CircuitPis,
     settings: &ParsilSettings<&Table>,
     res: Vec<PsqlRow>,
 ) -> Result<()> {
+    // the query to use to fetch all the rows keys involved in the result tree.
+    let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
+    
     let rows_query = parsil::executor::generate_query_keys(&mut parsed, settings)?;
     let all_touched_rows = table
         .execute_row_query(&rows_query.to_string(), query.min_block, query.max_block)
@@ -260,6 +263,10 @@ async fn prove_query(
     .await?;
     let proof = prove_revelation(ctx, table, &query, &pis, current_epoch).await?;
     info!("Revelation proof done! Checking public inputs...");
+    // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
+    // to check the public inputs
+    let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
+    
     check_final_outputs(
         proof,
         ctx,
@@ -278,7 +285,7 @@ async fn prove_revelation(
     ctx: &TestContext,
     table: &Table,
     query: &QueryCooking,
-    pis: &CircuitPis,
+    pis: &DynamicCircuitPis,
     tree_epoch: Epoch,
 ) -> Result<Vec<u8>> {
     // load the query proof, which is at the root of the tree
@@ -314,7 +321,7 @@ fn check_final_outputs(
     ctx: &TestContext,
     table: &Table,
     query: &QueryCooking,
-    pis: &CircuitPis,
+    pis: &StaticCircuitPis,
     tree_epoch: Epoch,
     num_touched_rows: usize,
     res: Vec<PsqlRow>,
@@ -353,8 +360,8 @@ fn check_final_outputs(
         &pis.predication_operations,
         &pis.result,
         &metadata_hash,
-        Some(QueryBoundSource::Constant(query.example_row.value)), //ToDo: need to get this from parsil
-        Some(QueryBoundSource::Constant(query.example_row.value)),
+        pis.bounds.min_query_secondary.clone(),
+        pis.bounds.max_query_secondary.clone(),
     )?;
     assert_eq!(
         HashOutput::try_from(revelation_pis.computational_hash().to_bytes())?,
@@ -567,16 +574,13 @@ where
                 }
             }
         };
-        info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
-        debug!(
-            "node info for {primary}, {k:?}: {:?}",
-            get_node_info(&planner.tree, &k, primary as Epoch).await
-        );
-        //debug!("input for {primary}, {k:?}: {:?}", input);
-        let proof = planner
-            .ctx
-            .run_query_proof(GlobalCircuitInput::Query(input))?;
-        info.save_proof(planner.ctx, primary, &k, proof)?;
+        if info.load_proof(planner.ctx, primary, &k).is_err() {
+            info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
+            let proof = planner
+                .ctx
+                .run_query_proof(GlobalCircuitInput::Query(input))?;
+            info.save_proof(planner.ctx, primary, &k, proof)?;
+        }
         info!("Universal query proof DONE for {primary} -> {k:?} ");
         workplan.done(&wk)?;
         proven_nodes.insert(k);
@@ -598,7 +602,7 @@ where
 {
     query: QueryCooking,
     genesis: BlockPrimaryIndex,
-    pis: &'a parsil::circuit::CircuitPis,
+    pis: &'a DynamicCircuitPis,
     ctx: &'a mut TestContext,
     tree: &'a MerkleTreeKvDb<T, V, S>,
     columns: TableColumns,
@@ -836,7 +840,7 @@ async fn prove_single_row(
     columns: &TableColumns,
     primary: BlockPrimaryIndex,
     row_key: &RowTreeKey,
-    pis: &CircuitPis,
+    pis: &DynamicCircuitPis,
     query: &QueryCooking,
 ) -> Result<Vec<u8>> {
     // 1. Get the all the cells including primary and secondary index
@@ -1008,7 +1012,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     let query_str = format!(
         "SELECT AVG({value_column})
                 FROM {table_name}
-                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER} 
+                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
                 AND {key_column} = '0x{key_value}';"
     );
