@@ -71,6 +71,17 @@ impl TestCell {
         }
     }
 
+    /// Create a random test cell with id.
+    pub fn random_with_id(id: F) -> Self {
+        let mut rng = thread_rng();
+
+        Self {
+            id,
+            value: U256::from_limbs(rng.gen::<[u64; 4]>()),
+            hash: Default::default(),
+        }
+    }
+
     /// Build new `TestCell` from `value` and `id`
     pub fn new(value: U256, id: F) -> Self {
         Self {
