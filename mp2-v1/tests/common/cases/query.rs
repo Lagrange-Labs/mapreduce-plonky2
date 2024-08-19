@@ -34,8 +34,11 @@ use mp2_v1::{
     values_extraction::identifier_block_column,
 };
 use parsil::{
-    circuit::CircuitPis, parse_and_validate, symbols::ContextProvider, ParsilSettings,
-    PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
+    assembler::{CircuitPis, DynamicCircuitPis},
+    parse_and_validate,
+    symbols::ContextProvider,
+    ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
+    DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{
@@ -113,7 +116,7 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
     // the query to use to fetch all the rows keys involved in the result tree.
-    let pis = parsil::circuit::assemble(&parsed, &settings, &query_info.placeholders)?;
+    let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query_info.placeholders)?;
     prove_query(ctx, table, query_info, parsed, pis, &settings)
         .await
         .expect("unable to run universal query proof");
@@ -126,7 +129,7 @@ async fn prove_query(
     table: &Table,
     query: QueryCooking,
     mut parsed: Query,
-    pis: CircuitPis,
+    pis: DynamicCircuitPis,
     settings: &ParsilSettings<&Table>,
 ) -> Result<()> {
     let rows_query = parsil::executor::generate_query_keys(&mut parsed, settings)?;
@@ -425,7 +428,7 @@ where
 {
     query: QueryCooking,
     genesis: BlockPrimaryIndex,
-    pis: &'a parsil::circuit::CircuitPis,
+    pis: &'a DynamicCircuitPis,
     ctx: &'a mut TestContext,
     tree: &'a MerkleTreeKvDb<T, V, S>,
     columns: TableColumns,
@@ -722,7 +725,7 @@ async fn prove_single_row(
     columns: &TableColumns,
     primary: BlockPrimaryIndex,
     row_key: &RowTreeKey,
-    pis: &CircuitPis,
+    pis: &DynamicCircuitPis,
     query: &QueryCooking,
 ) -> Result<Vec<u8>> {
     // 1. Get the all the cells including primary and secondary index
@@ -900,7 +903,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     let query_str = format!(
         "SELECT AVG({value_column})
                 FROM {table_name}
-                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER} 
+                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
                 AND {key_column} = '0x{key_value}';"
     );
