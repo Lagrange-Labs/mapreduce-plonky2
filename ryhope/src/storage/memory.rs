@@ -32,15 +32,22 @@ where
     in_tx: bool,
     /// The successive states of the persisted value.
     ts: Vec<Option<T>>,
+    /// The initial epoch
+    epoch_offset: Epoch,
 }
 impl<T> VersionedStorage<T>
 where
     T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
     fn new(initial_state: T) -> Self {
+        Self::new_at(initial_state, 0)
+    }
+
+    fn new_at(initial_state: T, epoch: Epoch) -> Self {
         Self {
             in_tx: false,
             ts: vec![Some(initial_state)],
+            epoch_offset: epoch,
         }
     }
 }
@@ -74,10 +81,13 @@ where
     T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
     fn current_epoch(&self) -> Epoch {
-        (self.ts.len() - 1).try_into().unwrap()
+        let inner_epoch: Epoch = (self.ts.len() - 1).try_into().unwrap();
+        inner_epoch + self.epoch_offset
     }
 
     async fn fetch_at(&self, epoch: Epoch) -> T {
+        let epoch = epoch - self.epoch_offset;
+        assert!(epoch >= 0);
         self.ts[epoch as usize].clone().unwrap()
     }
 
@@ -88,7 +98,13 @@ where
     }
 
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
-        ensure!(epoch >= 0, "unable to rollback before epoch 0");
+        ensure!(
+            epoch >= self.epoch_offset,
+            "unable to rollback before epoch {}",
+            self.epoch_offset
+        );
+
+        let epoch = epoch - self.epoch_offset;
         ensure!(
             epoch <= self.current_epoch(),
             "unable to rollback to epoch `{}` more recent than current epoch `{}`",
@@ -117,11 +133,18 @@ pub struct VersionedKvStorage<K: Debug, V: Debug> {
     /// is represented as a Some, whereas a deletion is represented by
     /// associating k to None.
     mem: Vec<HashMap<K, Option<V>>>,
+    /// The initial epoch
+    epoch_offset: Epoch,
 }
 impl<K: Debug, V: Debug> VersionedKvStorage<K, V> {
     pub fn new() -> Self {
+        Self::new_at(0)
+    }
+
+    pub fn new_at(initial_epoch: Epoch) -> Self {
         VersionedKvStorage {
             mem: vec![Default::default()],
+            epoch_offset: initial_epoch,
         }
     }
 
@@ -136,13 +159,20 @@ where
     K: Hash + Eq + Clone + Debug + Send + Sync,
     V: Clone + Debug + Send + Sync,
 {
+    fn initial_epoch(&self) -> Epoch {
+        self.epoch_offset
+    }
+
     fn current_epoch(&self) -> Epoch {
         // There is a 1-1 mapping between the epoch and the position in the list of
         // diffs; epoch 0 being the initial empty state.
-        (self.mem.len() - 1) as Epoch
+        let inner_epoch: Epoch = (self.mem.len() - 1) as Epoch;
+        inner_epoch + self.epoch_offset
     }
 
     async fn try_fetch_at(&self, k: &K, epoch: Epoch) -> Option<V> {
+        assert!(epoch >= self.epoch_offset);
+        let epoch = epoch - self.epoch_offset;
         // To fetch a key at a given epoch, the list of diffs up to the
         // requested epoch is iterated in reverse. The first occurence of k,
         // i.e. the most recent one, will be the current value.
@@ -201,7 +231,12 @@ where
     }
 
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
-        ensure!(epoch >= 0, "unable to rollback before epoch 0");
+        ensure!(
+            epoch >= self.epoch_offset,
+            "unable to rollback before epoch {}",
+            self.epoch_offset
+        );
+        let epoch = epoch - self.epoch_offset;
         ensure!(
             epoch <= self.current_epoch(),
             "unable to rollback to epoch `{}` more recent than current epoch `{}`",
@@ -228,10 +263,14 @@ pub struct InMemory<T: TreeTopology, V: Debug + Sync> {
 }
 impl<T: TreeTopology, V: Debug + Sync> InMemory<T, V> {
     pub fn new(tree_state: T::State) -> Self {
+        Self::new_at(tree_state, 0)
+    }
+
+    pub fn new_at(tree_state: T::State, initial_epoch: Epoch) -> Self {
         Self {
-            state: VersionedStorage::new(tree_state),
-            nodes: VersionedKvStorage::new(),
-            data: VersionedKvStorage::new(),
+            state: VersionedStorage::new_at(tree_state, initial_epoch),
+            nodes: VersionedKvStorage::new_at(initial_epoch),
+            data: VersionedKvStorage::new_at(initial_epoch),
             in_tx: false,
         }
     }
@@ -249,6 +288,10 @@ impl<T: TreeTopology, V: Debug + Sync> FromSettings<T::State> for InMemory<T, V>
             InitSettings::MustExist => unimplemented!(),
             InitSettings::MustNotExist(tree_state) | InitSettings::Reset(tree_state) => {
                 Ok(Self::new(tree_state))
+            }
+            InitSettings::MustNotExistAt(tree_state, initial_epoch)
+            | InitSettings::ResetAt(tree_state, initial_epoch) => {
+                Ok(Self::new_at(tree_state, initial_epoch))
             }
         }
     }
@@ -281,7 +324,11 @@ where
     }
 
     async fn born_at(&self, epoch: Epoch) -> Vec<T::Key> {
-        self.nodes.mem[epoch as usize].keys().cloned().collect()
+        assert!(epoch >= self.nodes.epoch_offset);
+        self.nodes.mem[(epoch - self.nodes.epoch_offset) as usize]
+            .keys()
+            .cloned()
+            .collect()
     }
 
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {

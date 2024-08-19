@@ -19,7 +19,7 @@ use crate::query::computational_hash_ids::Operation;
 
 use super::ComputationalHashTarget;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 /// Input wires for basic operation component
 pub struct BasicOperationInputWires {
     /// value to be employed for constant operand, if any, in the basic operation
@@ -367,7 +367,7 @@ mod tests {
         let input_hash = array::from_fn(|_| gen_random_field_hash());
         let placeholder_ids = array::from_fn(|_| {
             let id: u8 = rng.gen();
-            PlaceholderIdentifier::GenericPlaceholder(id as usize)
+            PlaceholderIdentifier::Generic(id as usize)
         });
         let first_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));
         let second_input_selector = F::from_canonical_usize(rng.gen_range(0..NUM_INPUTS + 2));

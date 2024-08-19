@@ -63,8 +63,7 @@ pub fn serialize_array<T: ToBytes, S: Serializer, const N: usize>(
     input: &[T; N],
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    let byte_vec = input.iter().map(|inp| inp.to_bytes()).collect::<Vec<_>>();
-    Vec::<Vec<u8>>::serialize(&byte_vec, serializer)
+    serialize_vec(input, serializer)
 }
 
 /// `deserialize_array` allows to deserialize an array with `N` elements of type `T: FromBytes` employing a serde deserializer;

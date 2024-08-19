@@ -150,27 +150,24 @@ impl<
             num_placeholders <= MAX_NUM_PLACEHOLDERS,
             "number of placeholders provided is more than the maximum number of placeholders"
         );
-        // get placeholder ids from `placeholders` and sort them to ensure that they are provided
-        // in the correct order to the circuit
-        let mut sorted_placeholder_ids = placeholders.ids();
-        sorted_placeholder_ids.sort();
-        let (padded_placeholder_ids, padded_placeholder_values): (Vec<F>, Vec<_>) =
-            sorted_placeholder_ids
-                .iter()
-                .map(|id| (*id, placeholders.get(id).unwrap()))
-                // pad placeholder ids and values with the first items in the arrays, as expected by the circuit
-                .chain(repeat((
-                    PlaceholderIdentifier::MinQueryOnIdx1,
-                    placeholders
-                        .get(&PlaceholderIdentifier::MinQueryOnIdx1)
-                        .unwrap(),
-                )))
-                .take(MAX_NUM_PLACEHOLDERS)
-                .map(|(id, value)| {
-                    let id: F = id.to_field();
-                    (id, value)
-                })
-                .unzip();
+        // get placeholder ids from `placeholders` in the order expected by the circuit
+        let placeholder_ids = placeholders.ids();
+        let (padded_placeholder_ids, padded_placeholder_values): (Vec<F>, Vec<_>) = placeholder_ids
+            .iter()
+            .map(|id| (*id, placeholders.get(id).unwrap()))
+            // pad placeholder ids and values with the first items in the arrays, as expected by the circuit
+            .chain(repeat((
+                PlaceholderIdentifier::MinQueryOnIdx1,
+                placeholders
+                    .get(&PlaceholderIdentifier::MinQueryOnIdx1)
+                    .unwrap(),
+            )))
+            .take(MAX_NUM_PLACEHOLDERS)
+            .map(|(id, value)| {
+                let id: F = id.to_field();
+                (id, value)
+            })
+            .unzip();
         let compute_checked_placeholder_for_id = |placeholder_id: PlaceholderIdentifier| {
             let value = placeholders.get(&placeholder_id)?;
             // locate placeholder with id `placeholder_id` in `padded_placeholder_ids`
@@ -355,7 +352,7 @@ mod tests {
             },
             api::CircuitInput as QueryInput,
             computational_hash_ids::{
-                AggregationOperation, Identifiers, Operation, PlaceholderIdentifier,
+                AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
             },
             public_inputs::{PublicInputs as QueryPI, QueryPublicInputs},
             universal_circuit::{
@@ -415,8 +412,12 @@ mod tests {
         let column_cells = (0..NUM_COLUMNS)
             .map(|_| ColumnCell::new(rng.gen(), gen_random_u256(rng)))
             .collect_vec();
-        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
-        let placeholder_ids = [0, 1].map(|i| PlaceholderIdentifier::GenericPlaceholder(i));
+        let row_cells = RowCells::new(
+            column_cells[0].clone(),
+            column_cells[1].clone(),
+            column_cells[2..].to_vec(),
+        );
+        let placeholder_ids = [0, 1].map(|i| PlaceholderIdentifier::Generic(i));
         let predicate_operations = vec![
             // C4 < $2
             BasicOperation::new_binary_operation(
@@ -471,7 +472,6 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_ITEMS_PER_OUTPUT,
         >::ids_for_placeholder_hash(
-            &row_cells,
             &predicate_operations,
             &results,
             &placeholders,
@@ -489,7 +489,14 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_ITEMS_PER_OUTPUT,
         >(
-            &row_cells,
+            &ColumnIDs::new(
+                column_cells[0].id.to_canonical_u64(),
+                column_cells[1].id.to_canonical_u64(),
+                column_cells[2..]
+                    .iter()
+                    .map(|cell| cell.id.to_canonical_u64())
+                    .collect_vec(),
+            ),
             &predicate_operations,
             &results,
             &placeholders,
@@ -557,13 +564,11 @@ mod tests {
             preprocessing_pi.block_hash_fields()
         );
         assert_eq!(pi.num_placeholders(), (placeholders.len()).to_field(),);
-        // check that each placeholder value in `pi.placeholder_values` is either found in placeholder values or it is a query bound
         let expected_values = placeholders.placeholder_values();
-        assert!(pi.placeholder_values().into_iter().all(|value| {
-            expected_values
-                .iter()
-                .any(|expected_val| *expected_val == value)
-        }));
+        assert_eq!(
+            pi.placeholder_values()[..placeholders.len()],
+            expected_values,
+        );
         // check entry count
         assert_eq!(query_pi.num_matching_rows(), pi.entry_count(),);
         // check results and overflow
@@ -573,13 +578,16 @@ mod tests {
         assert_eq!(pi.overflow_flag(), overflow,);
         // check computational hash
         // first, compute the final computational hash
-        let column_ids = column_cells
-            .iter()
-            .map(|cell| cell.id.to_canonical_u64())
-            .collect_vec();
         let metadata_hash = HashOut::<F>::from_partial(preprocessing_pi.metadata_hash());
         let computational_hash = Identifiers::computational_hash(
-            &column_ids,
+            &ColumnIDs::new(
+                column_cells[0].id.to_canonical_u64(),
+                column_cells[1].id.to_canonical_u64(),
+                column_cells[2..]
+                    .iter()
+                    .map(|cell| cell.id.to_canonical_u64())
+                    .collect_vec(),
+            ),
             &predicate_operations,
             &results,
             &HashOutput::try_from(metadata_hash.to_bytes()).unwrap(),

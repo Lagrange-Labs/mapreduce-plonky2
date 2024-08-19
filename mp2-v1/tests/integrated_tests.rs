@@ -1,32 +1,37 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
+#![feature(async_closure)]
 #![feature(assert_matches)]
-use std::future::Future;
+#![feature(associated_type_defaults)]
 
-use alloy::primitives::U256;
-use anyhow::Result;
+use std::{
+    fs::File,
+    io::{BufReader, BufWriter},
+    path::PathBuf,
+};
+
+use alloy::{
+    eips::BlockNumberOrTag,
+    primitives::{Address, U256},
+    providers::ProviderBuilder,
+};
+use anyhow::{Context, Result};
 
 use common::{
-    cases::local_simple::{ChangeType, UpdateType},
-    context,
-    proof_storage::{KeyValueDB, MemoryProofStorage, ProofKey},
-    rowtree::MerkleRowTree,
+    cases::{
+        indexing::{ChangeType, TreeFactory, UpdateType},
+        query::{test_query, TableType},
+    },
+    context::{self, ParamsType, TestContextConfig},
+    proof_storage::{ProofKV, ProofStorage, DEFAULT_PROOF_STORE_FOLDER},
+    table::{Table, TableInfo},
     TestCase, TestContext,
 };
+use envconfig::Envconfig;
 use log::info;
-use mp2_v1::indexing::{
-    cell::Cell,
-    row::{CellCollection, RowPayload, RowTreeKey},
-};
-use ryhope::{
-    storage::{
-        updatetree::{UpdatePlan, UpdateTree},
-        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
-    },
-    tree::scapegoat::{self, Alpha},
-    InitSettings,
-};
+use mp2_common::eth::ProofQuery;
+use parsil::symbols::ContextProvider;
 use test_log::test;
 
 pub(crate) mod common;
@@ -50,32 +55,33 @@ pub(crate) mod common;
 //    );
 //    info!("Generated Final Extraction (C.5.1) proof for mapping (with length slot check)");
 //}
+//
+
+const PROOF_STORE_FILE: &str = "test_proofs.store";
+const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
 
 #[test(tokio::test)]
 #[ignore]
-async fn db_creation_integrated_tests() -> Result<()> {
+async fn integrated_indexing() -> Result<()> {
     // Create the test context for mainnet.
     // let ctx = &mut TestContext::new_mainet();
     let _ = env_logger::try_init();
-    // Create the test context for the local node.
-    //let storage = MemoryProofStorage::default();
-    info!("Loading proof storage");
-    let storage = KeyValueDB::new_from_env("test_proofs.store")?;
+    info!("Running INDEXING test");
+    let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
     info!("Loading Anvil and contract");
     let mut ctx = context::new_local_chain(storage).await;
     info!("Initial Anvil block: {}", ctx.block_number().await);
-    info!("Building params");
-    // Build the parameters.
-    ctx.build_params().unwrap();
+    info!("Building indexing params");
+    ctx.build_params(ParamsType::Indexing).unwrap();
 
     info!("Params built");
-    let mut single = TestCase::single_value_test_case(&ctx).await?;
+    let mut single = TestCase::single_value_test_case(&ctx, TreeFactory::New).await?;
     let changes = vec![
         ChangeType::Update(UpdateType::Rest),
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
     single.run(&mut ctx, changes.clone()).await?;
-    let mut mapping = TestCase::mapping_test_case(&ctx).await?;
+    let mut mapping = TestCase::mapping_test_case(&ctx, TreeFactory::New).await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
@@ -84,8 +90,110 @@ async fn db_creation_integrated_tests() -> Result<()> {
         ChangeType::Deletion,
     ];
     mapping.run(&mut ctx, changes).await?;
+    // save columns information and table information in JSON so querying test can pick up
+    write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table.table_info())?;
     Ok(())
 }
+
+#[test(tokio::test)]
+#[ignore]
+async fn integrated_querying() -> Result<()> {
+    let _ = env_logger::try_init();
+    info!("Running QUERY test");
+    let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
+    let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
+    info!("Loading Anvil and contract");
+    let mut ctx = context::new_local_chain(storage).await;
+    info!("Building querying params");
+    ctx.build_params(ParamsType::Query).unwrap();
+    info!("Params built");
+    let table = Table::load(table_info.table_name, table_info.columns).await?;
+    test_query(&mut ctx, table, TableType::Mapping).await?;
+    Ok(())
+}
+
+fn table_info_path(f: &str) -> PathBuf {
+    let cfg = TestContextConfig::init_from_env()
+        .context("while parsing configuration")
+        .unwrap();
+    let path = cfg
+        .params_dir
+        .unwrap_or(DEFAULT_PROOF_STORE_FOLDER.to_string());
+    let mut path = PathBuf::from(path);
+    path.push(f);
+    path
+}
+
+fn write_table_info(f: &str, info: TableInfo) -> Result<()> {
+    let full_path = table_info_path(f);
+    let file = File::create(full_path)?;
+    let writer = BufWriter::new(file);
+    serde_json::to_writer(writer, &info)?;
+    Ok(())
+}
+
+fn read_table_info(f: &str) -> Result<TableInfo> {
+    let full_path = table_info_path(f);
+    let file = File::open(full_path)?;
+    let reader = BufReader::new(file);
+    let info = serde_json::from_reader(reader)?;
+    Ok(info)
+}
+
+//use crate::common::bindings::simple::Simple::{self};
+//#[tokio::test]
+//async fn test_empty_mpt() -> Result<()> {
+//    let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
+//    let mut ctx = context::new_local_chain(storage).await;
+//    info!("Building querying params");
+//    let mut single = TestCase::single_value_test_case(&ctx, TreeFactory::New).await?;
+//    let provider = ProviderBuilder::new()
+//        .with_recommended_fillers()
+//        .wallet(ctx.wallet())
+//        .on_http(ctx.rpc_url.parse().unwrap());
+//
+//    let contract = Simple::new(single.contract_address, &provider);
+//    let value = U256::from(10);
+//    contract
+//        .setS2(value)
+//        .send()
+//        .await
+//        .unwrap()
+//        .watch()
+//        .await
+//        .unwrap();
+//    let bn = ctx.block_number().await;
+//    let query = ProofQuery::new_simple_slot(single.contract_address, 0);
+//    let response = ctx
+//        .query_mpt_proof(&query, BlockNumberOrTag::Number(bn))
+//        .await;
+//    println!(
+//        "GIVEN VALUE of slot 0 : {}",
+//        response.storage_proof[0].value
+//    );
+//    let leaf = response.storage_proof[0].proof.last().unwrap().to_vec();
+//    println!("LEAF: {:?}", leaf);
+//    println!(
+//        "--> len of proof = {}",
+//        response.storage_proof[0].proof.len()
+//    );
+//    // THIS PANICS !!!
+//    //let tuple = rlp::decode_list(&leaf);
+//    //let leaf_value: Vec<u8> = rlp::decode(&tuple)?;
+//    //let uvalue = U256::from_be_slice(&leaf_value);
+//    //println!("EXTRACTED value of slot 0 {}", uvalue);
+//    // DOESN?T work because i can't set an empty address erf..
+//    contract
+//        .setMapping(U256::from(10), Address::from_slice(&vec![]))
+//        .send()
+//        .await
+//        .unwrap()
+//        .watch()
+//        .await
+//        .unwrap();
+//    //
+//    Ok(())
+//}
 
 //#[test]
 //fn ryhope_scapegoat2() -> Result<()> {

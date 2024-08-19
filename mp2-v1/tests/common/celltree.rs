@@ -24,7 +24,7 @@ use super::{
     table::{CellsUpdateResult, Table, TableID},
 };
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     /// Given a [`MerkleCellTree`], recursively prove its hash and returns the storage key
     /// associated to the root proof
     /// The row key is used for (a) saving the new proofs to the storage (b) loading the previous
@@ -47,12 +47,13 @@ impl<P: ProofStorage> TestContext<P> {
             true => new_row_key.clone(),
             false => previous_row.k.clone(),
         };
-        let table_id = &table.id;
+        let table_id = &table.name;
         // Store the proofs here for the tests; will probably be done in S3 for
         // prod.
         let mut workplan = ut.into_workplan();
 
-        while let Some(Next::Ready(k)) = workplan.next() {
+        while let Some(Next::Ready(wk)) = workplan.next() {
+            let k = &wk.k;
             let (context, cell) = tree.fetch_with_context(&k).await;
 
             let proof = if context.is_leaf() {
@@ -145,7 +146,7 @@ impl<P: ProofStorage> TestContext<P> {
                 table: table_id.clone(),
                 secondary: new_row_key.clone(),
                 primary,
-                tree_key: k,
+                tree_key: *k,
             };
 
             let pproof = ProofWithVK::deserialize(&proof).unwrap();
@@ -171,7 +172,7 @@ impl<P: ProofStorage> TestContext<P> {
                         .unwrap()
                 )
             );
-            workplan.done(&k).unwrap();
+            workplan.done(&wk).unwrap();
         }
         let root = tree.root().await.unwrap();
         let root_data = tree.root_data().await.unwrap();
@@ -215,7 +216,7 @@ impl<P: ProofStorage> TestContext<P> {
         // We need to (a) move the proofs to the new (new_row_key, primary) identifier
         // then (b) update all the impacted cells to also have this new information about the new
         // primary index
-        self.move_cells_proof_to_new_row(&table.id, primary, &cells_update)
+        self.move_cells_proof_to_new_row(&table.name.clone(), primary, &cells_update)
             .await
             .expect("unable to move cells tree proof:");
         // set the primary index for all cells that are in the update plan to the new primary
@@ -278,7 +279,7 @@ impl<P: ProofStorage> TestContext<P> {
             .await;
         let root_proof_key = CellProofIdentifier {
             primary,
-            table: table.id.clone(),
+            table: table.name.clone(),
             secondary: cells_update.new_row_key,
             tree_key: root_key,
         };

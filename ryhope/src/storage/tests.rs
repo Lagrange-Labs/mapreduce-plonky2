@@ -17,7 +17,7 @@ use crate::{
         scapegoat::{self, Alpha},
         PrintableTree, TreeTopology,
     },
-    InitSettings, MerkleTreeKvDb, NodePayload,
+    Epoch, InitSettings, MerkleTreeKvDb, NodePayload,
 };
 
 use super::TreeTransactionalStorage;
@@ -30,8 +30,7 @@ impl NodePayload for usize {}
 impl NodePayload for String {}
 impl NodePayload for i64 {}
 
-#[tokio::test]
-async fn storage_in_memory() -> Result<()> {
+async fn _storage_in_memory(initial_epoch: Epoch) -> Result<()> {
     type K = String;
     type V = usize;
 
@@ -39,14 +38,91 @@ async fn storage_in_memory() -> Result<()> {
     type Storage = InMemory<TestTree, V>;
 
     let mut s = MerkleTreeKvDb::<TestTree, V, Storage>::new(
-        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
+        InitSettings::ResetAt(scapegoat::Tree::empty(Alpha::new(0.8)), initial_epoch),
         (),
     )
     .await?;
 
     with_storage(&mut s).await?;
 
-    for i in 1..=6 {
+    for i in initial_epoch + 1..initial_epoch + 6 {
+        println!("\nEpoch = {i}");
+        let mut ss = s.view_at(i);
+        s.tree().print(&mut ss).await;
+        s.diff_at(i).await.unwrap().print();
+
+        match i - initial_epoch {
+            1 => {
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
+            }
+            2 => {
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
+            }
+            3 => {
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_none())
+            }
+            4 => {}
+            5 => {
+                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_some())
+            }
+            6 => {
+                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_none())
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn storage_in_memory() -> Result<()> {
+    _storage_in_memory(0).await
+}
+
+#[tokio::test]
+async fn shifted_storage_in_memory() -> Result<()> {
+    _storage_in_memory(388).await
+}
+
+async fn _storage_in_pgsql(initial_epoch: Epoch) -> Result<()> {
+    type K = String;
+    type V = usize;
+
+    type TestTree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<TestTree, V>;
+    let table = format!("simple_{}", initial_epoch);
+
+    let mut s = MerkleTreeKvDb::<TestTree, V, Storage>::new(
+        InitSettings::ResetAt(scapegoat::Tree::empty(Alpha::new(0.8)), initial_epoch),
+        SqlStorageSettings {
+            source: SqlServerConnection::NewConnection(db_url()),
+            table: table.clone(),
+        },
+    )
+    .await?;
+    with_storage(&mut s).await?;
+    println!("Old one");
+    s.print_tree().await;
+
+    let mut s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
+        InitSettings::MustExist,
+        SqlStorageSettings {
+            source: SqlServerConnection::NewConnection(db_url()),
+            table,
+        },
+    )
+    .await?;
+    println!("New one");
+    s2.print_tree().await;
+
+    assert_eq!(s2.root_data().await, s.root_data().await);
+    assert_eq!(
+        s.tree().size(&mut s2.storage).await,
+        s2.tree().size(&s2.storage).await
+    );
+
+    for i in initial_epoch + 1..=initial_epoch + 6 {
         println!("\nEpoch = {i}");
         let mut ss = s.view_at(i);
         s.tree().print(&mut ss).await;
@@ -78,69 +154,12 @@ async fn storage_in_memory() -> Result<()> {
 
 #[tokio::test]
 async fn storage_in_pgsql() -> Result<()> {
-    type K = String;
-    type V = usize;
+    _storage_in_pgsql(0).await
+}
 
-    type TestTree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<TestTree, V>;
-
-    let mut s = MerkleTreeKvDb::<TestTree, V, Storage>::new(
-        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
-        SqlStorageSettings {
-            table: "simple".to_string(),
-            source: SqlServerConnection::NewConnection(db_url()),
-        },
-    )
-    .await?;
-    with_storage(&mut s).await?;
-    println!("Old one");
-    s.print_tree().await;
-
-    let mut s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
-        InitSettings::MustExist,
-        SqlStorageSettings {
-            table: "simple".to_string(),
-            source: SqlServerConnection::NewConnection(db_url()),
-        },
-    )
-    .await?;
-    println!("New one");
-    s2.print_tree().await;
-
-    assert_eq!(s2.root_data().await, s.root_data().await);
-    assert_eq!(
-        s.tree().size(&mut s2.storage).await,
-        s2.tree().size(&s2.storage).await
-    );
-
-    for i in 1..=6 {
-        println!("\nEpoch = {i}");
-        let mut ss = s.view_at(i);
-        s.tree().print(&mut ss).await;
-        s.diff_at(i).await.unwrap().print();
-
-        match i {
-            1 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
-            }
-            2 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
-            }
-            3 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_none())
-            }
-            4 => {}
-            5 => {
-                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_some())
-            }
-            6 => {
-                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_none())
-            }
-            _ => {}
-        }
-    }
-
-    Ok(())
+#[tokio::test]
+async fn shifted_storage_in_pgsql() -> Result<()> {
+    _storage_in_pgsql(438).await
 }
 
 /// A simple payload carrying a value, and aggregating the min and max of values
@@ -377,7 +396,7 @@ async fn hashes() -> Result<()> {
     type Storage = InMemory<Tree, V>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
-        InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
+        InitSettings::ResetAt(Tree::empty(Alpha::fully_balanced()), 392),
         (),
     )
     .await?;
@@ -588,7 +607,7 @@ async fn aggregation_pgsql() -> Result<()> {
 
     type Storage = PgsqlStorage<Tree, V>;
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
-        InitSettings::Reset(Tree::empty()),
+        InitSettings::ResetAt(Tree::empty(), 32),
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: "agg".to_string(),
@@ -620,6 +639,7 @@ async fn test_rollback<
     S: EpochKvStorage<i64, MinMaxi64> + TreeTransactionalStorage<i64, MinMaxi64> + Send + Sync,
 >(
     s: &mut S,
+    initial_epoch: Epoch,
 ) {
     for i in 0..3 {
         s.in_transaction(|s| {
@@ -633,15 +653,17 @@ async fn test_rollback<
         .unwrap();
     }
 
-    assert_eq!(s.current_epoch(), 3);
+    assert_eq!(s.current_epoch(), 3 + initial_epoch);
     assert_eq!(s.size().await, 6);
     for i in 0..=5 {
         assert!(s.contains(&i.into()).await);
     }
 
     // Rollback twice to reach epoch 1
-    s.rollback_to(1).await.expect("failed to rollback to 1");
-    assert_eq!(s.current_epoch(), 1);
+    s.rollback_to(1 + initial_epoch)
+        .await
+        .expect(&format!("failed to rollback to {}", 1 + initial_epoch));
+    assert_eq!(s.current_epoch(), 1 + initial_epoch);
     assert_eq!(s.size().await, 2);
     for i in 0..=5 {
         if i <= 1 {
@@ -653,7 +675,7 @@ async fn test_rollback<
 
     // rollback once to reach to epoch 0
     s.rollback().await.unwrap();
-    assert_eq!(s.current_epoch(), 0);
+    assert_eq!(s.current_epoch(), initial_epoch);
     assert_eq!(s.size().await, 0);
     for i in 0..=5 {
         assert!(!s.contains(&i.into()).await);
@@ -677,7 +699,26 @@ async fn rollback_memory() {
     .await
     .expect("unable to initialize tree");
 
-    test_rollback(&mut s).await;
+    test_rollback(&mut s, 0).await;
+}
+
+#[tokio::test]
+async fn rollback_memory_at() {
+    type K = i64;
+    type V = MinMaxi64;
+    type Tree = scapegoat::Tree<K>;
+
+    type Storage = InMemory<Tree, V>;
+
+    const INITIAL_EPOCH: Epoch = 4875;
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+        InitSettings::ResetAt(Tree::empty(Alpha::new(0.7)), INITIAL_EPOCH),
+        (),
+    )
+    .await
+    .expect("unable to initialize tree");
+
+    test_rollback(&mut s, INITIAL_EPOCH).await;
 }
 
 #[tokio::test]
@@ -697,7 +738,28 @@ async fn rollback_psql() {
     .await
     .expect("unable to initialize tree");
 
-    test_rollback(&mut s).await;
+    test_rollback(&mut s, 0).await;
+}
+
+#[tokio::test]
+async fn rollback_psql_at() {
+    type K = i64;
+    type V = MinMaxi64;
+    type Tree = scapegoat::Tree<K>;
+
+    const INITIAL_EPOCH: Epoch = 4875;
+    type Storage = PgsqlStorage<Tree, V>;
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+        InitSettings::ResetAt(Tree::empty(Alpha::new(0.7)), INITIAL_EPOCH),
+        SqlStorageSettings {
+            source: SqlServerConnection::NewConnection(db_url()),
+            table: "rollback_at".to_string(),
+        },
+    )
+    .await
+    .expect("unable to initialize tree");
+
+    test_rollback(&mut s, INITIAL_EPOCH).await;
 }
 
 #[tokio::test]

@@ -32,7 +32,7 @@ mod utils;
 
 use super::{
     api::CircuitInput,
-    computational_hash_ids::{Identifiers, Output, PlaceholderIdentifier},
+    computational_hash_ids::{ColumnIDs, Identifiers, Output, PlaceholderIdentifier},
     universal_circuit::{
         output_no_aggregation::Circuit as NoAggOutputCircuit,
         output_with_aggregation::Circuit as AggOutputCircuit,
@@ -120,6 +120,10 @@ impl QueryBounds {
                 .map(|source| QueryBoundSecondary::new(placeholders, source))
                 .unwrap_or(Ok(QueryBoundSecondary::new_constant_bound(U256::MAX)))?,
         })
+    }
+
+    pub fn is_primary_in_range(&self, v: &U256) -> bool {
+        &self.min_query_primary <= v && v <= &self.max_query_primary
     }
 }
 
@@ -306,7 +310,7 @@ impl QueryHashNonExistenceCircuits {
         const MAX_NUM_RESULT_OPS: usize,
         const MAX_NUM_RESULTS: usize,
     >(
-        row_cells: &RowCells,
+        column_ids: &ColumnIDs,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         placeholders: &Placeholders,
@@ -318,11 +322,6 @@ impl QueryHashNonExistenceCircuits {
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
         [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     {
-        let column_ids = row_cells
-            .to_cells()
-            .iter()
-            .map(|cell| cell.id.to_canonical_u64())
-            .collect_vec();
         let computational_hash = if is_rows_tree_node {
             Identifiers::computational_hash_without_query_bounds(
                 &column_ids,
@@ -347,11 +346,7 @@ impl QueryHashNonExistenceCircuits {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >::ids_for_placeholder_hash(
-            row_cells,
-            predicate_operations,
-            results,
-            placeholders,
-            query_bounds,
+            predicate_operations, results, placeholders, query_bounds
         )?;
         let placeholder_hash = if is_rows_tree_node {
             placeholder_hash_without_query_bounds(&placeholder_hash_ids, &placeholders)

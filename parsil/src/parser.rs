@@ -2,17 +2,17 @@ use anyhow::*;
 use log::*;
 use sqlparser::{
     ast::{Query, Statement},
-    dialect::GenericDialect,
+    dialect::AnsiDialect,
     parser::Parser,
 };
 
-use crate::validate::validate;
+use crate::{symbols::ContextProvider, utils::ParsilSettings};
 
-const DIALECT: GenericDialect = GenericDialect {};
+const DIALECT: AnsiDialect = AnsiDialect {};
 
-pub fn parse(req: &str) -> Result<Query> {
+pub fn parse<C: ContextProvider>(_settings: &ParsilSettings<C>, req: &str) -> Result<Query> {
     debug!("Parsing `{req}`");
-    let parsed =
+    let mut parsed =
         Parser::parse_sql(&DIALECT, req).with_context(|| format!("trying to parse `{req}`"))?;
 
     ensure!(
@@ -21,8 +21,7 @@ pub fn parse(req: &str) -> Result<Query> {
         parsed.len()
     );
 
-    if let Statement::Query(query) = &parsed[0] {
-        validate(&query)?;
+    if let Statement::Query(ref mut query) = &mut parsed[0] {
         Ok(*query.clone())
     } else {
         bail!("expected query, found `{}`", parsed[0])

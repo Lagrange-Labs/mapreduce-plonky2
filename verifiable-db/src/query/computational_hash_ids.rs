@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     iter::{once, repeat},
     mem::variant_count,
 };
@@ -34,7 +34,8 @@ use super::{
     aggregation::{QueryBoundSource, QueryBounds},
     universal_circuit::{
         universal_circuit_inputs::{
-            BasicOperation, InputOperand, OutputItem, PlaceholderId, ResultStructure,
+            BasicOperation, InputOperand, OutputItem, PlaceholderId, PlaceholderIdsSet,
+            ResultStructure,
         },
         universal_query_circuit::QueryBound,
         ComputationalHash, ComputationalHashTarget,
@@ -104,12 +105,12 @@ impl Identifiers {
     /// Internal method employed to comput the computational hash corresponding to a query represented by the
     /// provided inputs, without including the query bounds portion of the computational hash
     pub(crate) fn computational_hash_without_query_bounds(
-        column_ids: &[u64],
+        column_ids: &ColumnIDs,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
     ) -> Result<ComputationalHash> {
+        let column_ids = column_ids.to_vec();
         let mut cache = ComputationalHashCache::new(column_ids.len());
-        let column_ids = column_ids.iter().map(|id| id.to_field()).collect_vec();
         let predicate_ops_hash =
             Operation::operation_hash(predicate_operations, &column_ids, &mut cache)?;
         let predicate_hash = predicate_ops_hash.last().unwrap();
@@ -128,7 +129,7 @@ impl Identifiers {
     /// Compute the computational hash computed by the universal circuit for the query represented
     /// by the given inputs
     pub fn computational_hash_universal_circuit(
-        column_ids: &[u64],
+        column_ids: &ColumnIDs,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         min_query_secondary: Option<QueryBoundSource>,
@@ -152,7 +153,7 @@ impl Identifiers {
 
     /// Compute the computational hash.
     pub fn computational_hash(
-        column_ids: &[u64],
+        column_ids: &ColumnIDs,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         metadata_hash: &HashOutput,
@@ -163,19 +164,42 @@ impl Identifiers {
             column_ids,
             predicate_operations,
             results,
-            min_query_secondary,
-            max_query_secondary,
+            min_query_secondary.clone(),
+            max_query_secondary.clone(),
         )?;
-        // compute placeholder ids array from operations of the query
-        let mut placeholder_ids = predicate_operations
-            .iter()
-            .chain(&results.result_operations)
-            .flat_map(|op| op.extract_placeholder_ids())
-            .collect_vec();
-        placeholder_ids.sort();
+        // compute set of placeholder ids from operations of the query and from query bounds
+        let placeholder_ids_set = PlaceholderIdsSet::from(
+            predicate_operations
+                .iter()
+                .chain(&results.result_operations)
+                .flat_map(|op| op.extract_placeholder_ids())
+                // add special placeholders for primary index query bounds to the (sorted) set of placeholder ids
+                .chain([
+                    PlaceholderIdentifier::MinQueryOnIdx1,
+                    PlaceholderIdentifier::MaxQueryOnIdx1,
+                ])
+                // add placeholders employed in secondary query bounds (if any)
+                .chain(
+                    [min_query_secondary, max_query_secondary]
+                        .into_iter()
+                        .flat_map(|query_bound| {
+                            query_bound
+                                .map(|bound| match bound {
+                                    QueryBoundSource::Placeholder(id) => Some(vec![id]),
+                                    QueryBoundSource::Operation(op) => {
+                                        Some(op.extract_placeholder_ids())
+                                    }
+                                    QueryBoundSource::Constant(_) => None,
+                                })
+                                .flatten()
+                                // If None, return a placeholder that is for sure already in the set
+                                .unwrap_or(vec![PlaceholderIdentifier::MinQueryOnIdx1])
+                        }),
+                ),
+        );
 
         // compute placeholder id hash
-        let placeholder_id_hash = placeholder_ids_hash(&placeholder_ids);
+        let placeholder_id_hash = placeholder_ids_hash(placeholder_ids_set);
 
         //ToDo: add ORDER BY info and DISTINCT info for queries without the results tree, when adding results tree
         // circuits APIs
@@ -198,6 +222,30 @@ impl<F: RichField> ToField<F> for Identifiers {
         F::from_canonical_usize(self.position())
     }
 }
+/// Data structure to provide identifiers of columns of a table to compute computational hash
+#[derive(Clone, Debug)]
+pub struct ColumnIDs {
+    pub(crate) primary: F,
+    pub(crate) secondary: F,
+    pub(crate) rest: Vec<F>,
+}
+
+impl ColumnIDs {
+    pub fn new(primary_id: u64, secondary_id: u64, rest_ids: Vec<u64>) -> Self {
+        Self {
+            primary: primary_id.to_field(),
+            secondary: secondary_id.to_field(),
+            rest: rest_ids.into_iter().map(|id| id.to_field()).collect_vec(),
+        }
+    }
+
+    pub(crate) fn to_vec(&self) -> Vec<F> {
+        [self.primary, self.secondary]
+            .into_iter()
+            .chain(self.rest.clone())
+            .collect_vec()
+    }
+}
 
 #[derive(Clone, Debug, Copy, Default)]
 pub enum Extraction {
@@ -205,7 +253,7 @@ pub enum Extraction {
     Column,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Default, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Default, Hash)]
 /// Set of constant identifiers employed in the
 /// computational hash, which is a compact representation
 /// of the query being proven by the query circuits
@@ -216,9 +264,9 @@ pub enum Operation {
     MulOp,
     DivOp,
     ModOp,
-    LessThanOp,
     EqOp,
     NeOp,
+    LessThanOp,
     GreaterThanOp,
     LessThanOrEqOp,
     GreaterThanOrEqOp,
@@ -226,6 +274,31 @@ pub enum Operation {
     OrOp,
     NotOp,
     XorOp,
+}
+impl std::fmt::Debug for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Operation::AddOp => '+',
+                Operation::SubOp => '-',
+                Operation::MulOp => '*',
+                Operation::DivOp => '/',
+                Operation::ModOp => '%',
+                Operation::EqOp => '=',
+                Operation::NeOp => '≠',
+                Operation::LessThanOp => '<',
+                Operation::GreaterThanOp => '>',
+                Operation::LessThanOrEqOp => '≤',
+                Operation::GreaterThanOrEqOp => '≥',
+                Operation::AndOp => '&',
+                Operation::OrOp => '|',
+                Operation::NotOp => '!',
+                Operation::XorOp => '^',
+            }
+        )
+    }
 }
 
 impl<F: RichField> ToField<F> for Operation {
@@ -566,8 +639,8 @@ impl AggregationOperation {
         }
     }
 
-    pub fn to_id(&self) -> usize {
-        Identifiers::AggregationOperations(*self).position()
+    pub fn to_id(&self) -> u64 {
+        Identifiers::AggregationOperations(*self).position() as u64
     }
 }
 
@@ -582,7 +655,7 @@ pub enum PlaceholderIdentifier {
     // MAX_I1
     MaxQueryOnIdx1,
     // $1, $2 ...
-    GenericPlaceholder(usize),
+    Generic(usize),
 }
 
 impl<F: RichField> ToField<F> for PlaceholderIdentifier {
@@ -594,11 +667,11 @@ impl<F: RichField> ToField<F> for PlaceholderIdentifier {
 impl<F: RichField> FromFields<F> for PlaceholderIdentifier {
     fn from_fields(t: &[F]) -> Self {
         let generic_placeholder_start_value =
-            <Self as ToField<F>>::to_field(&Self::GenericPlaceholder(0)).to_canonical_u64();
+            <Self as ToField<F>>::to_field(&Self::Generic(0)).to_canonical_u64();
         match t[0] {
             f if <Self as ToField<F>>::to_field(&Self::MinQueryOnIdx1) == f => Self::MinQueryOnIdx1,
             f if <Self as ToField<F>>::to_field(&Self::MaxQueryOnIdx1) == f => Self::MaxQueryOnIdx1,
-            f => Self::GenericPlaceholder(
+            f => Self::Generic(
                 f.to_canonical_u64()
                     .checked_sub(generic_placeholder_start_value)
                     .expect("invalid field element for PlaceholderIdentifier")
@@ -616,7 +689,7 @@ impl PlaceholderIdentifier {
 
     pub(crate) fn position(&self) -> usize {
         match self {
-            Self::GenericPlaceholder(i) => self.discriminant() + i,
+            Self::Generic(i) => self.discriminant() + i,
             _ => self.discriminant(),
         }
     }

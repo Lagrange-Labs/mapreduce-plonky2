@@ -130,6 +130,9 @@ where
     K: Send + Sync,
     V: Send + Sync,
 {
+    /// Return the first registered time stamp of the storage
+    fn initial_epoch(&self) -> Epoch;
+
     /// Return the current time stamp of the storage
     fn current_epoch(&self) -> Epoch;
 

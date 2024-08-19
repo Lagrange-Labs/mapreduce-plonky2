@@ -1,10 +1,13 @@
 use alloy::primitives::Address;
-use anyhow::Result;
+use anyhow::{ensure, Context, Result};
+use bb8::Pool;
+use bb8_postgres::{tokio_postgres::NoTls, PostgresConnectionManager};
 use futures::{
     stream::{self, StreamExt},
     FutureExt,
 };
 use log::debug;
+use mp2_common::F;
 use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
     cell::{self, Cell, CellTreeKey, MerkleCellTree},
@@ -12,52 +15,50 @@ use mp2_v1::indexing::{
     row::{CellCollection, Row, RowTreeKey},
     ColumnID,
 };
+use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
+use plonky2::field::types::Field;
 use ryhope::{
-    storage::{updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
+    storage::{
+        pgsql::{SqlServerConnection, SqlStorageSettings},
+        updatetree::UpdateTree,
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
+    },
     tree::{
         sbbst,
         scapegoat::{self, Alpha},
     },
-    InitSettings,
+    Epoch, InitSettings,
 };
 use serde::{Deserialize, Serialize};
-use std::hash::Hash;
+use std::{hash::Hash, iter::once};
+use tokio_postgres::row::Row as PsqlRow;
+use verifiable_db::query::universal_circuit::universal_circuit_inputs::ColumnCell;
 
 use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
 
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TableID(String);
+pub type TableID = String;
 
-impl TableID {
-    /// TODO: should contain more info probablyalike which index are selected
-    pub fn new(init_block: u64, contract: &Address, slots: &[u8]) -> Self {
-        TableID(format!(
-            "{}-{}-{}",
-            init_block,
-            contract,
-            slots
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>()
-                .join("+"),
-        ))
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum IndexType {
     Primary,
     Secondary,
     None,
 }
 
-#[derive(Clone, Debug)]
-pub struct TableColumn {
-    pub identifier: ColumnID,
-    pub _index: IndexType,
+impl IndexType {
+    pub fn is_primary(&self) -> bool {
+        matches!(self, IndexType::Primary)
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TableColumn {
+    pub name: String,
+    pub identifier: ColumnID,
+    pub index: IndexType,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TableColumns {
     pub primary: TableColumn,
     pub secondary: TableColumn,
@@ -107,8 +108,20 @@ impl TableColumns {
     }
 }
 
+pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
+async fn new_db_pool(db_url: &str) -> Result<DBPool> {
+    let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
+        .with_context(|| format!("while connecting to postgreSQL with `{}`", db_url))?;
+
+    let db_pool = DBPool::builder()
+        .build(db_manager)
+        .await
+        .context("while creating the db_pool")?;
+    Ok(db_pool)
+}
 pub struct Table {
-    pub(crate) id: TableID,
+    pub(crate) genesis_block: BlockPrimaryIndex,
+    pub(crate) name: TableID,
     pub(crate) columns: TableColumns,
     // NOTE: there is no cell tree because it's small and can be reconstructed
     // on the fly very quickly. Otherwise, we would need to store one cell tree per row
@@ -117,27 +130,84 @@ pub struct Table {
     // the columns information
     pub(crate) row: MerkleRowTree,
     pub(crate) index: MerkleIndexTree,
+    pub(crate) db_pool: DBPool,
+}
+
+fn row_table_name(name: &str) -> String {
+    format!("row_{}", name)
+}
+fn index_table_name(name: &str) -> String {
+    format!("index_{}", name)
 }
 
 impl Table {
-    pub async fn new(genesis_block: u64, table_id: TableID, columns: TableColumns) -> Self {
+    pub async fn load(table_name: String, columns: TableColumns) -> Result<Self> {
+        let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
         let row_tree = MerkleRowTree::new(
-            InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
-            (),
+            InitSettings::MustExist,
+            SqlStorageSettings {
+                table: row_table_name(&table_name),
+                source: SqlServerConnection::NewConnection(db_url.clone()),
+            },
         )
         .await
         .unwrap();
         let index_tree = MerkleIndexTree::new(
-            //InitSettings::Reset(sbbst::Tree::empty()),
-            InitSettings::Reset(sbbst::Tree::with_shift((genesis_block - 1) as usize)),
-            (),
+            InitSettings::MustExist,
+            SqlStorageSettings {
+                source: SqlServerConnection::NewConnection(db_url.clone()),
+                table: index_table_name(&table_name),
+            },
         )
         .await
         .unwrap();
+        let genesis = index_tree.storage_state().await.shift;
+        columns.self_assert();
+
+        Ok(Self {
+            db_pool: new_db_pool(&db_url).await?,
+            columns,
+            genesis_block: genesis as BlockPrimaryIndex,
+            name: table_name,
+            row: row_tree,
+            index: index_tree,
+        })
+    }
+    pub fn row_table_name(&self) -> String {
+        row_table_name(&self.name)
+    }
+
+    pub async fn new(genesis_block: u64, table_name: String, columns: TableColumns) -> Self {
+        let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
+        let db_settings_index = SqlStorageSettings {
+            source: SqlServerConnection::NewConnection(db_url.clone()),
+            table: index_table_name(&table_name),
+        };
+        let db_settings_row = SqlStorageSettings {
+            source: SqlServerConnection::NewConnection(db_url.clone()),
+            table: row_table_name(&table_name),
+        };
+
+        let row_tree = ryhope::new_row_tree(
+            genesis_block as Epoch,
+            Alpha::new(0.8),
+            db_settings_row,
+            true,
+        )
+        .await
+        .unwrap();
+        let index_tree = ryhope::new_index_tree(genesis_block as Epoch, db_settings_index, true)
+            .await
+            .unwrap();
+
         columns.self_assert();
         Self {
+            db_pool: new_db_pool(&db_url)
+                .await
+                .expect("unable to create db pool"),
             columns,
-            id: table_id,
+            genesis_block: genesis_block as BlockPrimaryIndex,
+            name: table_name,
             row: row_tree,
             index: index_tree,
         }
@@ -323,6 +393,11 @@ impl Table {
         {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
+            let root = self.row.root_data().await.unwrap();
+            println!(
+                " ++ After row update, row cell tree root tree proof hash = {:?}",
+                hex::encode(root.cell_root_hash.unwrap().0)
+            );
             self.row.print_tree().await;
             println!("\n+++++++++++++++++++++++++++++++++\n");
         }
@@ -347,6 +422,26 @@ impl Table {
             })
             .await?;
         Ok(IndexUpdateResult { plan })
+    }
+
+    pub async fn execute_row_query(
+        &self,
+        query: &str,
+        min_block: BlockPrimaryIndex,
+        max_block: BlockPrimaryIndex,
+    ) -> Result<Vec<PsqlRow>> {
+        let connection = self.db_pool.get().await.unwrap();
+        let res = connection
+            .query(query, &[&(min_block as i64), &(max_block as i64)])
+            .await
+            .context("while fetching current epoch")?;
+        Ok(res)
+    }
+    pub fn table_info(&self) -> TableInfo {
+        TableInfo {
+            table_name: self.name.clone(),
+            columns: self.columns.clone(),
+        }
     }
 }
 
@@ -381,7 +476,7 @@ pub struct RowUpdateResult {
 
 #[derive(Debug, Clone)]
 pub struct CellsUpdate<PrimaryIndex> {
-    /// Row key where to fetch the previous cells existing. In case  of  
+    /// Row key where to fetch the previous cells existing. In case  of
     /// a secondary index value changing, that means a deletion + insertion.
     /// So tree logic should fetch the cells from the to-be-deleted row first
     ///     * In case there is no update of secondary index value, this value is
@@ -454,4 +549,75 @@ where
 pub enum TreeUpdateType {
     Insertion,
     Update,
+}
+
+impl Table {
+    fn to_zktable(&self) -> Result<ZkTable> {
+        let zk_columns = self.columns.to_zkcolumns();
+        Ok(ZkTable {
+            // NOTE : we always look data in the row table
+            name: self.row_table_name(),
+            user_name: self.name.clone(),
+            columns: zk_columns,
+        })
+    }
+
+    fn current_block(&self) -> u64 {
+        todo!()
+    }
+}
+
+impl TableColumns {
+    pub fn to_zkcolumns(&self) -> Vec<ZkColumn> {
+        once(&self.primary_column())
+            .chain(once(&self.secondary_column()))
+            .chain(self.rest.iter())
+            .map(|c| c.to_zkcolumn())
+            .collect()
+    }
+}
+
+impl TableColumn {
+    pub fn to_zkcolumn(&self) -> ZkColumn {
+        ZkColumn {
+            id: self.identifier,
+            kind: match self.index {
+                IndexType::Primary => ColumnKind::PrimaryIndex,
+                IndexType::Secondary => ColumnKind::SecondaryIndex,
+                IndexType::None => ColumnKind::Standard,
+            },
+            name: self.name.clone(),
+        }
+    }
+}
+
+impl ContextProvider for Table {
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+        <&Self as ContextProvider>::fetch_table(&self, table_name)
+    }
+
+    fn output_ids(&self) -> Vec<u64> {
+        todo!()
+    }
+}
+impl ContextProvider for &Table {
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+        ensure!(
+            self.row_table_name() == table_name,
+            "names differ table {} vs requested {}",
+            self.row_table_name(),
+            table_name
+        );
+        self.to_zktable()
+    }
+
+    fn output_ids(&self) -> Vec<u64> {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableInfo {
+    pub columns: TableColumns,
+    pub table_name: String,
 }

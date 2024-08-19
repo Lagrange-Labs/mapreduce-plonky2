@@ -1,17 +1,16 @@
-use futures::{stream, StreamExt};
-use std::{collections::HashSet, marker::PhantomData};
-
 use anyhow::*;
 use async_trait::async_trait;
+use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData};
 
 use storage::{
     updatetree::{Next, UpdatePlan, UpdateTree},
     view::TreeStorageView,
-    EpochKvStorage, FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage,
-    TreeStorage, TreeTransactionalStorage,
+    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
+    TransactionalStorage, TreeStorage, TreeTransactionalStorage,
 };
-use tree::{MutableTree, NodeContext, PrintableTree, TreeTopology};
+use tree::{sbbst, scapegoat, MutableTree, NodeContext, NodePath, PrintableTree, TreeTopology};
 
 pub mod storage;
 #[cfg(test)]
@@ -41,11 +40,17 @@ pub enum InitSettings<T> {
     /// Fail to initialize if the data does not already exist.
     MustExist,
     /// Fail to initialize if the tree already exists, create with the given
-    /// state it otherwise.
+    /// state otherwise.
     MustNotExist(T),
+    /// Fail to initialize if the tree already exists, create with the given
+    /// state and starting at the given epoch otherwise.
+    MustNotExistAt(T, Epoch),
     /// Ensure that the tree is re-created with the given settings, erasing it
     /// if it exists.
     Reset(T),
+    /// Ensure that the tree is re-created with the given settings and at the
+    /// given initial epoch, erasing it if it exists.
+    ResetAt(T, Epoch),
 }
 
 /// An `MerkleTreeKvDb` wraps together:
@@ -112,11 +117,19 @@ impl<
         })
     }
 
+    /// Returns the storage state, which can be useful to fetch information like the shift on sbbst
+    pub async fn storage_state(&self) -> <T as TreeTopology>::State {
+        self.storage.state().fetch().await
+    }
     /// Compute a bottom-up-aggregated value on the payload of the nodes,
     /// recursively from the leaves up to the root node.
     async fn aggregate(&mut self, mut plan: UpdatePlan<T::Key>) -> Result<()> {
-        while let Some(Next::Ready(k)) = plan.next() {
-            let c = self.tree.node_context(&k, &self.storage).await.unwrap();
+        while let Some(Next::Ready(item)) = plan.next() {
+            let c = self
+                .tree
+                .node_context(&item.k, &self.storage)
+                .await
+                .unwrap();
             let mut child_data = vec![];
             for c in c.iter_children() {
                 if let Some(k) = c {
@@ -126,10 +139,10 @@ impl<
                 }
             }
 
-            let mut payload = self.storage.data().fetch(&k).await;
+            let mut payload = self.storage.data().fetch(&item.k).await;
             payload.aggregate(child_data.into_iter());
-            plan.done(&k)?;
-            self.storage.data_mut().store(k, payload).await?
+            plan.done(&item)?;
+            self.storage.data_mut().store(item.k, payload).await?
         }
         Ok(())
     }
@@ -150,6 +163,20 @@ impl<
     /// Return the key mapped to the current root of the Merkle tree.
     pub async fn root(&self) -> Option<T::Key> {
         self.tree.root(&self.storage).await
+    }
+    pub async fn root_at(&self, epoch: Epoch) -> Option<T::Key> {
+        let view = self.view_at(epoch);
+        self.tree.root(&view).await
+    }
+
+    pub async fn root_data_at(&self, epoch: Epoch) -> Option<V> {
+        let view = self.view_at(epoch);
+        if let Some(root) = self.tree.root(&view).await {
+            let root = self.storage.data().fetch_at(&root, epoch).await;
+            Some(root)
+        } else {
+            None
+        }
     }
 
     /// Return the current root hash of the Merkle tree.
@@ -232,6 +259,20 @@ impl<
         self.tree.node_context(k, &self.storage).await
     }
 
+    /// Return, if it exists, a [`NodePath`] for the given key in the underlying
+    /// tree representing its ascendance up to the tree root.
+    pub async fn lineage(&self, k: &T::Key) -> Option<NodePath<T::Key>> {
+        self.tree.lineage(k, &self.storage).await
+    }
+
+    /// Return, if it exists, a [`NodePath`] for the given key at the given
+    /// epoch in the underlying tree representing its ascendance up to the tree
+    /// root.
+    pub async fn lineage_at(&self, k: &T::Key, epoch: Epoch) -> Option<NodePath<T::Key>> {
+        let s = TreeStorageView::<'_, T, S>::new(&self.storage, epoch);
+        self.tree.lineage(k, &s).await
+    }
+
     /// Return an epoch-locked, read-only, [`TreeStorage`] offering a view on
     /// this Merkle tree as it was at the given epoch.
     pub fn view_at(&self, epoch: Epoch) -> TreeStorageView<'_, T, S> {
@@ -273,6 +314,11 @@ impl<
         S: TransactionalStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
     > RoEpochKvStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
 {
+    /// Return the first registered time stamp of the storage
+    fn initial_epoch(&self) -> Epoch {
+        self.storage.data().initial_epoch()
+    }
+
     fn current_epoch(&self) -> Epoch {
         self.storage.data().current_epoch()
     }
@@ -374,4 +420,76 @@ impl<
     pub async fn print_tree(&self) {
         self.tree.print(&self.storage).await
     }
+}
+
+/// Create a new index tree-specific `EpochTreeStorage` from the given parameters.
+///
+/// * `genesis_block` - the first block number that will be inserted
+/// * `storage_settings` - the settings to build the storage backend
+/// * `reset_if_exist` - if true, an existing tree would be deleted
+///
+/// Fails if the tree construction or either of the storage initialization
+/// failed.
+pub async fn new_index_tree<
+    V: NodePayload + Send + Sync,
+    S: TransactionalStorage
+        + TreeStorage<sbbst::Tree>
+        + PayloadStorage<sbbst::NodeIdx, V>
+        + FromSettings<sbbst::State>,
+>(
+    genesis_block: Epoch,
+    storage_settings: S::Settings,
+    reset_if_exist: bool,
+) -> Result<MerkleTreeKvDb<sbbst::Tree, V, S>> {
+    ensure!(genesis_block > 0, "the genesis block must be positive");
+
+    let initial_epoch = genesis_block - 1;
+    let tree_settings = sbbst::Tree::with_shift(initial_epoch.try_into()?);
+
+    MerkleTreeKvDb::new(
+        if reset_if_exist {
+            InitSettings::ResetAt(tree_settings, initial_epoch)
+        } else {
+            InitSettings::MustNotExistAt(tree_settings, initial_epoch)
+        },
+        storage_settings,
+    )
+    .await
+}
+
+/// Create a new row tree-specific `EpochTreeStorage` from the given parameters.
+///
+/// * `genesis_block` - the first block number that will be inserted
+/// * `storage_settings` - the settings to build the storage backend
+/// * `reset_if_exist` - if true, an existing tree would be deleted
+///
+/// Fails if the tree construction or either of the storage initialization
+/// failed.
+pub async fn new_row_tree<
+    K: Debug + Sync + Send + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a>,
+    V: NodePayload + Send + Sync,
+    S: TransactionalStorage
+        + TreeStorage<scapegoat::Tree<K>>
+        + PayloadStorage<K, V>
+        + FromSettings<scapegoat::State<K>>,
+>(
+    genesis_block: Epoch,
+    alpha: scapegoat::Alpha,
+    storage_settings: S::Settings,
+    reset_if_exist: bool,
+) -> Result<MerkleTreeKvDb<scapegoat::Tree<K>, V, S>> {
+    ensure!(genesis_block > 0, "the genesis block must be positive");
+
+    let initial_epoch = genesis_block - 1;
+    let tree_settings = scapegoat::Tree::empty(alpha);
+
+    MerkleTreeKvDb::new(
+        if reset_if_exist {
+            InitSettings::ResetAt(tree_settings, initial_epoch)
+        } else {
+            InitSettings::MustNotExistAt(tree_settings, initial_epoch)
+        },
+        storage_settings,
+    )
+    .await
 }

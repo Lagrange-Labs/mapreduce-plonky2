@@ -1,11 +1,10 @@
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
-
 use anyhow::*;
 use async_trait::async_trait;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use postgres_types::Json;
 use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 use tokio::sync::RwLock;
 use tokio_postgres;
 use tokio_postgres::{NoTls, Row};
@@ -85,7 +84,7 @@ where
         connection
             .query(
                 &format!(
-                    "SELECT payload FROM {} WHERE key=$1 AND valid_from <= $2 AND $2 <= valid_until",
+                    "SELECT payload FROM {} WHERE key=$1 AND __valid_from <= $2 AND $2 <= __valid_until",
                     table
                 ),
                 &[&(k.to_bytea()), &epoch],
@@ -118,7 +117,7 @@ where
         db_tx
             .execute(
                 &format!(
-                    "UPDATE {} SET payload=$3 WHERE key=$1 AND valid_from<=$2 AND $2<=valid_until",
+                    "UPDATE {} SET payload=$3 WHERE key=$1 AND __valid_from<=$2 AND $2<=__valid_until",
                     table
                 ),
                 &[&k.to_bytea(), &epoch, &Json(v)],
@@ -129,10 +128,10 @@ where
     }
 }
 
-// Void nodes are used by the SBBST
 pub struct NodeConnector;
 
 #[async_trait]
+// Void nodes are used by the SBBST
 impl<K> DbConnector<K, ()> for NodeConnector
 where
     K: ToFromBytea + Send + Sync,
@@ -146,7 +145,7 @@ where
         connection
             .query(
                 &format!(
-                    "SELECT * FROM {} WHERE key=$1 AND valid_from<=$2 AND $2<=valid_until",
+                    "SELECT * FROM {} WHERE key=$1 AND __valid_from<=$2 AND $2<=__valid_until",
                     table
                 ),
                 &[&k.to_bytea(), &epoch],
@@ -175,7 +174,7 @@ where
             .execute(
                 &format!(
                     "INSERT INTO
-                     {} (key, valid_from, valid_until)
+                     {} (key, __valid_from, __valid_until)
                      VALUES ($1, $2, $2)",
                     table
                 ),
@@ -212,7 +211,7 @@ where
             .query(
                 &format!(
                     "SELECT parent, left_child, right_child, subtree_size FROM {}
-                 WHERE key=$1 AND valid_from<=$2 AND $2<=valid_until",
+                 WHERE key=$1 AND __valid_from<=$2 AND $2<=__valid_until",
                     table
                 ),
                 &[&k.to_bytea(), &epoch],
@@ -262,7 +261,7 @@ where
             .execute(
                 &format!(
                     "INSERT INTO
-                     {} (key, valid_from, valid_until, subtree_size, parent, left_child, right_child)
+                     {} (key, __valid_from, __valid_until, subtree_size, parent, left_child, right_child)
                      VALUES ($1, $2, $2, $3, $4, $5, $6)",
                     table
                 ),
@@ -284,6 +283,7 @@ where
 pub struct CachedDbStore<V: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> {
     /// A pointer to the DB client
     db: DBPool,
+    initial_epoch: Epoch,
     in_tx: bool,
     dirty: bool,
     epoch: Epoch,
@@ -291,12 +291,13 @@ pub struct CachedDbStore<V: Debug + Clone + Sync + Serialize + for<'a> Deseriali
     pub(super) cache: RwLock<Option<V>>,
 }
 impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStore<T> {
-    pub fn new(epoch: Epoch, table: String, db: DBPool) -> Self {
+    pub fn new(initial_epoch: Epoch, current_epoch: Epoch, table: String, db: DBPool) -> Self {
         Self {
+            initial_epoch,
             db,
             in_tx: false,
             dirty: true,
-            epoch,
+            epoch: current_epoch,
             table,
             cache: RwLock::new(None),
         }
@@ -305,26 +306,27 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
     /// Initialize a new store, with the given state. The initial state is
     /// immediately persisted, as the DB representation of the payload must be
     /// valid even if it is never modified further by the user.
-    pub async fn with_value(epoch: Epoch, table: String, db: DBPool, t: T) -> Result<Self> {
+    pub async fn with_value(initial_epoch: Epoch, table: String, db: DBPool, t: T) -> Result<Self> {
         {
             let connection = db.get().await.unwrap();
             connection
                 .query(
                     &format!(
-                        "INSERT INTO {}_meta (valid_from, valid_until, payload)
+                        "INSERT INTO {}_meta (__valid_from, __valid_until, payload)
                      VALUES ($1, $1, $2)",
                         table
                     ),
-                    &[&epoch, &Json(t.clone())],
+                    &[&initial_epoch, &Json(t.clone())],
                 )
                 .await?;
         }
 
         Ok(Self {
             db,
+            initial_epoch,
             in_tx: false,
             dirty: true,
-            epoch,
+            epoch: initial_epoch,
             table,
             cache: RwLock::new(Some(t)),
         })
@@ -352,7 +354,7 @@ where
             connection
                 .query(
                     &format!(
-                        "INSERT INTO {}_meta (valid_from, valid_until, payload)
+                        "INSERT INTO {}_meta (__valid_from, __valid_until, payload)
                      VALUES ($1, $1, $2)",
                         self.table
                     ),
@@ -363,7 +365,7 @@ where
             connection
                 .query(
                     &format!(
-                        "UPDATE {}_meta SET valid_until = $1 + 1 WHERE valid_until = $1",
+                        "UPDATE {}_meta SET __valid_until = $1 + 1 WHERE __valid_until = $1",
                         self.table
                     ),
                     &[&(self.epoch)],
@@ -388,9 +390,9 @@ where
             let connection = self.db.get().await.unwrap();
             let row = connection
                 .query_one(
-                    // Fetch the row with the most recent valid_from
+                    // Fetch the row with the most recent __valid_from
                     &format!(
-                        "SELECT payload FROM {}_meta WHERE valid_from <= $1 AND $1 <= valid_until",
+                        "SELECT payload FROM {}_meta WHERE __valid_from <= $1 AND $1 <= __valid_until",
                         self.table
                     ),
                     &[&self.epoch],
@@ -408,14 +410,21 @@ where
         connection
             .query_one(
                 &format!(
-                    "SELECT payload FROM {}_meta WHERE valid_from <= $1 AND $1 <= valid_until",
+                    "SELECT payload FROM {}_meta WHERE __valid_from <= $1 AND $1 <= __valid_until",
                     self.table,
                 ),
                 &[&epoch],
             )
             .await
             .map(|row| row.get::<_, Json<T>>(0).0)
-            .expect("failed to fetch state")
+            .with_context(|| {
+                anyhow!(
+                    "failed to fetch state from `{}_meta` at epoch `{}`",
+                    self.table,
+                    epoch
+                )
+            })
+            .unwrap()
     }
 
     async fn store(&mut self, t: T) {
@@ -428,7 +437,12 @@ where
     }
 
     async fn rollback_to(&mut self, new_epoch: Epoch) -> Result<()> {
-        ensure!(new_epoch >= 0, "unable to rollback before epoch 0");
+        ensure!(
+            new_epoch >= self.initial_epoch,
+            "unable to rollback to {} before initial epoch {}",
+            new_epoch,
+            self.initial_epoch
+        );
         ensure!(
             new_epoch < self.current_epoch(),
             "unable to rollback into the future: requested epoch ({}) > current epoch ({})",
@@ -446,7 +460,7 @@ where
         db_tx
             .query(
                 &format!(
-                    "UPDATE {}_meta SET valid_until = $1 WHERE valid_until > $1",
+                    "UPDATE {}_meta SET __valid_until = $1 WHERE __valid_until > $1",
                     self.table
                 ),
                 &[&new_epoch],
@@ -455,7 +469,7 @@ where
         // Delete nodes that would not have been born yet
         db_tx
             .query(
-                &format!("DELETE FROM {}_meta WHERE valid_from > $1", self.table),
+                &format!("DELETE FROM {}_meta WHERE __valid_from > $1", self.table),
                 &[&new_epoch],
             )
             .await?;
@@ -475,6 +489,8 @@ where
     V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V>,
 {
+    /// The initial epoch
+    initial_epoch: Epoch,
     /// The latest *commited* epoch
     epoch: Epoch,
     /// A pointer to the DB client
@@ -491,9 +507,10 @@ where
     V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V>,
 {
-    pub fn new(epoch: Epoch, table: String, db: DBPool) -> Self {
+    pub fn new(initial_epoch: Epoch, current_epoch: Epoch, table: String, db: DBPool) -> Self {
         CachedDbKvStore {
-            epoch,
+            initial_epoch,
+            epoch: current_epoch,
             table,
             db: db.clone(),
             cache: Default::default(),
@@ -510,10 +527,14 @@ where
 #[async_trait]
 impl<K, V, F> RoEpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
-    K: ToFromBytea + Send + Sync,
+    K: ToFromBytea + Send + Sync + std::hash::Hash,
     V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V> + Sync,
 {
+    fn initial_epoch(&self) -> Epoch {
+        self.initial_epoch
+    }
+
     fn current_epoch(&self) -> Epoch {
         self.epoch
     }
@@ -549,7 +570,7 @@ where
         connection
             .query_one(
                 &format!(
-                    "SELECT COUNT(*) FROM {} WHERE valid_from <= $1 AND $1 <= valid_until",
+                    "SELECT COUNT(*) FROM {} WHERE __valid_from <= $1 AND $1 <= __valid_until",
                     self.table
                 ),
                 &[&self.epoch],
@@ -567,7 +588,7 @@ where
 #[async_trait]
 impl<K, V, F: DbConnector<K, V> + Send + Sync> EpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
-    K: ToFromBytea + Send + Sync,
+    K: ToFromBytea + Send + Sync + std::hash::Hash,
     V: Debug + Clone + Send + Sync,
     F: DbConnector<K, V> + Send + Sync,
 {
@@ -597,7 +618,12 @@ where
     }
 
     async fn rollback_to(&mut self, new_epoch: Epoch) -> Result<()> {
-        ensure!(new_epoch >= 0, "unable to rollback before epoch 0");
+        ensure!(
+            new_epoch >= self.initial_epoch,
+            "unable to rollback to {} before initial epoch {}",
+            new_epoch,
+            self.initial_epoch
+        );
         ensure!(
             new_epoch < self.current_epoch(),
             "unable to rollback into the future: requested epoch ({}) > current epoch ({})",
@@ -615,7 +641,7 @@ where
         db_tx
             .query(
                 &format!(
-                    "UPDATE {} SET valid_until = $1 WHERE valid_until > $1",
+                    "UPDATE {} SET __valid_until = $1 WHERE __valid_until > $1",
                     self.table
                 ),
                 &[&new_epoch],
@@ -624,7 +650,7 @@ where
         // Delete nodes that would not have been born yet
         db_tx
             .query(
-                &format!("DELETE FROM {} WHERE valid_from > $1", self.table),
+                &format!("DELETE FROM {} WHERE __valid_from > $1", self.table),
                 &[&new_epoch],
             )
             .await?;

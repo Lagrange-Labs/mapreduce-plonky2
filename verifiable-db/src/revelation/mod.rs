@@ -33,6 +33,7 @@ pub(crate) mod tests {
         query::{
             computational_hash_ids::{AggregationOperation, PlaceholderIdentifier},
             public_inputs::PublicInputs as QueryPublicInputs,
+            universal_circuit::universal_circuit_inputs::PlaceholderIdsSet,
         },
     };
     use alloy::primitives::U256;
@@ -85,7 +86,7 @@ pub(crate) mod tests {
             // Create an array of sample placeholder identifiers,
             // will set the first 4 to the query bounds as below.
             let mut placeholder_ids: [PlaceholderIdentifier; PH] =
-                array::from_fn(|_| PlaceholderIdentifier::GenericPlaceholder(rng.gen()));
+                array::from_fn(|_| PlaceholderIdentifier::Generic(rng.gen()));
             let mut placeholder_values = array::from_fn(|_| U256::from_limbs(rng.gen()));
 
             // Set the first 2 placeholder identifiers as below constants.
@@ -98,7 +99,8 @@ pub(crate) mod tests {
             .for_each(|(i, id)| placeholder_ids[i] = *id);
 
             // Compute the hash of placeholder identifiers.
-            let placeholder_ids_hash = placeholder_ids_hash(&placeholder_ids[2..num_placeholders]);
+            let placeholder_ids_hash =
+                placeholder_ids_hash(placeholder_ids[..num_placeholders].to_vec());
 
             // Re-compute placeholder hash
 
