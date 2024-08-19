@@ -165,7 +165,7 @@ async fn prove_query(
 ) -> Result<()> {
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
-    
+
     let rows_query = parsil::executor::generate_query_keys(&mut parsed, settings)?;
     let all_touched_rows = table
         .execute_row_query(&rows_query.to_string(), query.min_block, query.max_block)
@@ -266,7 +266,7 @@ async fn prove_query(
     // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
     // to check the public inputs
     let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
-    
+
     check_final_outputs(
         proof,
         ctx,
