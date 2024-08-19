@@ -1,11 +1,7 @@
 //! Module including the revelation circuits for query
 
-use crate::{
-    ivc::{public_inputs::H_RANGE as ORIGINAL_TREE_H_RANGE, NUM_IO},
-    query::{public_inputs::PublicInputs as QueryPublicInputs, PI_LEN as QUERY_PI_LEN},
-};
-use mp2_common::{utils::ToFields, F};
-use rand::{thread_rng, Rng};
+use crate::{ivc::NUM_IO, query::PI_LEN as QUERY_PI_LEN};
+use mp2_common::F;
 
 pub mod api;
 pub(crate) mod placeholders_check;
@@ -26,28 +22,12 @@ pub const NUM_PREPROCESSING_IO: usize = NUM_IO;
 #[rustfmt::skip]
 pub const NUM_QUERY_IO<const S: usize>: usize = QUERY_PI_LEN::<S>;
 
-/// Generate a random original tree proof.
-// TODO: This function is used in external tests (of groth16-framework), but it cannot be exported
-// from verifiable-db with `cfg(test)`. May restrict it with a test feature exporting.
-pub fn random_original_tree_proof<const S: usize>(query_pi: &QueryPublicInputs<F, S>) -> Vec<F> {
-    let mut rng = thread_rng();
-    let mut proof = (0..NUM_PREPROCESSING_IO)
-        .map(|_| rng.gen())
-        .collect::<Vec<u32>>()
-        .to_fields();
-
-    // Set the tree hash.
-    proof[ORIGINAL_TREE_H_RANGE].copy_from_slice(query_pi.to_hash_raw());
-
-    proof
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::query::{
         computational_hash_ids::{AggregationOperation, PlaceholderIdentifier},
-        public_inputs::PublicInputs as QueryPublicInputs,
+        public_inputs::PublicInputs as QueryProofPublicInputs,
     };
     use alloy::primitives::U256;
     use itertools::Itertools;
@@ -200,7 +180,7 @@ pub(crate) mod tests {
 
     /// Compute the query results from the proof, and it returns the results and overflow flag.
     pub(crate) fn compute_results_from_query_proof<const S: usize>(
-        query_pi: &QueryPublicInputs<F, S>,
+        query_pi: &QueryProofPublicInputs<F, S>,
     ) -> ([U256; S], bool)
     where
         [(); S - 1]:,

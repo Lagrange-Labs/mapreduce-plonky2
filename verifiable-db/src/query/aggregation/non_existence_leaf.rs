@@ -259,13 +259,18 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::query::{
-        aggregation::{
-            output_computation::tests::compute_dummy_output_values, random_aggregation_operations,
-            QueryBoundSecondary, QueryBoundSource, QueryBounds,
+    use crate::{
+        query::{
+            aggregation::{
+                output_computation::tests::compute_dummy_output_values, QueryBoundSecondary,
+                QueryBoundSource, QueryBounds,
+            },
+            computational_hash_ids::PlaceholderIdentifier,
+            universal_circuit::universal_circuit_inputs::{
+                Placeholder, PlaceholderId, Placeholders,
+            },
         },
-        computational_hash_ids::PlaceholderIdentifier,
-        universal_circuit::universal_circuit_inputs::{Placeholder, PlaceholderId, Placeholders},
+        test_utils::random_aggregation_operations,
     };
     use mp2_common::{poseidon::H, utils::ToFields, C};
     use mp2_test::{

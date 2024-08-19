@@ -208,13 +208,15 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::{
-        aggregation::{
-            random_aggregation_operations, random_aggregation_public_inputs,
-            tests::compute_output_item_value,
-            utils::tests::{unify_child_proof, unify_subtree_proof},
+    use crate::{
+        query::{
+            aggregation::{
+                tests::compute_output_item_value,
+                utils::tests::{unify_child_proof, unify_subtree_proof},
+            },
+            PI_LEN,
         },
-        PI_LEN,
+        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
     use mp2_common::{poseidon::H, utils::ToFields, C};
     use mp2_test::circuit::{run_circuit, UserCircuit};

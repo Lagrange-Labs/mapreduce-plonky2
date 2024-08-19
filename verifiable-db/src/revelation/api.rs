@@ -325,8 +325,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
@@ -346,10 +344,7 @@ mod tests {
     use crate::{
         ivc::PublicInputs as PreprocessingPI,
         query::{
-            aggregation::{
-                random_aggregation_operations, random_aggregation_public_inputs, QueryBounds,
-                QueryHashNonExistenceCircuits,
-            },
+            aggregation::{QueryBounds, QueryHashNonExistenceCircuits},
             api::CircuitInput as QueryInput,
             computational_hash_ids::{
                 AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
@@ -362,9 +357,12 @@ mod tests {
         },
         revelation::{
             api::{CircuitInput, Parameters},
-            random_original_tree_proof,
             tests::compute_results_from_query_proof,
             PublicInputs, NUM_PREPROCESSING_IO, NUM_QUERY_IO,
+        },
+        test_utils::{
+            random_aggregation_operations, random_aggregation_public_inputs,
+            random_original_tree_proof,
         },
     };
 

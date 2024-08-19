@@ -133,12 +133,9 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::{
-        aggregation::{
-            random_aggregation_operations, random_aggregation_public_inputs,
-            utils::tests::unify_subtree_proof,
-        },
-        PI_LEN,
+    use crate::{
+        query::{aggregation::utils::tests::unify_subtree_proof, PI_LEN},
+        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
     use mp2_common::{utils::ToFields, C};
     use mp2_test::circuit::{run_circuit, UserCircuit};
