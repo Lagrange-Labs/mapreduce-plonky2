@@ -169,6 +169,7 @@ mod tests {
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
+    use plonky2::field::types::Sample;
     use plonky2::{
         field::types::Field,
         hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
@@ -182,7 +183,7 @@ mod tests {
     #[test]
     fn test_poseidon_hash_flattening() {
         // Generate the test hash.
-        let hash = HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
+        let hash = HashOut::from(F::rand_array());
 
         // Flatten the hash values.
         let fields = flatten_poseidon_hash_value(hash);
