@@ -396,7 +396,10 @@ where
         };
         if info.load_proof(planner.ctx, primary, &k).is_err() {
             info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
-            debug!("node info for {primary}, {k:?}: {:?}", get_node_info(&planner.tree, &k, primary as Epoch).await);
+            debug!(
+                "node info for {primary}, {k:?}: {:?}",
+                get_node_info(&planner.tree, &k, primary as Epoch).await
+            );
             //debug!("input for {primary}, {k:?}: {:?}", input);
             let proof = planner.ctx.run_query_proof(input)?;
             info.save_proof(planner.ctx, primary, &k, proof)?;
@@ -893,7 +896,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     //          * but we can have "sec_index < $3 AND (price < $3 -10 OR sec_index * price < $4 + 20")
     //              * only the first predicate is used in range query
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
-    
+
     let query_str = format!(
         "SELECT AVG({value_column})
                 FROM {table_name}

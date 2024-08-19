@@ -5,12 +5,12 @@ use std::str::FromStr;
 use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
 
 use crate::{
-    circuit::{self, Assembler},
+    assembler,
     errors::ValidationError,
     expand, parser,
-    placeholders::{self, PlaceholderValidator},
+    placeholders::{self},
     symbols::ContextProvider,
-    validate::{self, SqlValidator},
+    validate::{self},
 };
 
 /// This register handle all operations related to placeholder registration,
@@ -146,7 +146,7 @@ pub fn parse_and_validate<C: ContextProvider>(
 
     placeholders::validate(&settings, &mut query)?;
     validate::validate(&settings, &mut query)?;
-    circuit::validate(&query, &settings)?;
+    assembler::validate(&query, &settings)?;
     Ok(query)
 }
 
