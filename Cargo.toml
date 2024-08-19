@@ -50,7 +50,7 @@ plonky2_crypto = { git = "https://github.com/Lagrange-Labs/plonky2-crypto" }
 plonky2_ecdsa = { git = "https://github.com/Lagrange-Labs/plonky2-ecdsa" }
 plonky2_ecgfp5 = { git = "https://github.com/Lagrange-Labs/plonky2-ecgfp5" }
 plonky2_monolith = "0.1.0"
-poseidon2_plonky2 = { git = "https://github.com/Lagrange-Labs/plonky2", branch = "introduce_poseidon2"}
+poseidon2_plonky2 = { git = "https://github.com/Lagrange-Labs/plonky2", branch = "upstream"}
 postgres = { version = "0.19.7", features = ["with-serde_json-1"] }
 rand = "0.8"
 rlp = "0.5"
