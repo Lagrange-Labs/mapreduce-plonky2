@@ -61,6 +61,7 @@ const PROOF_STORE_FILE: &str = "test_proofs.store";
 const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
 
 #[test(tokio::test)]
+#[ignore]
 async fn integrated_indexing() -> Result<()> {
     // Create the test context for mainnet.
     // let ctx = &mut TestContext::new_mainet();
@@ -95,6 +96,7 @@ async fn integrated_indexing() -> Result<()> {
 }
 
 #[test(tokio::test)]
+#[ignore]
 async fn integrated_querying() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test");

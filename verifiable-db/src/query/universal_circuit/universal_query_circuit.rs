@@ -1189,7 +1189,7 @@ mod tests {
         aggregation::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
         api::{CircuitInput, Parameters},
         computational_hash_ids::{
-            AggregationOperation, HashPermutation, Identifiers, Operation, Output,
+            AggregationOperation, ColumnIDs, HashPermutation, Identifiers, Operation, Output,
             PlaceholderIdentifier,
         },
         public_inputs::PublicInputs,
@@ -1547,11 +1547,14 @@ mod tests {
             placeholder_hash(&placeholder_hash_ids, &placeholders, &query_bounds).unwrap();
         let computational_hash = ComputationalHash::from_bytes(
             (&Identifiers::computational_hash_universal_circuit(
-                column_ids
-                    .iter()
-                    .map(|id| id.to_canonical_u64())
-                    .collect_vec()
-                    .as_slice(),
+                &ColumnIDs::new(
+                    column_ids[0].to_canonical_u64(),
+                    column_ids[1].to_canonical_u64(),
+                    column_ids[2..]
+                        .iter()
+                        .map(|id| id.to_canonical_u64())
+                        .collect_vec(),
+                ),
                 &predicate_operations,
                 &results,
                 Some((&query_bounds.min_query_secondary).into()),
@@ -1923,11 +1926,14 @@ mod tests {
             placeholder_hash(&placeholder_hash_ids, &placeholders, &query_bounds).unwrap();
         let computational_hash = ComputationalHash::from_bytes(
             (&Identifiers::computational_hash_universal_circuit(
-                column_ids
-                    .iter()
-                    .map(|id| id.to_canonical_u64())
-                    .collect_vec()
-                    .as_slice(),
+                &ColumnIDs::new(
+                    column_ids[0].to_canonical_u64(),
+                    column_ids[1].to_canonical_u64(),
+                    column_ids[2..]
+                        .iter()
+                        .map(|id| id.to_canonical_u64())
+                        .collect_vec(),
+                ),
                 &predicate_operations,
                 &results,
                 Some((&query_bounds.min_query_secondary).into()),

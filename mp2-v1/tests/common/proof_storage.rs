@@ -7,6 +7,7 @@ use super::{context::TestContextConfig, mkdir_all, table::TableID};
 use alloy::primitives::Address;
 use anyhow::{bail, Context, Result};
 use envconfig::Envconfig;
+use mp2_common::types::HashOutput;
 use mp2_test::cells_tree::CellTree;
 use mp2_v1::indexing::{
     block::{BlockPrimaryIndex, BlockTree},
@@ -15,6 +16,8 @@ use mp2_v1::indexing::{
 use ryhope::tree::{sbbst, TreeTopology};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+type QueryID = HashOutput;
 
 type CellTreeKey = <CellTree as TreeTopology>::Key;
 type IndexTreeKey = <BlockTree as TreeTopology>::Key;

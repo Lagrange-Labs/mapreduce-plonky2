@@ -1,5 +1,6 @@
 use plonky2::{
     field::types::{Field, PrimeField64},
+    hash::hash_types::HashOut,
     plonk::config::GenericHashOut,
 };
 use std::{
@@ -22,7 +23,13 @@ use anyhow::{Context, Result};
 use futures::{future::BoxFuture, io::empty, stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::{debug, info, warn};
-use mp2_common::{array::ToField, poseidon::empty_poseidon_hash, types::HashOutput, F};
+use mp2_common::{
+    array::ToField,
+    poseidon::empty_poseidon_hash,
+    proof::{deserialize_proof, ProofWithVK},
+    types::HashOutput,
+    C, D, F,
+};
 use mp2_v1::{
     indexing::{
         self,
@@ -34,7 +41,7 @@ use mp2_v1::{
     values_extraction::identifier_block_column,
 };
 use parsil::{
-    assembler::{CircuitPis, DynamicCircuitPis},
+    assembler::{CircuitPis, DynamicCircuitPis, StaticCircuitPis},
     parse_and_validate,
     symbols::ContextProvider,
     ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
@@ -52,26 +59,52 @@ use ryhope::{
 };
 use sqlparser::ast::Query;
 use tokio_postgres::Row as PsqlRow;
-use verifiable_db::query::{
-    self,
-    aggregation::{ChildPosition, NodeInfo, QueryBounds, SubProof},
-    universal_circuit::universal_circuit_inputs::{
-        ColumnCell, PlaceholderId, Placeholders, RowCells,
+use verifiable_db::{
+    ivc::PublicInputs as IndexingPIS,
+    query::{
+        self,
+        aggregation::{ChildPosition, NodeInfo, QueryBoundSource, QueryBounds, SubProof},
+        computational_hash_ids::{ColumnIDs, Identifiers},
+        universal_circuit::universal_circuit_inputs::{
+            ColumnCell, PlaceholderId, Placeholders, RowCells,
+        },
     },
+    revelation::PublicInputs,
 };
 
-pub const NUM_COLUMNS: usize = 3;
-pub const MAX_NUM_COLUMNS: usize = 20;
-pub const MAX_NUM_PREDICATE_OPS: usize = 20;
 pub const MAX_NUM_RESULT_OPS: usize = 20;
 pub const MAX_NUM_RESULTS: usize = 10;
+pub const MAX_NUM_OUTPUTS: usize = 3;
+pub const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
+pub const MAX_NUM_PLACEHOLDERS: usize = 10;
+pub const MAX_NUM_COLUMNS: usize = 20;
+pub const MAX_NUM_PREDICATE_OPS: usize = 20;
 
-pub type CircuitInput = query::api::CircuitInput<
+pub type GlobalCircuitInput = verifiable_db::api::QueryCircuitInput<
     MAX_NUM_COLUMNS,
     MAX_NUM_PREDICATE_OPS,
     MAX_NUM_RESULT_OPS,
-    MAX_NUM_RESULTS,
+    MAX_NUM_OUTPUTS,
+    MAX_NUM_ITEMS_PER_OUTPUT,
+    MAX_NUM_PLACEHOLDERS,
 >;
+
+pub type QueryCircuitInput = verifiable_db::query::api::CircuitInput<
+    MAX_NUM_COLUMNS,
+    MAX_NUM_PREDICATE_OPS,
+    MAX_NUM_RESULT_OPS,
+    MAX_NUM_ITEMS_PER_OUTPUT,
+>;
+
+pub type RevelationCircuitInput = verifiable_db::revelation::api::CircuitInput<
+    MAX_NUM_OUTPUTS,
+    MAX_NUM_ITEMS_PER_OUTPUT,
+    MAX_NUM_PLACEHOLDERS,
+    { QueryCircuitInput::num_placeholders_ids() },
+>;
+
+pub type RevelationPublicInputs<'a> =
+    PublicInputs<'a, F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>;
 
 pub enum TableType {
     Mapping,
@@ -89,7 +122,7 @@ pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Re
 async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     let settings = ParsilSettings {
         context: table,
-        placeholders: PlaceholderSettings::with_freestanding(2),
+        placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
     };
     let query_info = cook_query(table).await?;
     info!("QUERY on the testcase: {}", query_info.query);
@@ -115,9 +148,7 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
         exec_query.query.to_string()
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
-    // the query to use to fetch all the rows keys involved in the result tree.
-    let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query_info.placeholders)?;
-    prove_query(ctx, table, query_info, parsed, pis, &settings)
+    prove_query(ctx, table, query_info, parsed, &settings, res)
         .await
         .expect("unable to run universal query proof");
     Ok(())
@@ -129,9 +160,12 @@ async fn prove_query(
     table: &Table,
     query: QueryCooking,
     mut parsed: Query,
-    pis: DynamicCircuitPis,
     settings: &ParsilSettings<&Table>,
+    res: Vec<PsqlRow>,
 ) -> Result<()> {
+    // the query to use to fetch all the rows keys involved in the result tree.
+    let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
+
     let rows_query = parsil::executor::generate_query_keys(&mut parsed, settings)?;
     let all_touched_rows = table
         .execute_row_query(&rows_query.to_string(), query.min_block, query.max_block)
@@ -227,6 +261,149 @@ async fn prove_query(
         current_epoch as BlockPrimaryIndex,
     )
     .await?;
+    let proof = prove_revelation(ctx, table, &query, &pis, current_epoch).await?;
+    info!("Revelation proof done! Checking public inputs...");
+    // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
+    // to check the public inputs
+    let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
+
+    check_final_outputs(
+        proof,
+        ctx,
+        table,
+        &query,
+        &pis,
+        current_epoch,
+        touched_rows.len(),
+        res,
+    )?;
+    info!("Revelation done!");
+    Ok(())
+}
+
+async fn prove_revelation(
+    ctx: &TestContext,
+    table: &Table,
+    query: &QueryCooking,
+    pis: &DynamicCircuitPis,
+    tree_epoch: Epoch,
+) -> Result<Vec<u8>> {
+    // load the query proof, which is at the root of the tree
+    let query_proof = {
+        let root_key = table.index.root_at(tree_epoch).await.unwrap();
+        let proof_key = ProofKey::QueryAggregateIndex(root_key);
+        ctx.storage.get_proof_exact(&proof_key)?
+    };
+    // load the preprocessing proof at the same epoch
+    let indexing_proof = {
+        let pk = ProofKey::IVC(tree_epoch as BlockPrimaryIndex);
+        ctx.storage.get_proof_exact(&pk)?
+    };
+    let pis_hash = QueryCircuitInput::ids_for_placeholder_hash(
+        &pis.predication_operations,
+        &pis.result,
+        &query.placeholders,
+        &pis.bounds,
+    )?;
+    let input = RevelationCircuitInput::new_revelation_no_results_tree(
+        query_proof,
+        indexing_proof,
+        &pis.bounds,
+        &query.placeholders,
+        pis_hash,
+    )?;
+    let proof = ctx.run_query_proof(GlobalCircuitInput::Revelation(input))?;
+    Ok(proof)
+}
+
+fn check_final_outputs(
+    revelation_proof: Vec<u8>,
+    ctx: &TestContext,
+    table: &Table,
+    query: &QueryCooking,
+    pis: &StaticCircuitPis,
+    tree_epoch: Epoch,
+    num_touched_rows: usize,
+    res: Vec<PsqlRow>,
+) -> Result<()> {
+    // fetch indexing proof, whose public inputs are needed to check correctness of revelation proof outputs
+    let indexing_proof = {
+        let pk = ProofKey::IVC(tree_epoch as BlockPrimaryIndex);
+        ctx.storage.get_proof_exact(&pk)?
+    };
+    let deserialized_indexing_proof = ProofWithVK::deserialize(&indexing_proof)?;
+    let indexing_pis = IndexingPIS::from_slice(&deserialized_indexing_proof.proof().public_inputs);
+
+    let deserialized_proof = deserialize_proof::<F, C, D>(&revelation_proof)?;
+    let revelation_pis = RevelationPublicInputs::from_slice(&deserialized_proof.public_inputs);
+    // check original blockchain hash. ToDo: access it from Anvil
+    assert_eq!(
+        indexing_pis.block_hash_fields(),
+        revelation_pis.original_block_hash(),
+    );
+    // check computational hash
+    let metadata_hash = HashOutput::try_from(
+        HashOut::<F>::from_vec(indexing_pis.metadata_hash().to_vec()).to_bytes(),
+    )?;
+    let column_ids = ColumnIDs::new(
+        table.columns.primary.identifier,
+        table.columns.secondary.identifier,
+        table
+            .columns
+            .non_indexed_columns()
+            .into_iter()
+            .map(|column| column.identifier)
+            .collect_vec(),
+    );
+    let expected_computational_hash = Identifiers::computational_hash(
+        &column_ids,
+        &pis.predication_operations,
+        &pis.result,
+        &metadata_hash,
+        pis.bounds.min_query_secondary.clone(),
+        pis.bounds.max_query_secondary.clone(),
+    )?;
+    assert_eq!(
+        HashOutput::try_from(revelation_pis.computational_hash().to_bytes())?,
+        expected_computational_hash,
+    );
+    // check num placeholders
+    let expected_num_placeholders = query.placeholders.len();
+    assert_eq!(
+        expected_num_placeholders as u64,
+        revelation_pis.num_placeholders().to_canonical_u64(),
+    );
+    // check placeholder values
+    let expected_placeholder_values = query.placeholders.placeholder_values();
+    assert_eq!(
+        expected_placeholder_values,
+        revelation_pis.placeholder_values()[..expected_num_placeholders], // consider only the valid placeholders
+    );
+    // check entry count
+    assert_eq!(
+        num_touched_rows as u64,
+        revelation_pis.entry_count().to_canonical_u64(),
+    );
+    // check there were no overflow errors
+    assert!(!revelation_pis.overflow_flag(),);
+    // check number of results
+    assert_eq!(
+        res.len() as u64,
+        revelation_pis.num_results().to_canonical_u64(),
+    );
+    // check results
+    res.into_iter()
+        .zip(revelation_pis.result_values().into_iter())
+        .for_each(|(expected_res, res)| {
+            (0..expected_res.len()).for_each(|i| {
+                let SqlReturn::Numeric(expected_res) = SqlType::Numeric.extract(&expected_res, i);
+                assert_eq!(
+                    U256::from_str_radix(&expected_res.to_string(), 10).unwrap(),
+                    res[i],
+                );
+            })
+        });
+
     Ok(())
 }
 
@@ -320,7 +497,7 @@ where
             let (node_info, left_info, right_info) =
             // we can use primary as epoch now that tree stores epoch from genesis
                 get_node_info(&planner.tree, &k, primary as Epoch).await;
-            CircuitInput::new_single_path(
+            QueryCircuitInput::new_single_path(
                 SubProof::new_embedded_tree_proof(embedded_proof.unwrap())?,
                 left_info,
                 right_info,
@@ -349,7 +526,7 @@ where
                 )
                 .await;
                 // we look which child is the one to load from storage, the one we already proved
-                CircuitInput::new_single_path(
+                QueryCircuitInput::new_single_path(
                     SubProof::new_child_proof(child_proof, child_pos)?,
                     left_info,
                     right_info,
@@ -367,7 +544,7 @@ where
                         info.load_proof(planner.ctx, primary, node_ctx.left.as_ref().unwrap())?;
                     let right_proof =
                         info.load_proof(planner.ctx, primary, node_ctx.right.as_ref().unwrap())?;
-                    CircuitInput::new_full_node(
+                    QueryCircuitInput::new_full_node(
                         left_proof,
                         right_proof,
                         embedded_proof.expect("should be a embedded_proof here"),
@@ -385,7 +562,7 @@ where
                         ChildPosition::Left => right_info,
                         ChildPosition::Right => left_info,
                     };
-                    CircuitInput::new_partial_node(
+                    QueryCircuitInput::new_partial_node(
                         child_proof,
                         embedded_proof.expect("should be an embedded_proof here too"),
                         unproven,
@@ -399,12 +576,9 @@ where
         };
         if info.load_proof(planner.ctx, primary, &k).is_err() {
             info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
-            debug!(
-                "node info for {primary}, {k:?}: {:?}",
-                get_node_info(&planner.tree, &k, primary as Epoch).await
-            );
-            //debug!("input for {primary}, {k:?}: {:?}", input);
-            let proof = planner.ctx.run_query_proof(input)?;
+            let proof = planner
+                .ctx
+                .run_query_proof(GlobalCircuitInput::Query(input))?;
             info.save_proof(planner.ctx, primary, &k, proof)?;
         }
         info!("Universal query proof DONE for {primary} -> {k:?} ");
@@ -660,65 +834,6 @@ where
     )
 }
 
-// Returns the node info belonging to this node. recurse is just used to indicate at which step in
-// the substree should we stop
-// Return is node info, node hash , left hash , right hash
-//async fn fetch_child_info(
-//    tree: &MerkleRowTree,
-//    k: RowTreeKey,
-//    at: Epoch,
-//    recurse: usize,
-//) -> BoxFuture<'static, (NodeInfo, HashOutput, Option<NodeInfo>, Option<NodeInfo>)> {
-//    async move {
-//        let (ctx, node_payload) = tree.fetch_with_context_at(&k, at).await;
-//        if recurse == 0 {
-//            let ni = NodeInfo::new(
-//                &node_payload.cell_root_hash,
-//                // if we stop recursing, we're at the grand child level so we don't carea bout the
-//                // child hashes
-//                None,
-//                None,
-//                node_payload.secondary_index_value(),
-//                node_payload.min,
-//                node_payload.max,
-//            );
-//            return (ni, node_payload.hash, None, None);
-//        }
-//        let (left_node, left_hash) = match ctx.left {
-//            Some(left_k) => {
-//                let (left_ni, left_hash, _, _) =
-//                    // TODO: find out this double await, it's weird but it works..
-//                    fetch_child_info(tree, left_k, at, recurse - 1).await.await;
-//                (Some(left_ni), Some(left_hash))
-//            }
-//            None => (None, None),
-//        };
-//        let (right_node, right_hash) = match ctx.right {
-//            Some(right_k) => {
-//                let (right_ni, right_hash, _, _) =
-//                    fetch_child_info(tree, right_k, at, recurse - 1).await.await;
-//                (Some(right_ni), Some(right_hash))
-//            }
-//            None => (None, None),
-//        };
-//
-//        return (
-//            NodeInfo::new(
-//                &node_payload.cell_root_hash,
-//                left_hash.as_ref(),
-//                right_hash.as_ref(),
-//                node_payload.secondary_index_value(),
-//                node_payload.min,
-//                node_payload.max,
-//            ),
-//            node_payload.hash,
-//            left_node,
-//            right_node,
-//        );
-//    }
-//    .boxed()
-//}
-
 async fn prove_single_row(
     ctx: &mut TestContext,
     tree: &MerkleRowTree,
@@ -753,7 +868,7 @@ async fn prove_single_row(
     let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(primary));
     let row = RowCells::new(primary_cell, secondary_cell, rest_cells);
     // 2. create input
-    let input = CircuitInput::new_universal_circuit(
+    let input = QueryCircuitInput::new_universal_circuit(
         &row,
         &pis.predication_operations,
         &pis.result,
@@ -764,20 +879,14 @@ async fn prove_single_row(
     .expect("unable to create universal query circuit inputs");
     // 3. run proof if not ran already
     let proof_key = ProofKey::QueryUniversal((primary, row_key.clone()));
-    let proof = match ctx.storage.get_proof_exact(&proof_key) {
-        Ok(proof) => {
-            info!("Loading universal query proof for {primary} -> {row_key:?}");
-            proof
-        }
-        Err(_) => {
-            info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");
-            let proof = ctx
-                .run_query_proof(input)
-                .expect("unable to generate universal proof for {epoch} -> {row_key:?}");
-            info!("Universal query proof DONE for {primary} -> {row_key:?} ");
-            ctx.storage.store_proof(proof_key, proof.clone())?;
-            proof
-        }
+    let proof = {
+        info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");
+        let proof = ctx
+            .run_query_proof(GlobalCircuitInput::Query(input))
+            .expect("unable to generate universal proof for {epoch} -> {row_key:?}");
+        info!("Universal query proof DONE for {primary} -> {row_key:?} ");
+        ctx.storage.store_proof(proof_key, proof.clone())?;
+        proof
     };
     Ok(proof)
 }
