@@ -1,13 +1,17 @@
 //! Testing context used in the cases
 
-use super::{
-    MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS,
-    MAX_NUM_RESULT_OPS, NUM_PREPROCESSING_IO, NUM_QUERY_IO,
-};
+use super::{NUM_PREPROCESSING_IO, NUM_QUERY_IO};
 use groth16_framework::{compile_and_generate_assets, utils::clone_circuit_data};
 use mp2_common::{C, D, F};
 use recursion_framework::framework_testing::TestingRecursiveCircuits;
-use verifiable_db::{api::WrapCircuitParams, revelation::api::Parameters as RevelationParameters};
+use verifiable_db::{
+    api::WrapCircuitParams,
+    revelation::api::Parameters as RevelationParameters,
+    test_utils::{
+        MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+    },
+};
 
 /// Test context
 pub(crate) struct TestContext {
