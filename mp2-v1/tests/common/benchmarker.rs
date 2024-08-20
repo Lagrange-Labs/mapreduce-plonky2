@@ -27,9 +27,12 @@ impl Benchmarker {
     }
 
     pub fn new_from_path(path: PathBuf) -> Result<Self> {
-        let writer = File::options().append(true).open(&path)?;
-        let mut wtr = csv::Writer::from_writer(writer);
-        wtr.write_record(&["name", "time"]);
+        if !path.exists() {
+            // only write the header if the file doesn't exists
+            let writer = File::options().create(true).append(true).open(&path)?;
+            let mut wtr = csv::Writer::from_writer(writer);
+            wtr.write_record(["name", "time"])?;
+        }
         info!("Benchmarker setup to write output in {:?}", path);
         Ok(Self { csv_path: path })
     }
