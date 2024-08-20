@@ -267,12 +267,12 @@ where
             .take(MAX_NUM_RESULTS)
             .collect_vec();
         let min_query = if is_rows_tree_node {
-            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary)
+            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary())
         } else {
             QueryBound::new_primary_index_bound(placeholders, true)
         }?;
         let max_query = if is_rows_tree_node {
-            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary)
+            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary())
         } else {
             QueryBound::new_primary_index_bound(placeholders, false)
         }?;
@@ -287,8 +287,8 @@ where
                 .collect_vec()
                 .try_into()
                 .unwrap(),
-            computational_hash: query_hashes.computational_hash,
-            placeholder_hash: query_hashes.placeholder_hash,
+            computational_hash: query_hashes.computational_hash(),
+            placeholder_hash: query_hashes.placeholder_hash(),
             aggregation_ops: aggregation_ops.try_into().unwrap(),
             is_rows_tree_node,
             min_query,
@@ -366,8 +366,8 @@ where
                 &hash
                     .to_vec()
                     .into_iter()
-                    .chain(query_bounds.min_query_primary.to_fields())
-                    .chain(query_bounds.max_query_primary.to_fields())
+                    .chain(query_bounds.min_query_primary().to_fields())
+                    .chain(query_bounds.max_query_primary().to_fields())
                     .collect_vec(),
             )
             .to_bytes(),
@@ -1133,8 +1133,8 @@ mod tests {
             );
             assert_eq!(pis.min_value(), node_info.min,);
             assert_eq!(pis.max_value(), node_info.max,);
-            assert_eq!(pis.min_query_value(), query_bounds.min_query_primary,);
-            assert_eq!(pis.max_query_value(), query_bounds.max_query_primary,);
+            assert_eq!(pis.min_query_value(), query_bounds.min_query_primary());
+            assert_eq!(pis.max_query_value(), query_bounds.max_query_primary());
             assert_eq!(
                 pis.index_ids().to_vec(),
                 vec![column_ids.primary, column_ids.secondary,],
@@ -1145,10 +1145,10 @@ mod tests {
                     .iter()
                     .fold((U256::ZERO, false, 0u64), |acc, value| {
                         if value[2] >= U256::from(5)
-                            && value[0] >= query_bounds.min_query_primary
-                            && value[0] <= query_bounds.max_query_primary
-                            && value[1] >= query_bounds.min_query_secondary.value
-                            && value[1] <= query_bounds.max_query_secondary.value
+                            && value[0] >= query_bounds.min_query_primary()
+                            && value[0] <= query_bounds.max_query_primary()
+                            && value[1] >= query_bounds.min_query_secondary().value
+                            && value[1] <= query_bounds.max_query_secondary().value
                         {
                             let (sum, overflow) = value[0].overflowing_add(value[2]);
                             let new_overflow = acc.1 || overflow;

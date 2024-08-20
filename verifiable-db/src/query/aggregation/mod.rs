@@ -1,23 +1,18 @@
-use anyhow::{Error, Result};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
 use alloy::primitives::U256;
-use itertools::Itertools;
+use anyhow::Result;
 use mp2_common::{
-    array::ToField,
-    poseidon::{empty_poseidon_hash, H},
+    poseidon::empty_poseidon_hash,
     proof::ProofWithVK,
     serialization::{deserialize_long_array, serialize_long_array},
     types::HashOutput,
-    utils::ToFields,
     F,
 };
 use plonky2::{
-    field::types::PrimeField64,
-    hash::hash_types::HashOut,
-    plonk::config::{GenericHashOut, Hasher},
+    field::types::{Field, Sample},
+    hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
+    plonk::config::GenericHashOut,
 };
+use serde::{Deserialize, Serialize};
 
 pub(crate) mod child_proven_single_path_node;
 pub(crate) mod embedded_tree_proven_single_path_node;
@@ -34,14 +29,11 @@ use super::{
     api::CircuitInput,
     computational_hash_ids::{ColumnIDs, Identifiers, Output, PlaceholderIdentifier},
     universal_circuit::{
-        output_no_aggregation::Circuit as NoAggOutputCircuit,
-        output_with_aggregation::Circuit as AggOutputCircuit,
         universal_circuit_inputs::{
-            BasicOperation, ColumnCell, PlaceholderId, Placeholders, ResultStructure, RowCells,
+            BasicOperation, PlaceholderId, Placeholders, ResultStructure, RowCells,
         },
         universal_query_circuit::{
             placeholder_hash, placeholder_hash_without_query_bounds, QueryBound,
-            UniversalQueryCircuitInputs,
         },
         ComputationalHash, PlaceholderHash,
     },
@@ -96,10 +88,10 @@ impl QueryBoundSecondary {
 #[derive(Clone, Debug)]
 /// Data structure storing the query bounds specified in the query for primary and secondary index
 pub struct QueryBounds {
-    pub(crate) min_query_primary: U256,
-    pub(crate) max_query_primary: U256,
-    pub(crate) min_query_secondary: QueryBoundSecondary,
-    pub(crate) max_query_secondary: QueryBoundSecondary,
+    min_query_primary: U256,
+    max_query_primary: U256,
+    min_query_secondary: QueryBoundSecondary,
+    max_query_secondary: QueryBoundSecondary,
 }
 
 impl QueryBounds {
@@ -124,6 +116,20 @@ impl QueryBounds {
 
     pub fn is_primary_in_range(&self, v: &U256) -> bool {
         &self.min_query_primary <= v && v <= &self.max_query_primary
+    }
+
+    // Getter functions for the struct fields
+    pub fn min_query_primary(&self) -> U256 {
+        self.min_query_primary
+    }
+    pub fn max_query_primary(&self) -> U256 {
+        self.max_query_primary
+    }
+    pub fn min_query_secondary(&self) -> &QueryBoundSecondary {
+        &self.min_query_secondary
+    }
+    pub fn max_query_secondary(&self) -> &QueryBoundSecondary {
+        &self.max_query_secondary
     }
 }
 
@@ -299,8 +305,8 @@ pub struct SinglePathInput {
 /// non-existence circuits. These hashes are computed from the query specific data provided as input
 /// to the initialization method of this data structure
 pub struct QueryHashNonExistenceCircuits {
-    pub(crate) computational_hash: ComputationalHash,
-    pub(crate) placeholder_hash: PlaceholderHash,
+    computational_hash: ComputationalHash,
+    placeholder_hash: PlaceholderHash,
 }
 
 impl QueryHashNonExistenceCircuits {
@@ -358,6 +364,14 @@ impl QueryHashNonExistenceCircuits {
             placeholder_hash,
         })
     }
+
+    // Getter functions for the struct fields
+    pub fn computational_hash(&self) -> ComputationalHash {
+        self.computational_hash
+    }
+    pub fn placeholder_hash(&self) -> PlaceholderHash {
+        self.placeholder_hash
+    }
 }
 
 /// Input data structure for circuits employed to prove the non-existence of rows satisfying the query bounds
@@ -397,91 +411,11 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
 pub(crate) mod tests {
     use crate::query::{
         computational_hash_ids::{AggregationOperation, Identifiers},
-        public_inputs::{PublicInputs, QueryPublicInputs},
-        PI_LEN,
+        public_inputs::PublicInputs,
     };
     use alloy::primitives::U256;
-    use mp2_common::{
-        array::ToField, group_hashing::add_curve_point, types::CURVE_TARGET_LEN, utils::ToFields, F,
-    };
-    use mp2_test::utils::random_vector;
-    use plonky2::{
-        field::types::{Field, Sample},
-        hash::hash_types::NUM_HASH_OUT_ELTS,
-    };
+    use mp2_common::{array::ToField, group_hashing::add_curve_point, utils::ToFields, F};
     use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{prelude::SliceRandom, thread_rng, Rng};
-    use std::array;
-
-    /// Generate a field array of S random aggregation operations.
-    pub(crate) fn random_aggregation_operations<const S: usize>() -> [F; S] {
-        let ops = [
-            AggregationOperation::IdOp,
-            AggregationOperation::SumOp,
-            AggregationOperation::MinOp,
-            AggregationOperation::MaxOp,
-            AggregationOperation::AvgOp,
-        ];
-
-        let mut rng = thread_rng();
-        array::from_fn(|_| {
-            let op = *ops.choose(&mut rng).unwrap();
-            Identifiers::AggregationOperations(op).to_field()
-        })
-    }
-
-    /// Generate S number of proof public input slices by the specified operations.
-    /// The each returned proof public inputs could be constructed by
-    /// `PublicInputs::from_slice` function.
-    pub(crate) fn random_aggregation_public_inputs<const N: usize, const S: usize>(
-        ops: &[F; S],
-    ) -> [Vec<F>; N] {
-        let [ops_range, overflow_range, index_ids_range, c_hash_range, p_hash_range] = [
-            QueryPublicInputs::OpIds,
-            QueryPublicInputs::Overflow,
-            QueryPublicInputs::IndexIds,
-            QueryPublicInputs::ComputationalHash,
-            QueryPublicInputs::PlaceholderHash,
-        ]
-        .map(PublicInputs::<F, S>::to_range);
-
-        let first_value_start =
-            PublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues).start;
-        let is_first_op_id =
-            ops[0] == Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
-
-        // Generate the index ids, computational hash and placeholder hash,
-        // they should be same for a series of public inputs.
-        let mut rng = thread_rng();
-        let index_ids: Vec<_> = random_vector::<u32>(2).to_fields();
-        let [computational_hash, placeholder_hash]: [Vec<_>; 2] =
-            array::from_fn(|_| random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
-
-        array::from_fn(|_| {
-            let mut pi = random_vector::<u32>(PI_LEN::<S>).to_fields();
-
-            // Copy the specified operations to the proofs.
-            pi[ops_range.clone()].copy_from_slice(ops);
-
-            // Set the overflow flag to a random boolean.
-            let overflow = F::from_bool(rng.gen());
-            pi[overflow_range.clone()].copy_from_slice(&[overflow]);
-
-            // Set the index ids, computational hash and placeholder hash,
-            pi[index_ids_range.clone()].copy_from_slice(&index_ids);
-            pi[c_hash_range.clone()].copy_from_slice(&computational_hash);
-            pi[p_hash_range.clone()].copy_from_slice(&placeholder_hash);
-
-            // If the first operation is ID, set the value to a random point.
-            if is_first_op_id {
-                let first_value = Point::sample(&mut rng).to_weierstrass().to_fields();
-                pi[first_value_start..first_value_start + CURVE_TARGET_LEN]
-                    .copy_from_slice(&first_value);
-            }
-
-            pi
-        })
-    }
 
     /// Compute the output values and the overflow number at the specified index by
     /// the proofs. It's the test function corresponding to `compute_output_item`.

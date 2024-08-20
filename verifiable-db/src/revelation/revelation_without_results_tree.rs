@@ -394,12 +394,11 @@ where
 mod tests {
     use super::*;
     use crate::{
-        query::{
-            aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
-            public_inputs::QueryPublicInputs,
-        },
-        revelation::tests::{
-            compute_results_from_query_proof, random_original_tree_proof, TestPlaceholders,
+        query::public_inputs::QueryPublicInputs,
+        revelation::tests::{compute_results_from_query_proof, TestPlaceholders},
+        test_utils::{
+            random_aggregation_operations, random_aggregation_public_inputs,
+            random_original_tree_proof,
         },
     };
     use mp2_common::{poseidon::flatten_poseidon_hash_value, utils::ToFields, C, D};
