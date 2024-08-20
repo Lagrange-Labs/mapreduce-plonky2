@@ -1,5 +1,6 @@
 use anyhow::Result;
 use envconfig::Envconfig;
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -35,6 +36,7 @@ impl Benchmarker {
             std::fs::remove_file(&path)?;
         }
         File::create(path.clone())?;
+        info!("Benchmarker setup to write output in {:?}", path);
         Ok(Self { csv_path: path })
     }
 
@@ -54,10 +56,26 @@ impl Benchmarker {
             name: name.to_string(),
             time: elapsed,
         };
-        let writer = File::open(&self.csv_path)?;
+        let writer = File::options().append(true).open(&self.csv_path)?;
         let mut wtr = csv::Writer::from_writer(writer);
         wtr.serialize(record)?;
         wtr.flush()?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Benchmarker;
+    use anyhow::Result;
+    #[test]
+    fn benchmarker() -> Result<()> {
+        let path = testfile::generate_name();
+        let b = Benchmarker::new_from_path(path)?;
+        b.bench("test_fun", || {
+            let _total: u32 = (0..10000).sum();
+            Ok(())
+        })?;
         Ok(())
     }
 }

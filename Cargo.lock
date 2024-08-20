@@ -3203,6 +3203,7 @@ dependencies = [
  "sha3",
  "sqlparser",
  "test-log",
+ "testfile",
  "tokio",
  "tokio-postgres",
  "verifiable-db",
@@ -5387,6 +5388,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.75",
+]
+
+[[package]]
+name = "testfile"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6fd2b9c52ee45b6ad79363f8706393a99bfb126480f739e93d9cef2dea7da26"
+dependencies = [
+ "rand",
 ]
 
 [[package]]
