@@ -117,6 +117,9 @@ pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Re
 
 async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
     let query_info = cook_query(table).await?;
+    test_query_mapping(ctx, table, query_info).await?;
+    // cook query with custom placeholders
+    let query_info = cook_query_secondary_index_placeholder(table).await?;
     test_query_mapping(ctx, table, query_info).await
 }
 
