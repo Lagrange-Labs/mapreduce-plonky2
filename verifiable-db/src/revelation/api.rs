@@ -197,12 +197,16 @@ impl<
             .map(|placeholder_id| compute_checked_placeholder_for_id(placeholder_id))
             .collect::<Result<Vec<_>>>()?;
         // compute placeholders data to be hashed for secondary query bounds
-        let min_query_secondary =
-            QueryBound::new_secondary_index_bound(&placeholders, &query_bounds.min_query_secondary)
-                .unwrap();
-        let max_query_secondary =
-            QueryBound::new_secondary_index_bound(&placeholders, &query_bounds.max_query_secondary)
-                .unwrap();
+        let min_query_secondary = QueryBound::new_secondary_index_bound(
+            &placeholders,
+            &query_bounds.min_query_secondary(),
+        )
+        .unwrap();
+        let max_query_secondary = QueryBound::new_secondary_index_bound(
+            &placeholders,
+            &query_bounds.max_query_secondary(),
+        )
+        .unwrap();
         let secondary_query_bound_placeholders = [min_query_secondary, max_query_secondary]
             .into_iter()
             .flat_map(|query_bound| {
@@ -480,10 +484,7 @@ mod tests {
         .unwrap();
 
         // generate the computational hash and placeholder hash that should be exposed by query proofs
-        let QueryHashNonExistenceCircuits {
-            computational_hash,
-            placeholder_hash,
-        } = QueryHashNonExistenceCircuits::new::<
+        let non_existence_circuits = QueryHashNonExistenceCircuits::new::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
@@ -504,6 +505,8 @@ mod tests {
             false, // we need to generate values as if we are in an index tree node
         )
         .unwrap();
+        let computational_hash = non_existence_circuits.computational_hash();
+        let placeholder_hash = non_existence_circuits.placeholder_hash();
 
         let [mut query_pi_raw] = random_aggregation_public_inputs::<1, MAX_NUM_ITEMS_PER_OUTPUT>(
             &ops_ids.try_into().unwrap(),
@@ -518,8 +521,14 @@ mod tests {
 
         // Set the minimum, maximum query, placeholder hash andn computational hash to expected values.
         [
-            (min_query_range, query_bounds.min_query_primary.to_fields()),
-            (max_query_range, query_bounds.max_query_primary.to_fields()),
+            (
+                min_query_range,
+                query_bounds.min_query_primary().to_fields(),
+            ),
+            (
+                max_query_range,
+                query_bounds.max_query_primary().to_fields(),
+            ),
             (p_hash_range, placeholder_hash.to_vec()),
             (c_hash_range, computational_hash.to_vec()),
         ]
@@ -591,8 +600,8 @@ mod tests {
             &predicate_operations,
             &results,
             &HashOutput::try_from(metadata_hash.to_bytes()).unwrap(),
-            Some((&query_bounds.min_query_secondary).into()),
-            Some((&query_bounds.max_query_secondary).into()),
+            Some(query_bounds.min_query_secondary().into()),
+            Some(query_bounds.max_query_secondary().into()),
         )
         .unwrap();
         // then, check that it is the same exposed by the proof

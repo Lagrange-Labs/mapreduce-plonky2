@@ -88,10 +88,10 @@ impl QueryBoundSecondary {
 #[derive(Clone, Debug)]
 /// Data structure storing the query bounds specified in the query for primary and secondary index
 pub struct QueryBounds {
-    pub min_query_primary: U256,
-    pub max_query_primary: U256,
-    pub min_query_secondary: QueryBoundSecondary,
-    pub max_query_secondary: QueryBoundSecondary,
+    min_query_primary: U256,
+    max_query_primary: U256,
+    min_query_secondary: QueryBoundSecondary,
+    max_query_secondary: QueryBoundSecondary,
 }
 
 impl QueryBounds {
@@ -116,6 +116,20 @@ impl QueryBounds {
 
     pub fn is_primary_in_range(&self, v: &U256) -> bool {
         &self.min_query_primary <= v && v <= &self.max_query_primary
+    }
+
+    // Getter functions for the struct fields
+    pub fn min_query_primary(&self) -> U256 {
+        self.min_query_primary
+    }
+    pub fn max_query_primary(&self) -> U256 {
+        self.max_query_primary
+    }
+    pub fn min_query_secondary(&self) -> &QueryBoundSecondary {
+        &self.min_query_secondary
+    }
+    pub fn max_query_secondary(&self) -> &QueryBoundSecondary {
+        &self.max_query_secondary
     }
 }
 
@@ -291,8 +305,8 @@ pub struct SinglePathInput {
 /// non-existence circuits. These hashes are computed from the query specific data provided as input
 /// to the initialization method of this data structure
 pub struct QueryHashNonExistenceCircuits {
-    pub computational_hash: ComputationalHash,
-    pub placeholder_hash: PlaceholderHash,
+    computational_hash: ComputationalHash,
+    placeholder_hash: PlaceholderHash,
 }
 
 impl QueryHashNonExistenceCircuits {
@@ -349,6 +363,14 @@ impl QueryHashNonExistenceCircuits {
             computational_hash,
             placeholder_hash,
         })
+    }
+
+    // Getter functions for the struct fields
+    pub fn computational_hash(&self) -> ComputationalHash {
+        self.computational_hash
+    }
+    pub fn placeholder_hash(&self) -> PlaceholderHash {
+        self.placeholder_hash
     }
 }
 
