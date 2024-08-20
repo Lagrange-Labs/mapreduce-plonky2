@@ -9,6 +9,7 @@
 use alloy::primitives::U256;
 use anyhow::*;
 use log::warn;
+use serde::{Deserialize, Serialize};
 use mp2_common::{array::ToField, F};
 use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Query, Select,
@@ -739,7 +740,7 @@ impl BuildableBounds for QueryBounds {
 
 /// This struct contains all the data required to build the public inputs of the
 /// universal query circuit for a given query.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CircuitPis<T: BuildableBounds> {
     /// The [`ResultStructure`] taken as input by the universal query circuit
     pub result: ResultStructure,
