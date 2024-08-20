@@ -832,9 +832,12 @@ contract Verifier {
             bytes4(rem << (REM_NUM_PLACEHOLDERS_POS * 32))
         );
         require(
+            numPlaceholders <= MAX_NUM_PLACEHOLDERS,
+            "Placeholder number cannot overflow."
+        );
+        require(
             // The first two placeholders are minimum and maximum block numbers.
-            numPlaceholders <= MAX_NUM_PLACEHOLDERS &&
-                numPlaceholders == query.userPlaceholders.length + 2,
+            numPlaceholders == query.userPlaceholders.length + 2,
             "Placeholder number cannot overflow and must equal as expected."
         );
         // Check the minimum and maximum block numbers.
