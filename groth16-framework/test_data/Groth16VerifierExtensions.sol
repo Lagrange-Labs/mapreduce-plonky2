@@ -9,6 +9,8 @@ contract Query is Verifier {
     uint256 constant TOP_THREE_BIT_MASK = ~(uint256(7) << 253);
 
     // Generic constants for the supported queries
+    // TODO: These constants are possible to be changed depending on user queries exploration.
+    // Once we know which queries users are mostly doing, we'll be able to modify these constants.
     // Maximum number of the results
     uint32 constant MAX_NUM_OUTPUTS = 3;
     // Maximum number of the items per result
