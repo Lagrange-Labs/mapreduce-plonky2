@@ -39,7 +39,7 @@ use super::{
     },
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Data structure representing a query bound on secondary index
 pub struct QueryBoundSecondary {
     /// value of the query bound. Could come either from a constant in the query or from a placeholder
@@ -48,7 +48,7 @@ pub struct QueryBoundSecondary {
     pub(crate) source: QueryBoundSource,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Enumeration employed to specify whether a query bound for secondary indexed is taken in the query from
 /// a constant or from a placeholder
 pub enum QueryBoundSource {
@@ -85,7 +85,7 @@ impl QueryBoundSecondary {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Data structure storing the query bounds specified in the query for primary and secondary index
 pub struct QueryBounds {
     min_query_primary: U256,
