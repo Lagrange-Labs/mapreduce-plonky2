@@ -1,11 +1,11 @@
-use alloy::primitives::U256;
-use anyhow::Result;
-use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
+use crate::assembler::{assemble_dynamic, DynamicCircuitPis};
 use crate::{
     symbols::FileContextProvider,
     utils::{parse_and_validate, ParsilSettings, PlaceholderSettings},
 };
-use crate::assembler::{assemble_dynamic, DynamicCircuitPis};
+use alloy::primitives::U256;
+use anyhow::Result;
+use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
 /// NOTE: queries that may bother us in the future
 const CAREFUL: &[&str] = &[
@@ -121,7 +121,12 @@ fn test_serde_circuit_pis() {
 
     let q = "SELECT foo FROM table2";
     let query = parse_and_validate(q, &settings).unwrap();
-    let pis = assemble_dynamic(&query, &settings, &Placeholders::new_empty(U256::from(10), U256::from(20))).unwrap();
+    let pis = assemble_dynamic(
+        &query,
+        &settings,
+        &Placeholders::new_empty(U256::from(10), U256::from(20)),
+    )
+    .unwrap();
 
     let serialized = serde_json::to_vec(&pis).unwrap();
     let deserialized: DynamicCircuitPis = serde_json::from_slice(&serialized).unwrap();

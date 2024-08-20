@@ -9,8 +9,8 @@
 use alloy::primitives::U256;
 use anyhow::*;
 use log::warn;
-use serde::{Deserialize, Serialize};
 use mp2_common::{array::ToField, F};
+use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Query, Select,
     SelectItem, SetExpr, TableAlias, TableFactor, UnaryOperator, Value,
