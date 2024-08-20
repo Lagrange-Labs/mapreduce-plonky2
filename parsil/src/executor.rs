@@ -157,11 +157,12 @@ struct RowFetcher<'a, C: ContextProvider> {
     largest_placeholder: usize,
 }
 impl<'a, C: ContextProvider> RowFetcher<'a, C> {
-    fn new(settings: &'a ParsilSettings<C>, largest_placeholder: usize) -> Self {
-        Self {
+    fn new(query: &mut Query, settings: &'a ParsilSettings<C>) -> Result<Self> {
+        let largest_placeholder = placeholders::validate(settings, query)?;
+        Ok(Self {
             settings,
             largest_placeholder,
-        }
+        })
     }
 
     fn process(&mut self, query: &mut Query) -> Result<()> {
@@ -334,11 +335,12 @@ struct Executor<'a, C: ContextProvider> {
     largest_placeholder: usize,
 }
 impl<'a, C: ContextProvider> Executor<'a, C> {
-    fn new(settings: &'a ParsilSettings<C>, largest_placeholder: usize) -> Self {
-        Self {
+    fn new(query: &mut Query, settings: &'a ParsilSettings<C>) -> Result<Self> {
+        let largest_placeholder = placeholders::validate(settings, query)?;
+        Ok(Self {
             settings,
             largest_placeholder,
-        }
+        })
     }
 }
 
@@ -499,13 +501,11 @@ pub fn generate_query_execution<C: ContextProvider>(
     query: &mut Query,
     settings: &ParsilSettings<C>,
 ) -> Result<TranslatedQuery> {
-    let largest_placeholder = placeholders::validate(settings, query)?;
-
-    let mut executor = Executor::new(settings, largest_placeholder);
+    let mut executor = Executor::new(query, settings)?;
     let mut query_execution = query.clone();
     query_execution.visit(&mut executor)?;
 
-    let placeholder_mapping = (1..=largest_placeholder)
+    let placeholder_mapping = (1..=executor.largest_placeholder)
         .map(|i| PlaceholderId::Generic(i))
         .chain(std::iter::once(PlaceholderId::MinQueryOnIdx1))
         .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
@@ -523,9 +523,7 @@ pub fn generate_query_keys<C: ContextProvider>(
     query: &mut Query,
     settings: &ParsilSettings<C>,
 ) -> Result<Query> {
-    let largest_placeholder = placeholders::validate(settings, query)?;
-
-    let mut pis = RowFetcher::new(settings, largest_placeholder);
+    let mut pis = RowFetcher::new(query, settings)?;
     let mut query_pis = query.clone();
     pis.process(&mut query_pis)?;
     info!("PIs: {query_pis}");
