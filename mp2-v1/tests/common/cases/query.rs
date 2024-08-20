@@ -41,7 +41,12 @@ use mp2_v1::{
     values_extraction::identifier_block_column,
 };
 use parsil::{
-    assembler::{CircuitPis, DynamicCircuitPis, StaticCircuitPis}, executor::TranslatedQuery, parse_and_validate, symbols::ContextProvider, ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER
+    assembler::{CircuitPis, DynamicCircuitPis, StaticCircuitPis},
+    executor::TranslatedQuery,
+    parse_and_validate,
+    symbols::ContextProvider,
+    ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
+    DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{
@@ -124,12 +129,16 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
 }
 
 /// Run a test query on the mapping table such as created during the indexing phase
-async fn test_query_mapping(ctx: &mut TestContext, table: &Table, query_info: QueryCooking) -> Result<()> {
+async fn test_query_mapping(
+    ctx: &mut TestContext,
+    table: &Table,
+    query_info: QueryCooking,
+) -> Result<()> {
     let settings = ParsilSettings {
         context: table,
         placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
     };
-    
+
     info!("QUERY on the testcase: {}", query_info.query);
     let mut parsed = parse_and_validate(&query_info.query, &settings)?;
     println!("QUERY table columns -> {:?}", table.columns.to_zkcolumns());
@@ -142,10 +151,7 @@ async fn test_query_mapping(ctx: &mut TestContext, table: &Table, query_info: Qu
     let exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
     let query_params = exec_query.convert_placeholders(&query_info.placeholders);
     let res = table
-        .execute_row_query(
-            &exec_query.query.to_string(),
-            &query_params,
-        )
+        .execute_row_query(&exec_query.query.to_string(), &query_params)
         .await?;
     info!(
         "Found {} results from query {}",
@@ -157,9 +163,17 @@ async fn test_query_mapping(ctx: &mut TestContext, table: &Table, query_info: Qu
     let all_touched_rows = table
         .execute_row_query(&rows_query.to_string(), &query_params)
         .await?;
-    prove_query(ctx, table, query_info, parsed, &settings, all_touched_rows, res)
-        .await
-        .expect("unable to run universal query proof");
+    prove_query(
+        ctx,
+        table,
+        query_info,
+        parsed,
+        &settings,
+        all_touched_rows,
+        res,
+    )
+    .await
+    .expect("unable to run universal query proof");
     Ok(())
 }
 
@@ -485,7 +499,13 @@ where
             // For the index tree however, we need to always generate an aggregate proof
             // unwrap is safe since we are a leaf and therefore there is an embedded proof since we
             // are guaranteed the row is satisfying the query
-            info.save_proof(&mut planner.ctx, &query_id, primary, &k, embedded_proof.unwrap())?;
+            info.save_proof(
+                &mut planner.ctx,
+                &query_id,
+                primary,
+                &k,
+                embedded_proof.unwrap(),
+            )?;
             proven_nodes.insert(k);
             workplan.done(&wk)?;
             continue;
@@ -547,10 +567,18 @@ where
                 // child(ren) and current node belong to query
                 if node_ctx.left.is_some() && node_ctx.right.is_some() {
                     // full node case
-                    let left_proof =
-                        info.load_proof(planner.ctx, &query_id, primary, node_ctx.left.as_ref().unwrap())?;
-                    let right_proof =
-                        info.load_proof(planner.ctx, &query_id, primary, node_ctx.right.as_ref().unwrap())?;
+                    let left_proof = info.load_proof(
+                        planner.ctx,
+                        &query_id,
+                        primary,
+                        node_ctx.left.as_ref().unwrap(),
+                    )?;
+                    let right_proof = info.load_proof(
+                        planner.ctx,
+                        &query_id,
+                        primary,
+                        node_ctx.right.as_ref().unwrap(),
+                    )?;
                     QueryCircuitInput::new_full_node(
                         left_proof,
                         right_proof,
@@ -581,7 +609,10 @@ where
                 }
             }
         };
-        if info.load_proof(planner.ctx, &query_id, primary, &k).is_err() {
+        if info
+            .load_proof(planner.ctx, &query_id, primary, &k)
+            .is_err()
+        {
             info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
             let proof = planner
                 .ctx
@@ -704,8 +735,11 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
         if self.is_satisfying_query(k) {
             // load the proof of the row root for this query
             // We assume it is already proven, otherwise, there is a flaw in the logic
-            let row_root_proof_key =
-                ProofKey::QueryAggregateRow((planner.query.query.clone(), k.clone(), v.row_tree_root_key.clone()));
+            let row_root_proof_key = ProofKey::QueryAggregateRow((
+                planner.query.query.clone(),
+                k.clone(),
+                v.row_tree_root_key.clone(),
+            ));
             let proof = planner
                 .ctx
                 .storage
@@ -961,26 +995,18 @@ async fn find_longest_lived_key(table: &Table) -> Result<(RowTreeKey, BlockRange
     let (longest_sequence, starting) = find_longest_consecutive_sequence(epochs.to_vec());
     let min_block = starting as BlockPrimaryIndex;
     let max_block = min_block + longest_sequence;
-    Ok((
-        longest_key.clone(),
-        (
-            min_block,
-            max_block,
-        )
-    ))
+    Ok((longest_key.clone(), (min_block, max_block)))
 }
 
-// cook up a SQL query on the secondary index and with a predicate on the non-indexed column. 
+// cook up a SQL query on the secondary index and with a predicate on the non-indexed column.
 // we just iterate on mapping keys and take the one that exist for most blocks. We also choose
-// a value to filter over the non-indexed column 
+// a value to filter over the non-indexed column
 async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
         "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block,
-        max_block,
-        key_value
+        min_block, max_block, key_value
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
@@ -990,22 +1016,14 @@ async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCo
 
     let filtering_value = *BASE_VALUE + U256::from(5);
 
-    let placeholders = Placeholders::from(
-        (
-            vec![
-                (
-                    PlaceholderId::Generic(1),
-                    longest_key.value,
-                ),
-                (
-                    PlaceholderId::Generic(2),
-                    filtering_value,
-                )
-            ],
-            U256::from(min_block),
-            U256::from(max_block)
-        )
-    );
+    let placeholders = Placeholders::from((
+        vec![
+            (PlaceholderId::Generic(1), longest_key.value),
+            (PlaceholderId::Generic(2), filtering_value),
+        ],
+        U256::from(min_block),
+        U256::from(max_block),
+    ));
 
     let query_str = format!(
         "SELECT AVG({value_column})
@@ -1029,9 +1047,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
         "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block,
-        max_block,
-        key_value
+        min_block, max_block, key_value
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();

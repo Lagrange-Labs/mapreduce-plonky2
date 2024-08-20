@@ -16,7 +16,10 @@ use mp2_v1::indexing::{
     row::{CellCollection, Row, RowTreeKey},
     ColumnID,
 };
-use parsil::{executor::TranslatedQuery, symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable}};
+use parsil::{
+    executor::TranslatedQuery,
+    symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable},
+};
 use plonky2::field::types::Field;
 use ryhope::{
     storage::{
@@ -33,9 +36,14 @@ use ryhope::{
 use serde::{Deserialize, Serialize};
 use std::{hash::Hash, iter::once};
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql};
-use verifiable_db::query::{computational_hash_ids::PlaceholderIdentifier, universal_circuit::universal_circuit_inputs::{ColumnCell, Placeholders}};
+use verifiable_db::query::{
+    computational_hash_ids::PlaceholderIdentifier,
+    universal_circuit::universal_circuit_inputs::{ColumnCell, Placeholders},
+};
 
-use super::{cases::query::SqlReturn, index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
+use super::{
+    cases::query::SqlReturn, index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier,
+};
 
 pub type TableID = String;
 
@@ -425,22 +433,22 @@ impl Table {
         Ok(IndexUpdateResult { plan })
     }
 
-    pub async fn execute_row_query(
-        &self,
-        query: &str,
-        params: &[U256],
-    ) -> Result<Vec<PsqlRow>> {
+    pub async fn execute_row_query(&self, query: &str, params: &[U256]) -> Result<Vec<PsqlRow>> {
         // introduce this closure to coerce each param to have type `dyn ToSql + Sync` (required by pgSQL APIs)
-        let prepare_param = |param: U256| -> Box<dyn ToSql + Sync> {
-            Box::new(param)
-        };
-        let query_params = params.into_iter()
-        .map(|param| 
-            prepare_param(*param)
-        ).collect_vec();
+        let prepare_param = |param: U256| -> Box<dyn ToSql + Sync> { Box::new(param) };
+        let query_params = params
+            .into_iter()
+            .map(|param| prepare_param(*param))
+            .collect_vec();
         let connection = self.db_pool.get().await.unwrap();
         let res = connection
-            .query(query, &query_params.iter().map(|param| param.as_ref()).collect_vec())
+            .query(
+                query,
+                &query_params
+                    .iter()
+                    .map(|param| param.as_ref())
+                    .collect_vec(),
+            )
             .await
             .context("while fetching current epoch")?;
         Ok(res)
