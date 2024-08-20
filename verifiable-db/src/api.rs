@@ -25,7 +25,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitData, VerifierOnlyCircuitData},
-        config::Hasher,
+        config::{Hasher, PoseidonGoldilocksConfig},
     },
 };
 use recursion_framework::framework::{
@@ -131,6 +131,8 @@ struct ParamsInfo {
     preprocessing_vk: VerifierOnlyCircuitData<C, D>,
 }
 
+type WrapC = PoseidonGoldilocksConfig;
+
 #[derive(Serialize, Deserialize)]
 /// Wrapper circuit around the different type of revelation circuits we expose. Reason we need one is to be able
 /// to always keep the same succinct wrapper circuit and Groth16 circuit regardless of the end result we submit
@@ -142,7 +144,7 @@ struct WrapCircuitParams<
 > {
     query_verifier_wires: RecursiveCircuitsVerifierTarget<D>,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    circuit_data: CircuitData<F, C, D>,
+    circuit_data: CircuitData<F, WrapC, D>,
 }
 
 impl<
@@ -191,7 +193,7 @@ where
         serialize_proof(&proof)
     }
 
-    pub fn circuit_data(&self) -> &CircuitData<F, C, D> {
+    pub fn circuit_data(&self) -> &CircuitData<F, WrapC, D> {
         &self.circuit_data
     }
 }
