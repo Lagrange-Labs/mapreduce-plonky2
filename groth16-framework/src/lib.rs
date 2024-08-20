@@ -65,6 +65,8 @@
 //!    groth16_verifier.verify(groth16_proof2);
 //!    ``
 
+use plonky2::plonk::config::PoseidonGoldilocksConfig;
+
 mod compiler;
 mod evm;
 mod proof;
@@ -95,12 +97,14 @@ pub use verifier::{
     groth16::Groth16Verifier,
 };
 
+pub type C = PoseidonGoldilocksConfig;
+
 // Reference more test cases in the `tests` folder.
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_utils::test_groth16_proving_and_verification;
-    use mp2_common::{proof::serialize_proof, C, D, F};
+    use mp2_common::{proof::serialize_proof, D, F};
     use plonky2::{
         field::types::Field,
         iop::witness::{PartialWitness, WitnessWrite},

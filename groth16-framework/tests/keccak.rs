@@ -1,14 +1,14 @@
 //! Test the Groth16 proving process for the Keccak circuit.
 
 use groth16_framework::{
-    compile_and_generate_assets, test_utils::test_groth16_proving_and_verification,
+    compile_and_generate_assets, test_utils::test_groth16_proving_and_verification, C,
 };
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit},
     mpt_sequential::PAD_LEN,
     proof::serialize_proof,
-    C, D, F,
+    D, F,
 };
 use plonky2::{
     field::types::Field,

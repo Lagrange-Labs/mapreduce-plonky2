@@ -1,9 +1,9 @@
 //! Test the Groth16 proving process for the Group Hashing circuit.
 
 use groth16_framework::{
-    compile_and_generate_assets, test_utils::test_groth16_proving_and_verification,
+    compile_and_generate_assets, test_utils::test_groth16_proving_and_verification, C,
 };
-use mp2_common::{group_hashing::CircuitBuilderGroupHashing, proof::serialize_proof, C, D, F};
+use mp2_common::{group_hashing::CircuitBuilderGroupHashing, proof::serialize_proof, D, F};
 use plonky2::{
     field::types::Field,
     iop::witness::{PartialWitness, WitnessWrite},

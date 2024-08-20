@@ -1,10 +1,11 @@
 //! Utility functions
 
+use crate::C;
 use alloy::primitives::U256;
 use anyhow::{anyhow, Result};
 use mp2_common::{
     serialization::{FromBytes, ToBytes},
-    C, D, F,
+    D, F,
 };
 use plonky2::plonk::circuit_data::CircuitData;
 use std::{

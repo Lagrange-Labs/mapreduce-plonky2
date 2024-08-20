@@ -1,10 +1,13 @@
 //! Compile the circuit data and generate the asset files
 
-use crate::utils::{
-    serialize_circuit_data, write_file, CIRCUIT_DATA_FILENAME, SOLIDITY_VERIFIER_FILENAME,
+use crate::{
+    utils::{
+        serialize_circuit_data, write_file, CIRCUIT_DATA_FILENAME, SOLIDITY_VERIFIER_FILENAME,
+    },
+    C,
 };
 use anyhow::{anyhow, Result};
-use mp2_common::{C, D, F};
+use mp2_common::{D, F};
 use plonky2::plonk::{circuit_data::CircuitData, config::GenericHashOut};
 use plonky2x::backend::{
     circuit::{DefaultParameters, Groth16WrapperParameters},

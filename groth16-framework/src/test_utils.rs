@@ -4,10 +4,10 @@
 use crate::{
     prover::groth16::combine_proofs,
     utils::{hex_to_u256, read_file, write_file},
-    EVMVerifier, Groth16Proof, Groth16Prover, Groth16Verifier,
+    EVMVerifier, Groth16Proof, Groth16Prover, Groth16Verifier, C,
 };
 use alloy::{contract::Interface, dyn_abi::DynSolValue, json_abi::JsonAbi};
-use mp2_common::{proof::deserialize_proof, C, D, F};
+use mp2_common::{proof::deserialize_proof, D, F};
 use plonky2::plonk::proof::ProofWithPublicInputs;
 use std::path::Path;
 

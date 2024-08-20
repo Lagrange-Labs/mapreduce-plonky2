@@ -20,7 +20,7 @@ use serial_test::serial;
 use std::path::Path;
 
 /// Test proving for the query circuits.
-// #[ignore] // Ignore for long running time in CI.
+#[ignore] // Ignore for long running time in CI.
 #[serial]
 #[test]
 fn test_groth16_proving_for_query() {
@@ -57,7 +57,7 @@ fn verify_query_in_solidity(asset_dir: &str) {
     // Build the contract interface for encoding the verification input.
     let abi = JsonAbi::parse(["function processQuery( \
             bytes32[], \
-            tuple(uint64, uint64, uint64, uint64, bytes32, bytes32, uint256[]) \
+            tuple(uint32, uint32, uint64, uint64, bytes32, bytes32, uint256[]) \
         ) public view returns (tuple(uint256, bytes[]))"])
     .unwrap();
     let contract = Interface::new(abi);
@@ -81,8 +81,8 @@ fn verify_query_in_solidity(asset_dir: &str) {
 
     // Construct the testing query input argument.
     let query_input = DynSolValue::Tuple(vec![
-        DynSolValue::Uint(U256::from(query_input.query_limit), 64),
-        DynSolValue::Uint(U256::from(query_input.query_offset), 64),
+        DynSolValue::Uint(U256::from(query_input.query_limit), 32),
+        DynSolValue::Uint(U256::from(query_input.query_offset), 32),
         DynSolValue::Uint(U256::from(query_input.min_block_number), 64),
         DynSolValue::Uint(U256::from(query_input.max_block_number), 64),
         DynSolValue::FixedBytes(query_input.block_hash, 32),

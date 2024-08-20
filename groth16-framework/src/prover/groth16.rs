@@ -3,10 +3,11 @@
 use crate::{
     proof::Groth16Proof,
     utils::{deserialize_circuit_data, hex_to_u256, read_file, CIRCUIT_DATA_FILENAME},
+    C,
 };
 use alloy::primitives::U256;
 use anyhow::Result;
-use mp2_common::{proof::deserialize_proof, C, D, F};
+use mp2_common::{proof::deserialize_proof, D, F};
 use plonky2::{
     field::types::PrimeField64,
     plonk::{circuit_data::CircuitData, proof::ProofWithPublicInputs},

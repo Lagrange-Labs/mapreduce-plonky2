@@ -4351,7 +4351,7 @@ source = "git+https://github.com/Lagrange-Labs/plonky2?branch=upstream#3c4cc3749
 [[package]]
 name = "plonky2x"
 version = "0.1.0"
-source = "git+https://github.com/Lagrange-Labs/succinctx?branch=use-poseidon2#0b59685570d7d5d735cdb4d022cfbcf4a166a12a"
+source = "git+https://github.com/Lagrange-Labs/succinctx?branch=fix-build#8580a6f3b205e9e898fdc6b4ac84b36a91ab2bfe"
 dependencies = [
  "anyhow",
  "array-macro",
@@ -4376,7 +4376,6 @@ dependencies = [
  "num-bigint 0.4.6",
  "plonky2",
  "plonky2x-derive",
- "poseidon2_plonky2",
  "rand",
  "reqwest 0.11.27",
  "serde",
@@ -4394,7 +4393,7 @@ dependencies = [
 [[package]]
 name = "plonky2x-derive"
 version = "0.1.0"
-source = "git+https://github.com/Lagrange-Labs/succinctx?branch=use-poseidon2#0b59685570d7d5d735cdb4d022cfbcf4a166a12a"
+source = "git+https://github.com/Lagrange-Labs/succinctx?branch=fix-build#8580a6f3b205e9e898fdc6b4ac84b36a91ab2bfe"
 dependencies = [
  "proc-macro2",
  "quote",
