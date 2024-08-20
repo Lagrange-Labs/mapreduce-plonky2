@@ -34,6 +34,7 @@ impl Benchmarker {
         if path.exists() {
             std::fs::remove_file(&path)?;
         }
+        File::create(path.clone())?;
         Ok(Self { csv_path: path })
     }
 
