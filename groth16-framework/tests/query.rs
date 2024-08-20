@@ -20,7 +20,7 @@ use serial_test::serial;
 use std::path::Path;
 
 /// Test proving for the query circuits.
-#[ignore] // Ignore for long running time in CI.
+// #[ignore] // Ignore for long running time in CI.
 #[serial]
 #[test]
 fn test_groth16_proving_for_query() {
