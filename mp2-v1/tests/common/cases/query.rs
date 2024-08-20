@@ -364,7 +364,13 @@ fn check_final_outputs(
         pis.bounds.max_query_secondary.clone(),
     )?;
     assert_eq!(
-        HashOutput::try_from(revelation_pis.computational_hash().to_bytes())?,
+        HashOutput::try_from(
+            revelation_pis
+                .flat_computational_hash()
+                .iter()
+                .flat_map(|f| u32::try_from(f.to_canonical_u64()).unwrap().to_be_bytes())
+                .collect_vec()
+        )?,
         expected_computational_hash,
     );
     // check num placeholders

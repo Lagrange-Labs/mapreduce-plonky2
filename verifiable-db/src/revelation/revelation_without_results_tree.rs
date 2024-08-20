@@ -1,10 +1,10 @@
 //! The revelation circuit handling the queries where we don't need to build the results tree
 
 use crate::{
-    ivc::{PublicInputs as OriginalTreePublicInputs, NUM_IO},
+    ivc::PublicInputs as OriginalTreePublicInputs,
     query::{
         computational_hash_ids::AggregationOperation,
-        public_inputs::PublicInputs as QueryProofPublicInputs, PI_LEN,
+        public_inputs::PublicInputs as QueryProofPublicInputs,
     },
     revelation::{placeholders_check::check_placeholders, PublicInputs},
 };
@@ -14,7 +14,7 @@ use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     default_config,
-    poseidon::H,
+    poseidon::{flatten_poseidon_hash_target, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{
@@ -34,7 +34,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::VerifierOnlyCircuitData,
-        config::{GenericConfig, Hasher},
+        config::Hasher,
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -152,7 +152,6 @@ where
         original_tree_proof: &OriginalTreePublicInputs<Target>,
     ) -> RevelationWithoutResultsTreeWires<L, S, PH, PP> {
         let zero = b.zero();
-        let one = b.one();
         let u256_zero = b.zero_u256();
 
         let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_safe());
@@ -252,18 +251,23 @@ where
         let overflow = b.is_not_equal(overflow, zero).target;
 
         let num_results = b.not(is_entry_count_zero);
+
+        let flat_computational_hash = flatten_poseidon_hash_target(b, computational_hash);
+
         // Register the public innputs.
         PublicInputs::<_, L, S, PH>::new(
             &original_tree_proof.block_hash(),
-            &computational_hash.to_targets(),
-            &[num_placeholders],
+            &flat_computational_hash,
             &placeholder_values_slice,
-            &[query_proof.num_matching_rows_target()],
-            &[overflow],
+            &results_slice,
+            &[num_placeholders],
             // The aggregation query proof only has one result.
             &[num_results.target],
-            &results_slice,
+            &[query_proof.num_matching_rows_target()],
+            &[overflow],
+            // Query limit
             &[zero],
+            // Query offset
             &[zero],
         )
         .register(b);
@@ -396,18 +400,11 @@ mod tests {
         },
         revelation::tests::{
             compute_results_from_query_proof, random_original_tree_proof, TestPlaceholders,
-            ORIGINAL_TREE_PI_LEN,
         },
     };
-    use mp2_common::{utils::ToFields, C, D};
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
-    use plonky2::{
-        field::types::{Field, PrimeField64},
-        plonk::config::Hasher,
-    };
+    use mp2_common::{poseidon::flatten_poseidon_hash_value, utils::ToFields, C, D};
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::{field::types::Field, plonk::config::Hasher};
     use rand::{prelude::SliceRandom, thread_rng, Rng};
 
     // L: maximum number of results
@@ -454,7 +451,7 @@ mod tests {
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let query_proof = b.add_virtual_target_arr::<QUERY_PI_LEN>().to_vec();
-            let original_tree_proof = b.add_virtual_target_arr::<ORIGINAL_TREE_PI_LEN>().to_vec();
+            let original_tree_proof = b.add_virtual_target_arr::<NUM_PREPROCESSING_IO>().to_vec();
 
             let query_pi = QueryProofPublicInputs::from_slice(&query_proof);
             let original_tree_pi = OriginalTreePublicInputs::from_slice(&original_tree_proof);
@@ -551,7 +548,10 @@ mod tests {
                 .collect_vec();
             let exp_hash = H::hash_no_pad(&inputs);
 
-            assert_eq!(pi.computational_hash(), exp_hash);
+            assert_eq!(
+                pi.flat_computational_hash(),
+                flatten_poseidon_hash_value(exp_hash),
+            );
         }
         // Number of placeholders
         assert_eq!(

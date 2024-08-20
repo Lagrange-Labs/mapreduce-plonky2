@@ -355,13 +355,9 @@ mod tests {
                 AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
             },
             public_inputs::{PublicInputs as QueryPI, QueryPublicInputs},
-            universal_circuit::{
-                universal_circuit_inputs::{
-                    BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders,
-                    ResultStructure, RowCells,
-                },
-                universal_query_circuit::placeholder_hash,
-                PlaceholderHash,
+            universal_circuit::universal_circuit_inputs::{
+                BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders,
+                ResultStructure, RowCells,
             },
         },
         revelation::{
@@ -376,7 +372,12 @@ mod tests {
         init_logging();
         const MAX_NUM_OUTPUTS: usize = 3;
         const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
-        const MAX_NUM_PLACEHOLDERS: usize = 15;
+        // NOTE: Since the revelation public inputs is extended by flattening the
+        // computational hash (increasing 4 fields). This constant cannot be greater
+        // than 14, otherwise it causes infinite loop when building parameters.
+        // We could also adjust other generic parameters (as MAX_NUM_OUTPUTS) to
+        // restrict the length of revelation public inputs.
+        const MAX_NUM_PLACEHOLDERS: usize = 14;
         const MAX_NUM_COLUMNS: usize = 20;
         const MAX_NUM_PREDICATE_OPS: usize = 20;
         const MAX_NUM_RESULT_OPS: usize = 20;
@@ -417,7 +418,7 @@ mod tests {
             column_cells[1].clone(),
             column_cells[2..].to_vec(),
         );
-        let placeholder_ids = [0, 1].map(|i| PlaceholderIdentifier::Generic(i));
+        let placeholder_ids = [0, 1].map(PlaceholderIdentifier::Generic);
         let predicate_operations = vec![
             // C4 < $2
             BasicOperation::new_binary_operation(
@@ -597,7 +598,13 @@ mod tests {
         .unwrap();
         // then, check that it is the same exposed by the proof
         assert_eq!(
-            HashOutput::try_from(pi.computational_hash().to_bytes()).unwrap(),
+            HashOutput::try_from(
+                pi.flat_computational_hash()
+                    .iter()
+                    .flat_map(|f| u32::try_from(f.to_canonical_u64()).unwrap().to_be_bytes())
+                    .collect_vec()
+            )
+            .unwrap(),
             computational_hash,
         )
     }

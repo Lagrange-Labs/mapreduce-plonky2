@@ -20,8 +20,9 @@ pub fn weierstrass_to_point(w: &WeierstrassPoint) -> Point {
     p
 }
 
+/// Generate a random Uint256.
 pub fn gen_random_u256<R: Rng>(rng: &mut R) -> U256 {
-    U256::from_limbs(rng.gen::<[u64; 4]>())
+    U256::from_limbs(rng.gen())
 }
 
 pub fn gen_random_field_hash<F: RichField>() -> HashOut<F> {
