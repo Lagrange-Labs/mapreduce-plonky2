@@ -1,6 +1,6 @@
 //! Storage trie for proving tests
 
-use super::{proof_storage::ProofStorage, TestContext};
+use super::{benchmarker::Benchmarker, proof_storage::ProofStorage, TestContext};
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
@@ -37,6 +37,7 @@ struct ProvingContext<'a> {
     params: &'a PublicParameters,
     slots: &'a HashMap<RawNode, StorageSlot>,
     variable_slot: Option<u8>,
+    b: &'a Benchmarker,
 }
 
 impl<'a> ProvingContext<'a> {
@@ -46,12 +47,14 @@ impl<'a> ProvingContext<'a> {
         params: &'a PublicParameters,
         slots: &'a HashMap<RawNode, StorageSlot>,
         variable_slot: Option<u8>,
+        bench: &'a Benchmarker,
     ) -> Self {
         Self {
             contract_address,
             params,
             slots,
             variable_slot,
+            b: bench,
         }
     }
 
@@ -167,7 +170,11 @@ impl TrieNode {
         let input = CircuitInput::ValuesExtraction(input);
 
         // Generate the proof.
-        generate_proof(ctx.params, input).unwrap()
+        ctx.b
+            .bench("indexing::extraction::mpt::branch", || {
+                generate_proof(ctx.params, input)
+            })
+            .unwrap()
     }
 
     /// Prove an extension node.
@@ -185,7 +192,11 @@ impl TrieNode {
         let input = CircuitInput::ValuesExtraction(input);
 
         // Generate the proof.
-        generate_proof(ctx.params, input).unwrap()
+        ctx.b
+            .bench("indexing::extraction::mpt::extension", || {
+                generate_proof(ctx.params, input)
+            })
+            .unwrap()
     }
 
     /// Prove a leaf node.
@@ -217,7 +228,13 @@ impl TrieNode {
         let input = CircuitInput::ValuesExtraction(input);
 
         // Generate the proof.
-        let proof = generate_proof(ctx.params, input).unwrap();
+
+        let proof = ctx
+            .b
+            .bench("indexing::extraction::mpt::leaf", || {
+                generate_proof(ctx.params, input)
+            })
+            .unwrap();
         let pproof = ProofWithVK::deserialize(&proof).unwrap();
         let pi = mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
         let list: Vec<Vec<u8>> = rlp::decode_list(&node);
@@ -282,7 +299,11 @@ impl TrieNode {
         let input = CircuitInput::LengthExtraction(input);
 
         // Generate the proof.
-        generate_proof(ctx.params, input).unwrap()
+        ctx.b
+            .bench("indexing::extraction::length::branch", || {
+                generate_proof(ctx.params, input)
+            })
+            .unwrap()
     }
 
     /// Prove an extension node.
@@ -301,7 +322,11 @@ impl TrieNode {
         let input = CircuitInput::LengthExtraction(input);
 
         // Generate the proof.
-        generate_proof(ctx.params, input).unwrap()
+        ctx.b
+            .bench("indexing::extraction::length::extension", || {
+                generate_proof(ctx.params, input)
+            })
+            .unwrap()
     }
 }
 
@@ -390,8 +415,15 @@ impl TestStorageTrie {
         contract_address: &Address,
         variable_slot: u8,
         params: &PublicParameters,
+        b: &Benchmarker,
     ) -> ProofWithVK {
-        let ctx = ProvingContext::new(contract_address, params, &self.slots, Some(variable_slot));
+        let ctx = ProvingContext::new(
+            contract_address,
+            params,
+            &self.slots,
+            Some(variable_slot),
+            b,
+        );
 
         // Must prove with 1 slot at least.
         let proof = self.root.as_ref().unwrap().prove_length(ctx);
@@ -404,8 +436,9 @@ impl TestStorageTrie {
         &self,
         contract_address: &Address,
         params: &PublicParameters,
+        b: &Benchmarker,
     ) -> ProofWithVK {
-        let ctx = ProvingContext::new(contract_address, params, &self.slots, None);
+        let ctx = ProvingContext::new(contract_address, params, &self.slots, None, b);
 
         // Must prove with 1 slot at least.
         let proof = self.root.as_ref().unwrap().prove_value(ctx);
