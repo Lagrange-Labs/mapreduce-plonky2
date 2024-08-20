@@ -13,11 +13,6 @@ pub struct Benchmarker {
     csv_path: PathBuf,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, Clone)]
-struct Record {
-    name: String,
-    time: u128,
-}
 const DEFAULT_BENCH_FILE: &str = "bench.csv";
 
 impl Benchmarker {
@@ -32,10 +27,9 @@ impl Benchmarker {
     }
 
     pub fn new_from_path(path: PathBuf) -> Result<Self> {
-        if path.exists() {
-            std::fs::remove_file(&path)?;
-        }
-        File::create(path.clone())?;
+        let writer = File::options().append(true).open(&path)?;
+        let mut wtr = csv::Writer::from_writer(writer);
+        wtr.write_record(&["name", "time"]);
         info!("Benchmarker setup to write output in {:?}", path);
         Ok(Self { csv_path: path })
     }
@@ -52,13 +46,9 @@ impl Benchmarker {
     }
 
     pub fn write_to_csv(&self, name: &str, elapsed: u128) -> Result<()> {
-        let record = Record {
-            name: name.to_string(),
-            time: elapsed,
-        };
         let writer = File::options().append(true).open(&self.csv_path)?;
         let mut wtr = csv::Writer::from_writer(writer);
-        wtr.serialize(record)?;
+        wtr.write_record([name, &elapsed.to_string()])?;
         wtr.flush()?;
         Ok(())
     }
