@@ -695,9 +695,9 @@ contract Verifier {
     // The query input struct passed into the processQuery function
     struct QueryInput {
         // Query limit parameter
-        uint64 limit;
+        uint32 limit;
         // Query offset parameter
-        uint64 offset;
+        uint32 offset;
         // Minimum block number
         uint64 minBlockNumber;
         // Maximum block number
