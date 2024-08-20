@@ -27,6 +27,7 @@ alloy = { version = "0.2", default-features = false, features = [
   "transports",
   "transport-http",
   "reqwest",
+  "postgres",
 ] }
 anyhow = "1.0"
 base64 = "0.22"

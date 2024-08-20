@@ -10,9 +10,9 @@ use std::{
 };
 
 use crate::common::{
-    cases::indexing::BLOCK_COLUMN_NAME,
+    cases::indexing::{BASE_VALUE, BLOCK_COLUMN_NAME},
     index_tree::{IndexStorage, MerkleIndexTree},
-    proof_storage::ProofKey,
+    proof_storage::{ProofKey, QueryID},
     rowtree::{MerkleRowTree, RowStorage},
     table::TableColumns,
 };
@@ -41,11 +41,7 @@ use mp2_v1::{
     values_extraction::identifier_block_column,
 };
 use parsil::{
-    assembler::{CircuitPis, DynamicCircuitPis, StaticCircuitPis},
-    parse_and_validate,
-    symbols::ContextProvider,
-    ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
-    DEFAULT_MIN_BLOCK_PLACEHOLDER,
+    assembler::{CircuitPis, DynamicCircuitPis, StaticCircuitPis}, executor::TranslatedQuery, parse_and_validate, symbols::ContextProvider, ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER
 };
 use ryhope::{
     storage::{
@@ -118,13 +114,19 @@ pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Re
     }
     Ok(())
 }
-/// Run a test query on the mapping table such as created during the indexing phase
+
 async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
+    let query_info = cook_query(table).await?;
+    test_query_mapping(ctx, table, query_info).await
+}
+
+/// Run a test query on the mapping table such as created during the indexing phase
+async fn test_query_mapping(ctx: &mut TestContext, table: &Table, query_info: QueryCooking) -> Result<()> {
     let settings = ParsilSettings {
         context: table,
         placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
     };
-    let query_info = cook_query(table).await?;
+    
     info!("QUERY on the testcase: {}", query_info.query);
     let mut parsed = parse_and_validate(&query_info.query, &settings)?;
     println!("QUERY table columns -> {:?}", table.columns.to_zkcolumns());
@@ -135,11 +137,11 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
 
     // the query to use to actually get the outputs expected
     let exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
+    let query_params = exec_query.convert_placeholders(&query_info.placeholders);
     let res = table
         .execute_row_query(
             &exec_query.query.to_string(),
-            query_info.min_block, // - table.genesis_block as BlockPrimaryIndex + 1,
-            query_info.max_block, //- table.genesis_block as BlockPrimaryIndex + 1,
+            &query_params,
         )
         .await?;
     info!(
@@ -148,7 +150,11 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
         exec_query.query.to_string()
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
-    prove_query(ctx, table, query_info, parsed, &settings, res)
+    let rows_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
+    let all_touched_rows = table
+        .execute_row_query(&rows_query.to_string(), &query_params)
+        .await?;
+    prove_query(ctx, table, query_info, parsed, &settings, all_touched_rows, res)
         .await
         .expect("unable to run universal query proof");
     Ok(())
@@ -159,17 +165,13 @@ async fn prove_query(
     ctx: &mut TestContext,
     table: &Table,
     query: QueryCooking,
-    mut parsed: Query,
+    parsed: Query,
     settings: &ParsilSettings<&Table>,
+    all_touched_rows: Vec<PsqlRow>,
     res: Vec<PsqlRow>,
 ) -> Result<()> {
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
-
-    let rows_query = parsil::executor::generate_query_keys(&mut parsed, settings)?;
-    let all_touched_rows = table
-        .execute_row_query(&rows_query.to_string(), query.min_block, query.max_block)
-        .await?;
     // group the rows per block number
     let touched_rows = all_touched_rows
         .into_iter()
@@ -261,6 +263,7 @@ async fn prove_query(
         current_epoch as BlockPrimaryIndex,
     )
     .await?;
+    info!("Query proofs done! Generating revelation proof...");
     let proof = prove_revelation(ctx, table, &query, &pis, current_epoch).await?;
     info!("Revelation proof done! Checking public inputs...");
     // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
@@ -291,7 +294,7 @@ async fn prove_revelation(
     // load the query proof, which is at the root of the tree
     let query_proof = {
         let root_key = table.index.root_at(tree_epoch).await.unwrap();
-        let proof_key = ProofKey::QueryAggregateIndex(root_key);
+        let proof_key = ProofKey::QueryAggregateIndex((query.query.clone(), root_key));
         ctx.storage.get_proof_exact(&proof_key)?
     };
     // load the preprocessing proof at the same epoch
@@ -432,6 +435,7 @@ where
         + Send
         + Sync,
 {
+    let query_id = planner.query.query.clone();
     let mut workplan = update.into_workplan();
     let mut proven_nodes = HashSet::new();
     let fetch_only_proven_child = |nctx: NodeContext<<T as TreeTopology>::Key>,
@@ -455,7 +459,7 @@ where
             _ => panic!("stg's wrong in the tree"),
         };
         let child_proof = info
-            .load_proof(cctx, primary, &child_key)
+            .load_proof(cctx, &query_id, primary, &child_key)
             .expect("key should already been proven");
         (pos, child_proof)
     };
@@ -478,7 +482,7 @@ where
             // For the index tree however, we need to always generate an aggregate proof
             // unwrap is safe since we are a leaf and therefore there is an embedded proof since we
             // are guaranteed the row is satisfying the query
-            info.save_proof(&mut planner.ctx, primary, &k, embedded_proof.unwrap())?;
+            info.save_proof(&mut planner.ctx, &query_id, primary, &k, embedded_proof.unwrap())?;
             proven_nodes.insert(k);
             workplan.done(&wk)?;
             continue;
@@ -541,9 +545,9 @@ where
                 if node_ctx.left.is_some() && node_ctx.right.is_some() {
                     // full node case
                     let left_proof =
-                        info.load_proof(planner.ctx, primary, node_ctx.left.as_ref().unwrap())?;
+                        info.load_proof(planner.ctx, &query_id, primary, node_ctx.left.as_ref().unwrap())?;
                     let right_proof =
-                        info.load_proof(planner.ctx, primary, node_ctx.right.as_ref().unwrap())?;
+                        info.load_proof(planner.ctx, &query_id, primary, node_ctx.right.as_ref().unwrap())?;
                     QueryCircuitInput::new_full_node(
                         left_proof,
                         right_proof,
@@ -574,12 +578,12 @@ where
                 }
             }
         };
-        if info.load_proof(planner.ctx, primary, &k).is_err() {
+        if info.load_proof(planner.ctx, &query_id, primary, &k).is_err() {
             info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
             let proof = planner
                 .ctx
                 .run_query_proof(GlobalCircuitInput::Query(input))?;
-            info.save_proof(planner.ctx, primary, &k, proof)?;
+            info.save_proof(planner.ctx, &query_id, primary, &k, proof)?;
         }
         info!("Universal query proof DONE for {primary} -> {k:?} ");
         workplan.done(&wk)?;
@@ -626,12 +630,14 @@ where
     fn load_proof(
         &self,
         ctx: &TestContext,
+        query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &<T as TreeTopology>::Key,
     ) -> Result<Vec<u8>>;
     fn save_proof(
         &self,
         ctx: &mut TestContext,
+        query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &<T as TreeTopology>::Key,
         proof: Vec<u8>,
@@ -662,23 +668,25 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
     fn load_proof(
         &self,
         ctx: &TestContext,
+        query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
     ) -> Result<Vec<u8>> {
         //assert_eq!(primary, *key);
-        let proof_key = ProofKey::QueryAggregateIndex(*key);
+        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
     fn save_proof(
         &self,
         ctx: &mut TestContext,
+        query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
         proof: Vec<u8>,
     ) -> Result<()> {
         //assert_eq!(primary, *key);
-        let proof_key = ProofKey::QueryAggregateIndex(*key);
+        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -694,7 +702,7 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
             // load the proof of the row root for this query
             // We assume it is already proven, otherwise, there is a flaw in the logic
             let row_root_proof_key =
-                ProofKey::QueryAggregateRow((k.clone(), v.row_tree_root_key.clone()));
+                ProofKey::QueryAggregateRow((planner.query.query.clone(), k.clone(), v.row_tree_root_key.clone()));
             let proof = planner
                 .ctx
                 .storage
@@ -723,21 +731,23 @@ impl TreeInfo<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> for RowInfo {
     fn load_proof(
         &self,
         ctx: &TestContext,
+        query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
     ) -> Result<Vec<u8>> {
-        let proof_key = ProofKey::QueryAggregateRow((primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
     fn save_proof(
         &self,
         ctx: &mut TestContext,
+        query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
         proof: Vec<u8>,
     ) -> Result<()> {
-        let proof_key = ProofKey::QueryAggregateRow((primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -878,7 +888,7 @@ async fn prove_single_row(
     )
     .expect("unable to create universal query circuit inputs");
     // 3. run proof if not ran already
-    let proof_key = ProofKey::QueryUniversal((primary, row_key.clone()));
+    let proof_key = ProofKey::QueryUniversal((query.query.clone(), primary, row_key.clone()));
     let proof = {
         info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");
         let proof = ctx
@@ -897,15 +907,11 @@ struct QueryCooking {
     placeholders: Placeholders,
     min_block: BlockPrimaryIndex,
     max_block: BlockPrimaryIndex,
-    // At the moment it returns the row key selected and the epochs to run the circuit on
-    // This will get removed once we can serach through JSON in PSQL directly.
-    example_row: RowTreeKey,
-    epochs: Vec<Epoch>,
 }
 
-// cook up a SQL query on the secondary index. For that we just iterate on mapping keys and
-// take the one that exist for most blocks
-async fn cook_query(table: &Table) -> Result<QueryCooking> {
+type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
+
+async fn find_longest_lived_key(table: &Table) -> Result<(RowTreeKey, BlockRange)> {
     let mut all_table = HashMap::new();
     let max = table.row.current_epoch();
     let min = table.row.initial_epoch() + 1;
@@ -948,11 +954,29 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
                 max
             )
         });
+    // we set the block bounds
+    let (longest_sequence, starting) = find_longest_consecutive_sequence(epochs.to_vec());
+    let min_block = starting as BlockPrimaryIndex;
+    let max_block = min_block + longest_sequence;
+    Ok((
+        longest_key.clone(),
+        (
+            min_block,
+            max_block,
+        )
+    ))
+}
+
+// cook up a SQL query on the secondary index and with a predicate on the non-indexed column. 
+// we just iterate on mapping keys and take the one that exist for most blocks. We also choose
+// a value to filter over the non-indexed column 
+async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCooking> {
+    let (longest_key, (min_block, max_block)) = find_longest_lived_key(table).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> sequence of {:?} (sequence:  {:?}), hex -> {}",
-        find_longest_consecutive_sequence(epochs.clone()),
-        epochs,
+        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
+        min_block,
+        max_block,
         key_value
     );
     // now we can fetch the key that we want
@@ -960,11 +984,57 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     // Assuming this is mapping with only two columns !
     let value_column = table.columns.rest[0].name.clone();
     let table_name = table.row_table_name();
-    // we set the block bounds
-    let (longest_sequence, starting) = find_longest_consecutive_sequence(epochs.to_vec());
-    // TODO: careful about off by one error. -1 because tree epoch starts at 1
-    let min_block = starting as BlockPrimaryIndex;
-    let max_block = min_block + longest_sequence;
+
+    let filtering_value = *BASE_VALUE + U256::from(5);
+
+    let placeholders = Placeholders::from(
+        (
+            vec![
+                (
+                    PlaceholderId::Generic(1),
+                    longest_key.value,
+                ),
+                (
+                    PlaceholderId::Generic(2),
+                    filtering_value,
+                )
+            ],
+            U256::from(min_block),
+            U256::from(max_block)
+        )
+    );
+
+    let query_str = format!(
+        "SELECT AVG({value_column})
+                FROM {table_name}
+                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
+                AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
+                AND {key_column} = $1 AND {value_column} >= $2;"
+    );
+    Ok(QueryCooking {
+        min_block: min_block as BlockPrimaryIndex,
+        max_block: max_block as BlockPrimaryIndex,
+        query: query_str,
+        placeholders,
+    })
+}
+
+// cook up a SQL query on the secondary index. For that we just iterate on mapping keys and
+// take the one that exist for most blocks
+async fn cook_query(table: &Table) -> Result<QueryCooking> {
+    let (longest_key, (min_block, max_block)) = find_longest_lived_key(table).await?;
+    let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
+    info!(
+        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
+        min_block,
+        max_block,
+        key_value
+    );
+    // now we can fetch the key that we want
+    let key_column = table.columns.secondary.name.clone();
+    // Assuming this is mapping with only two columns !
+    let value_column = table.columns.rest[0].name.clone();
+    let table_name = table.row_table_name();
     // primary_min_placeholder = ".."
     // primary_max_placeholder = ".."
     // Address == $3 --> placeholders.hashmap empty, put in query bounds secondary_min = secondary_max = "$3""
@@ -1021,8 +1091,6 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        example_row: longest_key.clone(),
-        epochs: epochs.clone(),
     })
 }
 
@@ -1117,14 +1185,14 @@ pub enum SqlType {
 impl SqlType {
     pub fn extract(&self, row: &PsqlRow, idx: usize) -> SqlReturn {
         match self {
-            SqlType::Numeric => SqlReturn::Numeric(row.get::<_, rust_decimal::Decimal>(idx)),
+            SqlType::Numeric => SqlReturn::Numeric(row.get::<_, U256>(idx)),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum SqlReturn {
-    Numeric(rust_decimal::Decimal),
+    Numeric(U256),
 }
 
 fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) {
@@ -1136,6 +1204,7 @@ fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) {
         "{:?}",
         columns.iter().map(|c| c.name().to_string()).join(" | ")
     );
+    assert!(columns.len() > 0);
     for row in rows {
         println!("{:?}", types.extract(row, 0));
     }

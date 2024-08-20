@@ -1234,7 +1234,7 @@ static SHIFT: AtomicU64 = AtomicU64::new(0);
 
 use lazy_static::lazy_static;
 lazy_static! {
-    static ref BASE_VALUE: U256 = U256::from(10);
+    pub(crate) static ref BASE_VALUE: U256 = U256::from(10);
     static ref DEFAULT_ADDRESS: Address =
         Address::from_str("0xBA401cdAc1A3B6AEede21c9C4A483bE6c29F88C4").unwrap();
 }
