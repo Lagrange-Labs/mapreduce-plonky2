@@ -29,7 +29,7 @@ use super::{
     ComputationalHashTarget,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 /// Input wires for output component for queries without results aggregation
 pub struct InputWires<const MAX_NUM_RESULTS: usize> {
     /// Selectors employed to choose which item, among the inputs ones,

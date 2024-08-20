@@ -1,13 +1,11 @@
+use self::storages::{
+    CachedDbKvStore, CachedDbStore, DbConnector, NodeConnector, PayloadConnector,
+};
 use crate::storage::RoEpochKvStorage;
 use crate::tree::TreeTopology;
 use crate::{Epoch, InitSettings};
 use std::collections::HashSet;
 use std::fmt::Debug;
-use std::hash::Hash;
-
-use self::storages::{
-    CachedDbKvStore, CachedDbStore, DbConnector, NodeConnector, PayloadConnector,
-};
 
 use super::{EpochKvStorage, EpochStorage, PayloadStorage};
 use super::{FromSettings, TransactionalStorage, TreeStorage};
@@ -24,7 +22,7 @@ mod storages;
 
 /// A trait that must be implemented by a custom node key. This allows to
 /// (de)serialize any custom key to and fro a PgSQL BYTEA.
-pub trait ToFromBytea: Clone + Sync + Hash + Eq {
+pub trait ToFromBytea: Clone + Eq {
     /// Return the BYTEA representation of this type to be stored in a PgSQL
     /// column.
     fn to_bytea(&self) -> Vec<u8>;
@@ -191,13 +189,38 @@ where
                 Self::load_existing(&storage_settings.source, storage_settings.table).await
             }
             InitSettings::MustNotExist(tree_state) => {
-                Self::create_new(&storage_settings.source, storage_settings.table, tree_state).await
+                Self::create_new_at(
+                    &storage_settings.source,
+                    storage_settings.table,
+                    tree_state,
+                    0,
+                )
+                .await
+            }
+            InitSettings::MustNotExistAt(tree_state, epoch) => {
+                Self::create_new_at(
+                    &storage_settings.source,
+                    storage_settings.table,
+                    tree_state,
+                    epoch,
+                )
+                .await
             }
             InitSettings::Reset(tree_settings) => {
-                Self::reset(
+                Self::reset_at(
                     &storage_settings.source,
                     storage_settings.table,
                     tree_settings,
+                    0,
+                )
+                .await
+            }
+            InitSettings::ResetAt(tree_settings, initial_epoch) => {
+                Self::reset_at(
+                    &storage_settings.source,
+                    storage_settings.table,
+                    tree_settings,
+                    initial_epoch,
                 )
                 .await
             }
@@ -210,13 +233,16 @@ where
 /// initial state to the database, even if the tree is left empty.
 ///
 /// Fail if the DB query fails.
-async fn fetch_current_epoch(db: DBPool, table: &str) -> Result<i64> {
+async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64)> {
     let connection = db.get().await.unwrap();
     connection
-        .query_one(&format!("SELECT MAX(valid_until) FROM {table}_meta",), &[])
+        .query_one(
+            &format!("SELECT MIN(__valid_from), MAX(__valid_until) FROM {table}_meta",),
+            &[],
+        )
         .await
-        .map(|r| r.get(0))
-        .context("while fetching current epoch")
+        .map(|r| (r.get(0), r.get(1)))
+        .context("while fetching current epoch data")
 }
 
 impl<T, V> PgsqlStorage<T, V>
@@ -228,33 +254,34 @@ where
     T::State: Sync + Clone,
     NodeConnector: DbConnector<T::Key, T::Node>,
 {
-    /// Create a new tree storage and its associated table in the specified table.
+    /// Create a new tree storage with the given initial epoch and its
+    /// associated tables in the specified table.
     ///
     /// Will fail if the table already exists.
-    pub async fn create_new(
+    pub async fn create_new_at(
         db_src: &SqlServerConnection,
         table: String,
         tree_state: T::State,
+        epoch: Epoch,
     ) -> Result<Self> {
         let db_pool = Self::init_db_pool(db_src).await?;
 
         ensure!(
-            fetch_current_epoch(db_pool.clone(), &table).await.is_err(),
+            fetch_epoch_data(db_pool.clone(), &table).await.is_err(),
             "table `{table}` already exists"
         );
         Self::create_tables(db_pool.clone(), &table).await?;
 
-        let epoch = 0;
         let r = Self {
             table: table.clone(),
             db: db_pool.clone(),
             epoch,
             in_tx: false,
-            nodes: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
+            nodes: CachedDbKvStore::new(epoch, epoch, table.clone(), db_pool.clone()),
             state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
                 .await
                 .context("failed to store initial state")?,
-            data: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
+            data: CachedDbKvStore::new(epoch, epoch, table.clone(), db_pool.clone()),
         };
         Ok(r)
     }
@@ -265,7 +292,7 @@ where
     pub async fn load_existing(db_src: &SqlServerConnection, table: String) -> Result<Self> {
         let db_pool = Self::init_db_pool(db_src).await?;
 
-        let latest_epoch = fetch_current_epoch(db_pool.clone(), &table)
+        let (initial_epoch, latest_epoch) = fetch_epoch_data(db_pool.clone(), &table)
             .await
             .with_context(|| format!("table `{table}` does not exist"))?;
         info!("latest epoch is {latest_epoch}");
@@ -274,9 +301,14 @@ where
             table: table.clone(),
             db: db_pool.clone(),
             epoch: latest_epoch,
-            state: CachedDbStore::new(latest_epoch, table.clone(), db_pool.clone()),
-            nodes: CachedDbKvStore::new(latest_epoch, table.clone(), db_pool.clone()),
-            data: CachedDbKvStore::new(latest_epoch, table.clone(), db_pool.clone()),
+            state: CachedDbStore::new(initial_epoch, latest_epoch, table.clone(), db_pool.clone()),
+            nodes: CachedDbKvStore::new(
+                initial_epoch,
+                latest_epoch,
+                table.clone(),
+                db_pool.clone(),
+            ),
+            data: CachedDbKvStore::new(initial_epoch, latest_epoch, table.clone(), db_pool.clone()),
             in_tx: false,
         };
 
@@ -285,27 +317,42 @@ where
 
     /// Create a new tree storage and its associated table in the specified
     /// table, deleting it if it already exists.
-    pub async fn reset(
+    pub async fn reset_at(
         db_src: &SqlServerConnection,
         table: String,
         tree_state: T::State,
+        initial_epoch: Epoch,
     ) -> Result<Self> {
         let db_pool = Self::init_db_pool(db_src).await?;
 
         delete_storage_table(db_pool.clone(), &table).await?;
         Self::create_tables(db_pool.clone(), &table).await?;
-        let epoch = 0;
 
         let r = Self {
             table: table.clone(),
             db: db_pool.clone(),
-            epoch,
-            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
-                .await
-                .context("failed to store initial state")?,
+            epoch: initial_epoch,
+            state: CachedDbStore::with_value(
+                initial_epoch,
+                table.clone(),
+                db_pool.clone(),
+                tree_state,
+            )
+            .await
+            .context("failed to store initial state")?,
 
-            nodes: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
-            data: CachedDbKvStore::new(epoch, table.clone(), db_pool.clone()),
+            nodes: CachedDbKvStore::new(
+                initial_epoch,
+                initial_epoch,
+                table.clone(),
+                db_pool.clone(),
+            ),
+            data: CachedDbKvStore::new(
+                initial_epoch,
+                initial_epoch,
+                table.clone(),
+                db_pool.clone(),
+            ),
             in_tx: false,
         };
 
@@ -337,8 +384,8 @@ where
     /// transactions they went through, hence allowing to access any of them at
     /// any timestamp of choice. Its columns are:
     ///   - key: byte-serialized key of this row node in the tree;
-    ///   - valid_from: from which epoch this row is valid;
-    ///   - valid_until: up to which epoch this row is valid;
+    ///   - __valid_from: from which epoch this row is valid;
+    ///   - __valid_until: up to which epoch this row is valid;
     ///   - [tree-specific]: a set of columns defined by the tree DB connector
     ///     storing node-specific values depending on the tree implementation;
     ///   - [payload specific]: a column containing the payload of this node,
@@ -348,8 +395,8 @@ where
     /// historic data, but storing the underlying tree inner state instead of
     /// the nodes. Combined with the node table, it allows to rebuild the whole
     /// underlying tree at any timestamp. Its columns are:
-    ///   - valid_from: from which epoch this row is valid;
-    ///   - valid_until: up to which epoch this row is valid;
+    ///   - __valid_from: from which epoch this row is valid;
+    ///   - __valid_until: up to which epoch this row is valid;
     ///   - payload: a JSONB-serialized value representing the inner state of
     ///     the tree at the given epoch range.
     ///
@@ -368,10 +415,10 @@ where
                 &format!(
                     "CREATE TABLE {table} (
                    key          BYTEA NOT NULL,
-                   valid_from   BIGINT NOT NULL,
-                   valid_until  BIGINT DEFAULT -1,
+                   __valid_from   BIGINT NOT NULL,
+                   __valid_until  BIGINT DEFAULT -1,
                    {node_columns}
-                   UNIQUE (key, valid_from))"
+                   UNIQUE (key, __valid_from))"
                 ),
                 &[],
             )
@@ -384,8 +431,8 @@ where
             .execute(
                 &format!(
                     "CREATE TABLE {table}_meta (
-                   valid_from   BIGINT NOT NULL UNIQUE,
-                   valid_until  BIGINT DEFAULT -1,
+                   __valid_from   BIGINT NOT NULL UNIQUE,
+                   __valid_until  BIGINT DEFAULT -1,
                    payload      JSONB)"
                 ),
                 &[],
@@ -397,7 +444,7 @@ where
 
     async fn update_all(&self, db_tx: &tokio_postgres::Transaction<'_>) -> Result<()> {
         let update_all = format!(
-            "UPDATE {} SET valid_until=$1 WHERE valid_until=$2",
+            "UPDATE {} SET __valid_until=$1 WHERE __valid_until=$2",
             self.table
         );
 
@@ -417,7 +464,7 @@ where
         let rows = db_tx
             .query(
                 &format!(
-                    "UPDATE {} SET valid_until={} WHERE key=$1 AND valid_until={} RETURNING *",
+                    "UPDATE {} SET __valid_until={} WHERE key=$1 AND __valid_until={} RETURNING *",
                     self.table,
                     self.epoch,
                     self.epoch + 1
@@ -621,7 +668,7 @@ where
         let connection = self.db.get().await.unwrap();
         connection
             .query(
-                &format!("SELECT key FROM {} WHERE valid_from=$1", self.table),
+                &format!("SELECT key FROM {} WHERE __valid_from=$1", self.table),
                 &[&epoch],
             )
             .await

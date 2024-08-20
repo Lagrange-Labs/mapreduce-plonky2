@@ -1,29 +1,57 @@
 use anyhow::Result;
 
-use crate::prepare;
+use crate::{
+    symbols::FileContextProvider,
+    utils::{parse_and_validate, ParsilSettings, PlaceholderSettings},
+};
+
+/// NOTE: queries that may bother us in the future
+const CAREFUL: &[&str] = &[
+    // What to do if b.t is longer than a.x?
+    "SELECT x, (SELECT t AS tt FROM b) FROM a;",
+    // Double aliasing
+    "SELECT pipo.not_tt FROM (SELECT t AS tt FROM b) AS pipo (not_tt);",
+];
 
 #[test]
 fn must_accept() -> Result<()> {
+    let settings = ParsilSettings {
+        context: FileContextProvider::from_file("tests/context.json")?,
+        placeholders: PlaceholderSettings::with_freestanding(3),
+    };
+
     for q in [
-        "SELECT 25",
-        "SELECT q FROM pipo WHERE block = 3",
-        "SELECT q FROM pipo WHERE block IN (1, 2, 4)",
-        "SELECT q FROM pipo WHERE NOT block BETWEEN 12 AND 15",
+        // "SELECT 25",
+        "SELECT foo, bar FROM table2 WHERE block = 3",
+        "SELECT AVG(foo), MIN(bar) FROM table2 WHERE block = 3",
+        "SELECT foo FROM table2 WHERE block IN (1, 2, 4)",
+        "SELECT bar FROM table2 WHERE NOT block BETWEEN 12 AND 15",
+        "SELECT a, c FROM table2 AS tt (a, b, c)",
+        // "SELECT '0x1122334455667788990011223344556677889900112233445566778899001122'",
+        // "SELECT '0x'",
+        // "SELECT '1234567'",
+        // "SELECT '0b01001'",
+        // "SELECT '0o1234567'",
     ] {
-        prepare(q)?;
+        parse_and_validate(q, &settings)?;
     }
     Ok(())
 }
 
 #[test]
 fn must_reject() {
+    let settings = ParsilSettings {
+        context: FileContextProvider::from_file("tests/context.json").unwrap(),
+        placeholders: PlaceholderSettings::with_freestanding(3),
+    };
+
     for q in [
-        // Funcalls unsupported
-        "SELECT q FROM t WHERE SOME_FUNC(q)",
+        // Mixing aggregates and scalars
+        "SELECT q, MIN(r) FROM pipo WHERE block = 3",
         // Bitwise operators unsupported
-        "SELECT a & b FROM t WHERE SOME_FUNC(q)",
-        "SELECT a | b FROM t WHERE SOME_FUNC(q)",
-        "SELECT a ^ b FROM t WHERE SOME_FUNC(q)",
+        "SELECT a & b FROM t",
+        "SELECT a | b FROM t",
+        "SELECT a ^ b FROM t",
         // *LIKE unsupported
         "SELECT x FROM t WHERE x LIKE 'adsf%'",
         "SELECT x FROM t WHERE x ILIKE 'adsf%'",
@@ -38,7 +66,46 @@ fn must_reject() {
         // No ALL/ANY
         "SELECT a FROM t WHERE a = ALL (SELECT b FROM u)",
         "SELECT a FROM t WHERE a < ANY (SELECT b FROM u)",
+        // Too many ORDER BY
+        "SELECT * FROM t ORDER BY a, b, c",
+        // Too long
+        "SELECT '0x11223344556677889900112233445566778899001122334455667788990011223'",
+        // Unknown prefix
+        "SELECT '0t11223344556677889900112233445566778899001122334455667788990011223'",
+        // Invalid digit
+        "SELECT '0o12345678'",
     ] {
-        assert!(dbg!(prepare(q)).is_err())
+        assert!(dbg!(parse_and_validate(q, &settings)).is_err())
     }
+}
+
+#[test]
+fn must_resolve() -> Result<()> {
+    let settings = ParsilSettings {
+        context: FileContextProvider::from_file("tests/context.json")?,
+        placeholders: PlaceholderSettings::with_freestanding(3),
+    };
+    for q in [
+        "SELECT foo FROM table2",
+        "SELECT foo FROM table2 WHERE bar < 3",
+        "SELECT foo, * FROM table2",
+        "SELECT AVG(foo) FROM table2 WHERE block BETWEEN 43 and 68",
+        "SELECT foo, bar FROM table2 ORDER BY bar",
+        "SELECT foo, bar FROM table2 ORDER BY foo, bar",
+    ] {
+        parse_and_validate(q, &settings)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn ref_query() -> Result<()> {
+    let settings = ParsilSettings {
+        context: FileContextProvider::from_file("tests/context.json")?,
+        placeholders: PlaceholderSettings::with_freestanding(2),
+    };
+
+    let q = "SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99";
+    let query = parse_and_validate(q, &settings)?;
+    Ok(())
 }

@@ -12,6 +12,7 @@ use crate::{
 };
 use alloy::primitives::U256;
 use anyhow::Result;
+use log::info;
 use mp2_common::{
     default_config,
     poseidon::H,
@@ -134,7 +135,7 @@ struct ParamsInfo {
 /// Wrapper circuit around the different type of revelation circuits we expose. Reason we need one is to be able
 /// to always keep the same succinct wrapper circuit and Groth16 circuit regardless of the end result we submit
 /// onchain.
-pub struct WrapCircuitParams<
+struct WrapCircuitParams<
     const MAX_NUM_OUTPUTS: usize,
     const MAX_NUM_ITEMS_PER_OUTPUT: usize,
     const MAX_NUM_PLACEHOLDERS: usize,
@@ -153,7 +154,7 @@ where
     [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
-    pub fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
+    fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
         let mut builder = CircuitBuilder::new(default_config());
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<
             F,
@@ -177,7 +178,7 @@ where
         }
     }
 
-    pub fn generate_proof(
+    fn generate_proof(
         &self,
         revelation_circuit_set: &RecursiveCircuits<F, C, D>,
         query_proof: &ProofWithVK,
@@ -282,12 +283,15 @@ where
     pub fn build_params(preprocessing_params_info: &[u8]) -> Result<Self> {
         let params_info: ParamsInfo = bincode::deserialize(preprocessing_params_info)?;
         let query_params = QueryParams::build();
+        info!("Building the revelation circuit parameters...");
         let revelation_params = RevelationParams::build(
             query_params.get_circuit_set(),
             &params_info.preprocessing_circuit_set,
             &params_info.preprocessing_vk,
         );
+        info!("Building the final wrapping circuit parameters...");
         let wrap_circuit = WrapCircuitParams::build(revelation_params.get_circuit_set());
+        info!("All QUERY parameters built !");
         Ok(Self {
             query_params,
             revelation_params,

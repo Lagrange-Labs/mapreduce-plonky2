@@ -15,7 +15,7 @@ use mp2_common::{
 use mp2_v1::{
     api::{generate_proof, CircuitInput, PublicParameters},
     length_extraction,
-    values_extraction::{self, identifier_single_var_column},
+    values_extraction::{self},
 };
 use rand::{thread_rng, Rng};
 use rlp::{Prototype, Rlp};
@@ -353,9 +353,9 @@ impl TestStorageTrie {
 
     /// Query the contract at the provided address, fetch a proof using the context, and add it to
     /// the trie's slot.
-    pub(crate) async fn query_proof_and_add_slot<P: ProofStorage>(
+    pub(crate) async fn query_proof_and_add_slot(
         &mut self,
-        ctx: &TestContext<P>,
+        ctx: &TestContext,
         contract_address: &Address,
         slot: usize,
     ) {

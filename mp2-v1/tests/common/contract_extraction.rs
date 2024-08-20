@@ -21,7 +21,7 @@ use mp2_v1::{
 use plonky2::field::types::Field;
 use rlp::{Prototype, Rlp};
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     /// Generate the Contract Extraction (C.3) proof.
     pub(crate) async fn prove_contract_extraction(
         &self,

@@ -15,13 +15,30 @@ use plonky2::{
     plonk::config::{GenericHashOut, Hasher},
 };
 use ryhope::{storage::pgsql::ToFromBytea, tree::scapegoat, NodePayload};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use verifiable_db::query::universal_circuit::universal_circuit_inputs::ColumnCell;
 
 pub type RowTree = scapegoat::Tree<RowTreeKey>;
 pub type RowTreeKeyNonce = Vec<u8>;
 
 pub trait ToNonce {
     fn to_nonce(&self) -> RowTreeKeyNonce;
+}
+
+/// Serialize a U256 into its decimal representation
+fn u256_to_string<S: Serializer>(x: &U256, s: S) -> Result<S::Ok, S::Error> {
+    // U256 defaults to decimal stringization
+    s.serialize_str(&format!("{x}"))
+}
+
+/// Deserialize a U256 from its decimal representation
+fn string_to_u256<'de, D>(d: D) -> Result<U256, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    String::deserialize(d).and_then(|s| {
+        U256::from_str_radix(&s, 10).map_err(|e| serde::de::Error::custom(e.to_string()))
+    })
 }
 
 /// A unique identifier of a secondary-indexed row, from the secondary index value and an unique
@@ -63,6 +80,7 @@ impl RowTreeKey {
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct CellInfo<PrimaryIndex> {
     /// Value of the cell
+    #[serde(serialize_with = "u256_to_string", deserialize_with = "string_to_u256")]
     pub value: U256,
     /// The primary index under which this cell was proven to. In most cases it will be a block
     /// number.
@@ -253,7 +271,7 @@ impl<
                 ).to_fields())
                 .collect::<Vec<_>>();
         println!(
-            "\n--RYHOPE Row : id {:?}, value {:?} (empty hash{}) left_hash {:?}, right_hash {:?} min {:?}, max {:?}, tree_root_hash {:?}",
+            "\n--RYHOPE aggregate() Row : id {:?}, value {:?} (empty hash{}) left_hash {:?}, right_hash {:?} min {:?}, max {:?}, tree_root_hash {:?}",
             self.secondary_index_column,
             self.secondary_index_value(),
             left_hash == *empty_poseidon_hash(),
@@ -288,11 +306,32 @@ impl ToNonce for U256 {
     }
 }
 
+impl<PrimaryIndex> ToFromBytea for RowPayload<PrimaryIndex>
+where
+    PrimaryIndex: std::fmt::Debug
+        + PartialEq
+        + Eq
+        + Default
+        + Clone
+        + Sized
+        + Serialize
+        + for<'a> Deserialize<'a>,
+{
+    fn to_bytea(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap()
+    }
+
+    fn from_bytea(bytes: Vec<u8>) -> Self {
+        serde_json::from_slice(&bytes).expect("invalid row payload JSON in database")
+    }
+}
+
 impl ToFromBytea for RowTreeKey {
     fn to_bytea(&self) -> Vec<u8> {
-        self.to_bytes().unwrap()
+        serde_json::to_vec(self).expect("unable to serialize row key to json")
     }
+
     fn from_bytea(bytes: Vec<u8>) -> Self {
-        Self::from_bytes(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("invalid row key JSON in db")
     }
 }

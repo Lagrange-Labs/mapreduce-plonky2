@@ -12,7 +12,7 @@ use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
 use ryhope::tree::TreeTopology;
 use verifiable_db::ivc::PublicInputs;
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     pub async fn prove_ivc(
         &mut self,
         table_id: &TableID,

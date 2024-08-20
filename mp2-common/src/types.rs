@@ -4,8 +4,10 @@ use crate::{array::Array, D, F};
 use anyhow::ensure;
 use derive_more::Deref;
 use plonky2::{
-    field::extension::quintic::QuinticExtension, iop::target::Target,
-    plonk::circuit_builder::CircuitBuilder,
+    field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},
+    hash::hash_types::HashOut,
+    iop::target::Target,
+    plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use serde::{Deserialize, Serialize};
@@ -56,7 +58,7 @@ pub type PackedMappingKeyTarget = Array<U32Target, PACKED_MAPPING_KEY_LEN>;
 
 /// Regular hash output function - it can be generated from field elements using
 /// poseidon with the output serialized or via regular hash functions.
-#[derive(Clone, Default, Debug, Serialize, Deserialize, Deref, PartialEq, Eq)]
+#[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, Deref, PartialEq, Eq)]
 pub struct HashOutput(pub [u8; 32]);
 
 /// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
@@ -92,5 +94,11 @@ impl<'a> From<&'a HashOutput> for &'a [u8] {
 impl<'a> From<&'a HashOutput> for Vec<u8> {
     fn from(value: &'a HashOutput) -> Self {
         value.0.to_vec()
+    }
+}
+
+impl From<HashOut<F>> for HashOutput {
+    fn from(value: HashOut<F>) -> Self {
+        value.to_bytes().try_into().unwrap()
     }
 }

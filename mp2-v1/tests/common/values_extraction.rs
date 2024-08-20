@@ -19,7 +19,7 @@ use plonky2::field::types::Field;
 
 type MappingKey = Vec<u8>;
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     /// Generate the Values Extraction (C.1) proof for single variables.
     pub(crate) async fn prove_single_values_extraction(
         &self,

@@ -333,7 +333,7 @@ impl QueryBound {
                 if let Some(operand) = op.second_operand {
                     match operand {
                         InputOperand::Constant(_) | InputOperand::Placeholder(_) => (),
-                        _ => bail!("Invalid operand for query bound operation: must be either a placeholder or a constant")     
+                        _ => bail!("Invalid operand for query bound operation: must be either a placeholder or a constant")
                     }
                 }
                 *op
@@ -387,7 +387,7 @@ impl QueryBound {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 /// Input wires for the universal query circuit
 pub struct UniversalQueryCircuitWires<
     const MAX_NUM_COLUMNS: usize,
@@ -397,7 +397,7 @@ pub struct UniversalQueryCircuitWires<
     T: OutputComponent<MAX_NUM_RESULTS>,
 > {
     /// Input wires for column extraction component
-    column_extraction_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
+    pub(crate) column_extraction_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
     /// flag specifying whether the given row is stored in a leaf node of a rows tree or not
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_leaf: BoolTarget,
@@ -457,7 +457,7 @@ pub trait OutputComponentWires {
     /// - It is a `UInt256Target` in the output for queries with aggregation operations
     type FirstT: ToTargets;
     /// Input wires of the output component
-    type InputWires: Serialize + for<'a> Deserialize<'a> + Clone + Debug;
+    type InputWires: Serialize + for<'a> Deserialize<'a> + Clone + Debug + Eq + PartialEq;
 
     /// Get the identifiers of the aggregation operations specified in the query to aggregate the
     /// results (e.g., `SUM`, `AVG`)
@@ -1070,7 +1070,7 @@ where
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 /// Inputs for the 2 variant of universal query circuit
 pub enum UniversalCircuitInput<
     const MAX_NUM_COLUMNS: usize,
@@ -1189,7 +1189,7 @@ mod tests {
         aggregation::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
         api::{CircuitInput, Parameters},
         computational_hash_ids::{
-            AggregationOperation, HashPermutation, Identifiers, Operation, Output,
+            AggregationOperation, ColumnIDs, HashPermutation, Identifiers, Operation, Output,
             PlaceholderIdentifier,
         },
         public_inputs::PublicInputs,
@@ -1287,10 +1287,14 @@ mod tests {
             .zip(column_ids.iter())
             .map(|(&value, &id)| ColumnCell { value, id })
             .collect_vec();
-        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
+        let row_cells = RowCells::new(
+            column_cells[0].clone(),
+            column_cells[1].clone(),
+            column_cells[2..].to_vec(),
+        );
         // define placeholders
-        let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
-        let second_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(1);
+        let first_placeholder_id = PlaceholderId::Generic(0);
+        let second_placeholder_id = PlaceholderIdentifier::Generic(1);
         let mut placeholders = Placeholders::new_empty(
             U256::default(),
             U256::default(), // dummy values
@@ -1299,7 +1303,7 @@ mod tests {
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is the max query bound
-        let third_placeholder_id = PlaceholderId::GenericPlaceholder(2);
+        let third_placeholder_id = PlaceholderId::Generic(2);
         placeholders.insert(third_placeholder_id, max_query);
 
         // build predicate operations
@@ -1543,11 +1547,14 @@ mod tests {
             placeholder_hash(&placeholder_hash_ids, &placeholders, &query_bounds).unwrap();
         let computational_hash = ComputationalHash::from_bytes(
             (&Identifiers::computational_hash_universal_circuit(
-                column_ids
-                    .iter()
-                    .map(|id| id.to_canonical_u64())
-                    .collect_vec()
-                    .as_slice(),
+                &ColumnIDs::new(
+                    column_ids[0].to_canonical_u64(),
+                    column_ids[1].to_canonical_u64(),
+                    column_ids[2..]
+                        .iter()
+                        .map(|id| id.to_canonical_u64())
+                        .collect_vec(),
+                ),
                 &predicate_operations,
                 &results,
                 Some((&query_bounds.min_query_secondary).into()),
@@ -1630,10 +1637,14 @@ mod tests {
             .zip(column_ids.iter())
             .map(|(&value, &id)| ColumnCell { value, id })
             .collect_vec();
-        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
+        let row_cells = RowCells::new(
+            column_cells[0].clone(),
+            column_cells[1].clone(),
+            column_cells[2..].to_vec(),
+        );
         // define placeholders
-        let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
-        let second_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(1);
+        let first_placeholder_id = PlaceholderId::Generic(0);
+        let second_placeholder_id = PlaceholderIdentifier::Generic(1);
         let mut placeholders = Placeholders::new_empty(
             U256::default(),
             U256::default(), // dummy values
@@ -1642,7 +1653,7 @@ mod tests {
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is the min query bound
-        let third_placeholder_id = PlaceholderId::GenericPlaceholder(2);
+        let third_placeholder_id = PlaceholderId::Generic(2);
         placeholders.insert(third_placeholder_id, min_query);
 
         // build predicate operations
@@ -1915,11 +1926,14 @@ mod tests {
             placeholder_hash(&placeholder_hash_ids, &placeholders, &query_bounds).unwrap();
         let computational_hash = ComputationalHash::from_bytes(
             (&Identifiers::computational_hash_universal_circuit(
-                column_ids
-                    .iter()
-                    .map(|id| id.to_canonical_u64())
-                    .collect_vec()
-                    .as_slice(),
+                &ColumnIDs::new(
+                    column_ids[0].to_canonical_u64(),
+                    column_ids[1].to_canonical_u64(),
+                    column_ids[2..]
+                        .iter()
+                        .map(|id| id.to_canonical_u64())
+                        .collect_vec(),
+                ),
                 &predicate_operations,
                 &results,
                 Some((&query_bounds.min_query_secondary).into()),

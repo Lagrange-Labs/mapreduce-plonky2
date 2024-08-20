@@ -1,9 +1,12 @@
 //! Define test cases
 
 use alloy::primitives::{Address, U256};
-use local_simple::TableRowValues;
+use indexing::TableRowValues;
 use log::debug;
-use mp2_common::eth::StorageSlot;
+use mp2_common::{
+    eth::StorageSlot,
+    utils::{pack_and_compute_poseidon_value, Endianness},
+};
 use mp2_test::utils::random_vector;
 use mp2_v1::{
     indexing::{
@@ -11,15 +14,21 @@ use mp2_v1::{
         cell::Cell,
         row::{RowTreeKey, ToNonce},
     },
-    values_extraction::{identifier_for_mapping_key_column, identifier_for_mapping_value_column},
+    values_extraction::{
+        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+        identifier_single_var_column,
+    },
 };
+use rand::{thread_rng, Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
 use super::{
     rowtree::SecondaryIndexCell,
     table::{CellsUpdate, Table},
 };
 
-pub mod local_simple;
+pub mod indexing;
+pub mod query;
 
 /// The key,value such that the combination is unique. This can be turned into a RowTreeKey.
 /// to store in the row tree.
@@ -201,8 +210,4 @@ pub(crate) struct LengthExtractionArgs {
 pub(crate) struct ContractExtractionArgs {
     /// Storage slot
     pub(crate) slot: StorageSlot,
-}
-
-fn random_address() -> Address {
-    Address::from_slice(&random_vector(20))
 }

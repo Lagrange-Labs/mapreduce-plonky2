@@ -1,6 +1,6 @@
 //! Utility structs and functions used for integration tests
 use anyhow::Result;
-mod bindings;
+pub mod bindings;
 mod block_extraction;
 pub mod cases;
 pub mod celltree;
@@ -13,7 +13,7 @@ mod length_extraction;
 pub(crate) mod proof_storage;
 pub mod rowtree;
 mod storage_trie;
-mod table;
+pub mod table;
 mod values_extraction;
 
 use std::path::PathBuf;
