@@ -76,10 +76,8 @@ pub struct TableInfo {
 impl TableInfo {
     pub fn metadata_hash(&self) -> MetadataHash {
         let slots = match &self.source {
-            TableSourceSlot::Mapping((mapping, None)) => SlotInputs::Mapping(mapping.slot),
-            TableSourceSlot::Mapping((mapping, Some(length))) => {
-                SlotInputs::MappingWithLength(mapping.slot, length.slot)
-            }
+            TableSourceSlot::Mapping((mapping, _)) => SlotInputs::Mapping(mapping.slot),
+            // mapping with length not tested right now
             TableSourceSlot::SingleValues(args) => SlotInputs::Simple(args.slots.clone()),
         };
         metadata_hash(slots, &self.contract_address)
