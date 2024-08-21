@@ -182,7 +182,7 @@ impl TestCase {
         TableInfo {
             table_name: self.table.name.clone(),
             columns: self.table.columns.clone(),
-            contract_address: self.contract_address.clone(),
+            contract_address: self.contract_address,
             source: self.source.clone(),
         }
     }
