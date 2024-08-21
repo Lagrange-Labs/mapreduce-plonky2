@@ -37,7 +37,7 @@ impl TestContext {
         }
 
         info!("Prove the test storage trie including the simple slots {slots:?}");
-        let proof_value = trie.prove_value(contract_address, self.params());
+        let proof_value = trie.prove_value(contract_address, self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof_value.proof().public_inputs);
@@ -102,7 +102,7 @@ impl TestContext {
         }
 
         info!("Prove the test storage trie including the mapping slots ({slot}, ...)");
-        let proof = trie.prove_value(&contract_address, &self.params());
+        let proof = trie.prove_value(&contract_address, &self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof.proof().public_inputs);
