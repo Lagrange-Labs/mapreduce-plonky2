@@ -1,21 +1,21 @@
 use self::storages::{
     CachedDbKvStore, CachedDbStore, DbConnector, NodeConnector, PayloadConnector,
 };
-use crate::storage::RoEpochKvStorage;
-use crate::tree::TreeTopology;
-use crate::{Epoch, InitSettings};
-use std::collections::HashSet;
-use std::fmt::Debug;
-
-use super::{EpochKvStorage, EpochStorage, PayloadStorage, SqlTransactionStorage};
-use super::{FromSettings, TransactionalStorage, TreeStorage};
-use crate::storage::pgsql::storages::DBPool;
+use super::{
+    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, SqlTransactionStorage,
+    TransactionalStorage, TreeStorage,
+};
+use crate::{
+    storage::{pgsql::storages::DBPool, RoEpochKvStorage},
+    tree::TreeTopology,
+    Epoch, InitSettings,
+};
 use anyhow::*;
-use async_trait::async_trait;
 use bb8_postgres::PostgresConnectionManager;
 use itertools::Itertools;
 use log::*;
 use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, fmt::Debug};
 use tokio_postgres::{NoTls, Transaction};
 
 mod storages;
@@ -81,7 +81,6 @@ impl ToFromBytea for usize {
 }
 
 /// Characterize a type that may be used as node payload.
-#[async_trait]
 pub trait PayloadInDb: Clone + Send + Sync + Debug + Serialize + for<'a> Deserialize<'a> {}
 impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> PayloadInDb for T {}
 
@@ -168,7 +167,6 @@ where
     in_tx: bool,
 }
 
-#[async_trait]
 impl<T, V> FromSettings<T::State> for PgsqlStorage<T, V>
 where
     T: TreeTopology,
@@ -608,7 +606,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T: TreeTopology, V: PayloadInDb> TransactionalStorage for PgsqlStorage<T, V>
 where
     V: Send + Sync,
@@ -645,7 +642,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T: TreeTopology, V: PayloadInDb> SqlTransactionStorage for PgsqlStorage<T, V>
 where
     V: Send + Sync,
@@ -669,7 +665,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T, V> TreeStorage<T> for PgsqlStorage<T, V>
 where
     T: TreeTopology,
@@ -730,7 +725,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T, V> PayloadStorage<T::Key, V> for PgsqlStorage<T, V>
 where
     T: TreeTopology,

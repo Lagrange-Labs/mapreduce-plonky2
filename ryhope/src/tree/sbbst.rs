@@ -50,11 +50,11 @@
 //! while parent > max(tree)
 //!   parent = parent(s_tree, parent)
 use super::{MutableTree, NodeContext, NodePath, TreeTopology};
-use crate::storage::{EpochKvStorage, EpochStorage, TreeStorage};
-use crate::tree::PrintableTree;
+use crate::{
+    storage::{EpochKvStorage, EpochStorage, TreeStorage},
+    tree::PrintableTree,
+};
 use anyhow::*;
-use async_trait::async_trait;
-use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -398,7 +398,6 @@ fn children_inner_in_saturated(n: &InnerIdx) -> Option<(InnerIdx, InnerIdx)> {
     Some((maybe_left, maybe_right))
 }
 
-#[async_trait]
 impl TreeTopology for Tree {
     /// Max, shift
     type State = State;
@@ -444,12 +443,8 @@ impl TreeTopology for Tree {
         k: &NodeIdx,
         s: &S,
     ) -> Option<NodeContext<NodeIdx>> {
-        async {
-            let state = s.state().fetch().await;
-            state.node_context(k)
-        }
-        .boxed()
-        .await
+        let state = s.state().fetch().await;
+        state.node_context(k)
     }
 
     async fn contains<S: TreeStorage<Tree>>(&self, k: &NodeIdx, s: &S) -> bool {
@@ -458,7 +453,6 @@ impl TreeTopology for Tree {
     }
 }
 
-#[async_trait]
 impl MutableTree for Tree {
     // The SBBST only support appending exactly after the current largest key.
     async fn insert<S: TreeStorage<Tree>>(
@@ -497,7 +491,6 @@ impl MutableTree for Tree {
     }
 }
 
-#[async_trait]
 impl PrintableTree for Tree {
     async fn print<S: TreeStorage<Tree>>(&self, s: &S) {
         let state = s.state().fetch().await;

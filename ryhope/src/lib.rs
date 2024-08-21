@@ -1,5 +1,4 @@
 use anyhow::*;
-use async_trait::async_trait;
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData};
@@ -25,7 +24,6 @@ pub type Epoch = i64;
 /// A payload attached to a node, that may need to compute aggregated values
 /// from the bottom of the tree to the top. If not, simply do not override the
 /// default definition of `aggregate`.
-#[async_trait]
 pub trait NodePayload: Sized + Serialize + for<'a> Deserialize<'a> {
     /// Set an aggregate value for the current node, computable from the payload
     /// of its children.
@@ -308,7 +306,6 @@ impl<
 // Write operations need to (i) be forwarded to the key tree, and (ii) see their
 // dirty keys accumulated in order to build the dirty keys tree at the commiting
 // of the transaction.
-#[async_trait]
 impl<
         T: TreeTopology + MutableTree,
         V: NodePayload + Send + Sync,
@@ -337,7 +334,6 @@ impl<
     }
 }
 
-#[async_trait]
 impl<
         T: TreeTopology + MutableTree,
         V: NodePayload + Sync + Send,
@@ -412,7 +408,6 @@ impl<
     }
 }
 
-#[async_trait]
 impl<
         T: TreeTopology + MutableTree + Send + Sync,
         V: NodePayload + Send + Sync,

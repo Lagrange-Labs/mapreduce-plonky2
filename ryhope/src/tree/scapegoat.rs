@@ -2,12 +2,16 @@ use super::PrintableTree;
 use super::{MutableTree, NodeContext, NodePath, TreeTopology};
 use crate::storage::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TreeStorage};
 use anyhow::*;
-use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::{cmp::Ordering, fmt::Debug, hash::Hash, marker::PhantomData};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+    marker::PhantomData,
+};
 
 /// The representation of a fraction as its numerator and denominator, allowing
 /// for efficient generation of the fraction and its inverse.
@@ -163,7 +167,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     }
 
     fn rec_depth<'a, S: TreeStorage<Tree<K>> + Sync>(k: &'a K, s: &'a S) -> BoxFuture<'a, usize> {
-        async move {
+        async {
             let n = &s.nodes().fetch(k).await;
             let depth_l = if let Some(left) = n.left.as_ref() {
                 Self::rec_depth(left, s).await + 1
@@ -791,7 +795,6 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     }
 }
 
-#[async_trait]
 impl<K: Sync + Debug + Ord + Clone + Hash + Serialize + for<'a> Deserialize<'a>> TreeTopology
     for Tree<K>
 where
@@ -870,7 +873,6 @@ where
     }
 }
 
-#[async_trait]
 impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send>
     MutableTree for Tree<K>
 {
@@ -883,7 +885,6 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     }
 }
 
-#[async_trait]
 impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send>
     PrintableTree for Tree<K>
 {

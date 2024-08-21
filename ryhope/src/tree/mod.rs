@@ -1,8 +1,6 @@
-use std::{collections::HashSet, fmt::Debug, hash::Hash};
-
 use anyhow::*;
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, fmt::Debug, future::Future, hash::Hash};
 
 use crate::storage::TreeStorage;
 
@@ -33,7 +31,6 @@ impl<K> NodePath<K> {
 }
 
 /// Define common topological operations on trees.
-#[async_trait]
 pub trait TreeTopology: Default + Send + Sync {
     type Key: Debug + Clone + Hash + Eq + Sync + Send;
     type Node: Debug + Sync + Send;
@@ -87,33 +84,32 @@ pub trait TreeTopology: Default + Send + Sync {
 
     /// Return the immediate neighborhood of the given `k`, if it exists, in the
     /// tree.
-    async fn node_context<S: TreeStorage<Self>>(
+    fn node_context<S: TreeStorage<Self>>(
         &self,
         k: &Self::Key,
         s: &S,
-    ) -> Option<NodeContext<Self::Key>>;
+    ) -> impl Future<Output = Option<NodeContext<Self::Key>>> + Send;
 }
 
 /// Define operations to mutate a tree.
-#[async_trait]
 pub trait MutableTree: TreeTopology {
     /// Insert the given key in the tree; fail if it is already present.
     ///
     /// Return the [`NodePath`] to the newly inserted node.
-    async fn insert<S: TreeStorage<Self>>(
+    fn insert<S: TreeStorage<Self>>(
         &mut self,
         k: Self::Key,
         s: &mut S,
-    ) -> Result<NodePath<Self::Key>>;
+    ) -> impl Future<Output = Result<NodePath<Self::Key>>> + Send;
 
     /// Remove the given key from the tree; fail if it is already present.
     ///
     /// Return the `Key`s of the nodes affected by the deletion.
-    async fn delete<S: TreeStorage<Self>>(
+    fn delete<S: TreeStorage<Self>>(
         &mut self,
         k: &Self::Key,
         s: &mut S,
-    ) -> Result<Vec<Self::Key>>;
+    ) -> impl Future<Output = Result<Vec<Self::Key>>> + Send;
 }
 
 /// A data structure encompassing the immediate neighborhood of a node.
@@ -146,7 +142,6 @@ impl<K> NodeContext<K> {
     }
 }
 
-#[async_trait]
 pub trait PrintableTree: TreeTopology {
     async fn print<S: TreeStorage<Self>>(&self, s: &S);
 }

@@ -1,13 +1,11 @@
 use anyhow::*;
-use async_trait::async_trait;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, hash::Hash};
+use std::{fmt::Debug, future::Future, hash::Hash};
 use tokio_postgres::Transaction;
 
-use crate::{tree::TreeTopology, Epoch, InitSettings};
-
 use self::updatetree::UpdateTree;
+use crate::{tree::TreeTopology, Epoch, InitSettings};
 
 pub mod memory;
 pub mod pgsql;
@@ -28,7 +26,6 @@ pub enum Operation<K, V> {
 
 /// Characterize a type whose new instances can be built from a `Self::Settings`
 /// instance.
-#[async_trait]
 pub trait FromSettings<T>
 where
     Self: Sized,
@@ -44,7 +41,6 @@ where
 /// A `TreeStorage` stores all data related to the tree structure, i.e. (i) the
 /// state of the tree structure, (ii) the putative metadata associated to the
 /// tree nodes.
-#[async_trait]
 pub trait TreeStorage<T: TreeTopology>: Send + Sync {
     /// A storage backend for the underlying tree state
     type StateStorage: EpochStorage<T::State> + Send + Sync;
@@ -76,7 +72,6 @@ pub trait TreeStorage<T: TreeTopology>: Send + Sync {
 }
 
 /// A backend storing the payloads associated to the nodes of a tree.
-#[async_trait]
 pub trait PayloadStorage<K: Hash + Eq + Send + Sync, V: Send + Sync> {
     type DataStorage: EpochKvStorage<K, V> + Send + Sync;
 
@@ -86,7 +81,6 @@ pub trait PayloadStorage<K: Hash + Eq + Send + Sync, V: Send + Sync> {
     fn data_mut(&mut self) -> &mut Self::DataStorage;
 }
 
-#[async_trait]
 pub trait EpochStorage<T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>>:
     TransactionalStorage
 where
@@ -96,20 +90,22 @@ where
     fn current_epoch(&self) -> Epoch;
 
     /// Return the value stored at the current epoch.
-    async fn fetch(&self) -> T {
-        self.fetch_at(self.current_epoch()).await
+    fn fetch(&self) -> impl Future<Output = T> + Send {
+        async { self.fetch_at(self.current_epoch()).await }
     }
 
     /// Return the value stored at the given epoch.
-    async fn fetch_at(&self, epoch: Epoch) -> T;
+    fn fetch_at(&self, epoch: Epoch) -> impl Future<Output = T> + Send;
 
     /// Set the stored value at the current epoch.
-    async fn store(&mut self, t: T);
+    fn store(&mut self, t: T) -> impl Future<Output = ()> + Send;
 
-    async fn update<F: FnMut(&mut T) + Send>(&mut self, mut f: F) {
-        let mut t = self.fetch().await;
-        f(&mut t);
-        self.store(t).await;
+    fn update<F: FnMut(&mut T) + Send>(&mut self, mut f: F) -> impl Future<Output = ()> + Send {
+        async move {
+            let mut t = self.fetch().await;
+            f(&mut t);
+            self.store(t).await;
+        }
     }
 
     /// Roll back this storage one epoch in the past.
@@ -124,9 +120,9 @@ where
 /// A read-only, versioned, KV storage. Intended to be implemented in
 /// conjunction with [`EpochKvStorage`] or [`WriteOnceEpochKvStorage`] to inject
 /// data in the storage.
-#[async_trait]
 pub trait RoEpochKvStorage<K: Eq + Hash, V>
 where
+    Self: Sync,
     K: Send + Sync,
     V: Send + Sync,
 {
@@ -139,26 +135,26 @@ where
     /// Return the value associated to `k` in the current epoch.
     ///
     /// Panic if `k` is not associated to any value at the current epoch.
-    async fn fetch(&self, k: &K) -> V {
-        self.fetch_at(k, self.current_epoch()).await
+    fn fetch(&self, k: &K) -> impl Future<Output = V> + Send {
+        async { self.fetch_at(k, self.current_epoch()).await }
     }
 
     /// Return the value associated to `k` at the current epoch if it exists,
     /// `None` otherwise.
-    async fn try_fetch(&self, k: &K) -> Option<V> {
-        self.try_fetch_at(k, self.current_epoch()).await
+    fn try_fetch(&self, k: &K) -> impl Future<Output = Option<V>> + Send {
+        async { self.try_fetch_at(k, self.current_epoch()).await }
     }
 
     /// Return the value associated to `k` at the given `epoch`.
     ///
     /// Panic if `k` is not associated to any value at `epoch`.
-    async fn fetch_at(&self, k: &K, epoch: Epoch) -> V {
-        self.try_fetch_at(k, epoch).await.unwrap()
+    fn fetch_at(&self, k: &K, epoch: Epoch) -> impl Future<Output = V> + Send {
+        async move { self.try_fetch_at(k, epoch).await.unwrap() }
     }
 
     /// Return the value associated to `k` at the given `epoch` if it exists,
     /// `None` otherwise.
-    async fn try_fetch_at(&self, k: &K, epoch: Epoch) -> Option<V>;
+    fn try_fetch_at(&self, k: &K, epoch: Epoch) -> impl Future<Output = Option<V>> + Send;
 
     /// Return whether the given key is present at the current epoch.
     async fn contains(&self, k: &K) -> bool {
@@ -176,37 +172,41 @@ where
 
 /// A versioned KV storage only allowed to mutate entries only in the current
 /// epoch.
-#[async_trait]
 pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>:
     RoEpochKvStorage<K, V>
 {
     /// Within a transaction, delete the existing storage entry at `k`.
     ///
     /// Fail if `k` does not exist.
-    async fn remove(&mut self, k: K) -> Result<()>;
+    fn remove(&mut self, k: K) -> impl Future<Output = Result<()>> + Send;
 
     /// Within a transaction, update the existing storage entry at `k` with
     /// value `new_value`.
     ///
     /// Fail if `k` does not exist.
-    async fn update(&mut self, k: K, new_value: V) -> Result<()>;
+    fn update(&mut self, k: K, new_value: V) -> impl Future<Output = Result<()>> + Send;
 
     /// Apply the given function `updater` onto the value associated to `k` and
     /// persist the updated value.
     ///
     /// Fail if `k` does not exist.
-    async fn update_with<F: Fn(&mut V) + Send + Sync>(&mut self, k: K, updater: F)
+    fn update_with<F: Fn(&mut V) + Send + Sync>(
+        &mut self,
+        k: K,
+        updater: F,
+    ) -> impl Future<Output = ()> + Send
     where
-        Self: Sync,
-        K: Sync + 'async_trait,
+        Self: Sync + Send,
     {
-        let mut v = self.fetch(&k).await;
-        updater(&mut v);
-        self.update(k, v).await.unwrap();
+        async move {
+            let mut v = self.fetch(&k).await;
+            updater(&mut v);
+            self.update(k, v).await.unwrap();
+        }
     }
 
     /// Associate `value` to `k`.
-    async fn store(&mut self, k: K, value: V) -> Result<()>;
+    fn store(&mut self, k: K, value: V) -> impl Future<Output = Result<()>> + Send;
 
     /// Rollback this storage one epoch back. Please note that this is a
     /// destructive and irreversible operation.
@@ -220,7 +220,6 @@ pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>:
 }
 
 /// Characterizes a trait allowing for epoch-based atomic updates.
-#[async_trait]
 pub trait TransactionalStorage {
     /// Start a new transaction, defining a transition between the storage at
     /// two epochs.
@@ -233,10 +232,10 @@ pub trait TransactionalStorage {
     /// Execute the given function acting on `Self` within a transaction.
     ///
     /// Will fail if the transaction failed.
-    async fn in_transaction<F: Fn(&mut Self) -> BoxFuture<'_, Result<()>> + Send>(
-        &mut self,
-        f: F,
-    ) -> Result<()> {
+    async fn in_transaction<Fut, F: FnOnce(&mut Self) -> Fut>(&mut self, f: F) -> Result<()>
+    where
+        Fut: Future<Output = Result<()>>,
+    {
         self.start_transaction()?;
         f(self).await?;
         self.commit_transaction().await
@@ -246,7 +245,6 @@ pub trait TransactionalStorage {
 /// This trait is similar to [`TransactionalStorage`], but let the caller re-use
 /// an existing SQL transaction rather than letting the implementer handle
 /// transaction creation & execution.
-#[async_trait]
 pub(crate) trait SqlTransactionStorage: TransactionalStorage {
     /// Similar to the [`commit`] method of [`TransactionalStorage`], but
     /// re-using a given transaction.
@@ -329,7 +327,6 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
 ///
 ///   * the `post_commit` hook **must** be called after, and only after, a
 ///   successful SQL transaction execution.
-#[async_trait]
 pub trait SqlTreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send + Sync>:
     TreeTransactionalStorage<K, V>
 {

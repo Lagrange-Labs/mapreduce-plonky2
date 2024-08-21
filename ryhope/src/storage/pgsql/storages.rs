@@ -1,20 +1,18 @@
+use crate::{
+    storage::{
+        EpochKvStorage, EpochStorage, RoEpochKvStorage, SqlTransactionStorage, TransactionalStorage,
+    },
+    tree::scapegoat,
+    Epoch,
+};
 use anyhow::*;
-use async_trait::async_trait;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use postgres_types::Json;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
+use std::{collections::HashMap, fmt::Debug, future::Future, marker::PhantomData};
 use tokio::sync::RwLock;
-use tokio_postgres::{self, Transaction};
-use tokio_postgres::{NoTls, Row};
-
-use crate::storage::SqlTransactionStorage;
-use crate::{
-    storage::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TransactionalStorage},
-    tree::scapegoat,
-    Epoch,
-};
+use tokio_postgres::{self, NoTls, Row, Transaction};
 
 use super::{CachedValue, ToFromBytea};
 
@@ -22,7 +20,7 @@ pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 
 /// Type implementing this trait define the behavior of a storage tree
 /// components regarding their persistence in DB.
-#[async_trait]
+
 pub trait DbConnector<K, V>
 where
     K: ToFromBytea,
@@ -38,10 +36,7 @@ where
         _k: &K,
         _birth_epoch: Epoch,
         _v: V,
-    ) -> Result<()>
-    where
-        V: 'async_trait,
-    {
+    ) -> Result<()> {
         unreachable!()
     }
 
@@ -53,15 +48,17 @@ where
         _k: &K,
         _epoch: Epoch,
         _v: V,
-    ) -> Result<()>
-    where
-        V: 'async_trait,
-    {
+    ) -> Result<()> {
         unreachable!()
     }
 
     /// Return the value associated to the given key at the given epoch.
-    async fn fetch_at(db: DBPool, table: &str, k: &K, epoch: Epoch) -> Result<Option<V>>;
+    fn fetch_at(
+        db: DBPool,
+        table: &str,
+        k: &K,
+        epoch: Epoch,
+    ) -> impl Future<Output = Result<Option<V>>> + Send;
 
     /// Given a PgSQL row, extract a value from it.
     fn from_row(r: &Row) -> Result<V>;
@@ -69,7 +66,6 @@ where
 
 pub struct PayloadConnector;
 
-#[async_trait]
 impl<K, V> DbConnector<K, V> for PayloadConnector
 where
     K: ToFromBytea,
@@ -111,10 +107,7 @@ where
         k: &K,
         epoch: Epoch,
         v: V,
-    ) -> Result<()>
-    where
-        V: 'async_trait,
-    {
+    ) -> Result<()> {
         db_tx
             .execute(
                 &format!(
@@ -131,7 +124,6 @@ where
 
 pub struct NodeConnector;
 
-#[async_trait]
 // Void nodes are used by the SBBST
 impl<K> DbConnector<K, ()> for NodeConnector
 where
@@ -187,7 +179,6 @@ where
     }
 }
 
-#[async_trait]
 impl<K> DbConnector<K, scapegoat::Node<K>> for NodeConnector
 where
     K: ToFromBytea + Send + Sync,
@@ -381,7 +372,6 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
     }
 }
 
-#[async_trait]
 impl<T> TransactionalStorage for CachedDbStore<T>
 where
     T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
@@ -411,7 +401,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T> SqlTransactionStorage for CachedDbStore<T>
 where
     T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
@@ -429,7 +418,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T> EpochStorage<T> for CachedDbStore<T>
 where
     T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a> + Send,
@@ -577,7 +565,6 @@ where
     }
 }
 
-#[async_trait]
 impl<K, V, F> RoEpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync + std::hash::Hash,
@@ -638,7 +625,6 @@ where
     }
 }
 
-#[async_trait]
 impl<K, V, F: DbConnector<K, V> + Send + Sync> EpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync + std::hash::Hash,
