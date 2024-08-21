@@ -15,9 +15,13 @@ use crate::common::{
     proof_storage::ProofKey,
     rowtree::{MerkleRowTree, RowStorage},
     table::TableColumns,
+    TableInfo,
 };
 
-use super::super::{context::TestContext, proof_storage::ProofStorage, table::Table};
+use super::{
+    super::{context::TestContext, proof_storage::ProofStorage, table::Table},
+    TableSourceSlot,
+};
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::{Context, Result};
 use futures::{future::BoxFuture, io::empty, stream, FutureExt, StreamExt};
@@ -31,6 +35,7 @@ use mp2_common::{
     C, D, F,
 };
 use mp2_v1::{
+    api::MetadataHash,
     indexing::{
         self,
         block::{BlockPrimaryIndex, BlockTree},
@@ -106,20 +111,19 @@ pub type RevelationCircuitInput = verifiable_db::revelation::api::CircuitInput<
 pub type RevelationPublicInputs<'a> =
     PublicInputs<'a, F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>;
 
-pub enum TableType {
-    Mapping,
-    Single,
-}
-
-pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Result<()> {
-    match t {
-        TableType::Mapping => query_mapping(ctx, &table).await?,
+pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
+    match &t.source {
+        TableSourceSlot::Mapping((map, _)) => query_mapping(ctx, &table, t.metadata_hash()).await?,
         _ => unimplemented!("yet"),
     }
     Ok(())
 }
 /// Run a test query on the mapping table such as created during the indexing phase
-async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
+async fn query_mapping(
+    ctx: &mut TestContext,
+    table: &Table,
+    table_hash: MetadataHash,
+) -> Result<()> {
     let settings = ParsilSettings {
         context: table,
         placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
@@ -148,7 +152,7 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
         exec_query.query.to_string()
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
-    prove_query(ctx, table, query_info, parsed, &settings, res)
+    prove_query(ctx, table, query_info, parsed, &settings, res, table_hash)
         .await
         .expect("unable to run universal query proof");
     Ok(())
@@ -162,6 +166,7 @@ async fn prove_query(
     mut parsed: Query,
     settings: &ParsilSettings<&Table>,
     res: Vec<PsqlRow>,
+    metadata: MetadataHash,
 ) -> Result<()> {
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
@@ -276,6 +281,7 @@ async fn prove_query(
         current_epoch,
         touched_rows.len(),
         res,
+        metadata,
     )?;
     info!("Revelation done!");
     Ok(())
@@ -325,6 +331,7 @@ fn check_final_outputs(
     tree_epoch: Epoch,
     num_touched_rows: usize,
     res: Vec<PsqlRow>,
+    offcircuit_md: MetadataHash,
 ) -> Result<()> {
     // fetch indexing proof, whose public inputs are needed to check correctness of revelation proof outputs
     let indexing_proof = {
@@ -345,6 +352,11 @@ fn check_final_outputs(
     let metadata_hash = HashOutput::try_from(
         HashOut::<F>::from_vec(indexing_pis.metadata_hash().to_vec()).to_bytes(),
     )?;
+    assert_eq!(
+        offcircuit_md, metadata_hash,
+        "metadata hash computed by circuit and offcircuit is not the same"
+    );
+
     let column_ids = ColumnIDs::new(
         table.columns.primary.identifier,
         table.columns.secondary.identifier,

@@ -21,12 +21,12 @@ use anyhow::{Context, Result};
 use common::{
     cases::{
         indexing::{ChangeType, TreeFactory, UpdateType},
-        query::{test_query, TableType},
+        query::test_query,
     },
     context::{self, ParamsType, TestContextConfig},
     proof_storage::{ProofKV, ProofStorage, DEFAULT_PROOF_STORE_FOLDER},
-    table::{Table, TableInfo},
-    TestCase, TestContext,
+    table::Table,
+    TableInfo, TestCase, TestContext,
 };
 use envconfig::Envconfig;
 use log::info;
@@ -91,7 +91,7 @@ async fn integrated_indexing() -> Result<()> {
     ];
     mapping.run(&mut ctx, changes).await?;
     // save columns information and table information in JSON so querying test can pick up
-    write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table.table_info())?;
+    write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
     Ok(())
 }
 
@@ -107,8 +107,8 @@ async fn integrated_querying() -> Result<()> {
     info!("Building querying params");
     ctx.build_params(ParamsType::Query).unwrap();
     info!("Params built");
-    let table = Table::load(table_info.table_name, table_info.columns).await?;
-    test_query(&mut ctx, table, TableType::Mapping).await?;
+    let table = Table::load(table_info.table_name.clone(), table_info.columns.clone()).await?;
+    test_query(&mut ctx, table, table_info).await?;
     Ok(())
 }
 
