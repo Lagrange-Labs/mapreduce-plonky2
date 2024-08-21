@@ -14,20 +14,21 @@ resolver = "2"
 
 [workspace.dependencies]
 alloy = { version = "0.2", default-features = false, features = [
+  "consensus",
   "contract",
   "getrandom",
-  "node-bindings",
-  "providers",
   "network",
-  "signer-local",
-  "sol-types",
+  "node-bindings",
+  "postgres",
+  "providers",
+  "reqwest",
+  "rlp",
   "rpc",
   "rpc-types",
-  "consensus",
-  "rlp",
-  "transports",
+  "signer-local",
+  "sol-types",
   "transport-http",
-  "reqwest",
+  "transports",
 ] }
 anyhow = "1.0"
 base64 = "0.22"

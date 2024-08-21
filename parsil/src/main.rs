@@ -1,9 +1,13 @@
+use std::str::FromStr;
+
+use alloy::primitives::U256;
 use anyhow::*;
 use clap::{Parser, Subcommand};
 use log::Level;
 use sqlparser::ast::Query;
 use symbols::{ContextProvider, FileContextProvider};
 use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
+use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
 mod assembler;
 mod errors;
@@ -18,9 +22,6 @@ mod visitor;
 
 #[derive(Parser)]
 struct Args {
-    #[arg()]
-    request: String,
-
     #[arg(short = 'v', global = true)]
     verbose: bool,
 
@@ -31,14 +32,32 @@ struct Args {
 #[derive(Subcommand)]
 enum Command {
     /// Displays the AST as parsed by sqlparser.
-    Debug {},
+    Debug {
+        #[arg()]
+        request: String,
+    },
     /// Generate the PIs required by the universal query circuit.
-    Circuit {},
+    Circuit {
+        #[arg()]
+        request: String,
+    },
     /// Generate the queries to execute the user query of fetch the range of
     /// primary indices and key it touches.
     Query {
+        #[arg()]
+        request: String,
+
         #[command(subcommand)]
         kind: QueryKind,
+    },
+    /// Generate the query to bracket the secondary index values for an empty
+    /// result query.
+    Bracket {
+        table: String,
+        lo_primary: String,
+        hi_primary: String,
+        lo_secondary: Option<String>,
+        hi_secondary: Option<String>,
     },
 }
 
@@ -61,30 +80,55 @@ fn main() -> Result<()> {
         context: FileContextProvider::from_file("tests/context.json")?,
         placeholders: PlaceholderSettings::with_freestanding(3),
     };
-    let mut query = parse_and_validate(&args.request, &settings)?;
 
     match args.command {
-        Command::Debug {} => {
-            println!("Query string:\n{}", &args.request);
+        Command::Debug { request } => {
+            let mut query = parse_and_validate(&request, &settings)?;
+            println!("Query string:\n{}", &request);
             if args.verbose {
                 println!("{:#?}", query);
             }
             println!("Final query:\n{}", query);
         }
-        Command::Circuit {} => {
+        Command::Circuit { request } => {
+            let mut query = parse_and_validate(&request, &settings)?;
             assembler::validate(&query, &settings)?;
         }
-        Command::Query { kind } => match kind {
-            QueryKind::Execute => {
-                let translated = executor::generate_query_execution(&mut query, &settings)?;
+        Command::Query { request, kind } => {
+            let mut query = parse_and_validate(&request, &settings)?;
+            match kind {
+                QueryKind::Execute => {
+                    let translated = executor::generate_query_execution(&mut query, &settings)?;
 
-                println!("{}", translated.query);
-                println!("placeholders mapping: {:?}", translated.placeholder_mapping);
+                    println!("{}", translated.query);
+                    println!("placeholders mapping: {:?}", translated.placeholder_mapping);
+                }
+                QueryKind::Keys => {
+                    println!("{}", executor::generate_query_keys(&mut query, &settings)?)
+                }
             }
-            QueryKind::Keys => {
-                println!("{}", executor::generate_query_keys(&mut query, &settings)?)
-            }
-        },
+        }
+        Command::Bracket {
+            table,
+            lo_primary,
+            hi_primary,
+            lo_secondary,
+            hi_secondary,
+        } => {
+            println!(
+                "{}",
+                executor::bracket_secondary_index(
+                    &table,
+                    &settings,
+                    &Placeholders::new_empty(
+                        U256::from_str(&lo_primary).unwrap(),
+                        U256::from_str(&hi_primary).unwrap()
+                    ),
+                    lo_secondary.map(|x| U256::from_str(&x).unwrap()),
+                    hi_secondary.map(|x| U256::from_str(&x).unwrap())
+                )?
+            )
+        }
     }
 
     Ok(())
