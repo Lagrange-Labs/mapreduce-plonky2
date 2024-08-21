@@ -10,7 +10,7 @@ use sqlparser::ast::{
     Query, Select, SelectItem, SetExpr, TableAlias, TableFactor, TableWithJoins, Value,
     WildcardAdditionalOptions,
 };
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 use verifiable_db::query::{
     computational_hash_ids::PlaceholderIdentifier,
     universal_circuit::universal_circuit_inputs::{PlaceholderId, Placeholders},
@@ -530,18 +530,20 @@ pub fn generate_query_keys<C: ContextProvider>(
     Ok(query_pis)
 }
 
+/// Return two queries, respectively returning the largest sec. ind. value
+/// smaller than the given lower bound, and the smallest sec. ind. value larger
+/// than the given higher bound.
+///
+/// If the lower or higher bound are the extrema of the U256 definition domain,
+/// the associated query is `None`, reflecting the impossibility for a node
+/// satisfying the condition to exist in the database.
 pub fn bracket_secondary_index<C: ContextProvider>(
     table_name: &str,
     settings: &ParsilSettings<C>,
-    placeholders: &Placeholders,
-    secondary_lo: Option<U256>,
-    secondary_hi: Option<U256>,
-) -> Result<Query> {
-    let min_u256 = '0';
-    let max_u256 =
-        U256::from_str("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
-            .unwrap();
-
+    block_number: i64,
+    secondary_lo: U256,
+    secondary_hi: U256,
+) -> (Option<String>, Option<String>) {
     let sec_ind_column = settings
         .context
         .fetch_table(table_name)
@@ -552,42 +554,24 @@ pub fn bracket_secondary_index<C: ContextProvider>(
     // A simple alias for the sec. ind. values
     let sec_index = format!("(payload -> 'cells' -> '{sec_ind_column}' ->> 'value')::NUMERIC");
 
-    // Select the largest of all the sec. ind. values that remains smaller than:
-    //  - if the sec. ind. lower bound is set, the min of the sec. ind. lower
-    //  bound and the smallest sec. ind. value covered by the given prim. ind.
-    //  range;
-    //
-    //  - otherwise, the smallest sec. ind. value covered by the given prim.
-    //  ind. range.
-    let lower_bound = secondary_lo
-        .map(|lo| format!("LEAST('{lo}'::DECIMAL, inrange_sec_index.kmin)"))
-        .unwrap_or("inrange_sec_index.kmin".into());
-    let largest_below =
-        format!("SELECT COALESCE(MAX(sec_index), {min_u256}) FROM all_sec_index, inrange_sec_index WHERE sec_index < {lower_bound}");
+    // Select the largest of all the sec. ind. values that remains smaller than
+    // the provided sec. ind. lower bound if it is provided, -1 otherwise.
+    let largest_below = if secondary_lo == U256::MIN {
+        None
+    } else {
+        Some(format!("SELECT key FROM {table_name}
+                           WHERE {sec_index} < '{secondary_lo}'::DECIMAL AND __valid_from <= {block_number} AND __valid_until >= {block_number}
+                           ORDER BY {sec_index} DESC LIMIT 1"))
+    };
 
     // Symmetric situation for the upper bound.
-    let higher_bound = secondary_hi
-        .map(|hi| format!("GREATEST('{hi}'::DECIMAL, inrange_sec_index.kmax)"))
-        .unwrap_or("inrange_sec_index.kmax".into());
-    let smallest_above =
-        format!("select COALESCE(MIN(sec_index), '{max_u256}'::DECIMAL) FROM all_sec_index, inrange_sec_index WHERE sec_index > {higher_bound}");
+    let smallest_above = if secondary_hi == U256::MAX {
+        None
+    } else {
+        Some(format!("SELECT key FROM {table_name}
+                           WHERE {sec_index} > '{secondary_hi}'::DECIMAL AND __valid_from <= {block_number} AND __valid_until >= {block_number}
+                           ORDER BY {sec_index} ASC LIMIT 1"))
+    };
 
-    // 1. Extract all the sec. ind. in the table;
-    //
-    // 2. Extract all the sec. ind. covered by the prim. ind. range;
-    //
-    // 3. Apply the above sub-queries to find the highest-just-below and
-    // lowest-just-above values of the sec. ind.
-    let query = format!("WITH
-                           all_sec_index as (SELECT {sec_index} AS sec_index FROM {table_name}),
-                           inrange_sec_index AS (SELECT
-                                        MIN({sec_index}) AS kmin,
-                                        MAX({sec_index}) AS kmax
-                                      FROM {table_name} where __valid_until >= {min_primary_index} AND __valid_from <= {max_primary_index})
-                         ({largest_below}) UNION ({smallest_above})",
-                        min_primary_index = placeholders.0[&PlaceholderId::MinQueryOnIdx1],
-                        max_primary_index = placeholders.0[&PlaceholderIdentifier::MaxQueryOnIdx1]);
-
-    println!("{}", query);
-    todo!()
+    (largest_below, smallest_above)
 }

@@ -54,10 +54,9 @@ enum Command {
     /// result query.
     Bracket {
         table: String,
-        lo_primary: String,
-        hi_primary: String,
-        lo_secondary: Option<String>,
-        hi_secondary: Option<String>,
+        block: i64,
+        lo_secondary: String,
+        hi_secondary: String,
     },
 }
 
@@ -110,24 +109,20 @@ fn main() -> Result<()> {
         }
         Command::Bracket {
             table,
-            lo_primary,
-            hi_primary,
+            block,
             lo_secondary,
             hi_secondary,
         } => {
-            println!(
-                "{}",
-                executor::bracket_secondary_index(
-                    &table,
-                    &settings,
-                    &Placeholders::new_empty(
-                        U256::from_str(&lo_primary).unwrap(),
-                        U256::from_str(&hi_primary).unwrap()
-                    ),
-                    lo_secondary.map(|x| U256::from_str(&x).unwrap()),
-                    hi_secondary.map(|x| U256::from_str(&x).unwrap())
-                )?
-            )
+            let r = executor::bracket_secondary_index(
+                &table,
+                &settings,
+                block,
+                U256::from_str(&lo_secondary).unwrap(),
+                U256::from_str(&hi_secondary).unwrap(),
+            );
+
+            println!("{}", r.0.unwrap_or("nothing".into()));
+            println!("{}", r.1.unwrap_or("nothing".into()));
         }
     }
 
