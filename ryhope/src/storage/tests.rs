@@ -924,6 +924,9 @@ async fn grouped_txs() -> Result<()> {
     let mut binding = db_pool.get().await?;
     let mut tx = binding.transaction().await?;
 
+    // The genesis root, i.e. None
+    let first_root = t1.root().await;
+
     t1.start_transaction().await?;
     t2.start_transaction().await?;
 
@@ -934,6 +937,9 @@ async fn grouped_txs() -> Result<()> {
     t2.store(4, 329.into()).await?;
     t2.store(88, 15.into()).await?;
 
+    // The not-yet-commited root
+    let in_flight_root = t1.root().await;
+    assert_ne!(first_root, in_flight_root);
     t1.commit_in(&mut tx).await?;
     t2.commit_in(&mut tx).await?;
 
@@ -942,6 +948,10 @@ async fn grouped_txs() -> Result<()> {
     t1.commit_success();
     t2.commit_success();
 
+    // The commited root must be equal to its in-flight snapshot
+    let commited_root = t1.root().await;
+    assert_eq!(commited_root, in_flight_root);
+    // Sizes must have been commited coorectly
     assert_eq!(t1.size().await, 2);
     assert_eq!(t2.size().await, 3);
 
@@ -957,6 +967,7 @@ async fn grouped_txs() -> Result<()> {
     t1.store(4, 789.into()).await?;
 
     t2.store(578943, 542.into()).await?;
+    t2.store(943, commited_root.unwrap().into()).await?;
 
     t1.commit_in(&mut tx).await?;
     t2.commit_in(&mut tx).await?;
