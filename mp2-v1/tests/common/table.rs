@@ -461,12 +461,6 @@ impl Table {
             .context("while fetching current epoch")?;
         Ok(res)
     }
-    pub fn table_info(&self) -> TableInfo {
-        TableInfo {
-            table_name: self.name.clone(),
-            columns: self.columns.clone(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -638,10 +632,4 @@ impl ContextProvider for &Table {
     fn output_ids(&self) -> Vec<u64> {
         todo!()
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableInfo {
-    pub columns: TableColumns,
-    pub table_name: String,
 }

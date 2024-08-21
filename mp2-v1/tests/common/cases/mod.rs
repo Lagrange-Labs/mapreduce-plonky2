@@ -21,10 +21,12 @@ use mp2_v1::{
 };
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use serde::{Deserialize, Serialize};
 
 use super::{
     rowtree::SecondaryIndexCell,
     table::{CellsUpdate, Table},
+    TableInfo,
 };
 
 pub mod indexing;
@@ -49,7 +51,7 @@ impl From<(U256, U256)> for UniqueMappingEntry {
 
 /// What is the secondary index chosen for the table in the mapping.
 /// Each entry contains the identifier of the column expected to store in our tree
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MappingIndex {
     Key(u64),
     Value(u64),
@@ -143,7 +145,7 @@ impl UniqueMappingEntry {
     }
 }
 
-#[derive(Debug, Hash, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Hash, Clone, PartialEq, Eq)]
 pub(crate) enum TableSourceSlot {
     /// Test arguments for single values extraction (C.1)
     SingleValues(SingleValuesExtractionArgs),
@@ -175,15 +177,26 @@ pub(crate) struct TestCase {
     pub(crate) source: TableSourceSlot,
 }
 
+impl TestCase {
+    pub fn table_info(&self) -> TableInfo {
+        TableInfo {
+            table_name: self.table.name.clone(),
+            columns: self.table.columns.clone(),
+            contract_address: self.contract_address.clone(),
+            source: self.source.clone(),
+        }
+    }
+}
+
 /// Single values extraction arguments (C.1)
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub(crate) struct SingleValuesExtractionArgs {
     /// Simple slots
     pub(crate) slots: Vec<u8>,
 }
 
 /// Mapping values extraction arguments (C.1)
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub(crate) struct MappingValuesExtractionArgs {
     /// Mapping slot number
     pub(crate) slot: u8,
@@ -197,7 +210,7 @@ pub(crate) struct MappingValuesExtractionArgs {
 }
 
 /// Length extraction arguments (C.2)
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub(crate) struct LengthExtractionArgs {
     /// Length slot
     pub(crate) slot: u8,
