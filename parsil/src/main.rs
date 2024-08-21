@@ -10,6 +10,7 @@ use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
 use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
 mod assembler;
+mod bracketer;
 mod errors;
 mod executor;
 mod expand;
@@ -113,12 +114,12 @@ fn main() -> Result<()> {
             lo_secondary,
             hi_secondary,
         } => {
-            let r = executor::bracket_secondary_index(
+            let r = bracketer::_bracket_secondary_index(
                 &table,
                 &settings,
                 block,
-                U256::from_str(&lo_secondary).unwrap(),
-                U256::from_str(&hi_secondary).unwrap(),
+                &U256::from_str(&lo_secondary).unwrap(),
+                &U256::from_str(&hi_secondary).unwrap(),
             );
 
             println!("{}", r.0.unwrap_or("nothing".into()));
