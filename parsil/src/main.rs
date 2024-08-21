@@ -10,6 +10,7 @@ use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
 use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
 mod assembler;
+mod dsl;
 mod errors;
 mod executor;
 mod expand;

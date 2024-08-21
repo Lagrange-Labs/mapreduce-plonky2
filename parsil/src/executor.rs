@@ -575,3 +575,5 @@ pub fn bracket_secondary_index<C: ContextProvider>(
 
     (largest_below, smallest_above)
 }
+
+pub fn isolate_indices<C: ContextProvider>(query: &mut Query, settings: &ParsilSettings<C>) -> () {}
