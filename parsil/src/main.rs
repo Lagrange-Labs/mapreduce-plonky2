@@ -1,11 +1,16 @@
+use std::str::FromStr;
+
+use alloy::primitives::U256;
 use anyhow::*;
 use clap::{Parser, Subcommand};
 use log::Level;
 use sqlparser::ast::Query;
 use symbols::{ContextProvider, FileContextProvider};
 use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
+use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
 mod assembler;
+mod bracketer;
 mod errors;
 mod executor;
 mod expand;
@@ -18,9 +23,6 @@ mod visitor;
 
 #[derive(Parser)]
 struct Args {
-    #[arg()]
-    request: String,
-
     #[arg(short = 'v', global = true)]
     verbose: bool,
 
@@ -31,14 +33,31 @@ struct Args {
 #[derive(Subcommand)]
 enum Command {
     /// Displays the AST as parsed by sqlparser.
-    Debug {},
+    Debug {
+        #[arg()]
+        request: String,
+    },
     /// Generate the PIs required by the universal query circuit.
-    Circuit {},
+    Circuit {
+        #[arg()]
+        request: String,
+    },
     /// Generate the queries to execute the user query of fetch the range of
     /// primary indices and key it touches.
     Query {
+        #[arg()]
+        request: String,
+
         #[command(subcommand)]
         kind: QueryKind,
+    },
+    /// Generate the query to bracket the secondary index values for an empty
+    /// result query.
+    Bracket {
+        table: String,
+        block: i64,
+        lo_secondary: String,
+        hi_secondary: String,
     },
 }
 
@@ -61,30 +80,51 @@ fn main() -> Result<()> {
         context: FileContextProvider::from_file("tests/context.json")?,
         placeholders: PlaceholderSettings::with_freestanding(3),
     };
-    let mut query = parse_and_validate(&args.request, &settings)?;
 
     match args.command {
-        Command::Debug {} => {
-            println!("Query string:\n{}", &args.request);
+        Command::Debug { request } => {
+            let mut query = parse_and_validate(&request, &settings)?;
+            println!("Query string:\n{}", &request);
             if args.verbose {
                 println!("{:#?}", query);
             }
             println!("Final query:\n{}", query);
         }
-        Command::Circuit {} => {
+        Command::Circuit { request } => {
+            let mut query = parse_and_validate(&request, &settings)?;
             assembler::validate(&query, &settings)?;
         }
-        Command::Query { kind } => match kind {
-            QueryKind::Execute => {
-                let translated = executor::generate_query_execution(&mut query, &settings)?;
+        Command::Query { request, kind } => {
+            let mut query = parse_and_validate(&request, &settings)?;
+            match kind {
+                QueryKind::Execute => {
+                    let translated = executor::generate_query_execution(&mut query, &settings)?;
 
-                println!("{}", translated.query);
-                println!("placeholders mapping: {:?}", translated.placeholder_mapping);
+                    println!("{}", translated.query);
+                    println!("placeholders mapping: {:?}", translated.placeholder_mapping);
+                }
+                QueryKind::Keys => {
+                    println!("{}", executor::generate_query_keys(&mut query, &settings)?)
+                }
             }
-            QueryKind::Keys => {
-                println!("{}", executor::generate_query_keys(&mut query, &settings)?)
-            }
-        },
+        }
+        Command::Bracket {
+            table,
+            block,
+            lo_secondary,
+            hi_secondary,
+        } => {
+            let r = bracketer::_bracket_secondary_index(
+                &table,
+                &settings,
+                block,
+                &U256::from_str(&lo_secondary).unwrap(),
+                &U256::from_str(&hi_secondary).unwrap(),
+            );
+
+            println!("{}", r.0.unwrap_or("nothing".into()));
+            println!("{}", r.1.unwrap_or("nothing".into()));
+        }
     }
 
     Ok(())

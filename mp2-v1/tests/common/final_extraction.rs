@@ -26,10 +26,13 @@ impl TestContext {
         } else {
             CircuitInput::new_simple_input(block_proof, contract_proof, values_proof, compound_type)
         }?;
-        let proof = api::generate_proof(
-            self.params(),
-            api::CircuitInput::FinalExtraction(circuit_input),
-        )?;
+        let params = self.params();
+        let proof = self
+            .b
+            .bench("indexing::extraction::final", || {
+                api::generate_proof(params, api::CircuitInput::FinalExtraction(circuit_input))
+            })
+            .expect("unable to generate final extraction proof");
 
         let pproof = ProofWithVK::deserialize(&proof)?;
         let block = self.query_current_block().await;

@@ -37,16 +37,12 @@ use mp2_v1::{
         cell::MerkleCell,
         index::IndexNode,
         row::{Row, RowPayload, RowTree, RowTreeKey},
+        LagrangeNode,
     },
     values_extraction::identifier_block_column,
 };
 use parsil::{
-    assembler::{CircuitPis, DynamicCircuitPis, StaticCircuitPis},
-    executor::TranslatedQuery,
-    parse_and_validate,
-    symbols::ContextProvider,
-    ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
-    DEFAULT_MIN_BLOCK_PLACEHOLDER,
+    assembler::{CircuitPis, DynamicCircuitPis, StaticCircuitPis}, bracketer::bracket_secondary_index, executor::TranslatedQuery, parse_and_validate, symbols::ContextProvider, ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER
 };
 use ryhope::{
     storage::{
@@ -119,11 +115,11 @@ pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Re
 }
 
 async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
-    /*let query_info = cook_query(table).await?;
+    let query_info = cook_query(table).await?;
     test_query_mapping(ctx, table, query_info).await?;
     // cook query with custom placeholders
     let query_info = cook_query_secondary_index_placeholder(table).await?;
-    test_query_mapping(ctx, table, query_info).await?;*/
+    test_query_mapping(ctx, table, query_info).await?;
     // cook query filtering over a secondary index value not valid in all the blocks
     let query_info = cook_query_non_matching_entries_some_blocks(table).await?;
     test_query_mapping(ctx, table, query_info).await
@@ -237,6 +233,7 @@ async fn prove_query(
             table: &table,
             query: query.clone(),
             pis: &pis,
+            settings: &settings,
         };
         let info = RowInfo {
             satisfiying_rows: row_keys.clone(),
@@ -267,6 +264,7 @@ async fn prove_query(
         table: &table,
         query: query.clone(),
         pis: &pis,
+        settings: &settings,
     };
     let info = IndexInfo {
         bounds: pis.bounds.clone(),
@@ -382,7 +380,13 @@ fn check_final_outputs(
         pis.bounds.max_query_secondary.clone(),
     )?;
     assert_eq!(
-        HashOutput::try_from(revelation_pis.computational_hash().to_bytes())?,
+        HashOutput::try_from(
+            revelation_pis
+                .flat_computational_hash()
+                .iter()
+                .flat_map(|f| u32::try_from(f.to_canonical_u64()).unwrap().to_be_bytes())
+                .collect_vec()
+        )?,
         expected_computational_hash,
     );
     // check num placeholders
@@ -642,6 +646,7 @@ struct QueryPlanner<'a>
     pis: &'a DynamicCircuitPis,
     ctx: &'a mut TestContext,
     table: &'a Table,
+    settings: &'a ParsilSettings<&'a Table>
 }
 
 trait TreeInfo<T, V, S>
@@ -913,36 +918,20 @@ async fn prove_non_existence_row<'a>(
     planner: &mut QueryPlanner<'a>,
     primary: BlockPrimaryIndex,
 ) -> Result<()> {
-    let secondary_min_bound = planner.pis.bounds.min_query_secondary();
-    let secondary_max_bound = planner.pis.bounds.max_query_secondary();
     let tree = RowInfo::tree(planner);
-    let query_for_min = format!("
-        SELECT key FROM 
-            (SELECT key, generate_series(__valid_from, __valid_until) AS block,
-            generate_series(__valid_from, __valid_until) AS block_number, 
-            (payload -> 'cells' -> '12402577999739927615' ->> 'value')::NUMERIC AS map_value, 
-            (payload -> 'cells' -> '3885571730649180944' ->> 'value')::NUMERIC AS map_key FROM row_mapping_table) 
-        AS row_mapping_table 
-        WHERE block_number = $1 
-        AND map_value < $2 ORDER BY map_value DESC LIMIT 1;
-    ");
-    let query_for_max = format!("
-        SELECT key FROM 
-            (SELECT key, generate_series(__valid_from, __valid_until) AS block,
-            generate_series(__valid_from, __valid_until) AS block_number, 
-            (payload -> 'cells' -> '12402577999739927615' ->> 'value')::NUMERIC AS map_value, 
-            (payload -> 'cells' -> '3885571730649180944' ->> 'value')::NUMERIC AS map_key FROM row_mapping_table) 
-            AS row_mapping_table 
-        WHERE block_number = $1 
-        AND map_value > $2 ORDER BY map_value ASC LIMIT 1;
-    ");
+    let (query_for_min, query_for_max) = bracket_secondary_index(
+        &planner.table.row_table_name(), 
+        &planner.settings, 
+        primary as Epoch, 
+        &planner.pis.bounds
+    );
     
-    let find_node_for_proof = async |query: &str, query_bound: U256| 
+    let find_node_for_proof = async |query: Option<String>| 
         -> Result<Option<RowTreeKey>> {
-        let rows = planner.table.execute_row_query(&query, &[
-            U256::from(primary),
-            query_bound,
-        ]).await?;
+        if query.is_none() {
+            return Ok(None)
+        }
+        let rows = planner.table.execute_row_query(&query.unwrap(), &[]).await?;
         if rows.len() == 0 {
             // no node found, return None
             info!("Search node for non-existence circuit: no node found");
@@ -974,10 +963,10 @@ async fn prove_non_existence_row<'a>(
         Ok(Some(node_ctx.node_id))
     };
     // try first with lower node than secondary min query bound
-    let to_be_proven_node = match find_node_for_proof(&query_for_min, secondary_min_bound)
+    let to_be_proven_node = match find_node_for_proof(query_for_min)
         .await? {
             Some(node) => node,
-            None => find_node_for_proof(&query_for_max, secondary_max_bound).await?
+            None => find_node_for_proof(query_for_max).await?
                 .expect("No valid node found to prove non-existence, something is wrong")
         };
     let (node_info, left_child_info, right_child_info) = get_node_info(tree, &to_be_proven_node, primary as Epoch).await;
@@ -1038,6 +1027,7 @@ async fn prove_non_existence_row<'a>(
         table: planner.table,
         query: planner.query.clone(),
         pis: planner.pis,
+        settings: &planner.settings,
     };
     prove_query_on_tree(planner, info, proving_tree, primary).await?;
     
@@ -1445,59 +1435,5 @@ fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) {
     assert!(columns.len() > 0);
     for row in rows {
         println!("{:?}", types.extract(row, 0));
-    }
-}
-
-// NOTE this might be good to have on public API ?
-// cc/ @andrus
-pub trait LagrangeNode {
-    fn value(&self) -> U256;
-    fn hash(&self) -> HashOutput;
-    fn min(&self) -> U256;
-    fn max(&self) -> U256;
-    fn embedded_hash(&self) -> HashOutput;
-}
-
-impl<T: Eq + Default + std::fmt::Debug + Clone> LagrangeNode for RowPayload<T> {
-    fn value(&self) -> U256 {
-        self.secondary_index_value()
-    }
-
-    fn hash(&self) -> HashOutput {
-        self.hash.clone()
-    }
-
-    fn min(&self) -> U256 {
-        self.min
-    }
-
-    fn max(&self) -> U256 {
-        self.max
-    }
-
-    fn embedded_hash(&self) -> HashOutput {
-        self.cell_root_hash.clone().unwrap()
-    }
-}
-
-impl<T> LagrangeNode for IndexNode<T> {
-    fn value(&self) -> U256 {
-        self.value.0
-    }
-
-    fn hash(&self) -> HashOutput {
-        self.node_hash.clone()
-    }
-
-    fn min(&self) -> U256 {
-        self.min
-    }
-
-    fn max(&self) -> U256 {
-        self.max
-    }
-
-    fn embedded_hash(&self) -> HashOutput {
-        self.row_tree_hash.clone()
     }
 }

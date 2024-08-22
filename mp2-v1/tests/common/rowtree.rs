@@ -138,7 +138,11 @@ impl TestContext {
                         .unwrap(),
                 );
                 debug!("Before proving leaf node row tree key {:?}", k);
-                api::generate_proof(self.params(), inputs).expect("while proving leaf")
+                self.b
+                    .bench("indexing::row_tree::leaf", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
+                    .expect("while proving leaf")
             } else if context.is_partial() {
                 let child_key = context
                     .left
@@ -171,7 +175,11 @@ impl TestContext {
                 );
 
                 debug!("Before proving partial node row tree key");
-                api::generate_proof(self.params(), inputs).expect("while proving partial node")
+                self.b
+                    .bench("indexing::row_tree::partial", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
+                    .expect("while proving partial node")
             } else {
                 let left_key = context.left.unwrap();
                 let left_row = table.row.fetch(&left_key).await;
@@ -208,7 +216,11 @@ impl TestContext {
                     .unwrap(),
                 );
                 debug!("Before proving full node row tree key {:?}", k);
-                api::generate_proof(self.params(), inputs).expect("while proving full node")
+                self.b
+                    .bench("indexing::row_tree::full", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
+                    .expect("while proving full node")
             };
             let new_proof_key = RowProofIdentifier {
                 table: table.name.clone(),

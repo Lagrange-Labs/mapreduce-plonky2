@@ -23,6 +23,7 @@ use verifiable_db::{api::QueryParameters, query};
 use crate::common::mkdir_all;
 
 use super::{
+    benchmarker::Benchmarker,
     cases::{
         self,
         query::{
@@ -64,24 +65,15 @@ pub(crate) struct TestContext {
         >,
     >,
     pub(crate) storage: ProofKV,
+    pub(crate) b: Benchmarker,
 }
 /// Create the test context on a local anvil chain. It also setups the local simple test cases
 pub async fn new_local_chain(storage: ProofKV) -> TestContext {
     // Spin up a local node.
     let anvil = Anvil::new().spawn();
-
-    // Set up signer from the first default Anvil account.
-    let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
-    let wallet = EthereumWallet::from(signer);
-
     // Create a provider with the wallet for contract deployment and interaction.
     let rpc_url = anvil.endpoint();
-    let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
-        .wallet(wallet)
-        .on_http(rpc_url.parse().unwrap());
     info!("Anvil running at `{}`", rpc_url);
-
     let rpc = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
 
     TestContext {
@@ -91,6 +83,7 @@ pub async fn new_local_chain(storage: ProofKV) -> TestContext {
         params: None,
         query_params: None,
         storage,
+        b: Benchmarker::new_from_env().expect("can't create benchmarker"),
     }
 }
 

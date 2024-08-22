@@ -47,7 +47,7 @@ impl IntoIterator for PlaceholderIdsSet {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 /// Data structure employed to represent a set of placeholders, identified by their `PlaceholderId`
 pub struct Placeholders(pub HashMap<PlaceholderId, U256>);
 
@@ -115,7 +115,7 @@ impl From<(Vec<(PlaceholderId, U256)>, U256, U256)> for Placeholders {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
 /// Enumeration representing all the possible types of input operands for a basic operation
 pub enum InputOperand {
     // Input operand is a placeholder in the query
@@ -147,7 +147,7 @@ impl Default for InputOperand {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
 /// Data structure employed to specify a basic operation to be performed to
 /// compute the query
 pub struct BasicOperation {
@@ -318,7 +318,7 @@ impl BasicOperation {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Enumeration representing the type of output values that can be returned for each row
 pub enum OutputItem {
     /// Output value is a column of the table
@@ -331,7 +331,7 @@ pub enum OutputItem {
 
 /// Data structure that contains the description of the output items to be returned and the
 /// operations necessary to compute the output items
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResultStructure {
     pub result_operations: Vec<BasicOperation>,
     pub output_items: Vec<OutputItem>,
@@ -395,7 +395,7 @@ impl ResultStructure {
     }
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ColumnCell {
     pub value: U256,
     pub id: F,
@@ -410,7 +410,7 @@ impl ColumnCell {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RowCells {
     primary: ColumnCell,
     secondary: ColumnCell,
