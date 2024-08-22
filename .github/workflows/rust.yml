@@ -48,7 +48,7 @@ jobs:
 
   test:
     name: Test Suite
-    runs-on: [self-hosted, '${{ github.repository_owner }}']
+    runs-on: ['memory:128GB']
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
