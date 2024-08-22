@@ -14,12 +14,12 @@ use crate::common::{
     index_tree::{IndexStorage, MerkleIndexTree},
     proof_storage::{ProofKey, QueryID},
     rowtree::{MerkleRowTree, RowStorage},
-    table::TableColumns,
+    table::{self, TableColumns},
 };
 
 use super::super::{context::TestContext, proof_storage::ProofStorage, table::Table};
 use alloy::{primitives::U256, rpc::types::Block};
-use anyhow::{Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use futures::{future::BoxFuture, io::empty, stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::{debug, info, warn};
@@ -61,16 +61,14 @@ use ryhope::{
 use sqlparser::ast::Query;
 use tokio_postgres::Row as PsqlRow;
 use verifiable_db::{
-    ivc::PublicInputs as IndexingPIS,
-    query::{
+    ivc::PublicInputs as IndexingPIS, query::{
         self,
-        aggregation::{ChildPosition, NodeInfo, QueryBoundSource, QueryBounds, SubProof},
+        aggregation::{ChildPosition, NodeInfo, QueryBoundSource, QueryBounds, QueryHashNonExistenceCircuits, SubProof},
         computational_hash_ids::{ColumnIDs, Identifiers},
         universal_circuit::universal_circuit_inputs::{
             ColumnCell, PlaceholderId, Placeholders, RowCells,
         },
-    },
-    revelation::PublicInputs,
+    }, revelation::PublicInputs
 };
 
 pub const MAX_NUM_RESULT_OPS: usize = 20;
@@ -121,10 +119,13 @@ pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Re
 }
 
 async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
-    let query_info = cook_query(table).await?;
+    /*let query_info = cook_query(table).await?;
     test_query_mapping(ctx, table, query_info).await?;
     // cook query with custom placeholders
     let query_info = cook_query_secondary_index_placeholder(table).await?;
+    test_query_mapping(ctx, table, query_info).await?;*/
+    // cook query filtering over a secondary index value not valid in all the blocks
+    let query_info = cook_query_non_matching_entries_some_blocks(table).await?;
     test_query_mapping(ctx, table, query_info).await
 }
 
@@ -213,7 +214,6 @@ async fn prove_query(
         touched_rows.len(),
         touched_rows.keys(),
     );
-
     // prove the whole tree for each of the involved rows for each block
     for (primary_value, row_keys) in &touched_rows {
         let all_paths = stream::iter(row_keys)
@@ -234,11 +234,9 @@ async fn prove_query(
         let proving_tree = UpdateTree::from_paths(all_paths, *primary_value as Epoch);
         let planner = QueryPlanner {
             ctx,
-            genesis: table.genesis_block,
+            table: &table,
             query: query.clone(),
             pis: &pis,
-            tree: &table.row,
-            columns: table.columns.clone(),
         };
         let info = RowInfo {
             satisfiying_rows: row_keys.clone(),
@@ -247,13 +245,15 @@ async fn prove_query(
     }
     // do the same for the single index tree now
     let current_epoch = table.index.current_epoch();
-    let all_paths = stream::iter(touched_rows.keys())
-        .then(|primary| async {
+    let all_paths = stream::iter(
+        query.min_block..query.max_block
+    )
+        .then(|primary| async move {
             // NOTE : it is important to fetch the data at fixed epoch ! and this key fetched can be
             // different
             table
                 .index
-                .lineage_at(primary, current_epoch)
+                .lineage_at(&primary, current_epoch)
                 .await
                 .expect("index node doesn't have lineage?")
                 .into_full_path()
@@ -264,11 +264,9 @@ async fn prove_query(
     let proving_tree = UpdateTree::from_paths(all_paths, current_epoch);
     let planner = QueryPlanner {
         ctx,
+        table: &table,
         query: query.clone(),
-        genesis: table.genesis_block,
         pis: &pis,
-        tree: &table.index,
-        columns: table.columns.clone(),
     };
     let info = IndexInfo {
         bounds: pis.bounds.clone(),
@@ -434,7 +432,7 @@ fn check_final_outputs(
 /// clippy doesn't see that it can not be done
 #[allow(clippy::needless_lifetimes)]
 async fn prove_query_on_tree<'a, T, V, S, I>(
-    mut planner: QueryPlanner<'a, T, V, S>,
+    mut planner: QueryPlanner<'a>,
     info: I,
     update: UpdateTree<<T as TreeTopology>::Key>,
     primary: BlockPrimaryIndex,
@@ -482,8 +480,13 @@ where
     };
     while let Some(Next::Ready(wk)) = workplan.next() {
         let k = wk.k.clone();
-        let (node_ctx, node_payload) = planner
-            .tree
+        // closure performing all the operations necessary beofre jumping to the next iteration
+        let mut end_iteration = |proven_nodes: &mut HashSet<<T as TreeTopology>::Key>| -> Result<()> {
+            proven_nodes.insert(k.clone());
+            workplan.done(&wk)?;
+            Ok(())
+        };
+        let (node_ctx, node_payload) = I::tree(&mut planner)
             // since epoch starts at genesis now, we can directly give the value of the block
             // number as epoch number
             .fetch_with_context_at(&k, primary as Epoch)
@@ -504,10 +507,9 @@ where
                 &query_id,
                 primary,
                 &k,
-                embedded_proof.unwrap(),
+                embedded_proof?.unwrap(),
             )?;
-            proven_nodes.insert(k);
-            workplan.done(&wk)?;
+            end_iteration(&mut proven_nodes)?;
             continue;
         }
 
@@ -516,16 +518,24 @@ where
         // it is not the same meaning as a "leaf of a tree", here it just means is it the first
         // node in the merkle path.
         let input = if wk.is_path_end {
-            info!("node {primary}:{k:?} is at path end");
+            info!("node {primary} -> {k:?} is at path end");
+            if !is_satisfying_query {
+                // if the node of the key does not satisfy the query, but this node is at the end of
+                // a path to be proven, then it means we are in a tree with no satisfying nodes, and 
+                // so the current node is the node chosen to be proven with non-existence circuits. 
+                // Since the node has already been proven, we just save the proof and we continue
+                end_iteration(&mut proven_nodes)?;
+                continue;
+            }
             assert!(
                 info.is_satisfying_query(&k),
                 "first node in merkle path should always be a valid query one"
             );
             let (node_info, left_info, right_info) =
             // we can use primary as epoch now that tree stores epoch from genesis
-                get_node_info(&planner.tree, &k, primary as Epoch).await;
+                get_node_info(I::tree(&mut planner), &k, primary as Epoch).await;
             QueryCircuitInput::new_single_path(
-                SubProof::new_embedded_tree_proof(embedded_proof.unwrap())?,
+                SubProof::new_embedded_tree_proof(embedded_proof?.unwrap())?,
                 left_info,
                 right_info,
                 node_info,
@@ -546,7 +556,7 @@ where
                 let (child_pos, child_proof) =
                     fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                 let (node_info, left_info, right_info) = get_node_info(
-                    planner.tree,
+                    I::tree(&mut planner),
                     &k,
                     // we can use primary as epoch since storage starts epoch at genesis
                     primary as Epoch,
@@ -582,7 +592,7 @@ where
                     QueryCircuitInput::new_full_node(
                         left_proof,
                         right_proof,
-                        embedded_proof.expect("should be a embedded_proof here"),
+                        embedded_proof?.expect("should be a embedded_proof here"),
                         info.is_row_tree(),
                         &planner.pis.bounds,
                     )
@@ -592,14 +602,14 @@ where
                     let (child_pos, child_proof) =
                         fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                     let (_, left_info, right_info) =
-                        get_node_info(planner.tree, &k, primary as Epoch).await;
+                        get_node_info(I::tree(&mut planner), &k, primary as Epoch).await;
                     let unproven = match child_pos {
                         ChildPosition::Left => right_info,
                         ChildPosition::Right => left_info,
                     };
                     QueryCircuitInput::new_partial_node(
                         child_proof,
-                        embedded_proof.expect("should be an embedded_proof here too"),
+                        embedded_proof?.expect("should be an embedded_proof here too"),
                         unproven,
                         child_pos,
                         info.is_row_tree(),
@@ -614,36 +624,24 @@ where
             .is_err()
         {
             info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
+            //debug!("input: {input:?}");
             let proof = planner
                 .ctx
                 .run_query_proof(GlobalCircuitInput::Query(input))?;
             info.save_proof(planner.ctx, &query_id, primary, &k, proof)?;
         }
         info!("Universal query proof DONE for {primary} -> {k:?} ");
-        workplan.done(&wk)?;
-        proven_nodes.insert(k);
+        end_iteration(&mut proven_nodes)?;
     }
     Ok(vec![])
 }
 
-struct QueryPlanner<'a, T, V, S>
-where
-    T: TreeTopology + MutableTree,
-    // NOTICE the ToValue here to get the value associated to a node
-    V: NodePayload + Send + Sync + LagrangeNode,
-    S: TransactionalStorage
-        + TreeStorage<T>
-        + PayloadStorage<T::Key, V>
-        + FromSettings<T::State>
-        + Send
-        + Sync,
+struct QueryPlanner<'a>
 {
     query: QueryCooking,
-    genesis: BlockPrimaryIndex,
     pis: &'a DynamicCircuitPis,
     ctx: &'a mut TestContext,
-    tree: &'a MerkleTreeKvDb<T, V, S>,
-    columns: TableColumns,
+    table: &'a Table,
 }
 
 trait TreeInfo<T, V, S>
@@ -678,11 +676,14 @@ where
     ) -> Result<()>;
     async fn load_or_prove_embedded<'a>(
         &self,
-        planner: &mut QueryPlanner<'a, T, V, S>,
+        planner: &mut QueryPlanner<'a>,
         primary: BlockPrimaryIndex,
         k: &<T as TreeTopology>::Key,
         v: &V,
-    ) -> Option<Vec<u8>>;
+    ) -> Result<Option<Vec<u8>>>;
+    fn tree<'a>(
+        planner: &mut QueryPlanner<'a>,
+    ) -> &'a MerkleTreeKvDb<T, V, S>;
 }
 
 struct IndexInfo {
@@ -707,6 +708,7 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
         key: &BlockPrimaryIndex,
     ) -> Result<Vec<u8>> {
         //assert_eq!(primary, *key);
+        info!("loading proof for {primary} -> {key:?}");
         let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
         ctx.storage.get_proof_exact(&proof_key)
     }
@@ -726,32 +728,52 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
 
     async fn load_or_prove_embedded<'a>(
         &self,
-        planner: &mut QueryPlanner<'a, BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>,
+        planner: &mut QueryPlanner<'a>,
         primary: BlockPrimaryIndex,
         k: &BlockPrimaryIndex,
         v: &IndexNode<BlockPrimaryIndex>,
-    ) -> Option<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>> {
         //assert_eq!(primary, *k);
-        if self.is_satisfying_query(k) {
-            // load the proof of the row root for this query
-            // We assume it is already proven, otherwise, there is a flaw in the logic
+        info!("loading embedded proof for node {primary} -> {k:?}");
+        Ok(if self.is_satisfying_query(k) {
+            // load the proof of the row root for this query, if it is already proven;
+            // otherwise, it means that there are no rows in the rows tree embedded in this
+            // node that satisfies the query bounds on secondary index, so we need to
+            // generate a non-existence proof for the row tree
             let row_root_proof_key = ProofKey::QueryAggregateRow((
                 planner.query.query.clone(),
                 k.clone(),
                 v.row_tree_root_key.clone(),
             ));
-            let proof = planner
+            let proof = match planner
                 .ctx
                 .storage
-                .get_proof_exact(&row_root_proof_key)
-                .expect("row root proof for query should already have been proven");
+                .get_proof_exact(&row_root_proof_key) {
+                    Ok(proof) => proof,
+                    Err(_) => {
+                        prove_non_existence_row(planner, *k).await?;
+                        info!("non existence proved for {primary} -> {k:?}");
+                        // fetch again the generated proof
+                        planner
+                            .ctx
+                            .storage
+                            .get_proof_exact(&row_root_proof_key)
+                            .expect(format!("non-existence root proof not found for key {row_root_proof_key:?}").as_str())
+                    },
+                };
             Some(proof)
         } else {
             None
-        }
+        })
+    }
+    
+    fn tree<'a>(
+        planner: &mut QueryPlanner<'a>,
+    ) -> &'a MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> {
+        &planner.table.index
     }
 }
-
+#[derive(Default)]
 struct RowInfo {
     satisfiying_rows: HashSet<RowTreeKey>,
 }
@@ -790,29 +812,35 @@ impl TreeInfo<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> for RowInfo {
 
     async fn load_or_prove_embedded<'a>(
         &self,
-        planner: &mut QueryPlanner<'a, RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>,
+        planner: &mut QueryPlanner<'a>,
         primary: BlockPrimaryIndex,
         k: &RowTreeKey,
         _v: &RowPayload<BlockPrimaryIndex>,
-    ) -> Option<Vec<u8>> {
-        let ctx = &mut planner.ctx;
-        if self.is_satisfying_query(k) {
+    ) -> Result<Option<Vec<u8>>> {
+        Ok(if self.is_satisfying_query(k) {
+            let tree = Self::tree(planner);
+            let ctx = &mut planner.ctx;
             Some(
                 prove_single_row(
                     ctx,
-                    &planner.tree,
-                    &planner.columns,
+                    tree,
+                    &planner.table.columns,
                     primary,
                     &k,
                     &planner.pis,
                     &planner.query,
                 )
-                .await
-                .unwrap(),
+                .await?,
             )
         } else {
             None
-        }
+        })
+    }
+    
+    fn tree<'a>(
+        planner: &mut QueryPlanner<'a>,
+    ) -> &'a MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> {
+        &planner.table.row
     }
 }
 
@@ -879,6 +907,133 @@ where
         left_node,
         right_node,
     )
+}
+
+async fn prove_non_existence_row<'a>(
+    planner: &mut QueryPlanner<'a>,
+    primary: BlockPrimaryIndex,
+) -> Result<()> {
+    let secondary_min_bound = planner.pis.bounds.min_query_secondary();
+    let secondary_max_bound = planner.pis.bounds.max_query_secondary();
+    let tree = RowInfo::tree(planner);
+    let query_for_min = format!("
+        SELECT key FROM 
+            (SELECT key, generate_series(__valid_from, __valid_until) AS block, 
+            generate_series(__valid_from, __valid_until) AS block_number, 
+            (payload -> 'cells' -> '12191544657365810443' ->> 'value')::NUMERIC AS map_value, 
+            (payload -> 'cells' -> '10362498354857054631' ->> 'value')::NUMERIC AS map_key FROM row_mapping_table) 
+        AS row_mapping_table 
+        WHERE block_number = $1 
+        AND map_value < $2 ORDER BY map_value DESC LIMIT 1;
+    ");
+    let query_for_max = format!("
+        SELECT key FROM 
+            (SELECT key, generate_series(__valid_from, __valid_until) AS block, 
+            generate_series(__valid_from, __valid_until) AS block_number, 
+            (payload -> 'cells' -> '12191544657365810443' ->> 'value')::NUMERIC AS map_value, 
+            (payload -> 'cells' -> '10362498354857054631' ->> 'value')::NUMERIC AS map_key FROM row_mapping_table) 
+        AS row_mapping_table 
+        WHERE block_number = $1 
+        AND map_value > $2 ORDER BY map_value ASC LIMIT 1;
+    ");
+    
+    let find_node_for_proof = async |query: &str, query_bound: U256| 
+        -> Result<Option<RowTreeKey>> {
+        let rows = planner.table.execute_row_query(&query, &[
+            U256::from(primary),
+            query_bound,
+        ]).await?;
+        if rows.len() == 0 {
+            // no node found, return None
+            return Ok(None)
+        }
+        let row_key = rows[0].get::<_, Option<Vec<u8>>>(0)
+            .map(RowTreeKey::from_bytea)
+            .context("unable to parse row key tree")
+            .expect("");
+        // check if the node found has less than 2 children
+        let (node_ctx, _) = tree.fetch_with_context_at(&row_key, primary as Epoch).await;
+        Ok(
+            match (&node_ctx.left, &node_ctx.right) {
+            (Some(_), Some(_)) => None, // if it has children, return None, we cannot run the non-existence circuit over this node
+            _ => Some(row_key), // otherwise, we found the node, so we return its key
+            }
+        )
+    };
+    // try first with lower node than secondary min query bound
+    let to_be_proven_node = match find_node_for_proof(&query_for_min, secondary_min_bound)
+        .await? {
+            Some(node) => node,
+            None => find_node_for_proof(&query_for_max, secondary_max_bound).await?
+                .expect("No valid node found to prove non-existence, something is wrong")
+        };
+    let (node_info, left_child_info, right_child_info) = get_node_info(tree, &to_be_proven_node, primary as Epoch).await;
+    let child_info = match (left_child_info, right_child_info) {
+        (None, None) => None, // leaf node
+        (None, Some(info)) => Some((info, ChildPosition::Right)),
+        (Some(info), None) => Some((info, ChildPosition::Left)),
+        (Some(_), Some(_)) => bail!("chosen to prove a node with 2 children for non-existence circuit, something is wrong"),
+    };
+    let index_ids = [planner.table.columns.primary_column().identifier, planner.table.columns.secondary_column().identifier];
+    assert_eq!(index_ids[0], identifier_block_column());
+    let column_ids = ColumnIDs::new(
+        index_ids[0], 
+        index_ids[1], 
+        planner.table.columns.non_indexed_columns().iter().map(|column| column.identifier).collect_vec(),
+    );
+    let query_hashes = QueryHashNonExistenceCircuits::new::<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_ITEMS_PER_OUTPUT,
+    >(
+        &column_ids, 
+        &planner.pis.predication_operations, 
+        &planner.pis.result, 
+        &planner.query.placeholders, 
+        &planner.pis.bounds, 
+        true,
+    )?;
+    let input = QueryCircuitInput::new_non_existence_input(
+        node_info, 
+        child_info, 
+        U256::from(primary), 
+        &index_ids, 
+        &planner.pis.query_aggregations, 
+        query_hashes, 
+        true, 
+        &planner.pis.bounds, 
+        &planner.query.placeholders,
+    )?;
+    let proof_key = ProofKey::QueryAggregateRow((planner.query.query.clone(), primary, to_be_proven_node.clone()));
+    info!("Non-existence circuit proof RUNNING for {primary} -> {to_be_proven_node:?} ");
+    let proof = planner.ctx
+        .run_query_proof(GlobalCircuitInput::Query(input))
+        .expect(format!("unable to generate non-existence proof for {primary} -> {to_be_proven_node:?}").as_str());
+    info!("Non-existence circuit proof DONE for {primary} -> {to_be_proven_node:?} ");
+    planner.ctx.storage.store_proof(proof_key, proof.clone())?;
+    
+    // now generate the path up to the root of the row tree for the current epoch, as all nodes in such a path
+    // need to be proven
+    let path = planner.table
+        .row
+        // since the epoch starts at genesis we can directly give the block number !
+        .lineage_at(&to_be_proven_node, primary as Epoch)
+        .await
+        .expect("node doesn't have a lineage?")
+        .into_full_path()
+        .collect_vec();
+    let proving_tree = UpdateTree::from_paths([path], primary as Epoch);
+    let info = RowInfo::default();
+    let planner = QueryPlanner {
+        ctx: planner.ctx,
+        table: planner.table,
+        query: planner.query.clone(),
+        pis: planner.pis,
+    };
+    prove_query_on_tree(planner, info, proving_tree, primary).await?;
+    
+    Ok(())
 }
 
 async fn prove_single_row(
@@ -948,61 +1103,11 @@ struct QueryCooking {
 
 type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
 
-async fn find_longest_lived_key(table: &Table) -> Result<(RowTreeKey, BlockRange)> {
-    let mut all_table = HashMap::new();
-    let max = table.row.current_epoch();
-    let min = table.row.initial_epoch() + 1;
-    for block in (min..=max).rev() {
-        println!("Querying for block {block}");
-        let rows = collect_all_at(&table.row, block).await?;
-        debug!(
-            "Collecting {} rows at epoch {} (rows_keys {:?})",
-            rows.len(),
-            block,
-            rows.iter().map(|r| r.k.value).collect::<Vec<_>>()
-        );
-        for row in rows {
-            let blocks = all_table.entry(row.k.clone()).or_insert(Vec::new());
-            blocks.push(block);
-        }
-    }
-    // sort the epochs
-    let all_table: HashMap<_, _> = all_table
-        .into_iter()
-        .map(|(k, mut epochs)| {
-            epochs.sort_unstable();
-            (k, epochs)
-        })
-        .collect();
-    // find the longest running row
-    let (longest_key, epochs) = all_table
-        .iter()
-        .max_by_key(|(k, epochs)| {
-            // simplification here to start at first epoch where this row was. Otherwise need to do
-            // longest consecutive sequence etc...
-            let (l, _start) = find_longest_consecutive_sequence(epochs.to_vec());
-            debug!("finding sequence of {l} blocks for key {k:?} (epochs {epochs:?}");
-            l
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "unable to find longest row? -> length all _table {}, max {}",
-                all_table.len(),
-                max
-            )
-        });
-    // we set the block bounds
-    let (longest_sequence, starting) = find_longest_consecutive_sequence(epochs.to_vec());
-    let min_block = starting as BlockPrimaryIndex;
-    let max_block = min_block + longest_sequence;
-    Ok((longest_key.clone(), (min_block, max_block)))
-}
-
 // cook up a SQL query on the secondary index and with a predicate on the non-indexed column.
 // we just iterate on mapping keys and take the one that exist for most blocks. We also choose
 // a value to filter over the non-indexed column
 async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCooking> {
-    let (longest_key, (min_block, max_block)) = find_longest_lived_key(table).await?;
+    let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
         "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
@@ -1043,7 +1148,7 @@ async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCo
 // cook up a SQL query on the secondary index. For that we just iterate on mapping keys and
 // take the one that exist for most blocks
 async fn cook_query(table: &Table) -> Result<QueryCooking> {
-    let (longest_key, (min_block, max_block)) = find_longest_lived_key(table).await?;
+    let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
         "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
@@ -1112,6 +1217,112 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
         placeholders,
     })
 }
+
+/// Cook a query where there are no entries satisying the secondary query bounds only for some
+/// blocks of the primary index bounds (not for all the blocks)
+async fn cook_query_non_matching_entries_some_blocks(table: &Table) -> Result<QueryCooking> {
+    let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, true).await?;
+    let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
+    info!(
+        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
+        min_block, max_block, key_value
+    );
+    // now we can fetch the key that we want
+    let key_column = table.columns.secondary.name.clone();
+    // Assuming this is mapping with only two columns !
+    let value_column = table.columns.rest[0].name.clone();
+    let table_name = table.row_table_name();
+    // in this query we set query bounds on block numbers to the widest range, so that we
+    // are sure that there are blocks where the chosen key is not alive
+    let min_block = table.row.initial_epoch() + 1;
+    let max_block = table.row.current_epoch();
+    let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
+
+    let query_str = format!(
+        "SELECT AVG({value_column})
+                FROM {table_name}
+                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
+                AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
+                AND {key_column} = '0x{key_value}';"
+    );
+    Ok(QueryCooking {
+        min_block: min_block as BlockPrimaryIndex,
+        max_block: max_block as BlockPrimaryIndex,
+        query: query_str,
+        placeholders,
+    })
+}
+
+/// Utility function to associated to each row in the tree, the blocks where the row
+/// was valid
+async fn extract_row_liveness(table: &Table) -> Result<HashMap<RowTreeKey, Vec<Epoch>>> {
+    let mut all_table = HashMap::new();
+    let max = table.row.current_epoch();
+    let min = table.row.initial_epoch() + 1;
+    for block in (min..=max).rev() {
+        println!("Querying for block {block}");
+        let rows = collect_all_at(&table.row, block).await?;
+        debug!(
+            "Collecting {} rows at epoch {} (rows_keys {:?})",
+            rows.len(),
+            block,
+            rows.iter().map(|r| r.k.value).collect::<Vec<_>>()
+        );
+        for row in rows {
+            let blocks = all_table.entry(row.k.clone()).or_insert(Vec::new());
+            blocks.push(block);
+        }
+    }
+    // sort the epochs
+    all_table
+        .iter_mut()
+        .for_each(|(_, epochs)| {
+            epochs.sort_unstable()
+        });
+    Ok(all_table)
+}
+
+/// Find the the key of the node that lives the longest across all the blocks. If the
+/// `must_not_be_alive_in_some_blocks` flag is true, then the method considers only nodes
+/// that aren't live for all the blocks
+async fn find_longest_lived_key(table: &Table, must_not_be_alive_in_some_blocks: bool) -> Result<(RowTreeKey, BlockRange)> {
+    let initial_epoch = table.row.initial_epoch()+1;
+    let last_epoch = table.row.current_epoch();
+    let all_table = extract_row_liveness(table).await?;
+    // find the longest running row
+    let (longest_key, longest_sequence, starting) = all_table
+        .iter()
+        .filter_map(|(k, epochs)| {
+            // simplification here to start at first epoch where this row was. Otherwise need to do
+            // longest consecutive sequence etc...
+            let (l, start) = find_longest_consecutive_sequence(epochs.to_vec());
+            debug!("finding sequence of {l} blocks for key {k:?} (epochs {epochs:?}");
+            if must_not_be_alive_in_some_blocks {
+                if start > initial_epoch || (start + l as i64) < last_epoch {
+                    Some((k, l, start))
+                } else {
+                    None // it's live for all blocks, so we drop this row
+                }
+            } else {
+                Some((k, l, start))
+            }
+        })
+        .max_by_key(|(k, l, start)| {
+            *l
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "unable to find longest row? -> length all _table {}, max {}",
+                all_table.len(),
+                last_epoch,
+            )
+        });
+    // we set the block bounds
+    let min_block = starting as BlockPrimaryIndex;
+    let max_block = min_block + longest_sequence;
+    Ok((longest_key.clone(), (min_block, max_block)))
+}
+
 
 async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<BlockPrimaryIndex>>> {
     let root_key = tree.root_at(at).await.unwrap();

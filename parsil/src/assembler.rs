@@ -649,7 +649,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 .metadata()
                 .aggregation
                 .iter()
-                .map(|x| x.to_field())
+                .cloned()
                 .collect(),
             predication_operations: root_scope.metadata().predicates.ops.clone(),
             bounds: StaticQueryBounds::without_values(
@@ -672,7 +672,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 .metadata()
                 .aggregation
                 .iter()
-                .map(|x| x.to_field())
+                .cloned()
                 .collect(),
             predication_operations: root_scope.metadata().predicates.ops.clone(),
             bounds: QueryBounds::new(
@@ -745,7 +745,7 @@ pub struct CircuitPis<T: BuildableBounds> {
     pub result: ResultStructure,
     /// A list of [`AggregationOperation`] matching 1-1 the outputs in
     /// [`ResultStructure`]
-    pub query_aggregations: Vec<F>,
+    pub query_aggregations: Vec<AggregationOperation>,
     /// The list of crypto IDs of the column involved in the query. Their
     /// position in this list **MUST** match their index in the
     /// [`ResultStructure`] operations.
