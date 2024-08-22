@@ -216,7 +216,8 @@ mod tests {
         let simple_slot = 2_u8;
         let slot = StorageSlot::Simple(simple_slot as usize);
         let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let id = identifier_single_var_column(simple_slot, &contract_address);
+        let chain_id = 10;
+        let id = identifier_single_var_column(simple_slot, &contract_address, chain_id, vec![]);
 
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);

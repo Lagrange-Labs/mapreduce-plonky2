@@ -17,6 +17,7 @@ impl TestContext {
     pub(crate) async fn prove_length_extraction(
         &self,
         contract_address: &Address,
+        chain_id: u64,
         slot: u8,
         value: u8,
     ) -> ProofWithVK {
@@ -27,7 +28,7 @@ impl TestContext {
         // Query the slot and add the node path to the trie.
         trie.query_proof_and_add_slot(self, contract_address, slot as usize)
             .await;
-        let proof = trie.prove_length(&contract_address, value, &self.params(), &self.b);
+        let proof = trie.prove_length(&contract_address, chain_id, value, &self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::from_slice(&proof.proof().public_inputs);
