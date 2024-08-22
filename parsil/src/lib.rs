@@ -11,6 +11,7 @@ mod dsl;
 pub mod errors;
 pub mod executor;
 mod expand;
+pub mod insulator;
 mod parser;
 mod placeholders;
 pub mod symbols;

@@ -108,19 +108,12 @@ impl std::fmt::Display for Handle {
 pub trait ContextProvider {
     /// Return, if it exists, the structure of the given virtual table.
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable>;
-
-    /// Return the output IDs of the current query
-    fn output_ids(&self) -> Vec<u64>;
 }
 
 pub struct EmptyProvider;
 impl ContextProvider for EmptyProvider {
     fn fetch_table(&self, _table_name: &str) -> Result<ZkTable> {
         bail!("empty provider")
-    }
-
-    fn output_ids(&self) -> Vec<u64> {
-        vec![]
     }
 }
 
@@ -147,10 +140,6 @@ impl ContextProvider for FileContextProvider {
                 self.tables.keys().collect::<Vec<_>>()
             )
         })
-    }
-
-    fn output_ids(&self) -> Vec<u64> {
-        vec![]
     }
 }
 
@@ -305,13 +294,13 @@ impl<P: Debug + Clone> std::fmt::Display for Symbol<P> {
 
 /// A `ScopeTable` handles the hierarchy of symbols defining the symbol tables
 /// of a query.
-pub struct ScopeTable<M: Debug + Default, P: Debug + Clone> {
+pub struct ScopeTable<ScopeMetadata: Debug + Default, SymbolMetadata: Debug + Clone> {
     /// A tree of [`Scope`] mirroring the AST, whose nodes are the AST nodes
     /// introducing new contexts, i.e. `SELECT` and `FROM`.
     ///
     /// The tree topology is built through the `providers` links in the
     /// [`Scope`].
-    scopes: Vec<Scope<M, P>>,
+    scopes: Vec<Scope<ScopeMetadata, SymbolMetadata>>,
     /// A stack of pointers to the currently active node in the context tree.
     /// The top of the stack points toward the currentlt active [`Scope`]. New
     /// pointers are pushed when entering a new context, and popped when exiting

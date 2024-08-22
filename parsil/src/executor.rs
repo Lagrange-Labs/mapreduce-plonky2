@@ -77,7 +77,7 @@ fn funcall(fname: &str, args: Vec<Expr>) -> Expr {
 
 /// If the given expression is a string-encoded value, it is casted to a NUMERIC
 /// in place.
-fn convert_number_string(expr: &mut Expr) -> Result<()> {
+pub fn convert_number_string(expr: &mut Expr) -> Result<()> {
     if let Some(replacement) = match expr {
         Expr::Value(v) => match v {
             Value::Number(_, _) => None,
@@ -196,7 +196,6 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
 
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         convert_number_string(expr)?;
-        convert_funcalls(expr)?;
 
         if let Expr::Value(Value::Placeholder(ref mut name)) = expr {
             match self.settings.placeholders.resolve_placeholder(name)? {

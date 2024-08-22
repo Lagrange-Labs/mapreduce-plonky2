@@ -14,6 +14,7 @@ mod dsl;
 mod errors;
 mod executor;
 mod expand;
+mod insulator;
 mod parser;
 mod placeholders;
 mod symbols;
@@ -58,6 +59,12 @@ enum Command {
         block: i64,
         lo_secondary: String,
         hi_secondary: String,
+    },
+    /// Modify the given query to neuter all WHERE clauses not related to
+    /// indices.
+    Isolate {
+        #[arg()]
+        request: String,
     },
 }
 
@@ -104,7 +111,7 @@ fn main() -> Result<()> {
                     println!("placeholders mapping: {:?}", translated.placeholder_mapping);
                 }
                 QueryKind::Keys => {
-                    println!("{}", executor::generate_query_keys(&mut query, &settings)?)
+                    println!("{}", executor::generateq_query_keys(&mut query, &settings)?)
                 }
             }
         }
@@ -124,6 +131,10 @@ fn main() -> Result<()> {
 
             println!("{}", r.0.unwrap_or("nothing".into()));
             println!("{}", r.1.unwrap_or("nothing".into()));
+        }
+        Command::Isolate { request } => {
+            let mut query = parse_and_validate(&request, &settings)?;
+            insulator::insulate(&mut query, &settings);
         }
     }
 

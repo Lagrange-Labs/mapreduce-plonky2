@@ -537,6 +537,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 };
 
                 if let FunctionArguments::List(arglist) = &funcall.args {
+                    // NOTE: we only accept funcalls with a single argument for now
                     match &arglist.args[0] {
                         FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) => {
                             let wire = self.compile(e, storage_target)?;
