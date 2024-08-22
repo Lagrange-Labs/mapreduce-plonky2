@@ -1,10 +1,8 @@
+use anyhow::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::{collections::HashMap, fmt::Debug};
-
-use anyhow::*;
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
 use crate::tree::TreeTopology;
 use crate::{Epoch, InitSettings};
@@ -52,7 +50,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T> TransactionalStorage for VersionedStorage<T>
 where
     T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
@@ -75,7 +72,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T> EpochStorage<T> for VersionedStorage<T>
 where
     T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
@@ -153,7 +149,6 @@ impl<K: Debug, V: Debug> VersionedKvStorage<K, V> {
     }
 }
 
-#[async_trait]
 impl<K, V> RoEpochKvStorage<K, V> for VersionedKvStorage<K, V>
 where
     K: Hash + Eq + Clone + Debug + Send + Sync,
@@ -207,7 +202,6 @@ where
     }
 }
 
-#[async_trait]
 impl<K, V> EpochKvStorage<K, V> for VersionedKvStorage<K, V>
 where
     K: Hash + Eq + Clone + Debug + Send + Sync,
@@ -276,7 +270,6 @@ impl<T: TreeTopology, V: Debug + Sync> InMemory<T, V> {
     }
 }
 
-#[async_trait]
 impl<T: TreeTopology, V: Debug + Sync> FromSettings<T::State> for InMemory<T, V> {
     type Settings = ();
 
@@ -297,7 +290,6 @@ impl<T: TreeTopology, V: Debug + Sync> FromSettings<T::State> for InMemory<T, V>
     }
 }
 
-#[async_trait]
 impl<T, V> TreeStorage<T> for InMemory<T, V>
 where
     T: TreeTopology,
@@ -361,7 +353,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T, V> TransactionalStorage for InMemory<T, V>
 where
     T: TreeTopology,

@@ -1,22 +1,22 @@
 use self::storages::{
     CachedDbKvStore, CachedDbStore, DbConnector, NodeConnector, PayloadConnector,
 };
-use crate::storage::RoEpochKvStorage;
-use crate::tree::TreeTopology;
-use crate::{Epoch, InitSettings};
-use std::collections::HashSet;
-use std::fmt::Debug;
-
-use super::{EpochKvStorage, EpochStorage, PayloadStorage};
-use super::{FromSettings, TransactionalStorage, TreeStorage};
-use crate::storage::pgsql::storages::DBPool;
+use super::{
+    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, SqlTransactionStorage,
+    TransactionalStorage, TreeStorage,
+};
+use crate::{
+    storage::{pgsql::storages::DBPool, RoEpochKvStorage},
+    tree::TreeTopology,
+    Epoch, InitSettings,
+};
 use anyhow::*;
-use async_trait::async_trait;
 use bb8_postgres::PostgresConnectionManager;
 use itertools::Itertools;
 use log::*;
 use serde::{Deserialize, Serialize};
-use tokio_postgres::NoTls;
+use std::{collections::HashSet, fmt::Debug};
+use tokio_postgres::{NoTls, Transaction};
 
 mod storages;
 
@@ -81,7 +81,6 @@ impl ToFromBytea for usize {
 }
 
 /// Characterize a type that may be used as node payload.
-#[async_trait]
 pub trait PayloadInDb: Clone + Send + Sync + Debug + Serialize + for<'a> Deserialize<'a> {}
 impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> PayloadInDb for T {}
 
@@ -168,7 +167,6 @@ where
     in_tx: bool,
 }
 
-#[async_trait]
 impl<T, V> FromSettings<T::State> for PgsqlStorage<T, V>
 where
     T: TreeTopology,
@@ -495,9 +493,119 @@ where
     ) -> Result<()> {
         NodeConnector::insert_in_tx(db_tx, &self.table, k, self.epoch + 1, n).await
     }
+
+    async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
+        ensure!(self.in_tx, "not in a transaction");
+
+        // The putative new stamps if everything goes well
+        let new_epoch = self.epoch + 1;
+
+        // Pre-emptively extend by 1 the lifetime of the currently alive rows;
+        // those that should not be alive in the next epoch will be rolled back
+        // later.
+        self.update_all(db_tx).await?;
+
+        // Collect all the keys found in the caches
+        let mut cached_keys = HashSet::new();
+        {
+            let guard = self.nodes.cache.read().await;
+            cached_keys.extend(guard.keys().cloned());
+        }
+        {
+            let guard = self.data.cache.read().await;
+            cached_keys.extend(guard.keys().cloned());
+        }
+
+        for k in cached_keys {
+            let node_value = {
+                let guard = self.nodes.cache.read().await;
+                guard.get(&k).cloned()
+            };
+            let data_value = {
+                let guard = self.data.cache.read().await;
+                guard.get(&k).cloned()
+            };
+
+            match (node_value, data_value) {
+                    // Nothing or a combination of read-only operations, do nothing
+                    (None, None) // will never happen by construction of cached_keys
+                    | (None, Some(Some(CachedValue::Read(_))))
+                    | (Some(Some(CachedValue::Read(_))), None)
+                    | (Some(Some(CachedValue::Read(_))), Some(Some(CachedValue::Read(_)))) => {}
+
+                    // The node has been removed
+                    (Some(None), _) => {
+                        // k has been deleted; simply roll-back the lifetime of its row.
+                        self.rollback_one_row(db_tx, &k).await?;
+                    }
+
+                    // The payload alone has been updated
+                    (
+                        Some(Some(CachedValue::Read(_))),
+                        Some(Some(CachedValue::Written(new_payload))),
+                    )
+                    | (None, Some(Some(CachedValue::Written(new_payload)))) => {
+                        // rollback the old value if any
+                        let previous_node = self.rollback_one_row(db_tx, &k).await?.unwrap().0;
+                        // write the new value
+                        self.new_node(db_tx, &k, previous_node).await?;
+                        PayloadConnector::set_at_in_tx(
+                            db_tx,
+                            &self.table,
+                            &k,
+                            self.epoch + 1,
+                            new_payload.to_owned(),
+                        )
+                        .await?;
+                    }
+
+                    // The node has been updated, maybe its payload as well
+                    (Some(Some(CachedValue::Written(new_node))), maybe_new_payload) => {
+                        // insertion or displacement in the tree; the row has to be
+                        // duplicated/updated and rolled-back
+                        let previous_state = self.rollback_one_row(db_tx, &k).await?;
+
+                        // insert the new row representing the new state of the key...
+                        self.new_node(db_tx, &k, new_node.to_owned()).await?;
+
+                        // the new associated payload is the one present in the
+                        // cache if any (that would reflect and insertion or an
+                        // update), or the previous one (if the key moved in the
+                        // tree, but the payload stayed the same).
+                        let previous_payload = previous_state.as_ref().map(|x| x.1.clone());
+                        let maybe_new_payload = maybe_new_payload
+                            .and_then(|v| v.as_ref().map(|cv| cv.value().to_owned()));
+                        let payload = maybe_new_payload
+                            .or(previous_payload)
+                            .expect("both old and new payloads are both None");
+                        PayloadConnector::set_at_in_tx(db_tx, &self.table, &k, new_epoch, payload)
+                            .await?;
+                    }
+
+                    // A node cannot be removed through its payload
+                    (_, Some(None)) => unreachable!(),
+                }
+        }
+        self.state.commit_in(db_tx).await?;
+        Ok(())
+    }
+
+    fn on_commit_success(&mut self) {
+        self.in_tx = false;
+        self.epoch = self.epoch + 1;
+        self.state.commit_success();
+        self.data.new_epoch();
+        self.nodes.new_epoch();
+    }
+
+    fn on_commit_failed(&mut self) {
+        self.in_tx = false;
+        self.state.commit_failed();
+        self.data.clear();
+        self.nodes.clear();
+    }
 }
 
-#[async_trait]
 impl<T: TreeTopology, V: PayloadInDb> TransactionalStorage for PgsqlStorage<T, V>
 where
     V: Send + Sync,
@@ -514,125 +622,49 @@ where
     }
 
     async fn commit_transaction(&mut self) -> Result<()> {
-        ensure!(self.in_tx, "not in a transaction");
+        let pool = self.db.clone();
+        let mut connection = pool.get().await.unwrap();
+        let mut db_tx = connection
+            .transaction()
+            .await
+            .expect("unable to create DB transaction");
 
-        // The putative new stamps if everything goes well
-        let new_epoch = self.epoch + 1;
+        self.commit_in_transaction(&mut db_tx).await?;
 
-        {
-            // Open a PgSQL transaction, as we want the batch to be atomically
-            // successful or failed.
-            let mut connection = self.db.get().await.unwrap();
-            let db_tx = connection
-                .transaction()
-                .await
-                .expect("unable to create DB transaction");
-
-            // Pre-emptively extend by 1 the lifetime of the currently alive rows;
-            // those that should not be alive in the next epoch will be rolled back
-            // later.
-            self.update_all(&db_tx).await?;
-
-            // Collect all the keys found in the caches
-            let mut cached_keys = HashSet::new();
-            {
-                let guard = self.nodes.cache.read().await;
-                cached_keys.extend(guard.keys().cloned());
-            }
-            {
-                let guard = self.data.cache.read().await;
-                cached_keys.extend(guard.keys().cloned());
-            }
-
-            for k in cached_keys {
-                let node_value = {
-                    let guard = self.nodes.cache.read().await;
-                    guard.get(&k).cloned()
-                };
-                let data_value = {
-                    let guard = self.data.cache.read().await;
-                    guard.get(&k).cloned()
-                };
-
-                match (node_value, data_value) {
-                    // Nothing or a combination of read-only operations, do nothing
-                    (None, None) // will never happen by construction of cached_keys
-                    | (None, Some(Some(CachedValue::Read(_))))
-                    | (Some(Some(CachedValue::Read(_))), None)
-                    | (Some(Some(CachedValue::Read(_))), Some(Some(CachedValue::Read(_)))) => {}
-
-                    // The node has been removed
-                    (Some(None), _) => {
-                        // k has been deleted; simply roll-back the lifetime of its row.
-                        self.rollback_one_row(&db_tx, &k).await?;
-                    }
-
-                    // The payload alone has been updated
-                    (
-                        Some(Some(CachedValue::Read(_))),
-                        Some(Some(CachedValue::Written(new_payload))),
-                    )
-                    | (None, Some(Some(CachedValue::Written(new_payload)))) => {
-                        // rollback the old value if any
-                        let previous_node = self.rollback_one_row(&db_tx, &k).await?.unwrap().0;
-                        // write the new value
-                        self.new_node(&db_tx, &k, previous_node).await?;
-                        PayloadConnector::set_at_in_tx(
-                            &db_tx,
-                            &self.table,
-                            &k,
-                            self.epoch + 1,
-                            new_payload.to_owned(),
-                        )
-                        .await?;
-                    }
-
-                    // The node has been updated, maybe its payload as well
-                    (Some(Some(CachedValue::Written(new_node))), maybe_new_payload) => {
-                        // insertion or displacement in the tree; the row has to be
-                        // duplicated/updated and rolled-back
-                        let previous_state = self.rollback_one_row(&db_tx, &k).await?;
-
-                        // insert the new row representing the new state of the key...
-                        self.new_node(&db_tx, &k, new_node.to_owned()).await?;
-
-                        // the new associated payload is the one present in the
-                        // cache if any (that would reflect and insertion or an
-                        // update), or the previous one (if the key moved in the
-                        // tree, but the payload stayed the same).
-                        let previous_payload = previous_state.as_ref().map(|x| x.1.clone());
-                        let maybe_new_payload = maybe_new_payload
-                            .and_then(|v| v.as_ref().map(|cv| cv.value().to_owned()));
-                        let payload = maybe_new_payload
-                            .or(previous_payload)
-                            .expect("both old and new payloads are both None");
-                        PayloadConnector::set_at_in_tx(&db_tx, &self.table, &k, new_epoch, payload)
-                            .await?;
-                    }
-
-                    // A node cannot be removed through its payload
-                    (_, Some(None)) => unreachable!(),
-                }
-            }
-
-            // Atomically execute the PgSQL transaction
-            db_tx
-                .commit()
-                .await
-                .context("while committing transaction")?;
+        // Atomically execute the PgSQL transaction
+        let err = db_tx.commit().await.context("while committing transaction");
+        if err.is_ok() {
+            self.on_commit_success();
+        } else {
+            self.on_commit_failed();
         }
-
-        // Prepare the internal state for a new transaction
-        self.in_tx = false;
-        self.epoch = new_epoch;
-        self.state.commit_transaction().await?;
-        self.data.new_epoch();
-        self.nodes.new_epoch();
-        Ok(())
+        err
     }
 }
 
-#[async_trait]
+impl<T: TreeTopology, V: PayloadInDb> SqlTransactionStorage for PgsqlStorage<T, V>
+where
+    V: Send + Sync,
+    T::Key: ToFromBytea,
+    T::Node: Send + Sync + Clone,
+    T::State: Send + Sync + Clone,
+    NodeConnector: DbConnector<T::Key, T::Node>,
+{
+    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()> {
+        self.commit_in_transaction(tx).await
+    }
+
+    fn commit_success(&mut self) {
+        self.state.commit_success();
+        self.on_commit_success();
+    }
+
+    fn commit_failed(&mut self) {
+        self.state.commit_failed();
+        self.on_commit_failed()
+    }
+}
+
 impl<T, V> TreeStorage<T> for PgsqlStorage<T, V>
 where
     T: TreeTopology,
@@ -693,7 +725,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T, V> PayloadStorage<T::Key, V> for PgsqlStorage<T, V>
 where
     T: TreeTopology,
