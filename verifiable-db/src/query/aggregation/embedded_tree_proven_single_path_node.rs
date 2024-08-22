@@ -326,9 +326,9 @@ mod tests {
     use plonky2::plonk::config::Hasher;
     use rand::{thread_rng, Rng};
 
-    use crate::query::{
-        aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
-        PI_LEN,
+    use crate::{
+        query::PI_LEN,
+        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
 
     const MAX_NUM_RESULTS: usize = 20;

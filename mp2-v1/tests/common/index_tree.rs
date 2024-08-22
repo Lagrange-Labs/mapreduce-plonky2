@@ -104,8 +104,11 @@ impl TestContext {
                         row_tree_proof,
                     ),
                 );
-                api::generate_proof(self.params(), inputs)
-                    .expect("error while leaf index proof generation")
+                self.b
+                    .bench("indexing::index_tree::leaf", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
+                    .expect("unable to generate index tree leaf")
             } else if context.is_partial() {
                 info!(
                     "NodeIndex Proving --> PARTIAL (node {})",
@@ -152,7 +155,10 @@ impl TestContext {
                         row_tree_proof,
                     ),
                 );
-                api::generate_proof(self.params(), inputs)
+                self.b
+                    .bench("indexing::index_tree::partial", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
                     .expect("error while leaf index proof generation")
             } else {
                 // here we are simply proving the new updated nodes from the new node to
@@ -181,7 +187,10 @@ impl TestContext {
                         right_proof,
                     ),
                 );
-                api::generate_proof(self.params(), inputs)
+                self.b
+                    .bench("indexing::index_tree::full", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
                     .expect("error while membership index proof generation")
             };
             let proof_key = IndexProofIdentifier {

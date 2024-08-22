@@ -1,33 +1,26 @@
 //! Utility functions used for testing
+//! TODO: may move this code and the simple unit test of `lib.rs` to `tests/common`.
 
 use crate::{
     prover::groth16::combine_proofs,
     utils::{hex_to_u256, read_file, write_file},
-    EVMVerifier, Groth16Proof, Groth16Prover, Groth16Verifier, C, D, F,
+    EVMVerifier, Groth16Proof, Groth16Prover, Groth16Verifier, C,
 };
-use ethers::abi::{Contract, Token};
-use mapreduce_plonky2::api::deserialize_proof;
-use plonky2::{field::types::PrimeField64, plonk::proof::ProofWithPublicInputs};
+use alloy::{contract::Interface, dyn_abi::DynSolValue, json_abi::JsonAbi};
+use mp2_common::{proof::deserialize_proof, D, F};
+use plonky2::plonk::proof::ProofWithPublicInputs;
 use std::path::Path;
-
-/// Convert the plonky2 proof public inputs to bytes and save to a file
-/// `plonky2_proof_pis.bin` in the specified dir.
-pub fn save_plonky2_proof_pis(dir: &str, proof: &ProofWithPublicInputs<F, C, D>) {
-    let file_path = Path::new(dir).join("plonky2_proof_pis.bin");
-
-    let bytes: Vec<_> = proof
-        .public_inputs
-        .iter()
-        .flat_map(|f| f.to_canonical_u64().to_le_bytes())
-        .collect();
-
-    write_file(file_path, &bytes).unwrap();
-}
 
 /// Test Groth16 proving, verification and Solidity verification.
 pub fn test_groth16_proving_and_verification(asset_dir: &str, plonky2_proof: &[u8]) {
     // Generate the Groth16 proof.
+    let plonky2_proof = deserialize_proof(plonky2_proof).unwrap();
     let groth16_proof = groth16_prove(asset_dir, &plonky2_proof);
+
+    // Save the combined full proof.
+    let full_proof_path = Path::new(asset_dir).join("full_proof.bin");
+    let full_proof = combine_proofs(groth16_proof.clone(), plonky2_proof).unwrap();
+    write_file(full_proof_path, &full_proof).unwrap();
 
     // Verify the proof off-chain.
     groth16_verify(asset_dir, &groth16_proof);
@@ -37,7 +30,7 @@ pub fn test_groth16_proving_and_verification(asset_dir: &str, plonky2_proof: &[u
 }
 
 /// Test to generate the proof.
-fn groth16_prove(asset_dir: &str, plonky2_proof: &[u8]) -> Groth16Proof {
+fn groth16_prove(asset_dir: &str, plonky2_proof: &ProofWithPublicInputs<F, C, D>) -> Groth16Proof {
     // Read r1cs, pk and circuit bytes from asset dir.
     let r1cs = read_file(Path::new(asset_dir).join("r1cs.bin")).unwrap();
     let pk = read_file(Path::new(asset_dir).join("pk.bin")).unwrap();
@@ -49,22 +42,16 @@ fn groth16_prove(asset_dir: &str, plonky2_proof: &[u8]) -> Groth16Proof {
 
     // Construct the file paths to save the Groth16 and full proofs.
     let groth16_proof_path = Path::new(asset_dir).join("groth16_proof.json");
-    let full_proof_path = Path::new(asset_dir).join("full_proof.bin");
 
     // Generate the Groth16 proof.
-    let plonky2_proof = deserialize_proof(plonky2_proof).unwrap();
     let groth16_proof = prover
-        .generate_groth16_proof(&plonky2_proof)
+        .generate_groth16_proof(plonky2_proof)
         .expect("Failed to generate the proof");
     write_file(
         groth16_proof_path,
         serde_json::to_string(&groth16_proof).unwrap().as_bytes(),
     )
     .unwrap();
-
-    // Generate the full proof.
-    let full_proof = combine_proofs(groth16_proof.clone(), plonky2_proof).unwrap();
-    write_file(full_proof_path, &full_proof).unwrap();
 
     groth16_proof
 }
@@ -83,22 +70,22 @@ fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
         .to_string_lossy()
         .to_string();
 
-    let contract = Contract::load(
-        read_file(Path::new("test_data").join("query2.abi"))
-            .unwrap()
-            .as_slice(),
-    )
-    .expect("Failed to load the Solidity verifier contract from ABI");
+    // Build the contract interface for encoding the arguments of verification function.
+    let abi = JsonAbi::parse([
+        "function verifyProof(uint256[8] calldata proof, uint256[3] calldata input)",
+    ])
+    .unwrap();
+    let contract = Interface::new(abi);
 
-    let [proofs, inputs] = [&proof.proofs, &proof.inputs].map(|ss| {
-        ss.iter()
-            .map(|s| Token::Uint(hex_to_u256(s).unwrap()))
-            .collect()
+    let input = [&proof.proofs, &proof.inputs].map(|s| {
+        DynSolValue::FixedArray(
+            s.iter()
+                .map(|s| DynSolValue::Uint(hex_to_u256(s).unwrap(), 256))
+                .collect(),
+        )
     });
-    let input = vec![Token::FixedArray(proofs), Token::FixedArray(inputs)];
-    let verify_fun = &contract.functions["verifyProof"][0];
-    let calldata = verify_fun
-        .encode_input(&input)
+    let calldata = contract
+        .encode_input("verifyProof", &input)
         .expect("Failed to encode the inputs of Solidity contract function verifyProof");
 
     let verifier =

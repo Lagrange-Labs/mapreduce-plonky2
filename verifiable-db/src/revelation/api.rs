@@ -1,10 +1,5 @@
-use alloy::primitives::U256;
 use anyhow::{ensure, Result};
-use std::{
-    any::Any,
-    collections::HashMap,
-    iter::{once, repeat},
-};
+use std::iter::repeat;
 
 use itertools::Itertools;
 use mp2_common::{
@@ -12,17 +7,11 @@ use mp2_common::{
     default_config,
     poseidon::H,
     proof::{deserialize_proof, ProofWithVK},
-    types::HashOutput,
     utils::FromFields,
     C, D, F,
 };
-use plonky2::{
-    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
-    plonk::{
-        circuit_data::VerifierOnlyCircuitData,
-        config::{GenericHashOut, Hasher},
-        proof::ProofWithPublicInputs,
-    },
+use plonky2::plonk::{
+    circuit_data::VerifierOnlyCircuitData, config::Hasher, proof::ProofWithPublicInputs,
 };
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -35,20 +24,16 @@ use serde::{Deserialize, Serialize};
 use crate::{
     query::{
         aggregation::QueryBounds,
-        computational_hash_ids::{HashPermutation, Identifiers, PlaceholderIdentifier},
+        computational_hash_ids::PlaceholderIdentifier,
         universal_circuit::{
-            universal_circuit_inputs::{
-                BasicOperation, Placeholder, PlaceholderId, Placeholders, ResultStructure,
-            },
+            universal_circuit_inputs::{PlaceholderId, Placeholders},
             universal_query_circuit::QueryBound,
-            ComputationalHash,
         },
     },
     revelation::placeholders_check::CheckedPlaceholder,
 };
 
 use super::{
-    placeholders_check::placeholder_ids_hash,
     revelation_without_results_tree::{
         CircuitBuilderParams, RecursiveCircuitInputs, RecursiveCircuitWires,
         RevelationWithoutResultsTreeCircuit,
@@ -197,12 +182,16 @@ impl<
             .map(|placeholder_id| compute_checked_placeholder_for_id(placeholder_id))
             .collect::<Result<Vec<_>>>()?;
         // compute placeholders data to be hashed for secondary query bounds
-        let min_query_secondary =
-            QueryBound::new_secondary_index_bound(&placeholders, &query_bounds.min_query_secondary)
-                .unwrap();
-        let max_query_secondary =
-            QueryBound::new_secondary_index_bound(&placeholders, &query_bounds.max_query_secondary)
-                .unwrap();
+        let min_query_secondary = QueryBound::new_secondary_index_bound(
+            &placeholders,
+            &query_bounds.min_query_secondary(),
+        )
+        .unwrap();
+        let max_query_secondary = QueryBound::new_secondary_index_bound(
+            &placeholders,
+            &query_bounds.max_query_secondary(),
+        )
+        .unwrap();
         let secondary_query_bound_placeholders = [min_query_secondary, max_query_secondary]
             .into_iter()
             .flat_map(|query_bound| {
@@ -318,55 +307,40 @@ where
         proof.serialize()
     }
 
-    pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+    pub fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
         &self.circuit_set
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use alloy::primitives::U256;
+    use crate::test_utils::{
+        TestRevelationData, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
+        MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
+    };
     use itertools::Itertools;
     use mp2_common::{
         array::ToField,
         proof::{serialize_proof, ProofWithVK},
         types::HashOutput,
-        utils::{Fieldable, ToFields},
         C, D, F,
     };
-    use mp2_test::{log::init_logging, utils::gen_random_u256};
+    use mp2_test::log::init_logging;
     use plonky2::{
         field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::GenericHashOut,
     };
-    use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
 
     use crate::{
         ivc::PublicInputs as PreprocessingPI,
         query::{
-            aggregation::{
-                tests::{random_aggregation_operations, random_aggregation_public_inputs},
-                QueryBounds, QueryHashNonExistenceCircuits,
-            },
             api::CircuitInput as QueryInput,
-            computational_hash_ids::{
-                AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
-            },
-            public_inputs::{PublicInputs as QueryPI, QueryPublicInputs},
-            universal_circuit::{
-                universal_circuit_inputs::{
-                    BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders,
-                    ResultStructure, RowCells,
-                },
-                universal_query_circuit::placeholder_hash,
-                PlaceholderHash,
-            },
+            computational_hash_ids::{ColumnIDs, Identifiers},
+            public_inputs::PublicInputs as QueryPI,
         },
         revelation::{
             api::{CircuitInput, Parameters},
-            tests::{compute_results_from_query_proof, random_original_tree_proof},
+            tests::compute_results_from_query_proof,
             PublicInputs, NUM_PREPROCESSING_IO, NUM_QUERY_IO,
         },
     };
@@ -374,20 +348,13 @@ mod tests {
     #[test]
     fn test_api() {
         init_logging();
-        const MAX_NUM_OUTPUTS: usize = 3;
-        const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
-        const MAX_NUM_PLACEHOLDERS: usize = 15;
-        const MAX_NUM_COLUMNS: usize = 20;
-        const MAX_NUM_PREDICATE_OPS: usize = 20;
-        const MAX_NUM_RESULT_OPS: usize = 20;
-        const NUM_COLUMNS: usize = 4;
+
         let query_circuits = TestingRecursiveCircuits::<
             F,
             C,
             D,
             { NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT> },
         >::default();
-
         let preprocessing_circuits =
             TestingRecursiveCircuits::<F, C, D, NUM_PREPROCESSING_IO>::default();
         println!("building params");
@@ -405,66 +372,8 @@ mod tests {
                 .unwrap(),
         );
 
-        let rng = &mut thread_rng();
-
-        // generate query proof public inputs. Employ a simple query for test:
-        // SELECT AVG(C1*C2), COUNT(C3/$1) FROM T WHERE C4 < $2 AND C1 >= 42 AND C1 < 77
-        let column_cells = (0..NUM_COLUMNS)
-            .map(|_| ColumnCell::new(rng.gen(), gen_random_u256(rng)))
-            .collect_vec();
-        let row_cells = RowCells::new(
-            column_cells[0].clone(),
-            column_cells[1].clone(),
-            column_cells[2..].to_vec(),
-        );
-        let placeholder_ids = [0, 1].map(|i| PlaceholderIdentifier::Generic(i));
-        let predicate_operations = vec![
-            // C4 < $2
-            BasicOperation::new_binary_operation(
-                InputOperand::Column(3),
-                InputOperand::Placeholder(placeholder_ids[1]),
-                Operation::LessThanOp,
-            ),
-        ];
-        let result_operations = vec![
-            // C1*C2
-            BasicOperation::new_binary_operation(
-                InputOperand::Column(0),
-                InputOperand::Column(1),
-                Operation::MulOp,
-            ),
-            // C3/$1
-            BasicOperation::new_binary_operation(
-                InputOperand::Column(2),
-                InputOperand::Placeholder(placeholder_ids[0]),
-                Operation::DivOp,
-            ),
-        ];
-        let output_items = vec![OutputItem::ComputedValue(0), OutputItem::ComputedValue(1)];
-        let aggregation_ops = vec![
-            AggregationOperation::AvgOp.to_id() as u64,
-            AggregationOperation::CountOp.to_id() as u64,
-        ];
-        let ops_ids = aggregation_ops
-            .iter()
-            .map(|id| id.to_field())
-            .chain(random_aggregation_operations::<MAX_NUM_ITEMS_PER_OUTPUT>())
-            .take(MAX_NUM_ITEMS_PER_OUTPUT)
-            .collect_vec();
-        let results = ResultStructure::new_for_query_with_aggregation(
-            result_operations,
-            output_items,
-            aggregation_ops,
-        );
-        let placeholders = Placeholders::from((
-            placeholder_ids
-                .iter()
-                .map(|id| (*id, gen_random_u256(rng)))
-                .collect_vec(),
-            U256::from(42),
-            U256::from(76),
-        ));
-        let query_bounds = QueryBounds::new(&placeholders, None, None).unwrap();
+        // Generate the testing data for revalation circuit.
+        let test_data = TestRevelationData::sample(42, 76);
 
         let placeholder_hash_ids = QueryInput::<
             MAX_NUM_COLUMNS,
@@ -472,67 +381,18 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_ITEMS_PER_OUTPUT,
         >::ids_for_placeholder_hash(
-            &predicate_operations,
-            &results,
-            &placeholders,
-            &query_bounds,
+            test_data.predicate_operations(),
+            test_data.results(),
+            test_data.placeholders(),
+            test_data.query_bounds(),
         )
         .unwrap();
 
-        // generate the computational hash and placeholder hash that should be exposed by query proofs
-        let QueryHashNonExistenceCircuits {
-            computational_hash,
-            placeholder_hash,
-        } = QueryHashNonExistenceCircuits::new::<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_ITEMS_PER_OUTPUT,
-        >(
-            &ColumnIDs::new(
-                column_cells[0].id.to_canonical_u64(),
-                column_cells[1].id.to_canonical_u64(),
-                column_cells[2..]
-                    .iter()
-                    .map(|cell| cell.id.to_canonical_u64())
-                    .collect_vec(),
-            ),
-            &predicate_operations,
-            &results,
-            &placeholders,
-            &query_bounds,
-            false, // we need to generate values as if we are in an index tree node
-        )
-        .unwrap();
-
-        let [mut query_pi_raw] = random_aggregation_public_inputs::<1, MAX_NUM_ITEMS_PER_OUTPUT>(
-            &ops_ids.try_into().unwrap(),
-        );
-        let [min_query_range, max_query_range, p_hash_range, c_hash_range] = [
-            QueryPublicInputs::MinQuery,
-            QueryPublicInputs::MaxQuery,
-            QueryPublicInputs::PlaceholderHash,
-            QueryPublicInputs::ComputationalHash,
-        ]
-        .map(QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::to_range);
-
-        // Set the minimum, maximum query, placeholder hash andn computational hash to expected values.
-        [
-            (min_query_range, query_bounds.min_query_primary.to_fields()),
-            (max_query_range, query_bounds.max_query_primary.to_fields()),
-            (p_hash_range, placeholder_hash.to_vec()),
-            (c_hash_range, computational_hash.to_vec()),
-        ]
-        .into_iter()
-        .for_each(|(range, fields)| query_pi_raw[range].copy_from_slice(&fields));
-
-        let query_pi = QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::from_slice(&query_pi_raw);
-        // generate preprocessing proof public inputs
-        let preprocessing_pi_raw = random_original_tree_proof(&query_pi);
+        let query_pi = QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::from_slice(test_data.query_pi_raw());
 
         // generate query proof
         let [query_proof] = query_circuits
-            .generate_input_proofs::<1>([query_pi_raw.clone().try_into().unwrap()])
+            .generate_input_proofs::<1>([test_data.query_pi_raw().try_into().unwrap()])
             .unwrap();
         let [query_vk] = query_circuits.verifier_data_for_input_proofs::<1>();
         let query_proof = ProofWithVK::from((query_proof, query_vk.clone()))
@@ -540,7 +400,7 @@ mod tests {
             .unwrap();
         // generate pre-processing proof
         let [preprocessing_proof] = preprocessing_circuits
-            .generate_input_proofs::<1>([preprocessing_pi_raw.try_into().unwrap()])
+            .generate_input_proofs::<1>([test_data.preprocessing_pi_raw().try_into().unwrap()])
             .unwrap();
         let preprocessing_pi = PreprocessingPI::from_slice(&preprocessing_proof.public_inputs);
         let preprocessing_proof = serialize_proof(&preprocessing_proof).unwrap();
@@ -548,8 +408,8 @@ mod tests {
         let input = CircuitInput::new_revelation_no_results_tree(
             query_proof,
             preprocessing_proof,
-            &query_bounds,
-            &placeholders,
+            test_data.query_bounds(),
+            test_data.placeholders(),
             placeholder_hash_ids,
         )
         .unwrap();
@@ -563,10 +423,13 @@ mod tests {
             pi.original_block_hash(),
             preprocessing_pi.block_hash_fields()
         );
-        assert_eq!(pi.num_placeholders(), (placeholders.len()).to_field(),);
-        let expected_values = placeholders.placeholder_values();
         assert_eq!(
-            pi.placeholder_values()[..placeholders.len()],
+            pi.num_placeholders(),
+            (test_data.placeholders().len()).to_field()
+        );
+        let expected_values = test_data.placeholders().placeholder_values();
+        assert_eq!(
+            pi.placeholder_values()[..test_data.placeholders().len()],
             expected_values,
         );
         // check entry count
@@ -581,23 +444,29 @@ mod tests {
         let metadata_hash = HashOut::<F>::from_partial(preprocessing_pi.metadata_hash());
         let computational_hash = Identifiers::computational_hash(
             &ColumnIDs::new(
-                column_cells[0].id.to_canonical_u64(),
-                column_cells[1].id.to_canonical_u64(),
-                column_cells[2..]
+                test_data.column_cells()[0].id.to_canonical_u64(),
+                test_data.column_cells()[1].id.to_canonical_u64(),
+                test_data.column_cells()[2..]
                     .iter()
                     .map(|cell| cell.id.to_canonical_u64())
                     .collect_vec(),
             ),
-            &predicate_operations,
-            &results,
+            test_data.predicate_operations(),
+            test_data.results(),
             &HashOutput::try_from(metadata_hash.to_bytes()).unwrap(),
-            Some((&query_bounds.min_query_secondary).into()),
-            Some((&query_bounds.max_query_secondary).into()),
+            Some(test_data.query_bounds().min_query_secondary().into()),
+            Some(test_data.query_bounds().max_query_secondary().into()),
         )
         .unwrap();
         // then, check that it is the same exposed by the proof
         assert_eq!(
-            HashOutput::try_from(pi.computational_hash().to_bytes()).unwrap(),
+            HashOutput::try_from(
+                pi.flat_computational_hash()
+                    .iter()
+                    .flat_map(|f| u32::try_from(f.to_canonical_u64()).unwrap().to_be_bytes())
+                    .collect_vec()
+            )
+            .unwrap(),
             computational_hash,
         )
     }

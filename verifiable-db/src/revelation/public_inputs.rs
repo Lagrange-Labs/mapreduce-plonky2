@@ -4,6 +4,7 @@ use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     keccak::PACKED_HASH_LEN,
+    poseidon::FLATTEN_POSEIDON_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::CBuilder,
     u256::{UInt256Target, NUM_LIMBS},
@@ -12,38 +13,39 @@ use mp2_common::{
 };
 use plonky2::{
     field::types::Field,
-    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::target::{BoolTarget, Target},
 };
 use std::iter::once;
 
+// This is the final public inputs exported for Groth16 proving. It's aligned with Uint256,
+// and the fields are restricted within the range of Uint32 for sha256 in plonky2x.
 // L: maximum number of results
 // S: maximum number of items in each result
 // PH: maximum number of unique placeholder IDs and values bound for query
 pub enum RevelationPublicInputs {
-    /// `H`: Hash (keccak) - Hash of the blockchain corresponding to the latest
+    /// `H`: Keccak hash [F; 8] - Hash of the blockchain corresponding to the latest
     /// block inserted in the tree employed for this query
     OriginalBlockHash,
-    /// `C` : Hash (poseidon) - Computational hash representing the computation
-    /// performed to compute results of the query
-    ComputationalHash,
-    /// `num_placeholders` : F - Number (<= PH) of placeholder values actually
-    /// employed in the query
-    NumPlaceholders,
+    /// `C` : Poseidon Hash [F; 8] (Flattened to Uint32 fields) - Computational hash
+    /// representing the computation performed to compute results of the query
+    FlatComputationalHash,
     /// `placeholder_values` : [Uint256; PH] - Array corresponding to the
     /// placeholder values employed for the current query
     PlaceholderValues,
+    /// `result_values` : [[Uint256; S]; L] - Two-dimensional array of L results of
+    /// the query and each result has S values
+    ResultValues,
+    /// `num_placeholders` : F - Number (<= PH) of placeholder values actually
+    /// employed in the query
+    NumPlaceholders,
+    /// `num_results`: F - Number of actual results found in the results array
+    NumResults,
     /// `entry_count`: F - Number of matching entries found by the query.
     /// NOTE: it's considered as an Uint32 for now (cannot be out of range of Uint32).
     EntryCount,
     /// `overflow` : F - Boolean flag specifying whether an overflow errors
     /// occurred during arithmetic operations
     Overflow,
-    /// `num_results`: F - Number of actual results found in the results array
-    NumResults,
-    /// `result_values` : [[Uint256; S]; L] - Two-dimensional array of L results of
-    /// the query and each result has S values
-    ResultValues,
     /// `query_limit` : F - Limit value specified in the query
     QueryLimit,
     /// `query_offset` : F - Offset value specified in the query
@@ -56,13 +58,13 @@ pub enum RevelationPublicInputs {
 #[derive(Clone, Debug)]
 pub struct PublicInputs<'a, T, const L: usize, const S: usize, const PH: usize> {
     original_block_hash: &'a [T],
-    computational_hash: &'a [T],
-    num_placeholders: &'a T,
+    flat_computational_hash: &'a [T],
     placeholder_values: &'a [T],
+    result_values: &'a [T],
+    num_placeholders: &'a T,
+    num_results: &'a T,
     entry_count: &'a T,
     overflow: &'a T,
-    num_results: &'a T,
-    result_values: &'a [T],
     query_limit: &'a T,
     query_offset: &'a T,
 }
@@ -72,13 +74,13 @@ const NUM_PUBLIC_INPUTS: usize = RevelationPublicInputs::QueryOffset as usize + 
 impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, T, L, S, PH> {
     const PI_RANGES: [PublicInputRange; NUM_PUBLIC_INPUTS] = [
         Self::to_range(RevelationPublicInputs::OriginalBlockHash),
-        Self::to_range(RevelationPublicInputs::ComputationalHash),
-        Self::to_range(RevelationPublicInputs::NumPlaceholders),
+        Self::to_range(RevelationPublicInputs::FlatComputationalHash),
         Self::to_range(RevelationPublicInputs::PlaceholderValues),
+        Self::to_range(RevelationPublicInputs::ResultValues),
+        Self::to_range(RevelationPublicInputs::NumPlaceholders),
+        Self::to_range(RevelationPublicInputs::NumResults),
         Self::to_range(RevelationPublicInputs::EntryCount),
         Self::to_range(RevelationPublicInputs::Overflow),
-        Self::to_range(RevelationPublicInputs::NumResults),
-        Self::to_range(RevelationPublicInputs::ResultValues),
         Self::to_range(RevelationPublicInputs::QueryLimit),
         Self::to_range(RevelationPublicInputs::QueryOffset),
     ];
@@ -86,20 +88,20 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs
     const SIZES: [usize; NUM_PUBLIC_INPUTS] = [
         // Original block hash
         PACKED_HASH_LEN,
-        // Computational hash
-        NUM_HASH_OUT_ELTS,
-        // Number of placeholders
-        1,
+        // Computational hash (Flattened)
+        FLATTEN_POSEIDON_LEN,
         // Placeholder values
         NUM_LIMBS * PH,
+        // Result values of the query
+        NUM_LIMBS * L * S,
+        // Number of placeholders
+        1,
+        // Number of results
+        1,
         // Matching entry count
         1,
         // overflow
         1,
-        // Number of results
-        1,
-        // Result values of the query
-        NUM_LIMBS * L * S,
         // Limit value specified in the query
         1,
         // Offset value specified in the query
@@ -125,16 +127,24 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs
         self.original_block_hash
     }
 
-    pub(crate) fn to_computational_hash_raw(&self) -> &[T] {
-        self.computational_hash
+    pub(crate) fn to_flat_computational_hash_raw(&self) -> &[T] {
+        self.flat_computational_hash
+    }
+
+    pub(crate) fn to_placeholder_values_raw(&self) -> &[T] {
+        self.placeholder_values
+    }
+
+    pub(crate) fn to_result_values_raw(&self) -> &[T] {
+        self.result_values
     }
 
     pub(crate) fn to_num_placeholders_raw(&self) -> &T {
         self.num_placeholders
     }
 
-    pub(crate) fn to_placeholder_values_raw(&self) -> &[T] {
-        self.placeholder_values
+    pub(crate) fn to_num_results_raw(&self) -> &T {
+        self.num_results
     }
 
     pub(crate) fn to_entry_count_raw(&self) -> &T {
@@ -143,14 +153,6 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs
 
     pub(crate) fn to_overflow_raw(&self) -> &T {
         self.overflow
-    }
-
-    pub(crate) fn to_num_results_raw(&self) -> &T {
-        self.num_results
-    }
-
-    pub(crate) fn to_result_values_raw(&self) -> &[T] {
-        self.result_values
     }
 
     pub(crate) fn to_query_limit_raw(&self) -> &T {
@@ -170,13 +172,13 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs
 
         Self {
             original_block_hash: &input[Self::PI_RANGES[0].clone()],
-            computational_hash: &input[Self::PI_RANGES[1].clone()],
-            num_placeholders: &input[Self::PI_RANGES[2].clone()][0],
-            placeholder_values: &input[Self::PI_RANGES[3].clone()],
-            entry_count: &input[Self::PI_RANGES[4].clone()][0],
-            overflow: &input[Self::PI_RANGES[5].clone()][0],
-            num_results: &input[Self::PI_RANGES[6].clone()][0],
-            result_values: &input[Self::PI_RANGES[7].clone()],
+            flat_computational_hash: &input[Self::PI_RANGES[1].clone()],
+            placeholder_values: &input[Self::PI_RANGES[2].clone()],
+            result_values: &input[Self::PI_RANGES[3].clone()],
+            num_placeholders: &input[Self::PI_RANGES[4].clone()][0],
+            num_results: &input[Self::PI_RANGES[5].clone()][0],
+            entry_count: &input[Self::PI_RANGES[6].clone()][0],
+            overflow: &input[Self::PI_RANGES[7].clone()][0],
             query_limit: &input[Self::PI_RANGES[8].clone()][0],
             query_offset: &input[Self::PI_RANGES[9].clone()][0],
         }
@@ -184,25 +186,25 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs
 
     pub fn new(
         original_block_hash: &'a [T],
-        computational_hash: &'a [T],
-        num_placeholders: &'a [T],
+        flat_computational_hash: &'a [T],
         placeholder_values: &'a [T],
+        result_values: &'a [T],
+        num_placeholders: &'a [T],
+        num_results: &'a [T],
         entry_count: &'a [T],
         overflow: &'a [T],
-        num_results: &'a [T],
-        result_values: &'a [T],
         query_limit: &'a [T],
         query_offset: &'a [T],
     ) -> Self {
         Self {
             original_block_hash,
-            computational_hash,
-            num_placeholders: &num_placeholders[0],
+            flat_computational_hash,
             placeholder_values,
+            result_values,
+            num_placeholders: &num_placeholders[0],
+            num_results: &num_results[0],
             entry_count: &entry_count[0],
             overflow: &overflow[0],
-            num_results: &num_results[0],
-            result_values,
             query_limit: &query_limit[0],
             query_offset: &query_offset[0],
         }
@@ -211,13 +213,13 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs
     pub fn to_vec(&self) -> Vec<T> {
         self.original_block_hash
             .iter()
-            .chain(self.computational_hash.iter())
-            .chain(once(self.num_placeholders))
+            .chain(self.flat_computational_hash.iter())
             .chain(self.placeholder_values.iter())
+            .chain(self.result_values.iter())
+            .chain(once(self.num_placeholders))
+            .chain(once(self.num_results))
             .chain(once(self.entry_count))
             .chain(once(self.overflow))
-            .chain(once(self.num_results))
-            .chain(self.result_values.iter())
             .chain(once(self.query_limit))
             .chain(once(self.query_offset))
             .cloned()
@@ -232,13 +234,13 @@ impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputCommon
 
     fn register_args(&self, cb: &mut CBuilder) {
         cb.register_public_inputs(self.original_block_hash);
-        cb.register_public_inputs(self.computational_hash);
-        cb.register_public_input(*self.num_placeholders);
+        cb.register_public_inputs(self.flat_computational_hash);
         cb.register_public_inputs(self.placeholder_values);
+        cb.register_public_inputs(self.result_values);
+        cb.register_public_input(*self.num_placeholders);
+        cb.register_public_input(*self.num_results);
         cb.register_public_input(*self.entry_count);
         cb.register_public_input(*self.overflow);
-        cb.register_public_input(*self.num_results);
-        cb.register_public_inputs(self.result_values);
         cb.register_public_input(*self.query_limit);
         cb.register_public_input(*self.query_offset);
     }
@@ -249,12 +251,8 @@ impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, Targe
         self.to_original_block_hash_raw().try_into().unwrap()
     }
 
-    pub fn computational_hash_target(&self) -> HashOutTarget {
-        HashOutTarget::try_from(self.to_computational_hash_raw()).unwrap()
-    }
-
-    pub fn num_placeholders_target(&self) -> Target {
-        *self.to_num_placeholders_raw()
+    pub fn flat_computational_hash_target(&self) -> [Target; FLATTEN_POSEIDON_LEN] {
+        self.to_flat_computational_hash_raw().try_into().unwrap()
     }
 
     pub fn placeholder_values_target(&self) -> [UInt256Target; PH] {
@@ -264,18 +262,6 @@ impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, Targe
             .collect_vec()
             .try_into()
             .unwrap()
-    }
-
-    pub fn entry_count_target(&self) -> Target {
-        *self.to_entry_count_raw()
-    }
-
-    pub fn overflow_flag_target(&self) -> BoolTarget {
-        BoolTarget::new_unsafe(*self.to_overflow_raw())
-    }
-
-    pub fn num_results_target(&self) -> Target {
-        *self.to_num_results_raw()
     }
 
     pub fn result_values_target(&self) -> [[UInt256Target; S]; L] {
@@ -294,6 +280,22 @@ impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, Targe
             .unwrap()
     }
 
+    pub fn num_placeholders_target(&self) -> Target {
+        *self.to_num_placeholders_raw()
+    }
+
+    pub fn num_results_target(&self) -> Target {
+        *self.to_num_results_raw()
+    }
+
+    pub fn entry_count_target(&self) -> Target {
+        *self.to_entry_count_raw()
+    }
+
+    pub fn overflow_flag_target(&self) -> BoolTarget {
+        BoolTarget::new_unsafe(*self.to_overflow_raw())
+    }
+
     pub fn query_limit_target(&self) -> Target {
         *self.to_query_limit_raw()
     }
@@ -308,12 +310,8 @@ impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, F, L,
         self.to_original_block_hash_raw().try_into().unwrap()
     }
 
-    pub fn computational_hash(&self) -> HashOut<F> {
-        HashOut::try_from(self.to_computational_hash_raw()).unwrap()
-    }
-
-    pub fn num_placeholders(&self) -> F {
-        *self.to_num_placeholders_raw()
+    pub fn flat_computational_hash(&self) -> [F; FLATTEN_POSEIDON_LEN] {
+        self.to_flat_computational_hash_raw().try_into().unwrap()
     }
 
     pub fn placeholder_values(&self) -> [U256; PH] {
@@ -323,25 +321,6 @@ impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, F, L,
             .collect_vec()
             .try_into()
             .unwrap()
-    }
-
-    pub fn entry_count(&self) -> F {
-        *self.to_entry_count_raw()
-    }
-
-    pub fn overflow_flag(&self) -> bool {
-        let overflow = *self.to_overflow_raw();
-        if overflow == F::ONE {
-            return true;
-        }
-        if overflow == F::ZERO {
-            return false;
-        }
-        unreachable!("Overflow flag public input different from 0 or 1")
-    }
-
-    pub fn num_results(&self) -> F {
-        *self.to_num_results_raw()
     }
 
     pub fn result_values(&self) -> [[U256; S]; L] {
@@ -358,6 +337,29 @@ impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, F, L,
             .collect_vec()
             .try_into()
             .unwrap()
+    }
+
+    pub fn num_placeholders(&self) -> F {
+        *self.to_num_placeholders_raw()
+    }
+
+    pub fn num_results(&self) -> F {
+        *self.to_num_results_raw()
+    }
+
+    pub fn entry_count(&self) -> F {
+        *self.to_entry_count_raw()
+    }
+
+    pub fn overflow_flag(&self) -> bool {
+        let overflow = *self.to_overflow_raw();
+        if overflow == F::ONE {
+            return true;
+        }
+        if overflow == F::ZERO {
+            return false;
+        }
+        unreachable!("Overflow flag public input different from 0 or 1")
     }
 
     pub fn query_limit(&self) -> F {
@@ -434,8 +436,8 @@ mod tests {
             pis.to_original_block_hash_raw(),
         );
         assert_eq!(
-            &pis_raw[PI::to_range(RevelationPublicInputs::ComputationalHash)],
-            pis.to_computational_hash_raw(),
+            &pis_raw[PI::to_range(RevelationPublicInputs::FlatComputationalHash)],
+            pis.to_flat_computational_hash_raw(),
         );
         assert_eq!(
             &pis_raw[PI::to_range(RevelationPublicInputs::NumPlaceholders)],

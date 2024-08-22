@@ -596,12 +596,12 @@ where
 
         let min_query = QueryBound::new_secondary_index_bound(
             &placeholders,
-            &query_bounds.min_query_secondary,
+            &query_bounds.min_query_secondary(),
         )?;
 
         let max_query = QueryBound::new_secondary_index_bound(
             &placeholders,
-            &query_bounds.max_query_secondary,
+            &query_bounds.max_query_secondary(),
         )?;
 
         Ok(Self {
@@ -977,8 +977,8 @@ fn dummy_placeholder(placeholders: &Placeholders) -> Placeholder {
 
 fn dummy_placeholder_from_query_bounds(query_bounds: &QueryBounds) -> Placeholder {
     let placeholders = Placeholders::new_empty(
-        query_bounds.min_query_primary,
-        query_bounds.max_query_primary,
+        query_bounds.min_query_primary(),
+        query_bounds.max_query_primary(),
     );
     dummy_placeholder(&placeholders)
 }
@@ -1016,9 +1016,9 @@ pub(crate) fn placeholder_hash(
     // a constant or a placeholder. This information is available in `query_bounds`, so we just
     // process it
     let min_query =
-        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary)?;
+        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary())?;
     let max_query =
-        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary)?;
+        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary())?;
     Ok(QueryBound::add_secondary_query_bounds_to_placeholder_hash(
         &min_query,
         &max_query,
@@ -1458,8 +1458,8 @@ mod tests {
             ),
         )
         .unwrap();
-        let min_query_value = query_bounds.min_query_secondary.value;
-        let max_query_value = query_bounds.max_query_secondary.value;
+        let min_query_value = query_bounds.min_query_secondary().value;
+        let max_query_value = query_bounds.max_query_secondary().value;
 
         let input = CircuitInput::<
             MAX_NUM_COLUMNS,
@@ -1557,8 +1557,8 @@ mod tests {
                 ),
                 &predicate_operations,
                 &results,
-                Some((&query_bounds.min_query_secondary).into()),
-                Some((&query_bounds.max_query_secondary).into()),
+                Some(query_bounds.min_query_secondary().into()),
+                Some(query_bounds.max_query_secondary().into()),
             )
             .unwrap())
                 .into(),
@@ -1936,8 +1936,8 @@ mod tests {
                 ),
                 &predicate_operations,
                 &results,
-                Some((&query_bounds.min_query_secondary).into()),
-                Some((&query_bounds.max_query_secondary).into()),
+                Some(query_bounds.min_query_secondary().into()),
+                Some(query_bounds.max_query_secondary().into()),
             )
             .unwrap())
                 .into(),
