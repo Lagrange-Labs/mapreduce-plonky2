@@ -259,7 +259,7 @@ pub enum Extraction {
     Column,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Default, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Default, Hash, Serialize, Deserialize)]
 /// Set of constant identifiers employed in the
 /// computational hash, which is a compact representation
 /// of the query being proven by the query circuits
@@ -504,7 +504,7 @@ impl Operation {
     }
 }
 
-#[derive(Clone, Debug, Copy, Default)]
+#[derive(Clone, Debug, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Output {
     #[default]
     Aggregation,

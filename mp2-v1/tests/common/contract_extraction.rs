@@ -56,17 +56,17 @@ impl TestContext {
 
         // Generate the leaf proof.
         let leaf = nodes[0].to_vec();
-        let mut proof = prove_leaf(self.params(), leaf, &storage_root, contract_address);
+        let mut proof = prove_leaf(self, leaf, &storage_root, contract_address);
 
         // Prove the all nodes till to the root.
         for node in &nodes[1..] {
             let rlp = Rlp::new(node);
             match rlp.prototype().unwrap() {
                 Prototype::List(MPT_EXTENSION_RLP_SIZE) => {
-                    proof = prove_extension(self.params(), node.to_vec(), proof);
+                    proof = prove_extension(self, node.to_vec(), proof);
                 }
                 Prototype::List(MPT_BRANCH_RLP_SIZE) => {
-                    proof = prove_branch(self.params(), node.to_vec(), proof);
+                    proof = prove_branch(self, node.to_vec(), proof);
                 }
                 _ => panic!("Invalid RLP size for the state proof"),
             }
@@ -90,11 +90,12 @@ impl TestContext {
 
 /// Generate the leaf proof.
 fn prove_leaf(
-    params: &PublicParameters,
+    ctx: &TestContext,
     node: Vec<u8>,
     storage_root: &[u8],
     contract_address: &Address,
 ) -> Vec<u8> {
+    let params = ctx.params();
     // Generate the proof.
     let input = contract_extraction::CircuitInput::new_leaf(
         node.clone(),
@@ -102,7 +103,12 @@ fn prove_leaf(
         contract_address.clone(),
     );
     let input = CircuitInput::ContractExtraction(input);
-    let proof = generate_proof(params, input).unwrap();
+    let proof = ctx
+        .b
+        .bench("indexing::extraction::contract::leaf", || {
+            generate_proof(params, input)
+        })
+        .expect("unable to generate contract extract proof leaf");
 
     // Check the leaf public inputs.
     let proof_with_vk = ProofWithVK::deserialize(&proof).unwrap();
@@ -145,11 +151,17 @@ fn prove_leaf(
 }
 
 /// Generate the extension proof.
-fn prove_extension(params: &PublicParameters, node: Vec<u8>, child_proof: Vec<u8>) -> Vec<u8> {
+fn prove_extension(ctx: &TestContext, node: Vec<u8>, child_proof: Vec<u8>) -> Vec<u8> {
+    let params = ctx.params();
     // Generate the proof.
     let input = contract_extraction::CircuitInput::new_extension(node.clone(), child_proof.clone());
     let input = CircuitInput::ContractExtraction(input);
-    let proof = generate_proof(params, input).unwrap();
+    let proof = ctx
+        .b
+        .bench("indexing::extracting::contract::extension", || {
+            generate_proof(params, input)
+        })
+        .expect("unable to gen. contract extraction extension");
 
     // Check the extension public inputs.
     let proof_with_vk = ProofWithVK::deserialize(&proof).unwrap();
@@ -180,11 +192,17 @@ fn prove_extension(params: &PublicParameters, node: Vec<u8>, child_proof: Vec<u8
 }
 
 /// Generate the branch proof.
-fn prove_branch(params: &PublicParameters, node: Vec<u8>, child_proof: Vec<u8>) -> Vec<u8> {
+fn prove_branch(ctx: &TestContext, node: Vec<u8>, child_proof: Vec<u8>) -> Vec<u8> {
+    let params = ctx.params();
     // Generate the proof.
     let input = contract_extraction::CircuitInput::new_branch(node.clone(), child_proof.clone());
     let input = CircuitInput::ContractExtraction(input);
-    let proof = generate_proof(params, input).unwrap();
+    let proof = ctx
+        .b
+        .bench("indexing::extraction::contract::branch", || {
+            generate_proof(params, input)
+        })
+        .expect("unable to gen. contract extraction branch");
 
     // Check the branch public inputs.
     let proof_with_vk = ProofWithVK::deserialize(&proof).unwrap();

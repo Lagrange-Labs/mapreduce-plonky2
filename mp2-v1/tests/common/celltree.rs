@@ -66,7 +66,9 @@ impl TestContext {
                 let inputs = CircuitInput::CellsTree(
                     verifiable_db::cells_tree::CircuitInput::leaf(cell.identifier(), cell.value()),
                 );
-                api::generate_proof(self.params(), inputs).expect("while proving leaf")
+                self.b.bench("indexing::cell_tree::leaf", || {
+                    api::generate_proof(self.params(), inputs)
+                })
             } else if context.right.is_none() {
                 // Prove a partial node - only care about the left side since sbbst has this nice
                 // property
@@ -96,7 +98,9 @@ impl TestContext {
                     hex::encode(cells_tree::extract_hash_from_proof(&left_proof).map(|c|c.to_bytes()).unwrap())
                 );
 
-                api::generate_proof(self.params(), inputs).expect("while proving partial node")
+                self.b.bench("indexing::cell_tree::partial", || {
+                    api::generate_proof(self.params(), inputs).context("cell tree partial node")
+                })
             } else {
                 // Prove a full node.
                 let left_key = context.left.unwrap();
@@ -140,7 +144,9 @@ impl TestContext {
                         [left_proof, right_proof],
                     ));
 
-                api::generate_proof(self.params(), inputs).expect("while proving full node")
+                self.b.bench("indexing::cell_tree::full", || {
+                    api::generate_proof(self.params(), inputs).context("while proving full node")
+                })
             };
             let generated_proof_key = CellProofIdentifier {
                 table: table_id.clone(),
@@ -148,7 +154,7 @@ impl TestContext {
                 primary,
                 tree_key: *k,
             };
-
+            let proof = proof.expect("error generating proof");
             let pproof = ProofWithVK::deserialize(&proof).unwrap();
             let pi =
                 verifiable_db::cells_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);

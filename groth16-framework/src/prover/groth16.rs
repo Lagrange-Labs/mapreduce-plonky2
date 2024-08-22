@@ -3,10 +3,11 @@
 use crate::{
     proof::Groth16Proof,
     utils::{deserialize_circuit_data, hex_to_u256, read_file, CIRCUIT_DATA_FILENAME},
-    C, D, F,
+    C,
 };
+use alloy::primitives::U256;
 use anyhow::Result;
-use mapreduce_plonky2::api::deserialize_proof;
+use mp2_common::{proof::deserialize_proof, D, F};
 use plonky2::{
     field::types::PrimeField64,
     plonk::{circuit_data::CircuitData, proof::ProofWithPublicInputs},
@@ -57,12 +58,12 @@ impl Groth16Prover {
     }
 
     /// Generate the Groth16 proof from the plonky2 proof. It returns the
-    /// little-endian bytes as:
+    /// big-endian bytes as:
     /// `groth16_proof.proofs + groth16_proof.inputs + plonky2_proof.public_inputs`.
     /// In the combined bytes, each part has number as:
     /// - groth16_proof.proofs: 8 * U256 = 256 bytes
     /// - groth16_proof.inputs: 3 * U256 = 96 bytes
-    /// - plonky2_proof.public_inputs: the little-endian bytes of public inputs exported by user
+    /// - plonky2_proof.public_inputs: the encoded public inputs exported by user
     pub fn prove(&self, plonky2_proof: &[u8]) -> Result<Vec<u8>> {
         // Deserialize the plonky2 proof.
         let plonky2_proof = deserialize_proof(plonky2_proof)?;
@@ -84,7 +85,7 @@ impl Groth16Prover {
         // Note this verifier data is from the wrapped proof. However the wrapped proof hardcodes the
         // specific mapreduce-plonky2 proof verification key in its circuit, so indirectly, verifier knows the
         // Groth16 proof is for the correct mapreduce-plonky2 proof.
-        // This hardcoding is done here https://github.com/Lagrange-Labs/succinctx/blob/main/plonky2x/core/src/backend/wrapper/wrap.rs#L100
+        // This hardcoding is done here <https://github.com/Lagrange-Labs/succinctx/blob/main/plonky2x/core/src/backend/wrapper/wrap.rs#L100>
         let verifier_data = serde_json::to_string(&wrapped_output.verifier_data)?;
         let proof = serde_json::to_string(&wrapped_output.proof)?;
 
@@ -107,12 +108,13 @@ fn load_circuit_data(asset_dir: &str) -> Result<CircuitData<F, C, D>> {
     deserialize_circuit_data(&bytes)
 }
 
-/// Combine the Groth16 proof and the plonky2 proof to little-endian bytes as:
+/// Combine the Groth16 proof and the plonky2 proof to big-endian bytes as:
 /// `groth16_proof.proofs + groth16_proof.inputs + plonky2_proof.public_inputs`.
 /// In the combined bytes, each part has number as:
 /// - groth16_proof.proofs: 8 * U256 = 256 bytes
 /// - groth16_proof.inputs: 3 * U256 = 96 bytes
-/// - plonky2_proof.public_inputs: the little-endian bytes of public inputs exported by user
+/// - plonky2_proof.public_inputs: the encoded public inputs exported by user,
+///   all fields must be in range of Uint32, it's restricted by `sha256` (in plonky2x).
 pub fn combine_proofs(
     groth16_proof: Groth16Proof,
     plonky2_proof: ProofWithPublicInputs<F, C, D>,
@@ -126,18 +128,16 @@ pub fn combine_proofs(
         .collect::<Result<Vec<_>>>()?;
 
     // Convert the Groth16 U256s to bytes.
-    let groth16_bytes = groth16_u256s.iter().flat_map(|u| {
-        let mut bytes = [0u8; 32];
-        u.to_little_endian(&mut bytes);
-
-        bytes
-    });
+    let groth16_bytes = groth16_u256s
+        .iter()
+        .flat_map(|u| u.to_be_bytes::<{ U256::BYTES }>());
 
     // Convert the plonky2 public inputs to bytes.
-    let plonky2_pi_bytes = plonky2_proof
-        .public_inputs
-        .iter()
-        .flat_map(|f| f.to_canonical_u64().to_le_bytes());
+    let plonky2_pi_bytes = plonky2_proof.public_inputs.iter().flat_map(|f| {
+        u32::try_from(f.to_canonical_u64())
+            .expect("All fields of public inputs must be in range of Uint32 for sha256 of Groth16")
+            .to_be_bytes()
+    });
 
     // Connect the Groth16 bytes with the plonky2 public inputs bytes.
     let bytes = groth16_bytes.chain(plonky2_pi_bytes).collect();

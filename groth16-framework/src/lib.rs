@@ -65,7 +65,7 @@
 //!    groth16_verifier.verify(groth16_proof2);
 //!    ``
 
-use plonky2::{field::goldilocks_field::GoldilocksField, plonk::config::PoseidonGoldilocksConfig};
+use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
 mod compiler;
 mod evm;
@@ -74,10 +74,6 @@ pub mod prover;
 pub mod test_utils;
 pub mod utils;
 mod verifier;
-
-pub const D: usize = 2;
-pub type F = GoldilocksField;
-pub type C = PoseidonGoldilocksConfig;
 
 // The function is used to generate the asset files of `circuit.bin`,
 // `r1cs.bin`, `pk.bin`, `vk.bin` and `verifier.sol`. It's only necessary to be
@@ -101,12 +97,14 @@ pub use verifier::{
     groth16::Groth16Verifier,
 };
 
+pub type C = PoseidonGoldilocksConfig;
+
 // Reference more test cases in the `tests` folder.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{save_plonky2_proof_pis, test_groth16_proving_and_verification};
-    use mapreduce_plonky2::api::serialize_proof;
+    use crate::test_utils::test_groth16_proving_and_verification;
+    use mp2_common::{proof::serialize_proof, D, F};
     use plonky2::{
         field::types::Field,
         iop::witness::{PartialWitness, WitnessWrite},
@@ -128,7 +126,7 @@ mod tests {
         const ASSET_DIR: &str = "groth16_simple";
 
         // Build for the simple circuit and generate the plonky2 proof.
-        let (circuit_data, proof) = plonky2_build_and_prove(ASSET_DIR);
+        let (circuit_data, proof) = plonky2_build_and_prove();
 
         // Generate the asset files.
         compile_and_generate_assets(circuit_data, ASSET_DIR)
@@ -139,7 +137,7 @@ mod tests {
     }
 
     /// Build for the plonky2 circuit and generate the proof.
-    fn plonky2_build_and_prove(asset_dir: &str) -> (CircuitData<F, C, D>, Vec<u8>) {
+    fn plonky2_build_and_prove() -> (CircuitData<F, C, D>, Vec<u8>) {
         let config = CircuitConfig::standard_recursion_config();
         let mut cb = CircuitBuilder::<F, D>::new(config);
 
@@ -149,13 +147,14 @@ mod tests {
         cb.register_public_input(c);
 
         let mut pw = PartialWitness::new();
-        let inputs = thread_rng().gen::<[u32; 2]>().map(F::from_canonical_u32);
+        let inputs = thread_rng()
+            .gen::<[u16; 2]>()
+            .map(|u| F::from_canonical_u32(u as u32));
         pw.set_target(a, inputs[0]);
         pw.set_target(b, inputs[1]);
 
         let circuit_data = cb.build::<C>();
         let proof = circuit_data.prove(pw).unwrap();
-        save_plonky2_proof_pis(asset_dir, &proof);
         let proof = serialize_proof(&proof).unwrap();
 
         (circuit_data, proof)

@@ -25,7 +25,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitData, VerifierOnlyCircuitData},
-        config::Hasher,
+        config::{Hasher, PoseidonGoldilocksConfig},
     },
 };
 use recursion_framework::framework::{
@@ -131,18 +131,20 @@ struct ParamsInfo {
     preprocessing_vk: VerifierOnlyCircuitData<C, D>,
 }
 
+type WrapC = PoseidonGoldilocksConfig;
+
 #[derive(Serialize, Deserialize)]
 /// Wrapper circuit around the different type of revelation circuits we expose. Reason we need one is to be able
 /// to always keep the same succinct wrapper circuit and Groth16 circuit regardless of the end result we submit
 /// onchain.
-struct WrapCircuitParams<
+pub struct WrapCircuitParams<
     const MAX_NUM_OUTPUTS: usize,
     const MAX_NUM_ITEMS_PER_OUTPUT: usize,
     const MAX_NUM_PLACEHOLDERS: usize,
 > {
     query_verifier_wires: RecursiveCircuitsVerifierTarget<D>,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    circuit_data: CircuitData<F, C, D>,
+    circuit_data: CircuitData<F, WrapC, D>,
 }
 
 impl<
@@ -154,7 +156,7 @@ where
     [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
-    fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
+    pub fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
         let mut builder = CircuitBuilder::new(default_config());
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<
             F,
@@ -178,7 +180,7 @@ where
         }
     }
 
-    fn generate_proof(
+    pub fn generate_proof(
         &self,
         revelation_circuit_set: &RecursiveCircuits<F, C, D>,
         query_proof: &ProofWithVK,
@@ -191,7 +193,7 @@ where
         serialize_proof(&proof)
     }
 
-    pub fn circuit_data(&self) -> &CircuitData<F, C, D> {
+    pub fn circuit_data(&self) -> &CircuitData<F, WrapC, D> {
         &self.circuit_data
     }
 }

@@ -1,9 +1,11 @@
-use anyhow::Result;
-
+use crate::assembler::{assemble_dynamic, DynamicCircuitPis};
 use crate::{
     symbols::FileContextProvider,
     utils::{parse_and_validate, ParsilSettings, PlaceholderSettings},
 };
+use alloy::primitives::U256;
+use anyhow::Result;
+use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
 /// NOTE: queries that may bother us in the future
 const CAREFUL: &[&str] = &[
@@ -108,4 +110,26 @@ fn ref_query() -> Result<()> {
     let q = "SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99";
     let query = parse_and_validate(q, &settings)?;
     Ok(())
+}
+
+#[test]
+fn test_serde_circuit_pis() {
+    let settings = ParsilSettings {
+        context: FileContextProvider::from_file("tests/context.json").unwrap(),
+        placeholders: PlaceholderSettings::with_freestanding(3),
+    };
+
+    let q = "SELECT foo FROM table2";
+    let query = parse_and_validate(q, &settings).unwrap();
+    let pis = assemble_dynamic(
+        &query,
+        &settings,
+        &Placeholders::new_empty(U256::from(10), U256::from(20)),
+    )
+    .unwrap();
+
+    let serialized = serde_json::to_vec(&pis).unwrap();
+    let deserialized: DynamicCircuitPis = serde_json::from_slice(&serialized).unwrap();
+
+    assert_eq!(pis, deserialized);
 }

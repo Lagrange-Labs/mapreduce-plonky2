@@ -37,6 +37,7 @@ use mp2_v1::{
         cell::MerkleCell,
         index::IndexNode,
         row::{Row, RowPayload, RowTree, RowTreeKey},
+        LagrangeNode,
     },
     values_extraction::identifier_block_column,
 };
@@ -1144,59 +1145,5 @@ fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) {
     );
     for row in rows {
         println!("{:?}", types.extract(row, 0));
-    }
-}
-
-// NOTE this might be good to have on public API ?
-// cc/ @andrus
-pub trait LagrangeNode {
-    fn value(&self) -> U256;
-    fn hash(&self) -> HashOutput;
-    fn min(&self) -> U256;
-    fn max(&self) -> U256;
-    fn embedded_hash(&self) -> HashOutput;
-}
-
-impl<T: Eq + Default + std::fmt::Debug + Clone> LagrangeNode for RowPayload<T> {
-    fn value(&self) -> U256 {
-        self.secondary_index_value()
-    }
-
-    fn hash(&self) -> HashOutput {
-        self.hash.clone()
-    }
-
-    fn min(&self) -> U256 {
-        self.min
-    }
-
-    fn max(&self) -> U256 {
-        self.max
-    }
-
-    fn embedded_hash(&self) -> HashOutput {
-        self.cell_root_hash.clone().unwrap()
-    }
-}
-
-impl<T> LagrangeNode for IndexNode<T> {
-    fn value(&self) -> U256 {
-        self.value.0
-    }
-
-    fn hash(&self) -> HashOutput {
-        self.node_hash.clone()
-    }
-
-    fn min(&self) -> U256 {
-        self.min
-    }
-
-    fn max(&self) -> U256 {
-        self.max
-    }
-
-    fn embedded_hash(&self) -> HashOutput {
-        self.row_tree_hash.clone()
     }
 }

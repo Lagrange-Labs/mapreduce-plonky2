@@ -4,10 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+alloy.workspace = true
 anyhow.workspace = true
-bytes.workspace = true
-ethereum-types.workspace = true
-ethers.workspace = true
 hex.workspace = true
 log.workspace = true
 plonky2.workspace = true
@@ -16,12 +14,10 @@ revm.workspace = true
 rlp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha3.workspace = true
 
 gnark-utils = { path = "../gnark-utils" }
-mapreduce-plonky2 = { path = "../mapreduce-plonky2" }
+mp2_common = { path = "../mp2-common" }
 recursion_framework = { path = "../recursion-framework" }
-mp2_common = { path = "../mp2-common"}
 
 [dev-dependencies]
 env_logger.workspace = true
@@ -29,5 +25,7 @@ itertools.workspace = true
 plonky2_ecgfp5.workspace = true
 rand.workspace = true
 serial_test.workspace = true
+sha2.workspace = true
 
-mp2_common = { path = "../mp2-common" }
+mp2_test = { path = "../mp2-test" }
+verifiable-db = { path = "../verifiable-db" }

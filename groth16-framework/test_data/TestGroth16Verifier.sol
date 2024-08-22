@@ -9,7 +9,6 @@ pragma solidity ^0.8.0;
 /// to compress proofs.
 /// @notice See <https://2π.com/23/bn254-compression> for further explanation.
 contract Verifier {
-    
     /// Some of the provided public input values are larger than the field modulus.
     /// @dev Public input elements are not automatically reduced, as this is can be
     /// a dangerous source of bugs.
@@ -32,8 +31,10 @@ contract Verifier {
     //     t = 4965661367192848881
     //     P = 36⋅t⁴ + 36⋅t³ + 24⋅t² + 6⋅t + 1
     //     R = 36⋅t⁴ + 36⋅t³ + 18⋅t² + 6⋅t + 1
-    uint256 constant P = 0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47;
-    uint256 constant R = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001;
+    uint256 constant P =
+        0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47;
+    uint256 constant R =
+        0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001;
 
     // Extension field Fp2 = Fp[i] / (i² + 1)
     // Note: This is the complex extension field of Fp with i² = -1.
@@ -43,45 +44,72 @@ contract Verifier {
     //       Fp2 elements are encoded in the public interface as this became convention.
 
     // Constants in Fp
-    uint256 constant FRACTION_1_2_FP = 0x183227397098d014dc2822db40c0ac2ecbc0b548b438e5469e10460b6c3e7ea4;
-    uint256 constant FRACTION_27_82_FP = 0x2b149d40ceb8aaae81be18991be06ac3b5b4c5e559dbefa33267e6dc24a138e5;
-    uint256 constant FRACTION_3_82_FP = 0x2fcd3ac2a640a154eb23960892a85a68f031ca0c8344b23a577dcf1052b9e775;
+    uint256 constant FRACTION_1_2_FP =
+        0x183227397098d014dc2822db40c0ac2ecbc0b548b438e5469e10460b6c3e7ea4;
+    uint256 constant FRACTION_27_82_FP =
+        0x2b149d40ceb8aaae81be18991be06ac3b5b4c5e559dbefa33267e6dc24a138e5;
+    uint256 constant FRACTION_3_82_FP =
+        0x2fcd3ac2a640a154eb23960892a85a68f031ca0c8344b23a577dcf1052b9e775;
 
     // Exponents for inversions and square roots mod P
-    uint256 constant EXP_INVERSE_FP = 0x30644E72E131A029B85045B68181585D97816A916871CA8D3C208C16D87CFD45; // P - 2
-    uint256 constant EXP_SQRT_FP = 0xC19139CB84C680A6E14116DA060561765E05AA45A1C72A34F082305B61F3F52; // (P + 1) / 4;
+    uint256 constant EXP_INVERSE_FP =
+        0x30644E72E131A029B85045B68181585D97816A916871CA8D3C208C16D87CFD45; // P - 2
+    uint256 constant EXP_SQRT_FP =
+        0xC19139CB84C680A6E14116DA060561765E05AA45A1C72A34F082305B61F3F52; // (P + 1) / 4;
 
     // Groth16 alpha point in G1
-    uint256 constant ALPHA_X = 17330333415741891630922857861759419140429713083870969195253056090268730588231;
-    uint256 constant ALPHA_Y = 13147855596032776537719854481999312435171557910049365942978708861164077957575;
+    uint256 constant ALPHA_X =
+        9546294761966233765293384560330710544459265382353062338342861498940409829308;
+    uint256 constant ALPHA_Y =
+        6351669133693229216911358925748869260064479371597314995229974645184308250505;
 
     // Groth16 beta point in G2 in powers of i
-    uint256 constant BETA_NEG_X_0 = 16758506161375482877946419026719722387897560880191209056997830356941212839159;
-    uint256 constant BETA_NEG_X_1 = 18690365973070251330753499224415149299939454691983701219739132712643323437878;
-    uint256 constant BETA_NEG_Y_0 = 16995821639930247773077730108733027487498161380709855480092878505524243550890;
-    uint256 constant BETA_NEG_Y_1 = 14791793727027044317952920303255740322021400376557943282051210578720229612916;
+    uint256 constant BETA_NEG_X_0 =
+        11724005098281667443232501382701253711437306636653463196335919602250785347547;
+    uint256 constant BETA_NEG_X_1 =
+        17727871460296049920160492313722573763783174634536985406878802022228351170547;
+    uint256 constant BETA_NEG_Y_0 =
+        20202059160607634354147493839396511542944699434614879632307317518393214874048;
+    uint256 constant BETA_NEG_Y_1 =
+        8835434270689616112472850414927345684501201981950730073674301923407554031354;
 
     // Groth16 gamma point in G2 in powers of i
-    uint256 constant GAMMA_NEG_X_0 = 6612902507567725758386783171447595420647781809247593703229977230235440844414;
-    uint256 constant GAMMA_NEG_X_1 = 8981361993102265689731431270177247100346559061827532052508210074678927755794;
-    uint256 constant GAMMA_NEG_Y_0 = 21004606401077180568650349773249268942216042401777624850698798102793286965305;
-    uint256 constant GAMMA_NEG_Y_1 = 11433264132087598003707523080238201575733673420719598458081934768186387686870;
+    uint256 constant GAMMA_NEG_X_0 =
+        16752557280390569762527910115516201693899885433532544054833515692285116807641;
+    uint256 constant GAMMA_NEG_X_1 =
+        7246019110534609685873747791657500403850817756790552416365041800316036665883;
+    uint256 constant GAMMA_NEG_Y_0 =
+        8921854670031665798840016861097621964201698369798743066907952565981939267075;
+    uint256 constant GAMMA_NEG_Y_1 =
+        20014136531582781224517453526026723230516102910356249587023960785544158267983;
 
     // Groth16 delta point in G2 in powers of i
-    uint256 constant DELTA_NEG_X_0 = 13460370536885233749691890264640592263801515945598308685489071389863989243329;
-    uint256 constant DELTA_NEG_X_1 = 7446078270362644430684835216126762286985640274636751500345177250271496710212;
-    uint256 constant DELTA_NEG_Y_0 = 8904343038167562222334203070823223879087699429785781640342675937747820730244;
-    uint256 constant DELTA_NEG_Y_1 = 1290769152595958748740647974364729107031538148561537699220651358442626768940;
+    uint256 constant DELTA_NEG_X_0 =
+        20657988654721339145588113091897563991659786769997059265781503549451176217615;
+    uint256 constant DELTA_NEG_X_1 =
+        21421142263922919318205802242039411891516837115974980522502315424176806225268;
+    uint256 constant DELTA_NEG_Y_0 =
+        1343467117933048968879183315971106219674437949939694932525280216734573247516;
+    uint256 constant DELTA_NEG_Y_1 =
+        13154839413817901383157824121417951886919026897609401578452809815244602845950;
 
     // Constant and public input points
-    uint256 constant CONSTANT_X = 12484752919865885501215786314075294543942985291057727061214566657996507846298;
-    uint256 constant CONSTANT_Y = 19505527132595050955469553293312183341573459530592707039483673646759904006825;
-    uint256 constant PUB_0_X = 16327013178463254976652579613899091625007820473590446550886511371829018728784;
-    uint256 constant PUB_0_Y = 7083422222358725867100058744605310021565841293370371085907616043842068564188;
-    uint256 constant PUB_1_X = 4244620810512547658447845948408759809816218603609835280267711619968181312984;
-    uint256 constant PUB_1_Y = 2230107385590436921838299794596970962734904149385984053604787814007327676896;
-    uint256 constant PUB_2_X = 20647736807720147971022511559654886362126545156356793679063651986530931148395;
-    uint256 constant PUB_2_Y = 7398313951863728616776849167145809591053838496122470935503477689196516311306;
+    uint256 constant CONSTANT_X =
+        4184707520520122011793257904234991669636509277996356990733518938236154882348;
+    uint256 constant CONSTANT_Y =
+        2928772078490041155860083958873861373866029315050845801841553420110722957080;
+    uint256 constant PUB_0_X =
+        9646450843619374243739412061822460067822064205203180136489041505279299542605;
+    uint256 constant PUB_0_Y =
+        19358245788298237649258444490581466630554587737745601877113118231618057494806;
+    uint256 constant PUB_1_X =
+        6175329032515415423113064451342742976830146775559375128244403739592158328744;
+    uint256 constant PUB_1_Y =
+        9120731556075515755649758816840983129664476344270715291706615465714907028825;
+    uint256 constant PUB_2_X =
+        5740909622769856994395125932379684298161590633551870858880733385028125505621;
+    uint256 constant PUB_2_Y =
+        7277627956714195653724015201540013321240007268732788243406148146081025382336;
 
     /// Negation in Fp.
     /// @notice Returns a number x such that a + x = 0 in Fp.
@@ -117,7 +145,7 @@ contract Verifier {
             // Exponentiation failed.
             // Should not happen.
             revert ProofInvalid();
-        } 
+        }
     }
 
     /// Invertsion in Fp.
@@ -173,7 +201,11 @@ contract Verifier {
     /// @param hint A hint which of two possible signs to pick in the equation.
     /// @return x0 The real part of the square root.
     /// @return x1 The imaginary part of the square root.
-    function sqrt_Fp2(uint256 a0, uint256 a1, bool hint) internal view returns (uint256 x0, uint256 x1) {
+    function sqrt_Fp2(
+        uint256 a0,
+        uint256 a1,
+        bool hint
+    ) internal view returns (uint256 x0, uint256 x1) {
         // If this square root reverts there is no solution in Fp2.
         uint256 d = sqrt_Fp(addmod(mulmod(a0, a0, P), mulmod(a1, a1, P), P));
         if (hint) {
@@ -185,8 +217,10 @@ contract Verifier {
 
         // Check result to make sure we found a root.
         // Note: this also fails if a0 or a1 is not reduced.
-        if (a0 != addmod(mulmod(x0, x0, P), negate(mulmod(x1, x1, P)), P)
-        ||  a1 != mulmod(2, mulmod(x0, x1, P), P)) {
+        if (
+            a0 != addmod(mulmod(x0, x0, P), negate(mulmod(x1, x1, P)), P) ||
+            a1 != mulmod(2, mulmod(x0, x1, P), P)
+        ) {
             revert ProofInvalid();
         }
     }
@@ -198,7 +232,10 @@ contract Verifier {
     /// @param x The X coordinate in Fp.
     /// @param y The Y coordinate in Fp.
     /// @return c The compresed point (x with one signal bit).
-    function compress_g1(uint256 x, uint256 y) internal view returns (uint256 c) {
+    function compress_g1(
+        uint256 x,
+        uint256 y
+    ) internal view returns (uint256 c) {
         if (x >= P || y >= P) {
             // G1 point not in field.
             revert ProofInvalid();
@@ -207,7 +244,7 @@ contract Verifier {
             // Point at infinity
             return 0;
         }
-        
+
         // Note: sqrt_Fp reverts if there is no solution, i.e. the x coordinate is invalid.
         uint256 y_pos = sqrt_Fp(addmod(mulmod(mulmod(x, x, P), x, P), 3, P));
         if (y == y_pos) {
@@ -226,7 +263,9 @@ contract Verifier {
     /// @param c The compresed point (x with one signal bit).
     /// @return x The X coordinate in Fp.
     /// @return y The Y coordinate in Fp.
-    function decompress_g1(uint256 c) internal view returns (uint256 x, uint256 y) {
+    function decompress_g1(
+        uint256 c
+    ) internal view returns (uint256 x, uint256 y) {
         // Note that X = 0 is not on the curve since 0³ + 3 = 3 is not a square.
         // so we can use it to represent the point at infinity.
         if (c == 0) {
@@ -253,7 +292,7 @@ contract Verifier {
     /// @notice Reverts with InvalidProof if the coefficients are not reduced
     /// or if the point is not on the curve.
     /// @notice The G2 curve is defined over the complex extension Fp[i]/(i^2 + 1)
-    /// with coordinates (x0 + x1 ⋅ i, y0 + y1 ⋅ i). 
+    /// with coordinates (x0 + x1 ⋅ i, y0 + y1 ⋅ i).
     /// @notice The point at infinity is encoded as (0,0,0,0) and compressed to (0,0).
     /// @param x0 The real part of the X coordinate.
     /// @param x1 The imaginary poart of the X coordinate.
@@ -261,8 +300,12 @@ contract Verifier {
     /// @param y1 The imaginary part of the Y coordinate.
     /// @return c0 The first half of the compresed point (x0 with two signal bits).
     /// @return c1 The second half of the compressed point (x1 unmodified).
-    function compress_g2(uint256 x0, uint256 x1, uint256 y0, uint256 y1)
-    internal view returns (uint256 c0, uint256 c1) {
+    function compress_g2(
+        uint256 x0,
+        uint256 x1,
+        uint256 y0,
+        uint256 y1
+    ) internal view returns (uint256 c0, uint256 c1) {
         if (x0 >= P || x1 >= P || y0 >= P || y1 >= P) {
             // G2 point not in field.
             revert ProofInvalid();
@@ -277,28 +320,38 @@ contract Verifier {
         uint256 y0_pos;
         uint256 y1_pos;
         {
-            uint256 n3ab = mulmod(mulmod(x0, x1, P), P-3, P);
+            uint256 n3ab = mulmod(mulmod(x0, x1, P), P - 3, P);
             uint256 a_3 = mulmod(mulmod(x0, x0, P), x0, P);
             uint256 b_3 = mulmod(mulmod(x1, x1, P), x1, P);
-            y0_pos = addmod(FRACTION_27_82_FP, addmod(a_3, mulmod(n3ab, x1, P), P), P);
-            y1_pos = negate(addmod(FRACTION_3_82_FP,  addmod(b_3, mulmod(n3ab, x0, P), P), P));
+            y0_pos = addmod(
+                FRACTION_27_82_FP,
+                addmod(a_3, mulmod(n3ab, x1, P), P),
+                P
+            );
+            y1_pos = negate(
+                addmod(FRACTION_3_82_FP, addmod(b_3, mulmod(n3ab, x0, P), P), P)
+            );
         }
 
         // Determine hint bit
         // If this sqrt fails the x coordinate is not on the curve.
         bool hint;
         {
-            uint256 d = sqrt_Fp(addmod(mulmod(y0_pos, y0_pos, P), mulmod(y1_pos, y1_pos, P), P));
-            hint = !isSquare_Fp(mulmod(addmod(y0_pos, d, P), FRACTION_1_2_FP, P));
+            uint256 d = sqrt_Fp(
+                addmod(mulmod(y0_pos, y0_pos, P), mulmod(y1_pos, y1_pos, P), P)
+            );
+            hint = !isSquare_Fp(
+                mulmod(addmod(y0_pos, d, P), FRACTION_1_2_FP, P)
+            );
         }
 
         // Recover y
         (y0_pos, y1_pos) = sqrt_Fp2(y0_pos, y1_pos, hint);
         if (y0 == y0_pos && y1 == y1_pos) {
-            c0 = (x0 << 2) | (hint ? 2  : 0) | 0;
+            c0 = (x0 << 2) | (hint ? 2 : 0) | 0;
             c1 = x1;
         } else if (y0 == negate(y0_pos) && y1 == negate(y1_pos)) {
-            c0 = (x0 << 2) | (hint ? 2  : 0) | 1;
+            c0 = (x0 << 2) | (hint ? 2 : 0) | 1;
             c1 = x1;
         } else {
             // G1 point not on curve.
@@ -309,7 +362,7 @@ contract Verifier {
     /// Decompress a G2 point.
     /// @notice Reverts with InvalidProof if the input does not represent a valid point.
     /// @notice The G2 curve is defined over the complex extension Fp[i]/(i^2 + 1)
-    /// with coordinates (x0 + x1 ⋅ i, y0 + y1 ⋅ i). 
+    /// with coordinates (x0 + x1 ⋅ i, y0 + y1 ⋅ i).
     /// @notice The point at infinity is encoded as (0,0,0,0) and compressed to (0,0).
     /// @param c0 The first half of the compresed point (x0 with two signal bits).
     /// @param c1 The second half of the compressed point (x1 unmodified).
@@ -317,8 +370,10 @@ contract Verifier {
     /// @return x1 The imaginary poart of the X coordinate.
     /// @return y0 The real part of the Y coordinate.
     /// @return y1 The imaginary part of the Y coordinate.
-    function decompress_g2(uint256 c0, uint256 c1)
-    internal view returns (uint256 x0, uint256 x1, uint256 y0, uint256 y1) {
+    function decompress_g2(
+        uint256 c0,
+        uint256 c1
+    ) internal view returns (uint256 x0, uint256 x1, uint256 y0, uint256 y1) {
         // Note that X = (0, 0) is not on the curve since 0³ + 3/(9 + i) is not a square.
         // so we can use it to represent the point at infinity.
         if (c0 == 0 && c1 == 0) {
@@ -334,12 +389,14 @@ contract Verifier {
             revert ProofInvalid();
         }
 
-        uint256 n3ab = mulmod(mulmod(x0, x1, P), P-3, P);
+        uint256 n3ab = mulmod(mulmod(x0, x1, P), P - 3, P);
         uint256 a_3 = mulmod(mulmod(x0, x0, P), x0, P);
         uint256 b_3 = mulmod(mulmod(x1, x1, P), x1, P);
 
         y0 = addmod(FRACTION_27_82_FP, addmod(a_3, mulmod(n3ab, x1, P), P), P);
-        y1 = negate(addmod(FRACTION_3_82_FP,  addmod(b_3, mulmod(n3ab, x0, P), P), P));
+        y1 = negate(
+            addmod(FRACTION_3_82_FP, addmod(b_3, mulmod(n3ab, x0, P), P), P)
+        );
 
         // Note: sqrt_Fp2 reverts if there is no solution, i.e. the point is not on the curve.
         // Note: (X³ + 3/(9 + i)) is irreducible in Fp2, so y can not be zero.
@@ -358,8 +415,9 @@ contract Verifier {
     /// @param input The public inputs. These are elements of the scalar field Fr.
     /// @return x The X coordinate of the resulting G1 point.
     /// @return y The Y coordinate of the resulting G1 point.
-    function publicInputMSM(uint256[3] calldata input)
-    internal view returns (uint256 x, uint256 y) {
+    function publicInputMSM(
+        uint256[3] calldata input
+    ) internal view returns (uint256 x, uint256 y) {
         // Note: The ECMUL precompile does not reject unreduced values, so we check this.
         // Note: Unrolling this loop does not cost much extra in code-size, the bulk of the
         //       code-size is in the PUB_ constants.
@@ -376,25 +434,43 @@ contract Verifier {
             mstore(add(f, 0x20), CONSTANT_Y)
             mstore(g, PUB_0_X)
             mstore(add(g, 0x20), PUB_0_Y)
-            s :=  calldataload(input)
+            s := calldataload(input)
             mstore(add(g, 0x40), s)
             success := and(success, lt(s, R))
-            success := and(success, staticcall(gas(), PRECOMPILE_MUL, g, 0x60, g, 0x40))
-            success := and(success, staticcall(gas(), PRECOMPILE_ADD, f, 0x80, f, 0x40))
+            success := and(
+                success,
+                staticcall(gas(), PRECOMPILE_MUL, g, 0x60, g, 0x40)
+            )
+            success := and(
+                success,
+                staticcall(gas(), PRECOMPILE_ADD, f, 0x80, f, 0x40)
+            )
             mstore(g, PUB_1_X)
             mstore(add(g, 0x20), PUB_1_Y)
-            s :=  calldataload(add(input, 32))
+            s := calldataload(add(input, 32))
             mstore(add(g, 0x40), s)
             success := and(success, lt(s, R))
-            success := and(success, staticcall(gas(), PRECOMPILE_MUL, g, 0x60, g, 0x40))
-            success := and(success, staticcall(gas(), PRECOMPILE_ADD, f, 0x80, f, 0x40))
+            success := and(
+                success,
+                staticcall(gas(), PRECOMPILE_MUL, g, 0x60, g, 0x40)
+            )
+            success := and(
+                success,
+                staticcall(gas(), PRECOMPILE_ADD, f, 0x80, f, 0x40)
+            )
             mstore(g, PUB_2_X)
             mstore(add(g, 0x20), PUB_2_Y)
-            s :=  calldataload(add(input, 64))
+            s := calldataload(add(input, 64))
             mstore(add(g, 0x40), s)
             success := and(success, lt(s, R))
-            success := and(success, staticcall(gas(), PRECOMPILE_MUL, g, 0x60, g, 0x40))
-            success := and(success, staticcall(gas(), PRECOMPILE_ADD, f, 0x80, f, 0x40))
+            success := and(
+                success,
+                staticcall(gas(), PRECOMPILE_MUL, g, 0x60, g, 0x40)
+            )
+            success := and(
+                success,
+                staticcall(gas(), PRECOMPILE_ADD, f, 0x80, f, 0x40)
+            )
             x := mload(f)
             y := mload(add(f, 0x20))
         }
@@ -412,10 +488,16 @@ contract Verifier {
     /// verifyProof. I.e. Groth16 points (A, B, C) encoded as in EIP-197.
     /// @return compressed The compressed proof. Elements are in the same order as for
     /// verifyCompressedProof. I.e. points (A, B, C) in compressed format.
-    function compressProof(uint256[8] calldata proof)
-    public view returns (uint256[4] memory compressed) {
+    function compressProof(
+        uint256[8] calldata proof
+    ) public view returns (uint256[4] memory compressed) {
         compressed[0] = compress_g1(proof[0], proof[1]);
-        (compressed[2], compressed[1]) = compress_g2(proof[3], proof[2], proof[5], proof[4]);
+        (compressed[2], compressed[1]) = compress_g2(
+            proof[3],
+            proof[2],
+            proof[5],
+            proof[4]
+        );
         compressed[3] = compress_g1(proof[6], proof[7]);
     }
 
@@ -434,7 +516,9 @@ contract Verifier {
     ) public view {
         (uint256 Ax, uint256 Ay) = decompress_g1(compressedProof[0]);
         (uint256 Bx0, uint256 Bx1, uint256 By0, uint256 By1) = decompress_g2(
-                compressedProof[2], compressedProof[1]);
+            compressedProof[2],
+            compressedProof[1]
+        );
         (uint256 Cx, uint256 Cy) = decompress_g1(compressedProof[3]);
         (uint256 Lx, uint256 Ly) = publicInputMSM(input);
 
@@ -443,17 +527,17 @@ contract Verifier {
         // Note: The pairing precompile rejects unreduced values, so we won't check that here.
         uint256[24] memory pairings;
         // e(A, B)
-        pairings[ 0] = Ax;
-        pairings[ 1] = Ay;
-        pairings[ 2] = Bx1;
-        pairings[ 3] = Bx0;
-        pairings[ 4] = By1;
-        pairings[ 5] = By0;
+        pairings[0] = Ax;
+        pairings[1] = Ay;
+        pairings[2] = Bx1;
+        pairings[3] = Bx0;
+        pairings[4] = By1;
+        pairings[5] = By0;
         // e(C, -δ)
-        pairings[ 6] = Cx;
-        pairings[ 7] = Cy;
-        pairings[ 8] = DELTA_NEG_X_1;
-        pairings[ 9] = DELTA_NEG_X_0;
+        pairings[6] = Cx;
+        pairings[7] = Cy;
+        pairings[8] = DELTA_NEG_X_1;
+        pairings[9] = DELTA_NEG_X_0;
         pairings[10] = DELTA_NEG_Y_1;
         pairings[11] = DELTA_NEG_Y_0;
         // e(α, -β)
@@ -475,7 +559,14 @@ contract Verifier {
         bool success;
         uint256[1] memory output;
         assembly ("memory-safe") {
-            success := staticcall(gas(), PRECOMPILE_VERIFY, pairings, 0x300, output, 0x20)
+            success := staticcall(
+                gas(),
+                PRECOMPILE_VERIFY,
+                pairings,
+                0x300,
+                output,
+                0x20
+            )
         }
         if (!success || output[0] != 1) {
             // Either proof or verification key invalid.
@@ -501,7 +592,7 @@ contract Verifier {
 
         // Note: The precompile expects the F2 coefficients in big-endian order.
         // Note: The pairing precompile rejects unreduced values, so we won't check that here.
-        
+
         bool success;
         assembly ("memory-safe") {
             let f := mload(0x40) // Free memory pointer.
@@ -543,228 +634,283 @@ contract Verifier {
         }
     }
 
-    bytes32 constant CIRCUIT_DIGEST = 0x11dfacf55986a624e25127981619ea816ac50507cfc014f5b1f94dbfcf02c5e4;
-
-    // byteLen(uint160) / 4
-    uint32 constant PACKED_ADDRESS_LEN = 5;
-
-    // byteLen(uint256) / 4
-    uint32 constant PACKED_HASH_LEN = 8;
+    bytes32 constant CIRCUIT_DIGEST =
+        0x231eaa7fb7509d5345f2997ebaaed9bbef01f2bc6e70952dc0af493c3df7a0aa;
 
     // Top 3 bits mask.
     uint256 constant TOP_THREE_BIT_MASK = ~(uint256(7) << 253);
 
-    // Set the number of the NFT IDs. Each ID is an uint32.
-    uint32 constant L = 5;
+    // Generic constants for the supported queries
+    // TODO: These constants are possible to be changed depending on user queries exploration.
+    // Once we know which queries users are mostly doing, we'll be able to modify these constants.
+    // Maximum number of the results
+    uint32 constant MAX_NUM_OUTPUTS = 3;
+    // Maximum number of the items per result
+    uint32 constant MAX_NUM_ITEMS_PER_OUTPUT = 5;
+    // Maximum number of the placeholders
+    uint32 constant MAX_NUM_PLACEHOLDERS = 14;
 
-    // The start bytes32 offset of plonky2 public inputs in the whole data.
+    // The start uint256 offset of the public inputs in calldata.
     // groth16_proof_number (8) + groth16_input_number (3)
-    uint32 constant PLONKY2_PI_BYTES32_OFFSET = 11;
+    uint32 constant PI_OFFSET = 11;
 
-    // The total length of the plonky2 public inputs. Each input value is
-    // serialized as an uint64. It's related with both the full proof
-    // serialization and the wrapped circuit code.
-    uint32 constant PI_TOTAL_LEN = (L + 24) * 8;
+    // These values are aligned and each is an uint256.
+    // Block hash uint256 position in the public inputs
+    uint32 constant BLOCK_HASH_POS = 0;
+    // Flattened computational hash uint256 position
+    uint32 constant COMPUTATIONAL_HASH_POS = BLOCK_HASH_POS + 1;
+    // Placeholder values uint256 position
+    uint32 constant PLACEHOLDER_VALUES_POS = COMPUTATIONAL_HASH_POS + 1;
+    // Result values uint256 position
+    uint32 constant RESULT_VALUES_POS =
+        PLACEHOLDER_VALUES_POS + MAX_NUM_PLACEHOLDERS;
 
-    // The min block number offset in the plonky2 public inputs.
-    uint32 constant PI_MIN_BLOCK_NUM_OFFSET = 2 * 8;
+    // The remaining items of public inputs are saved in one uint256.
+    // The uint256 offset of the last uint256 of public inputs in calldata.
+    uint32 constant PI_REM_OFFSET =
+        PI_OFFSET +
+            RESULT_VALUES_POS +
+            MAX_NUM_OUTPUTS *
+            MAX_NUM_ITEMS_PER_OUTPUT;
+    // Placeholder number uint32 position in the last uint256
+    uint32 constant REM_NUM_PLACEHOLDERS_POS = 0;
+    // Result number uint32 position
+    uint32 constant REM_NUM_RESULTS_POS = 1;
+    // Entry count (current result number) uint32 position
+    uint32 constant REM_ENTRY_COUNT_POS = 2;
+    // Overflow flag uint32 position
+    uint32 constant REM_OVERFLOW_POS = 3;
+    // Query limit uint32 position
+    uint32 constant REM_QUERY_LIMIT_POS = 4;
+    // Query offset uint32 position
+    uint32 constant REM_QUERY_OFFSET_POS = 5;
 
-    // The max block number offset in the plonky2 public inputs.
-    uint32 constant PI_MAX_BLOCK_NUM_OFFSET = PI_MIN_BLOCK_NUM_OFFSET + 8;
+    // The total byte length of public inputs
+    uint32 constant PI_LEN =
+        32 * (PI_REM_OFFSET - PI_OFFSET) + (REM_QUERY_OFFSET_POS + 1) * 4;
 
-    // The contract address offset in the plonky2 public inputs.
-    uint32 constant PI_CONTRACT_ADDR_OFFSET = PI_MAX_BLOCK_NUM_OFFSET + 8;
+    // A computation overflow error during the query process
+    error QueryComputationOverflow();
 
-    // The user address offset in the plonky2 public inputs.
-    uint32 constant PI_USER_ADDR_OFFSET = PI_CONTRACT_ADDR_OFFSET + PACKED_ADDRESS_LEN * 8;
-
-    // The NFT IDS offset in the plonky2 public inputs.
-    uint32 constant PI_NFT_IDS_OFFSET = 16 * 8;
-
-    // The block hash offset in the plonky2 public inputs.
-    uint32 constant PI_BLOCK_HASH_OFFSET = PI_NFT_IDS_OFFSET + L * 8;
-
-    // The query struct used to check with the public inputs.
-    struct Query {
-        address contractAddress;
-        address userAddress;
-        address clientAddress;
-        uint256 minBlockNumber;
-        uint256 maxBlockNumber;
+    // The query input struct passed into the processQuery function
+    struct QueryInput {
+        // Query limit parameter
+        uint32 limit;
+        // Query offset parameter
+        uint32 offset;
+        // Minimum block number
+        uint64 minBlockNumber;
+        // Maximum block number
+        uint64 maxBlockNumber;
+        // Block hash
         bytes32 blockHash;
+        // Computational hash
+        bytes32 computationalHash;
+        // User placeholder values
+        uint256[] userPlaceholders;
     }
 
-    // This processQuery function does the followings:
-    // 1. Parse the Groth16 proofs (8 uint256) and inputs (3 uint256) from the `data` argument, and
-    //    call `verifyProof` function for Groth16 verification.
-    // 2. Parse the plonky2 public inputs from the `data` argument.
-    // 3. Calculate sha256 on the inputs to a hash value, and set the top 3 bits of this hash to 0.
-    //    Then asset this hash value must be equal to the last Groth16 input (groth16_inputs[2]).
-    // 4. Parse a Query instance from the plonky2 public inputs, and asset it must be equal to the
-    //    expected `query` argument.
-    // 5. Parse and return `L` NFT IDs (uint32) from the plonky2 public inputs.
-    function processQuery(bytes32[] calldata data, Query memory query) public view returns (uint256[] memory) {
-        // 1. Do Groth16 verification.
-        uint256[3] memory groth16_inputs = verifyGroth16Proof(data);
-
-        // 2. Parse the plonky2 public inputs.
-        bytes memory pis = parsePlonky2Inputs(data);
-
-        // 3. Assert the hash of plonky2 public inputs must be equal to the last Groth16 input.
-        verifyPlonky2Inputs(pis, groth16_inputs);
-
-        // 3. Asset the query in plonky2 public inputs must be equal to expected `query` argument.
-        verifyQuery(pis, query);
-
-        // 4. Parse and return the NFT IDs.
-        return parseNftIds(pis);
+    // The query output struct returned from the processQuery function
+    struct QueryOutput {
+        // Total number of the all matching rows
+        uint256 totalMatchedRows;
+        // Returned rows of the current cursor
+        bytes[] rows;
     }
 
-    // Parse the Groth16 proofs and inputs, and do verification. It returns the Groth16 inputs.
-    function verifyGroth16Proof(bytes32[] calldata data) internal view returns (uint256[3] memory) {
+    // The processQuery function does the followings:
+    // 1. Parse the Groth16 proofs (8 uint256) and inputs (3 uint256) from the `data`
+    //    argument, and call `verifyProof` function for Groth16 verification.
+    // 2. Calculate sha256 on the public inputs, and set the top 3 bits of this hash to 0.
+    //    Then ensure this hash value equals to the last Groth16 input (groth16_inputs[2]).
+    // 3. Parse the items from public inputs, and check as expected for query.
+    // 4. Parse and return the query output from public inputs.
+    function processQuery(
+        bytes32[] calldata data,
+        QueryInput memory query
+    ) public view returns (QueryOutput memory) {
+        // 1. Groth16 verification
+        uint256[3] memory groth16Inputs = verifyGroth16Proof(data);
+
+        // 2. Ensure the sha256 of public inputs equals to the last Groth16 input.
+        verifyPublicInputs(data, groth16Inputs);
+
+        // 3. Ensure the items of public inputs equal as expected for query.
+        verifyQuery(data, query);
+
+        // 4. Parse and return the query output.
+        return parseOutput(data);
+    }
+
+    // Parse the Groth16 proofs and inputs, do verification, and returns the Groth16 inputs.
+    function verifyGroth16Proof(
+        bytes32[] calldata data
+    ) internal view returns (uint256[3] memory) {
         uint256[8] memory proofs;
         uint256[3] memory inputs;
 
         for (uint32 i = 0; i < 8; ++i) {
-            proofs[i] = convertToU256(data[i]);
+            proofs[i] = uint256(data[i]);
         }
         for (uint32 i = 0; i < 3; ++i) {
-            inputs[i] = convertToU256(data[i + 8]);
+            inputs[i] = uint256(data[i + 8]);
         }
 
-        // Require the sha256 hash equals to the last Groth16 input.
-        require(inputs[0] == uint256(CIRCUIT_DIGEST), "The first Groth16 input must be equal to the circuit digest");
+        // Ensure the sha256 hash equals to the last Groth16 input.
+        require(
+            inputs[0] == uint256(CIRCUIT_DIGEST),
+            "The first Groth16 input must be equal to the circuit digest"
+        );
 
-        // Do Groth16 verification.
+        // Verify the Groth16 proof.
         this.verifyProof(proofs, inputs);
 
         return inputs;
     }
 
-    // Parse the plonky2 public inputs.
-    function parsePlonky2Inputs(bytes32[] calldata data) internal pure returns (bytes memory) {
-        bytes memory pis = new bytes(PI_TOTAL_LEN);
+    // Compute sha256 on the public inputs, and ensure it equals to the last Groth16 input.
+    function verifyPublicInputs(
+        bytes32[] calldata data,
+        uint256[3] memory groth16Inputs
+    ) internal pure {
+        // Parse the public inputs from calldata.
+        bytes memory pi = parsePublicInputs(data);
 
-        uint32 bytes32_len = PI_TOTAL_LEN / 32;
-        for (uint32 i = 0; i < bytes32_len; ++i) {
-            bytes32 b = data[PLONKY2_PI_BYTES32_OFFSET + i];
+        // Calculate sha256.
+        uint256 hash = uint256(sha256(pi));
+        // Set the top 3 bits of the hash value to 0.
+        hash = hash & TOP_THREE_BIT_MASK;
+
+        // Require the sha256 equals to the last Groth16 input.
+        require(
+            hash == groth16Inputs[2],
+            "The sha256 hash of public inputs must be equal to the last of the Groth16 inputs"
+        );
+    }
+
+    // Parse the public inputs from calldata.
+    function parsePublicInputs(
+        bytes32[] calldata data
+    ) internal pure returns (bytes memory) {
+        bytes memory pi = new bytes(PI_LEN);
+
+        // The calldata is encoded as Bytes32.
+        uint256 b32Len = PI_LEN / 32;
+        for (uint256 i = 0; i < b32Len; ++i) {
+            bytes32 b = data[PI_OFFSET + i];
             for (uint32 j = 0; j < 32; ++j) {
-                pis[i * 32 + j] = bytes1(b[j]);
+                pi[i * 32 + j] = bytes1(b[j]);
             }
         }
-
-        // Set the remaining bytes.
-        bytes32 remaining_data = data[PLONKY2_PI_BYTES32_OFFSET + bytes32_len];
-        for (uint32 i = 0; i < PI_TOTAL_LEN % 32; ++i) {
-            pis[bytes32_len * 32 + i] = remaining_data[i];
+        bytes32 rem = data[PI_OFFSET + b32Len];
+        for (uint32 i = 0; i < PI_LEN % 32; ++i) {
+            pi[b32Len * 32 + i] = rem[i];
         }
 
-        return pis;
+        return pi;
     }
 
-    // Calculate sha256 on the plonky2 inputs, and asset it must be equal to the last Groth16 input.
-    function verifyPlonky2Inputs(bytes memory pis, uint256[3] memory groth16_inputs) internal pure {
-        // Calculate sha256.
-        bytes32 pis_hash_bytes = sha256(pis);
-        uint256 pis_hash = uint256(pis_hash_bytes);
+    // Verify the public inputs with the expected query.
+    function verifyQuery(
+        bytes32[] calldata data,
+        QueryInput memory query
+    ) internal pure {
+        // Retrieve the last Uint256 of public inputs.
+        bytes32 rem = data[PI_REM_OFFSET];
 
-        // Set the top 3 bits of the hash value to 0.
-        pis_hash = pis_hash & TOP_THREE_BIT_MASK;
-
-        // Require the sha256 hash equals to the last Groth16 input.
-        require(pis_hash == groth16_inputs[2], "The plonky2 public inputs hash must be equal to the last of the Groth16 inputs");
-    }
-
-    // Verify the plonky2 inputs with the expected Query instance.
-    function verifyQuery(bytes memory pis, Query memory query) internal pure {
-        uint32 min_block_number = convertToU32(pis, PI_MIN_BLOCK_NUM_OFFSET);
+        // Check the block hash and computational hash.
+        bytes32 blockHash = data[PI_OFFSET + BLOCK_HASH_POS];
         require(
-            min_block_number == query.minBlockNumber,
-            "The parsed min block number must be equal to the expected one in query."
+            blockHash == query.blockHash,
+            "Block hash must equal as expected."
+        );
+        bytes32 computationalHash = data[PI_OFFSET + COMPUTATIONAL_HASH_POS];
+        require(
+            computationalHash == query.computationalHash,
+            "Computational hash must equal as expected."
         );
 
-        uint32 max_block_number = convertToU32(pis, PI_MAX_BLOCK_NUM_OFFSET);
+        uint32 numPlaceholders = uint32(
+            bytes4(rem << (REM_NUM_PLACEHOLDERS_POS * 32))
+        );
         require(
-            max_block_number == query.maxBlockNumber,
-            "The parsed max block number must be equal to the expected one in query."
+            numPlaceholders <= MAX_NUM_PLACEHOLDERS,
+            "Placeholder number cannot overflow."
+        );
+        require(
+            // The first two placeholders are minimum and maximum block numbers.
+            numPlaceholders == query.userPlaceholders.length + 2,
+            "Placeholder number cannot overflow and must equal as expected."
+        );
+        // Check the minimum and maximum block numbers.
+        require(
+            uint256(data[PI_OFFSET + PLACEHOLDER_VALUES_POS]) ==
+                query.minBlockNumber,
+            "The first placeholder must be the expected minimum block number."
+        );
+        require(
+            uint256(data[PI_OFFSET + PLACEHOLDER_VALUES_POS + 1]) ==
+                query.maxBlockNumber,
+            "The second placeholder must be the expected maximum block number."
+        );
+        // Check the user placeholders.
+        for (uint256 i = 0; i < numPlaceholders - 2; ++i) {
+            require(
+                uint256(data[PI_OFFSET + PLACEHOLDER_VALUES_POS + 2 + i]) ==
+                    query.userPlaceholders[i],
+                "The user placeholder must equal as expected."
+            );
+        }
+
+        // Check the query limit and offset.
+        uint32 limit = uint32(bytes4(rem << (REM_QUERY_LIMIT_POS * 32)));
+        require(limit == query.limit, "Query limit must equal as expected.");
+        uint32 offset = uint32(bytes4(rem << (REM_QUERY_OFFSET_POS * 32)));
+        require(offset == query.offset, "Query limit must equal as expected.");
+
+        // Throw an error if overflow.
+        uint32 overflow = uint32(bytes4(rem << (REM_OVERFLOW_POS * 32)));
+        if (overflow != 0) {
+            revert QueryComputationOverflow();
+        }
+    }
+
+    // Parse the query output from the public inputs.
+    function parseOutput(
+        bytes32[] calldata data
+    ) internal pure returns (QueryOutput memory) {
+        bytes32 rem = data[PI_REM_OFFSET];
+
+        // Retrieve total number of the matched rows.
+        uint32 totalMatchedRows = uint32(
+            bytes4(rem << (REM_ENTRY_COUNT_POS * 32))
         );
 
-        address contract_address = convertToAddress(pis, PI_CONTRACT_ADDR_OFFSET);
+        // Retrieve the current result number.
+        uint32 numResults = uint32(bytes4(rem << (REM_NUM_RESULTS_POS * 32)));
         require(
-            contract_address == query.contractAddress,
-            "The parsed contract address must be equal to the expected one in query."
+            numResults <= MAX_NUM_OUTPUTS,
+            "Result number cannot overflow."
         );
 
-        address user_address = convertToAddress(pis, PI_USER_ADDR_OFFSET);
-        require(
-            user_address == query.userAddress,
-            "The parsed user address must be equal to the expected one in query."
-        );
-
-        bytes32 block_hash = convertToHash(pis, PI_BLOCK_HASH_OFFSET);
-        require(
-            block_hash == query.blockHash,
-            "The parsed block hash must be equal to the expected one in query."
-        );
-    }
-
-    // Parse the `L` NFT IDs from the plonky2 public inputs.
-    function parseNftIds(bytes memory pis) internal pure returns (uint256[] memory) {
-        uint256[] memory nft_ids = new uint256[](L);
-        for (uint32 i = 0; i < L; ++i) {
-            nft_ids[i] = uint256(convertToLeftPaddingU32(pis, PI_NFT_IDS_OFFSET + i * 8));
+        // TODO: Each result value is an Uint256 and need to confirm this encoding code.
+        // And it encodes the whole row with dummy values, since we don't know the real
+        // number of items per result here.
+        uint32 offset = PI_OFFSET + RESULT_VALUES_POS;
+        bytes[] memory rows = new bytes[](numResults);
+        for (uint256 i = 0; i < numResults; ++i) {
+            rows[i] = abi.encode(
+                data[offset + i * MAX_NUM_ITEMS_PER_OUTPUT:offset +
+                    (i + 1) *
+                    MAX_NUM_ITEMS_PER_OUTPUT]
+            );
         }
 
-        return nft_ids;
-    }
+        QueryOutput memory output = QueryOutput({
+            totalMatchedRows: totalMatchedRows,
+            rows: rows
+        });
 
-    // Convert a bytes32 to an uint256.
-    function convertToU256(bytes32 b) internal pure returns (uint256) {
-        uint256 result;
-        for (uint32 i = 0; i < 32; i++) {
-            result |= uint256(uint8(b[i])) << (8 * i);
-        }
-
-        return result;
-    }
-
-    // Convert to an uint32 from a memory offset.
-    function convertToU32(bytes memory data, uint32 offset) internal pure returns (uint32) {
-        uint32 result;
-        for (uint32 i = 0; i < 4; ++i) {
-            result |= uint32(uint8(data[i + offset])) << (8 * i);
-        }
-
-        return result;
-    }
-
-    // Convert to an uint32 of left padding from a memory offset.
-    function convertToLeftPaddingU32(bytes memory data, uint32 offset) internal pure returns (uint32) {
-        uint32 result;
-        for (uint32 i = 0; i < 4; ++i) {
-            result |= uint32(uint8(data[i + offset])) << (8 * (3 - i));
-        }
-
-        return result;
-    }
-
-    // Convert to an address from a memory offset.
-    function convertToAddress(bytes memory pis, uint32 offset) internal pure returns (address) {
-        uint160 result;
-        for (uint32 i = 0; i < PACKED_ADDRESS_LEN; ++i) {
-            result |= uint160(convertToLeftPaddingU32(pis, offset + i * 8)) << (32 * (PACKED_ADDRESS_LEN - 1 - i));
-        }
-
-        return address(result);
-    }
-
-    // Convert to a hash from a memory offset.
-    function convertToHash(bytes memory pis, uint32 offset) internal pure returns (bytes32) {
-        uint256 result;
-        for (uint32 i = 0; i < PACKED_HASH_LEN; ++i) {
-            result |= uint256(convertToLeftPaddingU32(pis, offset + i * 8)) << (32 * (PACKED_HASH_LEN - 1 - i));
-        }
-
-        return bytes32(result);
+        return output;
     }
 }

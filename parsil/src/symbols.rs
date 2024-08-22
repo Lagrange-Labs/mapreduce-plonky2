@@ -13,6 +13,27 @@ pub struct ZkTable {
     /// Columns accessible from this table
     pub columns: Vec<ZkColumn>,
 }
+impl ZkTable {
+    /// Return this table column encoding the primary index.
+    ///
+    /// Panic if such a column does not exist, which can not happen.
+    pub fn primary_index_column(&self) -> &ZkColumn {
+        self.columns
+            .iter()
+            .find(|c| c.kind == ColumnKind::PrimaryIndex)
+            .unwrap()
+    }
+
+    /// Return this table column encoding the secondary index.
+    ///
+    /// Panic if such a column does not exist, which can not happen.
+    pub fn secondary_index_column(&self) -> &ZkColumn {
+        self.columns
+            .iter()
+            .find(|c| c.kind == ColumnKind::SecondaryIndex)
+            .unwrap()
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ColumnKind {

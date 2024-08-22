@@ -48,7 +48,7 @@ jobs:
 
   test:
     name: Test Suite
-    runs-on: nix-128g
+    runs-on: ['memory:128GB']
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
