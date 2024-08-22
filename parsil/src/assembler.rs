@@ -646,12 +646,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         Ok(CircuitPis {
             result,
             column_ids: self.columns.clone(),
-            query_aggregations: root_scope
-                .metadata()
-                .aggregation
-                .iter()
-                .cloned()
-                .collect(),
+            query_aggregations: root_scope.metadata().aggregation.iter().cloned().collect(),
             predication_operations: root_scope.metadata().predicates.ops.clone(),
             bounds: StaticQueryBounds::without_values(
                 self.secondary_index_bounds.low.clone(),
@@ -669,12 +664,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         Ok(CircuitPis {
             result,
             column_ids: self.columns.clone(),
-            query_aggregations: root_scope
-                .metadata()
-                .aggregation
-                .iter()
-                .cloned()
-                .collect(),
+            query_aggregations: root_scope.metadata().aggregation.iter().cloned().collect(),
             predication_operations: root_scope.metadata().predicates.ops.clone(),
             bounds: QueryBounds::new(
                 placeholders,

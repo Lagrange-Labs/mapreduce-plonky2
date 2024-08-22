@@ -384,8 +384,8 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
     pub(crate) node_info: NodeInfo,
     /// Data about the left child of the node, if any
     pub(crate) left_child_info: Option<NodeInfo>,
-     /// Data about the left child of the node, if any
-     pub(crate) right_child_info: Option<NodeInfo>,
+    /// Data about the left child of the node, if any
+    pub(crate) right_child_info: Option<NodeInfo>,
     /// Value of the primary index associated to the current node
     pub(crate) primary_index_value: U256,
     /// Identifier of primary and secondary indexed columns

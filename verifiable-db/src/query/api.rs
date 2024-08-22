@@ -235,9 +235,9 @@ where
     /// Initialize input to prove a node storing a value of the primary or secondary index which
     /// is outside of the query bounds, from the following inputs:
     /// - `node_info`: Data about the node being proven
-    /// - `left_child_info`: Data aboout the left child of the node being proven; must be `None` if 
+    /// - `left_child_info`: Data aboout the left child of the node being proven; must be `None` if
     ///     the node being proven has no left child
-    /// - `right_child_info`: Data aboout the right child of the node being proven; must be `None` if 
+    /// - `right_child_info`: Data aboout the right child of the node being proven; must be `None` if
     ///     the node being proven has no right child
     /// - `primary_index_value`: Value of the primary index associated to the current node
     /// - `index_ids`: Identifiers of the primary and secondary index columns
@@ -729,44 +729,44 @@ where
                 min_query,
                 max_query,
             }) => {
-                    // intermediate node
-                    let left_child_exists = left_child_info.is_some();
-                    let right_child_exists = right_child_info.is_some();
-                    let left_child_data = left_child_info.unwrap_or_default();
-                    let right_child_data = right_child_info.unwrap_or_default();
-                    let input = NonExistenceInterNodeCircuit {
-                        is_rows_tree_node,
-                        left_child_exists,
-                        right_child_exists,
-                        min_query,
-                        max_query,
-                        value: node_info.value,
-                        index_value: primary_index_value,
-                        left_child_value: left_child_data.value,
-                        left_child_min: left_child_data.min,
-                        left_child_max: left_child_data.max,
-                        right_child_value: right_child_data.value,
-                        right_child_min: right_child_data.min,
-                        right_child_max: right_child_data.max,
-                        index_ids,
-                        ops: aggregation_ops,
-                        subtree_hash: node_info.embedded_tree_hash,
-                        computational_hash,
-                        placeholder_hash,
-                        left_tree_hash: left_child_data.embedded_tree_hash,
-                        left_grand_children: left_child_data.child_hashes,
-                        right_tree_hash: right_child_data.embedded_tree_hash,
-                        right_grand_children: right_child_data.child_hashes,
-                    };
-                    (
-                        self.circuit_set.generate_proof(
-                            &self.non_existence_intermediate,
-                            [],
-                            [],
-                            input,
-                        )?,
-                        self.non_existence_intermediate.get_verifier_data().clone(),
-                    )
+                // intermediate node
+                let left_child_exists = left_child_info.is_some();
+                let right_child_exists = right_child_info.is_some();
+                let left_child_data = left_child_info.unwrap_or_default();
+                let right_child_data = right_child_info.unwrap_or_default();
+                let input = NonExistenceInterNodeCircuit {
+                    is_rows_tree_node,
+                    left_child_exists,
+                    right_child_exists,
+                    min_query,
+                    max_query,
+                    value: node_info.value,
+                    index_value: primary_index_value,
+                    left_child_value: left_child_data.value,
+                    left_child_min: left_child_data.min,
+                    left_child_max: left_child_data.max,
+                    right_child_value: right_child_data.value,
+                    right_child_min: right_child_data.min,
+                    right_child_max: right_child_data.max,
+                    index_ids,
+                    ops: aggregation_ops,
+                    subtree_hash: node_info.embedded_tree_hash,
+                    computational_hash,
+                    placeholder_hash,
+                    left_tree_hash: left_child_data.embedded_tree_hash,
+                    left_grand_children: left_child_data.child_hashes,
+                    right_tree_hash: right_child_data.embedded_tree_hash,
+                    right_grand_children: right_child_data.child_hashes,
+                };
+                (
+                    self.circuit_set.generate_proof(
+                        &self.non_existence_intermediate,
+                        [],
+                        [],
+                        input,
+                    )?,
+                    self.non_existence_intermediate.get_verifier_data().clone(),
+                )
             }
         });
 

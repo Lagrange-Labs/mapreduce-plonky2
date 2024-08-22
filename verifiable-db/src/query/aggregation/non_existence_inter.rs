@@ -10,6 +10,7 @@ use crate::query::{
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
+    array::ToField,
     hash::hash_maybe_first,
     poseidon::{empty_poseidon_hash, H},
     public_inputs::PublicInputCommon,
@@ -152,18 +153,13 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         let right_child_exists = b.add_virtual_bool_target_safe();
         // Initialize as unsafe, since all these Uint256s are either exposed as
         // public inputs or passed as inputs for hash computation.
-        let [value, index_value, 
-        left_child_value, left_child_min, left_child_max,
-        right_child_value, right_child_min, right_child_max
-        ] =
+        let [value, index_value, left_child_value, left_child_min, left_child_max, right_child_value, right_child_min, right_child_max] =
             b.add_virtual_u256_arr_unsafe();
         // compute min and max query bounds for secondary index
 
         let index_ids = b.add_virtual_target_arr();
         let ops = b.add_virtual_target_arr();
-        let [subtree_hash, computational_hash, placeholder_hash, 
-        left_child_subtree_hash, left_grand_child_hash1, left_grand_child_hash2,
-        right_child_subtree_hash, right_grand_child_hash1, right_grand_child_hash2] =
+        let [subtree_hash, computational_hash, placeholder_hash, left_child_subtree_hash, left_grand_child_hash1, left_grand_child_hash2, right_child_subtree_hash, right_grand_child_hash1, right_grand_child_hash2] =
             array::from_fn(|_| b.add_virtual_hash());
 
         let min_query = QueryBoundTarget::new(b);
@@ -192,7 +188,10 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         b.connect(is_left_child_out_of_range.target, left_child_exists.target);
         let is_child_greater_than_max = b.is_less_than_u256(&max_query_value, &right_child_min);
         let is_right_child_out_of_range = b.and(right_child_exists, is_child_greater_than_max);
-        b.connect(is_right_child_out_of_range.target, right_child_exists.target);
+        b.connect(
+            is_right_child_out_of_range.target,
+            right_child_exists.target,
+        );
 
         // Compute dummy values for each of the `S` values to be returned as output.
         let outputs = compute_dummy_output_targets(b, &ops);
@@ -211,12 +210,7 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
             .collect();
         let left_child_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        let left_child_hash = b.select_hash(
-            left_child_exists,
-            &left_child_hash,
-            &empty_hash,
-        );
-
+        let left_child_hash = b.select_hash(left_child_exists, &left_child_hash, &empty_hash);
 
         // Recompute hash of right child node to bind right_child_min and right_child_max inputs:
         // H(h1 || h2 || child_min || child_max || column_id || child_value || child_subtree_hash)
@@ -232,11 +226,7 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
             .collect();
         let right_child_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        let right_child_hash = b.select_hash(
-            right_child_exists,
-            &right_child_hash,
-            &empty_hash,
-        );
+        let right_child_hash = b.select_hash(right_child_exists, &right_child_hash, &empty_hash);
 
         // node_min = left_child_exists ? left_child_min : value
         let node_min = b.select_u256(left_child_exists, &left_child_min, &value);
@@ -257,7 +247,6 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
             .chain(subtree_hash.to_targets())
             .collect();
         let node_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
-
 
         // We add the query bounds to the placeholder hash only if the current node is in a rows tree.
         let placeholder_hash_with_query_bounds =
@@ -485,16 +474,14 @@ mod tests {
             // no constraints otherwise
             [U256::from_limbs(rng.gen()), U256::from_limbs(rng.gen())]
         };
-        let [index_value, left_child_value, right_child_value] = array::from_fn(|_| U256::from_limbs(rng.gen()));
+        let [index_value, left_child_value, right_child_value] =
+            array::from_fn(|_| U256::from_limbs(rng.gen()));
         let index_ids = F::rand_array();
-        let [subtree_hash, computational_hash, placeholder_hash, 
-            left_child_subtree_hash, left_grand_child_hash1, left_grand_child_hash2,
-            right_child_subtree_hash, right_grand_child_hash1, right_grand_child_hash2    
-        ] =
+        let [subtree_hash, computational_hash, placeholder_hash, left_child_subtree_hash, left_grand_child_hash1, left_grand_child_hash2, right_child_subtree_hash, right_grand_child_hash1, right_grand_child_hash2] =
             array::from_fn(|_| gen_random_field_hash());
         let left_grand_children = [left_grand_child_hash1, left_grand_child_hash2];
         let right_grand_children = [right_grand_child_hash1, right_grand_child_hash2];
-        
+
         let first_placeholder_id = PlaceholderId::Generic(0);
 
         let (min_query, max_query, placeholders) = if is_rows_tree_node {
@@ -749,7 +736,6 @@ mod tests {
         test_non_existence_inter_circuit(true, false, false, ops);
     }
 
-
     #[test]
     fn test_query_agg_non_existence_for_index_tree_leaf_node() {
         // Generate the random operations.
@@ -765,7 +751,6 @@ mod tests {
 
         test_non_existence_inter_circuit(true, true, true, ops);
     }
-
 
     #[test]
     fn test_query_agg_non_existence_for_index_tree_full_node() {
