@@ -39,15 +39,10 @@ use std::{array, iter};
 pub struct NonExistenceInterNodeWires<const MAX_NUM_RESULTS: usize> {
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_rows_tree_node: BoolTarget,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    is_left_child: BoolTarget,
     min_query: QueryBoundTargetInputs,
     max_query: QueryBoundTargetInputs,
     value: UInt256Target,
     index_value: UInt256Target,
-    child_value: UInt256Target,
-    child_min: UInt256Target,
-    child_max: UInt256Target,
     index_ids: [Target; 2],
     #[serde(
         serialize_with = "serialize_long_array",
@@ -61,12 +56,30 @@ pub struct NonExistenceInterNodeWires<const MAX_NUM_RESULTS: usize> {
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     placeholder_hash: HashOutTarget,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    child_subtree_hash: HashOutTarget,
+    left_child_min: UInt256Target,
+    left_child_max: UInt256Target,
+    left_child_value: UInt256Target,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    left_tree_hash: HashOutTarget,
     #[serde(
         serialize_with = "serialize_array",
         deserialize_with = "deserialize_array"
     )]
-    grand_child_hashes: [HashOutTarget; 2],
+    left_grand_children: [HashOutTarget; 2],
+    right_child_min: UInt256Target,
+    right_child_max: UInt256Target,
+    right_child_value: UInt256Target,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    right_tree_hash: HashOutTarget,
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
+    right_grand_children: [HashOutTarget; 2],
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    left_child_exists: BoolTarget,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    right_child_exists: BoolTarget,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -74,8 +87,6 @@ pub struct NonExistenceInterNodeCircuit<const MAX_NUM_RESULTS: usize> {
     /// The flag specified if the proof is generated for a node in a rows tree or
     /// for a node in the index tree
     pub(crate) is_rows_tree_node: bool,
-    /// The flag specified if the child node is the left or right child
-    pub(crate) is_left_child: bool,
     /// Minimum range bound specified in the query for the indexed column
     /// It's a range bound for the primary indexed column for index tree,
     /// and secondary indexed column for rows tree.
@@ -87,12 +98,6 @@ pub struct NonExistenceInterNodeCircuit<const MAX_NUM_RESULTS: usize> {
     /// (meaningful only if the current node belongs to a rows tree,
     /// can be equal to `value` if the current node belongs to the index tree)
     pub(crate) index_value: U256,
-    /// Value stored in the child node
-    pub(crate) child_value: U256,
-    /// Minimum value of the indexed column for the child node
-    pub(crate) child_min: U256,
-    /// Maximum value of the indexed column for the child node
-    pub(crate) child_max: U256,
     /// Integer identifiers of the indexed columns
     pub(crate) index_ids: [F; 2],
     /// Set of identifiers of the aggregation operations for each of the `S` items found in `V`
@@ -109,10 +114,30 @@ pub struct NonExistenceInterNodeCircuit<const MAX_NUM_RESULTS: usize> {
     /// Placeholder hash associated to the processing of single rows of the query
     /// (meaningless in this case, we just need to provide it for public input compliance)
     pub(crate) placeholder_hash: HashOut<F>,
-    /// Hash of the tree stored in the child node
-    pub(crate) child_subtree_hash: HashOut<F>,
-    /// Hashes of the children of the child of the current node
-    pub(crate) grand_child_hashes: [HashOut<F>; 2],
+    /// Minimum value associated to the left child
+    pub(crate) left_child_min: U256,
+    /// Maximum value associated to the left child
+    pub(crate) left_child_max: U256,
+    /// Value stored in the left child
+    pub(crate) left_child_value: U256,
+    /// Hashes of the row/rows tree stored in the left child
+    pub(crate) left_tree_hash: HashOut<F>,
+    /// Hashes of the children nodes of the left child
+    pub(crate) left_grand_children: [HashOut<F>; 2],
+    /// Minimum value associated to the right child
+    pub(crate) right_child_min: U256,
+    /// Maximum value associated to the right child
+    pub(crate) right_child_max: U256,
+    /// Value stored in the right child
+    pub(crate) right_child_value: U256,
+    /// Hashes of the row/rows tree stored in the right child
+    pub(crate) right_tree_hash: HashOut<F>,
+    /// Hashes of the children nodes of the right child
+    pub(crate) right_grand_children: [HashOut<F>; 2],
+    /// Boolean flag specifying whether there is a left child for the current node
+    pub(crate) left_child_exists: bool,
+    /// Boolean flag specifying whether there is a right child for the current node
+    pub(crate) right_child_exists: bool,
 }
 
 impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS> {
@@ -123,17 +148,22 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
 
         let is_rows_tree_node = b.add_virtual_bool_target_safe();
-        // Do range check in `hash_maybe_first` function.
-        let is_left_child = b.add_virtual_bool_target_unsafe();
+        let left_child_exists = b.add_virtual_bool_target_safe();
+        let right_child_exists = b.add_virtual_bool_target_safe();
         // Initialize as unsafe, since all these Uint256s are either exposed as
         // public inputs or passed as inputs for hash computation.
-        let [value, index_value, child_value, child_min, child_max] =
+        let [value, index_value, 
+        left_child_value, left_child_min, left_child_max,
+        right_child_value, right_child_min, right_child_max
+        ] =
             b.add_virtual_u256_arr_unsafe();
         // compute min and max query bounds for secondary index
 
         let index_ids = b.add_virtual_target_arr();
         let ops = b.add_virtual_target_arr();
-        let [subtree_hash, computational_hash, placeholder_hash, child_subtree_hash, grand_child_hash1, grand_child_hash2] =
+        let [subtree_hash, computational_hash, placeholder_hash, 
+        left_child_subtree_hash, left_grand_child_hash1, left_grand_child_hash2,
+        right_child_subtree_hash, right_grand_child_hash1, right_grand_child_hash2] =
             array::from_fn(|_| b.add_virtual_hash());
 
         let min_query = QueryBoundTarget::new(b);
@@ -155,57 +185,79 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         b.connect(is_out_of_range.target, ttrue.target);
 
         // Enforce that the records found in the subtree rooted in the child node
-        // are all out of the range specified by the query. If it's the left child,
-        // ensure child_max < MIN_query, otherwise child_min > MAX_query.
-        let is_child_less_than_min = b.is_less_than_u256(&child_max, &min_query_value);
-        let is_child_greater_than_max = b.is_less_than_u256(&max_query_value, &child_min);
-        let is_out_of_range = b.select(
-            is_left_child,
-            is_child_less_than_min.target,
-            is_child_greater_than_max.target,
-        );
-        b.connect(is_out_of_range, ttrue.target);
+        // are all out of the range specified by the query. If left child exists,
+        // ensure left_child_max < MIN_query; if right child exists, ensure right_child_min > MAX_query.
+        let is_child_less_than_min = b.is_less_than_u256(&left_child_max, &min_query_value);
+        let is_left_child_out_of_range = b.and(left_child_exists, is_child_less_than_min);
+        b.connect(is_left_child_out_of_range.target, left_child_exists.target);
+        let is_child_greater_than_max = b.is_less_than_u256(&max_query_value, &right_child_min);
+        let is_right_child_out_of_range = b.and(right_child_exists, is_child_greater_than_max);
+        b.connect(is_right_child_out_of_range.target, right_child_exists.target);
 
         // Compute dummy values for each of the `S` values to be returned as output.
         let outputs = compute_dummy_output_targets(b, &ops);
 
-        // Recompute hash of child node to bind child_min and child_max inputs:
+        // Recompute hash of left child node to bind left_child_min and left_child_max inputs:
         // H(h1 || h2 || child_min || child_max || column_id || child_value || child_subtree_hash)
-        let inputs = grand_child_hash1
+        let inputs = left_grand_child_hash1
             .to_targets()
             .into_iter()
-            .chain(grand_child_hash2.to_targets())
-            .chain(child_min.to_targets())
-            .chain(child_max.to_targets())
+            .chain(left_grand_child_hash2.to_targets())
+            .chain(left_child_min.to_targets())
+            .chain(left_child_max.to_targets())
             .chain(iter::once(column_id))
-            .chain(child_value.to_targets())
-            .chain(child_subtree_hash.to_targets())
+            .chain(left_child_value.to_targets())
+            .chain(left_child_subtree_hash.to_targets())
             .collect();
-        let child_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
+        let left_child_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        // node_min = is_left_child ? child_min : value
-        let node_min = b.select_u256(is_left_child, &child_min, &value);
-        // node_max = is_left_child ? value : child_max
-        let node_max = b.select_u256(is_left_child, &value, &child_max);
+        let left_child_hash = b.select_hash(
+            left_child_exists,
+            &left_child_hash,
+            &empty_hash,
+        );
+
+
+        // Recompute hash of right child node to bind right_child_min and right_child_max inputs:
+        // H(h1 || h2 || child_min || child_max || column_id || child_value || child_subtree_hash)
+        let inputs = right_grand_child_hash1
+            .to_targets()
+            .into_iter()
+            .chain(right_grand_child_hash2.to_targets())
+            .chain(right_child_min.to_targets())
+            .chain(right_child_max.to_targets())
+            .chain(iter::once(column_id))
+            .chain(right_child_value.to_targets())
+            .chain(right_child_subtree_hash.to_targets())
+            .collect();
+        let right_child_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
+
+        let right_child_hash = b.select_hash(
+            right_child_exists,
+            &right_child_hash,
+            &empty_hash,
+        );
+
+        // node_min = left_child_exists ? left_child_min : value
+        let node_min = b.select_u256(left_child_exists, &left_child_min, &value);
+        // node_max = right_child_exists ? right_child_max : value
+        let node_max = b.select_u256(right_child_exists, &right_child_max, &value);
         let [node_min_targets, node_max_targets] = [node_min, node_max].map(|u| u.to_targets());
 
         // Compute the node hash:
         // H(left_child_hash || right_child_hash || node_min || node_max || column_id || value || subtree_hash)
-        let rest: Vec<_> = node_min_targets
-            .clone()
+        let inputs = left_child_hash
+            .to_targets()
             .into_iter()
+            .chain(right_child_hash.to_targets())
+            .chain(node_min_targets.clone())
             .chain(node_max_targets.clone())
             .chain(iter::once(column_id))
             .chain(value.to_targets())
             .chain(subtree_hash.to_targets())
             .collect();
-        let node_hash = hash_maybe_first(
-            b,
-            is_left_child,
-            empty_hash.elements,
-            child_hash.elements,
-            &rest,
-        );
+        let node_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
+
 
         // We add the query bounds to the placeholder hash only if the current node is in a rows tree.
         let placeholder_hash_with_query_bounds =
@@ -253,25 +305,32 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         )
         .register(b);
 
-        let grand_child_hashes = [grand_child_hash1, grand_child_hash2];
+        let left_grand_children = [left_grand_child_hash1, left_grand_child_hash2];
+        let right_grand_children = [right_grand_child_hash1, right_grand_child_hash2];
 
         NonExistenceInterNodeWires {
             is_rows_tree_node,
-            is_left_child,
+            left_child_exists,
+            right_child_exists,
             min_query: min_query.into(),
             max_query: max_query.into(),
             value,
             index_value,
-            child_value,
-            child_min,
-            child_max,
+            left_child_value,
+            left_child_min,
+            left_child_max,
+            right_child_value,
+            right_child_min,
+            right_child_max,
             index_ids,
             ops,
             subtree_hash,
             computational_hash,
             placeholder_hash,
-            child_subtree_hash,
-            grand_child_hashes,
+            left_tree_hash: left_child_subtree_hash,
+            left_grand_children,
+            right_tree_hash: right_child_subtree_hash,
+            right_grand_children,
         }
     }
 
@@ -282,16 +341,20 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
     ) {
         [
             (wires.is_rows_tree_node, self.is_rows_tree_node),
-            (wires.is_left_child, self.is_left_child),
+            (wires.left_child_exists, self.left_child_exists),
+            (wires.right_child_exists, self.right_child_exists),
         ]
         .iter()
         .for_each(|(t, v)| pw.set_bool_target(*t, *v));
         [
             (&wires.value, self.value),
             (&wires.index_value, self.index_value),
-            (&wires.child_value, self.child_value),
-            (&wires.child_min, self.child_min),
-            (&wires.child_max, self.child_max),
+            (&wires.left_child_value, self.left_child_value),
+            (&wires.left_child_min, self.left_child_min),
+            (&wires.left_child_max, self.left_child_max),
+            (&wires.right_child_value, self.right_child_value),
+            (&wires.right_child_min, self.right_child_min),
+            (&wires.right_child_max, self.right_child_max),
         ]
         .iter()
         .for_each(|(t, v)| pw.set_u256_target(t, *v));
@@ -303,14 +366,20 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
             (wires.subtree_hash, self.subtree_hash),
             (wires.computational_hash, self.computational_hash),
             (wires.placeholder_hash, self.placeholder_hash),
-            (wires.child_subtree_hash, self.child_subtree_hash),
+            (wires.left_tree_hash, self.left_tree_hash),
+            (wires.right_tree_hash, self.right_tree_hash),
         ]
         .iter()
         .for_each(|(t, v)| pw.set_hash_target(*t, *v));
         wires
-            .grand_child_hashes
+            .left_grand_children
             .iter()
-            .zip(self.grand_child_hashes)
+            .zip(self.left_grand_children)
+            .for_each(|(t, v)| pw.set_hash_target(*t, v));
+        wires
+            .right_grand_children
+            .iter()
+            .zip(self.right_grand_children)
             .for_each(|(t, v)| pw.set_hash_target(*t, v));
     }
 }
@@ -383,7 +452,8 @@ mod tests {
 
     fn test_non_existence_inter_circuit(
         is_rows_tree_node: bool,
-        is_left_child: bool,
+        left_child_exists: bool,
+        right_child_exists: bool,
         ops: [F; MAX_NUM_RESULTS],
     ) {
         let min_query_value = U256::from(1000);
@@ -397,19 +467,30 @@ mod tests {
         ]
         .choose(&mut rng)
         .unwrap();
-        let [child_min, child_max] = if is_left_child {
-            // child_max < MIN_query
+        let [left_child_min, left_child_max] = if left_child_exists {
+            // left_child_max < MIN_query
             [U256::from_limbs(rng.gen()), min_query_value - U256::from(1)]
         } else {
-            // child_min > MAX_query
-            [max_query_value + U256::from(1), U256::from_limbs(rng.gen())]
+            // no constraints otherwise
+            [U256::from_limbs(rng.gen()), U256::from_limbs(rng.gen())]
         };
-        let [index_value, child_value] = array::from_fn(|_| U256::from_limbs(rng.gen()));
+        let [right_child_min, right_child_max] = if right_child_exists {
+            // right_child_min > MAX_query
+            [max_query_value + U256::from(1), U256::from_limbs(rng.gen())]
+        } else {
+            // no constraints otherwise
+            [U256::from_limbs(rng.gen()), U256::from_limbs(rng.gen())]
+        };
+        let [index_value, left_child_value, right_child_value] = array::from_fn(|_| U256::from_limbs(rng.gen()));
         let index_ids = F::rand_array();
-        let [subtree_hash, computational_hash, placeholder_hash, child_subtree_hash, grand_child_hash1, grand_child_hash2] =
+        let [subtree_hash, computational_hash, placeholder_hash, 
+            left_child_subtree_hash, left_grand_child_hash1, left_grand_child_hash2,
+            right_child_subtree_hash, right_grand_child_hash1, right_grand_child_hash2    
+        ] =
             array::from_fn(|_| gen_random_field_hash());
-        let grand_child_hashes = [grand_child_hash1, grand_child_hash2];
-
+        let left_grand_children = [left_grand_child_hash1, left_grand_child_hash2];
+        let right_grand_children = [right_grand_child_hash1, right_grand_child_hash2];
+        
         let first_placeholder_id = PlaceholderId::Generic(0);
 
         let (min_query, max_query, placeholders) = if is_rows_tree_node {
@@ -453,21 +534,27 @@ mod tests {
         // Construct the test circuit.
         let test_circuit = NonExistenceInterNodeCircuit {
             is_rows_tree_node,
-            is_left_child,
+            left_child_exists,
+            right_child_exists,
             min_query: min_query.clone(),
             max_query: max_query.clone(),
             value,
             index_value,
-            child_value,
-            child_min,
-            child_max,
+            left_child_value,
+            left_child_min,
+            left_child_max,
             index_ids,
             ops,
             subtree_hash,
             computational_hash,
             placeholder_hash,
-            child_subtree_hash,
-            grand_child_hashes,
+            left_tree_hash: left_child_subtree_hash,
+            left_grand_children,
+            right_child_value,
+            right_child_min,
+            right_child_max,
+            right_tree_hash: right_child_subtree_hash,
+            right_grand_children,
         };
 
         // Prove for the test circuit.
@@ -476,10 +563,15 @@ mod tests {
 
         // node_min = is_left_child ? child_min : value
         // node_max = is_left_child ? value : child_max
-        let [node_min, node_max] = if is_left_child {
-            [child_min, value]
+        let node_min = if left_child_exists {
+            left_child_min
         } else {
-            [value, child_max]
+            value
+        };
+        let node_max = if right_child_exists {
+            right_child_max
+        } else {
+            value
         };
 
         // Check the public inputs.
@@ -493,24 +585,41 @@ mod tests {
             };
 
             // H(h1 || h2 || child_min || child_max || column_id || child_value || child_subtree_hash)
-            let inputs: Vec<_> = grand_child_hash1
+            let inputs: Vec<_> = left_grand_child_hash1
                 .to_fields()
                 .into_iter()
-                .chain(grand_child_hash2.to_fields())
-                .chain(child_min.to_fields())
-                .chain(child_max.to_fields())
+                .chain(left_grand_child_hash2.to_fields())
+                .chain(left_child_min.to_fields())
+                .chain(left_child_max.to_fields())
                 .chain(iter::once(column_id))
-                .chain(child_value.to_fields())
-                .chain(child_subtree_hash.to_fields())
+                .chain(left_child_value.to_fields())
+                .chain(left_child_subtree_hash.to_fields())
                 .collect();
-            let child_hash = H::hash_no_pad(&inputs);
+            let left_child_hash = H::hash_no_pad(&inputs);
 
-            // left_child_hash = left ? child_hash : H("")
-            // right_child_hash = left ? H("") : child_hash
-            let [left_child_hash, right_child_hash] = if is_left_child {
-                [child_hash, *empty_hash]
+            let left_child_hash = if left_child_exists {
+                left_child_hash
             } else {
-                [*empty_hash, child_hash]
+                *empty_hash
+            };
+
+            // H(h1 || h2 || child_min || child_max || column_id || child_value || child_subtree_hash)
+            let inputs: Vec<_> = right_grand_child_hash1
+                .to_fields()
+                .into_iter()
+                .chain(right_grand_child_hash2.to_fields())
+                .chain(right_child_min.to_fields())
+                .chain(right_child_max.to_fields())
+                .chain(iter::once(column_id))
+                .chain(right_child_value.to_fields())
+                .chain(right_child_subtree_hash.to_fields())
+                .collect();
+            let right_child_hash = H::hash_no_pad(&inputs);
+
+            let right_child_hash = if right_child_exists {
+                right_child_hash
+            } else {
+                *empty_hash
             };
 
             // H(left_child_hash || right_child_hash || node_min || node_max || column_id || value || subtree_hash)
@@ -591,7 +700,7 @@ mod tests {
         // with the `is_rows_tree_node` and `is_left_child` flag.
         ops[0] = Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
 
-        test_non_existence_inter_circuit(true, true, ops);
+        test_non_existence_inter_circuit(true, true, false, ops);
     }
 
     #[test]
@@ -599,7 +708,7 @@ mod tests {
         // Generate the random operations.
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
-        test_non_existence_inter_circuit(true, false, ops);
+        test_non_existence_inter_circuit(true, false, true, ops);
     }
 
     #[test]
@@ -607,7 +716,7 @@ mod tests {
         // Generate the random operations.
         let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
-        test_non_existence_inter_circuit(false, true, ops);
+        test_non_existence_inter_circuit(false, true, false, ops);
     }
 
     #[test]
@@ -620,6 +729,50 @@ mod tests {
         // with the `is_rows_tree_node` and `is_left_child` flag.
         ops[0] = Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
 
-        test_non_existence_inter_circuit(false, false, ops);
+        test_non_existence_inter_circuit(false, false, true, ops);
+    }
+
+    #[test]
+    fn test_query_agg_non_existence_for_row_tree_leaf_node() {
+        // Generate the random operations.
+        let mut ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
+
+        // Set the first operation to ID for testing the digest.
+        // The condition of the first aggregation operation ID is not associated
+        // with the `is_rows_tree_node` and `is_left_child` flag.
+        ops[0] = Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
+
+        test_non_existence_inter_circuit(true, false, false, ops);
+    }
+
+
+    #[test]
+    fn test_query_agg_non_existence_for_index_tree_leaf_node() {
+        // Generate the random operations.
+        let mut ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
+
+        test_non_existence_inter_circuit(false, false, false, ops);
+    }
+
+    #[test]
+    fn test_query_agg_non_existence_for_row_tree_full_node() {
+        // Generate the random operations.
+        let mut ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
+
+        test_non_existence_inter_circuit(true, true, true, ops);
+    }
+
+
+    #[test]
+    fn test_query_agg_non_existence_for_index_tree_full_node() {
+        // Generate the random operations.
+        let mut ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
+
+        // Set the first operation to ID for testing the digest.
+        // The condition of the first aggregation operation ID is not associated
+        // with the `is_rows_tree_node` and `is_left_child` flag.
+        ops[0] = Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
+
+        test_non_existence_inter_circuit(false, true, true, ops);
     }
 }

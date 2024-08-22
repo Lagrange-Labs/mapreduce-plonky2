@@ -918,21 +918,21 @@ async fn prove_non_existence_row<'a>(
     let tree = RowInfo::tree(planner);
     let query_for_min = format!("
         SELECT key FROM 
-            (SELECT key, generate_series(__valid_from, __valid_until) AS block, 
+            (SELECT key, generate_series(__valid_from, __valid_until) AS block,
             generate_series(__valid_from, __valid_until) AS block_number, 
-            (payload -> 'cells' -> '12191544657365810443' ->> 'value')::NUMERIC AS map_value, 
-            (payload -> 'cells' -> '10362498354857054631' ->> 'value')::NUMERIC AS map_key FROM row_mapping_table) 
+            (payload -> 'cells' -> '12402577999739927615' ->> 'value')::NUMERIC AS map_value, 
+            (payload -> 'cells' -> '3885571730649180944' ->> 'value')::NUMERIC AS map_key FROM row_mapping_table) 
         AS row_mapping_table 
         WHERE block_number = $1 
         AND map_value < $2 ORDER BY map_value DESC LIMIT 1;
     ");
     let query_for_max = format!("
         SELECT key FROM 
-            (SELECT key, generate_series(__valid_from, __valid_until) AS block, 
+            (SELECT key, generate_series(__valid_from, __valid_until) AS block,
             generate_series(__valid_from, __valid_until) AS block_number, 
-            (payload -> 'cells' -> '12191544657365810443' ->> 'value')::NUMERIC AS map_value, 
-            (payload -> 'cells' -> '10362498354857054631' ->> 'value')::NUMERIC AS map_key FROM row_mapping_table) 
-        AS row_mapping_table 
+            (payload -> 'cells' -> '12402577999739927615' ->> 'value')::NUMERIC AS map_value, 
+            (payload -> 'cells' -> '3885571730649180944' ->> 'value')::NUMERIC AS map_key FROM row_mapping_table) 
+            AS row_mapping_table 
         WHERE block_number = $1 
         AND map_value > $2 ORDER BY map_value ASC LIMIT 1;
     ");
@@ -945,6 +945,7 @@ async fn prove_non_existence_row<'a>(
         ]).await?;
         if rows.len() == 0 {
             // no node found, return None
+            info!("Search node for non-existence circuit: no node found");
             return Ok(None)
         }
         let row_key = rows[0].get::<_, Option<Vec<u8>>>(0)
@@ -968,12 +969,6 @@ async fn prove_non_existence_row<'a>(
                 .expect("No valid node found to prove non-existence, something is wrong")
         };
     let (node_info, left_child_info, right_child_info) = get_node_info(tree, &to_be_proven_node, primary as Epoch).await;
-    let child_info = match (left_child_info, right_child_info) {
-        (None, None) => None, // leaf node
-        (None, Some(info)) => Some((info, ChildPosition::Right)),
-        (Some(info), None) => Some((info, ChildPosition::Left)),
-        (Some(_), Some(_)) => bail!("chosen to prove a node with 2 children for non-existence circuit, something is wrong"),
-    };
     let index_ids = [planner.table.columns.primary_column().identifier, planner.table.columns.secondary_column().identifier];
     assert_eq!(index_ids[0], identifier_block_column());
     let column_ids = ColumnIDs::new(
@@ -996,7 +991,8 @@ async fn prove_non_existence_row<'a>(
     )?;
     let input = QueryCircuitInput::new_non_existence_input(
         node_info, 
-        child_info, 
+        left_child_info,
+        right_child_info, 
         U256::from(primary), 
         &index_ids, 
         &planner.pis.query_aggregations, 

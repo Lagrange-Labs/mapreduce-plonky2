@@ -25,7 +25,6 @@ pub(crate) mod full_node_index_leaf;
 pub(crate) mod full_node_with_one_child;
 pub(crate) mod full_node_with_two_children;
 pub(crate) mod non_existence_inter;
-pub(crate) mod non_existence_leaf;
 mod output_computation;
 pub(crate) mod partial_node;
 mod utils;
@@ -383,10 +382,10 @@ impl QueryHashNonExistenceCircuits {
 pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
     /// Data about the node being proven
     pub(crate) node_info: NodeInfo,
-    /// Data about the child of the node, if any
-    pub(crate) child_info: Option<NodeInfo>,
-    /// Flag specifying whether the node hash a left or right child, if any
-    pub(crate) is_child_left: Option<bool>,
+    /// Data about the left child of the node, if any
+    pub(crate) left_child_info: Option<NodeInfo>,
+     /// Data about the left child of the node, if any
+     pub(crate) right_child_info: Option<NodeInfo>,
     /// Value of the primary index associated to the current node
     pub(crate) primary_index_value: U256,
     /// Identifier of primary and secondary indexed columns
