@@ -168,16 +168,17 @@ async fn test_query_mapping(
     let res = table
         .execute_row_query(&exec_query.query.to_string(), &query_params)
         .await?;
+    let res = if is_empty_result(&res, SqlType::Numeric) {
+        vec![] // empty results, but Postgres still return 1 row
+    } else {
+        res
+    };
     info!(
         "Found {} results from query {}",
         res.len(),
         exec_query.query.to_string()
     );
-    let res = if print_vec_sql_rows(&res, SqlType::Numeric).is_err() {
-        vec![] // empty results, but Postgres still return 1 row
-    } else {
-        res
-    };
+    print_vec_sql_rows(&res, SqlType::Numeric);
     let rows_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
     let all_touched_rows = table
         .execute_row_query(&rows_query.to_string(), &query_params)
@@ -1558,9 +1559,11 @@ pub enum SqlType {
 }
 
 impl SqlType {
-    pub fn extract(&self, row: &PsqlRow, idx: usize) -> Result<SqlReturn> {
+    pub fn extract(&self, row: &PsqlRow, idx: usize) -> Option<SqlReturn> {
         match self {
-            SqlType::Numeric => Ok(SqlReturn::Numeric(row.try_get::<_, U256>(idx)?)),
+            SqlType::Numeric => row
+                .get::<_, Option<U256>>(idx)
+                .map(|num| SqlReturn::Numeric(num)),
         }
     }
 }
@@ -1570,22 +1573,33 @@ pub enum SqlReturn {
     Numeric(U256),
 }
 
-fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) -> Result<()> {
+fn is_empty_result(rows: &[PsqlRow], types: SqlType) -> bool {
+    if rows.len() == 0 {
+        return true;
+    }
+    let columns = rows.first().as_ref().unwrap().columns();
+    if columns.len() == 0 {
+        return true;
+    }
+    for row in rows {
+        if types.extract(row, 0).is_none() {
+            return true;
+        }
+    }
+    false
+}
+
+fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) {
     if rows.len() == 0 {
         println!("no rows returned");
+        return;
     }
     let columns = rows.first().as_ref().unwrap().columns();
     println!(
         "{:?}",
         columns.iter().map(|c| c.name().to_string()).join(" | ")
     );
-    assert!(columns.len() > 0);
     for row in rows {
-        if row.is_empty() {
-            continue;
-        }
-        println!("{:?}", types.extract(row, 0)?);
+        println!("{:?}", types.extract(row, 0));
     }
-
-    Ok(())
 }
