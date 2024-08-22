@@ -165,18 +165,22 @@ impl TrieNode {
             .collect();
 
         // Build the branch circuit input.
-        let input = if ctx.is_simple_slot() {
-            values_extraction::CircuitInput::new_single_variable_branch(node, child_proofs)
+        let (name, input) = if ctx.is_simple_slot() {
+            (
+                "indexing::extraction::mpt::branch::variable",
+                values_extraction::CircuitInput::new_single_variable_branch(node, child_proofs),
+            )
         } else {
-            values_extraction::CircuitInput::new_mapping_variable_branch(node, child_proofs)
+            (
+                "indexing::extraction::mpt::branch::mapping",
+                values_extraction::CircuitInput::new_mapping_variable_branch(node, child_proofs),
+            )
         };
         let input = CircuitInput::ValuesExtraction(input);
 
         // Generate the proof.
         ctx.b
-            .bench("indexing::extraction::mpt::branch", || {
-                generate_proof(ctx.params, input)
-            })
+            .bench(name, || generate_proof(ctx.params, input))
             .unwrap()
     }
 
@@ -213,15 +217,19 @@ impl TrieNode {
         let slot = ctx.slots.get(&node).unwrap();
 
         // Build the leaf circuit input.
-        let input = match slot {
-            StorageSlot::Simple(slot) => values_extraction::CircuitInput::new_single_variable_leaf(
-                node.clone(),
-                *slot as u8,
-                ctx.contract_address,
-                ctx.chain_id,
-                vec![],
+        let (name, input) = match slot {
+            StorageSlot::Simple(slot) => (
+                "indexing::extraction::mpt::leaf::single",
+                values_extraction::CircuitInput::new_single_variable_leaf(
+                    node.clone(),
+                    *slot as u8,
+                    ctx.contract_address,
+                    ctx.chain_id,
+                    vec![],
+                ),
             ),
-            StorageSlot::Mapping(mapping_key, slot) => {
+            StorageSlot::Mapping(mapping_key, slot) => (
+                "indexing::extraction::mpt::leaf::mapping",
                 values_extraction::CircuitInput::new_mapping_variable_leaf(
                     node.clone(),
                     *slot as u8,
@@ -229,8 +237,8 @@ impl TrieNode {
                     ctx.contract_address,
                     ctx.chain_id,
                     vec![],
-                )
-            }
+                ),
+            ),
         };
         let input = CircuitInput::ValuesExtraction(input);
 
@@ -238,9 +246,7 @@ impl TrieNode {
 
         let proof = ctx
             .b
-            .bench("indexing::extraction::mpt::leaf", || {
-                generate_proof(ctx.params, input)
-            })
+            .bench(name, || generate_proof(ctx.params, input))
             .unwrap();
         let pproof = ProofWithVK::deserialize(&proof).unwrap();
         let pi = mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
