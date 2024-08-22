@@ -293,7 +293,11 @@ impl TrieNode {
         let input = CircuitInput::LengthExtraction(input);
 
         // Generate the proof.
-        generate_proof(ctx.params, input).unwrap()
+        ctx.b
+            .bench("indexing::extraction::length::leaf", || {
+                generate_proof(ctx.params, input)
+            })
+            .unwrap()
     }
 
     /// Prove a branch node.
