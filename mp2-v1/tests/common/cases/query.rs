@@ -952,14 +952,26 @@ async fn prove_non_existence_row<'a>(
             .map(RowTreeKey::from_bytea)
             .context("unable to parse row key tree")
             .expect("");
-        // check if the node found has less than 2 children
-        let (node_ctx, _) = tree.fetch_with_context_at(&row_key, primary as Epoch).await;
-        Ok(
-            match (&node_ctx.left, &node_ctx.right) {
-            (Some(_), Some(_)) => None, // if it has children, return None, we cannot run the non-existence circuit over this node
-            _ => Some(row_key), // otherwise, we found the node, so we return its key
+        // among the nodes with the same index value of the node with `row_key`, we need to find
+        // the one in the highest place in the tree, i.e., a node whose parent has not the same
+        // index value
+        let (mut node_ctx, node_value) = tree.fetch_with_context_at(&row_key, primary as Epoch).await;
+        let value = node_value.value();
+        let get_parent_data = async |node_ctx: &NodeContext<RowTreeKey>| {
+            if node_ctx.parent.is_some() {
+                let parent_key = node_ctx.parent.as_ref().unwrap();
+                let (ctx, value) = tree.fetch_with_context_at(parent_key, primary as Epoch).await;
+                Some((ctx, value))
+            } else {
+                None
             }
-        )
+        };
+        let mut parent_data = get_parent_data(&node_ctx).await;
+        while parent_data.is_some() && parent_data.as_ref().unwrap().1.value() == value {
+            node_ctx = parent_data.unwrap().0;
+            parent_data = get_parent_data(&node_ctx).await;
+        } 
+        Ok(Some(node_ctx.node_id))
     };
     // try first with lower node than secondary min query bound
     let to_be_proven_node = match find_node_for_proof(&query_for_min, secondary_min_bound)
