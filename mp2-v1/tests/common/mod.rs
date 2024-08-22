@@ -70,6 +70,7 @@ pub struct TableInfo {
     pub columns: TableColumns,
     pub table_name: String,
     pub contract_address: Address,
+    pub chain_id: u64,
     pub source: TableSourceSlot,
 }
 
@@ -80,6 +81,6 @@ impl TableInfo {
             // mapping with length not tested right now
             TableSourceSlot::SingleValues(args) => SlotInputs::Simple(args.slots.clone()),
         };
-        metadata_hash(slots, &self.contract_address)
+        metadata_hash(slots, &self.contract_address, self.chain_id, vec![])
     }
 }

@@ -34,6 +34,7 @@ type SerializedProof = Vec<u8>;
 #[derive(Clone, Copy)]
 struct ProvingContext<'a> {
     contract_address: &'a Address,
+    chain_id: u64,
     params: &'a PublicParameters,
     slots: &'a HashMap<RawNode, StorageSlot>,
     variable_slot: Option<u8>,
@@ -44,6 +45,7 @@ impl<'a> ProvingContext<'a> {
     /// Initialize the proving context.
     fn new(
         contract_address: &'a Address,
+        chain_id: u64,
         params: &'a PublicParameters,
         slots: &'a HashMap<RawNode, StorageSlot>,
         variable_slot: Option<u8>,
@@ -55,6 +57,7 @@ impl<'a> ProvingContext<'a> {
             slots,
             variable_slot,
             b: bench,
+            chain_id,
         }
     }
 
@@ -215,6 +218,8 @@ impl TrieNode {
                 node.clone(),
                 *slot as u8,
                 ctx.contract_address,
+                ctx.chain_id,
+                vec![],
             ),
             StorageSlot::Mapping(mapping_key, slot) => {
                 values_extraction::CircuitInput::new_mapping_variable_leaf(
@@ -222,6 +227,8 @@ impl TrieNode {
                     *slot as u8,
                     mapping_key.clone(),
                     ctx.contract_address,
+                    ctx.chain_id,
+                    vec![],
                 )
             }
         };
@@ -413,12 +420,14 @@ impl TestStorageTrie {
     pub(crate) fn prove_length(
         &self,
         contract_address: &Address,
+        chain_id: u64,
         variable_slot: u8,
         params: &PublicParameters,
         b: &Benchmarker,
     ) -> ProofWithVK {
         let ctx = ProvingContext::new(
             contract_address,
+            chain_id,
             params,
             &self.slots,
             Some(variable_slot),
@@ -435,10 +444,11 @@ impl TestStorageTrie {
     pub(crate) fn prove_value(
         &self,
         contract_address: &Address,
+        chain_id: u64,
         params: &PublicParameters,
         b: &Benchmarker,
     ) -> ProofWithVK {
-        let ctx = ProvingContext::new(contract_address, params, &self.slots, None, b);
+        let ctx = ProvingContext::new(contract_address, chain_id, params, &self.slots, None, b);
 
         // Must prove with 1 slot at least.
         let proof = self.root.as_ref().unwrap().prove_value(ctx);
