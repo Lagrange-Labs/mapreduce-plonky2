@@ -83,6 +83,10 @@ impl QueryBoundSecondary {
             source: QueryBoundSource::Constant(value),
         }
     }
+
+    pub fn value(&self) -> &U256 {
+        &self.value
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
