@@ -730,7 +730,7 @@ impl TestCase {
                     .await
                     .expect("can't get current values");
                 match c {
-                    ChangeType::Silent => vec![],
+                    ChangeType::Silent => {}
                     ChangeType::Deletion => {
                         panic!("can't remove a single row from blockchain data over single values")
                     }
