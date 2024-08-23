@@ -47,6 +47,15 @@ pub struct QueryBoundSecondary {
     pub(crate) overflow: bool,
     pub(crate) source: QueryBoundSource,
 }
+impl QueryBoundSecondary {
+    pub fn is_bounded_low(&self) -> bool {
+        self.value != U256::ZERO
+    }
+
+    pub fn is_bounded_high(&self) -> bool {
+        self.value != U256::MAX
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Enumeration employed to specify whether a query bound for secondary indexed is taken in the query from

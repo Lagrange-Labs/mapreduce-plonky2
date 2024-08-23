@@ -10,11 +10,10 @@ use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
 use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
 mod assembler;
-mod dsl;
 mod errors;
 mod executor;
 mod expand;
-mod insulator;
+mod isolator;
 mod parser;
 mod placeholders;
 mod symbols;
@@ -65,6 +64,10 @@ enum Command {
     Isolate {
         #[arg()]
         request: String,
+        #[arg(long)]
+        lo_sec: bool,
+        #[arg(long)]
+        hi_sec: bool,
     },
 }
 
@@ -111,7 +114,7 @@ fn main() -> Result<()> {
                     println!("placeholders mapping: {:?}", translated.placeholder_mapping);
                 }
                 QueryKind::Keys => {
-                    println!("{}", executor::generateq_query_keys(&mut query, &settings)?)
+                    println!("{}", executor::generate_query_keys(&mut query, &settings)?)
                 }
             }
         }
@@ -132,9 +135,14 @@ fn main() -> Result<()> {
             println!("{}", r.0.unwrap_or("nothing".into()));
             println!("{}", r.1.unwrap_or("nothing".into()));
         }
-        Command::Isolate { request } => {
+        Command::Isolate {
+            request,
+            lo_sec,
+            hi_sec,
+        } => {
             let mut query = parse_and_validate(&request, &settings)?;
-            insulator::insulate(&mut query, &settings);
+            let q = insulator::isolate_with(&mut query, &settings, lo_sec, hi_sec)?;
+            println!("{q}");
         }
     }
 

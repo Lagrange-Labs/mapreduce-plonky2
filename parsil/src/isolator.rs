@@ -1,85 +1,78 @@
 //! This module prunes a query from all its WHERE clauses that are not related
 //! to either the primary index, or a well-defined bound on the secondary index.
-use alloy::primitives::U256;
 use anyhow::*;
 use log::warn;
-use mp2_common::{array::ToField, F};
-use serde::{Deserialize, Serialize};
-use sqlparser::ast::{
-    BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Query, Select,
-    SelectItem, SetExpr, TableAlias, TableFactor, UnaryOperator, Value,
-};
-use verifiable_db::query::{
-    aggregation::{QueryBoundSource, QueryBounds},
-    computational_hash_ids::{AggregationOperation, Operation, PlaceholderIdentifier},
-    universal_circuit::universal_circuit_inputs::{
-        BasicOperation, InputOperand, OutputItem, Placeholders, ResultStructure,
-    },
-};
+use sqlparser::ast::{BinaryOperator, Expr, Query, Select, SelectItem, TableAlias, TableFactor};
+use verifiable_db::query::aggregation::QueryBounds;
 
 use crate::{
     errors::ValidationError,
     symbols::{ColumnKind, ContextProvider, Handle, Kind, ScopeTable, Symbol},
-    utils::{str_to_u256, ParsilSettings},
+    utils::ParsilSettings,
     visitor::{AstPass, Visit},
 };
 
-/// An interval used to constraint the secondary index of a query.
-#[derive(Debug, Default, Clone)]
-struct Bounds {
-    /// The higher bound, may be a constant or a static expression
-    high: Option<QueryBoundSource>,
-    /// The lower bound, may be a constant or a static expression
-    low: Option<QueryBoundSource>,
+enum ToIsolate {
+    Secondary,
+    LoSecondary,
+    HiSecondary,
+    NoSecondary,
+}
+impl ToIsolate {
+    fn from_lo_hi(lo_sec: bool, hi_sec: bool) -> Self {
+        match (lo_sec, hi_sec) {
+            (true, true) => Self::Secondary,
+            (true, false) => Self::LoSecondary,
+            (false, true) => Self::HiSecondary,
+            (false, false) => Self::NoSecondary,
+        }
+    }
 }
 
-pub(crate) struct Assembler<'a, C: ContextProvider> {
+#[derive(Clone, Copy)]
+enum Cmp {
+    Lt,
+    Gt,
+    Either,
+}
+impl ToIsolate {
+    fn to_kinds(&self) -> &[(ColumnKind, Cmp)] {
+        match self {
+            ToIsolate::Secondary => &[
+                (ColumnKind::PrimaryIndex, Cmp::Either),
+                (ColumnKind::SecondaryIndex, Cmp::Either),
+            ],
+            ToIsolate::LoSecondary => &[
+                (ColumnKind::PrimaryIndex, Cmp::Either),
+                (ColumnKind::SecondaryIndex, Cmp::Gt),
+            ],
+            ToIsolate::HiSecondary => &[
+                (ColumnKind::PrimaryIndex, Cmp::Either),
+                (ColumnKind::SecondaryIndex, Cmp::Lt),
+            ],
+            ToIsolate::NoSecondary => &[(ColumnKind::PrimaryIndex, Cmp::Either)],
+        }
+    }
+}
+
+pub(crate) struct Insulator<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
     /// The symbol table hierarchy for this query
     scopes: ScopeTable<(), Expr>,
-    secondary_index_bounds: Bounds,
+    isolation: ToIsolate,
 }
-impl<'a, C: ContextProvider> Assembler<'a, C> {
+impl<'a, C: ContextProvider> Insulator<'a, C> {
     /// Create a new empty [`Resolver`]
-    fn new(settings: &'a ParsilSettings<C>) -> Self {
-        Assembler {
+    fn new(settings: &'a ParsilSettings<C>, isolation: ToIsolate) -> Self {
+        Insulator {
             settings,
             scopes: ScopeTable::new(),
-            secondary_index_bounds: Default::default(),
+            isolation,
         }
     }
 
     fn exit_scope(&mut self) -> Result<()> {
         self.scopes.exit_scope().map(|_| ())
-    }
-
-    /// Return true if, within the current scope, the given symbol is
-    /// computable as an expression of constants and placeholders.
-    fn is_symbol_static(&self, s: &Symbol<Expr>) -> Result<bool> {
-        match s {
-            Symbol::Column { .. } => Ok(false),
-            Symbol::Alias { to, .. } => self.is_symbol_static(to),
-            Symbol::NamedExpression { payload, .. } => self.is_expr_static(&payload),
-            Symbol::Expression(_) => todo!(),
-            Symbol::Wildcard => Ok(false),
-        }
-    }
-
-    /// Return true if, within the current scope, the given expression is
-    /// computable as an expression of constants and placeholders.
-    fn is_expr_static(&self, e: &Expr) -> Result<bool> {
-        match e {
-            Expr::Identifier(s) => self.is_symbol_static(&self.scopes.resolve_freestanding(s)?),
-            Expr::CompoundIdentifier(c) => self.is_symbol_static(&self.scopes.resolve_compound(c)?),
-            Expr::BinaryOp { left, right, .. } => {
-                Ok(self.is_expr_static(left)? && self.is_expr_static(right)?)
-            }
-            Expr::UnaryOp { expr, .. } => self.is_expr_static(expr),
-            Expr::Nested(e) => self.is_expr_static(e),
-            Expr::Value(_) => Ok(true),
-
-            _ => Ok(false),
-        }
     }
 
     /// Return whether the given `Symbol` encodes the secondary index column.
@@ -93,38 +86,37 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
 
     /// Return whether, in the current scope, the given expression refers to the
     /// secondary index.
-    fn contains_index(&self, expr: &Expr, idx: ColumnKind) -> Result<bool> {
+    fn contains_index(&self, expr: &Expr, idx: ColumnKind, side: Cmp) -> Result<bool> {
         Ok(match expr {
             Expr::Identifier(s) => self.is_symbol_idx(&self.scopes.resolve_freestanding(s)?, idx),
             Expr::CompoundIdentifier(c) => {
                 self.is_symbol_idx(&self.scopes.resolve_compound(c)?, idx)
             }
-            Expr::UnaryOp { expr, .. } => self.contains_index(expr, idx)?,
+            Expr::UnaryOp { expr, .. } => self.contains_index(expr, idx, side)?,
             Expr::BinaryOp { left, right, .. } => {
-                self.contains_index(left, idx)? || self.contains_index(right, idx)?
+                self.contains_index(left, idx, side)? || self.contains_index(right, idx, side)?
             }
-            Expr::Nested(e) => self.contains_index(e, idx)?,
+            Expr::Nested(e) => self.contains_index(e, idx, side)?,
             _ => false,
         })
     }
 
-    fn isolate(&mut self, expr: &mut Expr) -> Result<()> {
-        fn should_keep(expr: &Expr) -> bool {
-            true
+    fn should_keep(&self, expr: &Expr) -> Result<bool> {
+        let mut keep = false;
+        for (idx, side) in self.isolation.to_kinds() {
+            keep |= self.contains_index(expr, *idx, *side)?;
         }
+        Ok(keep)
+    }
 
+    fn isolate(&mut self, expr: &mut Expr) -> Result<()> {
         if let Some(replacement) = match expr {
-            Expr::Value(_) | Expr::Identifier(_) | Expr::CompoundIdentifier(_) => None,
             Expr::Nested(e) => {
                 self.isolate(e)?;
                 None
             }
-            Expr::BinaryOp { left, op, right } => {
-                // TODO:
-                // if !left contains index left = None
-                // if !right contains index right = None
-                // if both self = None
-                match (should_keep(left), should_keep(right)) {
+            Expr::BinaryOp { left, right, .. } => {
+                match (self.should_keep(left)?, self.should_keep(right)?) {
                     (true, true) => {
                         self.isolate(left)?;
                         self.isolate(right)?;
@@ -137,22 +129,31 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                     (false, false) => unreachable!(),
                 }
             }
-            Expr::UnaryOp { op, expr } => match op {
-                UnaryOperator::Not => {
-                    todo!()
-                }
-                _ => unreachable!(),
-            },
+            Expr::UnaryOp { expr, .. } => {
+                self.isolate(expr)?;
+                None
+            }
             _ => None,
         } {
             *expr = replacement;
+        }
+
+        // Only recursively go down if we are within an `AND`
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } = expr
+        {
+            self.isolate(left)?;
+            self.isolate(right)?;
         }
 
         Ok(())
     }
 }
 
-impl<'a, C: ContextProvider> AstPass for Assembler<'a, C> {
+impl<'a, C: ContextProvider> AstPass for Insulator<'a, C> {
     fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
         match &table_factor {
             TableFactor::Table {
@@ -320,9 +321,27 @@ impl<'a, C: ContextProvider> AstPass for Assembler<'a, C> {
 
 /// Validate the given query, ensuring that it satisfies all the requirements of
 /// the circuit.
-pub fn validate<C: ContextProvider>(query: &Query, settings: &ParsilSettings<C>) -> Result<()> {
+pub fn isolate<C: ContextProvider>(
+    query: &Query,
+    settings: &ParsilSettings<C>,
+    bounds: &QueryBounds,
+) -> Result<Query> {
+    isolate_with(
+        query,
+        settings,
+        bounds.min_query_secondary().is_bounded_low(),
+        bounds.max_query_secondary().is_bounded_high(),
+    )
+}
+
+pub fn isolate_with<C: ContextProvider>(
+    query: &Query,
+    settings: &ParsilSettings<C>,
+    lo_sec: bool,
+    hi_sec: bool,
+) -> Result<Query> {
     let mut converted_query = query.clone();
-    let mut resolver = Assembler::new(settings);
-    converted_query.visit(&mut resolver)?;
-    resolver.prepare_result().map(|_| ())
+    let mut insulator = Insulator::new(settings, ToIsolate::from_lo_hi(lo_sec, hi_sec));
+    converted_query.visit(&mut insulator)?;
+    Ok(converted_query)
 }
