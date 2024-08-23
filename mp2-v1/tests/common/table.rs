@@ -603,10 +603,6 @@ impl ContextProvider for Table {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         <&Self as ContextProvider>::fetch_table(&self, table_name)
     }
-
-    fn output_ids(&self) -> Vec<u64> {
-        todo!()
-    }
 }
 impl ContextProvider for &Table {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
@@ -617,10 +613,6 @@ impl ContextProvider for &Table {
             table_name
         );
         self.to_zktable()
-    }
-
-    fn output_ids(&self) -> Vec<u64> {
-        todo!()
     }
 }
 
