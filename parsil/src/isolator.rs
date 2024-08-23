@@ -12,60 +12,69 @@ use crate::{
     visitor::{AstPass, Visit},
 };
 
+/// Define on which side(s) the secondary index is known to be bounded within a query.
 #[derive(Clone, Copy)]
-enum ToIsolate {
-    Secondary,
-    LoSecondary,
-    HiSecondary,
-    NoSecondary,
+enum SecondaryIndexBounds {
+    BothSides,
+    Low,
+    High,
+    None,
 }
-impl ToIsolate {
+impl SecondaryIndexBounds {
+    /// Instiantiate a [`SecondaryIndexBounds`] from a pair of booleans indicating whether
+    /// the secondary index is bounded on the lower and higher ends.
     fn from_lo_hi(lo_sec: bool, hi_sec: bool) -> Self {
         match (lo_sec, hi_sec) {
-            (true, true) => Self::Secondary,
-            (true, false) => Self::LoSecondary,
-            (false, true) => Self::HiSecondary,
-            (false, false) => Self::NoSecondary,
+            (true, true) => Self::BothSides,
+            (true, false) => Self::Low,
+            (false, true) => Self::High,
+            (false, false) => Self::None,
+        }
+    }
+
+    /// Generate a list of index and operator pattern to detect for a
+    /// [`SecondaryIndexBounds`] instance.
+    fn to_kinds(&self) -> &[(ColumnKind, RelevantFor)] {
+        match self {
+            SecondaryIndexBounds::BothSides => &[
+                (ColumnKind::PrimaryIndex, RelevantFor::Either),
+                (ColumnKind::SecondaryIndex, RelevantFor::Either),
+            ],
+            SecondaryIndexBounds::Low => &[
+                (ColumnKind::PrimaryIndex, RelevantFor::Either),
+                (ColumnKind::SecondaryIndex, RelevantFor::Gt),
+            ],
+            SecondaryIndexBounds::High => &[
+                (ColumnKind::PrimaryIndex, RelevantFor::Either),
+                (ColumnKind::SecondaryIndex, RelevantFor::Lt),
+            ],
+            SecondaryIndexBounds::None => &[(ColumnKind::PrimaryIndex, RelevantFor::Either)],
         }
     }
 }
 
+/// Describe whether an index is relevant when found on the left of a =, < or >
+/// comparison.
 #[derive(Clone, Copy)]
-enum Cmp {
+enum RelevantFor {
     Lt,
     Gt,
     Either,
 }
-impl ToIsolate {
-    fn to_kinds(&self) -> &[(ColumnKind, Cmp)] {
-        match self {
-            ToIsolate::Secondary => &[
-                (ColumnKind::PrimaryIndex, Cmp::Either),
-                (ColumnKind::SecondaryIndex, Cmp::Either),
-            ],
-            ToIsolate::LoSecondary => &[
-                (ColumnKind::PrimaryIndex, Cmp::Either),
-                (ColumnKind::SecondaryIndex, Cmp::Gt),
-            ],
-            ToIsolate::HiSecondary => &[
-                (ColumnKind::PrimaryIndex, Cmp::Either),
-                (ColumnKind::SecondaryIndex, Cmp::Lt),
-            ],
-            ToIsolate::NoSecondary => &[(ColumnKind::PrimaryIndex, Cmp::Either)],
-        }
-    }
-}
 
-pub(crate) struct Insulator<'a, C: ContextProvider> {
+/// An `Isolator` recursively browse the `WHERE` clauses of a query and prune
+/// all the sub-expressions irrelevant to evaluation of the known index bounds.
+pub(crate) struct Isolator<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
     /// The symbol table hierarchy for this query
     scopes: ScopeTable<(), Expr>,
-    isolation: ToIsolate,
+    /// The isolation operation to perform on the secondary index.
+    isolation: SecondaryIndexBounds,
 }
-impl<'a, C: ContextProvider> Insulator<'a, C> {
+impl<'a, C: ContextProvider> Isolator<'a, C> {
     /// Create a new empty [`Resolver`]
-    fn new(settings: &'a ParsilSettings<C>, isolation: ToIsolate) -> Self {
-        Insulator {
+    fn new(settings: &'a ParsilSettings<C>, isolation: SecondaryIndexBounds) -> Self {
+        Isolator {
             settings,
             scopes: ScopeTable::new(),
             isolation,
@@ -87,26 +96,26 @@ impl<'a, C: ContextProvider> Insulator<'a, C> {
 
     /// Return whether, in the current scope, the given expression refers to the
     /// secondary index.
-    fn contains_index(&self, expr: &Expr, idx: ColumnKind, side: Cmp) -> Result<bool> {
-        fn is_relevant_left(op: &BinaryOperator, side: Cmp) -> bool {
+    fn contains_index(&self, expr: &Expr, idx: ColumnKind, side: RelevantFor) -> Result<bool> {
+        fn is_relevant_left(op: &BinaryOperator, side: RelevantFor) -> bool {
             match side {
-                Cmp::Either => true,
-                Cmp::Gt => {
+                RelevantFor::Either => true,
+                RelevantFor::Gt => {
                     matches!(op, BinaryOperator::Gt | BinaryOperator::GtEq)
                 }
-                Cmp::Lt => {
+                RelevantFor::Lt => {
                     matches!(op, BinaryOperator::Lt | BinaryOperator::LtEq)
                 }
             }
         }
 
-        fn is_relevant_right(op: &BinaryOperator, side: Cmp) -> bool {
+        fn is_relevant_right(op: &BinaryOperator, side: RelevantFor) -> bool {
             match side {
-                Cmp::Either => true,
-                Cmp::Gt => {
+                RelevantFor::Either => true,
+                RelevantFor::Gt => {
                     matches!(op, BinaryOperator::Lt | BinaryOperator::LtEq)
                 }
-                Cmp::Lt => {
+                RelevantFor::Lt => {
                     matches!(op, BinaryOperator::Gt | BinaryOperator::GtEq)
                 }
             }
@@ -127,6 +136,8 @@ impl<'a, C: ContextProvider> Insulator<'a, C> {
         })
     }
 
+    /// Depending on the secondary index predicates, determine whether this
+    /// expression is relevant to index bounds or if it should be pruned.
     fn should_keep(&self, expr: &Expr) -> Result<bool> {
         let mut keep = false;
         for (idx, side) in self.isolation.to_kinds() {
@@ -135,6 +146,8 @@ impl<'a, C: ContextProvider> Insulator<'a, C> {
         Ok(keep)
     }
 
+    /// Recursively traverse an [`Expr`], pruning all sub-expresssions not
+    /// related to index bounds.
     fn isolate(&mut self, expr: &mut Expr) -> Result<()> {
         if let Some(replacement) = match expr {
             Expr::Nested(e) => {
@@ -191,7 +204,7 @@ impl<'a, C: ContextProvider> Insulator<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstPass for Insulator<'a, C> {
+impl<'a, C: ContextProvider> AstPass for Isolator<'a, C> {
     fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
         match &table_factor {
             TableFactor::Table {
@@ -379,7 +392,7 @@ pub fn isolate_with<C: ContextProvider>(
     hi_sec: bool,
 ) -> Result<Query> {
     let mut converted_query = query.clone();
-    let mut insulator = Insulator::new(settings, ToIsolate::from_lo_hi(lo_sec, hi_sec));
+    let mut insulator = Isolator::new(settings, SecondaryIndexBounds::from_lo_hi(lo_sec, hi_sec));
     converted_query.visit(&mut insulator)?;
     Ok(converted_query)
 }
