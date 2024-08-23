@@ -332,7 +332,7 @@ impl Table {
         new_primary: BlockPrimaryIndex,
         updates: Vec<TreeRowUpdate>,
     ) -> Result<RowUpdateResult> {
-        let current_epoch = self.row.current_epoch().await;
+        let current_epoch = self.row.current_epoch();
         let out = self
             .row
             .in_transaction(|t| {
@@ -395,7 +395,7 @@ impl Table {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
             let root = self.row.root_data().await.unwrap();
-            let new_epoch = self.row.current_epoch().await;
+            let new_epoch = self.row.current_epoch();
             assert!(
                 current_epoch != new_epoch,
                 "new epoch {} vs previous epoch {}",
