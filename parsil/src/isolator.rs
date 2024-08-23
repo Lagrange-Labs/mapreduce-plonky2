@@ -12,6 +12,7 @@ use crate::{
     visitor::{AstPass, Visit},
 };
 
+#[derive(Clone, Copy)]
 enum ToIsolate {
     Secondary,
     LoSecondary,
@@ -87,14 +88,39 @@ impl<'a, C: ContextProvider> Insulator<'a, C> {
     /// Return whether, in the current scope, the given expression refers to the
     /// secondary index.
     fn contains_index(&self, expr: &Expr, idx: ColumnKind, side: Cmp) -> Result<bool> {
+        fn is_relevant_left(op: &BinaryOperator, side: Cmp) -> bool {
+            match side {
+                Cmp::Either => true,
+                Cmp::Gt => {
+                    matches!(op, BinaryOperator::Gt | BinaryOperator::GtEq)
+                }
+                Cmp::Lt => {
+                    matches!(op, BinaryOperator::Lt | BinaryOperator::LtEq)
+                }
+            }
+        }
+
+        fn is_relevant_right(op: &BinaryOperator, side: Cmp) -> bool {
+            match side {
+                Cmp::Either => true,
+                Cmp::Gt => {
+                    matches!(op, BinaryOperator::Lt | BinaryOperator::LtEq)
+                }
+                Cmp::Lt => {
+                    matches!(op, BinaryOperator::Gt | BinaryOperator::GtEq)
+                }
+            }
+        }
+
         Ok(match expr {
             Expr::Identifier(s) => self.is_symbol_idx(&self.scopes.resolve_freestanding(s)?, idx),
             Expr::CompoundIdentifier(c) => {
                 self.is_symbol_idx(&self.scopes.resolve_compound(c)?, idx)
             }
             Expr::UnaryOp { expr, .. } => self.contains_index(expr, idx, side)?,
-            Expr::BinaryOp { left, right, .. } => {
-                self.contains_index(left, idx, side)? || self.contains_index(right, idx, side)?
+            Expr::BinaryOp { left, right, op } => {
+                (self.contains_index(left, idx, side)? && is_relevant_left(op, side))
+                    || (self.contains_index(right, idx, side)? && is_relevant_right(op, side))
             }
             Expr::Nested(e) => self.contains_index(e, idx, side)?,
             _ => false,
@@ -115,18 +141,30 @@ impl<'a, C: ContextProvider> Insulator<'a, C> {
                 self.isolate(e)?;
                 None
             }
-            Expr::BinaryOp { left, right, .. } => {
-                match (self.should_keep(left)?, self.should_keep(right)?) {
-                    (true, true) => {
-                        self.isolate(left)?;
-                        self.isolate(right)?;
-                        None
+            Expr::BinaryOp { left, right, op } => {
+                match op {
+                    BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor => {
+                        match (self.should_keep(&left)?, self.should_keep(&right)?) {
+                            (true, true) => {
+                                self.isolate(left)?;
+                                self.isolate(right)?;
+                                None
+                            }
+                            (true, false) => {
+                                self.isolate(left)?;
+                                Some(*left.to_owned())
+                            }
+                            (false, true) => {
+                                self.isolate(right)?;
+                                Some(*right.to_owned())
+                            }
+                            // NOTE: this cannot be reached, as then the expr
+                            // would never have been explored in the first
+                            // place.
+                            (false, false) => unreachable!(),
+                        }
                     }
-                    (true, false) => Some(*left.to_owned()),
-                    (false, true) => Some(*right.to_owned()),
-                    // NOTE: this cannot be reached, as then expr would never be
-                    // explored.
-                    (false, false) => unreachable!(),
+                    _ => None,
                 }
             }
             Expr::UnaryOp { expr, .. } => {

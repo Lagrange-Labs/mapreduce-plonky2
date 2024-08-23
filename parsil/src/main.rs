@@ -141,7 +141,7 @@ fn main() -> Result<()> {
             hi_sec,
         } => {
             let mut query = parse_and_validate(&request, &settings)?;
-            let q = insulator::isolate_with(&mut query, &settings, lo_sec, hi_sec)?;
+            let q = isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)?;
             println!("{q}");
         }
     }

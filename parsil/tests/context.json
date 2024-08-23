@@ -28,7 +28,7 @@
             {
                 "name": "foo",
                 "id": 45678,
-                "kind": "Standard"
+                "kind": "SecondaryIndex"
             },
             {
                 "name": "bar",
