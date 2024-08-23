@@ -68,6 +68,8 @@ enum Command {
         lo_sec: bool,
         #[arg(long)]
         hi_sec: bool,
+        #[arg(long)]
+        to_keys: bool,
     },
 }
 
@@ -139,10 +141,14 @@ fn main() -> Result<()> {
             request,
             lo_sec,
             hi_sec,
+            to_keys,
         } => {
             let mut query = parse_and_validate(&request, &settings)?;
-            let q = isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)?;
-            println!("{q}");
+            let mut q = isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)?;
+            if to_keys {
+                q = executor::generate_query_keys(&mut q, &settings)?;
+            }
+            println!("{}", q);
         }
     }
 
