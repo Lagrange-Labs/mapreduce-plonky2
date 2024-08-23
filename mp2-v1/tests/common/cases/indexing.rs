@@ -626,6 +626,7 @@ impl TestCase {
                 let new_key = next_mapping_key();
                 let new_value: U256 = next_address().into_word().into();
                 let mapping_updates = match c {
+                    ChangeType::Silent => vec![],
                     ChangeType::Insertion => {
                         vec![MappingUpdate::Insertion(new_key, new_value)]
                     }
@@ -729,6 +730,7 @@ impl TestCase {
                     .await
                     .expect("can't get current values");
                 match c {
+                    ChangeType::Silent => vec![],
                     ChangeType::Deletion => {
                         panic!("can't remove a single row from blockchain data over single values")
                     }
@@ -1053,6 +1055,7 @@ pub enum ChangeType {
     Deletion,
     Insertion,
     Update(UpdateType),
+    Silent,
 }
 
 #[derive(Clone, Debug)]
