@@ -1,19 +1,18 @@
+use crate::{
+    storage::{
+        EpochKvStorage, EpochStorage, RoEpochKvStorage, SqlTransactionStorage, TransactionalStorage,
+    },
+    tree::scapegoat,
+    Epoch,
+};
 use anyhow::*;
-use async_trait::async_trait;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use postgres_types::Json;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
+use std::{collections::HashMap, fmt::Debug, future::Future, marker::PhantomData};
 use tokio::sync::RwLock;
-use tokio_postgres;
-use tokio_postgres::{NoTls, Row};
-
-use crate::{
-    storage::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TransactionalStorage},
-    tree::scapegoat,
-    Epoch,
-};
+use tokio_postgres::{self, NoTls, Row, Transaction};
 
 use super::{CachedValue, ToFromBytea};
 
@@ -21,7 +20,7 @@ pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 
 /// Type implementing this trait define the behavior of a storage tree
 /// components regarding their persistence in DB.
-#[async_trait]
+
 pub trait DbConnector<K, V>
 where
     K: ToFromBytea,
@@ -37,10 +36,7 @@ where
         _k: &K,
         _birth_epoch: Epoch,
         _v: V,
-    ) -> Result<()>
-    where
-        V: 'async_trait,
-    {
+    ) -> Result<()> {
         unreachable!()
     }
 
@@ -52,15 +48,17 @@ where
         _k: &K,
         _epoch: Epoch,
         _v: V,
-    ) -> Result<()>
-    where
-        V: 'async_trait,
-    {
+    ) -> Result<()> {
         unreachable!()
     }
 
     /// Return the value associated to the given key at the given epoch.
-    async fn fetch_at(db: DBPool, table: &str, k: &K, epoch: Epoch) -> Result<Option<V>>;
+    fn fetch_at(
+        db: DBPool,
+        table: &str,
+        k: &K,
+        epoch: Epoch,
+    ) -> impl Future<Output = Result<Option<V>>> + Send;
 
     /// Given a PgSQL row, extract a value from it.
     fn from_row(r: &Row) -> Result<V>;
@@ -68,7 +66,6 @@ where
 
 pub struct PayloadConnector;
 
-#[async_trait]
 impl<K, V> DbConnector<K, V> for PayloadConnector
 where
     K: ToFromBytea,
@@ -110,10 +107,7 @@ where
         k: &K,
         epoch: Epoch,
         v: V,
-    ) -> Result<()>
-    where
-        V: 'async_trait,
-    {
+    ) -> Result<()> {
         db_tx
             .execute(
                 &format!(
@@ -130,7 +124,6 @@ where
 
 pub struct NodeConnector;
 
-#[async_trait]
 // Void nodes are used by the SBBST
 impl<K> DbConnector<K, ()> for NodeConnector
 where
@@ -186,7 +179,6 @@ where
     }
 }
 
-#[async_trait]
 impl<K> DbConnector<K, scapegoat::Node<K>> for NodeConnector
 where
     K: ToFromBytea + Send + Sync,
@@ -211,7 +203,7 @@ where
             .query(
                 &format!(
                     "SELECT parent, left_child, right_child, subtree_size FROM {}
-                 WHERE key=$1 AND __valid_from<=$2 AND $2<=__valid_until",
+                       WHERE key=$1 AND __valid_from <= $2 AND $2 <= __valid_until",
                     table
                 ),
                 &[&k.to_bytea(), &epoch],
@@ -283,10 +275,15 @@ where
 pub struct CachedDbStore<V: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> {
     /// A pointer to the DB client
     db: DBPool,
+    /// The first valid epoch
     initial_epoch: Epoch,
+    /// Whether a transaction is in process
     in_tx: bool,
+    /// True if the wrapped state has been modified
     dirty: bool,
+    /// The current epoch
     epoch: Epoch,
+    /// The table in which the data must be persisted
     table: String,
     pub(super) cache: RwLock<Option<V>>,
 }
@@ -331,9 +328,50 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
             cache: RwLock::new(Some(t)),
         })
     }
+
+    async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
+        ensure!(self.in_tx, "not in a transaction");
+
+        if self.dirty {
+            let state = self.cache.read().await.clone();
+            db_tx
+                .query(
+                    &format!(
+                        "INSERT INTO {}_meta (__valid_from, __valid_until, payload)
+                     VALUES ($1, $1, $2)",
+                        self.table
+                    ),
+                    &[&(self.epoch + 1), &Json(state)],
+                )
+                .await?;
+        } else {
+            db_tx
+                .query(
+                    &format!(
+                        "UPDATE {}_meta SET __valid_until = $1 + 1 WHERE __valid_until = $1",
+                        self.table
+                    ),
+                    &[&(self.epoch)],
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    fn on_commit_success(&mut self) {
+        self.epoch += 1;
+        self.dirty = false;
+        self.in_tx = false;
+    }
+
+    fn on_commit_failed(&mut self) {
+        let _ = self.cache.get_mut().take();
+        self.dirty = false;
+        self.in_tx = false;
+    }
 }
 
-#[async_trait]
 impl<T> TransactionalStorage for CachedDbStore<T>
 where
     T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
@@ -346,41 +384,40 @@ where
     }
 
     async fn commit_transaction(&mut self) -> Result<()> {
-        ensure!(self.in_tx, "not in a transaction");
-
-        let connection = self.db.get().await.unwrap();
-        if self.dirty {
-            let state = self.cache.read().await.clone();
-            connection
-                .query(
-                    &format!(
-                        "INSERT INTO {}_meta (__valid_from, __valid_until, payload)
-                     VALUES ($1, $1, $2)",
-                        self.table
-                    ),
-                    &[&(self.epoch + 1), &Json(state)],
-                )
-                .await?;
+        let pool = self.db.clone();
+        let mut connection = pool.get().await.unwrap();
+        let mut db_tx = connection
+            .transaction()
+            .await
+            .expect("unable to create DB transaction");
+        self.commit_in_transaction(&mut db_tx).await?;
+        let err = db_tx.commit().await;
+        if err.is_ok() {
+            self.on_commit_success()
         } else {
-            connection
-                .query(
-                    &format!(
-                        "UPDATE {}_meta SET __valid_until = $1 + 1 WHERE __valid_until = $1",
-                        self.table
-                    ),
-                    &[&(self.epoch)],
-                )
-                .await?;
-        }
-
-        self.epoch += 1;
-        self.dirty = false;
-        self.in_tx = false;
-        Ok(())
+            self.on_commit_failed()
+        };
+        err.context("while commiting transaction")
     }
 }
 
-#[async_trait]
+impl<T> SqlTransactionStorage for CachedDbStore<T>
+where
+    T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
+{
+    async fn commit_in(&mut self, tx: &mut tokio_postgres::Transaction<'_>) -> Result<()> {
+        self.commit_in_transaction(tx).await
+    }
+
+    fn commit_success(&mut self) {
+        self.on_commit_success()
+    }
+
+    fn commit_failed(&mut self) {
+        self.on_commit_failed()
+    }
+}
+
 impl<T> EpochStorage<T> for CachedDbStore<T>
 where
     T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a> + Send,
@@ -518,13 +555,16 @@ where
         }
     }
 
-    pub fn new_epoch(&mut self) {
-        self.epoch += 1;
+    pub fn clear(&mut self) {
         self.cache.get_mut().clear();
+    }
+
+    pub fn new_epoch(&mut self) {
+        self.clear();
+        self.epoch += 1;
     }
 }
 
-#[async_trait]
 impl<K, V, F> RoEpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync + std::hash::Hash,
@@ -585,7 +625,6 @@ where
     }
 }
 
-#[async_trait]
 impl<K, V, F: DbConnector<K, V> + Send + Sync> EpochKvStorage<K, V> for CachedDbKvStore<K, V, F>
 where
     K: ToFromBytea + Send + Sync + std::hash::Hash,

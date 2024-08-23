@@ -21,12 +21,14 @@ impl TestContext {
     pub(crate) async fn prove_block_extraction(&self) -> Result<Vec<u8>> {
         let block = self.query_current_block().await;
         let buffer = block.rlp();
-        let proof = api::generate_proof(
-            self.params(),
-            api::CircuitInput::BlockExtraction(block_extraction::CircuitInput::from_block_header(
-                buffer.clone(),
-            )),
-        )?;
+        let proof = self.b.bench("indexing::extraction::block", || {
+            api::generate_proof(
+                self.params(),
+                api::CircuitInput::BlockExtraction(
+                    block_extraction::CircuitInput::from_block_header(buffer.clone()),
+                ),
+            )
+        })?;
 
         let pproof = deserialize_proof::<F, C, D>(&proof)?;
         let pi = block_extraction::PublicInputs::from_slice(&pproof.public_inputs);

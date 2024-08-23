@@ -78,6 +78,7 @@ async fn integrated_indexing() -> Result<()> {
     let mut single = TestCase::single_value_test_case(&ctx, TreeFactory::New).await?;
     let changes = vec![
         ChangeType::Update(UpdateType::Rest),
+        ChangeType::Silent,
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
     single.run(&mut ctx, changes.clone()).await?;
@@ -85,7 +86,7 @@ async fn integrated_indexing() -> Result<()> {
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
-        ChangeType::Insertion,
+        ChangeType::Silent,
         ChangeType::Update(UpdateType::SecondaryIndex),
         ChangeType::Deletion,
     ];

@@ -41,7 +41,11 @@ impl TestContext {
             Err(_) => verifiable_db::ivc::CircuitInput::new_first_input(root_proof),
         }
         .expect("unable to create ivc circuit inputs");
-        let ivc_proof = api::generate_proof(self.params(), api::CircuitInput::IVC(input))
+        let ivc_proof = self
+            .b
+            .bench("indexing::ivc", || {
+                api::generate_proof(self.params(), api::CircuitInput::IVC(input))
+            })
             .expect("unable to create ivc proof");
         let proof = ProofWithVK::deserialize(&ivc_proof)?;
         let ivc_pi = PublicInputs::from_slice(&proof.proof().public_inputs);

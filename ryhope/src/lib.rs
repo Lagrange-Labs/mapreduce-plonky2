@@ -1,15 +1,15 @@
 use anyhow::*;
-use async_trait::async_trait;
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData};
-
 use storage::{
     updatetree::{Next, UpdatePlan, UpdateTree},
     view::TreeStorageView,
     EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
-    TransactionalStorage, TreeStorage, TreeTransactionalStorage,
+    SqlTransactionStorage, SqlTreeTransactionalStorage, TransactionalStorage, TreeStorage,
+    TreeTransactionalStorage,
 };
+use tokio_postgres::Transaction;
 use tree::{sbbst, scapegoat, MutableTree, NodeContext, NodePath, PrintableTree, TreeTopology};
 
 pub mod storage;
@@ -24,7 +24,6 @@ pub type Epoch = i64;
 /// A payload attached to a node, that may need to compute aggregated values
 /// from the bottom of the tree to the top. If not, simply do not override the
 /// default definition of `aggregate`.
-#[async_trait]
 pub trait NodePayload: Sized + Serialize + for<'a> Deserialize<'a> {
     /// Set an aggregate value for the current node, computable from the payload
     /// of its children.
@@ -307,7 +306,6 @@ impl<
 // Write operations need to (i) be forwarded to the key tree, and (ii) see their
 // dirty keys accumulated in order to build the dirty keys tree at the commiting
 // of the transaction.
-#[async_trait]
 impl<
         T: TreeTopology + MutableTree,
         V: NodePayload + Send + Sync,
@@ -336,7 +334,6 @@ impl<
     }
 }
 
-#[async_trait]
 impl<
         T: TreeTopology + MutableTree,
         V: NodePayload + Sync + Send,
@@ -408,6 +405,37 @@ impl<
         self.storage.commit_transaction().await?;
 
         Ok(update_tree)
+    }
+}
+
+impl<
+        T: TreeTopology + MutableTree + Send + Sync,
+        V: NodePayload + Send + Sync,
+        S: SqlTransactionStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
+    > SqlTreeTransactionalStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
+{
+    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<UpdateTree<T::Key>> {
+        let mut paths = vec![];
+        for k in self.dirty.drain() {
+            if let Some(p) = self.tree.lineage(&k, &self.storage).await {
+                paths.push(p.into_full_path().collect::<Vec<_>>());
+            }
+        }
+
+        let update_tree = UpdateTree::from_paths(paths, self.current_epoch() + 1);
+        let plan = update_tree.clone().into_workplan();
+        self.aggregate(plan.clone()).await?;
+        self.storage.commit_in(tx).await?;
+
+        Ok(update_tree)
+    }
+
+    fn commit_success(&mut self) {
+        self.storage.commit_success()
+    }
+
+    fn commit_failed(&mut self) {
+        self.storage.commit_failed()
     }
 }
 

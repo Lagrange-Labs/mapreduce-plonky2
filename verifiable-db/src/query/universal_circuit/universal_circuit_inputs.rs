@@ -47,7 +47,7 @@ impl IntoIterator for PlaceholderIdsSet {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 /// Data structure employed to represent a set of placeholders, identified by their `PlaceholderId`
 pub struct Placeholders(pub HashMap<PlaceholderId, U256>);
 
@@ -331,7 +331,7 @@ pub enum OutputItem {
 
 /// Data structure that contains the description of the output items to be returned and the
 /// operations necessary to compute the output items
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResultStructure {
     pub result_operations: Vec<BasicOperation>,
     pub output_items: Vec<OutputItem>,
@@ -395,7 +395,7 @@ impl ResultStructure {
     }
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ColumnCell {
     pub value: U256,
     pub id: F,
@@ -410,7 +410,7 @@ impl ColumnCell {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RowCells {
     primary: ColumnCell,
     secondary: ColumnCell,
@@ -431,7 +431,7 @@ impl RowCells {
     }
 
     /// Return the set of column cells, placing primary and secondary index columns at the beginning of the array
-    pub(crate) fn to_cells(&self) -> Vec<ColumnCell> {
+    pub fn to_cells(&self) -> Vec<ColumnCell> {
         [&self.primary, &self.secondary]
             .into_iter()
             .chain(&self.rest)

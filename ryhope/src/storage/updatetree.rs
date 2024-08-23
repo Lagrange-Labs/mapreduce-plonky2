@@ -1,7 +1,6 @@
 use crate::{tree::TreeTopology, Epoch};
 use anyhow::*;
-use futures::future::BoxFuture;
-use futures::FutureExt;
+use futures::{future::BoxFuture, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},
@@ -59,7 +58,7 @@ impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
         current: &'a K,
         nodes: &'a S,
     ) -> BoxFuture<'a, usize> {
-        async move {
+        async {
             let context = t.node_context(current, nodes).await.unwrap();
             let new_i = self.nodes.len();
             self.idx.insert(current.clone(), new_i);

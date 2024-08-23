@@ -92,6 +92,10 @@ impl QueryBoundSecondary {
             source: QueryBoundSource::Constant(value),
         }
     }
+
+    pub fn value(&self) -> &U256 {
+        &self.value
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,7 +147,7 @@ impl QueryBounds {
 }
 
 /// Data structure containing all the information needed as input by aggregation circuits for a single node of the tree
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NodeInfo {
     /// The hash of the embedded tree at this node. It can be the hash of the row tree if this node is a node in
     /// the index tree, or it can be a hash of the cells tree if this node is a node in a rows tree
@@ -190,7 +194,7 @@ impl NodeInfo {
         }
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// enum to specify whether a node is the left or right child of another node
 pub enum ChildPosition {
     Left,
@@ -255,7 +259,7 @@ pub struct OneProvenChildNodeInput {
     /// Common inputs shared across all the circuits
     pub(crate) common: CommonInputs,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// Data structure representing a proof for a child node
 pub struct ChildProof {
     /// Actual proof
@@ -273,7 +277,7 @@ impl ChildProof {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// Enum employed to specify whether a proof refers to a child node or the embedded tree stored in a node
 pub enum SubProof {
     /// Proof refer to a child
