@@ -163,10 +163,14 @@ async fn test_query_mapping(
 
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query_info.placeholders)
         .context("while assembling PIs")?;
+
     let rows_query = parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
         .context("while genrating keys in index bounds")?;
     let all_touched_rows = table
-        .execute_row_query(&rows_query.query.to_string(), &query_params)
+        .execute_row_query(
+            &rows_query.query.to_string(),
+            &rows_query.convert_placeholders(&query_info.placeholders),
+        )
         .await?;
 
     prove_query(
