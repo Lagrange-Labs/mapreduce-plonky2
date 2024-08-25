@@ -166,11 +166,14 @@ async fn test_query_mapping(
 
     let rows_query = parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
         .context("while genrating keys in index bounds")?;
+    println!(" -- touched rows query: {:?}", rows_query.query.to_string());
+    let mut initial_ph = vec![
+        U256::from(query_info.min_block),
+        U256::from(query_info.max_block),
+    ];
+    initial_ph.append(&mut rows_query.convert_placeholders(&query_info.placeholders));
     let all_touched_rows = table
-        .execute_row_query(
-            &rows_query.query.to_string(),
-            &rows_query.convert_placeholders(&query_info.placeholders),
-        )
+        .execute_row_query(&rows_query.query.to_string(), &initial_ph)
         .await?;
 
     prove_query(
