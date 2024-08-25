@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use sqlparser::ast::Query;
 use symbols::ContextProvider;
@@ -36,8 +37,8 @@ pub fn keys_in_index_boundaries<C: ContextProvider>(
     settings: &ParsilSettings<C>,
     bounds: &QueryBounds,
 ) -> Result<Query> {
-    let mut q = parse_and_validate(query, settings)?;
-    q = isolator::isolate(&q, settings, bounds)?;
-    q = executor::generate_query_keys(&mut q, settings)?;
+    let mut q = parse_and_validate(query, settings).context("while validating query")?;
+    q = isolator::isolate(&q, settings, bounds).context("while isolating indices")?;
+    q = executor::generate_query_keys(&mut q, settings).context("while generating query keys")?;
     Ok(q)
 }
