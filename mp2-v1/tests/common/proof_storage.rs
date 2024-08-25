@@ -17,8 +17,6 @@ use ryhope::tree::{sbbst, TreeTopology};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-type QueryID = HashOutput;
-
 type CellTreeKey = <CellTree as TreeTopology>::Key;
 type IndexTreeKey = <BlockTree as TreeTopology>::Key;
 
@@ -60,6 +58,8 @@ pub(crate) struct IndexProofIdentifier<PrimaryIndex> {
     pub(crate) tree_key: PrimaryIndex,
 }
 
+pub type QueryID = String;
+
 /// Uniquely identifies a proof in the proof storage backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProofKey {
@@ -72,9 +72,9 @@ pub enum ProofKey {
     ValueExtraction((TableID, BlockPrimaryIndex)),
     #[allow(clippy::upper_case_acronyms)]
     IVC(BlockPrimaryIndex),
-    QueryUniversal((BlockPrimaryIndex, RowTreeKey)),
-    QueryAggregateRow((BlockPrimaryIndex, RowTreeKey)),
-    QueryAggregateIndex(BlockPrimaryIndex),
+    QueryUniversal((QueryID, BlockPrimaryIndex, RowTreeKey)),
+    QueryAggregateRow((QueryID, BlockPrimaryIndex, RowTreeKey)),
+    QueryAggregateIndex((QueryID, BlockPrimaryIndex)),
 }
 
 impl ProofKey {

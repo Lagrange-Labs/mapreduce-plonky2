@@ -42,10 +42,10 @@ impl TranslatedQuery {
 
     /// From the [`Placeholders`] generated for the circuit public inputs,
     /// generate a list of placeholders that can be used in a PgSQL query.
-    pub fn convert_placeholders(&self, placeholders: &Placeholders) -> Vec<String> {
-        let mut r = vec![String::new(); self.placeholder_count()];
+    pub fn convert_placeholders(&self, placeholders: &Placeholders) -> Vec<U256> {
+        let mut r = vec![U256::default(); self.placeholder_count()];
         for (name, value) in placeholders.0.iter() {
-            r[self.placeholder_mapping[name]] = format!("'{}'::NUMERIC", value);
+            r[self.placeholder_mapping[name]] = *value;
         }
         r
     }
