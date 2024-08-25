@@ -160,10 +160,15 @@ async fn test_query_mapping(
         exec_query.query.to_string()
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
-    let rows_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
+
+    let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query_info.placeholders)
+        .context("while assembling PIs")?;
+    let rows_query = parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
+        .context("while genrating keys in index bounds")?;
     let all_touched_rows = table
         .execute_row_query(&rows_query.to_string(), &query_params)
         .await?;
+
     prove_query(
         ctx,
         table,
@@ -191,11 +196,6 @@ async fn prove_query(
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)
         .context("while assembling PIs")?;
-    let rows_query = parsil::keys_in_index_boundaries(&query.query, settings, &pis.bounds)
-        .context("while genrating keys in index bounds")?;
-    let all_touched_rows = table
-        .execute_row_query(&rows_query.to_string(), &[query.min_block, query.max_block])
-        .await?;
     // group the rows per block number
     let touched_rows = all_touched_rows
         .into_iter()
