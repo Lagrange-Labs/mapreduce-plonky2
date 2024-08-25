@@ -521,12 +521,24 @@ pub fn generate_query_execution<C: ContextProvider>(
 pub fn generate_query_keys<C: ContextProvider>(
     query: &mut Query,
     settings: &ParsilSettings<C>,
-) -> Result<Query> {
+) -> Result<TranslatedQuery> {
     let mut pis = RowFetcher::new(query, settings)?;
     let mut query_pis = query.clone();
     pis.process(&mut query_pis)?;
+
+    let largest_placeholder = placeholders::validate(settings, &mut query_pis)?;
+    let placeholder_mapping = (1..=largest_placeholder)
+        .map(|i| PlaceholderId::Generic(i))
+        .chain(std::iter::once(PlaceholderId::MinQueryOnIdx1))
+        .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
+        .enumerate()
+        .map(|(i, p)| (p, i))
+        .collect();
     info!("PIs: {query_pis}");
-    Ok(query_pis)
+    Ok(TranslatedQuery {
+        query: query_pis,
+        placeholder_mapping,
+    })
 }
 
 /// Return two queries, respectively returning the largest sec. ind. value
