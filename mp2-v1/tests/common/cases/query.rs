@@ -166,7 +166,7 @@ async fn test_query_mapping(
     let rows_query = parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
         .context("while genrating keys in index bounds")?;
     let all_touched_rows = table
-        .execute_row_query(&rows_query.to_string(), &query_params)
+        .execute_row_query(&rows_query.query.to_string(), &query_params)
         .await?;
 
     prove_query(
