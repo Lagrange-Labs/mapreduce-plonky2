@@ -166,7 +166,7 @@ async fn prove_query(
 ) -> Result<()> {
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
-
+    let rows_query = parsil::keys_in_index_boundaries(&query.query, settings, &pis.bounds)?;
     let rows_query = parsil::executor::generate_query_keys(&mut parsed, settings)?;
     let all_touched_rows = table
         .execute_row_query(&rows_query.to_string(), query.min_block, query.max_block)
