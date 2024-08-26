@@ -111,13 +111,12 @@ fn main() -> Result<()> {
             let mut query = parse_and_validate(&request, &settings)?;
             match kind {
                 QueryKind::Execute => {
-                    let translated = executor::generate_query_execution(&mut query, &settings)?;
-
-                    println!("{}", translated.query);
-                    println!("placeholders mapping: {:?}", translated.placeholder_mapping);
+                    let mut translated = executor::generate_query_execution(&mut query, &settings)?;
+                    println!("{}", translated.apply());
                 }
                 QueryKind::Keys => {
-                    println!("{}", executor::generate_query_keys(&mut query, &settings)?)
+                    let mut translated = executor::generate_query_keys(&mut query, &settings)?;
+                    println!("{}", translated.apply());
                 }
             }
         }
@@ -131,8 +130,7 @@ fn main() -> Result<()> {
             let mut q = isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)?;
             if to_keys {
                 let q = executor::generate_query_keys(&mut q, &settings)?;
-                println!("Query: {}", q.query);
-                println!("PH: {:?}", q.placeholder_mapping);
+                println!("Query: {}", q.apply());
             } else {
                 println!("{}", q);
             }

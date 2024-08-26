@@ -33,8 +33,47 @@ pub struct TranslatedQuery {
     /// Where each placeholder from the zkSQL query should be put in the array
     /// of PgSQL placeholder.
     pub placeholder_mapping: HashMap<PlaceholderId, usize>,
+    pub placeholder_name_mapping: HashMap<String, String>,
 }
 impl TranslatedQuery {
+    pub fn make<C: ContextProvider>(
+        mut query: Query,
+        settings: &ParsilSettings<C>,
+    ) -> Result<Self> {
+        let largest_placeholder = placeholders::validate(settings, &mut query)?;
+        let placeholder_mapping = (1..=largest_placeholder)
+            .map(|i| PlaceholderId::Generic(i))
+            .chain(std::iter::once(PlaceholderId::MinQueryOnIdx1))
+            .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
+            .enumerate()
+            .map(|(i, p)| (p, i))
+            .collect();
+
+        let placeholder_name_mapping = (1..=largest_placeholder)
+            .map(|i| format!("${i}"))
+            .chain(std::iter::once(
+                settings.placeholders.min_block_placeholder.clone(),
+            ))
+            .chain(std::iter::once(
+                settings.placeholders.max_block_placeholder.clone(),
+            ))
+            .enumerate()
+            .map(|(i, p)| (p, format!("${}", i + 1)))
+            .collect();
+
+        Ok(Self {
+            query,
+            placeholder_mapping,
+            placeholder_name_mapping,
+        })
+    }
+
+    pub fn apply(&mut self) -> Query {
+        let mut r = self.query.clone();
+        r.visit(self).unwrap();
+        r
+    }
+
     /// How many PgSQL placeholders should be allocated
     pub fn placeholder_count(&self) -> usize {
         self.placeholder_mapping.len()
@@ -48,6 +87,15 @@ impl TranslatedQuery {
             r[self.placeholder_mapping[name]] = *value;
         }
         r
+    }
+}
+
+impl AstPass for TranslatedQuery {
+    fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
+        if let Expr::Value(Value::Placeholder(name)) = expr {
+            *name = self.placeholder_name_mapping[name].to_string();
+        }
+        Ok(())
     }
 }
 
@@ -481,18 +529,7 @@ pub fn generate_query_execution<C: ContextProvider>(
     let mut query_execution = query.clone();
     query_execution.visit(&mut executor)?;
 
-    let placeholder_mapping = (1..=executor.largest_placeholder)
-        .map(|i| PlaceholderId::Generic(i))
-        .chain(std::iter::once(PlaceholderId::MinQueryOnIdx1))
-        .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
-        .enumerate()
-        .map(|(i, p)| (p, i))
-        .collect();
-
-    Ok(TranslatedQuery {
-        query: query_execution,
-        placeholder_mapping,
-    })
+    TranslatedQuery::make(query_execution, settings)
 }
 
 pub fn generate_query_keys<C: ContextProvider>(
@@ -503,19 +540,8 @@ pub fn generate_query_keys<C: ContextProvider>(
     let mut query_pis = query.clone();
     pis.process(&mut query_pis)?;
 
-    let largest_placeholder = placeholders::validate(settings, &mut query_pis)?;
-    let placeholder_mapping = (1..=largest_placeholder)
-        .map(|i| PlaceholderId::Generic(i))
-        .chain(std::iter::once(PlaceholderId::MinQueryOnIdx1))
-        .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
-        .enumerate()
-        .map(|(i, p)| (p, i))
-        .collect();
     info!("PIs: {query_pis}");
-    Ok(TranslatedQuery {
-        query: query_pis,
-        placeholder_mapping,
-    })
+    TranslatedQuery::make(query_pis, settings)
 }
 
 /// Return two queries, respectively returning the largest sec. ind. value
