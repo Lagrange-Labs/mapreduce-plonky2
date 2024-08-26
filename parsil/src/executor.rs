@@ -44,25 +44,22 @@ impl TranslatedQuery {
         settings: &ParsilSettings<C>,
     ) -> Result<Self> {
         let largest_placeholder = placeholders::validate(settings, &mut query)?;
-        let placeholder_mapping = (1..=largest_placeholder)
-            .map(|i| PlaceholderId::Generic(i))
-            .chain(std::iter::once(PlaceholderId::MinQueryOnIdx1))
+        let placeholder_mapping = std::iter::once(PlaceholderId::MinQueryOnIdx1)
             .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
+            .chain((1..=largest_placeholder).map(|i| PlaceholderId::Generic(i)))
             .enumerate()
             .map(|(i, p)| (p, i))
             .collect();
 
-        let placeholder_name_mapping = (1..=largest_placeholder)
-            .map(|i| format!("${i}"))
-            .chain(std::iter::once(
-                settings.placeholders.min_block_placeholder.clone(),
-            ))
-            .chain(std::iter::once(
-                settings.placeholders.max_block_placeholder.clone(),
-            ))
-            .enumerate()
-            .map(|(i, p)| (p, format!("${}", i + 1)))
-            .collect();
+        let placeholder_name_mapping =
+            std::iter::once(settings.placeholders.min_block_placeholder.clone())
+                .chain(std::iter::once(
+                    settings.placeholders.max_block_placeholder.clone(),
+                ))
+                .chain((1..=largest_placeholder).map(|i| format!("${i}")))
+                .enumerate()
+                .map(|(i, p)| (p, format!("${}", i + 1)))
+                .collect();
 
         Ok(Self {
             query,
@@ -88,16 +85,10 @@ impl TranslatedQuery {
     /// From the [`Placeholders`] generated for the circuit public inputs,
     /// generate a list of placeholders that can be used in a PgSQL query.
     pub fn convert_placeholders(&self, placeholders: &Placeholders) -> Vec<U256> {
-        let mut r = vec![U256::default(); self.placeholder_count()];
-        dbg!(&self.placeholder_mapping);
-        println!("Query: {}", self.query);
-        // NOTE: there may be *more* placeholders in `placeholders`, as those
-        // will contain *all* the placeholders from the query, whereas this translated
-        // query may be a derived one with placeholders dropped, e.g. an index bracketing
-        // query.
-        for (name, value) in placeholders.0.iter().take(self.placeholder_count()) {
-            println!("Handling {name:?}");
-            r[self.placeholder_mapping[name]] = *value;
+        let mut r = vec![U256::default(); self.placeholder_mapping.len()];
+        for (placeholder_id, positions) in self.placeholder_mapping.iter() {
+            println!("Handling {placeholder_id:?}");
+            r[*positions] = placeholders.0[placeholder_id];
         }
         r
     }
