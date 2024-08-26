@@ -6,6 +6,7 @@ use super::{proof_storage::ProofStorage, storage_trie::TestStorageTrie, TestCont
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
+    providers::Provider,
 };
 use log::info;
 use mp2_common::{
@@ -36,8 +37,9 @@ impl TestContext {
                 .await;
         }
 
+        let chain_id = self.rpc.get_chain_id().await.unwrap();
         info!("Prove the test storage trie including the simple slots {slots:?}");
-        let proof_value = trie.prove_value(contract_address, self.params(), &self.b);
+        let proof_value = trie.prove_value(contract_address, chain_id, self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof_value.proof().public_inputs);
@@ -101,8 +103,9 @@ impl TestContext {
             trie.add_slot(sslot, nodes);
         }
 
+        let chain_id = self.rpc.get_chain_id().await.unwrap();
         info!("Prove the test storage trie including the mapping slots ({slot}, ...)");
-        let proof = trie.prove_value(&contract_address, &self.params(), &self.b);
+        let proof = trie.prove_value(&contract_address, chain_id, &self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof.proof().public_inputs);

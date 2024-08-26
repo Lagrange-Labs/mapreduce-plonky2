@@ -156,7 +156,7 @@ impl TestContext {
                     ),
                 );
                 self.b
-                    .bench("indexing::index_tree::partial", || {
+                    .bench("indexing::index_tree::parent", || {
                         api::generate_proof(self.params(), inputs)
                     })
                     .expect("error while leaf index proof generation")
@@ -188,7 +188,7 @@ impl TestContext {
                     ),
                 );
                 self.b
-                    .bench("indexing::index_tree::full", || {
+                    .bench("indexing::index_tree::membership", || {
                         api::generate_proof(self.params(), inputs)
                     })
                     .expect("error while membership index proof generation")

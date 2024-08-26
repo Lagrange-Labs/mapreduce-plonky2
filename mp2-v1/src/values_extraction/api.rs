@@ -53,8 +53,14 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     /// Create a circuit input for proving a leaf MPT node of single variable.
-    pub fn new_single_variable_leaf(node: Vec<u8>, slot: u8, contract_address: &Address) -> Self {
-        let id = identifier_single_var_column(slot, contract_address);
+    pub fn new_single_variable_leaf(
+        node: Vec<u8>,
+        slot: u8,
+        contract_address: &Address,
+        chain_id: u64,
+        extra: Vec<u8>,
+    ) -> Self {
+        let id = identifier_single_var_column(slot, contract_address, chain_id, extra);
 
         CircuitInput::LeafSingle(LeafSingleCircuit {
             node,
@@ -69,9 +75,12 @@ impl CircuitInput {
         slot: u8,
         mapping_key: Vec<u8>,
         contract_address: &Address,
+        chain_id: u64,
+        extra: Vec<u8>,
     ) -> Self {
-        let key_id = identifier_for_mapping_key_column(slot, contract_address);
-        let value_id = identifier_for_mapping_value_column(slot, contract_address);
+        let key_id =
+            identifier_for_mapping_key_column(slot, contract_address, chain_id, extra.clone());
+        let value_id = identifier_for_mapping_value_column(slot, contract_address, chain_id, extra);
 
         CircuitInput::LeafMapping(LeafMappingCircuit {
             node,
@@ -456,6 +465,7 @@ mod tests {
     #[serial]
     fn test_values_extraction_api_serialization() {
         let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
+        let chain_id = 10;
 
         // Test serialization for public parameters.
         let params = PublicParameters::build();
@@ -483,7 +493,7 @@ mod tests {
         test_circuit_input(CircuitInput::LeafSingle(LeafSingleCircuit {
             node: proof.last().unwrap().to_vec(),
             slot: SimpleSlot::new(TEST_SLOT),
-            id: identifier_single_var_column(TEST_SLOT, &contract_address),
+            id: identifier_single_var_column(TEST_SLOT, &contract_address, chain_id, vec![]),
         }));
 
         // Test for leaf mapping variable circuit.
@@ -492,8 +502,18 @@ mod tests {
         let encoded = test_circuit_input(CircuitInput::LeafMapping(LeafMappingCircuit {
             node: proof.last().unwrap().to_vec(),
             slot: MappingSlot::new(TEST_SLOT, test_data.mapping_key.unwrap().clone()),
-            key_id: identifier_for_mapping_key_column(TEST_SLOT, &contract_address),
-            value_id: identifier_for_mapping_value_column(TEST_SLOT, &contract_address),
+            key_id: identifier_for_mapping_key_column(
+                TEST_SLOT,
+                &contract_address,
+                chain_id,
+                vec![],
+            ),
+            value_id: identifier_for_mapping_value_column(
+                TEST_SLOT,
+                &contract_address,
+                chain_id,
+                vec![],
+            ),
         }));
 
         // Test for branch circuit.
@@ -559,6 +579,7 @@ mod tests {
 
     fn test_apis(is_simple_aggregation: bool) {
         let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
+        let chain_id = 10;
 
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(memdb.clone());
@@ -600,13 +621,21 @@ mod tests {
 
         println!("Proving leaf 1...");
         let leaf_input1 = if is_simple_aggregation {
-            CircuitInput::new_single_variable_leaf(proof1[1].clone(), TEST_SLOT, &contract_address)
+            CircuitInput::new_single_variable_leaf(
+                proof1[1].clone(),
+                TEST_SLOT,
+                &contract_address,
+                chain_id,
+                vec![],
+            )
         } else {
             CircuitInput::new_mapping_variable_leaf(
                 proof1[1].clone(),
                 TEST_SLOT,
                 key1.to_vec(),
                 &contract_address,
+                chain_id,
+                vec![],
             )
         };
         let now = std::time::Instant::now();
@@ -628,6 +657,8 @@ mod tests {
                 proof2[1].clone(),
                 TEST_SLOT + 1,
                 &contract_address,
+                chain_id,
+                vec![],
             )
         } else {
             CircuitInput::new_mapping_variable_leaf(
@@ -635,6 +666,8 @@ mod tests {
                 TEST_SLOT,
                 key2.to_vec(),
                 &contract_address,
+                chain_id,
+                vec![],
             )
         };
         let now = std::time::Instant::now();
@@ -666,9 +699,12 @@ mod tests {
 
     fn test_circuits(is_simple_aggregation: bool, num_children: usize) {
         let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let id = identifier_single_var_column(TEST_SLOT, &contract_address);
-        let key_id = identifier_for_mapping_key_column(TEST_SLOT, &contract_address);
-        let value_id = identifier_for_mapping_value_column(TEST_SLOT, &contract_address);
+        let chain_id = 10;
+        let id = identifier_single_var_column(TEST_SLOT, &contract_address, chain_id, vec![]);
+        let key_id =
+            identifier_for_mapping_key_column(TEST_SLOT, &contract_address, chain_id, vec![]);
+        let value_id =
+            identifier_for_mapping_value_column(TEST_SLOT, &contract_address, chain_id, vec![]);
 
         let params = PublicParameters::build();
         let mut test_data =
@@ -689,6 +725,8 @@ mod tests {
                 p1.last().unwrap().to_vec(),
                 TEST_SLOT,
                 &contract_address,
+                chain_id,
+                vec![],
             )
         } else {
             CircuitInput::new_mapping_variable_leaf(
@@ -696,6 +734,8 @@ mod tests {
                 TEST_SLOT,
                 test_data.mapping_key.clone().unwrap(),
                 &contract_address,
+                chain_id,
+                vec![],
             )
         };
 
