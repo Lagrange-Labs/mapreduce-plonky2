@@ -33,6 +33,9 @@ pub struct TranslatedQuery {
     /// Where each placeholder from the zkSQL query should be put in the array
     /// of PgSQL placeholder.
     pub placeholder_mapping: HashMap<PlaceholderId, usize>,
+    /// A mapping from the named placeholders as defined in the settings to the
+    /// string representation of numeric placeholders (_e.g._ from `$MIN_BLOCK`
+    /// to `$4`).
     pub placeholder_name_mapping: HashMap<String, String>,
 }
 impl TranslatedQuery {
@@ -68,6 +71,9 @@ impl TranslatedQuery {
         })
     }
 
+    /// Combine the encapsulated query and placeholder mappings to generate a
+    /// SQL query with name placeholders replaced with the corresponding numeric
+    /// placeholders.
     pub fn apply(&mut self) -> Query {
         let mut r = self.query.clone();
         r.visit(self).unwrap();
@@ -209,15 +215,10 @@ fn fetch_from_payload(id: u64) -> Expr {
 /// circuits.
 struct RowFetcher<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
-    largest_placeholder: usize,
 }
 impl<'a, C: ContextProvider> RowFetcher<'a, C> {
-    fn new(query: &mut Query, settings: &'a ParsilSettings<C>) -> Result<Self> {
-        let largest_placeholder = placeholders::validate(settings, query)?;
-        Ok(Self {
-            settings,
-            largest_placeholder,
-        })
+    fn new(settings: &'a ParsilSettings<C>) -> Result<Self> {
+        Ok(Self { settings })
     }
 
     fn process(&mut self, query: &mut Query) -> Result<()> {
@@ -375,15 +376,10 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
 
 struct Executor<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
-    largest_placeholder: usize,
 }
 impl<'a, C: ContextProvider> Executor<'a, C> {
-    fn new(query: &mut Query, settings: &'a ParsilSettings<C>) -> Result<Self> {
-        let largest_placeholder = placeholders::validate(settings, query)?;
-        Ok(Self {
-            settings,
-            largest_placeholder,
-        })
+    fn new(settings: &'a ParsilSettings<C>) -> Result<Self> {
+        Ok(Self { settings })
     }
 }
 
@@ -532,7 +528,7 @@ pub fn generate_query_execution<C: ContextProvider>(
     query: &mut Query,
     settings: &ParsilSettings<C>,
 ) -> Result<TranslatedQuery> {
-    let mut executor = Executor::new(query, settings)?;
+    let mut executor = Executor::new(settings)?;
     let mut query_execution = query.clone();
     query_execution.visit(&mut executor)?;
 
@@ -543,7 +539,7 @@ pub fn generate_query_keys<C: ContextProvider>(
     query: &mut Query,
     settings: &ParsilSettings<C>,
 ) -> Result<TranslatedQuery> {
-    let mut pis = RowFetcher::new(query, settings)?;
+    let mut pis = RowFetcher::new(settings)?;
     let mut query_pis = query.clone();
     pis.process(&mut query_pis)?;
 

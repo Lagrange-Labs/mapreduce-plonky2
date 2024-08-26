@@ -129,7 +129,7 @@ fn main() -> Result<()> {
             let mut query = parse_and_validate(&request, &settings)?;
             let mut q = isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)?;
             if to_keys {
-                let q = executor::generate_query_keys(&mut q, &settings)?;
+                let mut q = executor::generate_query_keys(&mut q, &settings)?;
                 println!("Query: {}", q.apply());
             } else {
                 println!("{}", q);
