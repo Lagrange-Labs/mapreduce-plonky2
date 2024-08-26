@@ -34,8 +34,8 @@ pub struct TranslatedQuery {
     /// of PgSQL placeholder.
     pub placeholder_mapping: HashMap<PlaceholderId, usize>,
     /// A mapping from the named placeholders as defined in the settings to the
-    /// string representation of numeric placeholders (_e.g._ from `$MIN_BLOCK`
-    /// to `$4`).
+    /// string representation of numeric placeholders (e.g. from `$MIN_BLOCK` to
+    /// `$4`).
     pub placeholder_name_mapping: HashMap<String, String>,
 }
 impl TranslatedQuery {
@@ -219,6 +219,7 @@ impl<'a, C: ContextProvider> RowFetcher<'a, C> {
             select.projection = vec![
                 SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("key"))),
                 SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("block"))),
+                SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("payload"))),
             ];
         }
 
@@ -279,6 +280,7 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
                     .chain(std::iter::once(
                         SelectItem::ExprWithAlias { expr: expand_block_range(), alias: Ident::new("block") }
                     ))
+                    .chain(std::iter::once(SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("payload")))))
                     // then continue normally
                         .chain(table_columns.iter().enumerate().map(|(i, column)| {
                             let alias = Ident::new(
