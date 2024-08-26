@@ -83,7 +83,14 @@ impl TranslatedQuery {
     /// generate a list of placeholders that can be used in a PgSQL query.
     pub fn convert_placeholders(&self, placeholders: &Placeholders) -> Vec<U256> {
         let mut r = vec![U256::default(); self.placeholder_count()];
-        for (name, value) in placeholders.0.iter() {
+        dbg!(&self.placeholder_mapping);
+        println!("Query: {}", self.query);
+        // NOTE: there may be *more* placeholders in `placeholders`, as those
+        // will contain *all* the placeholders from the query, whereas this translated
+        // query may be a derived one with placeholders dropped, e.g. an index bracketing
+        // query.
+        for (name, value) in placeholders.0.iter().take(self.placeholder_count()) {
+            println!("Handling {name:?}");
             r[self.placeholder_mapping[name]] = *value;
         }
         r

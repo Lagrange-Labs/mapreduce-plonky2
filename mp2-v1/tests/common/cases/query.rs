@@ -149,10 +149,10 @@ async fn test_query_mapping(
     );
 
     // the query to use to actually get the outputs expected
-    let exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
+    let mut exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
     let query_params = exec_query.convert_placeholders(&query_info.placeholders);
     let res = table
-        .execute_row_query(&exec_query.query.to_string(), &query_params)
+        .execute_row_query(&exec_query.apply().to_string(), &query_params)
         .await?;
     info!(
         "Found {} results from query {}",
@@ -164,16 +164,24 @@ async fn test_query_mapping(
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query_info.placeholders)
         .context("while assembling PIs")?;
 
-    let rows_query = parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
-        .context("while genrating keys in index bounds")?;
+    let mut rows_query =
+        parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
+            .context("while genrating keys in index bounds")?;
     println!(" -- touched rows query: {:?}", rows_query.query.to_string());
     let mut initial_ph = vec![
         U256::from(query_info.min_block),
         U256::from(query_info.max_block),
     ];
-    initial_ph.append(&mut rows_query.convert_placeholders(&query_info.placeholders));
+    println!("placeholders from cooking: {:?}", query_info.placeholders);
+    println!(
+        "placeholders from query parsil: {:?}",
+        rows_query.placeholder_mapping
+    );
+    let initial_ph = rows_query.convert_placeholders(&query_info.placeholders);
+    println!("initial_ph: {:?}", initial_ph);
+    //initial_ph.append(&mut rows_query.convert_placeholders(&query_info.placeholders));
     let all_touched_rows = table
-        .execute_row_query(&rows_query.query.to_string(), &initial_ph)
+        .execute_row_query(&rows_query.apply().to_string(), &initial_ph)
         .await?;
 
     prove_query(
