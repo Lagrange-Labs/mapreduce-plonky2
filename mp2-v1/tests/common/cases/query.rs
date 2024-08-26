@@ -177,7 +177,7 @@ async fn test_query_mapping(
         &settings,
         all_touched_rows,
         res,
-        table_hash,
+        table_hash.clone(),
     )
     .await
     .expect("unable to run universal query proof");
