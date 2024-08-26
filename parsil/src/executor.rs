@@ -197,17 +197,6 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         convert_number_string(expr)?;
 
-        if let Expr::Value(Value::Placeholder(ref mut name)) = expr {
-            match self.settings.placeholders.resolve_placeholder(name)? {
-                PlaceholderIdentifier::MinQueryOnIdx1 => {
-                    *name = format!("${}", self.largest_placeholder + 1);
-                }
-                PlaceholderIdentifier::MaxQueryOnIdx1 => {
-                    *name = format!("${}", self.largest_placeholder + 2);
-                }
-                PlaceholderIdentifier::Generic(_) => {}
-            }
-        }
         Ok(())
     }
 
@@ -347,18 +336,6 @@ impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         convert_number_string(expr)?;
         convert_funcalls(expr)?;
-
-        if let Expr::Value(Value::Placeholder(ref mut name)) = expr {
-            match self.settings.placeholders.resolve_placeholder(name)? {
-                PlaceholderIdentifier::MinQueryOnIdx1 => {
-                    *name = format!("${}", self.largest_placeholder + 1);
-                }
-                PlaceholderIdentifier::MaxQueryOnIdx1 => {
-                    *name = format!("${}", self.largest_placeholder + 2);
-                }
-                PlaceholderIdentifier::Generic(_) => {}
-            }
-        }
 
         Ok(())
     }

@@ -121,23 +121,6 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Command::Bracket {
-            table,
-            block,
-            lo_secondary,
-            hi_secondary,
-        } => {
-            let r = executor::bracket_secondary_index(
-                &table,
-                &settings,
-                block,
-                U256::from_str(&lo_secondary).unwrap(),
-                U256::from_str(&hi_secondary).unwrap(),
-            );
-
-            println!("{}", r.0.unwrap_or("nothing".into()));
-            println!("{}", r.1.unwrap_or("nothing".into()));
-        }
         Command::Isolate {
             request,
             lo_sec,
@@ -147,9 +130,12 @@ fn main() -> Result<()> {
             let mut query = parse_and_validate(&request, &settings)?;
             let mut q = isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)?;
             if to_keys {
-                q = executor::generate_query_keys(&mut q, &settings)?;
+                let q = executor::generate_query_keys(&mut q, &settings)?;
+                println!("Query: {}", q.query);
+                println!("PH: {:?}", q.placeholder_mapping);
+            } else {
+                println!("{}", q);
             }
-            println!("{}", q);
         }
         Command::Bracket {
             table,
