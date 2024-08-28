@@ -2,7 +2,7 @@ use anyhow::*;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt::Debug, future::Future, hash::Hash};
 
-use crate::storage::TreeStorage;
+use crate::storage::{pgsql::ToFromBytea, TreeStorage};
 
 pub mod sbbst;
 pub mod scapegoat;
@@ -32,8 +32,8 @@ impl<K> NodePath<K> {
 
 /// Define common topological operations on trees.
 pub trait TreeTopology: Default + Send + Sync {
-    type Key: Debug + Clone + Hash + Eq + Sync + Send;
-    type Node: Debug + Sync + Send;
+    type Key: Debug + Clone + Hash + Eq + Sync + Send + Serialize + for<'a> Deserialize<'a>;
+    type Node: Debug + Clone + Sync + Send;
     /// Minimal data required to persist the tree.
     type State: Send + Sync + Clone + Debug + Serialize + for<'a> Deserialize<'a>;
 

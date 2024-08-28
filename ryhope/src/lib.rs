@@ -298,6 +298,14 @@ impl<
             Some(ut)
         }
     }
+
+    pub async fn everythin(
+        keys_query: &str,
+        min_block: Epoch,
+        max_block: Epoch,
+    ) -> Result<Vec<NodeContext<T::Key>>> {
+        todo!()
+    }
 }
 
 // Data-related read-only operation are directly forwarded to the data

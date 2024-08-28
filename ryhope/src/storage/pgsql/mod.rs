@@ -1,13 +1,11 @@
-use self::storages::{
-    CachedDbKvStore, CachedDbStore, DbConnector, NodeConnector, PayloadConnector,
-};
+use self::storages::{CachedDbStore, CachedDbTreeStore, DbConnector};
 use super::{
     EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, SqlTransactionStorage,
     TransactionalStorage, TreeStorage,
 };
 use crate::{
     storage::{pgsql::storages::DBPool, RoEpochKvStorage},
-    tree::TreeTopology,
+    tree::{NodeContext, TreeTopology},
     Epoch, InitSettings,
 };
 use anyhow::*;
@@ -15,7 +13,12 @@ use bb8_postgres::PostgresConnectionManager;
 use itertools::Itertools;
 use log::*;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fmt::Debug};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    sync::{Arc, Mutex},
+};
+use storages::{NodeProjection, PayloadProjection};
 use tokio_postgres::{NoTls, Transaction};
 
 mod storages;
@@ -144,12 +147,12 @@ pub struct SqlStorageSettings {
     pub source: SqlServerConnection,
 }
 
-pub struct PgsqlStorage<T: TreeTopology, V>
+pub struct PgsqlStorage<T, V>
 where
-    V: PayloadInDb + Send + Sync,
+    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
-    NodeConnector: DbConnector<T::Key, T::Node>,
+    V: PayloadInDb + Send + Sync,
 {
     /// The table in which this tree will be stored
     table: String,
@@ -160,21 +163,20 @@ where
     /// Tree state information
     state: CachedDbStore<T::State>,
     /// Topological information
-    nodes: CachedDbKvStore<T::Key, T::Node, NodeConnector>,
-    /// Node payloads
-    data: CachedDbKvStore<T::Key, V, PayloadConnector>,
+    tree_store: Arc<Mutex<CachedDbTreeStore<T, V>>>,
+    nodes: NodeProjection<T, V>,
+    payloads: PayloadProjection<T, V>,
     /// If any, the transaction progress
     in_tx: bool,
 }
 
 impl<T, V> FromSettings<T::State> for PgsqlStorage<T, V>
 where
-    T: TreeTopology,
+    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     T::State: Sync + Clone,
     V: PayloadInDb + Send + Sync,
-    NodeConnector: DbConnector<T::Key, T::Node>,
 {
     type Settings = SqlStorageSettings;
 
@@ -245,12 +247,11 @@ async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64)> {
 
 impl<T, V> PgsqlStorage<T, V>
 where
-    T: TreeTopology,
+    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
     T::Key: ToFromBytea,
     V: PayloadInDb,
     T::Node: Sync + Clone,
     T::State: Sync + Clone,
-    NodeConnector: DbConnector<T::Key, T::Node>,
 {
     /// Create a new tree storage with the given initial epoch and its
     /// associated tables in the specified table.
@@ -270,16 +271,30 @@ where
         );
         Self::create_tables(db_pool.clone(), &table).await?;
 
+        let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
+            epoch,
+            epoch,
+            table.clone(),
+            db_pool.clone(),
+        )));
+        let nodes = NodeProjection {
+            wrapped: tree_store.clone(),
+        };
+        let payloads = PayloadProjection {
+            wrapped: tree_store.clone(),
+        };
+
         let r = Self {
             table: table.clone(),
             db: db_pool.clone(),
             epoch,
             in_tx: false,
-            nodes: CachedDbKvStore::new(epoch, epoch, table.clone(), db_pool.clone()),
+            tree_store,
+            nodes,
+            payloads,
             state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
                 .await
                 .context("failed to store initial state")?,
-            data: CachedDbKvStore::new(epoch, epoch, table.clone(), db_pool.clone()),
         };
         Ok(r)
     }
@@ -294,19 +309,27 @@ where
             .await
             .with_context(|| format!("table `{table}` does not exist"))?;
         info!("latest epoch is {latest_epoch}");
+        let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
+            initial_epoch,
+            latest_epoch,
+            table.clone(),
+            db_pool.clone(),
+        )));
+        let nodes = NodeProjection {
+            wrapped: tree_store.clone(),
+        };
+        let payloads = PayloadProjection {
+            wrapped: tree_store.clone(),
+        };
 
         let r = Self {
             table: table.clone(),
             db: db_pool.clone(),
             epoch: latest_epoch,
             state: CachedDbStore::new(initial_epoch, latest_epoch, table.clone(), db_pool.clone()),
-            nodes: CachedDbKvStore::new(
-                initial_epoch,
-                latest_epoch,
-                table.clone(),
-                db_pool.clone(),
-            ),
-            data: CachedDbKvStore::new(initial_epoch, latest_epoch, table.clone(), db_pool.clone()),
+            tree_store,
+            nodes,
+            payloads,
             in_tx: false,
         };
 
@@ -326,6 +349,19 @@ where
         delete_storage_table(db_pool.clone(), &table).await?;
         Self::create_tables(db_pool.clone(), &table).await?;
 
+        let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
+            initial_epoch,
+            initial_epoch,
+            table.clone(),
+            db_pool.clone(),
+        )));
+        let nodes = NodeProjection {
+            wrapped: tree_store.clone(),
+        };
+        let payloads = PayloadProjection {
+            wrapped: tree_store.clone(),
+        };
+
         let r = Self {
             table: table.clone(),
             db: db_pool.clone(),
@@ -338,19 +374,9 @@ where
             )
             .await
             .context("failed to store initial state")?,
-
-            nodes: CachedDbKvStore::new(
-                initial_epoch,
-                initial_epoch,
-                table.clone(),
-                db_pool.clone(),
-            ),
-            data: CachedDbKvStore::new(
-                initial_epoch,
-                initial_epoch,
-                table.clone(),
-                db_pool.clone(),
-            ),
+            tree_store,
+            nodes,
+            payloads,
             in_tx: false,
         };
 
@@ -400,9 +426,8 @@ where
     ///
     /// Will fail if the CREATE is not valid (e.g. the table already exists)
     async fn create_tables(db: DBPool, table: &str) -> Result<()> {
-        let node_columns = <NodeConnector as DbConnector<T::Key, T::Node>>::columns()
+        let node_columns = <T as DbConnector<T::Key, T::Node, V>>::columns()
             .iter()
-            .chain(<PayloadConnector as DbConnector<T::Key, V>>::columns().iter())
             .map(|(name, t)| format!("{name} {t},"))
             .join("\n");
 
@@ -475,10 +500,7 @@ where
             // The row may not exist
             None
         } else if rows.len() == 1 {
-            Some((
-                NodeConnector::from_row(&rows[0])?,
-                <PayloadConnector as DbConnector<T::Key, V>>::from_row(&rows[0])?,
-            ))
+            Some((T::node_from_row(&rows[0])?, T::payload_from_row(&rows[0])?))
         } else {
             panic!("unexpected duplicated row");
         })
@@ -491,7 +513,7 @@ where
         k: &T::Key,
         n: T::Node,
     ) -> Result<()> {
-        NodeConnector::insert_in_tx(db_tx, &self.table, k, self.epoch + 1, n).await
+        T::create_node_in_tx(db_tx, &self.table, k, self.epoch + 1, n).await
     }
 
     async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
@@ -508,22 +530,28 @@ where
         // Collect all the keys found in the caches
         let mut cached_keys = HashSet::new();
         {
-            let guard = self.nodes.cache.read().await;
-            cached_keys.extend(guard.keys().cloned());
+            cached_keys.extend(self.tree_store.lock().unwrap().nodes_cache.keys().cloned());
         }
         {
-            let guard = self.data.cache.read().await;
-            cached_keys.extend(guard.keys().cloned());
+            cached_keys.extend(
+                self.tree_store
+                    .lock()
+                    .unwrap()
+                    .payload_cache
+                    .keys()
+                    .cloned(),
+            );
         }
 
         for k in cached_keys {
-            let node_value = {
-                let guard = self.nodes.cache.read().await;
-                guard.get(&k).cloned()
-            };
+            let node_value = { self.tree_store.lock().unwrap().nodes_cache.get(&k).cloned() };
             let data_value = {
-                let guard = self.data.cache.read().await;
-                guard.get(&k).cloned()
+                self.tree_store
+                    .lock()
+                    .unwrap()
+                    .payload_cache
+                    .get(&k)
+                    .cloned()
             };
 
             match (node_value, data_value) {
@@ -549,7 +577,7 @@ where
                         let previous_node = self.rollback_one_row(db_tx, &k).await?.unwrap().0;
                         // write the new value
                         self.new_node(db_tx, &k, previous_node).await?;
-                        PayloadConnector::set_at_in_tx(
+                        T::set_at_in_tx(
                             db_tx,
                             &self.table,
                             &k,
@@ -578,7 +606,7 @@ where
                         let payload = maybe_new_payload
                             .or(previous_payload)
                             .expect("both old and new payloads are both None");
-                        PayloadConnector::set_at_in_tx(db_tx, &self.table, &k, new_epoch, payload)
+                        T::set_at_in_tx(db_tx, &self.table, &k, new_epoch, payload)
                             .await?;
                     }
 
@@ -594,25 +622,23 @@ where
         self.in_tx = false;
         self.epoch = self.epoch + 1;
         self.state.commit_success();
-        self.data.new_epoch();
-        self.nodes.new_epoch();
+        self.tree_store.lock().unwrap().new_epoch();
     }
 
     fn on_commit_failed(&mut self) {
         self.in_tx = false;
         self.state.commit_failed();
-        self.data.clear();
-        self.nodes.clear();
+        self.tree_store.lock().unwrap().clear();
     }
 }
 
 impl<T: TreeTopology, V: PayloadInDb> TransactionalStorage for PgsqlStorage<T, V>
 where
     V: Send + Sync,
+    T: DbConnector<T::Key, T::Node, V>,
     T::Key: ToFromBytea,
     T::Node: Send + Sync + Clone,
     T::State: Send + Sync + Clone,
-    NodeConnector: DbConnector<T::Key, T::Node>,
 {
     fn start_transaction(&mut self) -> Result<()> {
         ensure!(!self.in_tx, "already in a transaction");
@@ -645,10 +671,10 @@ where
 impl<T: TreeTopology, V: PayloadInDb> SqlTransactionStorage for PgsqlStorage<T, V>
 where
     V: Send + Sync,
+    T: DbConnector<T::Key, T::Node, V>,
     T::Key: ToFromBytea,
     T::Node: Send + Sync + Clone,
     T::State: Send + Sync + Clone,
-    NodeConnector: DbConnector<T::Key, T::Node>,
 {
     async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()> {
         self.commit_in_transaction(tx).await
@@ -667,18 +693,16 @@ where
 
 impl<T, V> TreeStorage<T> for PgsqlStorage<T, V>
 where
-    T: TreeTopology,
+    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
     V: PayloadInDb + Send,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     T::State: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
-    NodeConnector: DbConnector<T::Key, T::Node>,
-
-    CachedDbKvStore<T::Key, T::Node, NodeConnector>: EpochKvStorage<T::Key, T::Node>,
-    CachedDbKvStore<T::Key, V, PayloadConnector>: EpochKvStorage<T::Key, V>,
 {
-    type NodeStorage = CachedDbKvStore<T::Key, T::Node, NodeConnector>;
     type StateStorage = CachedDbStore<T::State>;
+    type NodeStorage = NodeProjection<T, V>;
+
+    type U = String;
 
     fn state(&self) -> &Self::StateStorage {
         &self.state
@@ -712,39 +736,45 @@ where
 
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
         self.state.rollback_to(epoch).await?;
-        self.nodes.rollback_to(epoch).await?;
-        self.data.rollback_to(epoch).await?;
+        self.tree_store.lock().unwrap().rollback_to(epoch).await?;
         self.epoch = epoch;
 
         // Ensure epochs coherence
-        assert_eq!(self.state.current_epoch(), self.nodes.current_epoch());
-        assert_eq!(self.state.current_epoch(), self.data.current_epoch());
+        assert_eq!(
+            self.state.current_epoch(),
+            self.tree_store.lock().unwrap().current_epoch()
+        );
         assert_eq!(self.state.current_epoch(), self.epoch);
 
         Ok(())
+    }
+
+    async fn wide_lineage_between(
+        &self,
+        keys: Self::U,
+        start_epoch: Epoch,
+        end_epoch: Epoch,
+    ) -> Result<HashMap<(T::Key, Epoch), (NodeContext<T::Key>, T::Node)>> {
+        todo!()
     }
 }
 
 impl<T, V> PayloadStorage<T::Key, V> for PgsqlStorage<T, V>
 where
-    T: TreeTopology,
+    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
     V: PayloadInDb + Send,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     T::State: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
-    NodeConnector: DbConnector<T::Key, T::Node>,
-
-    CachedDbKvStore<T::Key, V, PayloadConnector>: EpochKvStorage<T::Key, V>,
     V: Sync,
-    PayloadConnector: DbConnector<T::Key, V>,
 {
-    type DataStorage = CachedDbKvStore<T::Key, V, PayloadConnector>;
+    type DataStorage = PayloadProjection<T, V>;
 
     fn data(&self) -> &Self::DataStorage {
-        &self.data
+        &self.payloads
     }
 
     fn data_mut(&mut self) -> &mut Self::DataStorage {
-        &mut self.data
+        &mut self.payloads
     }
 }

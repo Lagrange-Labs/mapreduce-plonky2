@@ -1,11 +1,14 @@
 //! This module offers facilities to “time-travel”, i.e. access the successive
 //! states of a tree at given epochs.
-use std::{fmt::Debug, marker::PhantomData};
+use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
 use anyhow::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{tree::TreeTopology, Epoch};
+use crate::{
+    tree::{NodeContext, TreeTopology},
+    Epoch,
+};
 
 use super::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TransactionalStorage, TreeStorage};
 
@@ -172,6 +175,8 @@ impl<'a, T: TreeTopology + 'a + Send, S: TreeStorage<T> + 'a> TreeStorage<T>
 where
     <S as TreeStorage<T>>::NodeStorage: Sync,
 {
+    type U = <S as TreeStorage<T>>::U;
+
     type StateStorage = StorageView<'a, T::State, S::StateStorage>;
     type NodeStorage = KvStorageAt<'a, T, S::NodeStorage>;
 
@@ -197,5 +202,16 @@ where
 
     async fn rollback_to(&mut self, _epoch: Epoch) -> Result<()> {
         unimplemented!("storage views are read only")
+    }
+
+    async fn wide_lineage_between(
+        &self,
+        keys: Self::U,
+        start_epoch: Epoch,
+        end_epoch: Epoch,
+    ) -> Result<HashMap<(T::Key, Epoch), (NodeContext<T::Key>, T::Node)>> {
+        self.wrapped
+            .wide_lineage_between(keys, start_epoch, end_epoch.min(self.epoch))
+            .await
     }
 }

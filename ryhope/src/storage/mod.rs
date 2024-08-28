@@ -1,11 +1,14 @@
 use anyhow::*;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, future::Future, hash::Hash};
+use std::{collections::HashMap, fmt::Debug, future::Future, hash::Hash};
 use tokio_postgres::Transaction;
 
 use self::updatetree::UpdateTree;
-use crate::{tree::TreeTopology, Epoch, InitSettings};
+use crate::{
+    tree::{NodeContext, TreeTopology},
+    Epoch, InitSettings,
+};
 
 pub mod memory;
 pub mod pgsql;
@@ -42,6 +45,8 @@ where
 /// state of the tree structure, (ii) the putative metadata associated to the
 /// tree nodes.
 pub trait TreeStorage<T: TreeTopology>: Send + Sync {
+    type U;
+
     /// A storage backend for the underlying tree state
     type StateStorage: EpochStorage<T::State> + Send + Sync;
     /// A storage backend for the underlying tree nodes
@@ -69,6 +74,13 @@ pub trait TreeStorage<T: TreeTopology>: Send + Sync {
 
     /// Rollback this tree to the given epoch
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()>;
+
+    async fn wide_lineage_between(
+        &self,
+        keys: Self::U,
+        start_epoch: Epoch,
+        end_epoch: Epoch,
+    ) -> Result<HashMap<(T::Key, Epoch), (NodeContext<T::Key>, T::Node)>>;
 }
 
 /// A backend storing the payloads associated to the nodes of a tree.

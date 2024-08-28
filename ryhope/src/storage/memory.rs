@@ -296,6 +296,8 @@ where
     T::Node: Clone,
     V: Clone + Debug + Sync + Send,
 {
+    type U = Vec<T::Key>;
+
     type StateStorage = VersionedStorage<<T as TreeTopology>::State>;
     type NodeStorage = VersionedKvStorage<<T as TreeTopology>::Key, <T as TreeTopology>::Node>;
 
@@ -333,6 +335,15 @@ where
         assert_eq!(self.state.current_epoch(), self.data.current_epoch());
 
         Ok(())
+    }
+
+    async fn wide_lineage_between(
+        &self,
+        keys: Self::U,
+        start_epoch: Epoch,
+        end_epoch: Epoch,
+    ) -> Result<HashMap<(T::Key, Epoch), (crate::tree::NodeContext<T::Key>, T::Node)>> {
+        todo!()
     }
 }
 
