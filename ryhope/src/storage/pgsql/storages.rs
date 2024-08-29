@@ -293,7 +293,7 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
             initial_epoch,
             db,
             in_tx: false,
-            dirty: true,
+            dirty: false,
             epoch: current_epoch,
             table,
             cache: RwLock::new(None),
