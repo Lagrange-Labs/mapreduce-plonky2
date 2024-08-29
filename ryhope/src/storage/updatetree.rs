@@ -291,6 +291,10 @@ impl<T: Clone + Hash + Eq> UpdatePlan<T> {
         }
         Ok(())
     }
+
+    pub fn completed(&self) -> bool {
+        self.t.nodes.is_empty()
+    }
 }
 impl<T: Clone + Hash + Eq> Iterator for UpdatePlan<T> {
     type Item = Next<WorkplanItem<T>>;
@@ -350,6 +354,8 @@ mod test {
                 break;
             }
         }
+
+        assert!(workplan.completed());
     }
 
     #[tokio::test]
