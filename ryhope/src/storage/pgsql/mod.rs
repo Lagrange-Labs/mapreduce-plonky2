@@ -1,20 +1,16 @@
 use self::storages::{CachedDbStore, CachedDbTreeStore, DbConnector};
 use super::{
-    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, SqlTransactionStorage,
-    TransactionalStorage, TreeStorage,
+    EpochStorage, FromSettings, MetaOperations, PayloadStorage, SqlTransactionStorage,
+    TransactionalStorage, TreeStorage, WideLineage,
 };
-use crate::{
-    storage::{pgsql::storages::DBPool, RoEpochKvStorage},
-    tree::{NodeContext, TreeTopology},
-    Epoch, InitSettings,
-};
+use crate::{storage::pgsql::storages::DBPool, tree::TreeTopology, Epoch, InitSettings};
 use anyhow::*;
 use bb8_postgres::PostgresConnectionManager;
 use itertools::Itertools;
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     fmt::Debug,
     sync::{Arc, Mutex},
 };
@@ -149,7 +145,7 @@ pub struct SqlStorageSettings {
 
 pub struct PgsqlStorage<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     V: PayloadInDb + Send + Sync,
@@ -172,7 +168,7 @@ where
 
 impl<T, V> FromSettings<T::State> for PgsqlStorage<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     T::State: Sync + Clone,
@@ -247,7 +243,7 @@ async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64)> {
 
 impl<T, V> PgsqlStorage<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: PayloadInDb,
     T::Node: Sync + Clone,
@@ -426,7 +422,7 @@ where
     ///
     /// Will fail if the CREATE is not valid (e.g. the table already exists)
     async fn create_tables(db: DBPool, table: &str) -> Result<()> {
-        let node_columns = <T as DbConnector<T::Key, T::Node, V>>::columns()
+        let node_columns = <T as DbConnector<V>>::columns()
             .iter()
             .map(|(name, t)| format!("{name} {t},"))
             .join("\n");
@@ -513,7 +509,7 @@ where
         k: &T::Key,
         n: T::Node,
     ) -> Result<()> {
-        T::create_node_in_tx(db_tx, &self.table, k, self.epoch + 1, n).await
+        T::create_node_in_tx(db_tx, &self.table, k, self.epoch + 1, &n).await
     }
 
     async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
@@ -635,7 +631,7 @@ where
 impl<T: TreeTopology, V: PayloadInDb> TransactionalStorage for PgsqlStorage<T, V>
 where
     V: Send + Sync,
-    T: DbConnector<T::Key, T::Node, V>,
+    T: DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Send + Sync + Clone,
     T::State: Send + Sync + Clone,
@@ -671,7 +667,7 @@ where
 impl<T: TreeTopology, V: PayloadInDb> SqlTransactionStorage for PgsqlStorage<T, V>
 where
     V: Send + Sync,
-    T: DbConnector<T::Key, T::Node, V>,
+    T: DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Send + Sync + Clone,
     T::State: Send + Sync + Clone,
@@ -693,7 +689,7 @@ where
 
 impl<T, V> TreeStorage<T> for PgsqlStorage<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     V: PayloadInDb + Send,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
@@ -701,8 +697,6 @@ where
 {
     type StateStorage = CachedDbStore<T::State>;
     type NodeStorage = NodeProjection<T, V>;
-
-    type U = String;
 
     fn state(&self) -> &Self::StateStorage {
         &self.state
@@ -748,20 +742,12 @@ where
 
         Ok(())
     }
-
-    async fn wide_lineage_between(
-        &self,
-        keys: Self::U,
-        start_epoch: Epoch,
-        end_epoch: Epoch,
-    ) -> Result<HashMap<(T::Key, Epoch), (NodeContext<T::Key>, T::Node)>> {
-        todo!()
-    }
 }
 
 impl<T, V> PayloadStorage<T::Key, V> for PgsqlStorage<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    Self: TreeStorage<T>,
+    T: TreeTopology + DbConnector<V>,
     V: PayloadInDb + Send,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
@@ -776,5 +762,30 @@ where
 
     fn data_mut(&mut self) -> &mut Self::DataStorage {
         &mut self.payloads
+    }
+}
+
+impl<T, V> MetaOperations<T, V> for PgsqlStorage<T, V>
+where
+    Self: TreeStorage<T>,
+    T: TreeTopology + DbConnector<V>,
+    V: PayloadInDb + Send,
+    T::Key: ToFromBytea,
+    T::Node: Sync + Clone,
+    T::State: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
+    V: Sync,
+{
+    type KeySource = String;
+
+    async fn wide_lineage_between(
+        &self,
+        t: &T,
+        keys: Self::KeySource,
+        bounds: (Epoch, Epoch),
+    ) -> Result<WideLineage<T::Key, V>> {
+        let r =
+            T::wide_lineage_between(t, self, self.db.clone(), &self.table, &keys, bounds).await?;
+
+        Ok(r)
     }
 }

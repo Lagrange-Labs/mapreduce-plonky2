@@ -299,7 +299,7 @@ impl<
         }
     }
 
-    pub async fn everythin(
+    pub async fn everything(
         keys_query: &str,
         min_block: Epoch,
         max_block: Epoch,

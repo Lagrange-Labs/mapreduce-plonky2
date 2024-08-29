@@ -1,8 +1,12 @@
 use crate::{
     storage::{
-        EpochKvStorage, EpochStorage, RoEpochKvStorage, SqlTransactionStorage, TransactionalStorage,
+        EpochKvStorage, EpochStorage, RoEpochKvStorage, SqlTransactionStorage,
+        TransactionalStorage, TreeStorage, WideLineage,
     },
-    tree::{sbbst, scapegoat, NodeContext, TreeTopology},
+    tree::{
+        sbbst::{self, NodeIdx},
+        scapegoat, NodeContext, TreeTopology,
+    },
     Epoch,
 };
 use anyhow::*;
@@ -11,7 +15,7 @@ use bb8_postgres::PostgresConnectionManager;
 use postgres_types::Json;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Debug,
     future::Future,
     marker::PhantomData,
@@ -24,12 +28,22 @@ use super::{CachedValue, PayloadInDb, ToFromBytea};
 
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 
+/// This macro is doing the job of `?` where it can not be used (typically in
+/// `async move { ... }`)
+macro_rules! ok_or_bail {
+    ($result:expr) => {
+        match $result {
+            Result::Ok(inner) => inner,
+            Result::Err(e) => return Err(e),
+        }
+    };
+}
+
 /// Type implementing this trait define the behavior of a storage tree
 /// components regarding their persistence in DB.
-
-pub trait DbConnector<K, N, V>
+pub trait DbConnector<V>: TreeTopology
 where
-    K: ToFromBytea + Send + Sync,
+    Self::Key: ToFromBytea,
     V: Serialize + for<'a> Deserialize<'a> + Clone + Send + Sync + Debug,
 {
     /// Return a list of pairs column name, SQL type required by the connector.
@@ -55,9 +69,9 @@ where
     async fn create_node_in_tx(
         db_tx: &tokio_postgres::Transaction<'_>,
         table: &str,
-        k: &K,
+        k: &Self::Key,
         birth_epoch: Epoch,
-        v: N,
+        v: &Self::Node,
     ) -> Result<()>;
 
     /// Within a PgSQL transaction, update the value associated at the given
@@ -65,7 +79,7 @@ where
     async fn set_at_in_tx(
         db_tx: &tokio_postgres::Transaction<'_>,
         table: &str,
-        k: &K,
+        k: &Self::Key,
         epoch: Epoch,
         v: V,
     ) -> Result<()> {
@@ -86,15 +100,15 @@ where
     fn fetch_node_at(
         db: DBPool,
         table: &str,
-        k: &K,
+        k: &Self::Key,
         epoch: Epoch,
-    ) -> impl Future<Output = Result<Option<N>>> + Send;
+    ) -> impl Future<Output = Result<Option<Self::Node>>> + Send;
 
     /// Return the value associated to the given key at the given epoch.
     fn fetch_payload_at(
         db: DBPool,
         table: &str,
-        k: &K,
+        k: &Self::Key,
         epoch: Epoch,
     ) -> impl std::future::Future<Output = Result<Option<V>>> + std::marker::Send {
         async move {
@@ -124,30 +138,34 @@ where
             .context("while parsing payload from row")
     }
 
-    fn node_from_row(row: &Row) -> Result<N>;
+    fn node_from_row(row: &Row) -> Result<Self::Node>;
 
-    fn wide_lineage_between(
+    fn wide_lineage_between<S: TreeStorage<Self>>(
         &self,
+        s: &S,
         db: DBPool,
         table: &str,
         keys_query: &str,
-        start_epoch: Epoch,
-        end_epoch: Epoch,
-    ) -> impl Future<Output = Result<HashMap<(K, Epoch), (NodeContext<K>, V)>>>;
+        bounds: (Epoch, Epoch),
+    ) -> impl Future<Output = Result<WideLineage<Self::Key, V>>>;
 }
 
 /// Implementation of a [`DbConnector`] for a tree over `K` with empty nodes.
 /// Only applies to the SBBST for now.
-impl<K, V> DbConnector<K, (), V> for sbbst::Tree
+impl<V> DbConnector<V> for sbbst::Tree
 where
-    K: ToFromBytea + Send + Sync,
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
 {
     fn node_columns() -> &'static [(&'static str, &'static str)] {
         &[]
     }
 
-    async fn fetch_node_at(db: DBPool, table: &str, k: &K, epoch: Epoch) -> Result<Option<()>> {
+    async fn fetch_node_at(
+        db: DBPool,
+        table: &str,
+        k: &NodeIdx,
+        epoch: Epoch,
+    ) -> Result<Option<()>> {
         let connection = db.get().await.unwrap();
         connection
             .query(
@@ -173,9 +191,9 @@ where
     async fn create_node_in_tx(
         db_tx: &tokio_postgres::Transaction<'_>,
         table: &str,
-        k: &K,
+        k: &NodeIdx,
         birth_epoch: Epoch,
-        _n: (),
+        _n: &(),
     ) -> Result<()> {
         db_tx
             .execute(
@@ -192,21 +210,83 @@ where
             .map(|_| ())
     }
 
-    async fn wide_lineage_between(
+    async fn wide_lineage_between<S: TreeStorage<Self>>(
         &self,
+        s: &S,
         db: DBPool,
         table: &str,
         keys_query: &str,
-        start_epoch: Epoch,
-        end_epoch: Epoch,
-    ) -> Result<HashMap<(K, Epoch), (NodeContext<K>, V)>> {
-        todo!()
+        bounds: (Epoch, Epoch),
+    ) -> Result<WideLineage<NodeIdx, V>> {
+        // Execute `keys_query` to retrieve the core keys from the DB
+        let core_keys = db
+            .get()
+            .await
+            .context("failed to get a connection")?
+            .query(keys_query, &[])
+            .await
+            .context("failed to execute `keys_query`")?
+            .iter()
+            .map(|row| row.try_get::<_, i64>("key").unwrap() as NodeIdx)
+            .collect::<Vec<_>>();
+
+        // The SBBST can compute all the wide lineage in closed form
+        let ascendances = self.ascendance(&core_keys, s).await;
+        let mut touched_keys = HashSet::new();
+        for n in ascendances.into_iter() {
+            touched_keys.extend(self.descendance(s, &n, 2).await);
+        }
+
+        // Fetch all the payloads for the wide lineage in one fell swoop
+        let payload_query = format!(
+            "SELECT
+               key, generate_series(GREATEST(__valid_from, $1), LEAST(__valid_until, $2)) AS block, payload
+             FROM {table}
+             WHERE __valid_from <= $1 AND $2 <= __valid_until AND key = ANY($3)",
+        );
+        let rows = db
+            .get()
+            .await
+            .context("failed to get a connection")?
+            .query(
+                &payload_query,
+                &[
+                    &bounds.0,
+                    &bounds.1,
+                    &touched_keys
+                        .into_iter()
+                        .map(|x| x.to_bytea())
+                        .collect::<Vec<_>>(),
+                ],
+            )
+            .await
+            .context("failed to fetch payload for touched keys")?;
+
+        // Assemble the final result
+        let mut nodes: HashMap<Epoch, HashMap<NodeIdx, (NodeContext<NodeIdx>, V)>> = HashMap::new();
+        for row in &rows {
+            let block = row
+                .try_get::<_, i64>("block")
+                .context("while fetching block from row")?;
+            let key = row
+                .try_get::<_, Vec<u8>>("key")
+                .map(NodeIdx::from_bytea)
+                .context("while fetching key from row")?;
+            let payload = Self::payload_from_row(row)?;
+            let context = self.node_context(&key, s).await.unwrap();
+            nodes
+                .entry(block)
+                .or_default()
+                .insert(key, (context, payload));
+        }
+
+        Ok((core_keys, nodes))
     }
 }
 
 /// Implementation of [`DbConnector`] for any valid key and a scapegoat tree
 /// built upon it.
-impl<K, V> DbConnector<K, scapegoat::Node<K>, V> for scapegoat::Tree<K>
+impl<K, V> DbConnector<V> for scapegoat::Tree<K>
 where
     K: ToFromBytea
         + Send
@@ -232,7 +312,7 @@ where
         table: &str,
         k: &K,
         epoch: Epoch,
-    ) -> Result<Option<scapegoat::Node<K>>> {
+    ) -> Result<Option<Self::Node>> {
         let connection = db.get().await.unwrap();
         connection
             .query(
@@ -261,8 +341,8 @@ where
             })
     }
 
-    fn node_from_row(row: &Row) -> Result<scapegoat::Node<K>> {
-        Ok(scapegoat::Node {
+    fn node_from_row(row: &Row) -> Result<Self::Node> {
+        Ok(Self::Node {
             k: K::from_bytea(row.try_get::<_, Vec<u8>>("key")?),
             subtree_size: row.try_get::<_, i64>("subtree_size")?.try_into().unwrap(),
             parent: row
@@ -282,7 +362,7 @@ where
         table: &str,
         k: &K,
         birth_epoch: Epoch,
-        n: scapegoat::Node<K>,
+        n: &Self::Node,
     ) -> Result<()> {
         db_tx
             .execute(
@@ -306,15 +386,64 @@ where
             .map(|_| ())
     }
 
-    fn wide_lineage_between(
+    fn wide_lineage_between<S: TreeStorage<Self>>(
         &self,
+        _: &S,
         db: DBPool,
         table: &str,
         keys_query: &str,
-        start_epoch: Epoch,
-        end_epoch: Epoch,
-    ) -> impl Future<Output = Result<HashMap<(K, Epoch), (NodeContext<K>, V)>>> {
-        async move { Ok(HashMap::new()) }
+        bounds: (Epoch, Epoch),
+    ) -> impl Future<Output = Result<WideLineage<K, V>>> {
+        async move {
+            // Call the mega-query doing everything
+            let query = format!(
+                include_str!("wide_lineage.sql"),
+                zk_table = table,
+                core_keys_query = keys_query
+            );
+            let connection = db.get().await.unwrap();
+            let rows = ok_or_bail!(connection
+                .query(&query, &[&bounds.0, &bounds.1, &2i32])
+                .await
+                .with_context(|| {
+                    format!(
+                        "while fetching wide lineage for {table} [[{}, {}]]",
+                        bounds.0, bounds.1
+                    )
+                }));
+
+            // Assemble the final result
+            let mut core_keys = Vec::new();
+            let mut nodes: HashMap<Epoch, HashMap<K, (NodeContext<K>, V)>> = HashMap::new();
+
+            for row in &rows {
+                let is_core = ok_or_bail!(row
+                    .try_get::<_, bool>("is_core")
+                    .context("while fetching core flag from row"));
+                let block = ok_or_bail!(row
+                    .try_get::<_, i64>("block")
+                    .context("while fetching block from row"));
+                let node = ok_or_bail!(<Self as DbConnector<V>>::node_from_row(row));
+                let payload = ok_or_bail!(Self::payload_from_row(row));
+                if is_core {
+                    core_keys.push(node.k.clone());
+                }
+                nodes.entry(block).or_default().insert(
+                    node.k.clone(),
+                    (
+                        NodeContext {
+                            node_id: node.k,
+                            parent: node.parent.clone(),
+                            left: node.left.clone(),
+                            right: node.right.clone(),
+                        },
+                        payload,
+                    ),
+                );
+            }
+
+            Ok((core_keys, nodes))
+        }
     }
 }
 
@@ -568,7 +697,7 @@ where
 /// when referring to older epochs.
 pub struct CachedDbTreeStore<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
 {
@@ -587,7 +716,7 @@ where
 }
 impl<T, V> CachedDbTreeStore<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
 {
@@ -692,7 +821,7 @@ where
 /// for [`CachedDbTreeStore`] for both `<T::Key, T::Node>` and `<T::Key, V>`.
 pub struct NodeProjection<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
 {
@@ -700,7 +829,7 @@ where
 }
 impl<T, V> RoEpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: PayloadInDb,
 {
@@ -743,7 +872,7 @@ where
 }
 impl<T, V> EpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     V: PayloadInDb,
@@ -790,7 +919,7 @@ where
 /// `<T::Key, V>`.
 pub struct PayloadProjection<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
 {
@@ -798,7 +927,7 @@ where
 }
 impl<T, V> RoEpochKvStorage<T::Key, V> for PayloadProjection<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: PayloadInDb,
 {
@@ -838,7 +967,7 @@ where
 }
 impl<T, V> EpochKvStorage<T::Key, V> for PayloadProjection<T, V>
 where
-    T: TreeTopology + DbConnector<T::Key, T::Node, V>,
+    T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     V: PayloadInDb,

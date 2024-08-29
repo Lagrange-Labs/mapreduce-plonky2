@@ -41,12 +41,12 @@ where
     ) -> Result<Self>;
 }
 
+type WideLineage<K, V> = (Vec<K>, HashMap<Epoch, HashMap<K, (NodeContext<K>, V)>>);
+
 /// A `TreeStorage` stores all data related to the tree structure, i.e. (i) the
 /// state of the tree structure, (ii) the putative metadata associated to the
 /// tree nodes.
 pub trait TreeStorage<T: TreeTopology>: Send + Sync {
-    type U;
-
     /// A storage backend for the underlying tree state
     type StateStorage: EpochStorage<T::State> + Send + Sync;
     /// A storage backend for the underlying tree nodes
@@ -74,13 +74,6 @@ pub trait TreeStorage<T: TreeTopology>: Send + Sync {
 
     /// Rollback this tree to the given epoch
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()>;
-
-    async fn wide_lineage_between(
-        &self,
-        keys: Self::U,
-        start_epoch: Epoch,
-        end_epoch: Epoch,
-    ) -> Result<HashMap<(T::Key, Epoch), (NodeContext<T::Key>, T::Node)>>;
 }
 
 /// A backend storing the payloads associated to the nodes of a tree.
@@ -359,4 +352,23 @@ pub trait SqlTreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Sen
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
     /// transaction execution is successful.
     fn commit_failed(&mut self);
+}
+
+/// The meta-operations trait gathers high-level operations that may be
+/// optimized depending on the backend.
+pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
+    TreeStorage<T> + PayloadStorage<T::Key, V>
+{
+    /// The type of the artefact used to retrieve a dynamic set of keys for the
+    /// [`TreeStorage`] implementing this trait.
+    type KeySource;
+
+    /// Fetch the subtree defined as the 2-depth extension of the subtree formed
+    /// by the union of all the paths-to-the-root for the given keys.
+    async fn wide_lineage_between(
+        &self,
+        t: &T,
+        keys: Self::KeySource,
+        bounds: (Epoch, Epoch),
+    ) -> Result<WideLineage<T::Key, V>>;
 }

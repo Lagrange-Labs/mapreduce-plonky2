@@ -4,12 +4,12 @@ use std::collections::HashSet;
 use std::hash::Hash;
 use std::{collections::HashMap, fmt::Debug};
 
-use crate::tree::TreeTopology;
+use crate::tree::{NodeContext, TreeTopology};
 use crate::{Epoch, InitSettings};
 
 use super::{
-    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
-    TransactionalStorage, TreeStorage,
+    EpochKvStorage, EpochStorage, FromSettings, MetaOperations, PayloadStorage, RoEpochKvStorage,
+    TransactionalStorage, TreeStorage, WideLineage,
 };
 
 /// A RAM-backed implementation of a transactional epoch storage for a single value.
@@ -296,10 +296,8 @@ where
     T::Node: Clone,
     V: Clone + Debug + Sync + Send,
 {
-    type U = Vec<T::Key>;
-
-    type StateStorage = VersionedStorage<<T as TreeTopology>::State>;
-    type NodeStorage = VersionedKvStorage<<T as TreeTopology>::Key, <T as TreeTopology>::Node>;
+    type StateStorage = VersionedStorage<T::State>;
+    type NodeStorage = VersionedKvStorage<T::Key, T::Node>;
 
     fn nodes(&self) -> &Self::NodeStorage {
         &self.nodes
@@ -335,15 +333,6 @@ where
         assert_eq!(self.state.current_epoch(), self.data.current_epoch());
 
         Ok(())
-    }
-
-    async fn wide_lineage_between(
-        &self,
-        keys: Self::U,
-        start_epoch: Epoch,
-        end_epoch: Epoch,
-    ) -> Result<HashMap<(T::Key, Epoch), (crate::tree::NodeContext<T::Key>, T::Node)>> {
-        todo!()
     }
 }
 
