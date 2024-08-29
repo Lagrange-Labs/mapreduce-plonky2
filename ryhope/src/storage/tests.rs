@@ -991,3 +991,58 @@ async fn grouped_txs() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn wide_update_trees() {
+    type K = i64;
+    type V = usize;
+    type Tree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<Tree, V>;
+
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+        InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
+        SqlStorageSettings {
+            source: SqlServerConnection::NewConnection(db_url()),
+            table: "wide".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for i in 0..10000 {
+                s.store(i, (10 * i).try_into().unwrap()).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    for i in 0..5 {
+        let to_remove = (i * 1..i * 100)
+            .map(|k| i * 1000 + k)
+            .collect::<HashSet<_>>();
+        s.in_transaction(|s| {
+            Box::pin({
+                async move {
+                    for k in to_remove.iter() {
+                        s.remove(*k).await?;
+                    }
+                    Ok(())
+                }
+            })
+        })
+        .await
+        .unwrap();
+    }
+
+    let query = "SELECT key FROM wide WHERE key = ANY(ARRAY['\\x0000000000000012'::bytea,'\\x0000000000000060'::bytea, '\\x000000000000032a'::bytea]) AND __valid_from <= 2 AND __valid_until >= 5".to_string();
+
+    let trees = s.wide_update_trees(&query, (2, 5)).await.unwrap();
+    for t in trees.iter() {
+        println!("{}:", t.epoch());
+        t.print();
+    }
+}

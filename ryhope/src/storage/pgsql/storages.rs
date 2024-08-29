@@ -422,8 +422,9 @@ where
 
             for row in &rows {
                 let is_core = ok_or_bail!(row
-                    .try_get::<_, bool>("is_core")
-                    .context("while fetching core flag from row"));
+                    .try_get::<_, i32>("is_core")
+                    .context("while fetching core flag from row"))
+                    > 0;
                 let block = ok_or_bail!(row
                     .try_get::<_, i64>("block")
                     .context("while fetching block from row"));
