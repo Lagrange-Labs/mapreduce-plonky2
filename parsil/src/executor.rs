@@ -169,12 +169,28 @@ fn convert_funcalls(expr: &mut Expr) -> Result<()> {
 }
 
 /// Generate an [`Expr`] encoding `generate_series(__valid_from, __valid_until)`
-fn expand_block_range() -> Expr {
+fn expand_block_range<C: ContextProvider>(settings: &ParsilSettings<C>) -> Expr {
     funcall(
         "generate_series",
         vec![
-            Expr::Identifier(Ident::new("__valid_from")),
-            Expr::Identifier(Ident::new("__valid_until")),
+            funcall(
+                "GREATEST",
+                vec![
+                    Expr::Identifier(Ident::new("__valid_from")),
+                    Expr::Value(Value::Placeholder(
+                        settings.placeholders.min_block_placeholder.to_owned(),
+                    )),
+                ],
+            ),
+            funcall(
+                "LEAST",
+                vec![
+                    Expr::Identifier(Ident::new("__valid_until")),
+                    Expr::Value(Value::Placeholder(
+                        settings.placeholders.max_block_placeholder.to_owned(),
+                    )),
+                ],
+            ),
         ],
     )
 }
@@ -274,7 +290,10 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
                     // Insert the `key` column in the selected values...
                     std::iter::once(SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("key"))))
                     .chain(std::iter::once(
-                        SelectItem::ExprWithAlias { expr: expand_block_range(), alias: Ident::new("block") }
+                        SelectItem::ExprWithAlias {
+                            expr: expand_block_range(self.settings),
+                            alias: Ident::new("block")
+                        }
                     ))
                     // then continue normally
                         .chain(table_columns.iter().enumerate().map(|(i, column)| {
@@ -287,7 +306,7 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
                             match column.kind {
                                 // primary index column := generate_series(__valid_from, __valid_until) AS name
                                 ColumnKind::PrimaryIndex => SelectItem::ExprWithAlias {
-                                    expr: expand_block_range(),
+                                    expr: expand_block_range(self.settings),
                                     alias,
                                 },
                                 // other columns := payload->'cells'->'id'->'value' AS name
@@ -428,7 +447,7 @@ impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
                             match column.kind {
                                 // primary index column := generate_series(__valid_from, __valid_until) AS name
                                 ColumnKind::PrimaryIndex => SelectItem::ExprWithAlias {
-                                    expr: expand_block_range(),
+                                    expr: expand_block_range(self.settings),
                                     alias,
                                 },
                                 // other columns := payload->'cells'->'id'->'value' AS name
