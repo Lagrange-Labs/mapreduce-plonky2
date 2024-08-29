@@ -5,7 +5,7 @@ use std::{collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData};
 use storage::{
     updatetree::{Next, UpdatePlan, UpdateTree},
     view::TreeStorageView,
-    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
+    EpochKvStorage, EpochStorage, FromSettings, MetaOperations, PayloadStorage, RoEpochKvStorage,
     SqlTransactionStorage, SqlTreeTransactionalStorage, TransactionalStorage, TreeStorage,
     TreeTransactionalStorage,
 };
@@ -164,13 +164,11 @@ impl<
         self.tree.root(&self.storage).await
     }
     pub async fn root_at(&self, epoch: Epoch) -> Option<T::Key> {
-        let view = self.view_at(epoch);
-        self.tree.root(&view).await
+        self.tree.root(&self.storage.view_at(epoch)).await
     }
 
     pub async fn root_data_at(&self, epoch: Epoch) -> Option<V> {
-        let view = self.view_at(epoch);
-        if let Some(root) = self.tree.root(&view).await {
+        if let Some(root) = self.tree.root(&self.storage.view_at(epoch)).await {
             let root = self.storage.data().fetch_at(&root, epoch).await;
             Some(root)
         } else {
@@ -190,8 +188,7 @@ impl<
 
     /// Return the current root hash of the Merkle tree at the given epoch.
     pub async fn root_hash_at(&self, epoch: Epoch) -> Option<V> {
-        let view = self.view_at(epoch);
-        if let Some(root) = self.tree.root(&view).await {
+        if let Some(root) = self.tree.root(&self.storage.view_at(epoch)).await {
             Some(self.storage.data().fetch_at(&root, epoch).await)
         } else {
             None
@@ -220,7 +217,11 @@ impl<
         k: &T::Key,
         epoch: Epoch,
     ) -> Option<(NodeContext<T::Key>, V)> {
-        if let Some(ctx) = self.tree.node_context(k, &self.view_at(epoch)).await {
+        if let Some(ctx) = self
+            .tree
+            .node_context(k, &self.storage.view_at(epoch))
+            .await
+        {
             if let Some(v) = self.try_fetch_at(k, epoch).await {
                 return Some((ctx, v));
             }
@@ -298,13 +299,26 @@ impl<
             Some(ut)
         }
     }
+}
 
-    pub async fn everything(
-        keys_query: &str,
-        min_block: Epoch,
-        max_block: Epoch,
-    ) -> Result<Vec<NodeContext<T::Key>>> {
-        todo!()
+impl<
+        T: TreeTopology + MutableTree + Send,
+        V: NodePayload + Send + Sync,
+        S: TransactionalStorage
+            + TreeStorage<T>
+            + PayloadStorage<T::Key, V>
+            + FromSettings<T::State>
+            + MetaOperations<T, V>,
+    > MerkleTreeKvDb<T, V, S>
+{
+    pub async fn wide_update_trees(
+        &self,
+        keys_query: &S::KeySource,
+        bounds: (Epoch, Epoch),
+    ) -> Result<Vec<UpdateTree<T::Key>>> {
+        self.storage
+            .wide_update_trees(&self.tree, keys_query, bounds)
+            .await
     }
 }
 

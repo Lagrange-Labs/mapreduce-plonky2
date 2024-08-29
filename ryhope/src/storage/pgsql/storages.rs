@@ -263,7 +263,10 @@ where
             .context("failed to fetch payload for touched keys")?;
 
         // Assemble the final result
-        let mut nodes: HashMap<Epoch, HashMap<NodeIdx, (NodeContext<NodeIdx>, V)>> = HashMap::new();
+        let mut nodes: HashMap<
+            Epoch,
+            (HashMap<NodeIdx, NodeContext<NodeIdx>>, HashMap<NodeIdx, V>),
+        > = HashMap::new();
         for row in &rows {
             let block = row
                 .try_get::<_, i64>("block")
@@ -274,10 +277,10 @@ where
                 .context("while fetching key from row")?;
             let payload = Self::payload_from_row(row)?;
             let context = self.node_context(&key, s).await.unwrap();
-            nodes
-                .entry(block)
-                .or_default()
-                .insert(key, (context, payload));
+
+            let h_block = nodes.entry(block).or_default();
+            h_block.0.insert(key, context);
+            h_block.1.insert(key, payload);
         }
 
         Ok((core_keys, nodes))
@@ -414,7 +417,8 @@ where
 
             // Assemble the final result
             let mut core_keys = Vec::new();
-            let mut nodes: HashMap<Epoch, HashMap<K, (NodeContext<K>, V)>> = HashMap::new();
+            let mut nodes: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)> =
+                HashMap::new();
 
             for row in &rows {
                 let is_core = ok_or_bail!(row
@@ -428,18 +432,18 @@ where
                 if is_core {
                     core_keys.push(node.k.clone());
                 }
-                nodes.entry(block).or_default().insert(
+
+                let h_block = nodes.entry(block).or_default();
+                h_block.0.insert(
                     node.k.clone(),
-                    (
-                        NodeContext {
-                            node_id: node.k,
-                            parent: node.parent.clone(),
-                            left: node.left.clone(),
-                            right: node.right.clone(),
-                        },
-                        payload,
-                    ),
+                    NodeContext {
+                        node_id: node.k.clone(),
+                        parent: node.parent.clone(),
+                        left: node.left.clone(),
+                        right: node.right.clone(),
+                    },
                 );
+                h_block.1.insert(node.k, payload);
             }
 
             Ok((core_keys, nodes))

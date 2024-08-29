@@ -780,7 +780,7 @@ where
     async fn wide_lineage_between(
         &self,
         t: &T,
-        keys: Self::KeySource,
+        keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<WideLineage<T::Key, V>> {
         let r =
