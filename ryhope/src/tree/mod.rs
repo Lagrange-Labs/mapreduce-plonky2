@@ -95,13 +95,13 @@ pub trait TreeTopology: Default + Send + Sync {
     ) -> Option<NodePath<Self::Key>>;
 
     /// Return the union of the lineages of all the `ns`
-    async fn ascendance<S: TreeStorage<Self>>(
+    async fn ascendance<S: TreeStorage<Self>, I: IntoIterator<Item = Self::Key>>(
         &self,
-        ns: &[Self::Key],
+        ns: I,
         s: &S,
     ) -> HashSet<Self::Key> {
         let mut ascendance = HashSet::new();
-        for n in ns {
+        for n in ns.into_iter() {
             if let Some(np) = self.lineage(&n, s).await {
                 ascendance.extend(np.into_full_path());
             }

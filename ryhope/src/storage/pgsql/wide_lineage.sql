@@ -3,8 +3,8 @@
 --  * core_keys_query: a query returning the core keys, i.e. the keys directly
 --    touched by the zkQuery.
 -- Placeholders:
---  * $1: start of the block range
---  * $2: end of the block range
+--  * $1: start of the epoch range
+--  * $2: end of the epoch range
 --  * $3: downward recursion limit for descendance expansion
 --
 -- Output:
@@ -38,7 +38,7 @@ WITH RECURSIVE descendance (is_core, key, parent, left_child, right_child, subtr
            RIGHT JOIN (SELECT 1 AS is_core, key FROM ({core_keys_query}) _core_keys_query) core_keys
            ON core_keys.key = {zk_table}.key
          UNION
-         -- General recursion case: find the rows in the given block range that
+         -- General recursion case: find the rows in the given epoch range that
          -- are the parent of at least one of the already accumulated rows, with
          -- the `is_core` flag set to 0.
          SELECT 0, parent.key, parent.left_child, parent.right_child, parent.{VALID_FROM}, parent.{VALID_UNTIL}
@@ -55,7 +55,7 @@ WITH RECURSIVE descendance (is_core, key, parent, left_child, right_child, subtr
        -- RIGHT JOIN criterion
        ON ascendance_expanded.key = {zk_table}.key
    UNION
-   -- General recursion case: find the rows in the given block range and within
+   -- General recursion case: find the rows in the given epoch range and within
    -- the given downward recursion limit that are a child of at least one of the
    -- already accumulated rows.
    SELECT 0, child.key, child.parent, child.left_child, child.right_child, child.subtree_size, child.{VALID_FROM}, child.{VALID_UNTIL}, child.{PAYLOAD}, depth + 1
@@ -66,10 +66,10 @@ WITH RECURSIVE descendance (is_core, key, parent, left_child, right_child, subtr
    -- added by path traversal). To preserve the core key flag, we aggregate by
    -- max. of is_core, that will always be 1 if the key is in the core set.
    MAX(is_core) AS is_core,
-   -- Expand the block ranges [[{VALID_FROM}, {VALID_UNTIL}]] into
+   -- Expand the epoch ranges [[{VALID_FROM}, {VALID_UNTIL}]] into
    -- ({VALID_UNTIL} - {VALID_FROM}) individual rows, clamped within
    -- [[min_block, max_block]]
-   generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS block,
+   generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS epoch,
    -- Normal columns
    key, parent, left_child, right_child, subtree_size, {PAYLOAD}
    FROM

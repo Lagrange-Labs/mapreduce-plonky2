@@ -44,7 +44,7 @@ where
 
 pub struct WideLineage<K, V> {
     /// The keys touched by the query itself
-    pub core_keys: Vec<K>,
+    pub core_keys: Vec<(Epoch, K)>,
     /// An epoch -> (K -> NodeContext, K -> Payload) mapping
     epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
 }

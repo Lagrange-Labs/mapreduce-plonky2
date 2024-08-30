@@ -216,11 +216,18 @@ where
             .await
             .context("failed to execute `keys_query`")?
             .iter()
-            .map(|row| row.try_get::<_, i64>("key").unwrap() as NodeIdx)
+            .map(|row| {
+                (
+                    row.get::<_, i64>("epoch"),
+                    row.get::<_, i64>("key") as NodeIdx,
+                )
+            })
             .collect::<Vec<_>>();
 
         // The SBBST can compute all the wide lineage in closed form
-        let ascendances = self.ascendance(&core_keys, s).await;
+        let ascendances = self
+            .ascendance(core_keys.iter().map(|(_epoch, key)| key).cloned(), s)
+            .await;
         let mut touched_keys = HashSet::new();
         for n in ascendances.into_iter() {
             touched_keys.extend(self.descendance(s, &n, 2).await);
@@ -229,7 +236,7 @@ where
         // Fetch all the payloads for the wide lineage in one fell swoop
         let payload_query = format!(
             "SELECT
-               key, generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS block, {PAYLOAD}
+               key, generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS epoch, {PAYLOAD}
              FROM {table}
              WHERE {VALID_FROM} <= $1 AND $2 <= {VALID_UNTIL} AND key = ANY($3)",
         );
@@ -258,8 +265,8 @@ where
         > = HashMap::new();
         for row in &rows {
             let epoch = row
-                .try_get::<_, i64>("block")
-                .context("while fetching block from row")?;
+                .try_get::<_, i64>("epoch")
+                .context("while fetching epoch from row")?;
             let key = row
                 .try_get::<_, Vec<u8>>("key")
                 .map(NodeIdx::from_bytea)
@@ -267,9 +274,9 @@ where
             let payload = Self::payload_from_row(row)?;
             let context = self.node_context(&key, s).await.unwrap();
 
-            let h_block = epoch_lineages.entry(epoch).or_default();
-            h_block.0.insert(key, context);
-            h_block.1.insert(key, payload);
+            let h_epoch = epoch_lineages.entry(epoch).or_default();
+            h_epoch.0.insert(key, context);
+            h_epoch.1.insert(key, payload);
         }
 
         Ok(WideLineage {
@@ -421,16 +428,16 @@ where
                     .context("while fetching core flag from row")?
                     > 0;
                 let epoch = row
-                    .try_get::<_, i64>("block")
-                    .context("while fetching block from row")?;
+                    .try_get::<_, i64>("epoch")
+                    .context("while fetching epoch from row")?;
                 let node = <Self as DbConnector<V>>::node_from_row(row)?;
                 let payload = Self::payload_from_row(row)?;
                 if is_core {
-                    core_keys.push(node.k.clone());
+                    core_keys.push((epoch, node.k.clone()));
                 }
 
-                let h_block = epoch_lineages.entry(epoch).or_default();
-                h_block.0.insert(
+                let h_epoch = epoch_lineages.entry(epoch).or_default();
+                h_epoch.0.insert(
                     node.k.clone(),
                     NodeContext {
                         node_id: node.k.clone(),
@@ -439,7 +446,7 @@ where
                         right: node.right.clone(),
                     },
                 );
-                h_block.1.insert(node.k, payload);
+                h_epoch.1.insert(node.k, payload);
             }
 
             Ok(WideLineage {
