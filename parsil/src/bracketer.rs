@@ -1,4 +1,5 @@
 use alloy::primitives::U256;
+use ryhope::{VALID_FROM, VALID_UNTIL};
 use verifiable_db::query::aggregation::QueryBounds;
 
 use crate::{symbols::ContextProvider, ParsilSettings};
@@ -49,7 +50,7 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
         None
     } else {
         Some(format!("SELECT key FROM {table_name}
-                           WHERE {sec_index} < '{secondary_lo}'::DECIMAL AND __valid_from <= {block_number} AND __valid_until >= {block_number}
+                           WHERE {sec_index} < '{secondary_lo}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
                            ORDER BY {sec_index} DESC LIMIT 1"))
     };
 
@@ -58,7 +59,7 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
         None
     } else {
         Some(format!("SELECT key FROM {table_name}
-                           WHERE {sec_index} > '{secondary_hi}'::DECIMAL AND __valid_from <= {block_number} AND __valid_until >= {block_number}
+                           WHERE {sec_index} > '{secondary_hi}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
                            ORDER BY {sec_index} ASC LIMIT 1"))
     };
 
