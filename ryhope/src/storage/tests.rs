@@ -21,7 +21,7 @@ use crate::{
         scapegoat::{self, Alpha},
         PrintableTree, TreeTopology,
     },
-    Epoch, InitSettings, MerkleTreeKvDb, NodePayload,
+    Epoch, InitSettings, MerkleTreeKvDb, NodePayload, VALID_FROM, VALID_UNTIL,
 };
 
 use super::TreeTransactionalStorage;
@@ -1038,7 +1038,7 @@ async fn wide_update_trees() {
         .unwrap();
     }
 
-    let query = "SELECT key FROM wide WHERE key = ANY(ARRAY['\\x0000000000000012'::bytea,'\\x0000000000000060'::bytea, '\\x000000000000032a'::bytea]) AND __valid_from <= 2 AND __valid_until >= 5".to_string();
+    let query = format!("SELECT key FROM wide WHERE key = ANY(ARRAY['\\x0000000000000012'::bytea,'\\x0000000000000060'::bytea, '\\x000000000000032a'::bytea]) AND {VALID_FROM} <= 2 AND {VALID_UNTIL} >= 5");
 
     let trees = s.wide_update_trees(&query, (2, 5)).await.unwrap();
     for t in trees.iter() {

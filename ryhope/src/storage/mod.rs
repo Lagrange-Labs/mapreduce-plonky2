@@ -42,10 +42,12 @@ where
     ) -> Result<Self>;
 }
 
-type WideLineage<K, V> = (
-    Vec<K>,
-    HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
-);
+pub struct WideLineage<K, V> {
+    /// The keys touched by the query itself
+    core_keys: Vec<K>,
+    /// An epoch -> (K -> NodeContext, K -> Payload) mapping
+    epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
+}
 
 /// A `TreeStorage` stores all data related to the tree structure, i.e. (i) the
 /// state of the tree structure, (ii) the putative metadata associated to the
@@ -392,9 +394,8 @@ pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
         bounds: (Epoch, Epoch),
     ) -> Result<Vec<UpdateTree<T::Key>>> {
         let wide_lineage = self.wide_lineage_between(t, keys, bounds).await?;
-        let epochs = &wide_lineage.1;
         let mut r = Vec::new();
-        for (epoch, nodes) in epochs.iter() {
+        for (epoch, nodes) in wide_lineage.epoch_lineages.iter() {
             if let Some(root) = t.root(&self.view_at(*epoch)).await {
                 r.push(UpdateTree::from_map(*epoch, &root, &nodes.0));
             }

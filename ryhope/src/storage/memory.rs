@@ -4,12 +4,12 @@ use std::collections::HashSet;
 use std::hash::Hash;
 use std::{collections::HashMap, fmt::Debug};
 
-use crate::tree::{NodeContext, TreeTopology};
+use crate::tree::TreeTopology;
 use crate::{Epoch, InitSettings};
 
 use super::{
-    EpochKvStorage, EpochStorage, FromSettings, MetaOperations, PayloadStorage, RoEpochKvStorage,
-    TransactionalStorage, TreeStorage, WideLineage,
+    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
+    TransactionalStorage, TreeStorage,
 };
 
 /// A RAM-backed implementation of a transactional epoch storage for a single value.

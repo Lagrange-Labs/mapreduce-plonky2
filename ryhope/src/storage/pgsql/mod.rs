@@ -3,7 +3,10 @@ use super::{
     EpochStorage, FromSettings, MetaOperations, PayloadStorage, SqlTransactionStorage,
     TransactionalStorage, TreeStorage, WideLineage,
 };
-use crate::{storage::pgsql::storages::DBPool, tree::TreeTopology, Epoch, InitSettings};
+use crate::{
+    storage::pgsql::storages::DBPool, tree::TreeTopology, Epoch, InitSettings, PAYLOAD, VALID_FROM,
+    VALID_UNTIL,
+};
 use anyhow::*;
 use bb8_postgres::PostgresConnectionManager;
 use itertools::Itertools;
@@ -233,7 +236,7 @@ async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64)> {
     let connection = db.get().await.unwrap();
     connection
         .query_one(
-            &format!("SELECT MIN(__valid_from), MAX(__valid_until) FROM {table}_meta",),
+            &format!("SELECT MIN({VALID_FROM}), MAX({VALID_UNTIL}) FROM {table}_meta",),
             &[],
         )
         .await
@@ -404,8 +407,8 @@ where
     /// transactions they went through, hence allowing to access any of them at
     /// any timestamp of choice. Its columns are:
     ///   - key: byte-serialized key of this row node in the tree;
-    ///   - __valid_from: from which epoch this row is valid;
-    ///   - __valid_until: up to which epoch this row is valid;
+    ///   - VALID_FROM: from which epoch this row is valid;
+    ///   - VALID_UNTIL: up to which epoch this row is valid;
     ///   - [tree-specific]: a set of columns defined by the tree DB connector
     ///     storing node-specific values depending on the tree implementation;
     ///   - [payload specific]: a column containing the payload of this node,
@@ -415,9 +418,9 @@ where
     /// historic data, but storing the underlying tree inner state instead of
     /// the nodes. Combined with the node table, it allows to rebuild the whole
     /// underlying tree at any timestamp. Its columns are:
-    ///   - __valid_from: from which epoch this row is valid;
-    ///   - __valid_until: up to which epoch this row is valid;
-    ///   - payload: a JSONB-serialized value representing the inner state of
+    ///   - VALID_FROM: from which epoch this row is valid;
+    ///   - VALID_UNTIL: up to which epoch this row is valid;
+    ///   - PAYLOAD: a JSONB-serialized value representing the inner state of
     ///     the tree at the given epoch range.
     ///
     /// Will fail if the CREATE is not valid (e.g. the table already exists)
@@ -434,10 +437,10 @@ where
                 &format!(
                     "CREATE TABLE {table} (
                    key          BYTEA NOT NULL,
-                   __valid_from   BIGINT NOT NULL,
-                   __valid_until  BIGINT DEFAULT -1,
+                   {VALID_FROM}   BIGINT NOT NULL,
+                   {VALID_UNTIL}  BIGINT DEFAULT -1,
                    {node_columns}
-                   UNIQUE (key, __valid_from))"
+                   UNIQUE (key, {VALID_FROM}))"
                 ),
                 &[],
             )
@@ -450,9 +453,9 @@ where
             .execute(
                 &format!(
                     "CREATE TABLE {table}_meta (
-                   __valid_from   BIGINT NOT NULL UNIQUE,
-                   __valid_until  BIGINT DEFAULT -1,
-                   payload      JSONB)"
+                   {VALID_FROM}   BIGINT NOT NULL UNIQUE,
+                   {VALID_UNTIL}  BIGINT DEFAULT -1,
+                   {PAYLOAD}      JSONB)"
                 ),
                 &[],
             )
@@ -463,7 +466,7 @@ where
 
     async fn update_all(&self, db_tx: &tokio_postgres::Transaction<'_>) -> Result<()> {
         let update_all = format!(
-            "UPDATE {} SET __valid_until=$1 WHERE __valid_until=$2",
+            "UPDATE {} SET {VALID_UNTIL}=$1 WHERE {VALID_UNTIL}=$2",
             self.table
         );
 
@@ -483,7 +486,7 @@ where
         let rows = db_tx
             .query(
                 &format!(
-                    "UPDATE {} SET __valid_until={} WHERE key=$1 AND __valid_until={} RETURNING *",
+                    "UPDATE {} SET {VALID_UNTIL}={} WHERE key=$1 AND {VALID_UNTIL}={} RETURNING *",
                     self.table,
                     self.epoch,
                     self.epoch + 1
@@ -532,7 +535,7 @@ where
             cached_keys.extend(
                 self.tree_store
                     .lock()
-                    .unwrap()
+                    .map_err(|e| anyhow!("failed to lock tree store mutex: {e}"))?
                     .payload_cache
                     .keys()
                     .cloned(),
@@ -544,7 +547,7 @@ where
             let data_value = {
                 self.tree_store
                     .lock()
-                    .unwrap()
+                    .map_err(|e| anyhow!("failed to lock tree store mutex: {e}"))?
                     .payload_cache
                     .get(&k)
                     .cloned()
@@ -718,7 +721,7 @@ where
         let connection = self.db.get().await.unwrap();
         connection
             .query(
-                &format!("SELECT key FROM {} WHERE __valid_from=$1", self.table),
+                &format!("SELECT key FROM {} WHERE {VALID_FROM}=$1", self.table),
                 &[&epoch],
             )
             .await

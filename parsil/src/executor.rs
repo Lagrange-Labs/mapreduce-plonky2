@@ -4,6 +4,7 @@
 use alloy::primitives::U256;
 use anyhow::*;
 use log::*;
+use ryhope::{PAYLOAD, VALID_FROM, VALID_UNTIL};
 use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, ExactNumberInfo, Expr, Function, FunctionArg,
     FunctionArgExpr, FunctionArgumentList, FunctionArguments, GroupByExpr, Ident, ObjectName,
@@ -168,7 +169,6 @@ fn convert_funcalls(expr: &mut Expr) -> Result<()> {
     Ok(())
 }
 
-/// Generate an [`Expr`] encoding `generate_series(__valid_from, __valid_until)`
 fn expand_block_range<C: ContextProvider>(settings: &ParsilSettings<C>) -> Expr {
     funcall(
         "generate_series",
@@ -176,7 +176,7 @@ fn expand_block_range<C: ContextProvider>(settings: &ParsilSettings<C>) -> Expr 
             funcall(
                 "GREATEST",
                 vec![
-                    Expr::Identifier(Ident::new("__valid_from")),
+                    Expr::Identifier(Ident::new(VALID_FROM)),
                     Expr::Value(Value::Placeholder(
                         settings.placeholders.min_block_placeholder.to_owned(),
                     )),
@@ -185,7 +185,7 @@ fn expand_block_range<C: ContextProvider>(settings: &ParsilSettings<C>) -> Expr 
             funcall(
                 "LEAST",
                 vec![
-                    Expr::Identifier(Ident::new("__valid_until")),
+                    Expr::Identifier(Ident::new(VALID_UNTIL)),
                     Expr::Value(Value::Placeholder(
                         settings.placeholders.max_block_placeholder.to_owned(),
                     )),
@@ -195,12 +195,12 @@ fn expand_block_range<C: ContextProvider>(settings: &ParsilSettings<C>) -> Expr 
     )
 }
 
-/// Generate an [`Expr`] encoding for `payload -> cells -> '{id}' -> value
+/// Generate an [`Expr`] encoding for `PAYLOAD -> cells -> '{id}' -> value
 fn fetch_from_payload(id: u64) -> Expr {
     Expr::Cast {
         kind: CastKind::DoubleColon,
         expr: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
-            left: Box::new(Expr::Identifier(Ident::new("payload"))),
+            left: Box::new(Expr::Identifier(Ident::new(PAYLOAD))),
             op: BinaryOperator::Arrow,
             right: Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Value(Value::SingleQuotedString("cells".into()))),
@@ -304,7 +304,7 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
                                     .unwrap_or(column.name.as_str()),
                             );
                             match column.kind {
-                                // primary index column := generate_series(__valid_from, __valid_until) AS name
+                                // primary index column := generate_series(VALID_FROM, VALID_UNTIL) AS name
                                 ColumnKind::PrimaryIndex => SelectItem::ExprWithAlias {
                                     expr: expand_block_range(self.settings),
                                     alias,
@@ -445,12 +445,12 @@ impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
                                     .unwrap_or(column.name.as_str()),
                             );
                             match column.kind {
-                                // primary index column := generate_series(__valid_from, __valid_until) AS name
+                                // primary index column := generate_series(VALID_FROM, VALID_UNTIL) AS name
                                 ColumnKind::PrimaryIndex => SelectItem::ExprWithAlias {
                                     expr: expand_block_range(self.settings),
                                     alias,
                                 },
-                                // other columns := payload->'cells'->'id'->'value' AS name
+                                // other columns := PAYLOAD->'cells'->'id'->'value' AS name
                                 ColumnKind::SecondaryIndex | ColumnKind::Standard => {
                                     SelectItem::ExprWithAlias {
                                         expr: fetch_from_payload(column.id),
@@ -576,7 +576,7 @@ pub fn bracket_secondary_index<C: ContextProvider>(
         .id;
 
     // A simple alias for the sec. ind. values
-    let sec_index = format!("(payload -> 'cells' -> '{sec_ind_column}' ->> 'value')::NUMERIC");
+    let sec_index = format!("({PAYLOAD} -> 'cells' -> '{sec_ind_column}' ->> 'value')::NUMERIC");
 
     // Select the largest of all the sec. ind. values that remains smaller than
     // the provided sec. ind. lower bound if it is provided, -1 otherwise.
@@ -584,7 +584,7 @@ pub fn bracket_secondary_index<C: ContextProvider>(
         None
     } else {
         Some(format!("SELECT key FROM {table_name}
-                           WHERE {sec_index} < '{secondary_lo}'::DECIMAL AND __valid_from <= {block_number} AND __valid_until >= {block_number}
+                           WHERE {sec_index} < '{secondary_lo}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
                            ORDER BY {sec_index} DESC LIMIT 1"))
     };
 
@@ -593,7 +593,7 @@ pub fn bracket_secondary_index<C: ContextProvider>(
         None
     } else {
         Some(format!("SELECT key FROM {table_name}
-                           WHERE {sec_index} > '{secondary_hi}'::DECIMAL AND __valid_from <= {block_number} AND __valid_until >= {block_number}
+                           WHERE {sec_index} > '{secondary_hi}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
                            ORDER BY {sec_index} ASC LIMIT 1"))
     };
 

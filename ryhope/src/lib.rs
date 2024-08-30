@@ -17,6 +17,13 @@ pub mod storage;
 mod tests;
 pub mod tree;
 
+/// The column containing the node payload in the zkTable
+pub const PAYLOAD: &str = "payload";
+/// The column containing the first epoch of validity of the row in the zkTable
+pub const VALID_FROM: &str = "valid_from";
+/// The column containing the last epoch of validity of the row in the zkTable
+pub const VALID_UNTIL: &str = "valid_until";
+
 /// A timestamp in a versioned storage. Using a signed type allows for easy
 /// detection & debugging of erroneous subtractions.
 pub type Epoch = i64;

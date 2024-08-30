@@ -3984,6 +3984,7 @@ dependencies = [
  "mp2_common",
  "plonky2",
  "postgres",
+ "ryhope",
  "serde",
  "serde_json",
  "sqlparser",

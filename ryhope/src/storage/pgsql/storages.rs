@@ -7,7 +7,7 @@ use crate::{
         sbbst::{self, NodeIdx},
         scapegoat, NodeContext, TreeTopology,
     },
-    Epoch,
+    Epoch, PAYLOAD, VALID_FROM, VALID_UNTIL,
 };
 use anyhow::*;
 use bb8::Pool;
@@ -27,17 +27,6 @@ use tokio_postgres::{self, NoTls, Row, Transaction};
 use super::{CachedValue, PayloadInDb, ToFromBytea};
 
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
-
-/// This macro is doing the job of `?` where it can not be used (typically in
-/// `async move { ... }`)
-macro_rules! ok_or_bail {
-    ($result:expr) => {
-        match $result {
-            Result::Ok(inner) => inner,
-            Result::Err(e) => return Err(e),
-        }
-    };
-}
 
 /// Type implementing this trait define the behavior of a storage tree
 /// components regarding their persistence in DB.
@@ -62,7 +51,7 @@ where
     /// Return a list of pairs of column names and SQL types required by the
     /// connector to store payload-related information.
     fn payload_columns() -> &'static [(&'static str, &'static str)] {
-        &[("payload", "JSONB")]
+        &[(PAYLOAD, "JSONB")]
     }
 
     /// Within a PgSQL transaction, insert the given value at the given epoch.
@@ -86,7 +75,7 @@ where
         db_tx
             .execute(
                 &format!(
-                    "UPDATE {} SET payload=$3 WHERE key=$1 AND __valid_from<=$2 AND $2<=__valid_until",
+                    "UPDATE {} SET payload=$3 WHERE key=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}",
                     table
                 ),
                 &[&k.to_bytea(), &epoch, &Json(v)],
@@ -116,7 +105,7 @@ where
             connection
             .query(
                 &format!(
-                    "SELECT payload FROM {} WHERE key=$1 AND __valid_from <= $2 AND $2 <= __valid_until",
+                    "SELECT {PAYLOAD} FROM {} WHERE key=$1 AND {VALID_FROM} <= $2 AND $2 <= {VALID_UNTIL}",
                     table
                 ),
                 &[&(k.to_bytea()), &epoch],
@@ -133,7 +122,7 @@ where
 
     /// Given a PgSQL row, extract a value from it.
     fn payload_from_row(row: &Row) -> Result<V> {
-        row.try_get::<_, Json<V>>("payload")
+        row.try_get::<_, Json<V>>(PAYLOAD)
             .map(|x| x.0)
             .context("while parsing payload from row")
     }
@@ -170,7 +159,7 @@ where
         connection
             .query(
                 &format!(
-                    "SELECT * FROM {} WHERE key=$1 AND __valid_from<=$2 AND $2<=__valid_until",
+                    "SELECT * FROM {} WHERE key=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}",
                     table
                 ),
                 &[&k.to_bytea(), &epoch],
@@ -199,7 +188,7 @@ where
             .execute(
                 &format!(
                     "INSERT INTO
-                     {} (key, __valid_from, __valid_until)
+                     {} (key, {VALID_FROM}, {VALID_UNTIL})
                      VALUES ($1, $2, $2)",
                     table
                 ),
@@ -240,9 +229,9 @@ where
         // Fetch all the payloads for the wide lineage in one fell swoop
         let payload_query = format!(
             "SELECT
-               key, generate_series(GREATEST(__valid_from, $1), LEAST(__valid_until, $2)) AS block, payload
+               key, generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS block, {PAYLOAD}
              FROM {table}
-             WHERE __valid_from <= $1 AND $2 <= __valid_until AND key = ANY($3)",
+             WHERE {VALID_FROM} <= $1 AND $2 <= {VALID_UNTIL} AND key = ANY($3)",
         );
         let rows = db
             .get()
@@ -263,12 +252,12 @@ where
             .context("failed to fetch payload for touched keys")?;
 
         // Assemble the final result
-        let mut nodes: HashMap<
+        let mut epoch_lineages: HashMap<
             Epoch,
             (HashMap<NodeIdx, NodeContext<NodeIdx>>, HashMap<NodeIdx, V>),
         > = HashMap::new();
         for row in &rows {
-            let block = row
+            let epoch = row
                 .try_get::<_, i64>("block")
                 .context("while fetching block from row")?;
             let key = row
@@ -278,12 +267,15 @@ where
             let payload = Self::payload_from_row(row)?;
             let context = self.node_context(&key, s).await.unwrap();
 
-            let h_block = nodes.entry(block).or_default();
+            let h_block = epoch_lineages.entry(epoch).or_default();
             h_block.0.insert(key, context);
             h_block.1.insert(key, payload);
         }
 
-        Ok((core_keys, nodes))
+        Ok(WideLineage {
+            core_keys,
+            epoch_lineages,
+        })
     }
 }
 
@@ -321,7 +313,7 @@ where
             .query(
                 &format!(
                     "SELECT parent, left_child, right_child, subtree_size FROM {}
-                       WHERE key=$1 AND __valid_from <= $2 AND $2 <= __valid_until",
+                       WHERE key=$1 AND {VALID_FROM} <= $2 AND $2 <= {VALID_UNTIL}",
                     table
                 ),
                 &[&k.to_bytea(), &epoch],
@@ -371,7 +363,7 @@ where
             .execute(
                 &format!(
                     "INSERT INTO
-                     {} (key, __valid_from, __valid_until, subtree_size, parent, left_child, right_child)
+                     {} (key, {VALID_FROM}, {VALID_UNTIL}, subtree_size, parent, left_child, right_child)
                      VALUES ($1, $2, $2, $3, $4, $5, $6)",
                     table
                 ),
@@ -401,11 +393,14 @@ where
             // Call the mega-query doing everything
             let query = format!(
                 include_str!("wide_lineage.sql"),
+                VALID_FROM = VALID_FROM,
+                VALID_UNTIL = VALID_UNTIL,
+                PAYLOAD = PAYLOAD,
                 zk_table = table,
                 core_keys_query = keys_query
             );
             let connection = db.get().await.unwrap();
-            let rows = ok_or_bail!(connection
+            let rows = connection
                 .query(&query, &[&bounds.0, &bounds.1, &2i32])
                 .await
                 .with_context(|| {
@@ -413,28 +408,28 @@ where
                         "while fetching wide lineage for {table} [[{}, {}]]",
                         bounds.0, bounds.1
                     )
-                }));
+                })?;
 
             // Assemble the final result
             let mut core_keys = Vec::new();
-            let mut nodes: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)> =
+            let mut epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)> =
                 HashMap::new();
 
             for row in &rows {
-                let is_core = ok_or_bail!(row
+                let is_core = row
                     .try_get::<_, i32>("is_core")
-                    .context("while fetching core flag from row"))
+                    .context("while fetching core flag from row")?
                     > 0;
-                let block = ok_or_bail!(row
+                let epoch = row
                     .try_get::<_, i64>("block")
-                    .context("while fetching block from row"));
-                let node = ok_or_bail!(<Self as DbConnector<V>>::node_from_row(row));
-                let payload = ok_or_bail!(Self::payload_from_row(row));
+                    .context("while fetching block from row")?;
+                let node = <Self as DbConnector<V>>::node_from_row(row)?;
+                let payload = Self::payload_from_row(row)?;
                 if is_core {
                     core_keys.push(node.k.clone());
                 }
 
-                let h_block = nodes.entry(block).or_default();
+                let h_block = epoch_lineages.entry(epoch).or_default();
                 h_block.0.insert(
                     node.k.clone(),
                     NodeContext {
@@ -447,7 +442,10 @@ where
                 h_block.1.insert(node.k, payload);
             }
 
-            Ok((core_keys, nodes))
+            Ok(WideLineage {
+                core_keys,
+                epoch_lineages,
+            })
         }
     }
 }
@@ -489,7 +487,7 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
             connection
                 .query(
                     &format!(
-                        "INSERT INTO {}_meta (__valid_from, __valid_until, payload)
+                        "INSERT INTO {}_meta ({VALID_FROM}, {VALID_UNTIL}, {PAYLOAD})
                      VALUES ($1, $1, $2)",
                         table
                     ),
@@ -517,7 +515,7 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
             db_tx
                 .query(
                     &format!(
-                        "INSERT INTO {}_meta (__valid_from, __valid_until, payload)
+                        "INSERT INTO {}_meta ({VALID_FROM}, {VALID_UNTIL}, {PAYLOAD})
                      VALUES ($1, $1, $2)",
                         self.table
                     ),
@@ -528,7 +526,7 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
             db_tx
                 .query(
                     &format!(
-                        "UPDATE {}_meta SET __valid_until = $1 + 1 WHERE __valid_until = $1",
+                        "UPDATE {}_meta SET {VALID_UNTIL} = $1 + 1 WHERE {VALID_UNTIL} = $1",
                         self.table
                     ),
                     &[&(self.epoch)],
@@ -607,9 +605,9 @@ where
             let connection = self.db.get().await.unwrap();
             let row = connection
                 .query_one(
-                    // Fetch the row with the most recent __valid_from
+                    // Fetch the row with the most recent VALID_FROM
                     &format!(
-                        "SELECT payload FROM {}_meta WHERE __valid_from <= $1 AND $1 <= __valid_until",
+                        "SELECT {PAYLOAD} FROM {}_meta WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
                         self.table
                     ),
                     &[&self.epoch],
@@ -627,7 +625,7 @@ where
         connection
             .query_one(
                 &format!(
-                    "SELECT payload FROM {}_meta WHERE __valid_from <= $1 AND $1 <= __valid_until",
+                    "SELECT {PAYLOAD} FROM {}_meta WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
                     self.table,
                 ),
                 &[&epoch],
@@ -677,7 +675,7 @@ where
         db_tx
             .query(
                 &format!(
-                    "UPDATE {}_meta SET __valid_until = $1 WHERE __valid_until > $1",
+                    "UPDATE {}_meta SET {VALID_UNTIL} = $1 WHERE {VALID_UNTIL} > $1",
                     self.table
                 ),
                 &[&new_epoch],
@@ -686,7 +684,7 @@ where
         // Delete nodes that would not have been born yet
         db_tx
             .query(
-                &format!("DELETE FROM {}_meta WHERE __valid_from > $1", self.table),
+                &format!("DELETE FROM {}_meta WHERE {VALID_FROM} > $1", self.table),
                 &[&new_epoch],
             )
             .await?;
@@ -760,7 +758,7 @@ where
         connection
             .query_one(
                 &format!(
-                    "SELECT COUNT(*) FROM {} WHERE __valid_from <= $1 AND $1 <= __valid_until",
+                    "SELECT COUNT(*) FROM {} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
                     self.table
                 ),
                 &[&self.epoch],
@@ -799,7 +797,7 @@ where
         db_tx
             .query(
                 &format!(
-                    "UPDATE {} SET __valid_until = $1 WHERE __valid_until > $1",
+                    "UPDATE {} SET {VALID_UNTIL} = $1 WHERE {VALID_UNTIL} > $1",
                     self.table
                 ),
                 &[&new_epoch],
@@ -808,7 +806,7 @@ where
         // Delete nodes that would not have been born yet
         db_tx
             .query(
-                &format!("DELETE FROM {} WHERE __valid_from > $1", self.table),
+                &format!("DELETE FROM {} WHERE {VALID_FROM} > $1", self.table),
                 &[&new_epoch],
             )
             .await?;
