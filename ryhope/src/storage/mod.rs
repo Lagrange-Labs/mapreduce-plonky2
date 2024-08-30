@@ -44,9 +44,24 @@ where
 
 pub struct WideLineage<K, V> {
     /// The keys touched by the query itself
-    core_keys: Vec<K>,
+    pub core_keys: Vec<K>,
     /// An epoch -> (K -> NodeContext, K -> Payload) mapping
     epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
+}
+
+impl<K: Hash + Eq + Clone, V: Clone> WideLineage<K, V> {
+    pub fn node_context_at(&self, epoch: Epoch, key: &K) -> Option<NodeContext<K>> {
+        self.epoch_lineages
+            .get(&epoch)
+            .and_then(|h| h.0.get(key))
+            .cloned()
+    }
+    pub fn payload_at(&self, epoch: Epoch, key: &K) -> Option<V> {
+        self.epoch_lineages
+            .get(&epoch)
+            .and_then(|h| h.1.get(key))
+            .cloned()
+    }
 }
 
 /// A `TreeStorage` stores all data related to the tree structure, i.e. (i) the

@@ -7,7 +7,7 @@ use storage::{
     view::TreeStorageView,
     EpochKvStorage, EpochStorage, FromSettings, MetaOperations, PayloadStorage, RoEpochKvStorage,
     SqlTransactionStorage, SqlTreeTransactionalStorage, TransactionalStorage, TreeStorage,
-    TreeTransactionalStorage,
+    TreeTransactionalStorage, WideLineage,
 };
 use tokio_postgres::Transaction;
 use tree::{sbbst, scapegoat, MutableTree, NodeContext, NodePath, PrintableTree, TreeTopology};
@@ -325,6 +325,15 @@ impl<
     ) -> Result<Vec<UpdateTree<T::Key>>> {
         self.storage
             .wide_update_trees(&self.tree, keys_query, bounds)
+            .await
+    }
+    pub async fn wide_lineage_between(
+        &self,
+        keys_query: &S::KeySource,
+        bounds: (Epoch, Epoch),
+    ) -> Result<WideLineage<T::Key, V>> {
+        self.storage
+            .wide_lineage_between(&self.tree, keys_query, bounds)
             .await
     }
 }
