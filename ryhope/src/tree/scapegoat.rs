@@ -467,16 +467,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
             if let Some(left) = n.left() {
                 Self::rec_print(left, d + 1, s).await;
             }
-            println!(
-                "{}{:?}/{} ({})",
-                "  |".repeat(d),
-                n.k,
-                n.parent
-                    .as_ref()
-                    .map(|x| format!("{:?}", x))
-                    .unwrap_or("None".to_string()),
-                n.subtree_size
-            );
+            println!("{}{:?} ({})", "  |".repeat(d), n.k, n.subtree_size);
             if let Some(right) = n.right() {
                 Self::rec_print(right, d + 1, s).await;
             }

@@ -994,13 +994,13 @@ async fn grouped_txs() -> Result<()> {
 
 #[tokio::test]
 async fn wide_update_trees() {
-    type K = i64;
+    type K = String;
     type V = usize;
     type Tree = scapegoat::Tree<K>;
     type Storage = PgsqlStorage<Tree, V>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
-        InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
+        InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: "wide".to_string(),
@@ -1009,10 +1009,14 @@ async fn wide_update_trees() {
     .await
     .unwrap();
 
+    const TEXT1: &str = "au solstice ete comme palais alcine ciel embrasera chateau versailles plus rien restera tu peux lacher bontemps toute sa cohorte que personne ne sorte deja temps";
+
+    const TEXT2: &str = "car je defie astre roi toutes planetes agencer doit titres tetes esope mots allument mon brulot grenouilles jupiter";
+
     s.in_transaction(|s| {
         Box::pin(async {
-            for i in 0..10000 {
-                s.store(i, (10 * i).try_into().unwrap()).await?;
+            for (i, word) in TEXT1.split(' ').enumerate() {
+                s.store(word.to_string(), i.try_into().unwrap()).await?;
             }
             Ok(())
         })
@@ -1020,27 +1024,29 @@ async fn wide_update_trees() {
     .await
     .unwrap();
 
-    for i in 0..5 {
-        let to_remove = (i * 1..i * 100)
-            .map(|k| i * 1000 + k)
-            .collect::<HashSet<_>>();
-        s.in_transaction(|s| {
-            Box::pin({
-                async move {
-                    for k in to_remove.iter() {
-                        s.remove(*k).await?;
-                    }
-                    Ok(())
-                }
-            })
+    s.print_tree().await;
+
+    println!("\n\n\n\n\n");
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for (i, word) in TEXT2.split(' ').enumerate() {
+                s.store(word.to_string(), i.try_into().unwrap()).await?;
+            }
+            Ok(())
         })
-        .await
-        .unwrap();
-    }
+    })
+    .await
+    .unwrap();
 
-    let query = format!("SELECT key FROM wide WHERE key = ANY(ARRAY['\\x0000000000000012'::bytea,'\\x0000000000000060'::bytea, '\\x000000000000032a'::bytea]) AND {VALID_FROM} <= 2 AND {VALID_UNTIL} >= 5");
+    s.print_tree().await;
 
-    let trees = s.wide_update_trees(&query, (2, 5)).await.unwrap();
+    // Keys are "restera" and "plus"
+    let query = format!("
+SELECT key, generate_series(GREATEST(1, {VALID_FROM}), LEAST(2, {VALID_FROM})) AS block
+FROM wide
+WHERE key = ANY(ARRAY['\\x72657374657261'::bytea,'\\x706c7573'::bytea, '\\x636172']) AND NOT ({VALID_FROM} > 2 OR {VALID_UNTIL} < 1)");
+
+    let trees = s.wide_update_trees(&query, (1, 2)).await.unwrap();
     for t in trees.iter() {
         println!("{}:", t.epoch());
         t.print();
