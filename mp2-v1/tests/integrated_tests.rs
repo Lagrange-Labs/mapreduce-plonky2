@@ -21,7 +21,10 @@ use anyhow::{Context, Result};
 use common::{
     cases::{
         indexing::{ChangeType, TreeFactory, UpdateType},
-        query::test_query,
+        query::{
+            test_query, GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput,
+            MAX_NUM_PLACEHOLDERS,
+        },
     },
     context::{self, ParamsType, TestContextConfig},
     proof_storage::{ProofKV, ProofStorage, DEFAULT_PROOF_STORE_FOLDER},
@@ -30,9 +33,16 @@ use common::{
 };
 use envconfig::Envconfig;
 use log::info;
-use mp2_common::eth::ProofQuery;
-use parsil::symbols::ContextProvider;
+use mp2_common::{eth::ProofQuery, proof::ProofWithVK};
+use parsil::{
+    assembler::DynamicCircuitPis,
+    parse_and_validate,
+    symbols::{ContextProvider, ZkTable},
+    ParsilSettings, PlaceholderSettings,
+};
+use serde::Deserialize;
 use test_log::test;
+use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
 pub(crate) mod common;
 
@@ -141,184 +151,67 @@ fn read_table_info(f: &str) -> Result<TableInfo> {
     Ok(info)
 }
 
-//use crate::common::bindings::simple::Simple::{self};
-//#[tokio::test]
-//async fn test_empty_mpt() -> Result<()> {
-//    let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
-//    let mut ctx = context::new_local_chain(storage).await;
-//    info!("Building querying params");
-//    let mut single = TestCase::single_value_test_case(&ctx, TreeFactory::New).await?;
-//    let provider = ProviderBuilder::new()
-//        .with_recommended_fillers()
-//        .wallet(ctx.wallet())
-//        .on_http(ctx.rpc_url.parse().unwrap());
-//
-//    let contract = Simple::new(single.contract_address, &provider);
-//    let value = U256::from(10);
-//    contract
-//        .setS2(value)
-//        .send()
-//        .await
-//        .unwrap()
-//        .watch()
-//        .await
-//        .unwrap();
-//    let bn = ctx.block_number().await;
-//    let query = ProofQuery::new_simple_slot(single.contract_address, 0);
-//    let response = ctx
-//        .query_mpt_proof(&query, BlockNumberOrTag::Number(bn))
-//        .await;
-//    println!(
-//        "GIVEN VALUE of slot 0 : {}",
-//        response.storage_proof[0].value
-//    );
-//    let leaf = response.storage_proof[0].proof.last().unwrap().to_vec();
-//    println!("LEAF: {:?}", leaf);
-//    println!(
-//        "--> len of proof = {}",
-//        response.storage_proof[0].proof.len()
-//    );
-//    // THIS PANICS !!!
-//    //let tuple = rlp::decode_list(&leaf);
-//    //let leaf_value: Vec<u8> = rlp::decode(&tuple)?;
-//    //let uvalue = U256::from_be_slice(&leaf_value);
-//    //println!("EXTRACTED value of slot 0 {}", uvalue);
-//    // DOESN?T work because i can't set an empty address erf..
-//    contract
-//        .setMapping(U256::from(10), Address::from_slice(&vec![]))
-//        .send()
-//        .await
-//        .unwrap()
-//        .watch()
-//        .await
-//        .unwrap();
-//    //
-//    Ok(())
-//}
+struct T(ZkTable);
+impl ContextProvider for T {
+    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+        Ok(self.0.clone())
+    }
 
-//#[test]
-//fn ryhope_scapegoat2() -> Result<()> {
-//    let mut row_tree = MerkleRowTree::new(
-//        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.8))),
-//        (),
-//    )
-//    .unwrap();
-//    let cell = Cell {
-//        id: 10,
-//        value: U256::from(10),
-//    };
-//    let payload = RowPayload {
-//        cells: CellCollection(vec![cell.clone(), cell.clone(), cell.clone()]),
-//        ..Default::default()
-//    };
-//    // RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [10] }/None (3)
-//    //   |RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [11] }/RowTreeKey { value: , rest: [10] } (2)
-//    //   |  |RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398834414), rest: [12] }/RowTreeKey { value: , rest: [11] } (1)
-//    let r10 = RowTreeKey {
-//        value: U256::from_str_radix("1056494154592187365319695072752373049978398833853", 10)
-//            .unwrap()
-//            .into(),
-//        rest: vec![10],
-//    };
-//    let r11 = RowTreeKey {
-//        value: U256::from_str_radix("1056494154592187365319695072752373049978398833853", 10)
-//            .unwrap()
-//            .into(),
-//        rest: vec![11],
-//    };
-//    let r12 = RowTreeKey {
-//        value: U256::from_str_radix("1056494154592187365319695072752373049978398834414", 10)
-//            .unwrap()
-//            .into(),
-//        rest: vec![12],
-//    };
-//    enum Update {
-//        Insert(RowTreeKey),
-//        Deletion(RowTreeKey),
-//    }
-//    let mut apply_update =
-//        |tree: &mut MerkleRowTree, updates: Vec<Update>| -> Result<UpdateTree<RowTreeKey>> {
-//            tree.in_transaction(|t| {
-//                for u in updates {
-//                    match u {
-//                        Update::Insert(k) => {
-//                            t.store(k, payload.clone())?;
-//                        }
-//                        Update::Deletion(k) => {
-//                            t.remove(k)?;
-//                        }
-//                    }
-//                }
-//                Ok(())
-//            })
-//        };
-//    println!("block 2");
-//    apply_update(
-//        &mut row_tree,
-//        vec![
-//            Update::Insert(r10.clone()),
-//            Update::Insert(r11.clone()),
-//            Update::Insert(r12),
-//        ],
-//    )?;
-//
-//    println!("block 3");
-//    // Insertion(Row { k: RowTreeKey { value: VectorU256(131889689160155728452442635557830924454313873897), rest: [13] },
-//    let r13 = RowTreeKey {
-//        value: U256::from_str_radix("131889689160155728452442635557830924454313873897", 10)
-//            .unwrap()
-//            .into(),
-//        rest: vec![13],
-//    };
-//    apply_update(&mut row_tree, vec![Update::Insert(r13)])?;
-//
-//    // Insertion(Row { k: RowTreeKey { value: VectorU256(760593967277233584130757083408460933562276361544), rest: [14] }, :
-//    println!("block 4");
-//    let r14 = RowTreeKey {
-//        value: U256::from_str_radix("760593967277233584130757083408460933562276361544", 10)
-//            .unwrap()
-//            .into(),
-//        rest: vec![14],
-//    };
-//    apply_update(&mut row_tree, vec![Update::Insert(r14)])?;
-//    // Deletion(RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [10] })
-//    // Insertion(Row { k: RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [15]
-//    println!("block 5");
-//    let r15 = RowTreeKey {
-//        value: U256::from_str_radix("1056494154592187365319695072752373049978398833853", 10)
-//            .unwrap()
-//            .into(),
-//        rest: vec![15],
-//    };
-//    apply_update(
-//        &mut row_tree,
-//        vec![Update::Deletion(r10), Update::Insert(r15)],
-//    )?;
-//
-//    //  Deletion(RowTreeKey { value: VectorU256(1056494154592187365319695072752373049978398833853), rest: [11] })
-//    // Insertion(Row { k: RowTreeKey { value: VectorU256(252811549864805747143179347346470204140167719177), rest: [11] },
-//    println!("block 6");
-//    let r11_bis = RowTreeKey {
-//        value: U256::from_str_radix("252811549864805747143179347346470204140167719177", 10)
-//            .unwrap()
-//            .into(),
-//        rest: vec![11],
-//    };
-//
-//    apply_update(
-//        &mut row_tree,
-//        vec![Update::Deletion(r11), Update::Insert(r11_bis.clone())],
-//    )?;
-//    // Deletion(RowTreeKey { value: VectorU256(252811549864805747143179347346470204140167719177), rest: [11] }
-//    println!("block 7");
-//    println!("BEFORE");
-//    row_tree.print_tree();
-//    let ut = apply_update(&mut row_tree, vec![Update::Deletion(r11_bis)])?;
-//
-//    println!("AFTER");
-//    row_tree.print_tree();
-//    println!("UT: ------------------------");
-//    ut.print();
-//    println!("----------------------------");
-//    Ok(())
-//}
+    fn output_ids(&self) -> Vec<u64> {
+        todo!()
+    }
+}
+#[tokio::test]
+#[ignore]
+async fn test_andrus_query() -> Result<()> {
+    let _ = env_logger::try_init();
+    let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
+    let cfg = TestContextConfig::init_from_env().context("while parsing configuration")?;
+    let folder = cfg
+        .params_dir
+        .unwrap_or(DEFAULT_PROOF_STORE_FOLDER.to_string());
+    let ivc_proof_name = format!("{folder}/{}", "ivc.proof");
+    let root_query_proof_name = format!("{folder}/{}", "root.proof");
+    let pis_name = format!("{folder}/{}", "pis.json");
+    let ivc_proof = tokio::fs::read(ivc_proof_name).await?;
+    let root_query_proof = tokio::fs::read(root_query_proof_name).await?;
+
+    let ph = Placeholders::new_empty(U256::from(2228671), U256::from(2228671));
+    let query = "select AVG(field1) from primitive1_rows WHERE block_number >= $MIN_BLOCK and block_number <= $MAX_BLOCK";
+    let zktable_str = r#"{"user_name":"primitive1","name":"primitive1_rows","columns":[{"name":"block_number","kind":"PrimaryIndex","id":15542555334667826467},{"name":"field1","kind":"SecondaryIndex","id":10143644063834010325},{"name":"field2","kind":"Standard","id":14738928498191419754},{"name":"field3","kind":"Standard","id":2724380514203373020},{"name":"field4","kind":"Standard","id":1084192582840933701}]}"#;
+    let table: ZkTable = serde_json::from_str(zktable_str)?;
+    let settings = ParsilSettings {
+        context: T(table),
+        placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
+    };
+
+    let parsed = parse_and_validate(query, &settings)?;
+    let computed_pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &ph)?;
+
+    let expected_pis: DynamicCircuitPis =
+        serde_json::from_slice(&tokio::fs::read(pis_name).await?)?;
+    assert_eq!(expected_pis, computed_pis);
+
+    info!("Loading Anvil and contract");
+    let mut ctx = context::new_local_chain(storage).await;
+    info!("Building querying params");
+    ctx.build_params(ParamsType::Query).unwrap();
+
+    let pis_hash = QueryCircuitInput::ids_for_placeholder_hash(
+        &computed_pis.predication_operations,
+        &computed_pis.result,
+        &ph,
+        &computed_pis.bounds,
+    )?;
+    let input = RevelationCircuitInput::new_revelation_no_results_tree(
+        root_query_proof,
+        ivc_proof,
+        &computed_pis.bounds,
+        &ph,
+        pis_hash,
+    )?;
+    info!("Generating the revelation proof");
+    let proof = ctx.run_query_proof(GlobalCircuitInput::Revelation(input))?;
+    info!("all good");
+    Ok(())
+}
