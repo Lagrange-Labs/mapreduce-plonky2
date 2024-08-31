@@ -201,6 +201,7 @@ async fn prove_query(
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
     // group the rows per block number
+    let number_of_rows = all_touched_rows.len();
     let touched_rows = all_touched_rows
         .into_iter()
         .map(|r| {
@@ -296,7 +297,7 @@ async fn prove_query(
     info!("Revelation proof done! Checking public inputs...");
     // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
     // to check the public inputs
-    let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
+    let pis = parsil::assembler::assemble_static(&parsed, settings)?;
 
     check_final_outputs(
         proof,
@@ -305,7 +306,7 @@ async fn prove_query(
         &query,
         &pis,
         current_epoch,
-        touched_rows.len(),
+        number_of_rows,
         res,
         metadata,
     )?;
