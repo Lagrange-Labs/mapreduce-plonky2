@@ -1,6 +1,7 @@
 use crate::{
     storage::{
-        EpochKvStorage, EpochStorage, RoEpochKvStorage, SqlTransactionStorage, TransactionalStorage,
+        BlankType, BlanketTransaction, EpochKvStorage, EpochStorage, RoEpochKvStorage,
+        SqlTransactionStorage, TransactionalStorage,
     },
     tree::scapegoat,
     Epoch,
@@ -405,7 +406,11 @@ impl<T> SqlTransactionStorage for CachedDbStore<T>
 where
     T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
 {
-    async fn commit_in(&mut self, tx: &mut tokio_postgres::Transaction<'_>) -> Result<()> {
+    type Tx = BlanketTransaction;
+    async fn commit_in<'a>(
+        &mut self,
+        tx: &mut <BlanketTransaction as BlankType<'a>>::Concrete,
+    ) -> Result<()> {
         self.commit_in_transaction(tx).await
     }
 

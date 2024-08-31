@@ -242,13 +242,29 @@ pub trait TransactionalStorage {
     }
 }
 
+pub trait BlankType<'a> {
+    type Concrete;
+}
+pub enum BlanketTransaction {}
+pub enum BlanketInMemory {}
+
+impl<'a> BlankType<'a> for BlanketTransaction {
+    type Concrete = Transaction<'a>;
+}
+
+impl<'a> BlankType<'a> for BlanketInMemory {
+    type Concrete = ();
+}
+
 /// This trait is similar to [`TransactionalStorage`], but let the caller re-use
 /// an existing SQL transaction rather than letting the implementer handle
 /// transaction creation & execution.
 pub trait SqlTransactionStorage: TransactionalStorage {
+    type Tx: for<'b> BlankType<'b>;
     /// Similar to the [`commit`] method of [`TransactionalStorage`], but
     /// re-using a given transaction.
-    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()>;
+    async fn commit_in<'a>(&mut self, tx: &mut <Self::Tx as BlankType<'a>>::Concrete)
+        -> Result<()>;
 
     /// Types implementing this trait may implement this method if there is code
     /// they want to have run after the transaction successful execution, _e.g._

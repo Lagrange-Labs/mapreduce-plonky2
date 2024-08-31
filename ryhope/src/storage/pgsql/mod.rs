@@ -2,8 +2,8 @@ use self::storages::{
     CachedDbKvStore, CachedDbStore, DbConnector, NodeConnector, PayloadConnector,
 };
 use super::{
-    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, SqlTransactionStorage,
-    TransactionalStorage, TreeStorage,
+    BlankType, BlanketTransaction, EpochKvStorage, EpochStorage, FromSettings, PayloadStorage,
+    SqlTransactionStorage, TransactionalStorage, TreeStorage,
 };
 use crate::{
     storage::{pgsql::storages::DBPool, RoEpochKvStorage},
@@ -494,7 +494,7 @@ where
         NodeConnector::insert_in_tx(db_tx, &self.table, k, self.epoch + 1, n).await
     }
 
-    async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
+    async fn commit_in_transaction<'a>(&mut self, db_tx: &'a mut Transaction<'_>) -> Result<()> {
         ensure!(self.in_tx, "not in a transaction");
 
         // The putative new stamps if everything goes well
@@ -629,7 +629,9 @@ where
             .await
             .expect("unable to create DB transaction");
 
-        self.commit_in_transaction(&mut db_tx).await?;
+        {
+            self.commit_in_transaction(&mut db_tx).await?;
+        }
 
         // Atomically execute the PgSQL transaction
         let err = db_tx.commit().await.context("while committing transaction");
@@ -650,7 +652,11 @@ where
     T::State: Send + Sync + Clone,
     NodeConnector: DbConnector<T::Key, T::Node>,
 {
-    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()> {
+    type Tx = BlanketTransaction;
+    async fn commit_in<'a>(
+        &mut self,
+        tx: &mut <BlanketTransaction as BlankType<'a>>::Concrete,
+    ) -> Result<()> {
         self.commit_in_transaction(tx).await
     }
 

@@ -8,7 +8,7 @@ use crate::tree::TreeTopology;
 use crate::{Epoch, InitSettings};
 
 use super::{
-    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
+    BlanketInMemory, EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
     SqlTransactionStorage, TransactionalStorage, TreeStorage,
 };
 
@@ -358,7 +358,8 @@ where
     T: TreeTopology,
     V: Clone + Debug + Send + Sync,
 {
-    async fn commit_in(&mut self, _tx: &mut tokio_postgres::Transaction<'_>) -> Result<()> {
+    type Tx = BlanketInMemory;
+    async fn commit_in<'a>(&mut self, _tx: &mut ()) -> Result<()> {
         self.commit_transaction().await
     }
 

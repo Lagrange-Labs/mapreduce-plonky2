@@ -5,9 +5,9 @@ use std::{collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData};
 use storage::{
     updatetree::{Next, UpdatePlan, UpdateTree},
     view::TreeStorageView,
-    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
-    SqlTransactionStorage, SqlTreeTransactionalStorage, TransactionalStorage, TreeStorage,
-    TreeTransactionalStorage,
+    BlanketTransaction, EpochKvStorage, EpochStorage, FromSettings, PayloadStorage,
+    RoEpochKvStorage, SqlTransactionStorage, SqlTreeTransactionalStorage, TransactionalStorage,
+    TreeStorage, TreeTransactionalStorage,
 };
 use tokio_postgres::Transaction;
 use tree::{sbbst, scapegoat, MutableTree, NodeContext, NodePath, PrintableTree, TreeTopology};
@@ -411,7 +411,10 @@ impl<
 impl<
         T: TreeTopology + MutableTree + Send + Sync,
         V: NodePayload + Send + Sync,
-        S: SqlTransactionStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
+        S: SqlTransactionStorage<Tx = BlanketTransaction>
+            + TreeStorage<T>
+            + PayloadStorage<T::Key, V>
+            + FromSettings<T::State>,
     > SqlTreeTransactionalStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
 {
     async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<UpdateTree<T::Key>> {
