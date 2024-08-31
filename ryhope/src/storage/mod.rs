@@ -242,8 +242,8 @@ pub trait TransactionalStorage {
     }
 }
 
-pub trait BlankType<'a> {
-    type Concrete;
+pub trait BlankType<'a>: Send {
+    type Concrete: Send;
 }
 pub enum BlanketTransaction {}
 pub enum BlanketInMemory {}
@@ -252,7 +252,7 @@ impl<'a> BlankType<'a> for BlanketTransaction {
     type Concrete = Transaction<'a>;
 }
 
-impl<'a> BlankType<'a> for BlanketInMemory {
+impl BlankType<'_> for BlanketInMemory {
     type Concrete = ();
 }
 
@@ -260,11 +260,13 @@ impl<'a> BlankType<'a> for BlanketInMemory {
 /// an existing SQL transaction rather than letting the implementer handle
 /// transaction creation & execution.
 pub trait SqlTransactionStorage: TransactionalStorage {
-    type Tx: for<'b> BlankType<'b>;
+    type Tx: for<'b> BlankType<'b> + Send;
     /// Similar to the [`commit`] method of [`TransactionalStorage`], but
     /// re-using a given transaction.
-    async fn commit_in<'a>(&mut self, tx: &mut <Self::Tx as BlankType<'a>>::Concrete)
-        -> Result<()>;
+    fn commit_in<'a>(
+        &mut self,
+        tx: &mut <Self::Tx as BlankType<'a>>::Concrete,
+    ) -> impl Future<Output = Result<()>>;
 
     /// Types implementing this trait may implement this method if there is code
     /// they want to have run after the transaction successful execution, _e.g._
@@ -346,9 +348,13 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
 pub trait SqlTreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send + Sync>:
     TreeTransactionalStorage<K, V>
 {
+    type Tx: for<'b> BlankType<'b>;
     /// Similar to the [`commit`] method of [`TreeTransactionalStorage`], but
     /// re-using a given transaction.
-    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<UpdateTree<K>>;
+    async fn commit_in<'a>(
+        &mut self,
+        tx: &mut <Self::Tx as BlankType<'a>>::Concrete,
+    ) -> Result<UpdateTree<K>>;
 
     /// Types implementing this trait may implement this method if there is code
     /// they want to have run after the transaction successful execution, _e.g._

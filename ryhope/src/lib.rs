@@ -5,7 +5,7 @@ use std::{collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData};
 use storage::{
     updatetree::{Next, UpdatePlan, UpdateTree},
     view::TreeStorageView,
-    BlanketTransaction, EpochKvStorage, EpochStorage, FromSettings, PayloadStorage,
+    BlankType, BlanketTransaction, EpochKvStorage, EpochStorage, FromSettings, PayloadStorage,
     RoEpochKvStorage, SqlTransactionStorage, SqlTreeTransactionalStorage, TransactionalStorage,
     TreeStorage, TreeTransactionalStorage,
 };
@@ -411,13 +411,14 @@ impl<
 impl<
         T: TreeTopology + MutableTree + Send + Sync,
         V: NodePayload + Send + Sync,
-        S: SqlTransactionStorage<Tx = BlanketTransaction>
-            + TreeStorage<T>
-            + PayloadStorage<T::Key, V>
-            + FromSettings<T::State>,
+        S: SqlTransactionStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
     > SqlTreeTransactionalStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
 {
-    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<UpdateTree<T::Key>> {
+    type Tx = S::Tx;
+    async fn commit_in<'a>(
+        &mut self,
+        tx: &mut <S::Tx as BlankType<'a>>::Concrete,
+    ) -> Result<UpdateTree<T::Key>> {
         let mut paths = vec![];
         for k in self.dirty.drain() {
             if let Some(p) = self.tree.lineage(&k, &self.storage).await {
