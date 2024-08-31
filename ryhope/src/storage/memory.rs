@@ -9,7 +9,7 @@ use crate::{Epoch, InitSettings};
 
 use super::{
     EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
-    TransactionalStorage, TreeStorage,
+    SqlTransactionStorage, TransactionalStorage, TreeStorage,
 };
 
 /// A RAM-backed implementation of a transactional epoch storage for a single value.
@@ -350,6 +350,24 @@ where
 
     fn data_mut(&mut self) -> &mut Self::DataStorage {
         &mut self.data
+    }
+}
+
+impl<T, V> SqlTransactionStorage for InMemory<T, V>
+where
+    T: TreeTopology,
+    V: Clone + Debug + Send + Sync,
+{
+    async fn commit_in(&mut self, _tx: &mut tokio_postgres::Transaction<'_>) -> Result<()> {
+        self.commit_transaction().await
+    }
+
+    fn commit_success(&mut self) {
+        todo!()
+    }
+
+    fn commit_failed(&mut self) {
+        todo!()
     }
 }
 
