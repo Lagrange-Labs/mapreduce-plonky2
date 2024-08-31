@@ -204,13 +204,18 @@ async fn prove_query(
     let number_of_rows = all_touched_rows.len();
     let touched_rows = all_touched_rows
         .into_iter()
-        .map(|r| {
+        .enumerate()
+        .map(|(i, r)| {
             let row_key = r
                 .get::<_, Option<Vec<u8>>>(0)
                 .map(RowTreeKey::from_bytea)
                 .context("unable to parse row key tree")
                 .expect("");
             let block: Epoch = r.get::<_, i64>(1);
+            info!(
+                " -- row [{}] => epoch = {} , value {:?}",
+                i, block, row_key.rest
+            );
             (block as BlockPrimaryIndex, row_key)
         })
         .fold(
@@ -438,7 +443,7 @@ fn check_final_outputs(
     );
     // check results
     res.into_iter()
-        .zip(revelation_pis.result_values().into_iter())
+        .zip(revelation_pis.result_values())
         .for_each(|(expected_res, res)| {
             (0..expected_res.len()).for_each(|i| {
                 let SqlReturn::Numeric(expected_res) = SqlType::Numeric.extract(&expected_res, i);
