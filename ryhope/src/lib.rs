@@ -133,7 +133,12 @@ impl<
             for c in c.iter_children() {
                 if let Some(k) = c {
                     child_data.push(Some(self.storage.data().try_fetch(k).await.with_context(
-                        || format!("[aggregation] failed to fetch node `{k:?}`"),
+                        || {
+                            format!(
+                                "[aggregation] failed to fetch node `{k:?}` at {}",
+                                self.storage.data().current_epoch()
+                            )
+                        },
                     )?));
                 } else {
                     child_data.push(None);
