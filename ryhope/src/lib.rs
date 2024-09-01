@@ -132,7 +132,9 @@ impl<
             let mut child_data = vec![];
             for c in c.iter_children() {
                 if let Some(k) = c {
-                    child_data.push(Some(self.storage.data().fetch(k).await));
+                    child_data.push(Some(self.storage.data().try_fetch(k).await.with_context(
+                        || format!("[aggregation] failed to fetch node `{k:?}`"),
+                    )?));
                 } else {
                     child_data.push(None);
                 }
