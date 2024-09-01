@@ -367,14 +367,7 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
 pub fn validate<C: ContextProvider>(settings: &ParsilSettings<C>, query: &mut Query) -> Result<()> {
     if let SetExpr::Select(ref mut select) = *query.body {
         ensure!(
-            select.projection.iter().all(|s| !matches!(
-                s,
-                SelectItem::UnnamedExpr(Expr::Function(_))
-                    | SelectItem::ExprWithAlias {
-                        expr: Expr::Function(_),
-                        ..
-                    }
-            )) | select.projection.iter().all(|s| matches!(
+            select.projection.iter().all(|s| matches!(
                 s,
                 SelectItem::UnnamedExpr(Expr::Function(_))
                     | SelectItem::ExprWithAlias {
@@ -382,7 +375,7 @@ pub fn validate<C: ContextProvider>(settings: &ParsilSettings<C>, query: &mut Qu
                         ..
                     }
             )),
-            ValidationError::MixedQuery,
+            ValidationError::TabularQuery,
         );
     } else {
         bail!(ValidationError::NotASelect)
