@@ -548,6 +548,7 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
 
     fn on_commit_success(&mut self) {
         trace!("[{self}] commit successful");
+        assert!(self.in_tx);
         self.epoch += 1;
         self.dirty = false;
         self.in_tx = false;
@@ -555,6 +556,7 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
 
     fn on_commit_failed(&mut self) {
         trace!("[{self}] commit failed");
+        assert!(self.in_tx);
         let _ = self.cache.get_mut().take();
         self.dirty = false;
         self.in_tx = false;

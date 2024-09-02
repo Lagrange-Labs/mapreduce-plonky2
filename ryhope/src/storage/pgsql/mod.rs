@@ -639,7 +639,9 @@ where
         Ok(())
     }
 
+    // FIXME: should return Result
     fn on_commit_success(&mut self) {
+        assert!(self.in_tx);
         trace!("[{self}] commit succesful; updating inner state");
         self.in_tx = false;
         self.epoch = self.epoch + 1;
@@ -648,6 +650,7 @@ where
     }
 
     fn on_commit_failed(&mut self) {
+        assert!(self.in_tx);
         trace!("[{self}] commit failed; updating inner state");
         self.in_tx = false;
         self.state.commit_failed();
@@ -708,13 +711,11 @@ where
 
     fn commit_success(&mut self) {
         trace!("[{self}] API-facing commit_success called");
-        self.state.commit_success();
         self.on_commit_success();
     }
 
     fn commit_failed(&mut self) {
         trace!("[{self}] API-facing commit_failed called");
-        self.state.commit_failed();
         self.on_commit_failed()
     }
 }
