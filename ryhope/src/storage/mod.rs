@@ -1,7 +1,13 @@
 use anyhow::*;
 use futures::future::BoxFuture;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Debug, future::Future, hash::Hash};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    future::Future,
+    hash::Hash,
+};
 use tokio_postgres::Transaction;
 use view::TreeStorageView;
 
@@ -49,7 +55,7 @@ pub struct WideLineage<K, V> {
     epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
 }
 
-impl<K: Hash + Eq + Clone, V: Clone> WideLineage<K, V> {
+impl<K: Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
     pub fn node_context_at(&self, epoch: Epoch, key: &K) -> Option<NodeContext<K>> {
         self.epoch_lineages
             .get(&epoch)
@@ -61,6 +67,43 @@ impl<K: Hash + Eq + Clone, V: Clone> WideLineage<K, V> {
             .get(&epoch)
             .and_then(|h| h.1.get(key))
             .cloned()
+    }
+
+    pub fn all_epochs(&self) -> HashMap<Epoch, HashSet<K>> {
+        self.core_keys
+            .iter()
+            .fold(HashMap::new(), |mut acc, (epoch, k)| {
+                acc.entry(*epoch).or_default().insert(k.clone());
+                acc
+            })
+    }
+    pub fn update_tree_for(&self, epoch: Epoch) -> Option<UpdateTree<K>> {
+        let epoch_data = self.epoch_lineages.get(&epoch)?;
+        let all_paths = self
+            .core_keys
+            .iter()
+            .filter(|(e, _)| *e == epoch)
+            .map(|(_, k)| {
+                let mut path = vec![k.clone()];
+                // ok to unwrap since we passed the filter, so that key must exist
+                // otherwise it's ryhope failure
+                let mut ctx = epoch_data.0.get(k).expect("lineage should get all keys");
+                while ctx.parent.is_some() {
+                    let parent_k = ctx.parent.as_ref().unwrap();
+                    ctx = epoch_data
+                        .0
+                        .get(parent_k)
+                        .expect("lineage should get all keys");
+                    path.push(parent_k.clone());
+                }
+                path
+            })
+            .collect_vec();
+        if all_paths.is_empty() {
+            None
+        } else {
+            Some(UpdateTree::from_paths(all_paths, epoch))
+        }
     }
 }
 
