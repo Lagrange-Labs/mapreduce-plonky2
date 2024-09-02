@@ -32,8 +32,8 @@ impl<K> NodePath<K> {
 
 /// Define common topological operations on trees.
 pub trait TreeTopology: Default + Send + Sync {
-    type Key: Debug + Clone + Hash + Eq + Sync + Send;
-    type Node: Debug + Sync + Send;
+    type Key: Debug + Clone + Hash + Eq + Sync + Send + Serialize + for<'a> Deserialize<'a>;
+    type Node: Debug + Clone + Sync + Send;
     /// Minimal data required to persist the tree.
     type State: Send + Sync + Clone + Debug + Serialize + for<'a> Deserialize<'a>;
 
@@ -60,6 +60,33 @@ pub trait TreeTopology: Default + Send + Sync {
         s: &S,
     ) -> Option<(Option<Self::Key>, Option<Self::Key>)>;
 
+    /// Return a set of `n` and its descendants, if any, up to `depth` levels
+    /// down.
+    async fn descendance<S: TreeStorage<Self>>(
+        &self,
+        s: &S,
+        n: &Self::Key,
+        depth: usize,
+    ) -> HashSet<Self::Key> {
+        let mut todos = vec![(n.to_owned(), 0)];
+        let mut descendance = HashSet::new();
+        while let Some(todo) = todos.pop() {
+            let current_depth = todo.1;
+            if current_depth <= depth {
+                if let Some(children) = self.children(&todo.0, s).await {
+                    for child in [children.0, children.1] {
+                        if let Some(child) = child {
+                            todos.push((child, current_depth + 1));
+                        }
+                    }
+                }
+                descendance.insert(todo.0);
+            }
+        }
+
+        descendance
+    }
+
     /// Returns the [`NodePath`] from the root of the tree to `k`.
     async fn lineage<S: TreeStorage<Self>>(
         &self,
@@ -68,13 +95,13 @@ pub trait TreeTopology: Default + Send + Sync {
     ) -> Option<NodePath<Self::Key>>;
 
     /// Return the union of the lineages of all the `ns`
-    async fn ascendance<S: TreeStorage<Self>>(
+    async fn ascendance<S: TreeStorage<Self>, I: IntoIterator<Item = Self::Key>>(
         &self,
-        ns: &[Self::Key],
+        ns: I,
         s: &S,
     ) -> HashSet<Self::Key> {
         let mut ascendance = HashSet::new();
-        for n in ns {
+        for n in ns.into_iter() {
             if let Some(np) = self.lineage(&n, s).await {
                 ascendance.extend(np.into_full_path());
             }

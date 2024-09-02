@@ -4,6 +4,7 @@
 use alloy::primitives::U256;
 use anyhow::*;
 use log::*;
+use ryhope::{PAYLOAD, VALID_FROM, VALID_UNTIL};
 use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, ExactNumberInfo, Expr, Function, FunctionArg,
     FunctionArgExpr, FunctionArgumentList, FunctionArguments, GroupByExpr, Ident, ObjectName,
@@ -33,8 +34,50 @@ pub struct TranslatedQuery {
     /// Where each placeholder from the zkSQL query should be put in the array
     /// of PgSQL placeholder.
     pub placeholder_mapping: HashMap<PlaceholderId, usize>,
+    /// A mapping from the named placeholders as defined in the settings to the
+    /// string representation of numeric placeholders (e.g. from `$MIN_BLOCK` to
+    /// `$4`).
+    pub placeholder_name_mapping: HashMap<String, String>,
 }
 impl TranslatedQuery {
+    pub fn make<C: ContextProvider>(
+        mut query: Query,
+        settings: &ParsilSettings<C>,
+    ) -> Result<Self> {
+        let largest_placeholder = placeholders::validate(settings, &mut query)?;
+        let placeholder_mapping = std::iter::once(PlaceholderId::MinQueryOnIdx1)
+            .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
+            .chain((1..=largest_placeholder).map(|i| PlaceholderId::Generic(i)))
+            .enumerate()
+            .map(|(i, p)| (p, i))
+            .collect();
+
+        let placeholder_name_mapping =
+            std::iter::once(settings.placeholders.min_block_placeholder.clone())
+                .chain(std::iter::once(
+                    settings.placeholders.max_block_placeholder.clone(),
+                ))
+                .chain((1..=largest_placeholder).map(|i| format!("${i}")))
+                .enumerate()
+                .map(|(i, p)| (p, format!("${}", i + 1)))
+                .collect();
+
+        Ok(Self {
+            query,
+            placeholder_mapping,
+            placeholder_name_mapping,
+        })
+    }
+
+    /// Combine the encapsulated query and placeholder mappings to generate a
+    /// SQL query with name placeholders replaced with the corresponding numeric
+    /// placeholders.
+    pub fn apply(&mut self) -> Query {
+        let mut r = self.query.clone();
+        r.visit(self).unwrap();
+        r
+    }
+
     /// How many PgSQL placeholders should be allocated
     pub fn placeholder_count(&self) -> usize {
         self.placeholder_mapping.len()
@@ -43,11 +86,21 @@ impl TranslatedQuery {
     /// From the [`Placeholders`] generated for the circuit public inputs,
     /// generate a list of placeholders that can be used in a PgSQL query.
     pub fn convert_placeholders(&self, placeholders: &Placeholders) -> Vec<U256> {
-        let mut r = vec![U256::default(); self.placeholder_count()];
-        for (name, value) in placeholders.0.iter() {
-            r[self.placeholder_mapping[name]] = *value;
+        let mut r = vec![U256::default(); self.placeholder_mapping.len()];
+        for (placeholder_id, positions) in self.placeholder_mapping.iter() {
+            println!("Handling {placeholder_id:?}");
+            r[*positions] = placeholders.0[placeholder_id];
         }
         r
+    }
+}
+
+impl AstPass for TranslatedQuery {
+    fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
+        if let Expr::Value(Value::Placeholder(name)) = expr {
+            *name = self.placeholder_name_mapping[name].to_string();
+        }
+        Ok(())
     }
 }
 
@@ -77,7 +130,7 @@ fn funcall(fname: &str, args: Vec<Expr>) -> Expr {
 
 /// If the given expression is a string-encoded value, it is casted to a NUMERIC
 /// in place.
-fn convert_number_string(expr: &mut Expr) -> Result<()> {
+pub fn convert_number_string(expr: &mut Expr) -> Result<()> {
     if let Some(replacement) = match expr {
         Expr::Value(v) => match v {
             Value::Number(_, _) => None,
@@ -116,23 +169,38 @@ fn convert_funcalls(expr: &mut Expr) -> Result<()> {
     Ok(())
 }
 
-/// Generate an [`Expr`] encoding `generate_series(__valid_from, __valid_until)`
-fn expand_block_range() -> Expr {
+fn expand_block_range<C: ContextProvider>(settings: &ParsilSettings<C>) -> Expr {
     funcall(
         "generate_series",
         vec![
-            Expr::Identifier(Ident::new("__valid_from")),
-            Expr::Identifier(Ident::new("__valid_until")),
+            funcall(
+                "GREATEST",
+                vec![
+                    Expr::Identifier(Ident::new(VALID_FROM)),
+                    Expr::Value(Value::Placeholder(
+                        settings.placeholders.min_block_placeholder.to_owned(),
+                    )),
+                ],
+            ),
+            funcall(
+                "LEAST",
+                vec![
+                    Expr::Identifier(Ident::new(VALID_UNTIL)),
+                    Expr::Value(Value::Placeholder(
+                        settings.placeholders.max_block_placeholder.to_owned(),
+                    )),
+                ],
+            ),
         ],
     )
 }
 
-/// Generate an [`Expr`] encoding for `payload -> cells -> '{id}' -> value
+/// Generate an [`Expr`] encoding for `PAYLOAD -> cells -> '{id}' -> value
 fn fetch_from_payload(id: u64) -> Expr {
     Expr::Cast {
         kind: CastKind::DoubleColon,
         expr: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
-            left: Box::new(Expr::Identifier(Ident::new("payload"))),
+            left: Box::new(Expr::Identifier(Ident::new(PAYLOAD))),
             op: BinaryOperator::Arrow,
             right: Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Value(Value::SingleQuotedString("cells".into()))),
@@ -149,36 +217,28 @@ fn fetch_from_payload(id: u64) -> Expr {
     }
 }
 
-/// The `RowFetcher` gathers all `(primary_index, row_key)` pairs generated by a
+/// The `KeyFetcher` gathers all `(row_key, epoch)` pairs generated by a
 /// query, used then to generate the values public inputs for the query
 /// circuits.
-struct RowFetcher<'a, C: ContextProvider> {
+struct KeyFetcher<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
-    largest_placeholder: usize,
 }
-impl<'a, C: ContextProvider> RowFetcher<'a, C> {
-    fn new(query: &mut Query, settings: &'a ParsilSettings<C>) -> Result<Self> {
-        let largest_placeholder = placeholders::validate(settings, query)?;
-        Ok(Self {
-            settings,
-            largest_placeholder,
-        })
+impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
+    fn new(settings: &'a ParsilSettings<C>) -> Result<Self> {
+        Ok(Self { settings })
     }
 
     fn process(&mut self, query: &mut Query) -> Result<()> {
         query.visit(self)?;
 
         if let SetExpr::Select(ref mut select) = *query.body {
-            select.projection = vec![
-                SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("key"))),
-                SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("block"))),
-            ];
+            select.projection = vec![SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("key")))];
         }
 
         Ok(())
     }
 }
-impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
+impl<'a, C: ContextProvider> AstPass for KeyFetcher<'a, C> {
     fn post_select(&mut self, select: &mut Select) -> Result<()> {
         // When we meet a SELECT, insert a * to be sure to bubble up the key &
         // block number
@@ -196,19 +256,7 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
 
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         convert_number_string(expr)?;
-        convert_funcalls(expr)?;
 
-        if let Expr::Value(Value::Placeholder(ref mut name)) = expr {
-            match self.settings.placeholders.resolve_placeholder(name)? {
-                PlaceholderIdentifier::MinQueryOnIdx1 => {
-                    *name = format!("${}", self.largest_placeholder + 1);
-                }
-                PlaceholderIdentifier::MaxQueryOnIdx1 => {
-                    *name = format!("${}", self.largest_placeholder + 2);
-                }
-                PlaceholderIdentifier::Generic(_) => {}
-            }
-        }
         Ok(())
     }
 
@@ -242,7 +290,10 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
                     // Insert the `key` column in the selected values...
                     std::iter::once(SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("key"))))
                     .chain(std::iter::once(
-                        SelectItem::ExprWithAlias { expr: expand_block_range(), alias: Ident::new("block") }
+                        SelectItem::ExprWithAlias {
+                            expr: expand_block_range(self.settings),
+                            alias: Ident::new("block")
+                        }
                     ))
                     // then continue normally
                         .chain(table_columns.iter().enumerate().map(|(i, column)| {
@@ -253,9 +304,9 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
                                     .unwrap_or(column.name.as_str()),
                             );
                             match column.kind {
-                                // primary index column := generate_series(__valid_from, __valid_until) AS name
+                                // primary index column := generate_series(VALID_FROM, VALID_UNTIL) AS name
                                 ColumnKind::PrimaryIndex => SelectItem::ExprWithAlias {
-                                    expr: expand_block_range(),
+                                    expr: expand_block_range(self.settings),
                                     alias,
                                 },
                                 // other columns := payload->'cells'->'id'->'value' AS name
@@ -332,15 +383,10 @@ impl<'a, C: ContextProvider> AstPass for RowFetcher<'a, C> {
 
 struct Executor<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
-    largest_placeholder: usize,
 }
 impl<'a, C: ContextProvider> Executor<'a, C> {
-    fn new(query: &mut Query, settings: &'a ParsilSettings<C>) -> Result<Self> {
-        let largest_placeholder = placeholders::validate(settings, query)?;
-        Ok(Self {
-            settings,
-            largest_placeholder,
-        })
+    fn new(settings: &'a ParsilSettings<C>) -> Result<Self> {
+        Ok(Self { settings })
     }
 }
 
@@ -348,18 +394,6 @@ impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         convert_number_string(expr)?;
         convert_funcalls(expr)?;
-
-        if let Expr::Value(Value::Placeholder(ref mut name)) = expr {
-            match self.settings.placeholders.resolve_placeholder(name)? {
-                PlaceholderIdentifier::MinQueryOnIdx1 => {
-                    *name = format!("${}", self.largest_placeholder + 1);
-                }
-                PlaceholderIdentifier::MaxQueryOnIdx1 => {
-                    *name = format!("${}", self.largest_placeholder + 2);
-                }
-                PlaceholderIdentifier::Generic(_) => {}
-            }
-        }
 
         Ok(())
     }
@@ -411,12 +445,12 @@ impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
                                     .unwrap_or(column.name.as_str()),
                             );
                             match column.kind {
-                                // primary index column := generate_series(__valid_from, __valid_until) AS name
+                                // primary index column := generate_series(VALID_FROM, VALID_UNTIL) AS name
                                 ColumnKind::PrimaryIndex => SelectItem::ExprWithAlias {
-                                    expr: expand_block_range(),
+                                    expr: expand_block_range(self.settings),
                                     alias,
                                 },
-                                // other columns := payload->'cells'->'id'->'value' AS name
+                                // other columns := PAYLOAD->'cells'->'id'->'value' AS name
                                 ColumnKind::SecondaryIndex | ColumnKind::Standard => {
                                     SelectItem::ExprWithAlias {
                                         expr: fetch_from_payload(column.id),
@@ -501,31 +535,67 @@ pub fn generate_query_execution<C: ContextProvider>(
     query: &mut Query,
     settings: &ParsilSettings<C>,
 ) -> Result<TranslatedQuery> {
-    let mut executor = Executor::new(query, settings)?;
+    let mut executor = Executor::new(settings)?;
     let mut query_execution = query.clone();
     query_execution.visit(&mut executor)?;
 
-    let placeholder_mapping = (1..=executor.largest_placeholder)
-        .map(|i| PlaceholderId::Generic(i))
-        .chain(std::iter::once(PlaceholderId::MinQueryOnIdx1))
-        .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
-        .enumerate()
-        .map(|(i, p)| (p, i))
-        .collect();
-
-    Ok(TranslatedQuery {
-        query: query_execution,
-        placeholder_mapping,
-    })
+    TranslatedQuery::make(query_execution, settings)
 }
 
 pub fn generate_query_keys<C: ContextProvider>(
     query: &mut Query,
     settings: &ParsilSettings<C>,
-) -> Result<Query> {
-    let mut pis = RowFetcher::new(query, settings)?;
+) -> Result<TranslatedQuery> {
+    let mut pis = KeyFetcher::new(settings)?;
     let mut query_pis = query.clone();
     pis.process(&mut query_pis)?;
+
     info!("PIs: {query_pis}");
-    Ok(query_pis)
+    TranslatedQuery::make(query_pis, settings)
+}
+
+/// Return two queries, respectively returning the largest sec. ind. value
+/// smaller than the given lower bound, and the smallest sec. ind. value larger
+/// than the given higher bound.
+///
+/// If the lower or higher bound are the extrema of the U256 definition domain,
+/// the associated query is `None`, reflecting the impossibility for a node
+/// satisfying the condition to exist in the database.
+pub fn bracket_secondary_index<C: ContextProvider>(
+    table_name: &str,
+    settings: &ParsilSettings<C>,
+    block_number: i64,
+    secondary_lo: U256,
+    secondary_hi: U256,
+) -> (Option<String>, Option<String>) {
+    let sec_ind_column = settings
+        .context
+        .fetch_table(table_name)
+        .unwrap()
+        .secondary_index_column()
+        .id;
+
+    // A simple alias for the sec. ind. values
+    let sec_index = format!("({PAYLOAD} -> 'cells' -> '{sec_ind_column}' ->> 'value')::NUMERIC");
+
+    // Select the largest of all the sec. ind. values that remains smaller than
+    // the provided sec. ind. lower bound if it is provided, -1 otherwise.
+    let largest_below = if secondary_lo == U256::MIN {
+        None
+    } else {
+        Some(format!("SELECT key FROM {table_name}
+                           WHERE {sec_index} < '{secondary_lo}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
+                           ORDER BY {sec_index} DESC LIMIT 1"))
+    };
+
+    // Symmetric situation for the upper bound.
+    let smallest_above = if secondary_hi == U256::MAX {
+        None
+    } else {
+        Some(format!("SELECT key FROM {table_name}
+                           WHERE {sec_index} > '{secondary_hi}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
+                           ORDER BY {sec_index} ASC LIMIT 1"))
+    };
+
+    (largest_below, smallest_above)
 }

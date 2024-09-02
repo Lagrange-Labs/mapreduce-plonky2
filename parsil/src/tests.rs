@@ -1,4 +1,5 @@
 use crate::assembler::{assemble_dynamic, DynamicCircuitPis};
+use crate::isolator;
 use crate::{
     symbols::FileContextProvider,
     utils::{parse_and_validate, ParsilSettings, PlaceholderSettings},
@@ -132,4 +133,76 @@ fn test_serde_circuit_pis() {
     let deserialized: DynamicCircuitPis = serde_json::from_slice(&serialized).unwrap();
 
     assert_eq!(pis, deserialized);
+}
+
+#[test]
+fn isolation() {
+    fn isolated_to_string(q: &str, lo_sec: bool, hi_sec: bool) -> String {
+        let settings = ParsilSettings {
+            context: FileContextProvider::from_file("tests/context.json").unwrap(),
+            placeholders: PlaceholderSettings::with_freestanding(3),
+        };
+
+        let mut query = parse_and_validate(q, &settings).unwrap();
+        isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)
+            .unwrap()
+            .to_string()
+    }
+
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table1 WHERE block BETWEEN 1 AND 5",
+            false,
+            false
+        ),
+        "SELECT * FROM table1 WHERE (block >= 1 AND block <= 5)"
+    );
+
+    // Drop references to other columns
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN 1 AND 5 AND 3 = 4 OR bar = 5",
+            false,
+            false
+        ),
+        "SELECT * FROM table2 WHERE (block >= 1 AND block <= 5)"
+    );
+
+    // Drop sec. ind. references if it has no kown bounds.
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo < 5",
+            false,
+            false
+        ),
+        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK)"
+    );
+
+    // Drop sec.ind. < [...] if it has a defined higher bound
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo < 5",
+            true,
+            false
+        ),
+        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK)"
+    );
+
+    // Keep sec.ind. < [...] if it has a defined higher bound
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo < 5",
+            false,
+            true
+        ),
+        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) AND foo < 5"
+    );
+
+    // Nicholas's example
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN 5 AND 10 AND (foo = 4 OR foo = 15) AND bar = 12",
+            false,
+            false),
+        "SELECT * FROM table2 WHERE (block >= 5 AND block <= 10)");
 }

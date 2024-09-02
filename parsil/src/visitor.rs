@@ -197,12 +197,6 @@ impl<P: AstPass> Visit<P> for Expr {
                 op.visit(pass)?;
                 expr.visit(pass)?;
             }
-            Expr::Convert { .. } | Expr::Cast { .. } => bail!("casts unsupported"),
-            Expr::AtTimeZone { .. } | Expr::Extract { .. } => bail!("dates unsupported"),
-            Expr::Ceil { .. } | Expr::Floor { .. } => bail!("float unsupported"),
-            Expr::Position { .. } | Expr::Substring { .. } | Expr::Trim { .. } => {
-                bail!("Strings unsupported")
-            }
             Expr::Overlay {
                 expr,
                 overlay_what,
@@ -218,10 +212,6 @@ impl<P: AstPass> Visit<P> for Expr {
             }
             Expr::Collate { expr, .. } => expr.visit(pass)?,
             Expr::Nested(e) => e.visit(pass)?,
-            Expr::Value(_) => {}
-            Expr::IntroducedString { .. } => bail!("MySQL"),
-            Expr::TypedString { .. } => {}
-            Expr::MapAccess { .. } => bail!("ClickHouse"),
             Expr::Function(Function {
                 parameters,
                 args,
@@ -278,21 +268,13 @@ impl<P: AstPass> Visit<P> for Expr {
                     e.visit(pass)?
                 }
             }
-            Expr::Struct { .. } | Expr::Named { .. } => unreachable!("BigQuery"),
-            Expr::Dictionary(_) | Expr::Map(_) => unreachable!("DuckDB"),
             Expr::Subscript { expr, .. } => expr.visit(pass)?,
             Expr::Array(array) => {
                 for e in array.elem.iter_mut() {
                     e.visit(pass)?;
                 }
             }
-            Expr::Interval(_) => unreachable!(),
-            Expr::MatchAgainst { .. } => unreachable!("MySQL"),
-            Expr::Wildcard => {}
-            Expr::QualifiedWildcard(_) => {}
-            Expr::OuterJoin(_) => unreachable!("non-standard"),
-            Expr::Prior(_) => todo!(),
-            Expr::Lambda(_) => unreachable!("DataBricks"),
+            _ => {}
         }
         pass.post_expr(self)
     }

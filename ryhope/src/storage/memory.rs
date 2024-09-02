@@ -296,8 +296,8 @@ where
     T::Node: Clone,
     V: Clone + Debug + Sync + Send,
 {
-    type StateStorage = VersionedStorage<<T as TreeTopology>::State>;
-    type NodeStorage = VersionedKvStorage<<T as TreeTopology>::Key, <T as TreeTopology>::Node>;
+    type StateStorage = VersionedStorage<T::State>;
+    type NodeStorage = VersionedKvStorage<T::Key, T::Node>;
 
     fn nodes(&self) -> &Self::NodeStorage {
         &self.nodes

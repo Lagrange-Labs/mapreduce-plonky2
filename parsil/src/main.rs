@@ -14,6 +14,7 @@ mod bracketer;
 mod errors;
 mod executor;
 mod expand;
+mod isolator;
 mod parser;
 mod placeholders;
 mod symbols;
@@ -59,6 +60,18 @@ enum Command {
         lo_secondary: String,
         hi_secondary: String,
     },
+    /// Modify the given query to neuter all WHERE clauses not related to
+    /// indices.
+    Isolate {
+        #[arg()]
+        request: String,
+        #[arg(long)]
+        lo_sec: bool,
+        #[arg(long)]
+        hi_sec: bool,
+        #[arg(long)]
+        to_keys: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -98,14 +111,28 @@ fn main() -> Result<()> {
             let mut query = parse_and_validate(&request, &settings)?;
             match kind {
                 QueryKind::Execute => {
-                    let translated = executor::generate_query_execution(&mut query, &settings)?;
-
-                    println!("{}", translated.query);
-                    println!("placeholders mapping: {:?}", translated.placeholder_mapping);
+                    let mut translated = executor::generate_query_execution(&mut query, &settings)?;
+                    println!("{}", translated.apply());
                 }
                 QueryKind::Keys => {
-                    println!("{}", executor::generate_query_keys(&mut query, &settings)?)
+                    let mut translated = executor::generate_query_keys(&mut query, &settings)?;
+                    println!("{}", translated.apply());
                 }
+            }
+        }
+        Command::Isolate {
+            request,
+            lo_sec,
+            hi_sec,
+            to_keys,
+        } => {
+            let mut query = parse_and_validate(&request, &settings)?;
+            let mut q = isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)?;
+            if to_keys {
+                let mut q = executor::generate_query_keys(&mut q, &settings)?;
+                println!("Query: {}", q.apply());
+            } else {
+                println!("{}", q);
             }
         }
         Command::Bracket {

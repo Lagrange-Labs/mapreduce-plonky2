@@ -184,14 +184,10 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 Symbol::Wildcard => unreachable!(),
             };
         }
-        self.scopes
-            .scope_at_mut(exited_scope)
-            .metadata_mut()
-            .outputs = output_items;
-        self.scopes
-            .scope_at_mut(exited_scope)
-            .metadata_mut()
-            .aggregation = aggregations;
+
+        let exited_scope_metadata = self.scopes.scope_at_mut(exited_scope).metadata_mut();
+        exited_scope_metadata.outputs = output_items;
+        exited_scope_metadata.aggregation = aggregations;
 
         Ok(())
     }
@@ -541,6 +537,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 };
 
                 if let FunctionArguments::List(arglist) = &funcall.args {
+                    // NOTE: we only accept funcalls with a single argument for now
                     match &arglist.args[0] {
                         FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) => {
                             let wire = self.compile(e, storage_target)?;

@@ -114,11 +114,11 @@ impl State {
         self.outer_root()
     }
 
-    pub fn ascendance(&self, ns: &[NodeIdx]) -> HashSet<NodeIdx> {
+    pub fn ascendance<I: IntoIterator<Item = NodeIdx>>(&self, ns: I) -> HashSet<NodeIdx> {
         let mut ascendance = HashSet::new();
         let inner_max = self.inner_max();
-        for n in ns {
-            let inner_idx = self.inner_idx(*n);
+        for n in ns.into_iter() {
+            let inner_idx = self.inner_idx(n);
             if inner_idx <= inner_max {
                 if let Some(lineage) = self.lineage_inner(&inner_idx) {
                     for n in lineage.into_full_path() {
@@ -409,7 +409,11 @@ impl TreeTopology for Tree {
         state.inner_max().0
     }
 
-    async fn ascendance<S: TreeStorage<Tree>>(&self, ns: &[Self::Key], s: &S) -> HashSet<NodeIdx> {
+    async fn ascendance<S: TreeStorage<Tree>, I: IntoIterator<Item = Self::Key>>(
+        &self,
+        ns: I,
+        s: &S,
+    ) -> HashSet<NodeIdx> {
         let state = s.state().fetch().await;
         state.ascendance(ns)
     }

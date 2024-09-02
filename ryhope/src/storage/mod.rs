@@ -1,11 +1,21 @@
 use anyhow::*;
 use futures::future::BoxFuture;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, future::Future, hash::Hash};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    future::Future,
+    hash::Hash,
+};
 use tokio_postgres::Transaction;
+use view::TreeStorageView;
 
 use self::updatetree::UpdateTree;
-use crate::{tree::TreeTopology, Epoch, InitSettings};
+use crate::{
+    tree::{NodeContext, TreeTopology},
+    Epoch, InitSettings,
+};
 
 pub mod memory;
 pub mod pgsql;
@@ -38,10 +48,69 @@ where
     ) -> Result<Self>;
 }
 
+pub struct WideLineage<K, V> {
+    /// The keys touched by the query itself
+    pub core_keys: Vec<(Epoch, K)>,
+    /// An epoch -> (K -> NodeContext, K -> Payload) mapping
+    epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
+}
+
+impl<K: Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
+    pub fn node_context_at(&self, epoch: Epoch, key: &K) -> Option<NodeContext<K>> {
+        self.epoch_lineages
+            .get(&epoch)
+            .and_then(|h| h.0.get(key))
+            .cloned()
+    }
+    pub fn payload_at(&self, epoch: Epoch, key: &K) -> Option<V> {
+        self.epoch_lineages
+            .get(&epoch)
+            .and_then(|h| h.1.get(key))
+            .cloned()
+    }
+
+    pub fn all_epochs(&self) -> HashMap<Epoch, HashSet<K>> {
+        self.core_keys
+            .iter()
+            .fold(HashMap::new(), |mut acc, (epoch, k)| {
+                acc.entry(*epoch).or_default().insert(k.clone());
+                acc
+            })
+    }
+    pub fn update_tree_for(&self, epoch: Epoch) -> Option<UpdateTree<K>> {
+        let epoch_data = self.epoch_lineages.get(&epoch)?;
+        let all_paths = self
+            .core_keys
+            .iter()
+            .filter(|(e, _)| *e == epoch)
+            .map(|(_, k)| {
+                let mut path = vec![k.clone()];
+                // ok to unwrap since we passed the filter, so that key must exist
+                // otherwise it's ryhope failure
+                let mut ctx = epoch_data.0.get(k).expect("lineage should get all keys");
+                while ctx.parent.is_some() {
+                    let parent_k = ctx.parent.as_ref().unwrap();
+                    ctx = epoch_data
+                        .0
+                        .get(parent_k)
+                        .expect("lineage should get all keys");
+                    path.push(parent_k.clone());
+                }
+                path
+            })
+            .collect_vec();
+        if all_paths.is_empty() {
+            None
+        } else {
+            Some(UpdateTree::from_paths(all_paths, epoch))
+        }
+    }
+}
+
 /// A `TreeStorage` stores all data related to the tree structure, i.e. (i) the
 /// state of the tree structure, (ii) the putative metadata associated to the
 /// tree nodes.
-pub trait TreeStorage<T: TreeTopology>: Send + Sync {
+pub trait TreeStorage<T: TreeTopology>: Sized + Send + Sync {
     /// A storage backend for the underlying tree state
     type StateStorage: EpochStorage<T::State> + Send + Sync;
     /// A storage backend for the underlying tree nodes
@@ -69,6 +138,15 @@ pub trait TreeStorage<T: TreeTopology>: Send + Sync {
 
     /// Rollback this tree to the given epoch
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()>;
+
+    /// Return an epoch-locked, read-only, [`TreeStorage`] offering a view on
+    /// this Merkle tree as it was at the given epoch.
+    fn view_at<'a>(&'a self, epoch: Epoch) -> TreeStorageView<'a, T, Self>
+    where
+        T: 'a,
+    {
+        TreeStorageView::<'a, T, Self>::new(self, epoch)
+    }
 }
 
 /// A backend storing the payloads associated to the nodes of a tree.
@@ -347,4 +425,39 @@ pub trait SqlTreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Sen
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
     /// transaction execution is successful.
     fn commit_failed(&mut self);
+}
+
+/// The meta-operations trait gathers high-level operations that may be
+/// optimized depending on the backend.
+pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
+    TreeStorage<T> + PayloadStorage<T::Key, V>
+{
+    /// The type of the artefact used to retrieve a dynamic set of keys for the
+    /// [`TreeStorage`] implementing this trait.
+    type KeySource;
+
+    /// Fetch the subtree defined as the 2-depth extension of the subtree formed
+    /// by the union of all the paths-to-the-root for the given keys.
+    async fn wide_lineage_between(
+        &self,
+        t: &T,
+        keys: &Self::KeySource,
+        bounds: (Epoch, Epoch),
+    ) -> Result<WideLineage<T::Key, V>>;
+
+    async fn wide_update_trees(
+        &self,
+        t: &T,
+        keys: &Self::KeySource,
+        bounds: (Epoch, Epoch),
+    ) -> Result<Vec<UpdateTree<T::Key>>> {
+        let wide_lineage = self.wide_lineage_between(t, keys, bounds).await?;
+        let mut r = Vec::new();
+        for (epoch, nodes) in wide_lineage.epoch_lineages.iter() {
+            if let Some(root) = t.root(&self.view_at(*epoch)).await {
+                r.push(UpdateTree::from_map(*epoch, &root, &nodes.0));
+            }
+        }
+        Ok(r)
+    }
 }
