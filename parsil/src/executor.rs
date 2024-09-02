@@ -232,7 +232,10 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
         query.visit(self)?;
 
         if let SetExpr::Select(ref mut select) = *query.body {
-            select.projection = vec![SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("key")))];
+            select.projection = vec![
+                SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("key"))),
+                SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("block"))),
+            ];
         }
 
         Ok(())
