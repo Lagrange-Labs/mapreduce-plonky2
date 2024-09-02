@@ -595,7 +595,11 @@ where
             } else {
                 // this case is easy, since all that's left is partial or full where both
                 // child(ren) and current node belong to query
-                if node_ctx.left.is_some() && node_ctx.right.is_some() {
+                let is_correct_left = node_ctx.left.is_some()
+                    && proven_nodes.contains(node_ctx.left.as_ref().unwrap());
+                let is_correct_right = node_ctx.right.is_some()
+                    && proven_nodes.contains(node_ctx.right.as_ref().unwrap());
+                if is_correct_left && is_correct_right {
                     // full node case
                     let left_proof = info.load_proof(
                         planner.ctx,
