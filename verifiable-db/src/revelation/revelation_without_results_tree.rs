@@ -225,10 +225,10 @@ where
 
         // Check that the tree employed to build the queries is the same as the
         // tree constructed in pre-processing.
-        //b.connect_hashes(
-        //    query_proof.tree_hash_target(),
-        //    original_tree_proof.merkle_hash(),
-        //);
+        b.connect_hashes(
+            query_proof.tree_hash_target(),
+            original_tree_proof.merkle_hash(),
+        );
 
         // Add the hash of placeholder identifiers and pre-processing metadata
         // hash to the computational hash:

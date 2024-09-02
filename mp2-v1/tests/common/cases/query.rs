@@ -226,7 +226,7 @@ async fn prove_query(
             },
         );
     info!(
-        "Found {} ROW KEYS to process during proving time -> {:?}",
+        "Found {} ROW KEYS to process during proving time -> epochs {:?}",
         touched_rows.len(),
         touched_rows.keys(),
     );
@@ -643,17 +643,12 @@ where
                 }
             }
         };
-        if info
-            .load_proof(planner.ctx, &query_id, primary, &k)
-            .is_err()
-        {
-            info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
-            let proof = planner
-                .ctx
-                .run_query_proof(GlobalCircuitInput::Query(input))?;
-            info.save_proof(planner.ctx, &query_id, primary, &k, proof)?;
-        }
-        info!("Universal query proof DONE for {primary} -> {k:?} ");
+        info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
+        let proof = planner
+            .ctx
+            .run_query_proof(GlobalCircuitInput::Query(input))?;
+        info.save_proof(planner.ctx, &query_id, primary, &k, proof)?;
+        info!("query proof DONE for {primary} -> {k:?} ");
         workplan.done(&wk)?;
         proven_nodes.insert(k);
     }
@@ -1118,6 +1113,7 @@ async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking
     // Assuming this is mapping with only two columns !
     let value_column = table.columns.rest[0].name.clone();
     let table_name = table.row_table_name();
+    let max_block = min_block + 1;
     // primary_min_placeholder = ".."
     // primary_max_placeholder = ".."
     // Address == $3 --> placeholders.hashmap empty, put in query bounds secondary_min = secondary_max = "$3""
