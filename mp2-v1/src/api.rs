@@ -177,16 +177,23 @@ pub enum SlotInputs {
 
 /// Compute metadata hash for a table related to the provided inputs slots of the contract with
 /// address `contract_address`
-pub fn metadata_hash(slot_input: SlotInputs, contract_address: &Address) -> MetadataHash {
+pub fn metadata_hash(
+    slot_input: SlotInputs,
+    contract_address: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+) -> MetadataHash {
     // closure to compute the metadata digest associated to a mapping variable
     let metadata_digest_mapping = |slot| {
-        let key_id = identifier_for_mapping_key_column(slot, contract_address);
-        let value_id = identifier_for_mapping_value_column(slot, contract_address);
+        let key_id =
+            identifier_for_mapping_key_column(slot, contract_address, chain_id, extra.clone());
+        let value_id =
+            identifier_for_mapping_value_column(slot, contract_address, chain_id, extra.clone());
         compute_leaf_mapping_metadata_digest(key_id, value_id, slot)
     };
     let digest = match slot_input {
         SlotInputs::Simple(slots) => slots.iter().fold(Point::NEUTRAL, |acc, &slot| {
-            let id = identifier_single_var_column(slot, contract_address);
+            let id = identifier_single_var_column(slot, contract_address, chain_id, extra.clone());
             let digest = compute_leaf_single_metadata_digest(id, slot);
             acc + digest
         }),

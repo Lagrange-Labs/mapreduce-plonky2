@@ -158,7 +158,7 @@ pub fn convert_number_string(expr: &mut Expr) -> Result<()> {
 fn convert_funcalls(expr: &mut Expr) -> Result<()> {
     if let Some(replacement) = match expr {
         Expr::Function(Function { name, .. }) => match name.to_string().to_uppercase().as_str() {
-            "AVG" => funcall("CEIL", vec![expr.clone()]).into(),
+            "AVG" => funcall("FLOOR", vec![expr.clone()]).into(),
             _ => None,
         },
         _ => None,

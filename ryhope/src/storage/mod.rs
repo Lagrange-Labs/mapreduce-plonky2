@@ -323,7 +323,7 @@ pub trait TransactionalStorage {
 /// This trait is similar to [`TransactionalStorage`], but let the caller re-use
 /// an existing SQL transaction rather than letting the implementer handle
 /// transaction creation & execution.
-pub(crate) trait SqlTransactionStorage: TransactionalStorage {
+pub trait SqlTransactionStorage: TransactionalStorage {
     /// Similar to the [`commit`] method of [`TransactionalStorage`], but
     /// re-using a given transaction.
     async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()>;

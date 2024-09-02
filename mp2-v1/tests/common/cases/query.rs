@@ -15,9 +15,13 @@ use crate::common::{
     proof_storage::{ProofKey, QueryID},
     rowtree::{MerkleRowTree, RowStorage},
     table::TableColumns,
+    TableInfo,
 };
 
-use super::super::{context::TestContext, proof_storage::ProofStorage, table::Table};
+use super::{
+    super::{context::TestContext, proof_storage::ProofStorage, table::Table},
+    TableSourceSlot,
+};
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::{Context, Result};
 use futures::{future::BoxFuture, io::empty, stream, FutureExt, StreamExt};
@@ -31,6 +35,7 @@ use mp2_common::{
     C, D, F,
 };
 use mp2_v1::{
+    api::MetadataHash,
     indexing::{
         self,
         block::{BlockPrimaryIndex, BlockTree, BlockTreeKey},
@@ -108,25 +113,27 @@ pub type RevelationCircuitInput = verifiable_db::revelation::api::CircuitInput<
 pub type RevelationPublicInputs<'a> =
     PublicInputs<'a, F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>;
 
-pub enum TableType {
-    Mapping,
-    Single,
-}
-
-pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Result<()> {
-    match t {
-        TableType::Mapping => query_mapping(ctx, &table).await?,
+pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
+    match &t.source {
+        TableSourceSlot::Mapping((map, _)) => query_mapping(ctx, &table, t.metadata_hash()).await?,
         _ => unimplemented!("yet"),
     }
     Ok(())
 }
 
-async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
-    let query_info = cook_query(table).await?;
-    test_query_mapping(ctx, table, query_info).await?;
+async fn query_mapping(
+    ctx: &mut TestContext,
+    table: &Table,
+    table_hash: MetadataHash,
+) -> Result<()> {
+    let query_info = cook_query_between_blocks(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+
+    let query_info = cook_query_unique_secondary_index(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with custom placeholders
     let query_info = cook_query_secondary_index_placeholder(table).await?;
-    test_query_mapping(ctx, table, query_info).await
+    test_query_mapping(ctx, table, query_info, &table_hash).await
 }
 
 /// Run a test query on the mapping table such as created during the indexing phase
@@ -134,6 +141,7 @@ async fn test_query_mapping(
     ctx: &mut TestContext,
     table: &Table,
     query_info: QueryCooking,
+    table_hash: &MetadataHash,
 ) -> Result<()> {
     let settings = ParsilSettings {
         context: table,
@@ -200,6 +208,7 @@ async fn test_query_mapping(
         &big_row_cache,
         &big_index_cache,
         res,
+        table_hash.clone(),
     )
     .await
     .expect("unable to run universal query proof");
@@ -216,10 +225,40 @@ async fn prove_query(
     big_cache: &WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     big_index_cache: &WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     res: Vec<PsqlRow>,
+    metadata: MetadataHash,
 ) -> Result<()> {
     // the query to use to fetch all the rows keys involved in the result tree.
-    let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)
-        .context("while assembling PIs")?;
+    let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
+    // group the rows per block number
+    let number_of_rows = all_touched_rows.len();
+    let touched_rows = all_touched_rows
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let row_key = r
+                .get::<_, Option<Vec<u8>>>(0)
+                .map(RowTreeKey::from_bytea)
+                .context("unable to parse row key tree")
+                .expect("");
+            let block: Epoch = r.get::<_, i64>(1);
+            info!(
+                " -- row [{}] => epoch = {} , value {:?}",
+                i, block, row_key.rest
+            );
+            (block as BlockPrimaryIndex, row_key)
+        })
+        .fold(
+            HashMap::<BlockPrimaryIndex, HashSet<RowTreeKey>>::new(),
+            |mut acc, (block, row_key)| {
+                acc.entry(block).or_default().insert(row_key);
+                acc
+            },
+        );
+    info!(
+        "Found {} ROW KEYS to process during proving time -> epochs {:?}",
+        touched_rows.len(),
+        touched_rows.keys(),
+    );
     let all_epochs = big_cache.all_epochs();
 
     // prove the whole tree for each of the involved rows for each block
@@ -242,6 +281,7 @@ async fn prove_query(
     }
     // do the same for the single index tree now
     let current_epoch = table.index.current_epoch();
+
     //for (epoch, index)
     //let all_paths = stream::iter(touched_rows.keys())
     //    .then(|primary| async {
@@ -341,6 +381,7 @@ fn check_final_outputs(
     tree_epoch: Epoch,
     num_touched_rows: usize,
     res: Vec<PsqlRow>,
+    offcircuit_md: MetadataHash,
 ) -> Result<()> {
     // fetch indexing proof, whose public inputs are needed to check correctness of revelation proof outputs
     let indexing_proof = {
@@ -361,6 +402,11 @@ fn check_final_outputs(
     let metadata_hash = HashOutput::try_from(
         HashOut::<F>::from_vec(indexing_pis.metadata_hash().to_vec()).to_bytes(),
     )?;
+    assert_eq!(
+        offcircuit_md, metadata_hash,
+        "metadata hash computed by circuit and offcircuit is not the same"
+    );
+
     let column_ids = ColumnIDs::new(
         table.columns.primary.identifier,
         table.columns.secondary.identifier,
@@ -415,7 +461,7 @@ fn check_final_outputs(
     );
     // check results
     res.into_iter()
-        .zip(revelation_pis.result_values().into_iter())
+        .zip(revelation_pis.result_values())
         .for_each(|(expected_res, res)| {
             (0..expected_res.len()).for_each(|i| {
                 let SqlReturn::Numeric(expected_res) = SqlType::Numeric.extract(&expected_res, i);
@@ -567,7 +613,11 @@ where
             } else {
                 // this case is easy, since all that's left is partial or full where both
                 // child(ren) and current node belong to query
-                if node_ctx.left.is_some() && node_ctx.right.is_some() {
+                let is_correct_left = node_ctx.left.is_some()
+                    && proven_nodes.contains(node_ctx.left.as_ref().unwrap());
+                let is_correct_right = node_ctx.right.is_some()
+                    && proven_nodes.contains(node_ctx.right.as_ref().unwrap());
+                if is_correct_left && is_correct_right {
                     // full node case
                     let left_proof = info.load_proof(
                         planner.ctx,
@@ -611,17 +661,12 @@ where
                 }
             }
         };
-        if info
-            .load_proof(planner.ctx, &query_id, primary, &k)
-            .is_err()
-        {
-            info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
-            let proof = planner
-                .ctx
-                .run_query_proof(GlobalCircuitInput::Query(input))?;
-            info.save_proof(planner.ctx, &query_id, primary, &k, proof)?;
-        }
-        info!("Universal query proof DONE for {primary} -> {k:?} ");
+        info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
+        let proof = planner
+            .ctx
+            .run_query_proof(GlobalCircuitInput::Query(input))?;
+        info.save_proof(planner.ctx, &query_id, primary, &k, proof)?;
+        info!("query proof DONE for {primary} -> {k:?} ");
         workplan.done(&wk)?;
         proven_nodes.insert(k);
     }
@@ -950,7 +995,7 @@ struct QueryCooking {
 
 type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
 
-async fn find_longest_lived_key(table: &Table) -> Result<(RowTreeKey, BlockRange)> {
+async fn rows_by_epoch(table: &Table) -> Result<HashMap<RowTreeKey, Vec<Epoch>>> {
     let mut all_table = HashMap::new();
     let max = table.row.current_epoch();
     let min = table.row.initial_epoch() + 1;
@@ -976,6 +1021,14 @@ async fn find_longest_lived_key(table: &Table) -> Result<(RowTreeKey, BlockRange
             (k, epochs)
         })
         .collect();
+    Ok(all_table)
+}
+
+async fn find_longest_lived_key(table: &Table) -> Result<(RowTreeKey, BlockRange)> {
+    let max = table.row.current_epoch();
+    let min = table.row.initial_epoch() + 1;
+
+    let all_table = rows_by_epoch(table).await?;
     // find the longest running row
     let (longest_key, epochs) = all_table
         .iter()
@@ -998,6 +1051,28 @@ async fn find_longest_lived_key(table: &Table) -> Result<(RowTreeKey, BlockRange
     let min_block = starting as BlockPrimaryIndex;
     let max_block = min_block + longest_sequence;
     Ok((longest_key.clone(), (min_block, max_block)))
+}
+
+async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
+    let max = table.row.current_epoch();
+    let min = max - 1;
+
+    let value_column = table.columns.rest[0].name.clone();
+    let table_name = table.row_table_name();
+    let placeholders = Placeholders::new_empty(U256::from(min), U256::from(max));
+
+    let query_str = format!(
+        "SELECT AVG({value_column})
+                FROM {table_name}
+                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
+                AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER};"
+    );
+    Ok(QueryCooking {
+        min_block: min as BlockPrimaryIndex,
+        max_block: max as BlockPrimaryIndex,
+        query: query_str,
+        placeholders,
+    })
 }
 
 // cook up a SQL query on the secondary index and with a predicate on the non-indexed column.
@@ -1044,7 +1119,7 @@ async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCo
 
 // cook up a SQL query on the secondary index. For that we just iterate on mapping keys and
 // take the one that exist for most blocks
-async fn cook_query(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1056,6 +1131,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     // Assuming this is mapping with only two columns !
     let value_column = table.columns.rest[0].name.clone();
     let table_name = table.row_table_name();
+    let max_block = min_block + 1;
     // primary_min_placeholder = ".."
     // primary_max_placeholder = ".."
     // Address == $3 --> placeholders.hashmap empty, put in query bounds secondary_min = secondary_max = "$3""
