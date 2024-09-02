@@ -10,7 +10,6 @@ use crate::{
 use anyhow::*;
 use bb8_postgres::PostgresConnectionManager;
 use itertools::Itertools;
-use log::*;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -19,6 +18,7 @@ use std::{
 };
 use storages::{NodeProjection, PayloadProjection};
 use tokio_postgres::{NoTls, Transaction};
+use tracing::*;
 
 mod storages;
 
@@ -233,6 +233,7 @@ where
 ///
 /// Fail if the DB query fails.
 async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64)> {
+    trace!("fetching epoch data for `{table}`");
     let connection = db.get().await.unwrap();
     connection
         .query_one(
@@ -244,6 +245,18 @@ async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64)> {
         .context("while fetching current epoch data")
 }
 
+impl<T, V> std::fmt::Display for PgsqlStorage<T, V>
+where
+    T: TreeTopology + DbConnector<V>,
+    T::Key: ToFromBytea,
+    V: PayloadInDb,
+    T::Node: Sync + Clone,
+    T::State: Sync + Clone,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PgSqlStorage {}@{}", self.table, self.epoch)
+    }
+}
 impl<T, V> PgsqlStorage<T, V>
 where
     T: TreeTopology + DbConnector<V>,
@@ -262,6 +275,7 @@ where
         tree_state: T::State,
         epoch: Epoch,
     ) -> Result<Self> {
+        debug!("creating new table for `{table}` at epoch {epoch}");
         let db_pool = Self::init_db_pool(db_src).await?;
 
         ensure!(
@@ -307,7 +321,7 @@ where
         let (initial_epoch, latest_epoch) = fetch_epoch_data(db_pool.clone(), &table)
             .await
             .with_context(|| format!("table `{table}` does not exist"))?;
-        info!("latest epoch is {latest_epoch}");
+        debug!("loading `{table}`; latest epoch is {latest_epoch}");
         let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
             initial_epoch,
             latest_epoch,
@@ -343,6 +357,7 @@ where
         tree_state: T::State,
         initial_epoch: Epoch,
     ) -> Result<Self> {
+        debug!("resetting table `{table}` at epoch {initial_epoch}");
         let db_pool = Self::init_db_pool(db_src).await?;
 
         delete_storage_table(db_pool.clone(), &table).await?;
@@ -483,6 +498,7 @@ where
         db_tx: &tokio_postgres::Transaction<'_>,
         key: &T::Key,
     ) -> Result<Option<(T::Node, V)>> {
+        trace!("[{self}] rolling back {key:?} one epoch");
         let rows = db_tx
             .query(
                 &format!(
@@ -512,11 +528,16 @@ where
         k: &T::Key,
         n: T::Node,
     ) -> Result<()> {
+        trace!(
+            "[{self}] creating a new instance for {k:?}@{}",
+            self.epoch + 1
+        );
         T::create_node_in_tx(db_tx, &self.table, k, self.epoch + 1, &n).await
     }
 
     async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
         ensure!(self.in_tx, "not in a transaction");
+        trace!("[{}] commiting in a transaction...", self);
 
         // The putative new stamps if everything goes well
         let new_epoch = self.epoch + 1;
@@ -614,10 +635,12 @@ where
                 }
         }
         self.state.commit_in(db_tx).await?;
+        trace!("[{}] commit successful.", self.table);
         Ok(())
     }
 
     fn on_commit_success(&mut self) {
+        trace!("[{self}] commit succesful; updating inner state");
         self.in_tx = false;
         self.epoch = self.epoch + 1;
         self.state.commit_success();
@@ -625,6 +648,7 @@ where
     }
 
     fn on_commit_failed(&mut self) {
+        trace!("[{self}] commit failed; updating inner state");
         self.in_tx = false;
         self.state.commit_failed();
         self.tree_store.lock().unwrap().clear();
@@ -640,6 +664,7 @@ where
     T::State: Send + Sync + Clone,
 {
     fn start_transaction(&mut self) -> Result<()> {
+        trace!("[{self}] starting a new transaction");
         ensure!(!self.in_tx, "already in a transaction");
         self.in_tx = true;
         self.state.start_transaction()?;
@@ -647,6 +672,7 @@ where
     }
 
     async fn commit_transaction(&mut self) -> Result<()> {
+        trace!("[{self}] commiting transaction");
         let pool = self.db.clone();
         let mut connection = pool.get().await.unwrap();
         let mut db_tx = connection
@@ -676,15 +702,18 @@ where
     T::State: Send + Sync + Clone,
 {
     async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()> {
+        trace!("[{self}] API-facing commit_in called");
         self.commit_in_transaction(tx).await
     }
 
     fn commit_success(&mut self) {
+        trace!("[{self}] API-facing commit_success called");
         self.state.commit_success();
         self.on_commit_success();
     }
 
     fn commit_failed(&mut self) {
+        trace!("[{self}] API-facing commit_failed called");
         self.state.commit_failed();
         self.on_commit_failed()
     }

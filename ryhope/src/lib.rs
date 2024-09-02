@@ -10,6 +10,7 @@ use storage::{
     TreeTransactionalStorage, WideLineage,
 };
 use tokio_postgres::Transaction;
+use tracing::*;
 use tree::{sbbst, scapegoat, MutableTree, NodeContext, NodePath, PrintableTree, TreeTopology};
 
 pub mod storage;
@@ -31,7 +32,7 @@ pub type Epoch = i64;
 /// A payload attached to a node, that may need to compute aggregated values
 /// from the bottom of the tree to the top. If not, simply do not override the
 /// default definition of `aggregate`.
-pub trait NodePayload: Sized + Serialize + for<'a> Deserialize<'a> {
+pub trait NodePayload: Debug + Sized + Serialize + for<'a> Deserialize<'a> {
     /// Set an aggregate value for the current node, computable from the payload
     /// of its children.
     ///
@@ -379,6 +380,7 @@ impl<
     > EpochKvStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
 {
     async fn remove(&mut self, k: T::Key) -> Result<()> {
+        trace!("[MerkleTreeKvDb] removing {k:?}");
         self.dirty
             .extend(self.tree.delete(&k, &mut self.storage).await?);
         self.storage.data_mut().remove(k).await?;
@@ -386,6 +388,7 @@ impl<
     }
 
     async fn update(&mut self, k: T::Key, new_value: V) -> Result<()> {
+        trace!("[MerkleTreeKvDb] updating {k:?} -> {new_value:?}");
         self.storage.data_mut().update(k.clone(), new_value).await?;
         self.dirty.insert(k);
         Ok(())
@@ -400,6 +403,7 @@ impl<
     }
 
     async fn store(&mut self, k: T::Key, value: V) -> Result<()> {
+        trace!("[MerkleTreeKvDb] storing {k:?} -> {value:?}");
         let ds = self.tree.insert(k.clone(), &mut self.storage).await?;
         self.dirty.extend(ds.into_full_path());
         self.storage.data_mut().store(k, value).await
@@ -409,6 +413,7 @@ impl<
     /// destructive and irreversible operation; to merely get a view on the
     /// storage at a given epoch, use the `view_at` method.
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
+        trace!("[MerkleTreeKvDb] rolling back to {epoch}");
         self.storage.rollback_to(epoch).await
     }
 }
@@ -423,11 +428,13 @@ impl<
     > TreeTransactionalStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
 {
     async fn start_transaction(&mut self) -> Result<()> {
+        trace!("[MerkleTreeKvDb] calling start_transaction");
         self.storage.start_transaction()?;
         Ok(())
     }
 
     async fn commit_transaction(&mut self) -> Result<UpdateTree<T::Key>> {
+        trace!("[MerkleTreeKvDb@] calling commit_transaction");
         let mut paths = vec![];
         for k in self.dirty.drain() {
             if let Some(p) = self.tree.lineage(&k, &self.storage).await {
@@ -453,6 +460,7 @@ impl<
     > SqlTreeTransactionalStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
 {
     async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<UpdateTree<T::Key>> {
+        trace!("[MerkleTreeKvDb] calling commit_in");
         let mut paths = vec![];
         for k in self.dirty.drain() {
             if let Some(p) = self.tree.lineage(&k, &self.storage).await {
@@ -469,10 +477,12 @@ impl<
     }
 
     fn commit_success(&mut self) {
+        trace!("[MerkleTreeKvDb] triggering commit_success");
         self.storage.commit_success()
     }
 
     fn commit_failed(&mut self) {
+        trace!("[MerkleTreeKvDb] triggering commit_failed");
         self.storage.commit_failed()
     }
 }

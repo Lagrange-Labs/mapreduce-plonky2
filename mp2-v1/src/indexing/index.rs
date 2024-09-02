@@ -54,8 +54,9 @@ impl<PrimaryIndex: Default> IndexNode<PrimaryIndex> {
     }
 }
 
-impl<PrimaryIndex: Default + Clone + Sized + Serialize + for<'a> Deserialize<'a>> NodePayload
-    for IndexNode<PrimaryIndex>
+impl<
+        PrimaryIndex: std::fmt::Debug + Default + Clone + Sized + Serialize + for<'a> Deserialize<'a>,
+    > NodePayload for IndexNode<PrimaryIndex>
 {
     fn aggregate<I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
         // curently always return the expected number of children which

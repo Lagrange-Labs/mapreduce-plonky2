@@ -104,7 +104,14 @@ impl<PrimaryIndex: Default> MerkleCell<PrimaryIndex> {
 }
 
 impl<
-        PrimaryIndex: PartialEq + Eq + Default + Clone + Sized + Serialize + for<'a> Deserialize<'a>,
+        PrimaryIndex: std::fmt::Debug
+            + PartialEq
+            + Eq
+            + Default
+            + Clone
+            + Sized
+            + Serialize
+            + for<'a> Deserialize<'a>,
     > NodePayload for MerkleCell<PrimaryIndex>
 {
     fn aggregate<'a, I: Iterator<Item = Option<Self>>>(&mut self, children: I) {

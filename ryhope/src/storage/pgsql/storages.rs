@@ -23,6 +23,7 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tokio_postgres::{self, NoTls, Row, Transaction};
+use tracing::*;
 
 use super::{CachedValue, PayloadInDb, ToFromBytea};
 
@@ -457,7 +458,7 @@ where
     }
 }
 
-pub struct CachedDbStore<V: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> {
+pub struct CachedDbStore<V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> {
     /// A pointer to the DB client
     db: DBPool,
     /// The first valid epoch
@@ -472,13 +473,13 @@ pub struct CachedDbStore<V: Debug + Clone + Sync + Serialize + for<'a> Deseriali
     table: String,
     pub(super) cache: RwLock<Option<V>>,
 }
-impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStore<T> {
+impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStore<T> {
     pub fn new(initial_epoch: Epoch, current_epoch: Epoch, table: String, db: DBPool) -> Self {
         Self {
             initial_epoch,
             db,
             in_tx: false,
-            dirty: true,
+            dirty: false,
             epoch: current_epoch,
             table,
             cache: RwLock::new(None),
@@ -516,6 +517,7 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
 
     async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
         ensure!(self.in_tx, "not in a transaction");
+        trace!("[{self}] commiting in transaction");
 
         if self.dirty {
             let state = self.cache.read().await.clone();
@@ -545,12 +547,14 @@ impl<T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStor
     }
 
     fn on_commit_success(&mut self) {
+        trace!("[{self}] commit successful");
         self.epoch += 1;
         self.dirty = false;
         self.in_tx = false;
     }
 
     fn on_commit_failed(&mut self) {
+        trace!("[{self}] commit failed");
         let _ = self.cache.get_mut().take();
         self.dirty = false;
         self.in_tx = false;
@@ -562,6 +566,7 @@ where
     T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
 {
     fn start_transaction(&mut self) -> Result<()> {
+        trace!("[{self}] starting transaction");
         ensure!(!self.in_tx, "already in a transaction");
 
         self.in_tx = true;
@@ -569,6 +574,7 @@ where
     }
 
     async fn commit_transaction(&mut self) -> Result<()> {
+        trace!("[{self}] committing transaction");
         let pool = self.db.clone();
         let mut connection = pool.get().await.unwrap();
         let mut db_tx = connection
@@ -586,19 +592,31 @@ where
     }
 }
 
+impl<T> std::fmt::Display for CachedDbStore<T>
+where
+    T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CachedDbStore {}@{}", self.table, self.epoch)
+    }
+}
+
 impl<T> SqlTransactionStorage for CachedDbStore<T>
 where
     T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
 {
     async fn commit_in(&mut self, tx: &mut tokio_postgres::Transaction<'_>) -> Result<()> {
+        trace!("[{self}] commit_in");
         self.commit_in_transaction(tx).await
     }
 
     fn commit_success(&mut self) {
+        trace!("[{self}] commit_success");
         self.on_commit_success()
     }
 
     fn commit_failed(&mut self) {
+        trace!("[{self}] commit_failed");
         self.on_commit_failed()
     }
 }
@@ -608,26 +626,18 @@ where
     T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a> + Send,
 {
     async fn fetch(&self) -> T {
+        trace!("[{self}] fetching payload");
         if self.cache.read().await.is_none() {
-            let connection = self.db.get().await.unwrap();
-            let row = connection
-                .query_one(
-                    // Fetch the row with the most recent VALID_FROM
-                    &format!(
-                        "SELECT {PAYLOAD} FROM {}_meta WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
-                        self.table
-                    ),
-                    &[&self.epoch],
-                )
-                .await
-                .expect("failed to fetch state");
-            let state = row.get::<_, Json<T>>(0).0;
-            let _ = self.cache.write().await.replace(state);
+            let state = self.fetch_at(self.epoch).await;
+            let _ = self.cache.write().await.replace(state.clone());
+            state
+        } else {
+            self.cache.read().await.to_owned().unwrap()
         }
-        self.cache.read().await.to_owned().unwrap()
     }
 
     async fn fetch_at(&self, epoch: Epoch) -> T {
+        trace!("[{self}] fetching payload at {}", epoch);
         let connection = self.db.get().await.unwrap();
         connection
             .query_one(
@@ -650,6 +660,7 @@ where
     }
 
     async fn store(&mut self, t: T) {
+        trace!("[{self}] storing {t:?}");
         self.dirty = true;
         let _ = self.cache.write().await.insert(t);
     }
@@ -724,6 +735,16 @@ where
     pub(super) payload_cache: HashMap<T::Key, Option<CachedValue<V>>>,
     _p: PhantomData<T>,
 }
+impl<T, V> std::fmt::Display for CachedDbTreeStore<T, V>
+where
+    T: TreeTopology + DbConnector<V>,
+    T::Key: ToFromBytea,
+    V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TreeStore {}@{}", self.table, self.epoch)
+    }
+}
 impl<T, V> CachedDbTreeStore<T, V>
 where
     T: TreeTopology + DbConnector<V>,
@@ -731,6 +752,7 @@ where
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
 {
     pub fn new(initial_epoch: Epoch, current_epoch: Epoch, table: String, db: DBPool) -> Self {
+        trace!("[{}] initializing CachedDbTreeStore", table);
         CachedDbTreeStore {
             initial_epoch,
             epoch: current_epoch,
@@ -780,6 +802,7 @@ where
     }
 
     pub(super) async fn rollback_to(&mut self, new_epoch: Epoch) -> Result<()> {
+        trace!("[{self}] rolling back to {new_epoch}");
         ensure!(
             new_epoch >= self.initial_epoch,
             "unable to rollback to {} before initial epoch {}",
@@ -837,6 +860,16 @@ where
 {
     pub(super) wrapped: Arc<Mutex<CachedDbTreeStore<T, V>>>,
 }
+impl<T, V> std::fmt::Display for NodeProjection<T, V>
+where
+    T: TreeTopology + DbConnector<V>,
+    T::Key: ToFromBytea,
+    V: PayloadInDb,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/Nodes", self.wrapped.lock().unwrap())
+    }
+}
 impl<T, V> RoEpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
 where
     T: TreeTopology + DbConnector<V>,
@@ -856,6 +889,7 @@ where
         k: &T::Key,
         epoch: Epoch,
     ) -> impl Future<Output = Option<T::Node>> + Send {
+        trace!("[{self}] fetching {k:?}@{epoch}",);
         let db = self.wrapped.lock().unwrap().db.clone();
         let table = self.wrapped.lock().unwrap().table.to_owned();
         async move {
@@ -894,11 +928,13 @@ where
     }
 
     fn remove(&mut self, k: T::Key) -> impl Future<Output = Result<()>> + Send {
+        trace!("[{self}] removing {k:?} from cache",);
         self.wrapped.lock().unwrap().nodes_cache.insert(k, None);
         async { Ok(()) }
     }
 
     fn update(&mut self, k: T::Key, new_value: T::Node) -> impl Future<Output = Result<()>> + Send {
+        trace!("[{self}] updating cache {k:?} -> {new_value:?}");
         // If the operation is already present from a read, replace it with the
         // new value.
         self.wrapped
@@ -910,6 +946,7 @@ where
     }
 
     fn store(&mut self, k: T::Key, value: T::Node) -> impl Future<Output = Result<()>> + Send {
+        trace!("[{self}] storing {k:?} -> {value:?} in cache");
         // If the operation is already present from a read, replace it with the
         // new value.
         self.wrapped
@@ -935,6 +972,17 @@ where
 {
     pub(super) wrapped: Arc<Mutex<CachedDbTreeStore<T, V>>>,
 }
+impl<T, V> std::fmt::Display for PayloadProjection<T, V>
+where
+    T: TreeTopology + DbConnector<V>,
+    T::Key: ToFromBytea,
+    V: PayloadInDb,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/Payload", self.wrapped.lock().unwrap())
+    }
+}
+
 impl<T, V> RoEpochKvStorage<T::Key, V> for PayloadProjection<T, V>
 where
     T: TreeTopology + DbConnector<V>,
@@ -950,6 +998,7 @@ where
     }
 
     fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> impl Future<Output = Option<V>> + Send {
+        trace!("[{self}] attempting to fetch payload for {k:?}@{epoch}");
         let db = self.wrapped.lock().unwrap().db.clone();
         let table = self.wrapped.lock().unwrap().table.to_owned();
         async move {
@@ -989,11 +1038,13 @@ where
     }
 
     fn remove(&mut self, k: T::Key) -> impl Future<Output = Result<()>> + Send {
+        trace!("[{self}] removing {k:?} from cache");
         self.wrapped.lock().unwrap().nodes_cache.insert(k, None);
         async { Ok(()) }
     }
 
     fn update(&mut self, k: T::Key, new_value: V) -> impl Future<Output = Result<()>> + Send {
+        trace!("[{self}] updating cache {k:?} -> {new_value:?}");
         // If the operation is already present from a read, replace it with the
         // new value.
         self.wrapped
@@ -1005,6 +1056,7 @@ where
     }
 
     fn store(&mut self, k: T::Key, value: V) -> impl Future<Output = Result<()>> + Send {
+        trace!("[{self}] storing {k:?} -> {value:?} in cache",);
         // If the operation is already present from a read, replace it with the
         // new value.
         self.wrapped

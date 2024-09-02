@@ -5155,13 +5155,13 @@ dependencies = [
  "delegate",
  "futures",
  "itertools 0.12.1",
- "log",
  "postgres-types",
  "rand",
  "serde",
  "sha256",
  "tokio",
  "tokio-postgres",
+ "tracing",
 ]
 
 [[package]]
