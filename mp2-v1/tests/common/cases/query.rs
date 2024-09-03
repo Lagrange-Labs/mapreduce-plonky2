@@ -161,7 +161,10 @@ async fn test_query_mapping(
     let mut exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
     let query_params = exec_query.convert_placeholders(&query_info.placeholders);
     let res = table
-        .execute_row_query(&exec_query.apply().to_string(), &query_params)
+        .execute_row_query(
+            &exec_query.normalize_placeholder_names().to_string(),
+            &query_params,
+        )
         .await?;
     info!(
         "Found {} results from query {}",
@@ -177,12 +180,12 @@ async fn test_query_mapping(
         parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
             .context("while genrating keys in index bounds")?;
     println!(" -- touched rows query: {:?}", rows_query.query.to_string());
-    let initial_ph = rows_query.convert_placeholders(&query_info.placeholders);
-    println!("initial_ph: {:?}", initial_ph);
     let big_row_cache = table
         .row
         .wide_lineage_between(
-            &rows_query.apply().to_string(),
+            &rows_query
+                .interpolate(&settings, &query_info.placeholders)?
+                .to_string(),
             (query_info.min_block as Epoch, query_info.max_block as Epoch),
         )
         .await?;

@@ -104,6 +104,9 @@ impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
                         .expect("lineage should get all keys");
                     path.push(parent_k.clone());
                 }
+                // NOTE: these paths are *ascending*, whereas the update tree is
+                // built from *descending* ones.
+                path.reverse();
                 path
             })
             .collect_vec();

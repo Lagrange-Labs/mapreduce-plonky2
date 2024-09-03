@@ -398,6 +398,10 @@ where
         bounds: (Epoch, Epoch),
     ) -> impl Future<Output = Result<WideLineage<K, V>>> {
         async move {
+            ensure!(
+                !keys_query.contains('$'),
+                "unexpected placeholder found in keys_query"
+            );
             // Call the mega-query doing everything
             let query = format!(
                 include_str!("wide_lineage.sql"),
@@ -410,12 +414,13 @@ where
                 LEFT_CHILD = LEFT_CHILD,
                 RIGHT_CHILD = RIGHT_CHILD,
                 SUBTREE_SIZE = SUBTREE_SIZE,
+                max_depth = 2,
                 zk_table = table,
-                core_keys_query = keys_query
+                core_keys_query = keys_query,
             );
             let connection = db.get().await.unwrap();
             let rows = connection
-                .query(&query, &[&bounds.0, &bounds.1, &2i32])
+                .query(&query, &[&bounds.0, &bounds.1])
                 .await
                 .with_context(|| {
                     format!(

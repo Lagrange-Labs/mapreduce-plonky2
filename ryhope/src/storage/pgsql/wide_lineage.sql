@@ -2,10 +2,10 @@
 --  * zk_table: the zkTable name
 --  * core_keys_query: a query returning the core keys, i.e. the keys directly
 --    touched by the zkQuery, providing the columns {KEY} and {EPOCH}.
+--  * max_depth: downward recursion limit for descendance expansion
 -- Placeholders:
 --  * $1: start of the epoch range
 --  * $2: end of the epoch range
---  * $3: downward recursion limit for descendance expansion
 --
 -- Output:
 -- A table of all the keys on the union of paths from each core key to the root,
@@ -71,7 +71,7 @@ WITH RECURSIVE descendance (is_core, {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD
      FROM {zk_table} child, descendance parent
      WHERE
        child.{KEY} IN (parent.{LEFT_CHILD}, parent.{RIGHT_CHILD})
-       AND depth < $3
+       AND depth < {max_depth}
        AND NOT (child.{VALID_FROM} > parent.{VALID_UNTIL} OR child.{VALID_UNTIL}  < parent.{VALID_FROM})
  ) SELECT
    -- is_core may be 1 (if the row is explicitely a core key) or 0 (if it has been

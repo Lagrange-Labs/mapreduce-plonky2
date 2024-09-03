@@ -71,7 +71,7 @@ impl TranslatedQuery {
     /// Combine the encapsulated query and placeholder mappings to generate a
     /// SQL query with name placeholders replaced with the corresponding numeric
     /// placeholders.
-    pub fn apply(&mut self) -> Query {
+    pub fn normalize_placeholder_names(&mut self) -> Query {
         let mut r = self.query.clone();
         r.visit(self).unwrap();
         r
@@ -87,10 +87,25 @@ impl TranslatedQuery {
     pub fn convert_placeholders(&self, placeholders: &Placeholders) -> Vec<U256> {
         let mut r = vec![U256::default(); self.placeholder_mapping.len()];
         for (placeholder_id, positions) in self.placeholder_mapping.iter() {
-            println!("Handling {placeholder_id:?}");
             r[*positions] = placeholders.0[placeholder_id];
         }
         r
+    }
+
+    /// Replace the placeholders met in the query by the values they should
+    /// take, as defined in the given [`Placeholder`].
+    pub fn interpolate<C: ContextProvider>(
+        &mut self,
+        settings: &ParsilSettings<C>,
+        placeholders: &Placeholders,
+    ) -> Result<Query> {
+        let mut r = self.query.clone();
+        let mut interpolator = PlaceholderInterpolator {
+            settings,
+            placeholders,
+        };
+        r.visit(&mut interpolator)?;
+        Ok(r)
     }
 }
 
@@ -99,6 +114,32 @@ impl AstPass for TranslatedQuery {
         if let Expr::Value(Value::Placeholder(name)) = expr {
             *name = self.placeholder_name_mapping[name].to_string();
         }
+        Ok(())
+    }
+}
+
+struct PlaceholderInterpolator<'a, C: ContextProvider> {
+    settings: &'a ParsilSettings<C>,
+    placeholders: &'a Placeholders,
+}
+impl<'a, C: ContextProvider> AstPass for PlaceholderInterpolator<'a, C> {
+    fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
+        if let Some(replacement) = if let Expr::Value(Value::Placeholder(name)) = expr {
+            let value = self
+                .placeholders
+                .get(&self.settings.placeholders.resolve_placeholder(name)?)?;
+            Some(Expr::Cast {
+                kind: CastKind::DoubleColon,
+                expr: Box::new(Expr::Value(Value::SingleQuotedString(format!("{value}")))),
+                data_type: UINT256,
+                format: None,
+            })
+        } else {
+            None
+        } {
+            *expr = replacement;
+        }
+
         Ok(())
     }
 }
