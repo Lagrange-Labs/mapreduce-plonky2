@@ -9,7 +9,6 @@ use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, ExactNumberInfo, Expr, Function, FunctionArg,
     FunctionArgExpr, FunctionArgumentList, FunctionArguments, GroupByExpr, Ident, ObjectName,
     Query, Select, SelectItem, SetExpr, TableAlias, TableFactor, TableWithJoins, Value,
-    WildcardAdditionalOptions,
 };
 use std::collections::HashMap;
 use verifiable_db::query::{
@@ -241,8 +240,8 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
                 distinct: None,
                 top: None,
                 projection: vec![
-                    SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
                     SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
+                    SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
                 ],
                 into: None,
                 from: vec![TableWithJoins {
@@ -291,8 +290,8 @@ impl<'a, C: ContextProvider> AstPass for KeyFetcher<'a, C> {
         // When we meet a SELECT, insert a * to be sure to bubble up the key &
         // block number
         select.projection = vec![
-            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
             SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
+            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
         ];
         Ok(())
     }
