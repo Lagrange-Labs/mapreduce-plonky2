@@ -9,7 +9,7 @@ use crate::{
     errors::ValidationError,
     symbols::{ColumnKind, ContextProvider, Handle, Kind, ScopeTable, Symbol},
     utils::ParsilSettings,
-    visitor::{AstPass, Visit},
+    visitor::{AstMutator, Visit},
 };
 
 /// Define on which side(s) the secondary index is known to be bounded within a query.
@@ -204,7 +204,9 @@ impl<'a, C: ContextProvider> Isolator<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstPass for Isolator<'a, C> {
+impl<'a, C: ContextProvider> AstMutator for Isolator<'a, C> {
+    type Error = anyhow::Error;
+
     fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
         match &table_factor {
             TableFactor::Table {

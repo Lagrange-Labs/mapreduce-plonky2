@@ -1,7 +1,6 @@
 //! This implements a generic visitor patter for an SQL AST. One is already
 //! defined in sqlparser, but its public interface is unfortunately restricte to
 //! only some node types, hence making it unfit for our needs.
-use anyhow::*;
 use sqlparser::ast::{
     BinaryOperator, Distinct, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
     FunctionArguments, GroupByExpr, Join, JoinConstraint, JoinOperator, NamedWindowDefinition,
@@ -34,17 +33,17 @@ use sqlparser::ast::{
 ///     Ok(())
 /// }
 /// ```
-macro_rules! visit_for {
+macro_rules! visit_mut {
     ( $( $type: ident )* ) => {
         $(
             camelpaste::item! {
                 #[allow(unused)]
-                fn [<pre_ $type:snake>](&mut self, [<$type:snake>]: &mut $type) -> Result<()> {
+                fn [<pre_ $type:snake>](&mut self, [<$type:snake>]: &mut $type) -> Result<(), Self::Error> {
                     Ok(())
                 }
 
                 #[allow(unused)]
-                fn [<post_ $type:snake>](&mut self, [<$type:snake>]: &mut $type) -> Result<()> {
+                fn [<post_ $type:snake>](&mut self, [<$type:snake>]: &mut $type) -> Result<(), Self::Error> {
                     Ok(())
                 }
             }
@@ -52,8 +51,10 @@ macro_rules! visit_for {
     };
 }
 
-pub trait AstPass {
-    visit_for!(
+pub trait AstMutator {
+    type Error;
+
+    visit_mut!(
             BinaryOperator
             Distinct
             Expr
@@ -78,21 +79,21 @@ pub trait AstPass {
     );
 
     /// Called before traversing a WHERE
-    fn pre_selection(&mut self) -> Result<()> {
+    fn pre_selection(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Called after traversing a WHERE
-    fn post_selection(&mut self) -> Result<()> {
+    fn post_selection(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
 }
 
-pub trait Visit<P: AstPass> {
-    fn visit(&mut self, pass: &mut P) -> Result<()>;
+pub trait Visit<P: AstMutator> {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error>;
 }
-impl<P: AstPass> Visit<P> for WindowSpec {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for WindowSpec {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_window_spec(self)?;
         for e in self.partition_by.iter_mut() {
             e.visit(pass)?
@@ -100,15 +101,15 @@ impl<P: AstPass> Visit<P> for WindowSpec {
         pass.post_window_spec(self)
     }
 }
-impl<P: AstPass> Visit<P> for Offset {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for Offset {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_offset(self)?;
         self.value.visit(pass)?;
         pass.post_offset(self)
     }
 }
-impl<P: AstPass> Visit<P> for FunctionArguments {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for FunctionArguments {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_function_arguments(self)?;
         match self {
             FunctionArguments::None => {}
@@ -122,20 +123,20 @@ impl<P: AstPass> Visit<P> for FunctionArguments {
         pass.post_function_arguments(self)
     }
 }
-impl<P: AstPass> Visit<P> for UnaryOperator {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for UnaryOperator {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_unary_operator(self)?;
         pass.post_unary_operator(self)
     }
 }
-impl<P: AstPass> Visit<P> for BinaryOperator {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for BinaryOperator {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_binary_operator(self)?;
         pass.post_binary_operator(self)
     }
 }
-impl<P: AstPass> Visit<P> for Expr {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for Expr {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_expr(self)?;
         match self {
             Expr::Identifier(_) => {}
@@ -216,7 +217,6 @@ impl<P: AstPass> Visit<P> for Expr {
                 parameters,
                 args,
                 filter,
-                null_treatment,
                 over,
                 within_group,
                 ..
@@ -226,7 +226,6 @@ impl<P: AstPass> Visit<P> for Expr {
                 if let Some(filter) = filter.as_mut() {
                     filter.visit(pass)?;
                 }
-                ensure!(null_treatment.is_none(), "Snowflake");
                 if let Some(over) = over.as_mut() {
                     match over {
                         WindowType::WindowSpec(window_spec) => {
@@ -279,15 +278,15 @@ impl<P: AstPass> Visit<P> for Expr {
         pass.post_expr(self)
     }
 }
-impl<P: AstPass> Visit<P> for OrderByExpr {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for OrderByExpr {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_order_by_expr(self)?;
         self.expr.visit(pass)?;
         pass.post_order_by_expr(self)
     }
 }
-impl<P: AstPass> Visit<P> for OrderBy {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for OrderBy {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_order_by(self)?;
         for e in self.exprs.iter_mut() {
             e.visit(pass)?;
@@ -295,8 +294,8 @@ impl<P: AstPass> Visit<P> for OrderBy {
         pass.post_order_by(self)
     }
 }
-impl<P: AstPass> Visit<P> for FunctionArg {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for FunctionArg {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_function_arg(self)?;
         match self {
             FunctionArg::Named { arg, .. } | FunctionArg::Unnamed(arg) => match arg {
@@ -308,8 +307,8 @@ impl<P: AstPass> Visit<P> for FunctionArg {
         pass.post_function_arg(self)
     }
 }
-impl<P: AstPass> Visit<P> for TableFactor {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for TableFactor {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_table_factor(self)?;
         match self {
             TableFactor::Table {
@@ -353,16 +352,16 @@ impl<P: AstPass> Visit<P> for TableFactor {
         pass.post_table_factor(self)
     }
 }
-impl<P: AstPass> Visit<P> for Join {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for Join {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_join(self)?;
         self.relation.visit(pass)?;
         self.join_operator.visit(pass)?;
         pass.post_join(self)
     }
 }
-impl<P: AstPass> Visit<P> for SelectItem {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for SelectItem {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_select_item(self)?;
         match self {
             SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
@@ -373,8 +372,8 @@ impl<P: AstPass> Visit<P> for SelectItem {
         pass.post_select_item(self)
     }
 }
-impl<P: AstPass> Visit<P> for JoinOperator {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for JoinOperator {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_join_operator(self)?;
         match self {
             JoinOperator::Inner(constraint)
@@ -391,8 +390,8 @@ impl<P: AstPass> Visit<P> for JoinOperator {
         pass.post_join_operator(self)
     }
 }
-impl<P: AstPass> Visit<P> for JoinConstraint {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for JoinConstraint {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_join_constraint(self)?;
         match self {
             JoinConstraint::On(e) => e.visit(pass)?,
@@ -401,8 +400,8 @@ impl<P: AstPass> Visit<P> for JoinConstraint {
         pass.post_join_constraint(self)
     }
 }
-impl<P: AstPass> Visit<P> for TableWithJoins {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for TableWithJoins {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_table_with_joins(self)?;
         self.relation.visit(pass)?;
         for j in self.joins.iter_mut() {
@@ -411,8 +410,8 @@ impl<P: AstPass> Visit<P> for TableWithJoins {
         pass.post_table_with_joins(self)
     }
 }
-impl<P: AstPass> Visit<P> for Distinct {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for Distinct {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_distinct(self)?;
         match self {
             Distinct::Distinct => {}
@@ -425,8 +424,8 @@ impl<P: AstPass> Visit<P> for Distinct {
         pass.post_distinct(self)
     }
 }
-impl<P: AstPass> Visit<P> for Select {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for Select {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_select(self)?;
 
         for f in self.from.iter_mut() {
@@ -472,8 +471,8 @@ impl<P: AstPass> Visit<P> for Select {
         pass.post_select(self)
     }
 }
-impl<P: AstPass> Visit<P> for Statement {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for Statement {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_statement(self)?;
         match self {
             Statement::Query(q) => q.visit(pass)?,
@@ -562,8 +561,8 @@ impl<P: AstPass> Visit<P> for Statement {
         Ok(())
     }
 }
-impl<P: AstPass> Visit<P> for SetExpr {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for SetExpr {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_set_expr(self)?;
         match self {
             SetExpr::Select(s) => s.visit(pass)?,
@@ -584,8 +583,8 @@ impl<P: AstPass> Visit<P> for SetExpr {
     }
 }
 
-impl<P: AstPass> Visit<P> for Query {
-    fn visit(&mut self, pass: &mut P) -> Result<()> {
+impl<P: AstMutator> Visit<P> for Query {
+    fn visit(&mut self, pass: &mut P) -> Result<(), P::Error> {
         pass.pre_query(self)?;
         self.body.visit(pass)?;
         if let Some(order_by) = self.order_by.as_mut() {

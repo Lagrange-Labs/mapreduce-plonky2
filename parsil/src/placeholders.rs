@@ -8,7 +8,7 @@ use crate::{
     errors::ValidationError,
     symbols::ContextProvider,
     utils::ParsilSettings,
-    visitor::{AstPass, Visit},
+    visitor::{AstMutator, Visit},
 };
 
 pub struct PlaceholderValidator<'a, C: ContextProvider> {
@@ -54,7 +54,9 @@ impl<'a, C: ContextProvider> PlaceholderValidator<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstPass for PlaceholderValidator<'a, C> {
+impl<'a, C: ContextProvider> AstMutator for PlaceholderValidator<'a, C> {
+    type Error = anyhow::Error;
+
     fn pre_expr(&mut self, expr: &mut Expr) -> anyhow::Result<()> {
         if let Expr::Value(Value::Placeholder(name)) = expr {
             self.resolve(name)?;

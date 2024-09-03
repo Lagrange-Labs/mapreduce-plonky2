@@ -20,7 +20,7 @@ use crate::{
     placeholders,
     symbols::{ColumnKind, ContextProvider},
     utils::str_to_u256,
-    visitor::{AstPass, Visit},
+    visitor::{AstMutator, Visit},
     ParsilSettings,
 };
 
@@ -173,7 +173,8 @@ impl TranslatedQuery {
     }
 }
 
-impl AstPass for TranslatedQuery {
+impl AstMutator for TranslatedQuery {
+    type Error = anyhow::Error;
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         if let Expr::Value(Value::Placeholder(name)) = expr {
             *name = self.placeholder_name_mapping[name].to_string();
@@ -386,7 +387,9 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
         Ok(())
     }
 }
-impl<'a, C: ContextProvider> AstPass for KeyFetcher<'a, C> {
+impl<'a, C: ContextProvider> AstMutator for KeyFetcher<'a, C> {
+    type Error = anyhow::Error;
+
     fn post_select(&mut self, select: &mut Select) -> Result<()> {
         // When we meet a SELECT, insert a * to be sure to bubble up the key &
         // block number
@@ -533,7 +536,9 @@ impl<'a, C: ContextProvider> Executor<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
+impl<'a, C: ContextProvider> AstMutator for Executor<'a, C> {
+    type Error = anyhow::Error;
+
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         convert_number_string(expr)?;
         convert_funcalls(expr)?;

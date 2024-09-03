@@ -27,7 +27,7 @@ use crate::{
     errors::ValidationError,
     symbols::{ColumnKind, ContextProvider, Handle, Kind, ScopeTable, Symbol},
     utils::{str_to_u256, ParsilSettings},
-    visitor::{AstPass, Visit},
+    visitor::{AstMutator, Visit},
 };
 
 /// A Wire carry data that can be injected in universal query circuits. It
@@ -587,10 +587,10 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 Ok((agg, self.to_output_expression(*sub_wire_id, true)?.1))
             }
             Wire::Constant(_) => bail!(ValidationError::UnsupportedFeature(
-                "top-level immediate values".into()
+                "top-level immediate values".into(),
             )),
             Wire::PlaceHolder(_) => bail!(ValidationError::UnsupportedFeature(
-                "top-level placeholders".into()
+                "top-level placeholders".into(),
             )),
         }
     }
@@ -763,8 +763,10 @@ pub type StaticCircuitPis = CircuitPis<StaticQueryBounds>;
 /// runtime.
 pub type DynamicCircuitPis = CircuitPis<QueryBounds>;
 
-impl<'a, C: ContextProvider> AstPass for Assembler<'a, C> {
-    fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
+impl<'a, C: ContextProvider> AstMutator for Assembler<'a, C> {
+    type Error = anyhow::Error;
+
+    fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<(), Self::Error> {
         match &table_factor {
             TableFactor::Table {
                 name, alias, args, ..

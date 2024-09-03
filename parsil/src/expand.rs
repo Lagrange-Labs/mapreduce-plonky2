@@ -3,11 +3,13 @@
 
 use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
 
-use crate::visitor::{AstPass, Visit};
+use crate::visitor::{AstMutator, Visit};
 
 struct Expander;
 
-impl AstPass for Expander {
+impl AstMutator for Expander {
+    type Error = anyhow::Error;
+
     fn pre_expr(&mut self, e: &mut Expr) -> anyhow::Result<()> {
         #[allow(non_snake_case)]
         let TRUE = Expr::Value(Value::Number("1".to_string(), false));
