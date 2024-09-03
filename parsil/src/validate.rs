@@ -48,9 +48,20 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
 
     fn pre_expr(&mut self, expr: &mut Expr) -> Result<()> {
         match expr {
-            Expr::Identifier(_)
-            | Expr::CompoundIdentifier(_)
-            | Expr::IsFalse(_)
+            Expr::Identifier(name) => {
+                ensure!(
+                    !name.value.starts_with("__"),
+                    ValidationError::ReservedIdentifier(name.value.to_owned())
+                );
+            }
+            Expr::CompoundIdentifier(names) => {
+                let latest = names.last().unwrap();
+                ensure!(
+                    !latest.value.starts_with("__"),
+                    ValidationError::ReservedIdentifier(latest.value.to_owned())
+                );
+            }
+            Expr::IsFalse(_)
             | Expr::IsNotFalse(_)
             | Expr::IsTrue(_)
             | Expr::IsNotTrue(_)

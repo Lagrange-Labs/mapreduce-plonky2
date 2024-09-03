@@ -1,5 +1,5 @@
 use alloy::primitives::U256;
-use ryhope::{VALID_FROM, VALID_UNTIL};
+use ryhope::{KEY, PAYLOAD, VALID_FROM, VALID_UNTIL};
 use verifiable_db::query::aggregation::QueryBounds;
 
 use crate::{symbols::ContextProvider, ParsilSettings};
@@ -42,14 +42,14 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
         .id;
 
     // A simple alias for the sec. ind. values
-    let sec_index = format!("(payload -> 'cells' -> '{sec_ind_column}' ->> 'value')::NUMERIC");
+    let sec_index = format!("({PAYLOAD} -> 'cells' -> '{sec_ind_column}' ->> 'value')::NUMERIC");
 
     // Select the largest of all the sec. ind. values that remains smaller than
     // the provided sec. ind. lower bound if it is provided, -1 otherwise.
     let largest_below = if *secondary_lo == U256::ZERO {
         None
     } else {
-        Some(format!("SELECT key FROM {table_name}
+        Some(format!("SELECT {KEY} FROM {table_name}
                            WHERE {sec_index} < '{secondary_lo}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
                            ORDER BY {sec_index} DESC LIMIT 1"))
     };
@@ -58,7 +58,7 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
     let smallest_above = if *secondary_hi == U256::MAX {
         None
     } else {
-        Some(format!("SELECT key FROM {table_name}
+        Some(format!("SELECT {KEY} FROM {table_name}
                            WHERE {sec_index} > '{secondary_hi}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
                            ORDER BY {sec_index} ASC LIMIT 1"))
     };

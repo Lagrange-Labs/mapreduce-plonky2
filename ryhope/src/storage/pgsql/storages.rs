@@ -7,7 +7,7 @@ use crate::{
         sbbst::{self, NodeIdx},
         scapegoat, NodeContext, TreeTopology,
     },
-    Epoch, PAYLOAD, VALID_FROM, VALID_UNTIL,
+    Epoch, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL,
 };
 use anyhow::*;
 use bb8::Pool;
@@ -28,6 +28,11 @@ use tracing::*;
 use super::{CachedValue, PayloadInDb, ToFromBytea};
 
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
+
+const PARENT: &str = "__parent";
+const LEFT_CHILD: &str = "__left_child";
+const RIGHT_CHILD: &str = "__right_child";
+const SUBTREE_SIZE: &str = "__subtree_size";
 
 /// Type implementing this trait define the behavior of a storage tree
 /// components regarding their persistence in DB.
@@ -76,7 +81,7 @@ where
         db_tx
             .execute(
                 &format!(
-                    "UPDATE {} SET payload=$3 WHERE key=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}",
+                    "UPDATE {} SET {PAYLOAD}=$3 WHERE {KEY}=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}",
                     table
                 ),
                 &[&k.to_bytea(), &epoch, &Json(v)],
@@ -106,7 +111,7 @@ where
             connection
             .query(
                 &format!(
-                    "SELECT {PAYLOAD} FROM {} WHERE key=$1 AND {VALID_FROM} <= $2 AND $2 <= {VALID_UNTIL}",
+                    "SELECT {PAYLOAD} FROM {} WHERE {KEY}=$1 AND {VALID_FROM} <= $2 AND $2 <= {VALID_UNTIL}",
                     table
                 ),
                 &[&(k.to_bytea()), &epoch],
@@ -160,7 +165,7 @@ where
         connection
             .query(
                 &format!(
-                    "SELECT * FROM {} WHERE key=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}",
+                    "SELECT * FROM {} WHERE {KEY}=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}",
                     table
                 ),
                 &[&k.to_bytea(), &epoch],
@@ -189,7 +194,7 @@ where
             .execute(
                 &format!(
                     "INSERT INTO
-                     {} (key, {VALID_FROM}, {VALID_UNTIL})
+                     {} ({KEY}, {VALID_FROM}, {VALID_UNTIL})
                      VALUES ($1, $2, $2)",
                     table
                 ),
@@ -220,7 +225,7 @@ where
             .map(|row| {
                 (
                     row.get::<_, i64>("epoch"),
-                    row.get::<_, i64>("key") as NodeIdx,
+                    row.get::<_, i64>(KEY) as NodeIdx,
                 )
             })
             .collect::<Vec<_>>();
@@ -237,9 +242,9 @@ where
         // Fetch all the payloads for the wide lineage in one fell swoop
         let payload_query = format!(
             "SELECT
-               key, generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS epoch, {PAYLOAD}
+               {KEY}, generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS epoch, {PAYLOAD}
              FROM {table}
-             WHERE {VALID_FROM} <= $1 AND $2 <= {VALID_UNTIL} AND key = ANY($3)",
+             WHERE {VALID_FROM} <= $1 AND $2 <= {VALID_UNTIL} AND {KEY} = ANY($3)",
         );
         let rows = db
             .get()
@@ -269,7 +274,7 @@ where
                 .try_get::<_, i64>("epoch")
                 .context("while fetching epoch from row")?;
             let key = row
-                .try_get::<_, Vec<u8>>("key")
+                .try_get::<_, Vec<u8>>(KEY)
                 .map(NodeIdx::from_bytea)
                 .context("while fetching key from row")?;
             let payload = Self::payload_from_row(row)?;
@@ -303,10 +308,10 @@ where
 {
     fn node_columns() -> &'static [(&'static str, &'static str)] {
         &[
-            ("parent", "BYTEA"),
-            ("left_child", "BYTEA"),
-            ("right_child", "BYTEA"),
-            ("subtree_size", "BIGINT"),
+            (PARENT, "BYTEA"),
+            (LEFT_CHILD, "BYTEA"),
+            (RIGHT_CHILD, "BYTEA"),
+            (SUBTREE_SIZE, "BIGINT"),
         ]
     }
 
@@ -320,8 +325,8 @@ where
         connection
             .query(
                 &format!(
-                    "SELECT parent, left_child, right_child, subtree_size FROM {}
-                       WHERE key=$1 AND {VALID_FROM} <= $2 AND $2 <= {VALID_UNTIL}",
+                    "SELECT {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD}, {SUBTREE_SIZE} FROM {}
+                       WHERE {KEY}=$1 AND {VALID_FROM} <= $2 AND $2 <= {VALID_UNTIL}",
                     table
                 ),
                 &[&k.to_bytea(), &epoch],
@@ -346,16 +351,16 @@ where
 
     fn node_from_row(row: &Row) -> Result<Self::Node> {
         Ok(Self::Node {
-            k: K::from_bytea(row.try_get::<_, Vec<u8>>("key")?),
-            subtree_size: row.try_get::<_, i64>("subtree_size")?.try_into().unwrap(),
+            k: K::from_bytea(row.try_get::<_, Vec<u8>>(KEY)?),
+            subtree_size: row.try_get::<_, i64>(SUBTREE_SIZE)?.try_into().unwrap(),
             parent: row
-                .try_get::<_, Option<Vec<u8>>>("parent")?
+                .try_get::<_, Option<Vec<u8>>>(PARENT)?
                 .map(K::from_bytea),
             left: row
-                .try_get::<_, Option<Vec<u8>>>("left_child")?
+                .try_get::<_, Option<Vec<u8>>>(LEFT_CHILD)?
                 .map(K::from_bytea),
             right: row
-                .try_get::<_, Option<Vec<u8>>>("right_child")?
+                .try_get::<_, Option<Vec<u8>>>(RIGHT_CHILD)?
                 .map(K::from_bytea),
         })
     }
@@ -371,7 +376,7 @@ where
             .execute(
                 &format!(
                     "INSERT INTO
-                     {} (key, {VALID_FROM}, {VALID_UNTIL}, subtree_size, parent, left_child, right_child)
+                     {} ({KEY}, {VALID_FROM}, {VALID_UNTIL}, {SUBTREE_SIZE}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD})
                      VALUES ($1, $2, $2, $3, $4, $5, $6)",
                     table
                 ),
@@ -401,9 +406,14 @@ where
             // Call the mega-query doing everything
             let query = format!(
                 include_str!("wide_lineage.sql"),
+                KEY = KEY,
+                PAYLOAD = PAYLOAD,
                 VALID_FROM = VALID_FROM,
                 VALID_UNTIL = VALID_UNTIL,
-                PAYLOAD = PAYLOAD,
+                PARENT = PARENT,
+                LEFT_CHILD = LEFT_CHILD,
+                RIGHT_CHILD = RIGHT_CHILD,
+                SUBTREE_SIZE = SUBTREE_SIZE,
                 zk_table = table,
                 core_keys_query = keys_query
             );

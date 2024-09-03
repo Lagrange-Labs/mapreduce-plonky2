@@ -4,7 +4,7 @@
 use alloy::primitives::U256;
 use anyhow::*;
 use log::*;
-use ryhope::{PAYLOAD, VALID_FROM, VALID_UNTIL};
+use ryhope::{KEY, PAYLOAD, VALID_FROM, VALID_UNTIL};
 use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, ExactNumberInfo, Expr, Function, FunctionArg,
     FunctionArgExpr, FunctionArgumentList, FunctionArguments, GroupByExpr, Ident, ObjectName,
@@ -233,8 +233,8 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
 
         if let SetExpr::Select(ref mut select) = *query.body {
             select.projection = vec![
-                SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("key"))),
                 SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("block"))),
+                SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
             ];
         }
 
@@ -291,7 +291,7 @@ impl<'a, C: ContextProvider> AstPass for KeyFetcher<'a, C> {
 
                 let select_items =
                     // Insert the `key` column in the selected values...
-                    std::iter::once(SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("key"))))
+                    std::iter::once(SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))))
                     .chain(std::iter::once(
                         SelectItem::ExprWithAlias {
                             expr: expand_block_range(self.settings),
