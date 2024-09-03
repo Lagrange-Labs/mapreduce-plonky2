@@ -25,6 +25,10 @@ use crate::{
     ParsilSettings,
 };
 
+/// The name under which the block will be exposed at the top level query for
+/// key generation.
+pub const BLOCK_ALIAS: &str = "__block";
+
 /// A data structure wrapping a zkSQL query converted into a pgSQL able to be
 /// executed on zkTables and its accompanying metadata.
 #[derive(Debug)]
@@ -231,12 +235,57 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
     fn process(&mut self, query: &mut Query) -> Result<()> {
         query.visit(self)?;
 
-        if let SetExpr::Select(ref mut select) = *query.body {
-            select.projection = vec![
-                SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("block"))),
-                SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
-            ];
-        }
+        let r = Query {
+            with: None,
+            body: Box::new(SetExpr::Select(Box::new(Select {
+                distinct: None,
+                top: None,
+                projection: vec![
+                    SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
+                    SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
+                ],
+                into: None,
+                from: vec![TableWithJoins {
+                    relation: TableFactor::Derived {
+                        lateral: false,
+                        subquery: Box::new(query.clone()),
+                        alias: None,
+                    },
+                    joins: vec![],
+                }],
+                lateral_views: vec![],
+                prewhere: None,
+                selection: None,
+                group_by: GroupByExpr::Expressions(vec![], vec![]),
+                cluster_by: vec![],
+                distribute_by: vec![],
+                sort_by: vec![],
+                having: None,
+                named_window: vec![],
+                qualify: None,
+                window_before_qualify: false,
+                value_table_mode: None,
+                connect_by: None,
+            }))),
+            order_by: None,
+            limit: None,
+            limit_by: vec![],
+            offset: None,
+            fetch: None,
+            locks: vec![],
+            for_clause: None,
+            settings: None,
+            format_clause: None,
+        };
+
+        *query = r;
+
+        // if let SetExpr::Select(ref mut select) = *query.body {
+        //     select.projection = vec![
+        //         SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
+        //         SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
+        //     ];
+        // }
 
         Ok(())
     }
@@ -295,7 +344,7 @@ impl<'a, C: ContextProvider> AstPass for KeyFetcher<'a, C> {
                     .chain(std::iter::once(
                         SelectItem::ExprWithAlias {
                             expr: expand_block_range(self.settings),
-                            alias: Ident::new("block")
+                            alias: Ident::new(BLOCK_ALIAS)
                         }
                     ))
                     // then continue normally
