@@ -67,4 +67,7 @@ pub enum ValidationError {
 
     #[error("`{0}`: compounded table names unsupported")]
     CompoundTableName(String),
+
+    #[error("`{0}`: reserved identifier")]
+    ReservedIdentifier(String),
 }

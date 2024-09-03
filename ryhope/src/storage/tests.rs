@@ -1,11 +1,10 @@
-use std::collections::HashSet;
-
 use anyhow::*;
 use bb8_postgres::PostgresConnectionManager;
 use futures::FutureExt;
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use tokio_postgres::NoTls;
 
 pub type DBPool = bb8::Pool<PostgresConnectionManager<NoTls>>;
@@ -21,7 +20,7 @@ use crate::{
         scapegoat::{self, Alpha},
         PrintableTree, TreeTopology,
     },
-    Epoch, InitSettings, MerkleTreeKvDb, NodePayload, VALID_FROM, VALID_UNTIL,
+    Epoch, InitSettings, MerkleTreeKvDb, NodePayload, KEY, VALID_FROM, VALID_UNTIL,
 };
 
 use super::TreeTransactionalStorage;
@@ -1042,9 +1041,9 @@ async fn wide_update_trees() {
 
     // Keys are "restera" and "plus"
     let query = format!("
-SELECT key, generate_series(GREATEST(1, {VALID_FROM}), LEAST(2, {VALID_FROM})) AS block
+SELECT {KEY}, generate_series(GREATEST(1, {VALID_FROM}), LEAST(2, {VALID_FROM})) AS block
 FROM wide
-WHERE key = ANY(ARRAY['\\x72657374657261'::bytea,'\\x706c7573'::bytea, '\\x636172']) AND NOT ({VALID_FROM} > 2 OR {VALID_UNTIL} < 1)");
+WHERE {KEY} = ANY(ARRAY['\\x72657374657261'::bytea,'\\x706c7573'::bytea, '\\x636172']) AND NOT ({VALID_FROM} > 2 OR {VALID_UNTIL} < 1)");
 
     let trees = s.wide_update_trees(&query, (1, 2)).await.unwrap();
     for t in trees.iter() {

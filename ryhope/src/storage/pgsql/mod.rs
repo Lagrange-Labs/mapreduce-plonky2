@@ -4,8 +4,8 @@ use super::{
     TransactionalStorage, TreeStorage, WideLineage,
 };
 use crate::{
-    storage::pgsql::storages::DBPool, tree::TreeTopology, Epoch, InitSettings, PAYLOAD, VALID_FROM,
-    VALID_UNTIL,
+    storage::pgsql::storages::DBPool, tree::TreeTopology, Epoch, InitSettings, KEY, PAYLOAD,
+    VALID_FROM, VALID_UNTIL,
 };
 use anyhow::*;
 use bb8_postgres::PostgresConnectionManager;
@@ -451,11 +451,11 @@ where
             .execute(
                 &format!(
                     "CREATE TABLE {table} (
-                   key          BYTEA NOT NULL,
+                   {KEY}          BYTEA NOT NULL,
                    {VALID_FROM}   BIGINT NOT NULL,
                    {VALID_UNTIL}  BIGINT DEFAULT -1,
                    {node_columns}
-                   UNIQUE (key, {VALID_FROM}))"
+                   UNIQUE ({KEY}, {VALID_FROM}))"
                 ),
                 &[],
             )
@@ -502,7 +502,7 @@ where
         let rows = db_tx
             .query(
                 &format!(
-                    "UPDATE {} SET {VALID_UNTIL}={} WHERE key=$1 AND {VALID_UNTIL}={} RETURNING *",
+                    "UPDATE {} SET {VALID_UNTIL}={} WHERE {KEY}=$1 AND {VALID_UNTIL}={} RETURNING *",
                     self.table,
                     self.epoch,
                     self.epoch + 1
@@ -751,7 +751,7 @@ where
         let connection = self.db.get().await.unwrap();
         connection
             .query(
-                &format!("SELECT key FROM {} WHERE {VALID_FROM}=$1", self.table),
+                &format!("SELECT {KEY} FROM {} WHERE {VALID_FROM}=$1", self.table),
                 &[&epoch],
             )
             .await

@@ -4,12 +4,11 @@
 use alloy::primitives::U256;
 use anyhow::*;
 use log::*;
-use ryhope::{PAYLOAD, VALID_FROM, VALID_UNTIL};
+use ryhope::{KEY, PAYLOAD, VALID_FROM, VALID_UNTIL};
 use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, ExactNumberInfo, Expr, Function, FunctionArg,
     FunctionArgExpr, FunctionArgumentList, FunctionArguments, GroupByExpr, Ident, ObjectName,
     Query, Select, SelectItem, SetExpr, TableAlias, TableFactor, TableWithJoins, Value,
-    WildcardAdditionalOptions,
 };
 use std::collections::HashMap;
 use verifiable_db::query::{
@@ -24,6 +23,10 @@ use crate::{
     visitor::{AstPass, Visit},
     ParsilSettings,
 };
+
+/// The name under which the block will be exposed at the top level query for
+/// key generation.
+pub const BLOCK_ALIAS: &str = "__block";
 
 /// A data structure wrapping a zkSQL query converted into a pgSQL able to be
 /// executed on zkTables and its accompanying metadata.
@@ -231,12 +234,53 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
     fn process(&mut self, query: &mut Query) -> Result<()> {
         query.visit(self)?;
 
-        if let SetExpr::Select(ref mut select) = *query.body {
-            select.projection = vec![
-                SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("key"))),
-                SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("block"))),
-            ];
-        }
+        let r = Query {
+            with: None,
+            body: Box::new(SetExpr::Select(Box::new(Select {
+                distinct: None,
+                top: None,
+                projection: vec![
+                    SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
+                    SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
+                ],
+                into: None,
+                from: vec![TableWithJoins {
+                    relation: TableFactor::Derived {
+                        lateral: false,
+                        subquery: Box::new(query.clone()),
+                        alias: Some(TableAlias {
+                            name: Ident::new("__inner"),
+                            columns: vec![],
+                        }),
+                    },
+                    joins: vec![],
+                }],
+                lateral_views: vec![],
+                prewhere: None,
+                selection: None,
+                group_by: GroupByExpr::Expressions(vec![], vec![]),
+                cluster_by: vec![],
+                distribute_by: vec![],
+                sort_by: vec![],
+                having: None,
+                named_window: vec![],
+                qualify: None,
+                window_before_qualify: false,
+                value_table_mode: None,
+                connect_by: None,
+            }))),
+            order_by: None,
+            limit: None,
+            limit_by: vec![],
+            offset: None,
+            fetch: None,
+            locks: vec![],
+            for_clause: None,
+            settings: None,
+            format_clause: None,
+        };
+
+        *query = r;
 
         Ok(())
     }
@@ -245,15 +289,10 @@ impl<'a, C: ContextProvider> AstPass for KeyFetcher<'a, C> {
     fn post_select(&mut self, select: &mut Select) -> Result<()> {
         // When we meet a SELECT, insert a * to be sure to bubble up the key &
         // block number
-        select
-            .projection
-            .push(SelectItem::Wildcard(WildcardAdditionalOptions {
-                opt_ilike: None,
-                opt_exclude: None,
-                opt_except: None,
-                opt_replace: None,
-                opt_rename: None,
-            }));
+        select.projection = vec![
+            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
+            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
+        ];
         Ok(())
     }
 
@@ -291,11 +330,11 @@ impl<'a, C: ContextProvider> AstPass for KeyFetcher<'a, C> {
 
                 let select_items =
                     // Insert the `key` column in the selected values...
-                    std::iter::once(SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("key"))))
+                    std::iter::once(SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))))
                     .chain(std::iter::once(
                         SelectItem::ExprWithAlias {
                             expr: expand_block_range(self.settings),
-                            alias: Ident::new("block")
+                            alias: Ident::new(BLOCK_ALIAS)
                         }
                     ))
                     // then continue normally
