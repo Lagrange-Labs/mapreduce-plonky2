@@ -325,4 +325,8 @@ where
             }
         }
     }
+
+    pub fn final_proof_circuit_data(&self) -> &CircuitData<F, WrapC, D> {
+        &self.wrap_circuit.circuit_data
+    }
 }
