@@ -249,7 +249,10 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
                     relation: TableFactor::Derived {
                         lateral: false,
                         subquery: Box::new(query.clone()),
-                        alias: None,
+                        alias: Some(TableAlias {
+                            name: Ident::new("__inner"),
+                            columns: vec![],
+                        }),
                     },
                     joins: vec![],
                 }],
@@ -280,13 +283,6 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
 
         *query = r;
 
-        // if let SetExpr::Select(ref mut select) = *query.body {
-        //     select.projection = vec![
-        //         SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
-        //         SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
-        //     ];
-        // }
-
         Ok(())
     }
 }
@@ -294,15 +290,10 @@ impl<'a, C: ContextProvider> AstPass for KeyFetcher<'a, C> {
     fn post_select(&mut self, select: &mut Select) -> Result<()> {
         // When we meet a SELECT, insert a * to be sure to bubble up the key &
         // block number
-        select
-            .projection
-            .push(SelectItem::Wildcard(WildcardAdditionalOptions {
-                opt_ilike: None,
-                opt_exclude: None,
-                opt_except: None,
-                opt_replace: None,
-                opt_rename: None,
-            }));
+        select.projection = vec![
+            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
+            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
+        ];
         Ok(())
     }
 
