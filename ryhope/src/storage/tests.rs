@@ -1,11 +1,10 @@
-use std::{arch::x86_64::_SIDD_MASKED_NEGATIVE_POLARITY, collections::HashSet};
-
 use anyhow::*;
 use bb8_postgres::PostgresConnectionManager;
 use futures::FutureExt;
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use tokio_postgres::NoTls;
 
 pub type DBPool = bb8::Pool<PostgresConnectionManager<NoTls>>;
