@@ -156,11 +156,8 @@ impl ContextProvider for T {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         Ok(self.0.clone())
     }
-
-    fn output_ids(&self) -> Vec<u64> {
-        todo!()
-    }
 }
+
 #[tokio::test]
 #[ignore]
 async fn test_andrus_query() -> Result<()> {

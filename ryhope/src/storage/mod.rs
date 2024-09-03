@@ -56,6 +56,9 @@ pub struct WideLineage<K, V> {
 }
 
 impl<K: Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
+    pub fn num_touched_rows(&self) -> usize {
+        self.core_keys.len()
+    }
     pub fn node_context_at(&self, epoch: Epoch, key: &K) -> Option<NodeContext<K>> {
         self.epoch_lineages
             .get(&epoch)
@@ -69,7 +72,8 @@ impl<K: Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
             .cloned()
     }
 
-    pub fn all_epochs(&self) -> HashMap<Epoch, HashSet<K>> {
+    /// Returns the list of keys touching the query associated with each epoch
+    pub fn keys_by_epochs(&self) -> HashMap<Epoch, HashSet<K>> {
         self.core_keys
             .iter()
             .fold(HashMap::new(), |mut acc, (epoch, k)| {
@@ -88,6 +92,7 @@ impl<K: Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
                 // ok to unwrap since we passed the filter, so that key must exist
                 // otherwise it's ryhope failure
                 let mut ctx = epoch_data.0.get(k).expect("lineage should get all keys");
+                // go back up to there is no more parent anymore, i.e. the root
                 while ctx.parent.is_some() {
                     let parent_k = ctx.parent.as_ref().unwrap();
                     ctx = epoch_data
