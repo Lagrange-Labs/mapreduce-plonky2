@@ -7,6 +7,7 @@ use std::{
     collections::{HashMap, HashSet},
     iter::once,
     process::Child,
+    thread::current,
 };
 
 use crate::common::{
@@ -172,9 +173,8 @@ async fn test_query_mapping(
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query_info.placeholders)
         .context("while assembling PIs")?;
 
-    let mut rows_query =
-        parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
-            .context("while genrating keys in index bounds")?;
+    let rows_query = parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
+        .context("while genrating keys in index bounds")?;
     println!(" -- touched rows query: {:?}", rows_query.query.to_string());
     let initial_ph = rows_query.convert_placeholders(&query_info.placeholders);
     println!("initial_ph: {:?}", initial_ph);
@@ -185,20 +185,22 @@ async fn test_query_mapping(
             (query_info.min_block as Epoch, query_info.max_block as Epoch),
         )
         .await?;
-    let index_query = "SELECT generate_series($1, $2) AS block".to_string();
+    // We set the epoch at which we request all the lineages - that's a fixed epoch
+    // and we set the generate_series according to the query
+    let current_epoch = table.index.current_epoch();
+    let index_query = format!(
+        "SELECT {current_epoch} as epoch, generate_series({}, {}) AS key",
+        query_info.min_block, query_info.max_block
+    );
     let big_index_cache = table
         .index
-        .wide_lineage_between(
-            &index_query,
-            (query_info.min_block as Epoch, query_info.max_block as Epoch),
-        )
+        // The bounds here means between which versions of the tree should we look. For index tree,
+        // we only look at _one_ version of the tree.
+        .wide_lineage_between(&index_query, (current_epoch, current_epoch))
         .await?;
+    // since we only analyze the index tree for one epoch
+    assert_eq!(big_index_cache.keys_by_epochs().len(), 1);
 
-    assert_eq!(
-        big_row_cache.all_epochs().into_keys().collect_vec(),
-        big_index_cache.all_epochs().into_keys().collect_vec(),
-        "two caches are not returning the same thing"
-    );
     prove_query(
         ctx,
         table,
@@ -222,49 +224,23 @@ async fn prove_query(
     query: QueryCooking,
     parsed: Query,
     settings: &ParsilSettings<&Table>,
-    big_cache: &WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
-    big_index_cache: &WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
+    row_cache: &WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
+    index_cache: &WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     res: Vec<PsqlRow>,
     metadata: MetadataHash,
 ) -> Result<()> {
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
-    // group the rows per block number
-    let number_of_rows = all_touched_rows.len();
-    let touched_rows = all_touched_rows
-        .into_iter()
-        .enumerate()
-        .map(|(i, r)| {
-            let row_key = r
-                .get::<_, Option<Vec<u8>>>(0)
-                .map(RowTreeKey::from_bytea)
-                .context("unable to parse row key tree")
-                .expect("");
-            let block: Epoch = r.get::<_, i64>(1);
-            info!(
-                " -- row [{}] => epoch = {} , value {:?}",
-                i, block, row_key.rest
-            );
-            (block as BlockPrimaryIndex, row_key)
-        })
-        .fold(
-            HashMap::<BlockPrimaryIndex, HashSet<RowTreeKey>>::new(),
-            |mut acc, (block, row_key)| {
-                acc.entry(block).or_default().insert(row_key);
-                acc
-            },
-        );
-    info!(
-        "Found {} ROW KEYS to process during proving time -> epochs {:?}",
-        touched_rows.len(),
-        touched_rows.keys(),
-    );
-    let all_epochs = big_cache.all_epochs();
+    let mut row_keys_per_epoch = row_cache.keys_by_epochs();
+    let all_epochs = query.min_block as Epoch..=query.max_block as Epoch;
 
     // prove the whole tree for each of the involved rows for each block
-    for (epoch, keys) in all_epochs {
-        let up = big_cache
-            .update_tree_for(epoch)
+    for epoch in all_epochs {
+        let keys = row_keys_per_epoch
+            .remove(&epoch)
+            .expect("gaps in query unsupported yet - coming soon");
+        let up = row_cache
+            .update_tree_for(epoch as Epoch)
             .expect("this epoch should exist");
         let planner = QueryPlanner {
             ctx,
@@ -279,60 +255,46 @@ async fn prove_query(
         };
         prove_query_on_tree(planner, info, up, epoch as BlockPrimaryIndex).await?;
     }
-    // do the same for the single index tree now
-    let current_epoch = table.index.current_epoch();
 
-    //for (epoch, index)
-    //let all_paths = stream::iter(touched_rows.keys())
-    //    .then(|primary| async {
-    //        // NOTE : it is important to fetch the data at fixed epoch ! and this key fetched can be
-    //        // different
-    //        table
-    //            .index
-    //            .lineage_at(primary, current_epoch)
-    //            .await
-    //            .expect("index node doesn't have lineage?")
-    //            .into_full_path()
-    //            .collect::<Vec<_>>()
-    //    })
-    //    .collect::<Vec<_>>()
-    //    .await;
-    //let proving_tree = UpdateTree::from_paths(all_paths, current_epoch);
-    //let planner = QueryPlanner {
-    //    ctx,
-    //    query: query.clone(),
-    //    genesis: table.genesis_block,
-    //    pis: &pis,
-    //    tree: &table.index,
-    //    columns: table.columns.clone(),
-    //};
-    //let info = IndexInfo {
-    //    bounds: pis.bounds.clone(),
-    //};
-    //prove_query_on_tree(
-    //    planner,
-    //    info,
-    //    proving_tree,
-    //    current_epoch as BlockPrimaryIndex,
-    //)
-    //.await?;
-    //info!("Query proofs done! Generating revelation proof...");
-    //let proof = prove_revelation(ctx, table, &query, &pis, current_epoch).await?;
-    //info!("Revelation proof done! Checking public inputs...");
-    //// get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
-    //// to check the public inputs
-    //let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
+    let proving_tree = index_cache
+        .update_tree_for(table.index.current_epoch())
+        .expect("should get update tree for index");
+    let planner = QueryPlanner {
+        ctx,
+        query: query.clone(),
+        genesis: table.genesis_block,
+        pis: &pis,
+        tree: &table.index,
+        columns: table.columns.clone(),
+    };
+    let info = IndexInfo {
+        bounds: pis.bounds.clone(),
+    };
+    prove_query_on_tree(
+        planner,
+        info,
+        proving_tree,
+        table.index.current_epoch() as BlockPrimaryIndex,
+    )
+    .await?;
+    info!("Query proofs done! Generating revelation proof...");
+    let proof = prove_revelation(ctx, table, &query, &pis, table.index.current_epoch()).await?;
+    info!("Revelation proof done! Checking public inputs...");
+    // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
+    // to check the public inputs
+    let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
 
-    //check_final_outputs(
-    //    proof,
-    //    ctx,
-    //    table,
-    //    &query,
-    //    &pis,
-    //    current_epoch,
-    //    touched_rows.len(),
-    //    res,
-    //)?;
+    check_final_outputs(
+        proof,
+        ctx,
+        table,
+        &query,
+        &pis,
+        table.index.current_epoch(),
+        row_cache.num_touched_rows(),
+        res,
+        metadata,
+    )?;
     info!("Revelation done!");
     Ok(())
 }
