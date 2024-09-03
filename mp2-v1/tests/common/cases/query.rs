@@ -63,7 +63,7 @@ use ryhope::{
         TreeStorage, TreeTransactionalStorage, WideLineage,
     },
     tree::{MutableTree, NodeContext, TreeTopology},
-    Epoch, MerkleTreeKvDb, NodePayload,
+    Epoch, MerkleTreeKvDb, NodePayload, EPOCH, KEY,
 };
 use sqlparser::ast::Query;
 use tokio_postgres::{types::Json, Row as PsqlRow};
@@ -173,23 +173,25 @@ async fn test_query_mapping(
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query_info.placeholders)
         .context("while assembling PIs")?;
 
-    let rows_query = parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
-        .context("while genrating keys in index bounds")?;
+    let mut rows_query =
+        parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
+            .context("while genrating keys in index bounds")?;
     println!(" -- touched rows query: {:?}", rows_query.query.to_string());
     let initial_ph = rows_query.convert_placeholders(&query_info.placeholders);
     println!("initial_ph: {:?}", initial_ph);
     let big_row_cache = table
         .row
         .wide_lineage_between(
-            &rows_query.query.to_string(),
+            &rows_query.apply().to_string(),
             (query_info.min_block as Epoch, query_info.max_block as Epoch),
         )
         .await?;
     // We set the epoch at which we request all the lineages - that's a fixed epoch
     // and we set the generate_series according to the query
     let current_epoch = table.index.current_epoch();
+    // Integer default to i32 in PgSQL, they must be cast to i64, a.k.a. BIGINT.
     let index_query = format!(
-        "SELECT {current_epoch} as epoch, generate_series({}, {}) AS key",
+        "SELECT {current_epoch}::BIGINT as {EPOCH}, generate_series({}::BIGINT, {}::BIGINT) AS {KEY}",
         query_info.min_block, query_info.max_block
     );
     let big_index_cache = table

@@ -7,7 +7,7 @@ use crate::{
         sbbst::{self, NodeIdx},
         scapegoat, NodeContext, TreeTopology,
     },
-    Epoch, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL,
+    Epoch, EPOCH, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL,
 };
 use anyhow::*;
 use bb8::Pool;
@@ -222,12 +222,7 @@ where
             .await
             .context("failed to execute `keys_query`")?
             .iter()
-            .map(|row| {
-                (
-                    row.get::<_, i64>("epoch"),
-                    row.get::<_, i64>(KEY) as NodeIdx,
-                )
-            })
+            .map(|row| (row.get::<_, i64>(EPOCH), row.get::<_, i64>(KEY) as NodeIdx))
             .collect::<Vec<_>>();
 
         // The SBBST can compute all the wide lineage in closed form
@@ -407,6 +402,7 @@ where
             let query = format!(
                 include_str!("wide_lineage.sql"),
                 KEY = KEY,
+                EPOCH = EPOCH,
                 PAYLOAD = PAYLOAD,
                 VALID_FROM = VALID_FROM,
                 VALID_UNTIL = VALID_UNTIL,
@@ -423,7 +419,7 @@ where
                 .await
                 .with_context(|| {
                     format!(
-                        "while fetching wide lineage for {table} [[{}, {}]]",
+                        "while fetching wide lineage for {table} [[{}, {}]] with: {query}",
                         bounds.0, bounds.1
                     )
                 })?;
@@ -439,7 +435,7 @@ where
                     .context("while fetching core flag from row")?
                     > 0;
                 let epoch = row
-                    .try_get::<_, i64>("epoch")
+                    .try_get::<_, i64>(EPOCH)
                     .context("while fetching epoch from row")?;
                 let node = <Self as DbConnector<V>>::node_from_row(row)?;
                 let payload = Self::payload_from_row(row)?;

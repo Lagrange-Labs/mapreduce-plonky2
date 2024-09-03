@@ -4,7 +4,7 @@
 use alloy::primitives::U256;
 use anyhow::*;
 use log::*;
-use ryhope::{KEY, PAYLOAD, VALID_FROM, VALID_UNTIL};
+use ryhope::{EPOCH, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL};
 use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, ExactNumberInfo, Expr, Function, FunctionArg,
     FunctionArgExpr, FunctionArgumentList, FunctionArguments, GroupByExpr, Ident, ObjectName,
@@ -23,10 +23,6 @@ use crate::{
     visitor::{AstPass, Visit},
     ParsilSettings,
 };
-
-/// The name under which the block will be exposed at the top level query for
-/// key generation.
-pub const BLOCK_ALIAS: &str = "__block";
 
 /// A data structure wrapping a zkSQL query converted into a pgSQL able to be
 /// executed on zkTables and its accompanying metadata.
@@ -241,7 +237,7 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
                 top: None,
                 projection: vec![
                     SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
-                    SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
+                    SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(EPOCH))),
                 ],
                 into: None,
                 from: vec![TableWithJoins {
@@ -291,7 +287,7 @@ impl<'a, C: ContextProvider> AstPass for KeyFetcher<'a, C> {
         // block number
         select.projection = vec![
             SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
-            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(BLOCK_ALIAS))),
+            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(EPOCH))),
         ];
         Ok(())
     }
@@ -334,7 +330,7 @@ impl<'a, C: ContextProvider> AstPass for KeyFetcher<'a, C> {
                     .chain(std::iter::once(
                         SelectItem::ExprWithAlias {
                             expr: expand_block_range(self.settings),
-                            alias: Ident::new(BLOCK_ALIAS)
+                            alias: Ident::new(EPOCH)
                         }
                     ))
                     // then continue normally

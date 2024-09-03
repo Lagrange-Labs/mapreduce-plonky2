@@ -1,7 +1,7 @@
 -- String inputs:
 --  * zk_table: the zkTable name
 --  * core_keys_query: a query returning the core keys, i.e. the keys directly
---    touched by the zkQuery.
+--    touched by the zkQuery, providing the columns {KEY} and {EPOCH}.
 -- Placeholders:
 --  * $1: start of the epoch range
 --  * $2: end of the epoch range
@@ -39,7 +39,7 @@ WITH RECURSIVE descendance (is_core, {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD
              -- XXX: this assumes that the block range is contiguous when
              -- translating it back to a range
              RIGHT JOIN
-               (SELECT 1 AS is_core, {KEY}, MIN(block) AS {VALID_FROM}, MAX(block) AS {VALID_UNTIL}
+               (SELECT 1 AS is_core, {KEY}, MIN({EPOCH}) AS {VALID_FROM}, MAX({EPOCH}) AS {VALID_UNTIL}
                   FROM ({core_keys_query}) _core_keys_query
                   GROUP BY {KEY}) core_keys
              ON core_keys.{KEY} = {zk_table}.{KEY}
@@ -81,7 +81,7 @@ WITH RECURSIVE descendance (is_core, {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD
    -- Expand the epoch ranges [[{VALID_FROM}, {VALID_UNTIL}]] into
    -- ({VALID_UNTIL} - {VALID_FROM}) individual rows, clamped within
    -- [[min_block, max_block]]
-   generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS epoch,
+   generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS {EPOCH},
    -- Normal columns
    {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD}, {SUBTREE_SIZE}, {PAYLOAD}
    FROM
